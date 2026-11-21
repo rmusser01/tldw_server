@@ -59,21 +59,28 @@ vi.mock("@/hooks/useTldwApiClient", () => ({
   useTldwApiClient: () => boundary.api,
 }));
 vi.mock("@/services/background-proxy", () => ({ bgRequest: boundary.request }));
-vi.mock("@/services/service-prompts", () => ({
-  loadServicePromptSnapshot: async () => ({
-    scopeKey: boundary.scopeKey,
-    requestScope: {
-      config: {
-        serverUrl: "https://open.example.test",
-        authMode: "multi-user",
-      },
-      userId: boundary.userId,
+vi.mock("@/services/service-prompts", () => {
+  const captured = () => ({
+    config: {
+      serverUrl: "https://open.example.test",
+      authMode: "multi-user" as const,
     },
-    scopeSignal: boundary.controller.signal,
-    scopeInvalidatedSignal: boundary.controller.signal,
-    release: boundary.release,
-  }),
-}));
+    userId: boundary.userId,
+  });
+  return {
+    resolveServicePromptScope: async () => ({
+      ...captured(),
+      scopeKey: boundary.scopeKey,
+    }),
+    loadServicePromptSnapshot: async () => ({
+      scopeKey: boundary.scopeKey,
+      requestScope: captured(),
+      scopeSignal: boundary.controller.signal,
+      scopeInvalidatedSignal: boundary.controller.signal,
+      release: boundary.release,
+    }),
+  };
+});
 vi.mock("@/utils/research-workspace-prefill", async (original) => ({
   ...(await original<typeof import("@/utils/research-workspace-prefill")>()),
   readResearchWebCaptures: async () => [],
@@ -104,6 +111,8 @@ import {
   flushWorkspacePersistence,
   useWorkspaceStore,
 } from "@/store/workspace";
+import { buildResearchWorkspaceServerSourceSignature } from "@/store/workspace-api";
+import type { WorkspaceApiResponse } from "@/services/tldw/domains/workspace-api";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
 import { WorkspacesManagerPage } from "../../Workspaces/WorkspacesManagerPage";
@@ -112,7 +121,7 @@ import { readSavedResearchWorkspaceChatReference } from "@/store/workspace-migra
 
 const TARGET = "workspace-A";
 const PREVIOUS = "workspace-B";
-const serverWorkspace = {
+const serverWorkspace: WorkspaceApiResponse = {
   id: TARGET,
   name: "Alpha",
   archived: false,
@@ -191,6 +200,8 @@ const canonical = () => ({
   partial_errors: [] as Array<{ code: string }>,
 });
 const reply = async ({ path }: { path: string }) => {
+  if (path === `/api/v1/workspaces/${TARGET}`) return serverWorkspace;
+  if (path === `/api/v1/workspaces/${TARGET}/sources`) return canonical().sources.items;
   if (path === `/api/v1/workspaces/${TARGET}/context`) return canonical();
   if (
     path === `/api/v1/workspaces/${TARGET}/artifacts` ||
@@ -207,7 +218,7 @@ const snapshot = (id: string, name: string) =>
     tag: `workspace:${name.toLowerCase()}`,
     createdAt: new Date("2026-10-01T00:00:00Z"),
   });
-const prepare = (cached: boolean) => {
+const prepare = (cached: boolean, scopeKey?: string) => {
   if (cached) {
     const alpha = snapshot(TARGET, "Alpha");
     alpha.sources = [
@@ -221,6 +232,15 @@ const prepare = (cached: boolean) => {
       },
     ];
     alpha.selectedSourceIds = ["source-A"];
+    if (scopeKey) {
+      alpha.serverWorkspace = {
+        scopeKey,
+        sourceSignature: buildResearchWorkspaceServerSourceSignature(alpha.sources),
+        selectedSourceSignature: "source-A",
+        metadata: serverWorkspace,
+        notes: [],
+      };
+    }
     useWorkspaceStore.getState().restoreServerWorkspace(alpha);
   }
   useWorkspaceStore
@@ -274,7 +294,7 @@ afterEach(() => {
 it.each([true, false])(
   "opens requested canonical workspace through manager with cached target=%s",
   async (cached) => {
-    prepare(cached);
+    prepare(cached, boundary.scopeKey);
     await mount();
     fireEvent.click(await screen.findByRole("button", { name: "Open Alpha" }));
     await act(async () => {
@@ -284,7 +304,7 @@ it.each([true, false])(
       expect(useWorkspaceStore.getState().workspaceId).toBe(TARGET),
     );
     expect(await screen.findByTestId("open-location")).toHaveTextContent(
-      `source_workspace_id=${TARGET}`,
+      `?workspace=${TARGET}`,
     );
     expect(await screen.findByRole("heading", { name: "Alpha" })).toBeVisible();
     expect(await screen.findByTestId("opened-sources")).toHaveTextContent(
@@ -302,6 +322,13 @@ it.each([true, false])(
         ([request]) => request.method === "GET",
       ),
     ).toBe(true);
+    for (const suffix of ["", "/sources", "/artifacts", "/notes"]) {
+      expect(boundary.request).toHaveBeenCalledWith(expect.objectContaining({
+        path: `/api/v1/workspaces/${TARGET}${suffix}`,
+        method: "GET",
+        headers: { "X-TLDW-Expected-User-ID": "1" }
+      }));
+    }
   },
 );
 

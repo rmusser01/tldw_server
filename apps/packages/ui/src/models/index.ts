@@ -1,7 +1,8 @@
 import { ChatTldw } from "./ChatTldw"
-import type { ChatScope } from "@/types/chat-scope"
-import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
+import type { ChatResearchContext, ChatTurnIdentity } from "@/services/tldw/TldwApiClient"
+import { getChatTurnIdentitySupport } from "@/services/tldw/server-capabilities"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import type { ChatScope } from "@/types/chat-scope"
 import {
   getAllDefaultModelSettings,
   getModelSettings
@@ -9,7 +10,7 @@ import {
 import { getDefaultApiProvider } from "@/services/tldw-server"
 import { tldwModels } from "@/services/tldw"
 import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
-import { useStoreChatModelSettings } from "@/store/model"
+import { useStoreChatModelSettings, type ChatModelSettings } from "@/store/model"
 import { useStoreMessageOption, type ToolChoice } from "@/store/option"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
@@ -28,6 +29,9 @@ type PageAssistModelOptions = {
   tools?: Record<string, unknown>[]
   saveToDb?: boolean
   conversationId?: string
+  tldwTurn?: ChatTurnIdentity
+  originalUserMessage?: string
+  generationSettings?: Readonly<ChatModelSettings>
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -37,6 +41,7 @@ type PageAssistModelOptions = {
   researchContext?: ChatResearchContext
   requestScope?: ServicePromptRequestScope
   scope?: ChatScope
+  signal?: AbortSignal
   retryFailedTurn?: boolean
   refreshImageCapability?: boolean
   clientMessageId?: string
@@ -65,6 +70,9 @@ export const pageAssistModel = async ({
   tools,
   saveToDb,
   conversationId,
+  tldwTurn,
+  originalUserMessage,
+  generationSettings,
   historyMessageLimit,
   historyMessageOrder,
   slashCommandInjectionMode,
@@ -74,12 +82,27 @@ export const pageAssistModel = async ({
   researchContext,
   requestScope,
   scope,
+  signal,
   retryFailedTurn,
   refreshImageCapability,
   clientMessageId,
   regenerateFromMessageId
 }: PageAssistModelOptions): Promise<ChatTldw> => {
-  const currentChatModelSettings = useStoreChatModelSettings.getState()
+  signal?.throwIfAborted()
+  if (tldwTurn) {
+    if (!conversationId?.trim() || saveToDb !== true) {
+      throw new Error("A durable user turn requires an explicitly bound persisted conversation.")
+    }
+    if (!requestScope) {
+      throw new Error("A durable user turn requires a captured server scope.")
+    }
+    const supportsDurableTurns = await getChatTurnIdentitySupport(requestScope, signal)
+    signal?.throwIfAborted()
+    if (supportsDurableTurns !== true) {
+      throw new Error("This server does not support durable workspace turns. Update the server before retrying.")
+    }
+  }
+  const currentChatModelSettings = generationSettings ?? useStoreChatModelSettings.getState()
   const {
     toolChoice: storedToolChoice,
     serverChatId,
@@ -269,12 +292,12 @@ export const pageAssistModel = async ({
   const _keepAlive = modelSettings?.keepAlive || keepAlive || ""
   const payload = {
     keepAlive: _keepAlive.length > 0 ? _keepAlive : undefined,
-    temperature: modelSettings?.temperature || temperature,
+    temperature: generationSettings ? modelSettings?.temperature ?? temperature : modelSettings?.temperature || temperature,
     topK: modelSettings?.topK || topK,
-    topP: modelSettings?.topP || topP,
+    topP: generationSettings ? modelSettings?.topP ?? topP : modelSettings?.topP || topP,
     numCtx: modelSettings?.numCtx || numCtx,
     numGpu: modelSettings?.numGpu || numGpu,
-    numPredict: modelSettings?.numPredict || numPredict,
+    numPredict: generationSettings ? modelSettings?.numPredict ?? numPredict : modelSettings?.numPredict || numPredict,
     useMMap: modelSettings?.useMMap || useMMap,
     minP: modelSettings?.minP || minP,
     repeatPenalty: modelSettings?.repeatPenalty || repeatPenalty,
@@ -285,6 +308,7 @@ export const pageAssistModel = async ({
     useMlock: modelSettings?.useMlock || useMlock
   }
 
+  signal?.throwIfAborted()
   // Default to tldw_server chat model
   return new ChatTldw({
     clientManagedHistory,
@@ -313,6 +337,8 @@ export const pageAssistModel = async ({
     supportsMultimodal: modelSupportsMultimodal,
     saveToDb: resolvedSaveToDb,
     conversationId: finalConversationId,
+    tldwTurn,
+    originalUserMessage,
     historyMessageLimit: normalizedHistoryMessageLimit,
     historyMessageOrder: normalizedHistoryMessageOrder,
     slashCommandInjectionMode: normalizedSlashInjectionMode,

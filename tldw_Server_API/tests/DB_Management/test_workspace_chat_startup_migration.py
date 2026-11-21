@@ -48,7 +48,7 @@ def test_upgrade_and_reopen_retains_existing_chat(
             if old.backend_type.value == "postgresql":
                 upgrade.setattr(backend_class, "execute", observe_ddl)
             upgraded = db_factory()
-        assert all(TABLE in statement for statement in ddl), ddl
+        assert all(TABLE in statement or "message_insertion_order" in statement for statement in ddl), ddl
         assert upgraded.backend.table_exists(TABLE)
         assert upgraded.get_conversation_by_id(cid)["title"] == "Retained"
         assert upgraded.execute_query(

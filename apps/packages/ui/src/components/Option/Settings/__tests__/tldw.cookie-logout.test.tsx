@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render as renderWithTestingLibrary, screen, waitFor } from "@testing-library/react"
+import { createMemoryRouter, RouterProvider } from "react-router-dom"
 import { Storage } from "@plasmohq/storage"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
@@ -69,14 +70,6 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string) => fallback ?? key
   })
-}))
-
-vi.mock("react-router-dom", async (importOriginal) => ({
-  ...await importOriginal<typeof import("react-router-dom")>(),
-  Link: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  useNavigate: () => vi.fn(),
-  useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
-  unstable_usePrompt: vi.fn()
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
@@ -192,6 +185,11 @@ vi.mock("../TldwConnectionSettings", () => ({
 }))
 
 import { TldwSettings } from "../tldw"
+
+const render = (element: React.ReactNode) => {
+  const router = createMemoryRouter([{ path: "/", element }])
+  return renderWithTestingLibrary(<RouterProvider router={router} />)
+}
 
 describe("TldwSettings cookie logout", () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks() })

@@ -20,7 +20,8 @@ import { ChatTldw } from "@/models/ChatTldw"
 import {
   beginServerChatWrite,
   getServerChatSaveStatus,
-  resetServerChatSaveStatus
+  resetServerChatSaveStatus,
+  serverChatSaveStatusStore
 } from "@/store/server-chat-save-status"
 import { HumanMessage } from "@/types/messages"
 
@@ -38,11 +39,12 @@ describe("ChatTldw server-persisted completions record the save status", () => {
     resetServerChatSaveStatus()
   })
 
-  it("marks the server chat saving while streaming and saved when the stream completes", async () => {
+  it("marks the server chat saving while streaming and saved after its persistence acknowledgment", async () => {
     let statusDuringStream: string | null = null
-    mocks.streamMessage.mockImplementationOnce(async function* () {
+    mocks.streamMessage.mockImplementationOnce(async function* (_messages, _options, onChunk) {
       statusDuringStream = getServerChatSaveStatus("server-chat")
       yield "Saved reply"
+      onChunk?.({ tldw_conversation_id: "server-chat", tldw_message_id: "saved-assistant" })
     })
     const model = new ChatTldw({
       model: "gpt-test",
@@ -54,6 +56,62 @@ describe("ChatTldw server-persisted completions record the save status", () => {
 
     expect(statusDuringStream).toBe("saving")
     expect(getServerChatSaveStatus("server-chat")).toBe("saved")
+  })
+
+  it.each([
+    { name: "no receipt", chunk: undefined },
+    { name: "conversation metadata only", chunk: { tldw_conversation_id: "server-chat" } },
+    { name: "provider completion only", chunk: { id: "provider-id", choices: [{ delta: {}, finish_reason: "stop" }] } },
+    { name: "another conversation's receipt", chunk: { tldw_conversation_id: "other-chat", tldw_message_id: "saved-assistant" } }
+  ])("does not mark the chat saved at EOF with $name", async ({ chunk }) => {
+    beginServerChatWrite("server-chat")("saved")
+    mocks.streamMessage.mockImplementationOnce(async function* (_messages, _options, onChunk) {
+      yield "Unconfirmed reply"
+      if (chunk) onChunk?.(chunk)
+    })
+    const model = new ChatTldw({
+      model: "gpt-test",
+      saveToDb: true,
+      conversationId: "server-chat"
+    })
+    const tokens = []
+    for await (const token of await model.stream([new HumanMessage("Hi")])) tokens.push(token)
+
+    expect(tokens).toEqual(["Unconfirmed reply"])
+    expect(getServerChatSaveStatus("server-chat")).toBe("failed")
+    expect(serverChatSaveStatusStore.getState().entries["server-chat"].inFlight).toBe(0)
+  })
+
+  it("accepts an ordinary native durable-turn acknowledgment for the current input", async () => {
+    const inputId = "12345678-1234-4321-8123-123456789abc"
+    mocks.streamMessage.mockImplementationOnce(async function* (_messages, _options, onChunk) {
+      yield "Saved reply"
+      onChunk?.({ tldw_conversation_id: "server-chat", tldw_user_message_id: inputId,
+        tldw_message_id: "saved-assistant" })
+    })
+    const model = new ChatTldw({ model: "gpt-test", saveToDb: true,
+      conversationId: "server-chat", tldwTurn: { user_message_id: inputId }, originalUserMessage: "Hi" })
+
+    await consume(await model.stream([new HumanMessage("Hi")]))
+
+    expect(model.serverMessagesAlreadyPersisted).toBe(true)
+    expect(getServerChatSaveStatus("server-chat")).toBe("saved")
+    expect(serverChatSaveStatusStore.getState().entries["server-chat"].inFlight).toBe(0)
+  })
+
+  it("preserves the previous outcome and partial output on transport interruption", async () => {
+    beginServerChatWrite("server-chat")("saved")
+    mocks.streamMessage.mockImplementationOnce(async function* (_messages, _options, onChunk) {
+      yield "Partial"
+      onChunk?.({ event: "stream_transport_interrupted", detail: "port dropped" })
+    })
+    const model = new ChatTldw({ model: "gpt-test", saveToDb: true, conversationId: "server-chat" })
+    const chunks = []
+    for await (const chunk of await model.stream([new HumanMessage("Hi")])) chunks.push(chunk)
+
+    expect(chunks).toEqual(["Partial", { event: "stream_transport_interrupted", detail: "port dropped" }])
+    expect(getServerChatSaveStatus("server-chat")).toBe("saved")
+    expect(serverChatSaveStatusStore.getState().entries["server-chat"].inFlight).toBe(0)
   })
 
   it("marks the server chat failed when the persisted completion errors", async () => {

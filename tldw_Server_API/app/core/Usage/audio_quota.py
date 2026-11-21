@@ -345,6 +345,7 @@ async def _monthly_minutes_exhausted(user_id: int, monthly_limit: float | None, 
     if monthly_limit is None:
         return False
     try:
+        await _get_daily_ledger()
         used_seconds = await ledger_used_this_month(str(int(user_id)), "minutes")
     except Exception:  # noqa: BLE001 - a counter failure must not block requests (spec 2 §2)
         logger.opt(exception=True).warning(

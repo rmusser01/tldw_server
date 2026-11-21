@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.core.Chat_Macros.branch_runner import ChatMacroLLMBranchRunner
 from tldw_Server_API.app.core.Chat_Macros.context_snapshot import snapshot_from_mapping
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
+from tldw_Server_API.app.core.Chat_Macros.service import ChatMacrosService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.chat_macros_test_helpers import FakeJobManager
 
@@ -463,8 +464,6 @@ class TestChatCompletionsEndpoint:
         monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
         db = _install_isolated_chat_db(test_client, tmp_path, monkeypatch)
 
-        from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-
         calls = []
 
         def fake_call(**kwargs):
@@ -475,7 +474,7 @@ class TestChatCompletionsEndpoint:
             raise RuntimeError("api_key=secret should not leak")
 
         monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
-        monkeypatch.setattr(chat_endpoint.ChatMacrosService, "list_macros", fail_list)
+        monkeypatch.setattr(ChatMacrosService, "list_macros", fail_list)
 
         try:
             response = test_client.post(

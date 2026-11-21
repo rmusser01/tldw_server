@@ -1,5 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
+import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
 import type {
   CompareHistorySelectionV1, HistoryEditTargetV1, HistoryCursorV1, HistoryNodeV1, HistoryResolutionV1,
   HistorySelectedContentV1, HistorySelectionSnapshotV1, HistorySelectionV1, HistoryViewSelectionV1
@@ -10,6 +11,61 @@ export class HistorySelectionError extends Error {
     super(code)
     this.name = "HistorySelectionError"
   }
+}
+
+/** Only a scoped address crosses the extension full-page URL. */
+export type HistorySelectionHandoff = HistorySelectionReference & {
+  owner_kind: "local" | "native"
+}
+
+export const parseHistorySelectionHandoff = (
+  search: string
+): HistorySelectionHandoff | null => {
+  const value = new URLSearchParams(search.replace(/^.*\?/, "")).get(
+    "historySelection"
+  )
+  if (!value) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    throw new Error("invalid_history_reference")
+  }
+  const keys = [
+    "profile_id",
+    "client_session_id",
+    "owner_key",
+    "conversation_id",
+    "owner_kind"
+  ]
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    Object.keys(parsed).some(
+      (key) => !keys.includes(key) && key !== "pending_confirmation_reference"
+    ) ||
+    keys.some(
+      (key) =>
+        typeof (parsed as any)[key] !== "string" || !(parsed as any)[key].length
+    ) ||
+    !["local", "native"].includes((parsed as any).owner_kind)
+  )
+    throw new Error("invalid_history_reference")
+  const pointer = (parsed as HistorySelectionReference)
+    .pending_confirmation_reference
+  if (
+    pointer !== undefined &&
+    (!pointer ||
+      typeof pointer !== "object" ||
+      Array.isArray(pointer) ||
+      Object.keys(pointer).length !== 3 ||
+      ["client_session_id", "view_session_id", "projection_id"].some(
+        (key) => typeof pointer[key] !== "string" || !pointer[key]
+      ))
+  )
+    throw new Error("invalid_history_reference")
+  return parsed as HistorySelectionHandoff
 }
 
 /** Owner keys minted by this client's local H1 authority (db/dexie/history-selection.ts). */

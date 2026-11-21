@@ -93,11 +93,13 @@ describe("Document real verified lease", () => {
     "aborts held document reads on real %s retirement",
     async (boundary) => {
       let finish!: (value: unknown) => void
-      api.listAnnotations.mockReturnValue(
-        new Promise((resolve) => {
-          finish = resolve
-        })
-      )
+      let finishRenewed!: (value: unknown) => void
+      const renewsInFixture = boundary === "logout"
+      api.listAnnotations.mockReset()
+        .mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+      if (renewsInFixture) {
+        api.listAnnotations.mockReturnValueOnce(new Promise((resolve) => { finishRenewed = resolve }))
+      }
       store.setState({ activeDocumentId: 1 })
       renderHook(() => useAnnotations(1), { wrapper })
       await waitFor(() => expect(api.listAnnotations).toHaveBeenCalledTimes(1))
@@ -110,26 +112,39 @@ describe("Document real verified lease", () => {
         else window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
       })
       expect(options.signal.aborted).toBe(true)
-      await act(async () => {
-        finish({
+      if (renewsInFixture) {
+        await waitFor(() => expect(api.listAnnotations).toHaveBeenCalledTimes(2))
+        const renewed = api.listAnnotations.mock.calls[1][1]
+        expect(renewed.signal).not.toBe(options.signal)
+        expect(renewed.signal.aborted).toBe(false)
+      }
+      const retiredPage = {
+        media_id: 1,
+        annotations: [{
+          id: "old",
           media_id: 1,
-          annotations: [
-            {
-              id: "old",
-              media_id: 1,
-              location: "1",
-              text: "Old private",
-              color: "yellow",
-              annotation_type: "highlight",
-              created_at: new Date(0).toISOString(),
-              updated_at: new Date(0).toISOString()
-            }
-          ],
-          total_count: 1
-        })
+          location: "1",
+          text: "Old private",
+          color: "yellow",
+          annotation_type: "highlight",
+          created_at: new Date(0).toISOString(),
+          updated_at: new Date(0).toISOString()
+        }],
+        total_count: 1
+      }
+      await act(async () => {
+        finish(retiredPage)
         await Promise.resolve()
       })
       expect(store.getState().annotations).toEqual([])
+      if (!renewsInFixture) return
+      await act(async () => {
+        finishRenewed({
+          ...retiredPage,
+          annotations: [{ ...retiredPage.annotations[0], id: "fresh", text: "Current annotation" }]
+        })
+      })
+      await waitFor(() => expect(store.getState().annotations.map(({ id }) => id)).toEqual(["fresh"]))
     }
   )
 })

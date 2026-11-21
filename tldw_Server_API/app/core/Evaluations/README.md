@@ -205,7 +205,7 @@ Notes:
 
 #### SimpleQA Verified (Local Dataset)
 
-The curated SimpleQA Verified set ships in the repo as `Helper_Scripts/Evals/simpleqa-verified.zip` (one CSV with `problem`, `answer` and `topic` columns).
+The curated SimpleQA Verified set ships in the repo as `Helper_Scripts/Evals/simpleqa-verified.zip` (one CSV with `problem`, `answer` and `topic` columns). The benchmark is listed only when this archive is available; it does not fall back to unverified SimpleQA.
 
 - Registry key: `simpleqa_verified`
 - The loader reads the CSV out of the zip; its `problem` column reaches the evaluator as `question`

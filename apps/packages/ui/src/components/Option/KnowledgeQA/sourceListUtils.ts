@@ -1,5 +1,7 @@
 import type { EvidenceOrigin, RagResult } from "./types"
 
+export { getOriginalResultIndex } from "@/utils/knowledge-qa-result-index"
+
 export type SourceSortMode = "relevance" | "title" | "date" | "cited"
 export type SourceDateFilter = "all" | "last_30d" | "last_365d" | "older_365d"
 export type SourceContentFacet =

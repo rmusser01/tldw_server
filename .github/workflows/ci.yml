@@ -1474,6 +1474,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py
@@ -1931,6 +1932,7 @@ jobs:
               tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
+              tldw_Server_API/tests/Services/test_main_reload_ownership.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
               tldw_Server_API/tests/Services/test_router_groups_contract.py
           - name: platform-services-main-pollers
@@ -1996,7 +1998,7 @@ jobs:
               tldw_Server_API/tests/Agent_Client_Protocol
     services:
       postgres:
-        image: ${{ matrix.shard.postgres_image || 'mirror.gcr.io/library/postgres:18-bookworm' }}
+        image: ${{ matrix.shard.postgres_image || 'docker.io/library/postgres:18-bookworm' }}
         env:
           POSTGRES_USER: tldw_user
           POSTGRES_PASSWORD: TestPassword123!
@@ -3232,6 +3234,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py
@@ -3689,6 +3692,7 @@ jobs:
               tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
+              tldw_Server_API/tests/Services/test_main_reload_ownership.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
               tldw_Server_API/tests/Services/test_router_groups_contract.py
           - name: platform-services-main-pollers
@@ -4798,6 +4802,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py
@@ -5249,6 +5254,7 @@ jobs:
               tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
+              tldw_Server_API/tests/Services/test_main_reload_ownership.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
               tldw_Server_API/tests/Services/test_router_groups_contract.py
           - name: platform-services-main-pollers
@@ -6268,6 +6274,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py
@@ -6719,6 +6726,7 @@ jobs:
               tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
+              tldw_Server_API/tests/Services/test_main_reload_ownership.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
               tldw_Server_API/tests/Services/test_router_groups_contract.py
           - name: platform-services-main-pollers
@@ -7729,6 +7737,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
+              tldw_Server_API/tests/Character_Chat/unit/test_lorebook_diagnostics_scope_api.py
           - name: chat-character-db-core
             paths: >-
               tldw_Server_API/tests/Characters/test_ccv3_parser.py
@@ -8180,6 +8189,7 @@ jobs:
               tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
+              tldw_Server_API/tests/Services/test_main_reload_ownership.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
               tldw_Server_API/tests/Services/test_router_groups_contract.py
           - name: platform-services-main-pollers

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +19,23 @@ def test_queue_estimate_sanitizes_base64_payload():
     small = chat_endpoint.estimate_tokens_from_json(_request("data:image/png;base64," + "a" * 4))
 
     assert large == small
+
+
+@pytest.mark.parametrize(
+    ("field", "proof"),
+    [
+        ("tldw_history_server_existing_input_v1", {"messages": [{"id": "stored-id"}]}),
+        ("tldw_turn", {"result_v1": {"sources": [{"excerpt": "not inference" * 200}]}}),
+    ],
+)
+def test_inference_estimate_keeps_saved_question_but_omits_history_proofs(field, proof):
+    ordinary = {
+        "messages": [{"role": "user", "content": "Canonical saved question"}],
+        "tldw_history_selection_v1": None,
+    }
+
+    assert json.loads(chat_endpoint._inference_request_json({**ordinary, field: None})) == {**ordinary, field: None}
+    assert json.loads(chat_endpoint._inference_request_json({**ordinary, field: proof})) == ordinary
 
 
 def test_build_test_mode_chat_response_returns_mermaid_for_mind_map_prompt():

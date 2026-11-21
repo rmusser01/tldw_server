@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -153,6 +154,7 @@ async def test_get_daily_minutes_used_failure_log_is_sanitized(monkeypatch):
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(audio_quota, "ledger_used_today", _failing_ledger_used_today)
+    monkeypatch.setattr(audio_quota, "_get_daily_ledger", AsyncMock(return_value=None))
     monkeypatch.setattr(audio_quota, "logger", logger_stub)
 
     minutes = await audio_quota.get_daily_minutes_used(123)

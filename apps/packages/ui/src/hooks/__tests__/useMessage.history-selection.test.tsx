@@ -15,6 +15,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-li
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useSidepanelChatFreshness } from "@/routes/sidepanel-chat-freshness"
 import { tldwModels } from "@/services/tldw/TldwModels"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import type { HistorySelectedContentV1, HistoryViewSelectionV1 } from "@/types/history-selection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
 import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
@@ -1465,7 +1466,8 @@ it("workspace H1: mounted sidepanel native character uses owner selection and AC
   ).toEqual(["u-old", "a1"])
   expect(h1.controller.followResult).toHaveBeenCalledWith(
     expect.objectContaining({ view_session_id: "origin" }),
-    "native-result"
+    "native-result",
+    expect.any(Function)
   )
   expect(h1.append).not.toHaveBeenCalled()
 })
@@ -1879,7 +1881,8 @@ it("workspace H1: a disconnect after the native owner ACK preserves the complete
   )
   expect(h1.controller.followResult).toHaveBeenCalledWith(
     expect.anything(),
-    "owner-result"
+    "owner-result",
+    expect.any(Function)
   )
   expect(h1.append).not.toHaveBeenCalled()
 })
@@ -3138,14 +3141,22 @@ describe("compact alternate-mode preparation ownership", () => {
     }
   })
 
-  it("compact Website refuses local settlement after the admitted provider's original account retires", async () => {
+  for (const { retirement, title } of [
+    { retirement: "snapshot", title: "compact Website refuses local settlement after the admitted provider's original account retires" },
+    { retirement: "transport-before", title: "compact Website keeps an admitted question in recovery when transport refuses the scope before output" },
+    { retirement: "transport-after", title: "compact Website does not auto-save a partial reply when transport refuses the scope before the watcher" }
+  ]) it(title, async () => {
     const mounted = await mountOwnedEmissionMode("website")
+    const followResult = vi.spyOn(h1.controller, "followResult")
+    const scopeError = createServicePromptScopeChangedError()
     let release!: () => void, entered = false
     const held = new Promise<void>(resolve => { release = resolve })
     h1.wire.mockImplementationOnce(async function* () {
-      yield { choices: [{ delta: { content: "Partial original answer" } }] }
+      if (retirement !== "transport-before")
+        yield { choices: [{ delta: { content: "Partial original answer" } }] }
       entered = true
       await held
+      if (retirement !== "snapshot") throw scopeError
       yield { choices: [{ delta: { content: " completed" } }] }
     })
     let pending!: ReturnType<typeof mounted.hook.result.current.onSubmit>
@@ -3160,23 +3171,29 @@ describe("compact alternate-mode preparation ownership", () => {
       const admitted = await mounted.memory.messages.where("history_id").equals(historyId).toArray()
       expect(admitted.map((row: StoredMessage) => [row.role, row.content])).toEqual([["user", mounted.input.message]])
       expect(mounted.account.isCurrent()).toBe(true)
-      // Retire the actual captured snapshot/account without replacing the
-      // local profile or aborting the response signal as if Stop were pressed.
-      act(() => { h1.auth.abort(); mounted.hook.rerender() })
-      expect(mounted.account.isCurrent()).toBe(false)
+      if (retirement === "snapshot") {
+        // Retire the captured account without cancelling the response as if Stop were pressed.
+        act(() => { h1.auth.abort(); mounted.hook.rerender() })
+        expect(mounted.account.isCurrent()).toBe(false)
+      }
+      let outcome: unknown
       await act(async () => {
         release()
-        expect(toChatSubmitResult(await pending)).toEqual({ status: "failed", errorMessage: "The server or authenticated account changed." })
+        outcome = toChatSubmitResult(await pending)
       })
       expect(h1.wire).toHaveBeenCalledOnce()
       const retained = await mounted.memory.messages.where("history_id").equals(historyId).toArray()
       expect(retained.map((row: StoredMessage) => [row.role, row.content])).toEqual([["user", mounted.input.message]])
+      expect(followResult).not.toHaveBeenCalled()
+      expect(mounted.account.isCurrent()).toBe(retirement !== "snapshot")
+      expect(outcome).toEqual({ status: "failed", errorMessage: retirement === "snapshot"
+        ? "The server or authenticated account changed." : scopeError.message })
       expect(mounted.hook.result.current.context.getController!()).toBeNull()
       expect(mocks.chatBaseState.streaming).toBe(false)
       expect((await mounted.sceneBucket.list()).records[mounted.sourceTarget.key]).toEqual(mounted.originalScenes.records[mounted.sourceTarget.key])
     } finally {
       release()
-      try { await pending } finally { mounted.cleanup() }
+      try { await pending } finally { followResult.mockRestore(); mounted.cleanup() }
     }
   })
 
@@ -3318,7 +3335,7 @@ describe("compact submission outcomes", () => {
       state: "accepted_unsent"
     })
     expect(h1.controller.followResult).toHaveBeenCalledOnce()
-    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.any(Object), h1.append.mock.calls[0][1].id)
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.any(Object), h1.append.mock.calls[0][1].id, expect.any(Function))
     expect(h1.append).toHaveBeenCalledOnce()
   })
 
@@ -5773,7 +5790,7 @@ it.each(["character", "ordinary"])("B02 sidepanel saved-question dispatch is exp
     expect(h1.wire).toHaveBeenCalledOnce()
     expect(h1.wire.mock.calls[0][0].messages).toEqual([])
     expect(h1.wire.mock.calls[0][0].tldw_history_server_existing_input_v1.messages).toEqual([{id: "u-old", revision: "r1"}])
-    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({view_session_id: "origin"}), "existing-answer")
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({view_session_id: "origin"}), "existing-answer", expect.any(Function))
   } else expect(h1.wire).not.toHaveBeenCalled()
 })
 
@@ -5808,7 +5825,7 @@ it("binds Auto native character Sidepanel sends to the current exact catalog pro
     })
     expect(catalog).toHaveBeenCalledWith(true, { requireFresh: true })
     expect(h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages.map((row: { id: string }) => row.id)).toEqual(["u-old", "a1"])
-    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({ view_session_id: "origin" }), "native-result")
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({ view_session_id: "origin" }), "native-result", expect.any(Function))
     expect(h1.append).not.toHaveBeenCalled()
     expect(h1.create).not.toHaveBeenCalled()
     expect(h1.roleplayAppend).not.toHaveBeenCalled()

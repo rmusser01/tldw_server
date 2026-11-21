@@ -2773,7 +2773,8 @@ export const useMessage = () => {
       return (
         actionsMountedRef.current &&
         session.restoreRevision === commandSession.restoreRevision &&
-        session.sourceSelectionRevision === commandSession.sourceSelectionRevision
+        session.sourceSelectionRevision === commandSession.sourceSelectionRevision &&
+        (!assertQueuedDispatchCurrent || assertQueuedDispatchCurrent.isSourceCurrent?.() === true)
       )
     }
     const commandState = useStoreMessageOption.getState();
@@ -2835,6 +2836,11 @@ export const useMessage = () => {
     if (requestedActorSceneSend?.isCurrent() === false || sceneCapture?.isCurrent() === false) return chatSubmitSkipped("Conversation changed");
     assertQueuedDispatchCurrent?.();
     assertCurrent?.();
+    const setTurnServerChatId: typeof setServerChatId = (id, options) => {
+      if (assertQueuedDispatchCurrent)
+        assertQueuedDispatchCurrent.publishServerChatId(id, value => setServerChatId(value, options));
+      else setServerChatId(id, options);
+    };
     const identityPublication = publishCommandIdentity;
     const setTurnHistoryId = historySetterForQueuedTurn(assertQueuedDispatchCurrent, () => turnSourceIsCurrent(), identityPublication);
     const saveMessageOnSuccess = saveSuccessForQueuedTurn(assertQueuedDispatchCurrent, () => turnSourceIsCurrent(), identityPublication);
@@ -2908,10 +2914,7 @@ export const useMessage = () => {
           controller: historySelection!,
           signal: activeController.signal,
           originIsCurrent: historyOriginIsCurrent!,
-          sourceIsCurrent: () =>
-            resumeSource.isCurrent() &&
-            (!assertQueuedDispatchCurrent ||
-              assertQueuedDispatchCurrent.isSourceCurrent?.() === true),
+          sourceIsCurrent: resumeSource.isCurrent,
           serverChatId: serverChatIdOverride || serverChatId,
           historyId: historyIdOverride ?? historyId,
           message,
@@ -3157,11 +3160,7 @@ export const useMessage = () => {
     }
 
     const commandLifetimeIsCurrent = () => {
-      const session = usePlaygroundSessionStore.getState();
-      return actionsMountedRef.current && actorSceneSend.scene.target.account?.isCurrent() === true &&
-        session.restoreRevision === commandSession.restoreRevision &&
-        session.sourceSelectionRevision === commandSession.sourceSelectionRevision &&
-        (!assertQueuedDispatchCurrent || assertQueuedDispatchCurrent.isSourceCurrent?.() === true);
+      return commandSessionIsCurrent() && actorSceneSend.scene.target.account?.isCurrent() === true;
     };
     ownIdentityIsCurrent = () => {
       const state = useStoreMessageOption.getState();
@@ -3278,7 +3277,7 @@ export const useMessage = () => {
             sourceIsCurrent: commandSessionIsCurrent,
             signal, temporary: temporaryChat, historyId, serverChatId: serverChatIdOverride || serverChatId,
             model, currentModel: selectedModel, toolChoice: resolvedToolChoice, settings: currentChatModelSettings,
-            message, image, historyRegenerate, setServerChatId, setMessages,
+            message, image, historyRegenerate, setServerChatId: setTurnServerChatId, setMessages,
             unsupportedContext: Boolean(resolvedWebSearch || resolvedSelectedSystemPrompt || replyActive ||
               conversationContextOverrides.historyForModel || conversationContextOverrides.messageForModel ||
               (effectiveAssistantState.mode === "overlay" && effectiveSelectedAssistant)),
@@ -3476,7 +3475,7 @@ export const useMessage = () => {
                   image,
                   greetingSeed,
                   historyEditResend,
-                  setServerChatId,
+                  setServerChatId: setTurnServerChatId,
                   setMessages,
                   unsupportedContext: Boolean(
                     resolvedWebSearch || resolvedSelectedSystemPrompt || replyActive ||
@@ -3574,8 +3573,7 @@ export const useMessage = () => {
                 // Only this Persona operation can acknowledge its own reset or created ID.
                 commandIdentity.serverChatId = id
                 try {
-                  if (assertQueuedDispatchCurrent) assertQueuedDispatchCurrent.publishServerChatId(id, value => setServerChatId(value, options))
-                  else setServerChatId(id, options)
+                  setTurnServerChatId(id, options)
                 } catch (error) {
                   identityRetired = true
                   throw error
@@ -3675,7 +3673,7 @@ export const useMessage = () => {
                     }
                   : undefined,
                 serverChatId,
-                setServerChatId,
+                setServerChatId: setTurnServerChatId,
                 surface: "sidepanel",
                 onServerChatMutated: invalidateServerChatHistory,
                 selectionSource,
@@ -3754,7 +3752,7 @@ export const useMessage = () => {
                     }
                   : undefined,
                 serverChatId,
-                setServerChatId,
+                setServerChatId: setTurnServerChatId,
                 surface: "sidepanel",
                 onServerChatMutated: invalidateServerChatHistory,
                 selectionSource,

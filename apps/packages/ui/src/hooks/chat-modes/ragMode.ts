@@ -27,12 +27,16 @@ import {
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup"
 import {
   loadServicePromptSnapshot,
   renderServicePromptPart,
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import type { ChatTurnIdentity } from "@/services/tldw/TldwApiClient"
+import { projectHistoryDurableSources } from "@/services/history-durable-turn"
 
 const RAG_STRING_ARRAY_KEYS = new Set([
   "sources",
@@ -229,6 +233,8 @@ type RagSourceEntry = {
 }
 
 type RagModeParams = HistoryChatModeParams & {
+  tldwTurn?: ChatTurnIdentity
+  conversationId?: string
   selectedModel: string
   useOCR: boolean
   selectedKnowledge: Knowledge | null
@@ -267,6 +273,7 @@ type RagModeParams = HistoryChatModeParams & {
   historyForModel?: ChatHistory
   regenerateFromMessage?: Message
   servicePromptSnapshot?: ServicePromptSnapshot
+  requestScope?: ServicePromptRequestScope
 }
 
 type PreparedRagRetrieval = {
@@ -472,13 +479,7 @@ const prepareRagRetrieval = async (
   const ragRes = (await tldwClient.ragSearch(query, ragOptions)) as RagResponse
   ctx.assertPreparationCurrent?.()
   const docs = getRagDocuments(ragRes)
-  const context = formatDocs(
-    docs.map((doc) => ({
-      pageContent: doc.content || doc.text || doc.chunk || "",
-      metadata: doc.metadata || {}
-    }))
-  )
-  const source = docs.map((doc) => ({
+  const rawSources = docs.map((doc) => ({
     name:
       getMetadataString(doc.metadata, "title") ||
       getMetadataString(doc.metadata, "source") ||
@@ -492,6 +493,10 @@ const prepareRagRetrieval = async (
     pageContent: doc.content || doc.text || doc.chunk || "",
     metadata: doc.metadata || {}
   }))
+  const source = ctx.historyTurn?.serverOwned && rawSources.length
+    ? [...projectHistoryDurableSources(rawSources)] as RagSourceEntry[]
+    : rawSources
+  const context = formatDocs(source)
   return {
     query,
     context,
@@ -549,7 +554,11 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       )
     } catch (error) {
       ctx.assertPreparationCurrent?.()
-      if (ctx.signal.aborted || isRequestConfigScopeChangedError(error)) {
+      if (
+        ctx.signal.aborted || isAbortLikeError(error) ||
+        isRequestConfigScopeChangedError(error) ||
+        typeof (error as { status?: unknown })?.status === "number"
+      ) {
         throw error
       }
       return buildSelectedSourceGroundingResponse(
@@ -618,7 +627,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
     ctx.assertPreparationCurrent?.()
 
     let applicationChatHistory = generateHistory(
-      ctx.historyForModel ?? ctx.history,
+      ctx.historyTurn?.serverOwned ? [] : ctx.historyForModel ?? ctx.history,
       ctx.selectedModel
     )
 
@@ -648,15 +657,19 @@ export const ragMode = async (
   params: RagModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using ragMode")
+  if (params.historySelection && params.tldwTurn &&
+      (isRegenerate || image || !hasSelectedMediaSources(params) || params.actorSettings?.isEnabled))
+    throw new Error("unsupported_history_action_context")
   const historyPreparation = params.historySelection
     ? params.historyPreparation ?? captureNormalChatPreparation(params)
     : undefined
+  const requestScope = params.requestScope ?? params.actorSceneSend?.requestScope
   const ownsServicePromptSnapshot = !params.servicePromptSnapshot
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
     (await loadServicePromptSnapshot(
       ["chat.rag.answer", "chat.rag.question_rewrite"],
-      { signal, requestScope: params.actorSceneSend?.requestScope }
+      { signal, ...(requestScope ? { requestScope } : {}) }
     ))
   const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
   try {

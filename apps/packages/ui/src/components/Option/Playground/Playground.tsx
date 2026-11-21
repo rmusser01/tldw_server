@@ -1547,14 +1547,28 @@ const PlaygroundContent = () => {
 
   const handlePrepareResearchFollowUp = React.useCallback(
     async (target: ResearchFollowUpTarget) => {
+      const { owner, view } = historySelection.getCurrent();
+      const threadKey = `${serverChatId ?? ""}::${historyId ?? ""}`;
       const attempt = {};
       followUpAttemptRef.current = attempt;
       let attachmentRevision = researchAttachmentIntentRef.current;
-      const source = captureChatDraftSource(() => followUpMountedRef.current &&
-        followUpAttemptRef.current === attempt &&
-        researchAttachmentIntentRef.current === attachmentRevision && renderedResearchFence() &&
-        useStoreMessageOption.getState().chatDraftRevision === researchDraftRevision &&
-        routeLocationKeyRef.current === routeLocationKey);
+      const source = captureChatDraftSource(() => {
+        const live = historySelection.getCurrent();
+        return followUpMountedRef.current &&
+          followUpAttemptRef.current === attempt &&
+          researchAttachmentIntentRef.current === attachmentRevision &&
+          renderedResearchFence() &&
+          useStoreMessageOption.getState().chatDraftRevision === researchDraftRevision &&
+          routeLocationKeyRef.current === routeLocationKey &&
+          previousThreadRef.current === threadKey &&
+          view === historySelection.view &&
+          owner === historySelection.owner &&
+          live.view === view &&
+          live.owner === owner &&
+          owner?.kind !== "unavailable" &&
+          owner?.validate_lease?.() !== false &&
+          historySelection.settingsMode(serverChatId) !== "pending";
+      });
       if (!source.isQuickPromptCurrent()) return;
       attachmentRevision = ++researchAttachmentIntentRef.current;
       if (attachedResearchContext?.run_id !== target.run_id) {
@@ -1582,6 +1596,9 @@ const PlaygroundContent = () => {
       researchDraftRevision,
       routeLocationKey,
       setSelectedQuickPrompt,
+      historySelection,
+      serverChatId,
+      historyId,
     ],
   );
 

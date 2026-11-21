@@ -167,6 +167,7 @@ def _ratchet_config_file() -> Path:
     same route keys on the way an operator already can in production: via
     ``config.txt``.
     """
+    from tldw_Server_API.app.core.config import _route_toggle_policy
     from tldw_Server_API.app.core.config_paths import resolve_config_file
 
     real_config_path = resolve_config_file()
@@ -179,11 +180,7 @@ def _ratchet_config_file() -> Path:
         parser.read(real_config_path)
     if not parser.has_section("API-Routes"):
         parser.add_section("API-Routes")
-    existing_enable = {
-        p.strip().lower()
-        for p in parser.get("API-Routes", "enable", fallback="").split(",")
-        if p.strip()
-    }
+    existing_enable = _route_toggle_policy()["enable"]
     forced = {
         k.strip().lower() for k in ROUTE_POLICY_ENV["ROUTES_ENABLE"].split(",") if k.strip()
     }
@@ -203,18 +200,23 @@ def load_app() -> Any:
     Returns the ``FastAPI`` instance.
     Raises ``RatchetError`` if the app cannot be constructed.
     """
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from tldw_Server_API.app.core import config
+
+    # Resolve dotenv-selected config before pinning the inspection copy.
+    config._load_env_files_early()
     # Test-mode wiring swaps in auth shims, so a run parented by pytest sees a
     # different dependency tree than a bare one and the inventory stops being
     # reproducible. Measure the production wiring, always.
     for marker in ("MINIMAL_TEST_APP", "PYTEST_CURRENT_TEST", "TEST_MODE", "TLDW_TEST_MODE"):
         os.environ.pop(marker, None)
+    config.clear_config_cache()
     # Inert in this process (see _ratchet_config_file's docstring) once the
     # markers above are cleared; kept as a harmless statement of intent and a
     # fallback for any code path that still reads them directly.
     for key, value in ROUTE_POLICY_ENV.items():
         os.environ[key] = value
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
     # Always overwrite (not setdefault): TLDW_CONFIG_FILE is the variable the
     # resolver checks first, so this must win over whatever TLDW_CONFIG_FILE,
     # TLDW_CONFIG_PATH or TLDW_CONFIG_DIR a caller environment already set.
@@ -223,9 +225,7 @@ def load_app() -> Any:
     # that imported any app module first (the RG route_map lint imports the
     # policy loader) has cached the real file, so route_enabled() would ignore
     # the copy above and every force-enabled router would vanish (TASK-13417).
-    config_module = sys.modules.get("tldw_Server_API.app.core.config")
-    if config_module is not None:
-        config_module.clear_config_cache()
+    config.clear_config_cache()
     os.environ.setdefault("AUTH_MODE", "single_user")
     # Config validation refuses to build without one. The app is inspected, never
     # served, so this value authenticates nothing.

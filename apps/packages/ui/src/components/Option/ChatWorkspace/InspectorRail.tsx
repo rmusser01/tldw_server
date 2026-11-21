@@ -1,13 +1,16 @@
-import { getDesignSystemState } from "@/design-system"
 import type { WorkspaceAssistantDefaultDegradedReason } from "@/types/workspace"
-import type { ChatWorkspaceAssistantSource } from "./types"
+import {
+  getChatWorkspaceRuntimeLabel,
+  type ChatWorkspaceAssistantSource,
+  type ChatWorkspaceRuntimeStatus
+} from "./types"
 
 export type InspectorRailStagedSource = {
   sourceId: string
   title: string
 }
 
-export type InspectorRailProps = {
+export type InspectorRailProps = ChatWorkspaceRuntimeStatus & {
   scopeLabel: string
   stagedSourceCount: number
   stagedSources: InspectorRailStagedSource[]
@@ -16,50 +19,34 @@ export type InspectorRailProps = {
   selectedPersonaLabel: string | null
   assistantSource: ChatWorkspaceAssistantSource
   workspaceAssistantDegradedReason?: WorkspaceAssistantDefaultDegradedReason | null
-  backendAvailable: boolean
-  workspaceReady: boolean
-  streaming: boolean
-  sendError?: string | null
 }
 
 const panelClass = "rounded-md border border-border bg-surface px-3 py-2"
 const headingClass = "text-[11px] font-semibold text-text-muted"
 const valueClass = "mt-1 text-sm font-medium text-text"
 const mutedClass = "mt-1 text-xs text-text-muted"
-const READY_STATE_LABEL = getDesignSystemState("ready").label
-
-const getRuntimeLabel = (
-  backendAvailable: boolean,
-  workspaceReady: boolean,
-  streaming: boolean,
-  sendError?: string | null
-) => {
-  if (!backendAvailable) {
-    return "Server unavailable"
+const getRuntimeRecoveryCopy = ({
+  backendAvailable,
+  workspaceReady,
+  connectionMode,
+  historyLoading,
+  historyLoadError,
+  sendError
+}: ChatWorkspaceRuntimeStatus) => {
+  if (connectionMode === "demo" || connectionMode === "bypass") {
+    return "Connect to a live server before sending workspace chat."
   }
-
-  if (!workspaceReady) {
-    return "Loading workspace context"
-  }
-
-  if (sendError) {
-    return "Send failed"
-  }
-
-  return streaming ? "Streaming" : READY_STATE_LABEL
-}
-
-const getRuntimeRecoveryCopy = (
-  backendAvailable: boolean,
-  workspaceReady: boolean,
-  sendError?: string | null
-) => {
   if (!backendAvailable) {
     return "Reconnect to the server before sending workspace chat."
   }
 
   if (!workspaceReady) {
     return "Wait for workspace identity before sending."
+  }
+
+  if (historyLoading) return "Wait for chat history before sending."
+  if (historyLoadError) {
+    return "Reopen the conversation to load its history before sending."
   }
 
   if (sendError) {
@@ -100,20 +87,25 @@ export const InspectorRail = ({
   workspaceAssistantDegradedReason,
   backendAvailable,
   workspaceReady,
+  connectionMode,
   streaming,
+  sending,
+  historyLoading,
+  historyLoadError,
   sendError
 }: InspectorRailProps) => {
-  const runtimeLabel = getRuntimeLabel(
+  const runtime = {
     backendAvailable,
     workspaceReady,
+    connectionMode,
     streaming,
+    sending,
+    historyLoading,
+    historyLoadError,
     sendError
-  )
-  const runtimeRecoveryCopy = getRuntimeRecoveryCopy(
-    backendAvailable,
-    workspaceReady,
-    sendError
-  )
+  }
+  const runtimeLabel = getChatWorkspaceRuntimeLabel(runtime)
+  const runtimeRecoveryCopy = getRuntimeRecoveryCopy(runtime)
   const assistantSourceLabel = getAssistantSourceLabel(assistantSource)
   const degradedReasonLabel = workspaceAssistantDegradedReason
     ? degradedReasonLabels[workspaceAssistantDegradedReason]

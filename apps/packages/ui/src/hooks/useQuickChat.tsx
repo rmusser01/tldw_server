@@ -155,6 +155,7 @@ export const useQuickChat = () => {
           options
         )) {
           if (!isCurrent()) return
+          if (typeof chunk !== "string") continue
           chunks.push(chunk)
           updateLastMessage(chunks.join(""))
         }

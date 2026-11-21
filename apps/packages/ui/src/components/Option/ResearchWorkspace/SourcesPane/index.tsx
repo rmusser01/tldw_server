@@ -1,4 +1,3 @@
-import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -13,7 +12,6 @@ import {
   PanelLeftClose,
   Loader2,
   AlertTriangle,
-  RefreshCw,
   Info,
   Eye,
   ClipboardCheck,
@@ -33,7 +31,6 @@ import {
 } from "antd"
 import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { isAbsoluteHttpUrl } from "@/utils/absolute-url-guard"
-import { safeExternalUrl } from "@/utils/safe-external-url"
 import {
   isWorkspaceSourcePartiallyQueryable,
   isWorkspaceSourceSelectable
@@ -47,7 +44,6 @@ import type {
   WorkspaceSourceType
 } from "@/types/workspace"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import type { WorkspaceSourcePreviewResponse } from "@/services/tldw/domains/workspace-api"
 import { mapServerSourceReviewFields } from "@/store/workspace-api"
 import {
   WORKSPACE_SOURCE_DRAG_TYPE,
@@ -67,6 +63,7 @@ import {
   getSourceSelectionOrigin
 } from "@/store/workspace-organization"
 import { AddSourceModal } from "./AddSourceModal"
+import { WorkspaceSourcePreview } from "./WorkspaceSourcePreview"
 import type { ResearchWorkspaceCapabilitiesResponse } from "../research-workspace-capabilities"
 import {
   SourceFolderMembershipMenu,
@@ -105,8 +102,6 @@ const SOURCE_TYPE_ICONS: Record<WorkspaceSourceType, React.ElementType> = {
 const SOURCE_VIRTUALIZATION_THRESHOLD = 60
 const SOURCE_VIRTUAL_ROW_HEIGHT = 80
 const SOURCE_VIRTUAL_OVERSCAN = 5
-const SOURCE_PREVIEW_MAX_CHARS = 3000
-const SOURCE_PREVIEW_CHUNK_LIMIT = 3
 const SOURCE_ANNOTATIONS_STORAGE_KEY =
   "tldw:research-workspace:source-annotations:v1"
 
@@ -126,13 +121,6 @@ const SOURCE_REVIEW_BADGES: Record<
     label: "Reviewed",
     className: "border-success/30 bg-success/10 text-success"
   }
-}
-
-type SourcePreviewLoadState = {
-  sourceId: string | null
-  loading: boolean
-  error: string | null
-  data: WorkspaceSourcePreviewResponse | null
 }
 
 const formatFileSize = (bytes?: number): string | null => {
@@ -361,32 +349,44 @@ const persistSourceAnnotations = (
   }
 }
 
-const describePreviewUnavailable = (
-  preview: WorkspaceSourcePreviewResponse | null,
-  t: (key: string, fallback: string) => string
-): string => {
-  const reason = preview?.unavailable_reason || preview?.status_reason || ""
-  if (reason === "extraction_pending" || preview?.preview_mode === "pending") {
-    return t(
-      "playground:sources.previewExtractionPending",
-      "Text extraction has not completed yet."
-    )
-  }
-  if (reason === "media_not_found" || preview?.preview_mode === "missing_media") {
-    return t(
-      "playground:sources.previewMediaMissing",
-      "Media item is missing or unavailable."
-    )
-  }
-  if (preview?.preview_mode === "failed" || reason.includes("failed")) {
-    return t(
-      "playground:sources.previewExtractionFailed",
-      "Source extraction or indexing failed. Preview content is unavailable."
-    )
-  }
-  return t(
-    "playground:sources.previewNoTextAvailable",
-    "No captured text is available for this source."
+const SourcesPanePreview = (
+  props: React.ComponentProps<typeof WorkspaceSourcePreview>
+) => {
+  const { children, onClose, source, title, workspaceId } = props
+  const unavailable = source?.statusDetails?.statusReason === "capture_unavailable"
+
+  React.useEffect(() => {
+    if (!unavailable || !source || !workspaceId?.trim()) return
+    return useWorkspaceStore.subscribe((state, previous) => {
+      const current = state.sources.find((item) => item.id === source.id)
+      if (
+        state.workspaceId !== previous.workspaceId ||
+        !current ||
+        current.mediaId !== source.mediaId ||
+        current.webCapture !== source.webCapture ||
+        current.statusDetails?.statusReason !== "capture_unavailable"
+      ) {
+        onClose()
+      }
+    })
+  }, [onClose, source, unavailable, workspaceId])
+
+  return (
+    <>
+      {/* Keep the shared account-change dismissal even without a fetchable source. */}
+      <WorkspaceSourcePreview {...props} source={unavailable ? null : source} />
+      {unavailable && workspaceId?.trim() && (
+        <Modal open title={title} onCancel={onClose} footer={null} width={680}>
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-text">{source.title}</p>
+            <p role="alert" className="text-sm text-warning">
+              Exact capture version unavailable
+            </p>
+            {children}
+          </div>
+        </Modal>
+      )}
+    </>
   )
 }
 
@@ -449,7 +449,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   }, [onResetAdvancedSourceFilters])
 
   // Store state
-  const workspaceId = useWorkspaceStore((s) => s.workspaceId) || "local"
+  const rawWorkspaceId = useWorkspaceStore((s) => s.workspaceId)
+  const workspaceId = rawWorkspaceId || "local"
   const sources = useWorkspaceStore((s) => s.sources)
   const selectedSourceIds = useWorkspaceStore((s) => s.selectedSourceIds)
   const sourceFolders = useWorkspaceStore((s) => s.sourceFolders) || []
@@ -511,17 +512,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   const [statusDetailsSourceId, setStatusDetailsSourceId] = React.useState<
     string | null
   >(null)
-  const [previewReloadNonce, setPreviewReloadNonce] = React.useState(0)
   const [sourceAnnotations, setSourceAnnotations] = React.useState<
     Record<string, SourceAnnotation[]>
   >(() => readPersistedSourceAnnotations(workspaceId))
-  const [sourcePreviewState, setSourcePreviewState] =
-    React.useState<SourcePreviewLoadState>({
-      sourceId: null,
-      loading: false,
-      error: null,
-      data: null
-    })
   const annotationsWorkspaceIdRef = React.useRef(workspaceId)
   const [annotationQuoteDraft, setAnnotationQuoteDraft] = React.useState("")
   const [annotationNoteDraft, setAnnotationNoteDraft] = React.useState("")
@@ -1029,124 +1022,6 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     },
     [workspaceId]
   )
-
-  React.useEffect(() => {
-    if (!previewSourceId || !previewSource) {
-      setSourcePreviewState((previous) => {
-        if (
-          previous.sourceId === null &&
-          !previous.loading &&
-          previous.error === null &&
-          previous.data === null
-        ) {
-          return previous
-        }
-        return {
-          sourceId: null,
-          loading: false,
-          error: null,
-          data: null
-        }
-      })
-      return
-    }
-
-    let cancelled = false
-    const controller = new AbortController()
-    let scope: Awaited<ReturnType<typeof loadServicePromptSnapshot>> | undefined
-    const activeSource = previewSource
-    const activeSourceId = previewSourceId
-    setSourcePreviewState({
-      sourceId: activeSourceId,
-      loading: true,
-      error: null,
-      data: null
-    })
-
-    const loadPreview = async () => {
-      if (typeof tldwClient.getWorkspaceSourcePreview !== "function") {
-        if (!cancelled) {
-          setSourcePreviewState({
-            sourceId: activeSourceId,
-            loading: false,
-            error: "Source preview API is unavailable.",
-            data: null
-          })
-        }
-        return
-      }
-
-      try {
-        if (activeSource?.statusDetails?.statusReason === "capture_unavailable")
-          throw new Error("Exact capture version unavailable");
-        if (activeSource?.webCapture)
-          scope = await loadServicePromptSnapshot([], {
-            signal: controller.signal
-          })
-        if (
-          cancelled ||
-          scope?.scopeSignal.aborted ||
-          scope?.scopeInvalidatedSignal.aborted
-        )
-          return
-        const data = await tldwClient.getWorkspaceSourcePreview(
-          workspaceId,
-          activeSourceId,
-          {
-            max_chars: SOURCE_PREVIEW_MAX_CHARS,
-            chunk_limit: SOURCE_PREVIEW_CHUNK_LIMIT,
-            ...(activeSource?.webCapture
-              ? { version_number: activeSource.webCapture.versionNumber }
-              : {})
-          },
-          scope
-            ? { requestScope: scope.requestScope, signal: scope.scopeSignal }
-            : undefined
-        )
-        if (
-          activeSource?.webCapture &&
-          data.document_version_number !== activeSource.webCapture.versionNumber
-        )
-          throw new Error("Exact capture version unavailable")
-        if (
-          !cancelled &&
-          !scope?.scopeSignal.aborted &&
-          !scope?.scopeInvalidatedSignal.aborted
-        ) {
-          setSourcePreviewState({
-            sourceId: activeSourceId,
-            loading: false,
-            error: null,
-            data
-          })
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setSourcePreviewState({
-            sourceId: activeSourceId,
-            loading: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : "Source preview could not load.",
-            data: null
-          })
-        }
-      }
-    }
-
-    void loadPreview()
-    return () => {
-      cancelled = true
-      controller.abort()
-      scope?.release()
-    }
-  }, [
-    previewReloadNonce,
-    previewSourceId,
-    workspaceId,
-    previewSource
-  ])
 
   const handleSelectAllToggle = React.useCallback((event: {
     target: { checked: boolean }
@@ -2651,198 +2526,19 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           })()}
       </Modal>
 
-      {/* Source preview modal */}
-      <Modal
-        open={Boolean(previewSource)}
+      <SourcesPanePreview
+        workspaceId={rawWorkspaceId ?? null}
+        source={previewSource}
+        onClose={handleClosePreview}
         title={t(
           "playground:sources.previewModalTitle",
           "Source preview and annotations"
         )}
-        onCancel={handleClosePreview}
-        footer={null}
-        width={680}
+        statusGuardrailsEnabled={statusGuardrailsEnabled}
+        readyStateLabel={readyStateLabel}
       >
-        {previewSource &&
-          (() => {
-            const previewStatus = statusGuardrailsEnabled
-              ? previewSource.status || "ready"
-              : "ready"
-            const previewStatusLabel =
-              previewStatus === "processing"
-                ? t("playground:sources.statusProcessing", "Processing")
-                : previewStatus === "error"
-                  ? t("playground:sources.statusErrorShort", "Error")
-                  : t("playground:sources.statusReady", readyStateLabel)
-            const previewData =
-              sourcePreviewState.sourceId === previewSource.id
-                ? sourcePreviewState.data
-                : null
-            const previewLoading =
-              sourcePreviewState.sourceId === previewSource.id &&
-              sourcePreviewState.loading
-            const previewError =
-              sourcePreviewState.sourceId === previewSource.id
-                ? sourcePreviewState.error
-                : null
-            const sourcePreviewSnippets =
-              previewData?.snippets?.filter(
-                (snippet) => snippet.kind === "chunk" && snippet.text?.trim()
-              ) ||
-              []
-            const previewTotalChars = previewData?.text_total_chars
-            const previewTruncated = Boolean(previewData?.text_truncated)
-            const formattedPreviewTotalChars =
-              typeof previewTotalChars === "number"
-                ? previewTotalChars.toLocaleString()
-                : null
-            const formattedPreviewShownChars = previewData?.text_preview
-              ? previewData.text_preview.length.toLocaleString()
-              : null
-            const previewCharacterSummary =
-              formattedPreviewTotalChars && previewTruncated
-                ? t(
-                    "playground:sources.previewTruncatedSummary",
-                    "Showing first {{shown}} of {{total}} characters.",
-                    {
-                      shown: formattedPreviewShownChars,
-                      total: formattedPreviewTotalChars
-                    }
-                  )
-                : formattedPreviewTotalChars
-                  ? t(
-                      "playground:sources.previewFullSummary",
-                      "Showing {{total}} characters.",
-                      {
-                        total: formattedPreviewTotalChars
-                      }
-                    )
-                  : null
-            const previewSafeUrl = safeExternalUrl(previewSource.url)
-
-            return (
-          <div className="space-y-4">
-            <div className="rounded border border-border bg-surface2/40 p-3">
-              <p className="text-sm font-semibold text-text">{previewSource.title}</p>
-              <p className="text-xs capitalize text-text-muted">
-                {previewSource.type} / {previewStatusLabel}
-              </p>
-              {previewSafeUrl && (
-                <a
-                  href={previewSafeUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 inline-block break-all text-xs text-primary hover:underline"
-                >
-                  {previewSafeUrl}
-                </a>
-              )}
-            </div>
-
-            <div className="rounded border border-border bg-surface/50 p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase text-text-muted">
-                  {t("playground:sources.capturedContent", "Captured content")}
-                </p>
-                {previewData?.readiness?.citation_ready && (
-                  <span className="rounded bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success">
-                    {t("playground:sources.citationReady", "Citation ready")}
-                  </span>
-                )}
-              </div>
-              {previewLoading ? (
-                <div className="flex items-center gap-2 text-sm text-text-muted">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {t(
-                    "playground:sources.previewLoading",
-                    "Loading captured content..."
-                  )}
-                </div>
-              ) : previewError ? (
-                <div className="space-y-2">
-                  <div className="flex items-start gap-2 text-sm text-warning">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>
-                      {t(
-                        "playground:sources.previewLoadError",
-                        "Source preview could not load."
-                      )}
-                    </span>
-                  </div>
-                  <p className="break-words rounded border border-border bg-surface2/40 p-2 font-mono text-xs text-warning">
-                    {previewError}
-                  </p>
-                  <Button
-                    size="small"
-                    icon={<RefreshCw className="h-3.5 w-3.5" />}
-                    onClick={() => setPreviewReloadNonce((value) => value + 1)}
-                  >
-                    {t("playground:sources.retryPreview", "Retry preview")}
-                  </Button>
-                </div>
-              ) : previewData?.content_available && previewData.text_preview ? (
-                <div className="space-y-2">
-                  <p className="max-h-52 overflow-y-auto whitespace-pre-wrap rounded border border-border bg-surface2/40 p-2 text-sm leading-6 text-text">
-                    {previewData.text_preview}
-                  </p>
-                  {previewCharacterSummary && (
-                    <p className="text-xs text-text-muted">
-                      {previewCharacterSummary}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <p className="rounded border border-border bg-surface2/40 p-2 text-sm text-text-muted">
-                  {describePreviewUnavailable(previewData, t)}
-                </p>
-              )}
-            </div>
-
-            <div className="rounded border border-border bg-surface/50 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase text-text-muted">
-                {t("playground:sources.evidenceSnippets", "Evidence snippets")}
-              </p>
-              {sourcePreviewSnippets.length === 0 ? (
-                <p className="text-xs text-text-muted">
-                  {t(
-                    "playground:sources.noEvidenceSnippets",
-                    "No chunk evidence is available yet."
-                  )}
-                </p>
-              ) : (
-                <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
-                  {sourcePreviewSnippets.map((snippet) => (
-                    <div
-                      key={snippet.id}
-                      className="rounded border border-border bg-surface2/40 p-2"
-                    >
-                      <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
-                        <span>
-                          {snippet.kind === "chunk"
-                            ? t("playground:sources.chunkLabel", "Chunk")
-                            : t(
-                                "playground:sources.contentExcerptLabel",
-                                "Content excerpt"
-                              )}
-                          {typeof snippet.chunk_index === "number"
-                            ? ` ${snippet.chunk_index}`
-                            : ""}
-                        </span>
-                        {typeof snippet.start_char === "number" &&
-                          typeof snippet.end_char === "number" && (
-                            <span>
-                              {snippet.start_char}-{snippet.end_char}
-                            </span>
-                          )}
-                      </div>
-                      <p className="whitespace-pre-wrap text-sm text-text">
-                        {snippet.text}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
+        {previewSource && (
+          <>
             <div className="rounded border border-border bg-surface/50 p-3">
               <p className="text-xs font-semibold uppercase text-text-muted">
                 {t(
@@ -2949,10 +2645,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 ))
               )}
             </div>
-          </div>
-            )
-          })()}
-      </Modal>
+          </>
+        )}
+      </SourcesPanePreview>
 
       <AddSourceModal researchWorkspaceCapabilities={researchWorkspaceCapabilities} />
     </div>

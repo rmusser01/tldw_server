@@ -20,6 +20,7 @@ import {
   filterItemsByDateRange,
   filterItemsByKeyword,
   filterItemsBySourceType,
+  getOriginalResultIndex,
   getResultChunkId,
   getResultSourceId,
   getSourceContentFacetLabel,
@@ -170,14 +171,6 @@ function getResultFeedbackKey(result: RagResult, index: number): string {
     return result.id
   }
   return `source-${index}`
-}
-
-function getOriginalResultIndex(result: RagResult, fallbackIndex: number): number {
-  const rawIndex = result.metadata?.original_result_index
-  if (typeof rawIndex !== "number" || !Number.isFinite(rawIndex)) {
-    return fallbackIndex
-  }
-  return Math.max(0, Math.round(rawIndex))
 }
 
 function buildAskPrompt(template: SourceAskTemplate, title: string): string {

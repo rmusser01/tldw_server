@@ -10,13 +10,13 @@ vi.mock('@/services/background-proxy', () => ({
 vi.mock('@/utils/safe-storage', () => ({
   createSafeStorage: () => ({
     get: async (key: string) => key === 'tldwConfig' ? {
-      serverUrl: 'https://chat.test',
+      serverUrl: 'https://memory.test',
       authMode: 'single-user',
+      apiKey: 'synthetic-memory-key',
       authSource: 'manual',
-      apiKey: 'memory-test-api-key',
       credentialSource: 'manual',
       apiKeyPersistence: 'device',
-      apiKeyServerOrigin: 'https://chat.test'
+      apiKeyServerOrigin: 'https://memory.test'
     } : null,
     set: async () => {},
     remove: async () => {}

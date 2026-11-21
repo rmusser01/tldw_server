@@ -2,6 +2,8 @@ import type { RoleplayResumeRecovery } from "@/services/tldw/roleplay-resume"
 /** Local H1 authority. All hashes run synchronously within the owning Dexie transaction. */
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
+import { z } from "zod"
+import { validateHistoryDurableResultReceipt } from "@/utils/history-durable-sources"
 import { db } from "./schema"
 import { indexMessageSearchTokens } from "./search-tokens"
 import type {
@@ -1157,7 +1159,13 @@ const reusesSavedQuestion = (action: HistoryTurnRecovery["action"]) =>
   action === "regenerate" || action === "continue"
 const HISTORY_TURN_ACTIONS = new Set<string>(["edit_resend", "regenerate", "continue"])
 
+type ServerRecovery = Extract<HistoryTurnRecovery, { persistence: "server" }>
+const isSelectedRecovery = (turn?: HistoryTurnRecovery): turn is ServerRecovery =>
+  turn?.persistence === "server" && (turn.logical_user_message_id !== undefined ||
+    turn.finalized_selection !== undefined || turn.observed_result !== undefined)
+
 const projectHistoryTurnRecovery = async (
+  view: HistoryViewSelectionV1,
   turn: HistoryTurnRecovery
 ): Promise<HistoryTurnRecovery> => {
   if (turn.action !== undefined && !HISTORY_TURN_ACTIONS.has(turn.action))
@@ -1169,6 +1177,19 @@ const projectHistoryTurnRecovery = async (
       turn.origin_view.cursor.kind !== "after_message")
   )
     fail("unsupported_history_action")
+  const selected = isSelectedRecovery(turn) ? turn : undefined
+  if (selected) {
+    const parsed = recoverySelectionSchema.safeParse(selected.finalized_selection)
+    if (!z.guid().safeParse(selected.logical_user_message_id).success || !parsed.success ||
+        parsed.data.owner_key !== turn.owner_key || parsed.data.conversation_id !== turn.conversation_id ||
+        parsed.data.selection_digest !== turn.selection_digest || selectionDigest(parsed.data as HistorySelectionV1) !== turn.selection_digest ||
+        !recoveryViewSchema.safeParse(turn.origin_view).success || !recoveryViewSchema.safeParse(view).success ||
+        !recoveryObservationSchema.safeParse(turn).success)
+      fail("invalid_history_operation")
+    if (turn.roleplay_resume !== undefined || turn.existing_selection !== undefined ||
+        turn.settlement_payload !== undefined || reusesSavedQuestion(turn.action))
+      fail("history_operation_conflict")
+  }
   // Whitelist the recovery projection; runtime extras cannot persist credentials/capabilities.
   const detached: HistoryTurnRecovery = structuredClone({
     operation_id: turn.operation_id,
@@ -1186,6 +1207,11 @@ const projectHistoryTurnRecovery = async (
     input_images: turn.input_images,
     result_text: turn.result_text,
     state: turn.state,
+    ...(selected ? {
+      logical_user_message_id: selected.logical_user_message_id,
+      finalized_selection: selected.finalized_selection,
+      ...(selected.observed_result !== undefined ? { observed_result: selected.observed_result } : {})
+    } : {}),
     ...(turn.outcome && HISTORY_TURN_OUTCOMES.has(turn.outcome)
       ? { outcome: turn.outcome }
       : {}),
@@ -1230,6 +1256,11 @@ const projectHistoryTurnRecovery = async (
         }
       : {})
   }) as HistoryTurnRecovery
+  if (selected && detached.persistence === "server") {
+    if (detached.input_id === undefined) delete detached.input_id
+    if (detached.assistant_id === undefined) delete detached.assistant_id
+    if (detached.admission) detached.admission = parseRecoveryAdmission(detached.admission)
+  }
   turn = detached
   let roleplay: RoleplayResumeRecovery | undefined
   if (turn.roleplay_resume !== undefined) {
@@ -1310,9 +1341,10 @@ export const retainHistoryTurnRecoveryInMemory = async (
   view: HistoryViewSelectionV1,
   turn: HistoryTurnRecovery
 ): Promise<void> => {
-  const detached = await projectHistoryTurnRecovery(turn);
+  let detached = await projectHistoryTurnRecovery(view, turn);
+  const selected = isSelectedRecovery(detached)
   const ordinary =
-    detached.persistence === 'server' && !detached.roleplay_resume && detached.action === undefined;
+    detached.persistence === 'server' && !detached.roleplay_resume && (selected || detached.action === undefined);
   if (
     !scope.profile_id ||
     !scope.client_session_id ||
@@ -1326,7 +1358,7 @@ export const retainHistoryTurnRecoveryInMemory = async (
   )
     fail('history_operation_conflict');
   if (
-    ordinary &&
+    ordinary && !selected &&
     (!detached.selection_digest ||
       !detached.request_context_digest ||
       (detached.admission &&
@@ -1341,7 +1373,12 @@ export const retainHistoryTurnRecoveryInMemory = async (
     fail('history_operation_conflict');
   const key = recoveryKey(scope, detached),
     prior = memoryTurnRecoveries.get(key)
-  if (prior) {
+  if (isSelectedRecovery(detached)) {
+    const earlier = prior?.turn
+    if (earlier && !isSelectedRecovery(earlier)) fail("history_operation_conflict")
+    detached = mergeSelectedRecovery(detached, isSelectedRecovery(earlier) ? earlier : undefined)
+  } else if (prior) {
+    if (isSelectedRecovery(prior.turn)) fail("history_operation_conflict")
     if (ordinary) {
       if (prior.turn.roleplay_resume) fail('history_operation_conflict');
       for (const field of [
@@ -1389,12 +1426,124 @@ export const retainHistoryTurnRecoveryInMemory = async (
 }
 
 /** Store a credential-free operation intent before dispatch, separate from all ancestry. */
+const recoveryString = z.string().min(1)
+const recoveryInterpretation = z.discriminatedUnion("kind", [
+  z.object({kind: z.literal("parent_graph_v1")}).strict(),
+  z.object({kind: z.literal("legacy_linear_v1"), projection_id: recoveryString}).strict()
+])
+const recoveryCursor = z.discriminatedUnion("kind", [
+  z.object({kind: z.literal("empty")}).strict(),
+  z.object({kind: z.literal("after_message"), message_id: recoveryString}).strict(),
+  z.object({kind: z.literal("before_message"), message_id: recoveryString}).strict()
+])
+const recoveryViewSchema = z.object({
+  view_session_id: recoveryString, owner_key: recoveryString, conversation_id: recoveryString,
+  interpretation: recoveryInterpretation, cursor: recoveryCursor, selection_revision: z.number().int().nonnegative()
+}).strict()
+const recoverySelectionSchema = z.object({
+  version: z.literal(1), owner_key: recoveryString, conversation_id: recoveryString,
+  interpretation: recoveryInterpretation, cursor: recoveryCursor, selection_revision: z.number().int().nonnegative(),
+  purpose: z.literal("send"),
+  messages: z.array(z.object({id: recoveryString, revision: recoveryString}).strict()),
+  fences: z.object({conversation: z.string(), history: z.string(), settings: z.string()}).strict(),
+  storage_context_digest: z.string(), request_context_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  selection_digest: z.string().regex(/^[0-9a-f]{64}$/)
+}).strict()
+const recoveryAdmissionSchema = z.object({
+  version: z.literal(1), owner_key: recoveryString, conversation_id: recoveryString,
+  input_message_id: z.guid(), input_message_revision: z.literal("1"),
+  selection_digest: z.string().regex(/^[0-9a-f]{64}$/)
+}).strict()
+const parseRecoveryAdmission = (value: HistoryAdmissionReferenceV1): HistoryAdmissionReferenceV1 => {
+  const parsed = recoveryAdmissionSchema.safeParse(value)
+  return parsed.success ? parsed.data : fail("invalid_history_operation")
+}
+const recoveryObservationSchema = z.object({
+  operation_id: recoveryString, created_at: z.number().int().nonnegative(),
+  request_context_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  input_text: z.string(), input_images: z.tuple([]), result_text: z.string(),
+  state: z.enum(["dispatching", "unknown", "accepted_unsent", "generated_unsaved", "refused"]),
+  input_id: z.guid().optional(), assistant_id: z.guid().optional(),
+  admission: z.object({}).passthrough().optional(),
+  observed_result: z.object({}).passthrough().optional()
+})
+
+const recoveryIntent = (value: HistoryTurnRecovery) => ({
+  origin_view: value.origin_view, selection_digest: value.selection_digest, request_context_digest: value.request_context_digest,
+  operation_id: value.operation_id, action: value.action, owner_key: value.owner_key, conversation_id: value.conversation_id,
+  persistence: value.persistence ?? "client",
+  ...(value.persistence === "server" ? {logical_user_message_id: value.logical_user_message_id, finalized_selection: value.finalized_selection} : {}),
+  ...(value.persistence === "server" ? {} : {input_id: value.input_id, assistant_id: value.assistant_id}), created_at: value.created_at,
+  input_text: value.input_text, input_images: value.input_images, roleplay_intent: value.roleplay_resume?.intent
+})
+
+const mergeSelectedRecovery = (turn: ServerRecovery, prior?: ServerRecovery): ServerRecovery => {
+  if (prior) {
+    if (canonicalHistoryJson(recoveryIntent(prior)) !== canonicalHistoryJson(recoveryIntent(turn)) ||
+        (prior.input_id && turn.input_id && prior.input_id !== turn.input_id) ||
+        (prior.assistant_id && turn.assistant_id && prior.assistant_id !== turn.assistant_id) ||
+        (prior.admission && turn.admission && canonicalHistoryJson(prior.admission) !== canonicalHistoryJson(turn.admission)))
+      fail("history_operation_conflict")
+    const input = turn.input_id ?? prior.input_id
+    const assistant = turn.assistant_id ?? prior.assistant_id
+    const admission = turn.admission ?? prior.admission
+    const observed = turn.observed_result ?? prior.observed_result
+    const keepsResult = prior.observed_result && !turn.observed_result
+    turn = {
+      ...turn,
+      ...(input ? { input_id: input } : {}),
+      ...(assistant ? { assistant_id: assistant } : {}),
+      ...(admission ? { admission: parseRecoveryAdmission(admission) } : {}),
+      ...(observed ? { observed_result: observed } : {}),
+      ...(!turn.settled_message_id && prior.settled_message_id ? { settled_message_id: prior.settled_message_id } : {}),
+      result_text: (keepsResult && prior.result_text) || turn.result_text || prior.result_text,
+      ...(keepsResult || (prior.admission && !turn.admission && !turn.observed_result && !turn.result_text)
+        ? { state: prior.state } : {})
+    }
+  }
+  const admission = turn.admission
+  if ((!admission && (turn.input_id || turn.assistant_id)) ||
+      (admission && (admission.owner_key !== turn.owner_key || admission.conversation_id !== turn.conversation_id ||
+        admission.input_message_id !== turn.input_id || admission.input_message_id !== turn.logical_user_message_id ||
+        admission.selection_digest !== turn.selection_digest)))
+    fail("history_operation_conflict")
+  const receipt = turn.observed_result
+  if (receipt) {
+    if (!admission || !Array.isArray(receipt.sources)) fail("history_operation_conflict")
+    const observed = validateHistoryDurableResultReceipt(
+      turn, admission, turn.request_context_digest, prior?.observed_result?.sources ?? receipt.sources, receipt
+    )
+    if ((turn.assistant_id && turn.assistant_id !== observed.result_message_id) ||
+        (prior?.observed_result && canonicalHistoryJson(prior.observed_result) !== canonicalHistoryJson(observed)))
+      fail("history_operation_conflict")
+    turn.observed_result = observed
+  }
+  if (turn.settled_message_id && (!admission || turn.settled_message_id !== turn.assistant_id))
+    fail("history_operation_conflict")
+  return turn
+}
+
+// A fallback after a rejected durable write cannot displace conflicting durable evidence.
+const reconcileSelectedMemory = (
+  durable: HistoryTurnRecovery, volatile: HistoryTurnRecovery, reading: boolean
+): HistoryTurnRecovery => {
+  if (!isSelectedRecovery(durable) || !isSelectedRecovery(volatile) || durable.state === "refused") return durable
+  try {
+    return reading ? mergeSelectedRecovery(volatile, durable) : mergeSelectedRecovery(durable, volatile)
+  } catch (error) {
+    if (!(error instanceof HistorySelectionError)) throw error
+    return durable
+  }
+}
+
 export const saveHistoryTurnRecovery = async (
   scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, turn: HistoryTurnRecovery
 ): Promise<void> => {
-  const detached = await projectHistoryTurnRecovery(turn)
-  const key = recoveryKey(scope, detached),
-    volatile = memoryTurnRecoveries.get(key)
+  if (isSelectedRecovery(turn)) view = structuredClone(view)
+  let detached = await projectHistoryTurnRecovery(view, turn)
+  const selected = isSelectedRecovery(detached)
+  const key = recoveryKey(scope, detached)
+  let volatile = memoryTurnRecoveries.get(key)
   if (volatile && detached.roleplay_resume)
     detached.retained_result_texts = retainedTexts(volatile.turn, detached)
   let written = false
@@ -1406,9 +1555,9 @@ export const saveHistoryTurnRecovery = async (
     if (previous?.history_turn_outcomes?.[detached.operation_id]) return
     if (!detached.origin_view || detached.origin_view.owner_key !== view.owner_key || detached.origin_view.conversation_id !== view.conversation_id || !detached.selection_digest || !detached.request_context_digest || (detached.persistence !== "server" && (!detached.input_id || !detached.assistant_id)))
       fail("invalid_history_operation")
-    if (detached.persistence === "server" && !detached.roleplay_resume && !detached.existing_selection && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
+    if (!selected && detached.persistence === "server" && !detached.roleplay_resume && !detached.existing_selection && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
       fail("history_operation_conflict")
-    if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || (!reusesSavedQuestion(detached.action) && detached.admission.selection_digest !== detached.selection_digest)))
+    if (!selected && detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || (!reusesSavedQuestion(detached.action) && detached.admission.selection_digest !== detached.selection_digest)))
       fail("history_operation_conflict")
     if (
       detached.state === "refused" &&
@@ -1440,14 +1589,7 @@ export const saveHistoryTurnRecovery = async (
       detached.settlement_payload.createdAt !== detached.created_at)) fail("history_operation_conflict")
     const prior = previous?.pending_turns?.[detached.operation_id]
     if (prior) {
-      const immutable = (value: HistoryTurnRecovery) => ({
-        origin_view: value.origin_view, selection_digest: value.selection_digest, request_context_digest: value.request_context_digest,
-        operation_id: value.operation_id, action: value.action, owner_key: value.owner_key, conversation_id: value.conversation_id,
-        persistence: value.persistence ?? "client",
-        ...(value.persistence === "server" ? {} : {input_id: value.input_id, assistant_id: value.assistant_id}), created_at: value.created_at,
-        input_text: value.input_text, input_images: value.input_images, roleplay_intent: value.roleplay_resume?.intent
-      })
-      if (canonicalHistoryJson(immutable(prior)) !== canonicalHistoryJson(immutable(detached))) fail("history_operation_conflict")
+      if (canonicalHistoryJson(recoveryIntent(prior)) !== canonicalHistoryJson(recoveryIntent(detached))) fail("history_operation_conflict")
       if (prior.state === "refused") {
         if (
           detached.admission ||
@@ -1488,16 +1630,21 @@ export const saveHistoryTurnRecovery = async (
         }
         detached.retained_result_texts = retainedTexts(prior, detached)
       }
-      if (prior.persistence === "server") {
+      if (!selected && prior.persistence === "server") {
         if (Boolean(prior.existing_selection) !== Boolean(detached.existing_selection)) fail("history_operation_conflict")
         if ((prior.input_id && detached.input_id && prior.input_id !== detached.input_id) || (prior.assistant_id && detached.assistant_id && prior.assistant_id !== detached.assistant_id)) fail("history_operation_conflict")
         if (prior.assistant_id && !detached.assistant_id) return
       }
-      if (prior.admission && detached.admission && canonicalHistoryJson(prior.admission) !== canonicalHistoryJson(detached.admission)) fail("history_operation_conflict")
+      if (!selected && prior.admission && detached.admission && canonicalHistoryJson(prior.admission) !== canonicalHistoryJson(detached.admission)) fail("history_operation_conflict")
       if (prior.existing_selection && canonicalHistoryJson(prior.existing_selection) !== canonicalHistoryJson(detached.existing_selection)) fail("history_operation_conflict")
       if (prior.settlement_payload && canonicalHistoryJson(prior.settlement_payload) !== canonicalHistoryJson(detached.settlement_payload)) fail("history_operation_conflict")
-      if (prior.admission && !detached.admission) return
-      if (prior.result_text && !detached.result_text) return
+      if (!selected && prior.admission && !detached.admission) return
+      if (!selected && prior.result_text && !detached.result_text) return
+    }
+    if (selected && detached.persistence === "server") {
+      detached = mergeSelectedRecovery(detached, prior?.persistence === "server" ? prior : undefined)
+      volatile = memoryTurnRecoveries.get(key)
+      if (volatile) detached = reconcileSelectedMemory(detached, volatile.turn, false)
     }
     await db.historySelections.put({
       ...(previous ?? {...scope, owner_key: view.owner_key, conversation_id: view.conversation_id, view: structuredClone(view)}),
@@ -1505,7 +1652,8 @@ export const saveHistoryTurnRecovery = async (
     })
     written = true
   })
-  if (written) memoryTurnRecoveries.delete(key)
+  if (written && (!selected || memoryTurnRecoveries.get(key) === volatile))
+    memoryTurnRecoveries.delete(key)
 }
 
 /** Reopened views discover only the same profile and verified owner/conversation. */
@@ -1551,6 +1699,13 @@ export const loadHistoryTurnRecoveries = async (
     )
       continue
     const existing = results.get(key)
+    if (existing && (isSelectedRecovery(existing.turn) || isSelectedRecovery(entry.turn))) {
+      const turn = reconcileSelectedMemory(existing.turn, entry.turn, true)
+      if (turn !== existing.turn) results.set(key, {
+        scope: existing.scope, turn: { ...turn, recovery_storage: "memory" }
+      })
+      continue
+    }
     const active = existing?.turn.roleplay_resume?.completion?.saved
       ? existing
       : entry

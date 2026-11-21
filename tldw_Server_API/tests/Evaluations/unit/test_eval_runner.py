@@ -566,7 +566,7 @@ async def test_every_judge_evaluator_of_a_run_gets_the_users_handle(monkeypatch,
         async def evaluate(self, **kwargs):
             if "provider_credentials" in kwargs:
                 seen.append(kwargs["provider_credentials"])
-            return {"metrics": {}}
+            return {"metrics": {"relevance": {"score": 0.75}}}
 
     monkeypatch.setattr(eval_runner, "run_geval", lambda **kwargs: seen.append(kwargs["provider_credentials"]) or {})
     monkeypatch.setattr(eval_runner, "RAGEvaluator", _Evaluator)
@@ -696,6 +696,7 @@ def test_an_all_unscored_run_reports_every_sample_failed(tmp_path):
         ("mean_score", "std_dev", "min_score", "max_score", "pass_rate")
     )
     assert (aggregate["total_samples"], aggregate["failed_samples"]) == (2, 2)
+    assert runner._calculate_metric_stats([{"error": "a"}, {"error": "b"}], ["accuracy"]) == {}
 
 
 @pytest.mark.parametrize("spec,want", [
@@ -751,15 +752,18 @@ async def test_an_unparseable_reply_from_a_successful_call_is_a_wrong_answer(mon
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("eval_type", ["label_choice", "nli_factcheck"])
+@pytest.mark.parametrize("message", [
+    {"content": ""}, {"content": None}, {},
+], ids=["empty", "null", "missing"])
 async def test_an_empty_reply_from_a_successful_call_is_a_wrong_answer_not_a_label_in_its_repr(
-    monkeypatch, tmp_path, eval_type
+    monkeypatch, tmp_path, eval_type, message
 ):
     """A reasoning model that spends max_tokens thinking returns empty content; the repr of that response is not read."""
     from types import SimpleNamespace
 
     from tldw_Server_API.app.core.Evaluations import eval_runner
 
-    empty = {"choices": [{"message": {"role": "assistant", "content": ""}, "finish_reason": "length"}]}
+    empty = {"choices": [{"message": {"role": "assistant", **message}, "finish_reason": "length"}]}
     monkeypatch.setattr(
         eval_runner, "get_adapter_or_raise", lambda _provider: SimpleNamespace(chat=lambda _r, timeout=None: empty)
     )
@@ -769,3 +773,58 @@ async def test_an_empty_reply_from_a_successful_call_is_a_wrong_answer_not_a_lab
     result = await fn(_SAMPLE, _SPEC, {"config": {"api_name": "openai", "model": "m"}}, "s1")
 
     assert (result["scores"], result["passed"], result["avg_score"]) == ({"accuracy": 0.0}, False, 0.0), result
+
+
+@pytest.mark.parametrize("spec,expected", [
+    ({"evaluator_model": "anthropic:claude-for-eval"}, ("anthropic", "claude-for-eval")),
+    ({"provider": "openrouter", "evaluator_model": "anthropic/claude-for-eval"}, ("openrouter", "anthropic/claude-for-eval")),
+    ({"api_name": "ollama", "model": "qwen:14b"}, ("ollama", "qwen:14b")),
+    ({"api_name": "  ", "provider": "anthropic", "model": "claude-for-eval"}, ("anthropic", "claude-for-eval")),
+    ({}, ("openai", "gpt-3.5-turbo")),
+])
+def test_created_evaluation_preserves_judge_selection_for_run_routing(spec, expected):
+    from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import CreateEvaluationRequest
+    from tldw_Server_API.app.core.Evaluations.eval_runner import run_llm_provider
+    from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+
+    created = CreateEvaluationRequest(name="finite-eval", eval_type="label_choice", eval_spec=spec)
+    persisted = {"eval_type": created.eval_type, "eval_spec": model_dump_compat(created.eval_spec)}
+    assert run_llm_provider(persisted, {}) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["label_choice", "nli_factcheck"])
+@pytest.mark.parametrize("reply,score", [
+    ('{"metadata":"A"}', 0.0), ('{"label":"A"}', 1.0),
+])
+async def test_structured_prediction_scores_only_its_label_field(monkeypatch, tmp_path, eval_type, reply, score):
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    monkeypatch.setattr(eval_runner, "_call_adapter_text", lambda **_kwargs: reply)
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
+    result = await fn(_SAMPLE, {**_SPEC, "structured_output": True}, {"config": {"api_name": "openai", "model": "m"}}, "s1")
+
+    assert (result["scores"], result["avg_score"]) == ({"accuracy": score}, score)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["rag", "response_quality"])
+@pytest.mark.parametrize("observed", [False, True])
+async def test_null_metric_is_not_counted_but_a_real_zero_is(monkeypatch, tmp_path, eval_type, observed):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    metrics = {"absent": {"score": None}}
+    if observed:
+        metrics["measured"] = {"score": 0.0}
+    evaluator = SimpleNamespace(evaluate=AsyncMock(return_value={"metrics": metrics, "overall_quality": None}))
+    monkeypatch.setattr(runner, "_rag_evaluator" if eval_type == "rag" else "_quality_evaluator", evaluator)
+    fn = runner._eval_rag if eval_type == "rag" else runner._eval_response_quality
+    result = await fn(_SAMPLE, {}, {"config": {}}, "s1")
+
+    if observed:
+        assert result["scores"] == {"measured": 0.0} and result["avg_score"] == 0.0
+    else:
+        assert "error" in result and "avg_score" not in result and not result.get("scores")

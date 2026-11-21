@@ -108,6 +108,7 @@ async def test_chat_completion_pipeline_delegates_executors():
 @pytest.mark.asyncio
 async def test_execute_non_stream_call_routes_through_pipeline(monkeypatch):
     captured: dict[str, object] = {}
+    audit_service, audit_context = object(), object()
 
     class _Pipeline:
         async def execute_non_stream(self, **kwargs):
@@ -137,8 +138,8 @@ async def test_execute_non_stream_call_routes_through_pipeline(monkeypatch):
         character_card_for_context=None,
         chat_db=None,
         save_message_fn=lambda *_args, **_kwargs: None,
-        audit_service=None,
-        audit_context=None,
+        audit_service=audit_service,
+        audit_context=audit_context,
         client_id="client",
         queue_execution_enabled=False,
         enable_provider_fallback=False,
@@ -149,6 +150,7 @@ async def test_execute_non_stream_call_routes_through_pipeline(monkeypatch):
     assert response == {"routed": True}
     assert captured["model"] == "gpt-test"
     assert captured["final_conversation_id"] == "conv-pipeline"
+    assert captured["audit"] == (audit_service, audit_context)
 
 
 @pytest.mark.asyncio

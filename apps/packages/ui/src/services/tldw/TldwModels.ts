@@ -450,9 +450,7 @@ export class TldwModelsService {
         return []
       }
 
-      if (!import.meta.env?.DEV) {
-        console.error('Failed to fetch models from tldw:', error)
-      }
+      console.warn('Failed to fetch models from tldw:', error)
 
       // Return empty array as fallback
       return []

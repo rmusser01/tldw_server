@@ -18,11 +18,14 @@ import zipfile
 from collections.abc import Generator
 from importlib import resources
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 
 from tldw_Server_API.app.core.http_client import fetch, fetch_json
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Evaluations.benchmark_registry import BenchmarkRegistry
 
 logger = logger
 
@@ -81,13 +84,13 @@ class DatasetLoader:
         if source.startswith(('http://', 'https://')):
             r = fetch(method="GET", url=source, timeout=15)
             try:
-                lines = r.text.strip().split('\n')
+                data = r.text
             finally:
                 with contextlib.suppress(Exception):
                     r.close()
-            return [dict(row) for row in csv.DictReader(lines, delimiter=delimiter)]
+            return [dict(row) for row in csv.DictReader(io.StringIO(data, newline=""), delimiter=delimiter)]
 
-        with open(source, encoding='utf-8') as f:  # the reader is lazy: read the rows while the file is open
+        with open(source, encoding='utf-8', newline="") as f:
             return [dict(row) for row in csv.DictReader(f, delimiter=delimiter)]
 
     @staticmethod
@@ -278,7 +281,7 @@ class BenchmarkDatasetLoader:
                 with zipfile.ZipFile(p) as archive:
                     member = next(n for n in archive.namelist() if n.endswith(".csv"))
                     with archive.open(member) as raw:
-                        return list(csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8")))
+                        return list(csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8", newline="")))
             if p.is_dir():
                 # Prefer a *_verified.jsonl or first jsonl/json
                 candidates = list(p.glob("*.jsonl")) + list(p.glob("*.json"))
@@ -360,6 +363,8 @@ class BenchmarkDatasetLoader:
 def load_benchmark_dataset(benchmark_name: str,
                           source: Optional[str] = None,
                           limit: Optional[int] = None,
+                          *,
+                          registry: Optional["BenchmarkRegistry"] = None,
                           **kwargs) -> list[dict[str, Any]]:
     """Load dataset for a specific benchmark.
 
@@ -367,6 +372,7 @@ def load_benchmark_dataset(benchmark_name: str,
         benchmark_name: Name of the benchmark
         source: Optional custom source (file, URL, or HF dataset)
         limit: Maximum number of samples to load
+        registry: Registry for resolving a benchmark's configured defaults
         **kwargs: Additional benchmark-specific parameters
 
     Returns:
@@ -375,8 +381,10 @@ def load_benchmark_dataset(benchmark_name: str,
     """
     from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
 
-    config = get_registry().get(benchmark_name)
+    config = (registry if registry is not None else get_registry()).get(benchmark_name)
     registered_source = config.dataset_source if config else None
+    if benchmark_name == "simpleqa_verified" and not (source or registered_source):
+        return []
 
     # Map benchmark names to loaders
     loaders = {
@@ -392,19 +400,23 @@ def load_benchmark_dataset(benchmark_name: str,
     if benchmark_name in loaders:
         data = loaders[benchmark_name](source)
     else:
-        # Try generic loading based on source format
+        # Configured sources need not have file extensions. An explicit source keeps its own format.
+        format_hint = None
+        if not source and config:
+            source = config.dataset_source
+            format_hint = config.dataset_format
         if not source:
             logger.error(f"No source specified for unknown benchmark: {benchmark_name}")
             return []
 
-        if source.startswith("huggingface://"):
-            dataset_id = source.replace("huggingface://", "")
+        if source.startswith("huggingface://") or format_hint == "huggingface":
+            dataset_id = source.removeprefix("huggingface://")
             data = DatasetLoader.load_huggingface(dataset_id)
-        elif source.endswith('.jsonl'):
+        elif format_hint == "jsonl" or (format_hint is None and source.endswith('.jsonl')):
             data = DatasetLoader.load_jsonl(source)
-        elif source.endswith('.json'):
+        elif format_hint == "json" or (format_hint is None and source.endswith('.json')):
             data = DatasetLoader.load_json(source)
-        elif source.endswith('.csv'):
+        elif format_hint == "csv" or (format_hint is None and source.endswith('.csv')):
             data = DatasetLoader.load_csv(source)
         else:
             logger.error(f"Cannot determine format for source: {source}")

@@ -159,9 +159,9 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: mockBgRequest
 }))
 
-vi.mock("@/store/workspace-migration", () => ({
-  runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration,
-  RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX: "tldw:research-workspace:migration:tombstone"
+vi.mock("@/store/workspace-migration", async original => ({
+  ...await original<typeof import("@/store/workspace-migration")>(),
+  runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration
 }))
 
 vi.mock("@/services/service-prompts", () => ({

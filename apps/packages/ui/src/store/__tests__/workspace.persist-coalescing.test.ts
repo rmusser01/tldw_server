@@ -258,6 +258,7 @@ describe("workspace persist coalescing writer", () => {
   })
 
   it("lands a buffered write by the 300ms trailing timer when idle delivery never fires", async () => {
+    await settlePersistWrites()
     vi.useFakeTimers()
     // Simulate a permanently-busy main thread: requestIdleCallback is
     // available but never fires, so only the trailing timer can deliver.

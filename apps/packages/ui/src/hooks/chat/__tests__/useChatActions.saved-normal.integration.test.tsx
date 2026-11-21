@@ -1378,7 +1378,10 @@ describe("saved normal Chat pipeline with autosave", () => {
     view.unmount()
   })
 
-  it("uses the selected provider once for source-grounded completion and retrieves evidence only", async () => {
+  it.each([
+    { fixture: "without receipts", receipts: false },
+    { fixture: "with receipts", receipts: true }
+  ])("uses the selected provider once for source-grounded completion and retrieves evidence only ($fixture)", async ({ receipts }) => {
     mocks.realProviderResolution = true
     const actualModels =
       await vi.importActual<typeof import("@/models")>("@/models")
@@ -1403,18 +1406,20 @@ describe("saved normal Chat pipeline with autosave", () => {
     })
     mocks.streamMessage.mockImplementation(
       async function* (_messages, options, onChunk) {
-        const id = options.conversationId || "source-chat"
-        if (!mocks.serverRows.has(id)) mocks.serverRows.set(id, [])
-        const rows = mocks.serverRows.get(id)!
-        rows.push(
-          { id: "source-user", role: "user", content: "Use this source" },
-          { id: "source-answer", role: "assistant", content: "Grounded answer" }
-        )
-        onChunk({
-          tldw_conversation_id: id,
-          tldw_user_message_id: "source-user",
-          tldw_message_id: "source-answer"
-        })
+        if (receipts) {
+          const id = options.conversationId || "source-chat"
+          if (!mocks.serverRows.has(id)) mocks.serverRows.set(id, [])
+          const rows = mocks.serverRows.get(id)!
+          rows.push(
+            { id: "source-user", role: "user", content: "Use this source" },
+            { id: "source-answer", role: "assistant", content: "Grounded answer" }
+          )
+          onChunk({
+            tldw_conversation_id: id,
+            tldw_user_message_id: "source-user",
+            tldw_message_id: "source-answer"
+          })
+        }
         yield "Grounded answer"
       }
     )
@@ -1434,6 +1439,12 @@ describe("saved normal Chat pipeline with autosave", () => {
         image: ""
       })
     })
+    expect(mocks.ragSearch).toHaveBeenCalledTimes(1)
+    expect(mocks.pageAssistModel).toHaveBeenCalledTimes(1)
+    expect(mocks.pageAssistModel).toHaveBeenCalledWith(expect.objectContaining({
+      apiProvider: "custom-openai-api", model: "custom-openai-api:shared-model"
+    }))
+    expect(mocks.ragSearch.mock.invocationCallOrder[0]).toBeLessThan(mocks.pageAssistModel.mock.invocationCallOrder[0])
     // Retrieval supplies evidence; the selected provider generates the one streamed answer.
     expect(mocks.ragSearch).toHaveBeenCalledWith(
       "Use this source",

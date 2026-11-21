@@ -86,6 +86,7 @@ import {
 import {
   getEvidenceOrigin,
   getMeasuredRelevance,
+  getOriginalResultIndex,
   hasLowMeasuredRelevance,
   getResultChunkId,
   getResultEvidenceText,
@@ -173,6 +174,7 @@ const isLocalThreadId = (id: string | null | undefined) =>
 
 type ResultsPayload = {
   query: string | null
+  scope: ScopeSnapshot | null
   completedGenerationEnabled?: boolean | null
   results: RagResult[]
   answer: string | null
@@ -209,7 +211,7 @@ type Action =
   | { type: "SET_QUERY_WARNING"; payload: string | null }
   | { type: "SET_SEARCHING"; payload: boolean }
   | { type: "SET_RESULTS"; payload: ResultsPayload }
-  | { type: "SET_PARTIAL_RESULTS"; payload: ResultsPayload }
+  | { type: "SET_PARTIAL_RESULTS"; payload: ResultsPayload & { scope: ScopeSnapshot } }
   | { type: "SET_EXTENSION_FAILURE_STATE"; payload: ExtensionKnowledgeFailureState | null }
   | { type: "MARK_SYNC_FAILED" }
   | {
@@ -249,7 +251,6 @@ type Action =
   | { type: "SET_EVIDENCE_RAIL_OPEN"; payload: boolean }
   | { type: "SET_EVIDENCE_RAIL_TAB"; payload: "sources" | "details" }
   | { type: "SET_QUERY_STAGE"; payload: QueryStage }
-  | { type: "SET_LAST_SEARCH_SCOPE"; payload: ScopeSnapshot | null }
   | { type: "SET_PINNED_SOURCE_FILTERS"; payload: PinnedSourceFilters }
   | { type: "SET_SOURCE_HEALTH_LOADING" }
   | { type: "SET_SOURCE_HEALTH"; payload: KnowledgeSourceHealthState }
@@ -280,6 +281,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         ...state,
         results: action.payload.results,
         resultQuery: action.payload.query,
+        lastSearchScope: action.payload.scope,
         completedGenerationEnabled: action.payload.completedGenerationEnabled ?? null,
         answer: action.payload.answer,
         citations: action.payload.citations,
@@ -299,6 +301,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         ...state,
         results: action.payload.results,
         resultQuery: action.payload.query,
+        lastSearchScope: action.payload.scope,
         answer: action.payload.answer,
         citations: action.payload.citations,
         answerTrustState: action.payload.answerTrustState,
@@ -361,6 +364,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         resultQuery: null,
+        lastSearchScope: null,
         results: [],
         completedGenerationEnabled: null,
         answer: null,
@@ -469,8 +473,6 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return { ...state, evidenceRailTab: action.payload }
     case "SET_QUERY_STAGE":
       return { ...state, queryStage: action.payload }
-    case "SET_LAST_SEARCH_SCOPE":
-      return { ...state, lastSearchScope: action.payload }
     case "SET_PINNED_SOURCE_FILTERS":
       return { ...state, pinnedSourceFilters: action.payload }
     case "SET_SOURCE_HEALTH_LOADING":
@@ -503,7 +505,6 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         ...state,
         preset: nextPreset,
         settings: nextSettings,
-        lastSearchScope: buildScopeSnapshot(nextPreset, nextSettings),
       }
     }
     default:
@@ -515,26 +516,21 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
 const KnowledgeQAContext = createContext<KnowledgeQAContextValue | null>(null)
 
 // Parse citation indices from generated answer [1], [2], etc.
-function parseCitations(answer: string, results: RagResult[]): CitationRef[] {
+function parseCitations(answer: string, results: RagResult[], useOriginalIndexes = false): CitationRef[] {
   const citationMatches = answer.match(/\[(\d+)\]/g) || []
   const indices = citationMatches
     .map((m) => parseInt(m.replace(/[\[\]]/g, ""), 10))
-    .filter((i) => i >= 1 && i <= results.length)
+    .filter((i) => i >= 1)
 
   const uniqueIndices = [...new Set(indices)]
-  return uniqueIndices.map((index) => ({
-    index,
-    documentId: results[index - 1]?.id || `doc_${index}`,
-    excerpt: results[index - 1]?.content || results[index - 1]?.text,
-  }))
-}
-
-function getOriginalResultIndex(result: RagResult, fallbackIndex: number): number {
-  const rawIndex = result.metadata?.original_result_index
-  if (typeof rawIndex !== "number" || !Number.isFinite(rawIndex)) {
-    return fallbackIndex
-  }
-  return Math.max(0, Math.round(rawIndex))
+  return uniqueIndices.flatMap((index) => {
+    const matches = useOriginalIndexes
+      ? results.filter((result, position) => getOriginalResultIndex(result, position) + 1 === index)
+      : results.slice(index - 1, index)
+    if (matches.length !== 1) return []
+    const [result] = matches
+    return [{ index, documentId: result.id || `doc_${index}`, excerpt: result.content || result.text }]
+  })
 }
 
 function normalizeAnswerText(value: unknown): string | null {
@@ -749,7 +745,7 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
   const answer =
     normalizeAnswerText(ragContext?.generated_answer) ??
     normalizeAnswerText(latestAssistantMessage.content)
-  const citations = answer ? parseCitations(answer, results) : []
+  const citations = answer ? parseCitations(answer, results, true) : []
   const storedTrustState = isKnowledgeAnswerTrustState(ragContext?.trust_state)
     ? ragContext.trust_state
     : null
@@ -2102,17 +2098,6 @@ function OwnedKnowledgeQAProvider({
           throw new Error("Chat creation returned no ID")
         }
 
-        if (!shouldActivate()) {
-          if (cleanupRemoteIfSkipped) {
-            try {
-              await tldwClient.deleteChat(String(threadId))
-            } catch (cleanupError) {
-              console.warn("Failed to delete skipped Knowledge QA conversation:", cleanupError)
-            }
-          }
-          return threadId
-        }
-
         const version =
           typeof response?.version === "number" ? response.version : null
         if (version != null) {
@@ -2129,6 +2114,16 @@ function OwnedKnowledgeQAProvider({
             if (isRequestConfigScopeChangedError(error)) throw error
             console.warn("Failed to fetch conversation version for tagging:", error)
           }
+        }
+        if (!shouldActivate()) {
+          if (cleanupRemoteIfSkipped) {
+            try {
+              await tldwClient.deleteChat(String(threadId))
+            } catch (cleanupError) {
+              console.warn("Failed to delete skipped Knowledge QA conversation:", cleanupError)
+            }
+          }
+          return threadId
         }
         const normalizedState: "in-progress" | "resolved" =
           response?.state === "resolved" ? "resolved" : "in-progress"
@@ -2435,7 +2430,7 @@ function OwnedKnowledgeQAProvider({
       search_query: question,
       search_mode: settings.search_mode,
       settings_snapshot: createRestorableSettingsSnapshot(settings),
-      retrieved_documents: results.map((r) => ({
+      retrieved_documents: results.map((r, index) => ({
         id: r.id,
         source_id: getResultSourceId(r) ?? undefined,
         source_type: r.sourceType || r.metadata?.source_type,
@@ -2449,6 +2444,7 @@ function OwnedKnowledgeQAProvider({
         unavailable_reason: getResultUnavailableReason(r) ?? undefined,
         url: r.metadata?.url,
         page_number: r.metadata?.page_number,
+        metadata: { original_result_index: getOriginalResultIndex(r, index) },
       })),
       generated_answer: answer || undefined,
       trust_state: answerTrustState,
@@ -2468,7 +2464,8 @@ function OwnedKnowledgeQAProvider({
     async (
       question: string,
       addToHistory: boolean,
-      settingsOverrides?: Partial<RagSettings>
+      settingsOverrides?: Partial<RagSettings>,
+      queryPreset: RagPresetName = state.preset
     ) => {
       if (!canStartPrivateOperation()) return
       if (scopeHandoffPending) {
@@ -2507,6 +2504,7 @@ function OwnedKnowledgeQAProvider({
       activeSearchAbortRef.current = abortController
       const isStaleSearchRequest = () =>
         !isCurrent() ||
+        abortController.signal.aborted ||
         activeSearchRequestIdRef.current !== searchRequestId ||
         activeSearchAbortRef.current !== abortController
       dispatch({ type: "SET_SEARCHING", payload: true })
@@ -2527,6 +2525,7 @@ function OwnedKnowledgeQAProvider({
           state.pinnedSourceFilters.noteIds
         ),
       }
+      const resultScope = buildScopeSnapshot(queryPreset, effectiveSettings)
       const validateResultsForScope = (candidateResults: RagResult[]) =>
         validateKnowledgeResultScope({
           selectedSources: effectiveSettings.sources,
@@ -2646,33 +2645,39 @@ function OwnedKnowledgeQAProvider({
           let terminalEvent: RagTerminalEvent | null = null
           let streamWhyPayload: unknown = null
           let streamSourceStatusPayload: unknown = null
-          // Streaming deltas are throttled (TASK-13511): citation parsing and
-          // trust normalization each scan the whole accumulated answer, so
-          // running them per token made long answers degrade quadratically.
-          // The scheduler flushes at most every 80ms with the latest state,
-          // mirroring the chat streaming cadence.
           let streamEnded = false
-          const emitPartialAnswer = () => {
+          const publishPartialResults = () => {
+            const scopeValidation = validateResultsForScope(streamResults)
+            const partialResults = scopeValidation.acceptedResults
+            if (scopeValidation.violations.length > 0) {
+              dispatch({
+                type: "SET_QUERY_WARNING",
+                payload: "Some returned sources were hidden because they were outside the selected source scope.",
+              })
+            }
             const partialAnswer = normalizeAnswerText(streamAnswer)
+            const visibleCitationIndexes = new Set(
+              partialResults.map((result, index) => getOriginalResultIndex(result, index) + 1)
+            )
             const partialCitations = partialAnswer
-              ? parseCitations(partialAnswer, streamResults)
+              ? parseCitations(partialAnswer, streamResults).filter(citation =>
+                  visibleCitationIndexes.has(citation.index)
+                )
               : []
             const partialTrust = normalizeKnowledgeAnswerTrust({
               answer: partialAnswer,
-              results: streamResults,
+              results: partialResults,
               citations: partialCitations,
               hasRequiredMetadata: true,
               syncFailed: isThreadSyncFailed(),
-              weakEvidence: hasWeakEvidence(
-                streamResults,
-                effectiveSettings.strip_min_relevance
-              ),
+              weakEvidence: hasWeakEvidence(partialResults, effectiveSettings.strip_min_relevance),
             })
             dispatch({
               type: "SET_PARTIAL_RESULTS",
               payload: {
                 query: trimmedQuery,
-                results: streamResults,
+                scope: resultScope,
+                results: partialResults,
                 answer: partialAnswer,
                 citations: partialCitations,
                 answerTrustState: partialTrust.state,
@@ -2686,8 +2691,10 @@ function OwnedKnowledgeQAProvider({
           }
           const streamingUpdateScheduler = createStreamingUpdateScheduler<null>({
             shouldFlush: () => !streamEnded && !isStaleSearchRequest(),
-            apply: () => emitPartialAnswer(),
+            // Deltas use the same scope-validated publication path as contexts.
+            apply: publishPartialResults,
           })
+          abortController.signal.addEventListener("abort", streamingUpdateScheduler.cancel, { once: true })
 
           try {
             for await (const event of (tldwClient as {
@@ -2743,7 +2750,7 @@ function OwnedKnowledgeQAProvider({
                   type: "SET_SEARCH_DETAILS",
                   payload: resolvedSearchDetails,
                 })
-                emitPartialAnswer()
+                publishPartialResults()
                 continue
               }
 
@@ -2787,8 +2794,6 @@ function OwnedKnowledgeQAProvider({
               effectiveSettings
             )
           } catch (streamError) {
-            streamEnded = true
-            streamingUpdateScheduler.cancel()
             const streamMessage =
               streamError instanceof Error
                 ? streamError.message
@@ -2800,6 +2805,8 @@ function OwnedKnowledgeQAProvider({
             if (isStreamAbort) {
               throw streamError
             }
+            streamingUpdateScheduler.flushNow()
+            streamEnded = true
             if (
               streamError instanceof RagTerminalStreamError &&
               streamError.event &&
@@ -2811,6 +2818,10 @@ function OwnedKnowledgeQAProvider({
             } else {
               throw streamError
             }
+          } finally {
+            streamEnded = true
+            streamingUpdateScheduler.cancel()
+            abortController.signal.removeEventListener("abort", streamingUpdateScheduler.cancel)
           }
         }
 
@@ -2889,6 +2900,7 @@ function OwnedKnowledgeQAProvider({
           type: "SET_RESULTS",
           payload: {
             query: trimmedQuery,
+            scope: resultScope,
             results,
             answer,
             citations,
@@ -2899,10 +2911,6 @@ function OwnedKnowledgeQAProvider({
           },
         })
         dispatch({ type: "SET_SEARCH_DETAILS", payload: resolvedSearchDetails })
-        dispatch({
-          type: "SET_LAST_SEARCH_SCOPE",
-          payload: buildScopeSnapshot(state.preset, effectiveSettings),
-        })
         void trackKnowledgeQaSearchMetric({
           type: "search_complete",
           duration_ms: Date.now() - searchStartedAt,
@@ -2977,7 +2985,7 @@ function OwnedKnowledgeQAProvider({
             sourcesCount: results.length,
             hasAnswer: !!answer,
             answerPreview: truncateAnswerPreview(answer),
-            preset: state.preset,
+            preset: queryPreset,
             settingsSnapshot: createRestorableSettingsSnapshot(effectiveSettings),
             conversationId: threadId && !isLocalThreadId(threadId) ? threadId : undefined,
             messageId: assistantMessageId || undefined,
@@ -3040,7 +3048,7 @@ function OwnedKnowledgeQAProvider({
             timestamp: new Date().toISOString(),
             sourcesCount: 0,
             hasAnswer: false,
-            preset: state.preset,
+            preset: queryPreset,
             settingsSnapshot: createRestorableSettingsSnapshot(effectiveSettings),
             conversationId: threadId && !isLocalThreadId(threadId) ? threadId : undefined,
             keywords: [KNOWLEDGE_QA_KEYWORD],
@@ -3083,14 +3091,18 @@ function OwnedKnowledgeQAProvider({
   const cancelSearch = useCallback(() => {
     if (!state.isSearching || !activeSearchAbortRef.current) return
 
+    const abortController = activeSearchAbortRef.current
+    activeSearchRequestIdRef.current += 1
+    activeSearchAbortRef.current = null
+    abortController.abort("cancel")
+    dispatch({ type: "CANCEL_SEARCH" })
     void trackKnowledgeQaSearchMetric({ type: "search_cancel" })
-    activeSearchAbortRef.current.abort("cancel")
     message.open({
       type: "info",
       content: "Search cancelled.",
       duration: 2,
     })
-  }, [message, state.isSearching])
+  }, [dispatch, message, state.isSearching])
 
   const search = useCallback(async (queryOverride?: string) => {
     // SearchBar keeps the raw query in local state and syncs the reducer on a
@@ -3209,6 +3221,16 @@ function OwnedKnowledgeQAProvider({
       dispatch({ type: "SET_MESSAGES", payload: messages })
 
       const hydration = deriveThreadHydrationState(messages)
+      const matchingHistoryItem = state.searchHistory.find(
+        (item) => item.conversationId === threadId
+      )
+      const restoredScopePayload = {
+        preset: matchingHistoryItem?.preset,
+        settingsSnapshot:
+          hydration?.settingsSnapshot ??
+          normalizeRestorableSettingsSnapshot(matchingHistoryItem?.settingsSnapshot),
+      }
+      const restoredScope = resolveHydratedScopeState(state.preset, state.settings, restoredScopePayload)
       if (hydration?.query) {
         dispatch({ type: "SET_QUERY", payload: hydration.query })
       }
@@ -3217,6 +3239,7 @@ function OwnedKnowledgeQAProvider({
           type: "SET_RESULTS",
           payload: {
             query: hydration.query,
+            scope: buildScopeSnapshot(restoredScope.nextPreset, restoredScope.nextSettings),
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,
@@ -3230,17 +3253,9 @@ function OwnedKnowledgeQAProvider({
         dispatch({ type: "CLEAR_RESULTS" })
       }
 
-      const matchingHistoryItem = state.searchHistory.find(
-        (item) => item.conversationId === threadId
-      )
       dispatch({
         type: "HYDRATE_RESTORED_SCOPE",
-        payload: {
-          preset: matchingHistoryItem?.preset,
-          settingsSnapshot:
-            hydration?.settingsSnapshot ??
-            normalizeRestorableSettingsSnapshot(matchingHistoryItem?.settingsSnapshot),
-        },
+        payload: restoredScopePayload,
       })
       if (matchingHistoryItem && hydration) {
         markHistoryMutation()
@@ -3282,6 +3297,8 @@ function OwnedKnowledgeQAProvider({
     dispatch,
     isCurrent,
     markHistoryMutation,
+    state.preset,
+    state.settings,
     state.searchHistory,
     tldwClient,
   ])
@@ -3327,6 +3344,8 @@ function OwnedKnowledgeQAProvider({
         dispatch({ type: "SET_ERROR", payload: null })
 
         const hydration = deriveThreadHydrationState(messages)
+        const restoredScopePayload = { settingsSnapshot: hydration?.settingsSnapshot ?? null }
+        const restoredScope = resolveHydratedScopeState(state.preset, state.settings, restoredScopePayload)
         if (hydration?.query) {
           dispatch({ type: "SET_QUERY", payload: hydration.query })
         }
@@ -3335,6 +3354,7 @@ function OwnedKnowledgeQAProvider({
             type: "SET_RESULTS",
             payload: {
               query: hydration.query,
+              scope: buildScopeSnapshot(restoredScope.nextPreset, restoredScope.nextSettings),
               completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
               results: hydration.results,
               answer: hydration.answer,
@@ -3349,9 +3369,7 @@ function OwnedKnowledgeQAProvider({
         }
         dispatch({
           type: "HYDRATE_RESTORED_SCOPE",
-          payload: {
-            settingsSnapshot: hydration?.settingsSnapshot ?? null,
-          },
+          payload: restoredScopePayload,
         })
         return true
       } catch (error) {
@@ -3375,7 +3393,7 @@ function OwnedKnowledgeQAProvider({
         return classifyThreadHydrationFailure(error)
       }
     },
-    [beginThreadHydrationRequest, dispatch, isCurrent, tldwClient]
+    [beginThreadHydrationRequest, dispatch, isCurrent, state.preset, state.settings, tldwClient]
   )
 
   const branchFromTurn = useCallback(
@@ -3495,6 +3513,8 @@ function OwnedKnowledgeQAProvider({
       })
 
       const hydration = deriveThreadHydrationState(branchedMessages)
+      const restoredScopePayload = { settingsSnapshot: hydration?.settingsSnapshot ?? null }
+      const restoredScope = resolveHydratedScopeState(state.preset, state.settings, restoredScopePayload)
       if (hydration?.query) {
         dispatch({ type: "SET_QUERY", payload: hydration.query })
       }
@@ -3503,6 +3523,7 @@ function OwnedKnowledgeQAProvider({
           type: "SET_RESULTS",
           payload: {
             query: hydration.query,
+            scope: buildScopeSnapshot(restoredScope.nextPreset, restoredScope.nextSettings),
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,
@@ -3519,6 +3540,8 @@ function OwnedKnowledgeQAProvider({
       } else {
         dispatch({ type: "CLEAR_RESULTS" })
       }
+
+      dispatch({ type: "HYDRATE_RESTORED_SCOPE", payload: restoredScopePayload })
 
       message.open({
         type: "success",
@@ -3537,6 +3560,8 @@ function OwnedKnowledgeQAProvider({
       persistRagContext,
       state.currentThreadId,
       state.messages,
+      state.preset,
+      state.settings,
       tldwClient,
     ]
   )
@@ -3717,7 +3742,7 @@ function OwnedKnowledgeQAProvider({
             payload: restoredScopePayload,
           })
           if (restoredQuery.length > 0) {
-            await runKnowledgeQuery(restoredQuery, false, restoredScope.nextSettings)
+            await runKnowledgeQuery(restoredQuery, false, restoredScope.nextSettings, restoredScope.nextPreset)
           }
           return
         }
@@ -3728,7 +3753,7 @@ function OwnedKnowledgeQAProvider({
         payload: restoredScopePayload,
       })
       if (restoredQuery.length > 0) {
-        await runKnowledgeQuery(restoredQuery, false, restoredScope.nextSettings)
+        await runKnowledgeQuery(restoredQuery, false, restoredScope.nextSettings, restoredScope.nextPreset)
       }
     },
     [dispatch, isCurrent, runKnowledgeQuery, selectThread, state.preset, state.settings]

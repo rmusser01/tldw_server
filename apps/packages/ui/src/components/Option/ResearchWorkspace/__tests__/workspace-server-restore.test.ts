@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const boundary = vi.hoisted(() => ({
   request: vi.fn(),
   captures: [] as unknown[],
+  captureRead: vi.fn(),
   controller: new AbortController(),
   release: vi.fn(),
   scopeKey: "original-alice",
@@ -15,13 +16,15 @@ const boundary = vi.hoisted(() => ({
 }));
 vi.mock("@/utils/research-workspace-prefill", async (original) => ({
   ...(await original<typeof import("@/utils/research-workspace-prefill")>()),
-  readResearchWebCaptures: async (owner: string, workspace: string) =>
-    owner === boundary.captureOwner && workspace === "original"
-      ? boundary.captures
-      : [],
+  readResearchWebCaptures: boundary.captureRead,
 }));
 vi.mock("@/services/background-proxy", () => ({ bgRequest: boundary.request }));
 vi.mock("@/services/service-prompts", () => ({
+  resolveServicePromptScope: async () => ({
+    config: boundary.config,
+    userId: boundary.userId,
+    scopeKey: boundary.scopeKey,
+  }),
   loadServicePromptSnapshot: async () => ({
     scopeKey: boundary.scopeKey,
     requestScope: {
@@ -40,9 +43,13 @@ import {
   buildResearchWorkspaceMigrationTombstoneKey,
 } from "@/store/workspace-migration";
 import { flushWorkspacePersistence, useWorkspaceStore } from "@/store/workspace";
+import { retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance";
 import {
   readMigratedResearchWorkspaceId,
   restoreMigratedResearchWorkspace,
+} from "../workspace-server-restore";
+import {
+  restoreMigratedResearchWorkspace as restoreReenteredWorkspace,
 } from "@/services/workspace-server-restore";
 import { isServicePromptRequestPath } from "@/services/tldw/service-prompt-scope-error";
 import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
@@ -58,6 +65,7 @@ const context = () => ({
     version: 1,
     deleted: false,
     archived: false,
+    workspace_profile: "research",
     study_materials_policy: "workspace",
     banner_title: "Research",
     banner_subtitle: "Two sources",
@@ -79,11 +87,17 @@ const context = () => ({
   },
   partial_errors: [] as Array<{ scope: string; code: string; message: string }>,
 });
-const restore = (apply = useWorkspaceStore.getState().restoreServerWorkspace) =>
-  restoreMigratedResearchWorkspace({
+const restore = (apply?: Parameters<typeof restoreMigratedResearchWorkspace>[0]["apply"]) => {
+  const origin = useWorkspaceStore.getState().workspaceId;
+  return restoreMigratedResearchWorkspace({
     signal: new AbortController().signal,
-    apply,
+    apply: apply ?? ((workspace, scopeKey) => useWorkspaceStore.getState().installServerWorkspace(
+      workspace, { scopeKey, expectedWorkspaceId: origin },
+    )),
   });
+};
+const reenter = (apply = useWorkspaceStore.getState().restoreServerWorkspace) =>
+  restoreReenteredWorkspace({ signal: new AbortController().signal, apply });
 
 beforeEach(() => {
   localStorage.clear();
@@ -94,6 +108,8 @@ beforeEach(() => {
   boundary.userId = "alice";
   boundary.config = { serverUrl: "https://original.test", authMode: "multi-user" };
   boundary.captureOwner = buildChatSurfaceScopeKeyFromConfig(boundary.config, { userId: "alice" });
+  boundary.captureRead.mockReset().mockImplementation(async (owner: string, workspace: string) =>
+    owner === boundary.captureOwner && workspace === "original" ? boundary.captures : []);
   boundary.release.mockReset();
   boundary.request
     .mockReset()
@@ -129,6 +145,65 @@ beforeEach(() => {
 });
 
 describe("migrated Research Workspace restoration", () => {
+  it("restores a scoped UUID note without granting provenance source membership", async () => {
+    const evidence = { importId: "knowledge-import", threadId: null, snapshot: false, sources: [] };
+    const content = retainKnowledgeNoteProvenance("Canonical UUID note", {
+      origin: "knowledge_qa",
+      research: {
+        workspace_id: "original", import_id: "knowledge-import",
+        sources: [{ mediaId: 7, evidence }, { mediaId: 99, evidence }],
+      },
+    });
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request: { path: string }) =>
+      request.path.startsWith("/api/v1/notes/search/")
+        ? { notes: [{ id: "12345678-1234-4123-8123-123456789abc", title: "Knowledge note", content, version: 4, keywords: ["workspace:original", "larch"] }] }
+        : request.path === "/api/v1/notes/12345678-1234-4123-8123-123456789abc"
+          ? { id: "12345678-1234-4123-8123-123456789abc", title: "Knowledge note", content, version: 4, keywords: ["workspace:original", "larch"] }
+        : originalRequest(request),
+    );
+    await expect(restore()).resolves.toBe(true);
+    const state = useWorkspaceStore.getState();
+    expect(state.currentNote).toMatchObject({
+      id: "12345678-1234-4123-8123-123456789abc", content, version: 4,
+      serverWorkspaceId: "original", serverScopeKey: "original-alice", isDirty: false,
+    });
+    expect(state.sources).toMatchObject([{ id: "source-1", mediaId: 7, knowledgeQaEvidence: evidence }]);
+    expect(state.sources).toHaveLength(1);
+    expect(state.selectedSourceIds).toEqual(["source-1"]);
+    expect(state.serverWorkspace?.notes).toMatchObject([{ id: 1, workspace_id: "original" }]);
+    expect(boundary.request).toHaveBeenCalledWith(expect.objectContaining({
+      path: expect.stringContaining("/api/v1/notes/search/"),
+      servicePromptConfig: expect.objectContaining({ expectedUserId: "alice" }),
+      headers: { "X-TLDW-Expected-User-ID": "alice" },
+      abortSignal: boundary.controller.signal,
+      method: "GET",
+    }));
+  });
+
+  it("retains canonical account provenance, complete notes and reconciliation baseline", async () => {
+    await restore();
+    expect(useWorkspaceStore.getState().serverWorkspace).toMatchObject({
+      scopeKey: "original-alice",
+      metadata: { id: "original", workspace_profile: "research" },
+      notes: [{ id: 1, workspace_id: "original", content: "Keep this note" }],
+      selectedSourceSignature: "source-1",
+    });
+  });
+
+  it("refuses restoration over a retained empty-ID draft without replacing it", async () => {
+    useWorkspaceStore.getState().updateNoteContent("Retained unsaved draft");
+    await expect(restore()).rejects.toThrow(/install|draft/i);
+    expect(useWorkspaceStore.getState().workspaceId).toBe("");
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      content: "Retained unsaved draft", isDirty: true,
+    });
+  });
+
+  it("does not report success when the final installation is refused", async () => {
+    await expect(restore(() => false)).rejects.toThrow(/install/i);
+    expect(useWorkspaceStore.getState().workspaceId).toBe("");
+  });
 
   it("retains a newly imported report through a tombstoned cold restore", async () => {
     const originalRequest = boundary.request.getMockImplementation()!;
@@ -142,7 +217,7 @@ describe("migrated Research Workspace restoration", () => {
       if (input.path === "/api/v1/workspaces/original/artifacts") return saved ? [saved] : [];
       return originalRequest(input);
     });
-    await expect(restore()).resolves.toBe(true);
+    await expect(reenter()).resolves.toBe(true);
     const draft = useWorkspaceStore.getState().addArtifact({
       type: "report",
       status: "completed",
@@ -162,7 +237,7 @@ describe("migrated Research Workspace restoration", () => {
     } finally { scope.release(); }
     await flushWorkspacePersistence();
     useWorkspaceStore.setState({ generatedArtifacts: [], workspaceSnapshots: {} });
-    await expect(restore()).resolves.toBe(true);
+    await expect(reenter()).resolves.toBe(true);
     expect(useWorkspaceStore.getState().generatedArtifacts).toContainEqual(
       expect.objectContaining({ id: draft.id, title: draft.title, content: draft.content,
         producerMetadata: draft.producerMetadata, data: draft.data }),
@@ -237,7 +312,7 @@ describe("migrated Research Workspace restoration", () => {
     expect(readMigratedResearchWorkspaceId(localStorage)).toBe("original");
   });
 
-  it("restores note content with empty keywords when legacy keywords JSON is malformed", async () => {
+  it("retains full canonical note content even when keywords JSON is malformed", async () => {
     boundary.request.mockImplementation(async ({ path }: { path: string }) =>
       path.endsWith("/context")
         ? context()
@@ -255,6 +330,11 @@ describe("migrated Research Workspace restoration", () => {
           : [],
     );
     await expect(restore()).resolves.toBe(true);
+    expect(useWorkspaceStore.getState().serverWorkspace?.notes[0]).toMatchObject({
+      content: "Keep this note", keywords_json: "bad JSON",
+    });
+    expect(useWorkspaceStore.getState().currentNote.id).toBeUndefined();
+    await expect(reenter()).resolves.toBe(true);
     expect(useWorkspaceStore.getState().currentNote).toMatchObject({
       content: "Keep this note",
       keywords: [],
@@ -316,11 +396,7 @@ describe("migrated Research Workspace restoration", () => {
         },
       ],
       selectedSourceIds: ["source-1"],
-      currentNote: {
-        title: "Saved note",
-        content: "Keep this note",
-        isDirty: false,
-      },
+      serverWorkspace: { scopeKey: "original-alice", notes: [{ title: "Saved note", content: "Keep this note" }] },
     });
     expect(readMigratedResearchWorkspaceId(localStorage)).toBe("original");
     expect(
@@ -332,6 +408,15 @@ describe("migrated Research Workspace restoration", () => {
       ),
     ).toBe(true);
     expect(boundary.release).toHaveBeenCalledOnce();
+  });
+
+  it("reenters with the authorized membership and saved legacy note", async () => {
+    await expect(reenter()).resolves.toBe(true);
+    expect(useWorkspaceStore.getState()).toMatchObject({
+      workspaceId: "original",
+      selectedSourceIds: ["source-1"],
+      currentNote: { title: "Saved note", content: "Keep this note", isDirty: false },
+    });
   });
 
   it("retains the server identity hint when deleted legacy persistence is rehydrated again", async () => {
@@ -528,7 +613,6 @@ it.each(["current", "persisted", "inactive"])(
 );
 
 it.each([
-  "owner",
   "workspace",
   "snapshot-workspace",
   "pin",
@@ -539,17 +623,6 @@ it.each([
   "canonical restore does not transfer refusal across %s boundaries",
   async (change) => {
     const { pin, ctx } = await restoreCaptureFixture();
-    if (change === "owner") {
-      boundary.userId = "bob";
-      boundary.scopeKey = "original-bob";
-      localStorage.setItem(
-        receiptKey,
-        JSON.stringify({
-          ...JSON.parse(localStorage.getItem(receiptKey)!),
-          serverScopeKey: boundary.scopeKey,
-        }),
-      );
-    }
     if (change === "workspace")
       useWorkspaceStore.setState({
         workspaceId: "another",
@@ -577,41 +650,6 @@ it.each([
         url: "https://example.org/ordinary",
       });
     }
-    if (change === "owner" || change === "ordinary") {
-      const { tldwClient } = await import("@/services/tldw/TldwApiClient");
-      const row = ctx.sources.items[0] as (typeof ctx.sources.items)[0] & {
-        url: string;
-      };
-      const clipId = row.id.slice("web-clipper:".length);
-      vi.spyOn(tldwClient, "getWebClipStatus").mockResolvedValue({
-        clip_id: clipId,
-        status: "saved" as const,
-        note: { id: "owned-note", title: "Ordinary", version: 1 },
-        workspace_placements: [
-          {
-            workspace_id: "original",
-            source_note_id: "owned-note",
-            workspace_note_id: 1,
-          },
-        ],
-        attachments: [],
-        analysis: {},
-        content_budget: {},
-      });
-      vi.spyOn(tldwClient, "listMediaDocumentVersions").mockResolvedValue([
-        {
-          media_id: 7,
-          version_number: 1,
-          created_at: pin.capturedAt,
-          safe_metadata: {
-            source: "web_clipper",
-            clip_id: clipId,
-            workspace_id: "original",
-            source_url: row.url,
-          },
-        },
-      ]);
-    }
     if (change === "transient")
       useWorkspaceStore
         .getState()
@@ -624,7 +662,7 @@ it.each([
       expect(state.sources[0].status).toBe("ready");
       expect(state.sources[0].statusMessage).toBeUndefined();
       expect(state.getSelectedMediaIds()).toEqual([7]);
-      if (change === "owner" || change === "ordinary")
+      if (change === "ordinary")
         expect(state.sources[0].webCapture).toBeUndefined();
       if (change === "pin")
         expect(state.sources[0].webCapture?.versionNumber).toBe(2);
@@ -632,8 +670,42 @@ it.each([
   },
 );
 
-it("canonical restore never revives refusal display intentionally scrubbed by an identical-ID tombstone", async () => {
+it("refuses Bob installation over Alice's protected same-ID cache, then activates after retirement", async () => {
   await restoreCaptureFixture();
+  const cached = useWorkspaceStore.getState();
+  boundary.userId = "bob";
+  boundary.scopeKey = "original-bob";
+  localStorage.setItem(receiptKey, JSON.stringify({
+    ...JSON.parse(localStorage.getItem(receiptKey)!), serverScopeKey: boundary.scopeKey,
+  }));
+  const persistence = useWorkspaceStore.persist.getOptions();
+  await persistence.storage!.setItem(persistence.name, {
+    state: persistence.partialize!(cached), version: persistence.version,
+  });
+  await useWorkspaceStore.persist.rehydrate();
+  const retained = useWorkspaceStore.getState();
+  expect(retained.serverWorkspace?.scopeKey).toBe("original-alice");
+  expect(retained.sources).toEqual(cached.sources);
+  expect(retained.currentNote).toEqual(cached.currentNote);
+  await expect(restore()).rejects.toThrow(/install/i);
+  expect(useWorkspaceStore.getState().sources).toEqual(retained.sources);
+  expect(useWorkspaceStore.getState().currentNote).toEqual(retained.currentNote);
+  expect(useWorkspaceStore.getState().workspaceSnapshots).toEqual(retained.workspaceSnapshots);
+  expect(useWorkspaceStore.getState().serverWorkspace).toEqual(retained.serverWorkspace);
+  useWorkspaceStore.getState().deleteWorkspace("original");
+  expect(useWorkspaceStore.getState().workspaceSnapshots.original).toBeUndefined();
+  await expect(restore()).resolves.toBe(true);
+  expect(useWorkspaceStore.getState().serverWorkspace?.scopeKey).toBe("original-bob");
+  expect(useWorkspaceStore.getState().sources[0]).toMatchObject({ status: "ready" });
+  expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([7]);
+});
+
+it("canonical restore never revives refusal display from a deleted legacy same-ID cache", async () => {
+  await restoreCaptureFixture();
+  // A retired legacy cache has no installed canonical ownership baseline.
+  useWorkspaceStore.setState({ serverWorkspace: null });
+  useWorkspaceStore.getState().saveCurrentWorkspace();
   const persistence = useWorkspaceStore.persist.getOptions();
   await persistence.storage!.setItem(persistence.name, {
     state: persistence.partialize!(useWorkspaceStore.getState()),
@@ -656,6 +728,49 @@ it("canonical restore never revives refusal display intentionally scrubbed by an
   );
 });
 
+it("preserves a verified canonical same-ID cache and refusal despite a legacy tombstone", async () => {
+  const { pin } = await restoreCaptureFixture();
+  const persistence = useWorkspaceStore.persist.getOptions();
+  await persistence.storage!.setItem(persistence.name, {
+    state: persistence.partialize!(useWorkspaceStore.getState()), version: persistence.version,
+  });
+  await useWorkspaceStore.persist.rehydrate();
+  expect(useWorkspaceStore.getState().serverWorkspace?.scopeKey).toBe("original-alice");
+  expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
+    webCapture: pin, statusDetails: { statusReason: "capture_head_changed" },
+  });
+  await expect(restore()).resolves.toBe(true);
+  expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
+});
+
+it.each(["account-aba", "workspace-aba"])("migration cannot install after %s during capture hydration", async change => {
+  await restoreCaptureFixture();
+  let resolve!: (records: unknown[]) => void;
+  boundary.captureRead.mockReturnValue(new Promise<unknown[]>(done => { resolve = done; }));
+  const signal = new AbortController();
+  const origin = useWorkspaceStore.getState().workspaceId;
+  const stopWorkspace = useWorkspaceStore.subscribe((state, previous) => {
+    if (state.workspaceId !== previous.workspaceId) signal.abort();
+  });
+  const apply = vi.fn();
+  const pending = restoreMigratedResearchWorkspace({ signal: signal.signal, apply })
+    .then(() => null, error => error);
+  await vi.waitFor(() => expect(boundary.captureRead).toHaveBeenCalledTimes(2));
+  if (change === "account-aba") {
+    boundary.controller.abort(); boundary.userId = "bob"; boundary.userId = "alice";
+  } else {
+    useWorkspaceStore.getState().createNewWorkspace("Intervening");
+    useWorkspaceStore.getState().switchWorkspace(origin);
+  }
+  resolve(boundary.captures);
+  expect(await pending).toMatchObject({
+    message: change === "workspace-aba" ? "Workspace restoration cancelled" : expect.stringMatching(/scope|account/i),
+  });
+  expect(apply).not.toHaveBeenCalled();
+  expect(useWorkspaceStore.getState().workspaceId).toBe(origin);
+  expect(useWorkspaceStore.getState().sources[0].statusDetails?.statusReason).toBe("capture_head_changed");
+  stopWorkspace();
+});
 
 const intactCapture = async () => {
   const clipId = "9c442db9-65b4-409a-b4f7-3cfe80cc963b";
@@ -721,7 +836,7 @@ const intactCapture = async () => {
 it("restores the accepted version from owned history without a local checkpoint or current workspace", async () => {
   const { version, tldwClient } = await intactCapture();
   expect(useWorkspaceStore.getState().workspaceId).toBe("");
-  await restore();
+  await reenter();
   const source = useWorkspaceStore.getState().sources[0];
   expect(source.webCapture).toMatchObject({
     versionNumber: 1,
@@ -788,7 +903,7 @@ it.each([
     );
   if (change === "status-binding")
     status.workspace_placements[0].workspace_id = "foreign";
-  await restore();
+  await reenter();
   expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
     status: "error",
     statusDetails: { statusReason: "capture_unavailable" },
@@ -803,19 +918,19 @@ it("does not apply a recovered pin after owner scope invalidation", async () => 
     return version;
   });
   const apply = vi.fn();
-  await expect(restore(apply)).rejects.toThrow();
+  await expect(reenter(apply)).rejects.toThrow();
   expect(apply).not.toHaveBeenCalled();
 });
 
 it("retains a known owned pin after checkpoint loss even when its exact version becomes unavailable", async () => {
   const { tldwClient } = await intactCapture();
-  await restore();
+  await reenter();
   const pin = useWorkspaceStore.getState().sources[0].webCapture;
   expect(pin).toBeDefined();
   vi.mocked(tldwClient.getMediaDocumentVersion).mockRejectedValue(
     new Error("Deleted version"),
   );
-  await restore();
+  await reenter();
   expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
     webCapture: pin,
     status: "error",
@@ -835,7 +950,7 @@ it("reads every history page without treating a later edit as accepted", async (
   vi.mocked(tldwClient.listMediaDocumentVersions)
     .mockResolvedValueOnce(page)
     .mockResolvedValueOnce([version]);
-  await restore();
+  await reenter();
   expect(
     useWorkspaceStore.getState().sources[0].webCapture?.versionNumber,
   ).toBe(1);
@@ -849,7 +964,7 @@ it("reads every history page without treating a later edit as accepted", async (
 it("keeps an authoritative ordinary clip usable without inventing capture semantics", async () => {
   const { version } = await intactCapture();
   delete (version.safe_metadata as Record<string, unknown>).capture_metadata;
-  await restore();
+  await reenter();
   expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
   expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([7]);
 });
@@ -859,7 +974,7 @@ it("keeps unavailable capture blocked after ordinary Media readiness reconciliat
   vi.mocked(tldwClient.getMediaDocumentVersion).mockRejectedValue(
     new Error("Deleted"),
   );
-  await restore();
+  await reenter();
   useWorkspaceStore.getState().setSourceStatusByMediaId(7, "ready");
   expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
     status: "error",
@@ -875,7 +990,7 @@ it.each(["owner", "workspace", "source", "media", "url"])(
   "never retains a previous pin across %s identity changes after checkpoint loss",
   async (change) => {
     const { ctx, version } = await intactCapture();
-    await restore();
+    await reenter();
     const previous = useWorkspaceStore.getState().sources[0];
     if (change === "owner")
       useWorkspaceStore.setState({
@@ -895,7 +1010,7 @@ it.each(["owner", "workspace", "source", "media", "url"])(
         sources: [{ ...previous, url: "https://example.org/foreign" }],
       });
     delete (version.safe_metadata as Record<string, unknown>).capture_metadata;
-    await restore();
+    await reenter();
     expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
     expect(useWorkspaceStore.getState().sources[0].id).toBe(
       ctx.sources.items[0].id,
@@ -920,7 +1035,7 @@ it.each(["missing-metadata", "malformed-descriptor", "overlapping-pages"])(
           safe_metadata: null,
         })),
       );
-    await restore();
+    await reenter();
     expect(
       useWorkspaceStore.getState().sources[0].statusDetails?.statusReason,
     ).toBe("capture_unavailable");
@@ -931,12 +1046,12 @@ it.each(["missing-metadata", "malformed-descriptor", "overlapping-pages"])(
 it("retains known unavailable capture semantics when later history loses its descriptor", async () => {
   const { version } = await intactCapture();
   version.content = "Tampered";
-  await restore();
+  await reenter();
   expect(
     useWorkspaceStore.getState().sources[0].statusDetails?.statusReason,
   ).toBe("capture_unavailable");
   delete (version.safe_metadata as Record<string, unknown>).capture_metadata;
-  await restore();
+  await reenter();
   expect(
     useWorkspaceStore.getState().sources[0].statusDetails?.statusReason,
   ).toBe("capture_unavailable");
@@ -950,9 +1065,9 @@ it("allows ordinary clip recovery after a transient history lookup failure", asy
   vi.mocked(tldwClient.listMediaDocumentVersions).mockRejectedValueOnce(
     new Error("Unavailable"),
   );
-  await restore();
+  await reenter();
   expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
-  await restore();
+  await reenter();
   expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
   expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([7]);
 });
@@ -965,7 +1080,7 @@ it.each(["queryable", "missing_media"])(
     vi.mocked(tldwClient.getMediaDocumentVersion).mockRejectedValueOnce(
       new Error("Temporarily unavailable"),
     );
-    await restore();
+    await reenter();
     expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
       status: "error",
       statusDetails: { statusReason: "capture_unavailable" },
@@ -973,7 +1088,7 @@ it.each(["queryable", "missing_media"])(
     });
     expect(useWorkspaceStore.getState().sources[0].webCapture).toBeUndefined();
     ctx.sources.items[0].state = state;
-    await restore();
+    await reenter();
     const recovered = useWorkspaceStore.getState().sources[0];
     expect(recovered.webCapture).toMatchObject({
       versionNumber: 1,
@@ -989,6 +1104,9 @@ it.each(["queryable", "missing_media"])(
       const preview = vi
         .spyOn(tldwClient, "getWorkspaceSourcePreview")
         .mockResolvedValue({
+          workspace_id: "original",
+          source_id: recovered.id,
+          media_id: recovered.mediaId,
           document_version_number: 1,
           text_preview: "Original accepted article",
           content_available: true,
@@ -1014,7 +1132,7 @@ it.each(["queryable", "missing_media"])(
 
 it("preserves intentional changed-head refusal when canonical recovery verifies the existing pin", async () => {
   await intactCapture();
-  await restore();
+  await reenter();
   const source = useWorkspaceStore.getState().sources[0];
   useWorkspaceStore
     .getState()
@@ -1025,7 +1143,7 @@ it("preserves intentional changed-head refusal when canonical recovery verifies 
       undefined,
       { statusReason: "capture_head_changed", retryEligible: false },
     );
-  await restore();
+  await reenter();
   expect(useWorkspaceStore.getState().sources[0]).toMatchObject({
     webCapture: source.webCapture,
     status: "error",
@@ -1048,7 +1166,7 @@ it("leaves multiple canonical Quick Notes for visible selection instead of choos
     return originalRequest(request);
   });
   const apply = vi.fn();
-  await restore(apply);
+  await reenter(apply);
   expect(apply.mock.calls[0][0].currentNote.id).toBeUndefined();
   expect(apply.mock.calls[0][0].currentNote.content).toBe("");
 });
@@ -1171,7 +1289,7 @@ describe("post-migration saved chat identity", () => {
     });
     await useWorkspaceStore.persist.rehydrate();
     expect(useWorkspaceStore.getState().workspaceId).toBe("");
-    await restore();
+    await reenter();
     expect(
       useWorkspaceStore.getState().getWorkspaceChatSession("original")
     ).toEqual(empty);
@@ -1244,7 +1362,7 @@ describe("post-migration saved chat identity", () => {
           : originalRequest(request)
       );
       const apply = vi.fn();
-      await expect(restore(apply)).rejects.toThrow("Saved workspace chat");
+      await expect(reenter(apply)).rejects.toThrow("Saved workspace chat");
       expect(apply).not.toHaveBeenCalled();
       expect(localStorage.getItem(receiptKey)).toBe(before);
     }
@@ -1272,7 +1390,7 @@ describe("post-migration saved chat identity", () => {
       };
     });
     const apply = vi.fn();
-    await expect(restore(apply)).rejects.toMatchObject({ status: 412 });
+    await expect(reenter(apply)).rejects.toMatchObject({ status: 412 });
     expect(apply).not.toHaveBeenCalled();
   });
 
@@ -1325,7 +1443,7 @@ describe("post-migration saved chat identity", () => {
       };
     });
     const apply = vi.fn();
-    await expect(restore(apply)).rejects.toThrow("changed during restoration");
+    await expect(reenter(apply)).rejects.toThrow("changed during restoration");
     expect(apply).not.toHaveBeenCalled();
     expect(localStorage.getItem(receiptKey)).toBe(latest);
   });
@@ -1356,7 +1474,7 @@ describe("post-migration saved chat identity", () => {
     });
     const apply = vi.fn();
     await expect(
-      restoreMigratedResearchWorkspace({
+      restoreReenteredWorkspace({
         signal: new AbortController().signal,
         isCurrent: () => current,
         apply
@@ -1380,7 +1498,7 @@ describe("post-migration saved chat identity", () => {
         JSON.stringify({ ...receipt, chatReference })
       );
       const apply = vi.fn();
-      await expect(restore(apply)).rejects.toThrow("reference is invalid");
+      await expect(reenter(apply)).rejects.toThrow("reference is invalid");
       expect(apply).not.toHaveBeenCalled();
       expect(
         boundary.request.mock.calls.every(
@@ -1410,7 +1528,7 @@ describe("post-migration saved chat identity", () => {
           }
         : originalRequest(request)
     );
-    await expect(restore()).resolves.toBe(true);
+    await expect(reenter()).resolves.toBe(true);
     expect(
       useWorkspaceStore.getState().getWorkspaceChatSession("original")
     ).toEqual(empty);
@@ -1428,7 +1546,7 @@ describe("post-migration saved chat identity", () => {
   });
   it("restores an acknowledged Chat in a fresh canonical Workspace without legacy payloads", async () => {
     localStorage.clear();
-    await restoreMigratedResearchWorkspace({
+    await restoreReenteredWorkspace({
       workspaceId: "original", signal: new AbortController().signal,
       apply: useWorkspaceStore.getState().restoreServerWorkspace,
     });
@@ -1440,7 +1558,7 @@ describe("post-migration saved chat identity", () => {
         : originalRequest(request));
     useWorkspaceStore.setState({ workspaceChatSessions: {} });
     const apply = vi.fn();
-    await restoreMigratedResearchWorkspace({
+    await restoreReenteredWorkspace({
       workspaceId: "original", signal: new AbortController().signal, apply,
     });
     expect(apply.mock.calls[0][1]).toMatchObject({ serverChatId: chatId, messages: [] });
@@ -1451,7 +1569,7 @@ describe("post-migration saved chat identity", () => {
     "keeps fresh canonical Chat restoration safe after %s",
     async (change) => {
       localStorage.clear();
-      await restoreMigratedResearchWorkspace({
+      await restoreReenteredWorkspace({
         workspaceId: "original", signal: new AbortController().signal,
         apply: useWorkspaceStore.getState().restoreServerWorkspace,
       });
@@ -1473,7 +1591,7 @@ describe("post-migration saved chat identity", () => {
           workspace_id: change === "wrong-workspace" ? "foreign" : "original", deleted: false };
       });
       const apply = vi.fn();
-      const restored = restoreMigratedResearchWorkspace({
+      const restored = restoreReenteredWorkspace({
         workspaceId: "original", signal: new AbortController().signal, apply,
       });
       if (change === "changed-hint" || change === "wrong-workspace") {
@@ -1493,7 +1611,7 @@ describe("post-migration saved chat identity", () => {
     "refuses a %s canonical Chat hint",
     async (kind) => {
       localStorage.clear();
-      await restoreMigratedResearchWorkspace({
+      await restoreReenteredWorkspace({
         workspaceId: "original", signal: new AbortController().signal,
         apply: useWorkspaceStore.getState().restoreServerWorkspace,
       });
@@ -1502,7 +1620,7 @@ describe("post-migration saved chat identity", () => {
       localStorage.setItem(key, kind === "malformed" ? "{" :
         kind === "oversized" ? " ".repeat(4097) : JSON.stringify({ referenceId: "original" }));
       const apply = vi.fn();
-      await expect(restoreMigratedResearchWorkspace({
+      await expect(restoreReenteredWorkspace({
         workspaceId: "original", signal: new AbortController().signal, apply,
       })).rejects.toThrow();
       expect(apply).not.toHaveBeenCalled();
@@ -1517,14 +1635,14 @@ describe("post-migration saved chat identity", () => {
       ...marker, chatReference: { referenceId: "different-reference", serverChatId: null },
     }));
     const apply = vi.fn();
-    await expect(restore(apply)).rejects.toThrow("references conflict");
+    await expect(reenter(apply)).rejects.toThrow("references conflict");
     expect(apply).not.toHaveBeenCalled();
   });
 
   it("enrolls an explicitly requested canonical workspace without manufacturing a migration tombstone", async () => {
     localStorage.clear();
     const applied = vi.fn();
-    await expect(restoreMigratedResearchWorkspace({
+    await expect(restoreReenteredWorkspace({
       workspaceId: "original", signal: new AbortController().signal, apply: applied,
     })).resolves.toBe(true);
     expect(applied).toHaveBeenCalledTimes(1);

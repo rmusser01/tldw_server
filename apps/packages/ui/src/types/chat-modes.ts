@@ -6,6 +6,8 @@ import type {
   HistoryViewSelectionV1,
   HistorySelectionV1
 } from "@/types/history-selection"
+import type { HistoryDurableResultReceiptV1 } from "@/types/history-durable-turn"
+import type { HistoryTurnKeepResult } from "@/services/history-turn-keep"
 import type {
   HistoryTurnOutcome,
   Message as StoredMessage
@@ -51,6 +53,8 @@ export type HistoryRegenerateBoundary = {
 
 /** One operation owns its adapter and immutable pending intent across display navigation. */
 export interface HistorySendTurn {
+  serverOwned?: boolean
+  observedResult?: HistoryDurableResultReceiptV1
   owner: HistoryOwnerV1
   capture: HistorySelectionCaptureV1
   currentView: () => HistoryViewSelectionV1 | null
@@ -72,6 +76,7 @@ export interface HistorySendTurn {
   existingSelection?: boolean
   stageSettlementPayload?: (message: StoredMessage) => Promise<void>
   selection?: HistorySelectionV1
+  requestContextDigest?: string
   input?: StoredMessage
   resultId?: string
   assistantId?: string
@@ -112,7 +117,7 @@ export interface HistorySendTurn {
   /** After a settled reply: clear its record, or keep it until a view follows. */
   finish?: (followed: boolean) => Promise<void>
   /** Put a reply that ended early back into the transcript. */
-  keep?: () => Promise<void>
+  keep?: () => Promise<HistoryTurnKeepResult | void>
   /** The turn has ended; its record may be kept by any view. */
   release?: () => void
 }
@@ -156,6 +161,8 @@ export interface SaveMessageBase {
 }
 
 export interface SaveMessageData extends SaveMessageBase {
+  serverOwnsUserMessage?: boolean
+  serverMessagesAlreadyPersisted?: boolean
   isRegenerate: boolean
   message: string
   fullText: string
@@ -170,6 +177,7 @@ export interface SaveMessageData extends SaveMessageBase {
 }
 
 export interface SaveMessageErrorData extends SaveMessageBase {
+  generationInfo?: Record<string, unknown>
   e: unknown
   botMessage: string
   history: ChatHistory

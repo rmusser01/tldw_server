@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.Chat.chat_request_schemas import (  # noqa: F401 -
     ResponseFormatJsonSchemaSpec,
     ResponseFormat,
     TLDWContinuationSpec,
+    TLDWTurnSpec,
     ResearchChatContextOutlineSection,
     ResearchChatContextClaim,
     ResearchChatContextVerificationSummary,
@@ -101,6 +102,10 @@ class ChatCompletionResponse(BaseModel):
     tldw_conversation_id: Optional[str] = Field(
         default=None,
         description="Conversation identifier persisted by tldw_server when chat history is enabled.",
+    )
+    tldw_user_message_id: Optional[str] = Field(
+        default=None,
+        description="Durable user-turn receipt; does not acknowledge assistant persistence.",
     )
     meta: Optional[dict[str, Any]] = Field(
         default=None,

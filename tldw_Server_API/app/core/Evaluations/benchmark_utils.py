@@ -503,7 +503,8 @@ Instructions:
                 "question": question,
                 "choices": choices_text,
                 "correct_answer": str(correct_answer),
-                "response": "{model_response}"
+                "response": "{model_response}",
+                **({"require_reasoning": True} if self.require_reasoning else {}),
             },
             "scoring_criteria": {
                 "accuracy": "Correct answer selection",

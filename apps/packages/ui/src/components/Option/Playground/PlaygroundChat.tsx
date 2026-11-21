@@ -316,7 +316,30 @@ export const PlaygroundChat = ({
   const compareModeActive = compareFeatureEnabled && compareMode
   const stableHistoryId =
     temporaryChat || historyId === "temp" ? null : historyId
-  const linkedResearchRunsEnabled = Boolean(serverChatId) && !temporaryChat
+  const researchActionScopeRef = React.useRef({ serverChatId, historyId, temporaryChat })
+  researchActionScopeRef.current = { serverChatId, historyId, temporaryChat }
+  const isResearchActionCurrent = React.useCallback(() => {
+    const scope = researchActionScopeRef.current
+    if (scope.serverChatId !== serverChatId || scope.historyId !== historyId || scope.temporaryChat !== temporaryChat) return false
+    if (!historySelection) return true
+    const current = historySelection.getCurrent()
+    const owner = current.owner
+    return Boolean(
+      current.view && current.view === historySelection.view &&
+      owner && owner === historySelection.owner && owner.kind !== "unavailable" &&
+      current.view.conversation_id === (serverChatId ?? stableHistoryId) &&
+      owner.conversation_id === current.view.conversation_id &&
+      owner.validate_lease?.() !== false
+    )
+  }, [historySelection, serverChatId, historyId, stableHistoryId, temporaryChat])
+  const researchActionsEnabled = isResearchActionCurrent()
+  const linkedResearchRunsEnabled = Boolean(serverChatId) && !temporaryChat &&
+    (!historySelection || (
+      historySelection.view?.conversation_id === serverChatId &&
+      historySelection.owner?.kind === "native" &&
+      historySelection.owner.conversation_id === serverChatId &&
+      historySelection.owner.validate_lease()
+    ))
   const [conversationInstanceId, setConversationInstanceId] = React.useState(
     () => generateID()
   )
@@ -326,7 +349,7 @@ export const PlaygroundChat = ({
   const latestLinkedResearchErrorAt = React.useRef(0)
 
   const linkedResearchRunsQuery = useQuery({
-    queryKey: ["playground:chat-linked-research-runs", serverChatId],
+    queryKey: ["playground:chat-linked-research-runs", serverChatId, historySelection?.view?.owner_key ?? null],
     queryFn: async () => {
       if (!serverChatId) {
         return { runs: [] as ChatLinkedResearchRun[] }
@@ -398,13 +421,13 @@ export const PlaygroundChat = ({
     return block.kind === "compare" ? "compare:" + block.clusterId : "message:" + (messages[block.index].id ?? messages[block.index].serverMessageId ?? block.index)
   }, [blocks, messages])
   const linkedResearchRuns = React.useMemo(() => {
-    if (!linkedResearchRunsEnabled || !linkedResearchRunsQuery.isSuccess) {
+    if (!linkedResearchRunsEnabled) {
       return []
     }
     return Array.isArray(linkedResearchRunsQuery.data?.runs)
       ? linkedResearchRunsQuery.data.runs
       : []
-  }, [linkedResearchRunsEnabled, linkedResearchRunsQuery.data?.runs, linkedResearchRunsQuery.isSuccess])
+  }, [linkedResearchRunsEnabled, linkedResearchRunsQuery.data?.runs])
   const returnedResearchRun = React.useMemo(
     () =>
       returnedResearchRunId
@@ -431,16 +454,25 @@ export const PlaygroundChat = ({
   )
   const handleAttachResearchRun = React.useCallback(
     async (runId: string, query: string) => {
-      if (!onAttachResearchContext) {
+      if (!onAttachResearchContext || !isResearchActionCurrent()) {
         return
       }
+      const selectionCurrent = historySelection?.fence() ?? (() => true)
       await tldwClient.initialize().catch(() => null)
+      if (!selectionCurrent() || !isResearchActionCurrent()) return
       const bundle = await tldwClient.getResearchBundle(runId)
+      if (!selectionCurrent() || !isResearchActionCurrent()) return
       onAttachResearchContext(
         deriveAttachedResearchContext(bundle, runId, query)
       )
     },
-    [onAttachResearchContext]
+    [onAttachResearchContext, historySelection, isResearchActionCurrent]
+  )
+  const handleResearchFollowUp = React.useCallback(
+    (target: ResearchFollowUpTarget) => {
+      if (isResearchActionCurrent()) onPrepareResearchFollowUp?.(target)
+    },
+    [isResearchActionCurrent, onPrepareResearchFollowUp]
   )
   const getMessageResearchHandoffState = React.useCallback(
     (metadataExtra?: Record<string, unknown>) => {
@@ -470,6 +502,7 @@ export const PlaygroundChat = ({
   )
   const buildMessageResearchActions = React.useCallback(
     (metadataExtra?: Record<string, unknown>): MessageResearchActions | undefined => {
+      if (!researchActionsEnabled) return undefined
       const handoff = getMessageResearchHandoffState(metadataExtra)
       if (!handoff) {
         return undefined
@@ -496,7 +529,7 @@ export const PlaygroundChat = ({
           : undefined,
         onFollowUp: canFollowUp
           ? () => {
-              onPrepareResearchFollowUp?.({
+              handleResearchFollowUp({
                 run_id: handoff.completion.run_id,
                 query: handoff.completion.query
               })
@@ -504,8 +537,9 @@ export const PlaygroundChat = ({
           : undefined
       }
     },
-    [getMessageResearchHandoffState, handleAttachResearchRun, onPrepareResearchFollowUp]
+    [researchActionsEnabled, getMessageResearchHandoffState, handleAttachResearchRun, handleResearchFollowUp, onPrepareResearchFollowUp]
   )
+  // Reuse row actions only while metadata, live policy and callbacks are current.
   const researchActionsCacheRef = React.useRef(
     new Map<
       string,
@@ -1349,7 +1383,7 @@ export const PlaygroundChat = ({
                       type="button"
                       className="text-sm font-medium text-text hover:text-primary"
                       onClick={() =>
-                        onPrepareResearchFollowUp({
+                        handleResearchFollowUp({
                           run_id: returnedResearchRun.run_id,
                           query: returnedResearchRun.query
                         })
@@ -1384,7 +1418,7 @@ export const PlaygroundChat = ({
             onUseInChat={(run) => {
               void handleAttachResearchRun(run.run_id, run.query)
             }}
-            onFollowUp={onPrepareResearchFollowUp}
+            onFollowUp={onPrepareResearchFollowUp ? handleResearchFollowUp : undefined}
           />
         </React.Suspense>
         <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} renderBlock={(block, blockIndex) => {

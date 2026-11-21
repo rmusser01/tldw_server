@@ -659,7 +659,8 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
           trigger={['click']}
           menu={{
             items: overflowMenuItems,
-            onClick: handleOverflowMenuClick
+            onClick: handleOverflowMenuClick,
+            triggerSubMenuAction: 'click'
           }}
         >
           <Tooltip

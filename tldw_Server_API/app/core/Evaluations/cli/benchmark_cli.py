@@ -346,6 +346,7 @@ async def _evaluate_batch(batch: list[dict[str, Any]], evaluator,
             evaluation_prompt=eval_data['evaluation_prompt'],
             input_data=eval_data['input_data'],
             scoring_criteria=eval_data['scoring_criteria'],
+            require_grade=eval_data.get("require_grade", False),
             api_name=model,
             api_key=api_key,
         )

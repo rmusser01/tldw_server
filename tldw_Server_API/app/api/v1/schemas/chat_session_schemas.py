@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     HistoryAdmissionV1,
     HistoryEditTargetV1,
     HistorySelectionV1,
+    HistoryRecoveryReadV1,
 )
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
@@ -468,6 +469,7 @@ class MessageResponse(BaseModel):
     """Schema for message responses."""
 
     tldw_history_admission_v1: HistoryAdmissionV1 | None = None
+    tldw_history_recovery_v1: HistoryRecoveryReadV1 | None = None
     id: str = Field(..., description="UUID of the message")
     conversation_id: str = Field(..., description="ID of the parent conversation")
     parent_message_id: Optional[str] = Field(None, description="ID of parent message")
@@ -497,6 +499,8 @@ class MessageResponse(BaseModel):
         result = handler(self)
         if self.images is None:
             result.pop("images", None)
+        if self.tldw_history_recovery_v1 is None:
+            result.pop("tldw_history_recovery_v1", None)
         return result
 
     model_config = {"from_attributes": True}

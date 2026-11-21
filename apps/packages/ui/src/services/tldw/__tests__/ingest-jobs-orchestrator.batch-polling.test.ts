@@ -58,8 +58,29 @@ const runPoll = async (options: {
 }
 
 describe("pollTrackedIngestJobs batch polling", () => {
+  it("resolves an idempotently replayed job retained in its original batch through its scoped per-job fetch", async () => {
+    const fetchJob = vi.fn(async (id: number) => ({ ok: true, data: {
+      id, batch_id: "original-batch", status: "completed", result: { media_id: 22 }
+    } }))
+    const { calls, results, tracker } = await runPoll({
+      batchResponses: [{ ok: true, data: { jobs: [
+        { id: 1, status: "completed", result: { media_id: 11 } },
+        { id: 3, status: "completed", result: { media_id: 33 } },
+        { id: 4, status: "completed", result: { media_id: 44 } },
+      ] } }], fetchJob,
+    })
+    expect(fetchJob).toHaveBeenCalledExactlyOnceWith(2)
+    expect(calls).toEqual([{ batchId: "batch-1", jobIds: [1, 2, 3, 4] }])
+    expect(results).toHaveLength(4)
+    expect(results.every(result => result.kind === "completed")).toBe(true)
+    expect(results).toContainEqual({ kind: "completed", data: { media_id: 22 } })
+    expect(tracker.getItems()).toEqual([])
+  })
+
   it("issues exactly one batch request per cycle for all unresolved jobs", async () => {
+    const fetchJob = vi.fn(async () => ({ ok: true, data: { status: "completed" } }))
     const { calls, results } = await runPoll({
+      fetchJob,
       batchResponses: [
         {
           ok: true,
@@ -82,6 +103,7 @@ describe("pollTrackedIngestJobs batch polling", () => {
     // 4 unresolved jobs across two submits of the same batch, but each cycle
     // must produce a single batched request.
     expect(calls).toHaveLength(2)
+    expect(fetchJob).not.toHaveBeenCalled()
     expect(calls[0]).toEqual({ batchId: "batch-1", jobIds: [1, 2, 3, 4] })
     expect(calls[1]).toEqual({ batchId: "batch-1", jobIds: [2] })
 
@@ -92,12 +114,10 @@ describe("pollTrackedIngestJobs batch polling", () => {
     )
   })
 
-  it("treats a job missing from the batch response like a per-job 404 (stays pending, never falls back to fetchJob)", async () => {
-    const fetchJob = vi.fn(async () => ({ ok: true, data: { status: "completed" } }))
+  it("keeps a missing job pending when its scoped per-job fallback returns 404", async () => {
+    const fetchJob = vi.fn(async () => ({ ok: false, status: 404 }))
     const { calls, results } = await runPoll({
-      // Job 2 is missing from the first batch response; exactly like the
-      // per-job 404 path it must stay pending and be re-requested next
-      // cycle instead of being failed or falling back to fetchJob.
+      // Both lookups omit job 2, so the next cycle still tracks it.
       batchResponses: [
         {
           ok: true,
@@ -117,7 +137,7 @@ describe("pollTrackedIngestJobs batch polling", () => {
       fetchJob
     })
 
-    expect(fetchJob).not.toHaveBeenCalled()
+    expect(fetchJob).toHaveBeenCalledExactlyOnceWith(2)
     // Missing job 2 stayed pending: the second cycle re-requests only it.
     expect(calls[1]).toEqual({ batchId: "batch-1", jobIds: [2] })
     expect(results).toHaveLength(4)
@@ -129,9 +149,11 @@ describe("pollTrackedIngestJobs batch polling", () => {
     tracker.trackJobs("batch-x", [7, 8], { id: "a" })
 
     const authError = { ok: false, status: 401, error: "Not authenticated." }
+    const fetchJob = vi.fn()
     const results = await pollTrackedIngestJobs({
       tracker,
       fetchJobs: vi.fn(async () => authError),
+      fetchJob,
       timeoutMs: 10,
       pollIntervalMs: 1,
       isCancelled: () => false,
@@ -149,6 +171,7 @@ describe("pollTrackedIngestJobs batch polling", () => {
     })
 
     expect(results).toHaveLength(2)
+    expect(fetchJob).not.toHaveBeenCalled()
     expect(results.every((r) => (r as any).status === "auth")).toBe(true)
   })
 

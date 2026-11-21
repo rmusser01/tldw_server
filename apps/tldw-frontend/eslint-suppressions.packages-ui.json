@@ -775,11 +775,6 @@
       "count": 1
     }
   },
-  "packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.history-admission.test.ts": {
-    "require-yield": {
-      "count": 1
-    }
-  },
   "packages/ui/src/hooks/chat/__tests__/useCharacterChatMode.watchdog.test.ts": {
     "require-yield": {
       "count": 1
@@ -994,11 +989,6 @@
   "packages/ui/src/services/flashcards.ts": {
     "no-restricted-syntax": {
       "count": 2
-    }
-  },
-  "packages/ui/src/services/note-keywords.ts": {
-    "no-restricted-syntax": {
-      "count": 3
     }
   },
   "packages/ui/src/services/notes-studio.ts": {

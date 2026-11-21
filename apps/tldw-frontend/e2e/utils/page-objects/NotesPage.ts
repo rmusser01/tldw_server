@@ -267,7 +267,7 @@ export class NotesPage extends BasePage {
     await expect.poll(() => exportMenuItem.evaluate(isMenuPointerReady), {
       timeout: 10_000, message: "Export menu receives pointer input before opening the flyout"
     }).toBe(true)
-    await exportMenuItem.hover()
+    await exportMenuItem.click()
     await expect(exportMenuItem).toHaveAttribute("aria-expanded", "true")
 
     await expect(this.printExportMenuItem).toBeVisible({ timeout: 10_000 })

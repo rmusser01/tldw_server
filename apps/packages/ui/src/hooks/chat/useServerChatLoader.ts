@@ -631,6 +631,15 @@ const resolveDeferredCharacterId = (value: string | number | null): number | nul
   return null
 }
 
+// Loading is shared across loader instances; history-selection fences are not.
+let serverChatLoadingOwner: {
+  controller: AbortController
+  chatId: string | null
+  selectionIntent: ReturnType<typeof usePlaygroundSessionStore.getState>["serverChatSelectionIntent"]
+  deferredRelease?: true
+  stopWaitingForIdle?: () => void
+} | null = null
+
 export const useServerChatLoader = ({
   ensureServerChatHistoryId,
   notification,
@@ -650,6 +659,48 @@ export const useServerChatLoader = ({
     setMessages,
     setIsLoading
   } = useChatBaseState(useStoreMessageOption)
+  const clearOwnedLoading = React.useCallback((
+    controller: AbortController | null,
+    settledSelectionIntent?: ReturnType<typeof usePlaygroundSessionStore.getState>["serverChatSelectionIntent"]
+  ) => {
+    const owner = serverChatLoadingOwner
+    if (!controller || owner?.controller !== controller) return
+    const currentIntent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+    const current = useStoreMessageOption.getState()
+    const deferredTeardown = settledSelectionIntent === undefined && owner.deferredRelease
+    const expectedIntent = deferredTeardown ? owner.selectionIntent : settledSelectionIntent
+    // Keep cleanup ownership while a newer selection is still debounced.
+    if (expectedIntent !== undefined && currentIntent && currentIntent !== expectedIntent) return
+    if (deferredTeardown && current.serverChatId !== owner.chatId) return
+    const finish = () => {
+      owner.stopWaitingForIdle?.()
+      serverChatLoadingOwner = null
+      setIsLoading(false)
+    }
+    if (!current.streaming && !current.isProcessing) {
+      finish()
+    } else if (!owner.stopWaitingForIdle) {
+      // Keep the loader's cleanup owned until the overlapping send settles.
+      owner.deferredRelease = true
+      const stopWaiting = useStoreMessageOption.subscribe((next, previous) => {
+        if (next.streaming || next.isProcessing || (!previous.streaming && !previous.isProcessing)) return
+        // Selection can reset activity before publishing its replacement intent.
+        queueMicrotask(() => {
+          if (serverChatLoadingOwner !== owner || owner.stopWaitingForIdle !== stopWaiting) return
+          const idle = useStoreMessageOption.getState()
+          if (idle.streaming || idle.isProcessing) return
+          const intent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+          if (idle.serverChatId === owner.chatId && (!intent || intent === owner.selectionIntent)) {
+            finish()
+          } else {
+            stopWaiting()
+            owner.stopWaitingForIdle = undefined
+          }
+        })
+      })
+      owner.stopWaitingForIdle = stopWaiting
+    }
+  }, [setIsLoading])
   const messagesRef = React.useRef(messages)
   const streamingRef = React.useRef(streaming)
   const processingRef = React.useRef(isProcessing)
@@ -713,6 +764,7 @@ export const useServerChatLoader = ({
     inFlight: boolean
     loaded: boolean
   }>({ chatId: null, controller: null, inFlight: false, loaded: false })
+  const ownedLoadingControllerRef = React.useRef<AbortController | null>(null)
   const serverChatDebounceRef = React.useRef<{
     chatId: string | null
     timer: ReturnType<typeof setTimeout> | null
@@ -733,26 +785,28 @@ export const useServerChatLoader = ({
       if (serverChatLoadRef.current.controller) {
         serverChatLoadRef.current.controller.abort()
       }
+      clearOwnedLoading(ownedLoadingControllerRef.current)
     }
-  }, [])
+  }, [clearOwnedLoading])
 
   React.useEffect(() => {
     if (!enabled) {
       serverChatLoadRef.current.controller?.abort()
-      serverChatLoadRef.current.inFlight = false
+      clearOwnedLoading(ownedLoadingControllerRef.current)
+      serverChatLoadRef.current = {
+        chatId: null,
+        controller: null,
+        inFlight: false,
+        loaded: false
+      }
       return
     }
     if (!serverChatId || assistantMeta?.isLoading) return
     const deliberateSelection = selectionIntent?.chatId === serverChatId &&
       selectionIntent !== handledSelectionIntent.current
-    // A failed history capture is settled for this chat until the user reopens it.
-    if (!deliberateSelection) {
-      const control = selectionRef.current
-      if (control?.canAutomaticallyLoad?.() === false) return
-      if (nativeHistoryUnavailableForChat(control?.getCurrent(), serverChatId)) return
-    }
     if (
       !deliberateSelection &&
+      serverChatMetaLoaded &&
       shouldSkipLoadedServerChatReload({
         activeServerChatId: serverChatId,
         loadedChatId: serverChatLoadRef.current.chatId,
@@ -779,17 +833,21 @@ export const useServerChatLoader = ({
     serverChatDebounceRef.current.chatId = serverChatId
     serverChatDebounceRef.current.timer = setTimeout(() => {
       const controller = new AbortController()
+      const previousLoadingController = ownedLoadingControllerRef.current
       let selectionCurrent = selectionRef.current?.fence() || (() => true)
       let ownedSelectionRevision = getSelectedAssistantOperationRevision()
-      const canCommitCurrentLoad = () =>
-        selectionCurrent() &&
-        useStoreMessageOption.getState().serverChatId === serverChatId &&
-        shouldCommitServerChatLoadResult({
-          requestedChatId: serverChatId,
-          activeServerChatId: serverChatLoadRef.current.chatId,
-          requestController: controller,
-          activeController: serverChatLoadRef.current.controller
-        })
+      const canCommitCurrentLoad = () => {
+        const currentIntent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+        return (!currentIntent || currentIntent === selectionIntent) &&
+          selectionCurrent() &&
+          useStoreMessageOption.getState().serverChatId === serverChatId &&
+          shouldCommitServerChatLoadResult({
+            requestedChatId: serverChatId,
+            activeServerChatId: serverChatLoadRef.current.chatId,
+            requestController: controller,
+            activeController: serverChatLoadRef.current.controller
+          })
+      }
       const applyOwnedAssistantSelection = async (selection: Parameters<typeof setSelectedAssistant>[0]) => {
         // setSelectedAssistant persists to extension storage; temporary reads make no
         // durable writes (H1), so they keep whatever assistant is already selected.
@@ -818,11 +876,17 @@ export const useServerChatLoader = ({
         loaded: false
       }
 
+      const clearRejectedChat = () => {
+        // This loader, rather than a new selection, is clearing the chat ID.
+        if (serverChatLoadingOwner?.controller === controller) serverChatLoadingOwner.chatId = null
+        clearOwnedLoading(controller, selectionIntent)
+        setServerChatId(null)
+      }
       const rejectCurrentOwner = async (code: string) => {
         if (!canCommitCurrentLoad()) return
         const control = selectionRef.current
         if (!control) {
-          setServerChatId(null)
+          clearRejectedChat()
           return
         }
         const owner = control.getCurrent().owner
@@ -853,8 +917,20 @@ export const useServerChatLoader = ({
         let stopWatchingAuthority: (() => void) | undefined
         let pendingAssistantPresentation: Promise<unknown> | undefined
         try {
+          if (controller.signal.aborted || useStoreMessageOption.getState().serverChatId !== serverChatId) return
           if (deliberateSelection) {
             if (usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
+          } else {
+            // Refusing an automatic load still has to release an aborted predecessor.
+            const control = selectionRef.current
+            if (control?.canAutomaticallyLoad?.() === false ||
+                nativeHistoryUnavailableForChat(control?.getCurrent(), serverChatId)) return
+          }
+          serverChatLoadingOwner?.stopWaitingForIdle?.()
+          serverChatLoadingOwner = { controller, chatId: serverChatId, selectionIntent }
+          ownedLoadingControllerRef.current = controller
+          setIsLoading(true)
+          if (deliberateSelection) {
             handledSelectionIntent.current = selectionIntent
             const control = selectionRef.current
             let accepted = !selectionIntent?.onLoaded
@@ -878,8 +954,7 @@ export const useServerChatLoader = ({
             // callback while preserving this load's H1 lease until a new intent.
             selectionAccepted = true
             usePlaygroundSessionStore.getState().completeServerChatSelection(selectionIntent)
-          } else if (selectionRef.current?.canAutomaticallyLoad?.() === false) return
-          setIsLoading(true)
+          }
           setServerChatLoadState("loading")
           setServerChatLoadError(null)
           snapshot = await loadServicePromptSnapshot([], { signal: controller.signal })
@@ -948,11 +1023,10 @@ export const useServerChatLoader = ({
               if (selectionRef.current) {
                 await rejectCurrentOwner("server_chat_scope_mismatch")
               } else {
-              setMessages([])
-              setHistory([])
-              setServerChatTitle(null)
-              setIsLoading(false)
-              setServerChatId(null)
+                setMessages([])
+                setHistory([])
+                setServerChatTitle(null)
+                clearRejectedChat()
               }
               return
             }
@@ -1310,8 +1384,7 @@ export const useServerChatLoader = ({
               setHistory([])
               setServerChatTitle(null)
               updatePageTitle()
-              setIsLoading(false)
-              setServerChatId(null)
+              clearRejectedChat()
             }
             return
           }
@@ -1329,7 +1402,12 @@ export const useServerChatLoader = ({
               messagesShown: useStoreMessageOption.getState().messages.length })
           }
         } finally {
-          if (useStoreMessageOption.getState().serverChatId === serverChatId) setIsLoading(false)
+          clearOwnedLoading(controller, selectionIntent)
+          // An unqualified replacement must release the aborted predecessor,
+          // but the controller check still protects any successor that claimed it.
+          if (previousLoadingController?.signal.aborted) {
+            clearOwnedLoading(previousLoadingController, selectionIntent)
+          }
           // Messages are ready independently of optional profile enrichment.
           // Keep this load's authority alive until that guarded work settles.
           await pendingAssistantPresentation?.catch(() => undefined)
@@ -1356,6 +1434,7 @@ export const useServerChatLoader = ({
       }
     }
   }, [
+    clearOwnedLoading,
     enabled,
     selectionIntent,
     assistantMeta?.isLoading,

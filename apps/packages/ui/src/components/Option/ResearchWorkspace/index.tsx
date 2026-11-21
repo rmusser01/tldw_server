@@ -24,6 +24,7 @@ import {
 import {
   createWorkspaceStorage,
   flushWorkspacePersistence,
+  hasRetainedWorkspaceContent,
   useWorkspaceStore
 } from "@/store/workspace"
 import {
@@ -31,12 +32,17 @@ import {
   WORKSPACE_STORAGE_CHANNEL_NAME,
   WORKSPACE_STORAGE_KEY,
   WORKSPACE_STORAGE_QUOTA_EVENT,
+  WORKSPACE_STORAGE_SPLIT_KEY_PREFIX,
+  collectResearchWorkspaceLegacyLocalStorageKeys,
   isWorkspaceBroadcastSyncEnabled,
   isWorkspaceBroadcastUpdateMessage,
+  markFreshWorkspaceInitializationForRuntime,
   shouldSurfaceWorkspaceConflictNotice,
+  wasWorkspaceFreshlyInitializedInRuntime,
   type WorkspaceStorageQuotaEventDetail
 } from "@/store/workspace-events"
 import {
+  getResearchWorkspaceMigrationEligibility,
   runResearchWorkspaceMigration,
   type ResearchWorkspaceIndexedDbStoreRef,
   type ResearchWorkspaceMigrationRunResult,
@@ -126,6 +132,7 @@ import {
 } from "@/store/workspace-organization"
 import {
   buildResearchWorkspaceServerSourceSignature,
+  matchesHydratedWorkspaceBaseline,
   reconcileResearchWorkspaceServerState
 } from "./workspace-server-reconcile"
 import {
@@ -139,7 +146,7 @@ import {
 } from "@/services/web-clipper/agent-task-handoff"
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 import { isEditableTarget } from "@/utils/editable-target"
-import { restoreMigratedResearchWorkspace } from "@/services/workspace-server-restore"
+import { restoreMigratedResearchWorkspace } from "./workspace-server-restore"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -157,7 +164,6 @@ const WORKSPACE_STORAGE_PAYLOAD_BUDGET_VITE_ENV =
   "VITE_WORKSPACE_STORAGE_PAYLOAD_BUDGET_MB"
 const WORKSPACE_STORAGE_PAYLOAD_BUDGET_NEXT_ENV =
   "NEXT_PUBLIC_WORKSPACE_STORAGE_PAYLOAD_BUDGET_MB"
-const WORKSPACE_STORAGE_SPLIT_KEY_PREFIX = `${WORKSPACE_STORAGE_KEY}:workspace:`
 const WORKSPACE_STORAGE_USAGE_REFRESH_DELAY_MS = 120
 const WEB_CLIP_AGENT_TASK_ROUTE_FLAG = "agent_task_handoff"
 const ACCOUNT_STORAGE_USAGE_REFRESH_DELAY_MS = 1400
@@ -167,8 +173,6 @@ const WORKSPACE_REFRESH_LOOP_TRACE_SESSION_KEY =
   "tldw:research-workspace:refresh-loop-trace:v1"
 const WORKSPACE_REFRESH_LOOP_PENDING_SIGNAL_SESSION_KEY =
   "tldw:research-workspace:refresh-loop-pending:v1"
-const WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER =
-  "__tldwResearchWorkspaceFreshInitialization"
 const WORKSPACE_REFRESH_LOOP_WINDOW_MS = 45_000
 const WORKSPACE_REFRESH_LOOP_THRESHOLD = 3
 const WORKSPACE_CONFLICT_TRACKED_FIELDS = [
@@ -227,55 +231,6 @@ const buildWebClipAgentTaskPrefill = (
     .filter((line) => line !== "")
     .join("\n")
 })
-
-const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
-  if (typeof window === "undefined") return []
-  const keys: string[] = []
-  try {
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index)
-      if (!key) continue
-      if (
-        key === WORKSPACE_STORAGE_KEY ||
-        key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX) ||
-        key.startsWith("tldw:research-workspace:") ||
-        key.startsWith("tldw:workspace:playground:")
-      ) {
-        keys.push(key)
-      }
-    }
-  } catch {
-    return []
-  }
-  return keys.sort()
-}
-
-type ResearchWorkspaceRuntimeWindow = Window & {
-  [WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER]?: Set<string>
-}
-
-const markFreshWorkspaceInitializationForRuntime = (
-  workspaceId: string
-): void => {
-  if (typeof window === "undefined" || !workspaceId) return
-  const runtimeWindow = window as ResearchWorkspaceRuntimeWindow
-  const initializedWorkspaceIds =
-    runtimeWindow[WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER] ??
-    new Set<string>()
-  initializedWorkspaceIds.add(workspaceId)
-  runtimeWindow[WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER] =
-    initializedWorkspaceIds
-}
-
-const wasWorkspaceFreshlyInitializedInRuntime = (
-  workspaceId: string
-): boolean =>
-  typeof window !== "undefined" &&
-  Boolean(
-    (window as ResearchWorkspaceRuntimeWindow)[
-      WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER
-    ]?.has(workspaceId)
-  )
 
 const jsonValueContainsOffloadPointer = (
   value: unknown,
@@ -1280,6 +1235,8 @@ const ResearchWorkspaceBody: React.FC = () => {
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
   const webCapture = useResearchWebCapture(workspaceId)
   const workspaceName = useWorkspaceStore((s) => s.workspaceName) || ""
+  const serverWorkspace = useWorkspaceStore((s) => s.serverWorkspace)
+  const studyMaterialsPolicy = useWorkspaceStore((s) => s.studyMaterialsPolicy)
   const activeDeepResearchReturnContext =
     isResearchWorkspaceDeepResearchReturnForWorkspace(
       initialDeepResearchReturnContextRef.current,
@@ -1293,10 +1250,26 @@ const ResearchWorkspaceBody: React.FC = () => {
     image: null
   }
   const initializeWorkspace = useWorkspaceStore((s) => s.initializeWorkspace)
-  const restoreServerWorkspace = useWorkspaceStore((s) => s.restoreServerWorkspace)
+  const installServerWorkspace = useWorkspaceStore((s) => s.installServerWorkspace)
   const [workspaceRestoreError, setWorkspaceRestoreError] = React.useState(false)
   const [workspaceRestoreAttempt, setWorkspaceRestoreAttempt] = React.useState(0)
   const createNewWorkspace = useWorkspaceStore((s) => s.createNewWorkspace)
+  const startSeparateWorkspace = React.useCallback(() => {
+    const retained = useWorkspaceStore.getState()
+    if (retained.workspaceId || (!hasRetainedWorkspaceContent(retained) && !retained.workspaceChatReferenceId)) {
+      createNewWorkspace()
+      return
+    }
+    Modal.confirm({
+      title: t("playground:workspace.discardRetainedTitle", "Discard retained workspace content?"),
+      content: t("playground:workspace.discardRetainedContent", "Starting a separate workspace will discard this local content."),
+      okText: t("playground:workspace.discardAndStart", "Discard and start new"),
+      cancelText: t("common:cancel", "Cancel"),
+      onOk: () => {
+        if (useWorkspaceStore.getState() === retained) createNewWorkspace()
+      }
+    })
+  }, [createNewWorkspace, t])
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
   const clearCurrentNote = useWorkspaceStore((s) => s.clearCurrentNote)
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
@@ -1430,9 +1403,19 @@ const ResearchWorkspaceBody: React.FC = () => {
     const reconcileSignature = [
       activeWorkspaceId,
       workspaceName,
+      studyMaterialsPolicy,
       workspaceServerSourceSignature,
       workspaceServerSelectedSourceSignature
     ].join("::")
+    if (matchesHydratedWorkspaceBaseline({
+      workspaceId: activeWorkspaceId, workspaceName, studyMaterialsPolicy,
+      sourceSignature: workspaceServerSourceSignature,
+      selectedSourceSignature: workspaceServerSelectedSourceSignature, baseline: serverWorkspace
+    })) {
+      workspaceServerReconcileSignatureRef.current = reconcileSignature
+      setServerWorkspaceIdentity(activeWorkspaceId)
+      return
+    }
     if (workspaceServerReconcileSignatureRef.current === reconcileSignature) {
       setServerWorkspaceIdentity(activeWorkspaceId)
       return
@@ -1449,6 +1432,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       client: tldwClient,
       workspaceId: activeWorkspaceId,
       workspaceName,
+      studyMaterialsPolicy,
       sources: workspaceServerSourcesRef.current,
       selectedSourceIds,
       onWorkspaceReady: () => {
@@ -1500,6 +1484,8 @@ const ResearchWorkspaceBody: React.FC = () => {
     statusGuardrailsEnabled,
     workspaceId,
     workspaceName,
+    serverWorkspace,
+    studyMaterialsPolicy,
     workspaceServerSelectedSourceSignature,
     workspaceServerSourceSignature
   ])
@@ -1687,7 +1673,8 @@ const ResearchWorkspaceBody: React.FC = () => {
       return [
         "Legacy workspace data found",
         "Server receipt saved",
-        "Local data retained until server content and readback are verified"
+        "Local data retained",
+        "Automatic local cleanup is disabled"
       ]
     }
 
@@ -1697,12 +1684,19 @@ const ResearchWorkspaceBody: React.FC = () => {
         ...(workspaceMigrationResult.serverMigration
           ? ["Server receipt saved"]
           : []),
-        "Local data retained"
+        "Local data retained",
+        "Automatic local cleanup is disabled"
       ]
     }
 
     if (workspaceMigrationResult.status === "failed") {
-      return ["Legacy workspace data found", workspaceMigrationResult.message];
+      return [
+        "Legacy workspace data found",
+        workspaceMigrationResult.deletedSurfaceIds.length > 0
+          ? "Migration failed after local deletion began"
+          : "Migration failed before local deletion",
+        workspaceMigrationResult.message
+      ]
     }
 
     if (workspaceMigrationResult.status === "deleted") {
@@ -1778,7 +1772,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (!isStoreHydrated || !workspaceId || !workspaceMigrationReady) return
     if (typeof window === "undefined") return
 
-    if (wasWorkspaceFreshlyInitializedInRuntime(workspaceId)) {
+    if (
+      getResearchWorkspaceMigrationEligibility(workspaceId, serverWorkspace) !==
+        "legacy" ||
+      wasWorkspaceFreshlyInitializedInRuntime(workspaceId)
+    ) {
       workspaceMigrationSignatureRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
@@ -1822,20 +1820,27 @@ const ResearchWorkspaceBody: React.FC = () => {
       mounted &&
       !retired &&
       useWorkspaceStore.getState().workspaceId === workspaceId;
-    const releaseAccount = watchChatAccountChanges((invalidated) => {
-      if (!invalidated || !mounted) return;
+    const retire = () => {
+      if (!mounted || retired) return;
       retired = true;
       if (workspaceMigrationSignatureRef.current === signature)
         workspaceMigrationSignatureRef.current = null;
       setWorkspaceMigrationLoading(false);
       setWorkspaceMigrationResult(null);
+    };
+    const releaseAccount = watchChatAccountChanges((invalidated) => {
+      if (invalidated) retire();
     });
-    setWorkspaceMigrationLoading(true)
-
-    const migrationInput: ResearchWorkspaceMigrationRunInput = {
+    const migrationInput = {
       targetWorkspaceId: workspaceId,
       targetWorkspaceName: workspaceName || "Research Workspace",
+      serverWorkspace,
       isCurrent,
+      getCurrentWorkspace: () => {
+        const current = useWorkspaceStore.getState();
+        return { workspaceId: current.workspaceId, serverWorkspace: current.serverWorkspace };
+      },
+      subscribeToWorkspaceChanges: (listener) => useWorkspaceStore.subscribe(listener),
       discoveredLocalStorageKeys,
       discoveredIndexedDbStores,
       readLocalStorageValue: async (key) => window.localStorage.getItem(key),
@@ -1844,10 +1849,14 @@ const ResearchWorkspaceBody: React.FC = () => {
         putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
         finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
         getWorkspaceMigration: tldwClient.getWorkspaceMigration,
-        ackWorkspaceMigrationClientDelete:
-          tldwClient.ackWorkspaceMigrationClientDelete,
       },
-    };
+    } satisfies ResearchWorkspaceMigrationRunInput;
+    const releaseWorkspace = useWorkspaceStore.subscribe(() => {
+      const current = migrationInput.getCurrentWorkspace();
+      if (current.workspaceId !== workspaceId ||
+          getResearchWorkspaceMigrationEligibility(workspaceId, current.serverWorkspace) !== "legacy") retire();
+    });
+    setWorkspaceMigrationLoading(true);
     const migrationPromise = (async () => {
       // Capture after initial source hydration and its queued durable writes settle.
       await flushWorkspacePersistence();
@@ -1898,6 +1907,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       })
       .finally(() => {
         releaseAccount();
+        releaseWorkspace();
         if (mounted && !retired) {
           setWorkspaceMigrationLoading(false);
         }
@@ -1907,11 +1917,13 @@ const ResearchWorkspaceBody: React.FC = () => {
       mounted = false;
       retired = true;
       releaseAccount();
+      releaseWorkspace();
       if (workspaceMigrationSignatureRef.current === signature)
         workspaceMigrationSignatureRef.current = null;
     }
   }, [
     isStoreHydrated,
+    serverWorkspace,
     statusGuardrailsEnabled,
     workspaceId,
     workspaceMigrationRetryNonce,
@@ -2864,28 +2876,42 @@ const ResearchWorkspaceBody: React.FC = () => {
   // Initialize workspace on mount if not already initialized — use ref to keep dep stable
   const initRef = React.useRef(initializeWorkspace)
   initRef.current = initializeWorkspace
-  const currentWorkspaceIdRef = React.useRef(workspaceId)
-  currentWorkspaceIdRef.current = workspaceId
   useEffect(() => {
     if (!isStoreHydrated) return
     if (workspaceId) return
 
     let cancelled = false
     const restoration = new AbortController()
+    const origin = useWorkspaceStore.getState().workspaceId
+    let lastWorkspaceId = origin
+    const stopWorkspace = useWorkspaceStore.subscribe(() => {
+      const nextWorkspaceId = useWorkspaceStore.getState().workspaceId
+      if (nextWorkspaceId !== lastWorkspaceId) restoration.abort()
+      lastWorkspaceId = nextWorkspaceId
+    })
+    const current = () => !cancelled && !restoration.signal.aborted &&
+      useWorkspaceStore.getState().storeHydrated !== false &&
+      useWorkspaceStore.getState().workspaceId === origin
     void Promise.resolve().then(async () => {
-      if (!cancelled && !currentWorkspaceIdRef.current) {
+      if (current() && !origin) {
         setWorkspaceRestoreError(false)
         try {
           const restored = await restoreMigratedResearchWorkspace({
             signal: restoration.signal,
-            isCurrent: () => !cancelled && !useWorkspaceStore.getState().workspaceId,
-            apply: (snapshot, chatSession) => {
-              if (!cancelled && !useWorkspaceStore.getState().workspaceId) restoreServerWorkspace(snapshot, chatSession)
+            apply: (workspace, scopeKey) => {
+              if (!current()) return false
+              stopWorkspace()
+              return installServerWorkspace(workspace, { scopeKey, expectedWorkspaceId: origin })
             }
           })
-          if (restored || cancelled || currentWorkspaceIdRef.current) return
+          if (restored || !current() || useWorkspaceStore.getState().workspaceId) return
         } catch {
-          if (!cancelled) setWorkspaceRestoreError(true)
+          if (current()) setWorkspaceRestoreError(true)
+          return
+        }
+        const retained = useWorkspaceStore.getState()
+        if (hasRetainedWorkspaceContent(retained) || retained.workspaceChatReferenceId) {
+          setWorkspaceRestoreError(true)
           return
         }
         const initialStorageKeys =
@@ -2896,10 +2922,12 @@ const ResearchWorkspaceBody: React.FC = () => {
             key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX)
         )
         if (!hadWorkspaceContentBeforeInitialization) {
+          stopWorkspace()
           const initializedWorkspaceId = initRef.current()
           markFreshWorkspaceInitializationForRuntime(initializedWorkspaceId)
           return
         }
+        stopWorkspace()
         initRef.current()
       }
     })
@@ -2907,8 +2935,9 @@ const ResearchWorkspaceBody: React.FC = () => {
     return () => {
       cancelled = true
       restoration.abort()
+      stopWorkspace()
     }
-  }, [isStoreHydrated, workspaceId, restoreServerWorkspace, workspaceRestoreAttempt])
+  }, [isStoreHydrated, workspaceId, installServerWorkspace, workspaceRestoreAttempt])
 
   useEffect(() => {
     if (!statusGuardrailsEnabled) return
@@ -3057,7 +3086,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
       if (event.altKey && !hasPrimaryModifier && event.shiftKey && key === "n") {
         event.preventDefault()
-        createNewWorkspace()
+        startSeparateWorkspace()
         return
       }
 
@@ -3118,7 +3147,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [
     clearCurrentNote,
     closeGlobalSearch,
-    createNewWorkspace,
+    startSeparateWorkspace,
     currentNote.content,
     currentNote.isDirty,
     currentNote.keywords.length,
@@ -3566,7 +3595,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   ]
 
-  if (!isStoreHydrated) {
+  if (!isStoreHydrated || (!workspaceId && !workspaceRestoreError)) {
     return <ResearchWorkspaceSkeleton isMobile={isMobile} />
   }
 
@@ -3576,7 +3605,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       <Button className="mt-2" onClick={() => setWorkspaceRestoreAttempt(attempt => attempt + 1)}>
         {t("common:retry", "Retry")}
       </Button>
-      <Button className="ml-2 mt-2" onClick={() => createNewWorkspace()}>
+      <Button className="ml-2 mt-2" onClick={startSeparateWorkspace}>
         {t("playground:workspace.startNewAfterRestoreFailure", "Start new workspace")}
       </Button>
       <p className="mt-2 text-sm text-text-muted">

@@ -17,12 +17,20 @@ import type { ChatScope } from "@/types/chat-scope"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
 import { extractStreamTransportInterruption, extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
+import { extractStreamingChunkError } from "@/utils/streaming-chunks"
 import { readChunkFinishReason } from "@/utils/output-limit-reply"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { ImageSupportUnconfirmedError } from "@/utils/chat-error-message"
+import type { ChatTurnIdentity } from "@/services/tldw/TldwApiClient"
+import type { HistoryAdmissionV1 } from "@/types/history-selection"
+import type { HistoryDurableResultReceiptV1, HistoryDurableSourceV1, HistoryDurableResultV1 } from "@/types/history-durable-turn"
+import { canonicalHistoryJson } from "@/db/dexie/history-selection"
+import { historyAdmissionReference, prepareHistoryContext } from "@/services/chat-history-selection"
+import { historyDurableRequestDigest, validateHistoryDurableAdmission } from "@/services/history-durable-turn"
+import { parseHistoryDurableResult, validateHistoryDurableResultReceipt } from "@/utils/history-durable-sources"
 import {
   beginServerChatWrite,
   type ServerChatWriteOutcome
@@ -59,6 +67,8 @@ export interface ChatTldwOptions {
   supportsMultimodal?: boolean
   saveToDb?: boolean
   conversationId?: string
+  tldwTurn?: ChatTurnIdentity
+  originalUserMessage?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -92,9 +102,15 @@ export class ChatTldw {
   tools?: Record<string, unknown>[]
   supportsMultimodal: boolean
   saveToDb?: boolean
+  serverMessagesAlreadyPersisted = false
+  serverUserMessageId?: string
+  historyAdmission?: HistoryAdmissionV1
+  historyResult?: HistoryDurableResultReceiptV1
   conversationId?: string
   serverMessageId?: string
   userServerMessageId?: string
+  tldwTurn?: ChatTurnIdentity
+  originalUserMessage?: string
   /** The last stream's `finish_reason` ("length" when the output limit cut it off, CM-03). */
   finishReason?: string
   historyMessageLimit?: number
@@ -112,6 +128,9 @@ export class ChatTldw {
   regenerateFromMessageId?: string
 
   constructor(options: ChatTldwOptions) {
+    if (options.clientManagedHistory && options.tldwTurn) {
+      throw new Error("unsupported_history_durable_turn")
+    }
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
     this.model = String(options.model || "").replace(/^tldw:/, "")
     this.routing = options.routing
@@ -143,6 +162,8 @@ export class ChatTldw {
     this.historyMessageOrder = options.clientManagedHistory
       ? undefined
       : options.historyMessageOrder
+    this.tldwTurn = options.tldwTurn
+    this.originalUserMessage = options.originalUserMessage
     this.slashCommandInjectionMode = options.slashCommandInjectionMode
     this.apiProvider = options.apiProvider
     this.extraHeaders = options.extraHeaders
@@ -179,10 +200,32 @@ export class ChatTldw {
     this.serverMessageId = undefined
     this.userServerMessageId = undefined
     this.finishReason = undefined
+    this.serverMessagesAlreadyPersisted = false
+    this.serverUserMessageId = undefined
+    this.historyAdmission = undefined
+    this.historyResult = undefined
+    const selected = options?.preparedRequest?.tldw_turn?.history_v1
+    const selectedRequest = selected !== undefined ? options!.preparedRequest! : undefined
+    if (selectedRequest) {
+      if (!selected) throw new Error("invalid_history_durable_request")
+      const digest = historyDurableRequestDigest(selectedRequest)
+      const expectedDigest = selected!.kind === "selection"
+        ? selected!.selection.request_context_digest : selected!.request_context_digest
+      if (selectedRequest.stream !== true || selectedRequest.save_to_db !== true ||
+          selectedRequest.model !== this.model || selectedRequest.api_provider !== this.apiProvider ||
+          selectedRequest.conversation_id !== this.conversationId || !this.tldwTurn ||
+          selectedRequest.tldw_turn!.user_message_id !== this.tldwTurn.user_message_id || digest !== expectedDigest)
+        throw new Error("invalid_history_durable_request")
+      parseHistoryDurableResult(selectedRequest.tldw_turn!.result_v1,
+        selectedRequest.tldw_turn!.result_v1?.sources.length ? "rag" : "plain")
+    }
+    let observationChunk: Record<string, unknown> | null = null
+    let serverWriteAcknowledged = false
 
     const tldwMessages = options?.preparedRequest
       ? []
-      : this.convertToTldwMessages(messages)
+      : this.prepareRequestMessages(messages)
+    const requestedConversationId = this.conversationId
     const toolCalls: ToolCall[] = []
     // Captures the background transport's `stream_transport_interrupted`
     // sentinel. TldwChat surfaces it via onChunk (not as a text token), so we
@@ -222,28 +265,72 @@ export class ChatTldw {
 
     const consumeChunk = (chunk: any) => {
       if (signal?.aborted) return
-      const streamedConversationId =
-        typeof chunk?.tldw_conversation_id === "string" &&
-        chunk.tldw_conversation_id.trim().length > 0
-          ? chunk.tldw_conversation_id.trim()
-          : typeof chunk?.conversation_id === "string" &&
-              chunk.conversation_id.trim().length > 0
-            ? chunk.conversation_id.trim()
-            : null
-      // Nonpersisted completions also carry a request-scoped conversation UUID.
-      // It must not turn local history into a link to a nonexistent server chat.
-      if (!options?.onChunk && streamedConversationId && this.saveToDb !== false) {
-        this.conversationId = streamedConversationId
-        this.saveToDb = true
-      }
-      if (!options?.onChunk && this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
-        const savedMessageId = chunk.tldw_message_id.trim()
-        if (savedMessageId) this.serverMessageId = savedMessageId
-      }
-
-      if (!options?.onChunk && this.saveToDb !== false && typeof chunk?.tldw_user_message_id === "string") {
-        const savedUserMessageId = chunk.tldw_user_message_id.trim()
-        if (savedUserMessageId) this.userServerMessageId = savedUserMessageId
+      if (selectedRequest && selected) {
+        const inputId = selectedRequest.tldw_turn!.user_message_id
+        const binding = selected.kind === "selection" ? selected.selection : selected.admission
+        const hasAdmission = chunk?.tldw_history_admission_v1 !== undefined
+        const hasResult = chunk?.tldw_history_result_v1 !== undefined
+        if (hasAdmission || hasResult || chunk?.tldw_message_id !== undefined || chunk?.tldw_user_message_id !== undefined) {
+          if (chunk?.tldw_conversation_id !== selectedRequest.conversation_id || chunk?.tldw_user_message_id !== inputId)
+            throw new Error("invalid_history_durable_receipt")
+          const admission = hasAdmission
+            ? validateHistoryDurableAdmission(binding, selected, inputId, chunk.tldw_history_admission_v1)
+            : this.historyAdmission
+          if (!admission || (this.historyAdmission && canonicalHistoryJson(this.historyAdmission) !== canonicalHistoryJson(admission)))
+            throw new Error("invalid_history_admission")
+          const result = hasResult ? validateHistoryDurableResultReceipt(binding, historyAdmissionReference(admission),
+            historyDurableRequestDigest(selectedRequest), selectedRequest.tldw_turn!.result_v1!.sources, chunk.tldw_history_result_v1) : undefined
+          if ((chunk?.tldw_message_id !== undefined && (!result || chunk.tldw_message_id !== result.result_message_id)) ||
+              (result && chunk?.tldw_message_id !== result.result_message_id) ||
+              (this.historyResult && result && canonicalHistoryJson(this.historyResult) !== canonicalHistoryJson(result)))
+            throw new Error("invalid_history_durable_receipt")
+          const changed = !this.historyAdmission || (result && !this.historyResult)
+          this.historyAdmission = admission
+          this.serverUserMessageId = inputId
+          this.userServerMessageId = inputId
+          if (result) {
+            this.historyResult = result
+            this.serverMessageId = result.result_message_id
+            this.serverMessagesAlreadyPersisted = true
+            serverWriteAcknowledged = true
+          }
+          if (changed) observationChunk = {
+            tldw_history_admission_v1: admission,
+            ...(result ? { tldw_history_result_v1: result } : {})
+          }
+        }
+      } else if (!options?.onChunk && this.saveToDb !== false) {
+        const streamedConversationId =
+          typeof chunk?.tldw_conversation_id === "string" &&
+          chunk.tldw_conversation_id.trim().length > 0
+            ? chunk.tldw_conversation_id.trim()
+            : typeof chunk?.conversation_id === "string" &&
+                chunk.conversation_id.trim().length > 0
+              ? chunk.conversation_id.trim()
+              : null
+        const acceptsReceipt = !this.tldwTurn || (
+          streamedConversationId === requestedConversationId &&
+          chunk?.tldw_user_message_id === this.tldwTurn.user_message_id
+        )
+        if (acceptsReceipt) {
+          if (streamedConversationId) {
+            this.conversationId = streamedConversationId
+            this.saveToDb = true
+            if (this.tldwTurn && streamedConversationId === requestedConversationId) {
+              this.serverUserMessageId = chunk.tldw_user_message_id
+            }
+          }
+          const assistantId = typeof chunk?.tldw_message_id === "string" ? chunk.tldw_message_id.trim() : ""
+          if (assistantId) {
+            this.serverMessageId = assistantId
+            if (streamedConversationId) {
+              this.serverMessagesAlreadyPersisted = true
+              if (streamedConversationId === requestedConversationId) serverWriteAcknowledged = true
+            }
+          }
+          const userId = typeof chunk?.tldw_user_message_id === "string" ? chunk.tldw_user_message_id.trim() : ""
+          if (userId) this.userServerMessageId = userId
+        }
       }
 
       const loopEvent = extractChatLoopEvent(chunk)
@@ -297,6 +384,7 @@ export class ChatTldw {
         clientMessageId: this.clientMessageId,
         regenerateFromMessageId: this.regenerateFromMessageId,
         conversationId: this.conversationId,
+        tldwTurn: this.tldwTurn,
         historyMessageLimit: this.historyMessageLimit,
         historyMessageOrder: this.historyMessageOrder,
         slashCommandInjectionMode: this.slashCommandInjectionMode,
@@ -312,6 +400,7 @@ export class ChatTldw {
       true
     )
 
+    const getUserMessageId = () => this.serverUserMessageId
     // A completion the server persists into an existing server chat is a
     // server write. Record its outcome so chat persistence labels only claim
     // the server once it has acknowledged the turn (CS-03 / XS-05, #3104).
@@ -333,8 +422,21 @@ export class ChatTldw {
           if (signal?.aborted) {
             break
           }
+          if (observationChunk) {
+            const observed = observationChunk
+            observationChunk = null
+            yield observed
+          }
+          if (selectedRequest && extractStreamingChunkError(token)) {
+            yield token
+            return
+          }
           fullText += extractTokenFromChunk(token)
           yield token
+        }
+        if (observationChunk && !signal?.aborted) {
+          yield observationChunk
+          observationChunk = null
         }
         // The extension port can drop after the first byte; TldwChat surfaces a
         // synthesized `stream_transport_interrupted` sentinel via onChunk rather
@@ -344,7 +446,7 @@ export class ChatTldw {
           yield interruptionChunk
         }
         if (!interruptionChunk && !signal?.aborted) {
-          serverWriteOutcome = "saved"
+          serverWriteOutcome = serverWriteAcknowledged ? "saved" : "failed"
         }
       } catch (error) {
         if (!signal?.aborted) serverWriteOutcome = "failed"
@@ -353,8 +455,13 @@ export class ChatTldw {
         endServerWrite?.(serverWriteOutcome)
         // Synthesize a minimal LangChain-style result for handleLLMEnd
         if (callbacks && callbacks.length > 0) {
-          const generationInfo =
-            toolCalls.length > 0 ? { tool_calls: toolCalls } : undefined
+          const userMessageId = getUserMessageId()
+          const generationInfo = toolCalls.length > 0 || userMessageId
+            ? {
+                ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+                ...(userMessageId ? { tldw_user_message_id: userMessageId } : {})
+              }
+            : undefined
           const result = {
             generations: [[{ text: fullText, generationInfo }]]
           }
@@ -370,6 +477,31 @@ export class ChatTldw {
     }
 
     return generator()
+  }
+
+  /** Bare body only: H1 finalization attaches the excluded history envelope afterwards. */
+  prepareSelectedDurableRequest(messages: BaseMessage[], sources: readonly HistoryDurableSourceV1[]):
+    ChatCompletionRequest & { tldw_turn: ChatTurnIdentity & { result_v1: HistoryDurableResultV1; history_v1?: import("@/types/history-durable-turn").HistoryDurableEnvelopeV1 } } {
+    if (this.clientManagedHistory || !this.tldwTurn || this.saveToDb !== true || !this.conversationId || !this.apiProvider || !this.model ||
+        this.tools?.length || this.toolChoice || this.retryFailedTurn || this.regenerateFromMessageId ||
+        (this.extraBody && Object.keys(this.extraBody).length) ||
+        (this.extraHeaders && Object.entries(this.extraHeaders).some(([key, value]) => key !== "X-TLDW-Loop-Compat" || value !== "1")) ||
+        messages.some(message => typeof message.content !== "string"))
+      throw new Error("invalid_history_durable_request")
+    const result = parseHistoryDurableResult({ version: 1, sources }, sources.length ? "rag" : "plain")
+    const request = prepareChatCompletionRequest(this.prepareRequestMessages(messages), {
+      model: this.model, apiProvider: this.apiProvider, routing: this.routing, temperature: this.temperature,
+      maxTokens: this.maxTokens, topP: this.topP, frequencyPenalty: this.frequencyPenalty,
+      presencePenalty: this.presencePenalty, systemPrompt: this.systemPrompt, reasoningEffort: this.reasoningEffort,
+      saveToDb: true, conversationId: this.conversationId, extraHeaders: this.extraHeaders,
+      researchContext: this.researchContext, slashCommandInjectionMode: this.slashCommandInjectionMode,
+      tldwTurn: this.tldwTurn
+    }, true)
+    // The generic builder trims/wraps user text; this protocol sends the original string exactly.
+    const exact = { ...request, messages: request.messages.map(message => message.role === "user"
+      ? { role: "user" as const, content: this.originalUserMessage! } : message),
+      tldw_turn: { user_message_id: this.tldwTurn.user_message_id, result_v1: result } }
+    return prepareHistoryContext(exact, () => true).payload as ReturnType<ChatTldw["prepareSelectedDurableRequest"]>
   }
 
   /** Freeze after the existing builder resolves tools/settings, before owner admission. */
@@ -437,7 +569,7 @@ export class ChatTldw {
     messages: BaseMessage[],
     options?: { signal?: AbortSignal }
   ): Promise<{ text: string; message: AIMessage }> {
-    const tldwMessages = this.convertToTldwMessages(messages)
+    const tldwMessages = this.prepareRequestMessages(messages)
 
     const response = await tldwChat.sendMessage(tldwMessages, {
       model: this.model,
@@ -459,6 +591,7 @@ export class ChatTldw {
       clientMessageId: this.clientMessageId,
       regenerateFromMessageId: this.regenerateFromMessageId,
       conversationId: this.conversationId,
+      tldwTurn: this.tldwTurn,
       historyMessageLimit: this.historyMessageLimit,
       historyMessageOrder: this.historyMessageOrder,
       slashCommandInjectionMode: this.slashCommandInjectionMode,
@@ -492,6 +625,32 @@ export class ChatTldw {
   ): Promise<{ content: string }> {
     const { text } = await this.generateOnce(messages, options)
     return { content: text }
+  }
+
+  private prepareRequestMessages(messages: BaseMessage[]): ChatMessage[] {
+    const converted = this.convertToTldwMessages(messages)
+    if (!this.tldwTurn) return converted
+    if (!this.saveToDb || !this.conversationId?.trim()) {
+      throw new Error("A durable user turn requires a persisted conversation.")
+    }
+    if (!this.originalUserMessage?.trim()) {
+      throw new Error("A durable user turn requires its original user message.")
+    }
+
+    // The server owns history; only this request's instructions and user are sent.
+    const context = converted.filter((entry) => entry.role === "system")
+    const currentUser = [...converted].reverse().find((entry) => entry.role === "user")
+    const currentContent = currentUser?.content
+    const currentText = typeof currentContent === "string"
+      ? currentContent
+      : (currentContent ?? []).map((part) => {
+          if (part.type !== "text") throw new Error("Durable workspace turns require text-only context.")
+          return part.text
+        }).join("\n")
+    if (currentText && currentText !== this.originalUserMessage) {
+      context.push({ role: "system", content: currentText })
+    }
+    return [...context, { role: "user", content: this.originalUserMessage }]
   }
 
   private normalizeImageUrl(

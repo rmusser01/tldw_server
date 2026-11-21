@@ -29,16 +29,17 @@ const buildPersistedPayload = (state: Record<string, unknown>) =>
   })
 
 describe("workspace storage quota eviction recovery", () => {
-  const storagePrototype = Object.getPrototypeOf(localStorage) as Storage;
-  let originalSetItem: Storage["setItem"];
+  let originalSetItem: Storage["setItem"]
+  let storagePrototype: Storage
 
   beforeEach(() => {
-    originalSetItem = storagePrototype.setItem;
+    storagePrototype = Object.getPrototypeOf(localStorage)
+    originalSetItem = storagePrototype.setItem
     localStorage.removeItem(STORAGE_KEY)
   })
 
   afterEach(() => {
-    storagePrototype.setItem = originalSetItem;
+    storagePrototype.setItem = originalSetItem
   })
 
   it("evicts least-recently-used archived workspace data before retrying", async () => {
@@ -58,7 +59,7 @@ describe("workspace storage quota eviction recovery", () => {
     )
 
     storagePrototype.setItem = (() => {
-      callCount += 1;
+      callCount += 1
       if (callCount === 1) {
         throw buildQuotaError();
       }
@@ -179,7 +180,7 @@ describe("workspace storage quota eviction recovery", () => {
     )
 
     storagePrototype.setItem = (() => {
-      callCount += 1;
+      callCount += 1
       if (callCount === 1) {
         throw buildQuotaError();
       }
@@ -263,7 +264,7 @@ describe("workspace storage quota eviction recovery", () => {
     )
 
     storagePrototype.setItem = (() => {
-      callCount += 1;
+      callCount += 1
       if (callCount === 1) {
         throw buildQuotaError();
       }
@@ -383,9 +384,9 @@ describe("workspace storage quota eviction recovery", () => {
     )
 
     storagePrototype.setItem = (() => {
-      callCount += 1;
-      throw buildQuotaError();
-    }) as typeof storagePrototype.setItem;
+      callCount += 1
+      throw buildQuotaError()
+    }) as typeof storagePrototype.setItem
 
     const payload = buildPersistedPayload({
       workspaceId: "workspace-active",

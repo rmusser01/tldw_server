@@ -117,7 +117,6 @@ export const isServicePromptRequestPath = (
   ].includes(pathname)) return true
   if (/^\/api\/v1\/workspaces\/[^/]+\/outputs$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/workspaces\/[^/]+\/outputs\/[A-Za-z0-9_-]+$/.test(pathname)) return requestMethod === "GET"
-  if (/^\/api\/v1\/workspaces\/[^/]+$/.test(pathname) && requestMethod === "PUT") return true
   if (pathname === "/api/v1/data-tables/generate") return requestMethod === "POST"
   if (/^\/api\/v1\/data-tables\/jobs\/[1-9][0-9]*$/.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
   const tablePath = /^\/api\/v1\/data-tables\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/regenerate)?$/i.exec(pathname)
@@ -166,23 +165,37 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
   if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
   if (/^\/api\/v1\/messages\/[^/]+$/.test(pathname)) {
-    if (["GET", "PUT"].includes(requestMethod)) return true
-    if (requestMethod !== "DELETE" || String(path).includes("#")) return false
-    const query = new URLSearchParams(String(path).split("?")[1] || "")
+    const rawPath = String(path)
+    if (rawPath.includes("#")) return false
+    const queryStart = rawPath.indexOf("?")
+    const query = new URLSearchParams(queryStart < 0 ? "" : rawPath.slice(queryStart + 1))
     const versions = query.getAll("expected_version")
-    const leaves = query.getAll("require_leaf")
-    const revisions = query.getAll("expected_revision")
-    return (
+    const versioned =
       versions.length === 1 &&
       /^[1-9][0-9]*$/.test(versions[0]) &&
       Number.isSafeInteger(Number(versions[0])) &&
-      Number(versions[0]) < Number.MAX_SAFE_INTEGER &&
+      Number(versions[0]) < Number.MAX_SAFE_INTEGER
+    const scopes = query.getAll("scope_type")
+    const workspaces = query.getAll("workspace_id")
+    const scoped = scopes.length === 1 && (
+      (scopes[0] === "global" && workspaces.length === 0) ||
+      (scopes[0] === "workspace" && workspaces.length === 1 && Boolean(workspaces[0].trim()))
+    )
+    const recovery = query.getAll("include_history_recovery_v1")
+    if (recovery.length) {
+      return scoped && requestMethod === "GET" && recovery.length === 1 && recovery[0] === "true" &&
+        /^\/api\/v1\/messages\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)
+    }
+    if (requestMethod === "GET") return scoped
+    if (requestMethod === "PUT") return scoped && versioned
+    const leaves = query.getAll("require_leaf")
+    const revisions = query.getAll("expected_revision")
+    return requestMethod === "DELETE" && versioned &&
       leaves.length === 1 &&
       leaves[0] === "true" &&
       revisions.length === 1 &&
       revisions[0].length > 0 &&
       revisions[0].length <= 128
-    )
   }
   if (pathname === "/api/v1/chat/dictionaries") return requestMethod === "GET"
   if (pathname === "/api/v1/files/reference-images") return requestMethod === "GET"
@@ -196,9 +209,14 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts\/[^/]+$/.test(pathname)) return requestMethod === "PUT"
   if (/^\/api\/v1\/research\/runs\/[^/]+\/bundle$/.test(pathname)) return requestMethod === "GET"
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/workspaces\/[^/]+(?:\/(?:sources|artifacts|notes))?$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/sources\/[^/]+\/preview$/.test(pathname)
+  )) return true
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/audio/transcriptions") return requestMethod === "POST"
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
+  if (pathname === "/api/v1/notes/wikilinks/resolve") return requestMethod === "POST"
   if (/^\/api\/v1\/web-clipper\/save\/?$/.test(pathname))
     return requestMethod === "POST"
   if (pathname === "/api/v1/media/ingest-web-content")
@@ -264,6 +282,7 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/flashcards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
   if (requestMethod === "PATCH" && /^\/api\/v1\/flashcards\/decks\/[1-9][0-9]*$/.test(pathname)) return true
   if (requestMethod === "GET") {
+    if (pathname === "/openapi.json") return true
     return (
       ["/api/v1/flashcards/decks", "/api/v1/flashcards/review/next", "/api/v1/flashcards/templates"].includes(pathname) || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
       pathname === "/api/v1/scheduled-tasks" ||

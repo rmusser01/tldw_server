@@ -1,9 +1,24 @@
-import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createStore } from "zustand/vanilla"
 import type { WorkspaceSource } from "@/types/workspace"
 import { SourcesPane } from "../SourcesPane"
+import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view"
 import { WORKSPACE_SOURCE_DRAG_TYPE } from "../drag-source"
+const { mockResolveServicePromptScope } = vi.hoisted(() => ({
+  mockResolveServicePromptScope: vi.fn()
+}))
+
+vi.mock("@/services/service-prompts", () => ({
+  resolveServicePromptScope: mockResolveServicePromptScope,
+  loadServicePromptSnapshot: async (_ids: unknown, options: { signal: AbortSignal }) => ({
+    requestScope: await mockResolveServicePromptScope(),
+    scopeSignal: options.signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: () => {}
+  })
+}))
+vi.mock("wxt/browser", () => ({ browser: {} }))
 const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
   () => ({
     mockScheduleWorkspaceUndoAction: vi.fn(),
@@ -21,14 +36,6 @@ const {
   mockUpdateWorkspaceSourceReviewState: vi.fn()
 }))
 
-vi.mock("@/services/service-prompts", () => ({
-  loadServicePromptSnapshot: async () => ({
-    requestScope: {},
-    scopeSignal: new AbortController().signal,
-    scopeInvalidatedSignal: new AbortController().signal,
-    release: () => {}
-  })
-}))
 const mockToggleSourceSelection = vi.fn()
 const mockSelectAllSources = vi.fn()
 const mockDeselectAllSources = vi.fn()
@@ -76,6 +83,7 @@ const workspaceStoreState = {
   reorderSource: mockReorderSource,
   mergeSourceReviewUpdates: mockMergeSourceReviewUpdates,
 }
+const fixtureWorkspaceStore = createStore(() => workspaceStoreState)
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -111,9 +119,13 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), {
+    getState: () => fixtureWorkspaceStore.getState(),
+    subscribe: (listener: Parameters<typeof fixtureWorkspaceStore.subscribe>[0]) =>
+      fixtureWorkspaceStore.subscribe(listener)
+  })
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -138,6 +150,10 @@ describe("SourcesPane Stage 2 source highlighting", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    mockResolveServicePromptScope.mockResolvedValue({
+      config: { serverUrl: "https://workspace.test", authMode: "multi-user", authSource: "manual" },
+      scopeKey: "workspace-owner-7", userId: 7, clientPrincipalVerified: true
+    })
     mockGetWorkspaceSourcePreview.mockResolvedValue({
       workspace_id: "workspace-1",
       source_id: "s1",
@@ -726,6 +742,9 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
     expect(await screen.findByText("Captured content")).toBeInTheDocument()
     expect(
+      await screen.findByText("Captured source text that the user can inspect.")
+    ).toBeInTheDocument()
+    expect(
       screen.getByText("Captured source text that the user can inspect.")
     ).toBeInTheDocument()
     expect(screen.getByText("Evidence snippets")).toBeInTheDocument()
@@ -733,6 +752,12 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     expect(
       screen.getByText("Showing first 47 of 2,400 characters.")
     ).toBeInTheDocument()
+    expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledWith("workspace-1", "s1",
+      { max_chars: 3000, chunk_limit: 3 },
+      { signal: expect.any(AbortSignal), requestScope: {
+        config: { serverUrl: "https://workspace.test", authMode: "multi-user", authSource: "manual" },
+        scopeKey: "workspace-owner-7", userId: 7, clientPrincipalVerified: true
+      } })
     expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledWith(
       "workspace-1",
       "s1",
@@ -740,7 +765,10 @@ describe("SourcesPane Stage 2 source highlighting", () => {
         max_chars: 3000,
         chunk_limit: 3
       },
-      undefined
+      expect.objectContaining({ requestScope: {
+        config: { serverUrl: "https://workspace.test", authMode: "multi-user", authSource: "manual" },
+        scopeKey: "workspace-owner-7", userId: 7, clientPrincipalVerified: true
+      } })
     )
   })
 
@@ -778,6 +806,9 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     fireEvent.click(screen.getByTestId("preview-source-s2"))
 
     expect(await screen.findByText("Captured content")).toBeInTheDocument()
+    expect(
+      await screen.findByText("Text extraction has not completed yet.")
+    ).toBeInTheDocument()
     expect(
       screen.getByText("Text extraction has not completed yet.")
     ).toBeInTheDocument()
@@ -977,6 +1008,10 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
 it("capture and refresh are explicit actions while pinned previews request the exact Media version", async () => {
   vi.clearAllMocks()
+  mockResolveServicePromptScope.mockResolvedValue({
+    config: { serverUrl: "https://workspace.test", authMode: "multi-user", authSource: "manual" },
+    scopeKey: "workspace-owner-7", userId: 7, clientPrincipalVerified: true
+  })
   const capture = vi.fn()
   const pin = {
     clipId: "clip",
@@ -992,6 +1027,9 @@ it("capture and refresh are explicit actions while pinned previews request the e
     { ...defaultSources[0], url: pin.requestedUrl, webCapture: pin }
   ]
   mockGetWorkspaceSourcePreview.mockResolvedValue({
+    workspace_id: "workspace-1",
+    source_id: "s1",
+    media_id: 1,
     document_version_number: 9,
     text_preview: "exact article",
     content_available: true,
@@ -1010,7 +1048,10 @@ it("capture and refresh are explicit actions while pinned previews request the e
       "workspace-1",
       "s1",
       expect.objectContaining({ version_number: 9 }),
-      expect.objectContaining({ requestScope: {} })
+      expect.objectContaining({ requestScope: {
+        config: { serverUrl: "https://workspace.test", authMode: "multi-user", authSource: "manual" },
+        scopeKey: "workspace-owner-7", userId: 7, clientPrincipalVerified: true
+      } })
     )
   )
   expect(await screen.findByText("exact article")).toBeInTheDocument()

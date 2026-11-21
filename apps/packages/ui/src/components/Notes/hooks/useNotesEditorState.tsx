@@ -662,7 +662,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     ]
   )
 
-  /** Remove a queued draft before the next await (loadDetail re-applies queued drafts). */
+  /** Remove a queued draft from both the live queue and its persisted state. */
   const dropOfflineDraftNow = React.useCallback((key: string) => {
     const current = offlineDraftQueueRef.current
     if (!current[key]) return
@@ -879,7 +879,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     })
   }, [updateRecentNotes])
 
-  const loadDetail = React.useCallback(async (id: string | number, ownedRequest?: NotesOwnedRequestOptions, savedEditRevision?: number): Promise<boolean> => {    if (activeSaveRef.current && ownedRequest?.abortSignal !== activeSaveRef.current.signal) {
+  const loadDetail = React.useCallback(async (
+    id: string | number,
+    ownedRequest?: NotesOwnedRequestOptions,
+    savedEditRevision?: number,
+    discardQueuedDraft = false
+  ): Promise<boolean> => {
+    if (activeSaveRef.current && ownedRequest?.abortSignal !== activeSaveRef.current.signal) {
       activeSaveRef.current.abort()
       activeSaveRef.current = null
       activeSavePromiseRef.current = null
@@ -893,14 +899,16 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     const requestEpoch = authorityEpochRef.current
     const noteEpoch = ++noteSelectionEpochRef.current
     const editRevision = savedEditRevision ?? editRevisionRef.current.revision
+    const dirtyRevision = dirtyRevisionRef.current
     const isCurrent = () => !ownedRequest?.abortSignal.aborted && authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === noteEpoch
+    const hasOriginalDraft = () => editRevisionRef.current.revision === editRevision && dirtyRevisionRef.current === dirtyRevision
     if (requestAuthorityScope === null) return false
     pendingSelectionEpochRef.current = String(selectedIdRef.current) !== String(id) ? noteEpoch : null
     clearAssistUndoState()
     setLoadingDetail(true)
     try {
       const d = await bgRequest<any>({ ...ownedRequest, path: noteResourcePath(id) as any, method: 'GET' as any })
-      if (!isCurrent() || editRevisionRef.current.revision !== editRevision) return false
+      if (!isCurrent() || !hasOriginalDraft()) return false
       const loadedTitle = String(d?.title || `Note ${id}`)
       const documentTitle = String(d?.title || '')
       const documentContent = stripKnowledgeNoteProvenance(String(d?.content || ''))
@@ -943,6 +951,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       rememberRecentNote(id, loadedTitle)
       let acceptedDocument = { title: documentTitle, content: documentContent, editorKeywords: documentKeywords,
         backlinkConversationId: links.conversation_id, backlinkMessageId: links.message_id }
+      if (discardQueuedDraft) dropOfflineDraftNow(offlineDraftKeyFor(id))
       const queuedDraft = offlineDraftQueueRef.current[`note:${String(id)}`]
       if (queuedDraft) {
         acceptedDocument = applyOfflineDraftToEditor(queuedDraft)
@@ -958,13 +967,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       await refreshTaskStateForNote(id, ownedRequest)
       return isCurrent()
     } catch {
-      if (isCurrent() && editRevisionRef.current.revision === editRevision) message.error('Failed to load note')
+      if (isCurrent() && hasOriginalDraft()) message.error('Failed to load note')
       return false
     } finally {
       if (pendingSelectionEpochRef.current === noteEpoch) pendingSelectionEpochRef.current = null
       if (isCurrent()) setLoadingDetail(false)
     }
-  }, [applyOfflineDraftToEditor, assignSelectedVersion, authorityScope, clearAssistUndoState, clearTaskState, dispatchSave, isOnline, message, refreshTaskStateForNote, rememberRecentNote, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setLoadingDetail, setMonitoringNotice, setOriginalMetadata])
+  }, [applyOfflineDraftToEditor, assignSelectedVersion, authorityScope, clearAssistUndoState, clearTaskState, dispatchSave, dropOfflineDraftNow, isOnline, message, refreshTaskStateForNote, rememberRecentNote, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setLoadingDetail, setMonitoringNotice, setOriginalMetadata])
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()
@@ -1364,6 +1373,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     const hasLocalDraft = isDirtyRef.current || saveStateRef.current.status === 'conflict'
     const shouldCopy = copyCleanDraft || hasLocalDraft
     const local = editRevisionRef.current
+    const dirtyRevision = dirtyRevisionRef.current
     const requestEpoch = authorityEpochRef.current
     const requestAuthorityScope = authorityScope
     const capturedConfig = connectionConfig ? { ...connectionConfig } : null
@@ -1373,7 +1383,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     const isCurrent = () => !controller.signal.aborted && authorityEpochRef.current === requestEpoch &&
       authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch &&
       String(selectedIdRef.current) === String(noteId)
-    const hasOriginalDraft = () => isCurrent() && editRevisionRef.current.revision === local.revision
+    const hasOriginalDraft = () => isCurrent() && editRevisionRef.current.revision === local.revision &&
+      dirtyRevisionRef.current === dirtyRevision
     try {
       let copied = false
       if (shouldCopy) {
@@ -1414,9 +1425,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         headers: { 'X-TLDW-Expected-User-ID': String(user.id) },
         abortSignal: controller.signal
       }
-      dropOfflineDraftNow(offlineDraftKeyFor(noteId))
       selectionEpoch += 1
-      const loaded = await loadDetail(noteId, ownedRequest, local.revision)
+      const loaded = await loadDetail(noteId, ownedRequest, local.revision, true)
       if (!loaded || !isCurrent()) return false
       void refetch()
       if (shouldCopy) {
@@ -1434,9 +1444,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       return false
     } finally {
       if (authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch) setLoadingDetail(false)
+      controller.abort()
       authorityRequestsRef.current.delete(controller)
     }
-  }, [authorityScope, clearAutosaveTimeout, confirmDanger, connectionConfig, dropOfflineDraftNow, loadDetail, message, refetch, setLoadingDetail, t])
+  }, [authorityScope, clearAutosaveTimeout, confirmDanger, connectionConfig, loadDetail, message, refetch, setLoadingDetail, t])
 
   const reloadSelectedNoteAfterConflict = takeTheirVersion
 
@@ -1726,6 +1737,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const noteId = selectedIdRef.current
       const baseVersion = expectedVersionOverride ?? selectedVersionRef.current
       const snapshot = editRevisionRef.current
+      const dirtyRevision = dirtyRevisionRef.current
       const saveEpoch = ++saveEpochRef.current
       let savedEditRevision = snapshot.revision
       const hasNewerEdits = () => editRevisionRef.current.revision !== savedEditRevision
@@ -1987,11 +1999,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             })
             expectedVersion = toNoteVersion(latest)
           }
+          if (trigger === 'keep-mine' && !replayingUpdate &&
+              (selectedIdRef.current !== noteId || hasNewerEdits() || dirtyRevisionRef.current !== dirtyRevision)) {
+            throw new DOMException('Note edits changed', 'AbortError')
+          }
           if (expectedVersion == null) {
             throw Object.assign(new Error('Missing version; reload and try again'), { status: 428 })
-          }
-          if (trigger === 'keep-mine' && !replayingUpdate && hasNewerEdits()) {
-            throw new DOMException('Note edits changed', 'AbortError')
           }
           const previousSavedTitle = pendingUpdate?.authority === requestEpoch && pendingUpdate.selection === requestNoteEpoch &&
             pendingUpdate.request.path === noteResourcePath(noteId) ? pendingUpdate.previousTitle : (
@@ -3214,12 +3227,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   /** Explicit overwrite: save over the server's latest version, never a stale one. */
   const keepMyVersion = React.useCallback(async (): Promise<boolean> => {
-    if (selectedIdRef.current == null || !saveNoteRef.current) return false
+    if (selectedIdRef.current == null || !saveNoteRef.current || authorityScopeRef.current !== authorityScope) return false
     clearAutosaveTimeout()
     return saveNoteRef.current({ showSuccessMessage: true, trigger: 'keep-mine' })
-  }, [clearAutosaveTimeout])
-
-
+  }, [authorityScope, clearAutosaveTimeout])
 
   /** "Reload" for a newer server copy when there is nothing local to lose. */
   const loadLatestVersion = React.useCallback(async (): Promise<boolean> => {

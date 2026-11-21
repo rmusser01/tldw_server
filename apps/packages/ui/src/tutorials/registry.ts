@@ -89,6 +89,7 @@ export interface TutorialDefinition {
  * Import tutorial definitions from individual files
  */
 import { playgroundTutorials } from "./definitions/playground"
+import { chatWorkspaceTutorials } from "./definitions/chat-workspace"
 import { researchWorkspaceTutorials } from "./definitions/research-workspace"
 import { mediaTutorials } from "./definitions/media"
 import { knowledgeTutorials } from "./definitions/knowledge"
@@ -116,6 +117,7 @@ import { collectionsTutorials } from "./definitions/collections"
 export const TUTORIAL_REGISTRY: TutorialDefinition[] = [
   ...gettingStartedTutorials,
   ...playgroundTutorials,
+  ...chatWorkspaceTutorials,
   ...researchWorkspaceTutorials,
   ...mediaTutorials,
   ...knowledgeTutorials,
