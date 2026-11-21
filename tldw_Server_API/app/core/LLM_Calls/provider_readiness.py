@@ -7,6 +7,7 @@ import re
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
+from importlib import util
 from typing import Any
 from urllib.parse import urlparse
 
@@ -143,6 +144,11 @@ def provider_readiness(
             f"Provider '{provider_name}' is not supported by chat completions. "
             "Choose a provider that can be used with /api/v1/chat/completions."
         )
+    elif chat_provider == "mlx" and util.find_spec("mlx_lm") is None:
+        provider_enabled = False
+        availability = "unavailable"
+        reason_code = "runtime_unavailable"
+        message = "The MLX runtime is not installed on this server."
     elif custom_openai_endpoint_requires_credentials(
         chat_provider,
         endpoint_url,
@@ -202,11 +208,11 @@ def provider_readiness(
         result = discovery_result or ModelDiscoveryResult("unreachable")
         display_name = provider_info.get("display_name") or provider_name
         if result.status == "ready" and not result.models and (
-            listed_inventory or not has_explicit_models
+            listed_inventory or chat_provider == "ollama" or not has_explicit_models
         ):
             reason_code = "no_models_reported"
             message = f"{display_name} did not report any models."
-            if listed_inventory:
+            if listed_inventory or chat_provider == "ollama":
                 provider_enabled = False
                 availability = "unavailable"
         elif result.status == "auth_failed":
@@ -222,7 +228,7 @@ def provider_readiness(
         elif result.status == "unsupported":
             reason_code = "model_discovery_unavailable"
             message = f"{display_name} does not expose a supported model discovery response."
-            if listed_inventory:
+            if listed_inventory or chat_provider == "ollama":
                 provider_enabled = False
                 availability = "unavailable"
         elif result.status == "unreachable":

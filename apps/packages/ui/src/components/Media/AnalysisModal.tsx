@@ -9,6 +9,8 @@ import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { parseProviderQualifiedModelSelection, resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+import { buildFriendlyErrorMessage, decodeChatErrorPayload } from "@/utils/chat-error-message"
+import { parseBillingLimitError } from "@/utils/billing-error"
 import { DEFAULT_ANALYSIS_SUMMARY_PROMPT } from "@/utils/default-prompts"
 import {
   extractMediaDetailAnalysis,
@@ -56,6 +58,9 @@ const normalizePersistedModelSelection = (value: unknown): string => {
   }
 }
 
+const isUsageLimitError = (error: unknown) =>
+  (error as { status?: number } | null)?.status === 402
+
 const extractStreamDelta = (chunk: string): string | null => {
   if (!chunk) return null
   let payload = chunk.trim()
@@ -92,6 +97,7 @@ function OwnedAnalysisModal({
   const { t } = useTranslation(['review', 'common'])
   const messageApi = useAntdMessage()
   const { selectedModel, setSelectedModel } = useSelectedModel()
+  const [modelsLoading, setModelsLoading] = useState(open)
   const [models, setModels] = useState<Array<{
     id: string; name?: string; modelId: string; requestModel: string; provider?: string; providerConflict: boolean
   }>>([])
@@ -168,7 +174,7 @@ function OwnedAnalysisModal({
       : `tldw:${normalizedSelectedModel}`
   }, [normalizedSelectedModel])
   const effectiveModelKey = useMemo(() => {
-    if (models.length === 0) return selectedModelKey
+    if (modelsLoading || models.length === 0) return undefined
     const selection = parseProviderQualifiedModelSelection(selectedModelKey)
     const modelId = selection.modelId.replace(/^tldw:/, "")
     const matches = models.filter((model) =>
@@ -182,7 +188,7 @@ function OwnedAnalysisModal({
     return !first.providerConflict && models.filter((model) => model.modelId === first.modelId).length === 1
       ? first.id
       : undefined
-  }, [models, selectedModelKey])
+  }, [models, modelsLoading, selectedModelKey])
   const effectiveMediaContent = mediaContent.trim()
     ? mediaContent
     : recoveredMediaContent
@@ -286,12 +292,17 @@ function OwnedAnalysisModal({
     }
   }
 
-  // Load models from tldw_server
+  // Check the current server catalog each time analysis opens.
   useEffect(() => {
+    if (!open) {
+      setModels([])
+      setModelsLoading(true)
+      return
+    }
     let cancelled = false
     ;(async () => {
       try {
-        const chatModels = await tldwModels.getChatModels()
+        const chatModels = await tldwModels.getChatModels(true, { requireFresh: true })
         const allModels = chatModels.map((m) => {
           const parsed = parseProviderQualifiedModelSelection(m.id)
           const metadataProvider = parseProviderQualifiedModelSelection(
@@ -317,13 +328,15 @@ function OwnedAnalysisModal({
         if (!cancelled) {
           setModels([])
         }
+      } finally {
+        if (!cancelled) setModelsLoading(false)
       }
     })()
 
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [open])
 
   // Load saved prompts from storage
   useEffect(() => {
@@ -502,6 +515,7 @@ function OwnedAnalysisModal({
         if (cancelledByUserRef.current || signal.aborted || isAbortError(err)) {
           return
         }
+        if (isUsageLimitError(err)) throw err
         streamError = err
       }
 
@@ -540,17 +554,28 @@ function OwnedAnalysisModal({
       if (cancelledByUserRef.current || signal.aborted || isAbortError(err)) {
         return
       }
+      if (isUsageLimitError(err)) {
+        messageApi.error(
+          parseBillingLimitError(err)?.category === 'llm_tokens_month'
+            ? t('mediaPage.analysisMonthlyTokenLimit', 'Your workspace reached its monthly AI token limit. Check your usage limits or contact support.')
+            : t('mediaPage.analysisUsageLimit', 'This analysis exceeds a usage limit. Check your usage limits or contact support.')
+        )
+        return
+      }
       if (isTimeoutError(err)) {
         messageApi.error(buildTimeoutMessage())
       } else {
         const errorText = String((err as Error)?.message || err || '').toLowerCase()
+        const friendly = decodeChatErrorPayload(buildFriendlyErrorMessage(err))
         messageApi.error(
           errorText.includes('analysis api provider is required')
             ? t(
                 'mediaPage.analysisProviderRequired',
                 'Choose an analysis provider, then retry analysis.'
               )
-            : t('mediaPage.analysisGenerateFailed', 'Failed to generate analysis')
+            : friendly
+              ? `${friendly.summary} ${friendly.hint}`
+              : t('mediaPage.analysisRetry', 'Analysis failed. Try again or choose another model.')
         )
       }
       console.warn('Analysis generation failed:', isTimeoutError(err) ? 'timeout' : 'provider_failure')
@@ -689,6 +714,7 @@ function OwnedAnalysisModal({
             id="media-analysis-model"
             aria-label={t('mediaPage.model', 'Model')}
             value={effectiveModelKey}
+            loading={modelsLoading}
             onChange={(value) => {
               void setSelectedModel(value).catch(() => {
                 messageApi.error(t('mediaPage.modelSelectionSaveFailed', 'The model choice could not be saved on this device. Select it again to retry.'))
@@ -708,6 +734,11 @@ function OwnedAnalysisModal({
               </Select.Option>
             ))}
           </Select>
+          {!modelsLoading && !models.some((model) => !model.providerConflict) && (
+            <p role="status" className="mt-2 text-sm text-text-secondary">
+              {t('mediaPage.analysisNoAvailableModels', 'No models are available for analysis. Check your server connection and provider setup, then reopen this dialog.')}
+            </p>
+          )}
         </div>
 
         <Button onClick={() => setAdvanced(value => !value)} aria-expanded={advanced}>{t('mediaPage.advancedAnalysis', { defaultValue: 'Advanced' })}</Button>

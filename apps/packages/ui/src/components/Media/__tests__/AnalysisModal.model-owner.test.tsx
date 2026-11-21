@@ -197,6 +197,47 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
       processing: { analysis: "Chosen model answer" },
     });
   });
+  it("blocks a saved selection when the current catalog has no models", async () => {
+    mocks.getChatModels.mockResolvedValue([]);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    await screen.findByText(/check your server connection and provider setup/i);
+    expect(screen.getByRole("button", { name: "Generate Analysis" })).toBeDisabled();
+    expect(mocks.bgStream).not.toHaveBeenCalled();
+  });
+
+  it("offers recovery when the selected model becomes unavailable", async () => {
+    const failure = Object.assign(new Error("Provider rejected the request"), {
+      status: 400,
+      details: { detail: { error_code: "model_not_available" } },
+    });
+    mocks.bgStream.mockImplementation(() => (async function* () { throw failure; })());
+    mocks.bgRequest.mockRejectedValue(failure);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    const generate = screen.getByRole("button", { name: "Generate Analysis" });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith(
+      expect.stringMatching(/choose a different model/i),
+    ));
+  });
+
+  it("explains a 402 usage-limit refusal without retrying generation", async () => {
+    const failure = Object.assign(new Error("Monthly LLM token limit reached"), {
+      status: 402,
+      details: { detail: { error: "limit_exceeded", category: "llm_tokens_month" } },
+    });
+    mocks.bgStream.mockImplementation(() => (async function* () { throw failure; })());
+    mocks.bgRequest.mockRejectedValue(failure);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    const generate = screen.getByRole("button", { name: "Generate Analysis" });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith(
+      expect.stringMatching(/workspace.*monthly ai token limit.*contact support/i),
+    ));
+    expect(mocks.bgRequest).not.toHaveBeenCalled();
+  });
+
   it("keeps the explicit choice in store and storage and sends its model and provider", async () => {
     function ExistingOwner() {
       useSelectedModel();
@@ -262,7 +303,7 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
     mocks.getChatModels.mockReturnValue(pending);
     render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
     const select = screen.getByRole("combobox", { name: "Model" });
-    expect(select).toHaveAttribute("data-selected-value", selected);
+    expect(select).toHaveAttribute("data-selected-value", "");
     await act(async () => {
       resolveCatalog([
         { id: "ollama:other-model", name: "Ollama first", provider: "ollama" },
