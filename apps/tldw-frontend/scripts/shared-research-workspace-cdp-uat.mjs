@@ -2439,15 +2439,15 @@ const inspectLayout = async (page, mode) => {
 }
 
 const stabilizeInitialDesktopCapture = async (page) => {
-  const headerToggle = page.getByTestId("chat-header-sidebar-toggle")
-  await headerToggle.waitFor({ state: "visible", timeout: 30_000 })
+  const headerControl = page.getByTestId("chat-toggle-shortcuts")
+  await headerControl.waitFor({ state: "visible", timeout: 30_000 })
   const neutralSurface = page.locator('[data-testid="shared-workspace-shell"] header p').first()
   await neutralSurface.waitFor({ state: "visible", timeout: 30_000 })
   await page.evaluate(async () => {
     await document.fonts?.ready
     window.scrollTo({ behavior: "instant", left: 0, top: 0 })
 
-    const headerControl = document.querySelector('[data-testid="chat-header-sidebar-toggle"]')
+    const headerControl = document.querySelector('[data-testid="chat-toggle-shortcuts"]')
     for (
       let scrollAncestor = headerControl?.parentElement;
       scrollAncestor;
@@ -3019,7 +3019,9 @@ export const runLiveUat = async (config) => {
     await detectRuntimeOverlay(memberPage, "member", ledger)
     await memberLedger.waitForIdle("before member ledger disposal")
     memberLedger.dispose()
-    const sidebarToggle = memberPage.getByTestId("chat-header-sidebar-toggle")
+    const sidebarToggle = memberPage.getByRole("button", {
+      name: /^(Expand|Collapse) sidebar$/u,
+    })
     const memberChatBaseUrl = `${config.apiUrl}/api/v1/chats/${encodeURIComponent(recipientConversationId)}`
     const memberChatsLedger = await beginStrictLedgerAfterTransition({
       contextName: "member-chats",
