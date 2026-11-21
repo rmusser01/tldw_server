@@ -111,7 +111,8 @@ def qualified_name(tree: ast.Module, lineno: int) -> str:
                     chain.append(child.name)
                     descend(child)
                     return
-            elif getattr(child, "lineno", lineno) <= lineno <= (getattr(child, "end_lineno", None) or 0):
+            # Nodes without a position (e.g. match_case) are descended into unconditionally.
+            elif not hasattr(child, "end_lineno") or child.lineno <= lineno <= (child.end_lineno or child.lineno):
                 descend(child)
 
     descend(tree)

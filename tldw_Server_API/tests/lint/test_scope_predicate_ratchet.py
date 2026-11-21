@@ -124,11 +124,18 @@ def test_qualname_sees_defs_nested_in_compound_statements(tmp_path) -> None:
         "    if True:\n"
         "        def g():\n"
         "            if user_id:\n"
-        '                conditions.append("user_id = ?")\n',
+        '                conditions.append("user_id = ?")\n'
+        "def h(user_id, kind):\n"
+        "    match kind:\n"
+        "        case \"a\":\n"
+        "            def k():\n"
+        "                if user_id:\n"
+        '                    conditions.append("user_id = ?")\n',
     )
     assert sorted(iter_findings(tmp_path)) == [
         "pkg/q.py::C.m if user_id",
         "pkg/q.py::f.g if user_id",
+        "pkg/q.py::h.k if user_id",
     ]
 
 
