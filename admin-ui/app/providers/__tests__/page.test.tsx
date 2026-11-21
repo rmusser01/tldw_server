@@ -253,3 +253,31 @@ describe('ProvidersPage usage enhancements', () => {
     expect(await screen.findByText(/Consider migrating to gpt-4\.1-mini\./i)).toBeInTheDocument();
   });
 });
+
+describe('ProvidersPage provider override denylist', () => {
+  it('saves denied models from the override dialog', async () => {
+    const user = userEvent.setup();
+    render(<ProvidersPage />);
+
+    await user.click(await screen.findByTitle('Manage override'));
+    await user.type(screen.getByLabelText('Denied models'), 'gpt-4o, gpt-4.1');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(apiMock.updateLLMProviderOverride).toHaveBeenCalledWith(
+        'openai',
+        expect.objectContaining({ allowed_models: [], denied_models: ['gpt-4o', 'gpt-4.1'] }),
+      );
+    });
+  });
+
+  it('shows the stored denylist in the row and the dialog', async () => {
+    apiMock.getLLMProviderOverrides.mockResolvedValue({ items: [{ provider: 'openai', denied_models: ['gpt-4o'] }] });
+    const user = userEvent.setup();
+    render(<ProvidersPage />);
+
+    expect(await screen.findByText('1 models denied')).toBeInTheDocument();
+    await user.click(screen.getByTitle('Manage override'));
+    expect((screen.getByLabelText('Denied models') as HTMLInputElement).value).toBe('gpt-4o');
+  });
+});
