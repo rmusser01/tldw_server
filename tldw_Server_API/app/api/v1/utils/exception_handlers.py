@@ -26,7 +26,7 @@ from loguru import logger
 from starlette.requests import ClientDisconnect
 
 from tldw_Server_API.app.core.exceptions import ChatConfigurationError
-from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_REFUSAL_STATUS
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_REFUSAL_STATUS, PROVIDER_STREAM_ERROR_MESSAGES
 
 
 def _get_request_id(request: Request) -> str:
@@ -120,7 +120,7 @@ async def admin_refusal_exception_handler(request: Request, exc: ChatConfigurati
     return JSONResponse(
         status_code=ADMIN_REFUSAL_STATUS[code],
         headers={"X-Request-ID": request_id},
-        content={"error": {"code": code, "message": exc.message, "request_id": request_id}},
+        content={"error": {"code": code, "message": PROVIDER_STREAM_ERROR_MESSAGES[code], "request_id": request_id}},
     )
 
 

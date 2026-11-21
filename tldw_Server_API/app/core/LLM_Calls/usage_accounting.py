@@ -362,11 +362,12 @@ async def _accounted_async_stream(
         _record_stream(provider, plan, request, seen, started)
 
 
-def _refuse_admin_disabled(provider: Any, request: Any) -> None:
+def refuse_admin_disabled(provider: Any, request: Any) -> None:
     """Refuse a provider or model the admin provider override disables, on any key (TASK-15581).
 
     Every adapter call passes here, from the gateway or a direct caller, so the owner's rule holds on every path.
     A key test (provider key validation, the admin provider test, the setup check) runs exempt and is not refused.
+    The gateway also calls it before model discovery (TASK-15582).
     """
     if current_llm_call_context().exempt:
         return
@@ -395,7 +396,7 @@ def _wrap_chat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def chat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _refuse_admin_disabled(self, request)
+        refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         if user_id is not None:
@@ -420,7 +421,7 @@ def _wrap_achat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     async def achat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _refuse_admin_disabled(self, request)
+        refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         if user_id is not None:
@@ -449,7 +450,7 @@ def _wrap_stream(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def stream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _refuse_admin_disabled(self, request)
+        refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         unchecked = user_id is not None and not check_user_sync(user_id)
@@ -475,7 +476,7 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def astream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _refuse_admin_disabled(self, request)
+        refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         plan = _plan_call(source)

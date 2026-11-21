@@ -2616,7 +2616,7 @@ _STANDALONE_WORKERS = (
 )
 # (module, click group, a command that makes LLM calls, one that makes none)
 _EVALUATION_CLIS = (
-    ("tldw_Server_API.cli.evals_cli", "main", "eval", "config"),
+    ("tldw_Server_API.cli.evals_cli", "main", "eval geval", "list-benchmarks"),
     ("tldw_Server_API.app.core.Evaluations.cli.evals_cli", "cli", "run", "list-benchmarks"),
     ("tldw_Server_API.app.core.Evaluations.cli.evals_cli_enhanced", "cli", "test-api", "list-benchmarks"),
 )
@@ -2675,10 +2675,10 @@ def test_each_evaluation_cli_loads_the_store_for_its_llm_commands(
     group = getattr(importlib.import_module(module_name), group_name)
     _unloaded_store_over_an_empty_database(monkeypatch)
 
-    other = CliRunner().invoke(group, [other_command, "--help"], obj={})
+    other = CliRunner().invoke(group, [other_command], obj={})
     with pytest.raises(ByokResolutionError, match="credential_store_unavailable"):
         capture_provider_override_call_snapshot("openai")
-    CliRunner().invoke(group, [llm_command], obj={})  # it may then fail its own parse; the store loads first
+    CliRunner().invoke(group, [*llm_command.split()], obj={})  # it may then fail its own parse; the store loads first
     assert other.exit_code == 0
     assert capture_provider_override_call_snapshot("openai").provider == "openai"
 
@@ -2693,10 +2693,10 @@ def test_an_evaluation_cli_skips_the_store_for_help_and_completion(
     group = getattr(importlib.import_module(module_name), group_name)
     _unloaded_store_over_an_empty_database(monkeypatch)
 
-    help_text = CliRunner().invoke(group, [llm_command, "--help"], obj={})
-    completion_ctx = group.make_context("cli", [llm_command], resilient_parsing=True)
+    help_text = CliRunner().invoke(group, [*llm_command.split(), "--help"], obj={})
+    completion_ctx = group.make_context("cli", llm_command.split(), resilient_parsing=True)
     with completion_ctx:
-        group.resolve_command(completion_ctx, [llm_command])
+        group.resolve_command(completion_ctx, llm_command.split())
     assert help_text.exit_code == 0
     with pytest.raises(ByokResolutionError, match="credential_store_unavailable"):
         capture_provider_override_call_snapshot("openai")
@@ -2717,7 +2717,7 @@ def test_an_evaluation_cli_that_cannot_load_the_store_says_why(
 
     group = getattr(importlib.import_module(module_name), group_name)
     monkeypatch.setattr(store, "refresh_llm_provider_overrides", _unreadable)
-    result = CliRunner().invoke(group, [llm_command], obj={})
+    result = CliRunner().invoke(group, [*llm_command.split()], obj={})
 
     assert result.exit_code == 1
     assert "DATABASE_URL" in result.output and "AuthNZ" in result.output
@@ -2800,3 +2800,26 @@ def test_an_authnz_pool_reset_keeps_every_admin_disable(monkeypatch):
     override = get_llm_provider_override("openai")
     assert override is not None and override.is_enabled is False
     assert reloads == [True]  # the next read after the reset reloads from the new pool
+
+
+@pytest.mark.parametrize(
+    ("module_name", "group_name", "llm_group"),
+    [
+        ("tldw_Server_API.cli.evals_cli", "main", "eval"),
+        ("tldw_Server_API.app.core.Evaluations.cli.evals_cli_enhanced", "cli", "recipes"),
+    ],
+    ids=["tldw-evals", "evals_cli_enhanced"],
+)
+def test_an_llm_group_given_no_subcommand_prints_help_without_the_store(monkeypatch, module_name, group_name, llm_group):
+    """TASK-15582 (minor 4 of #3537's final review): an LLM group given no subcommand only prints its help (click's
+    no_args_is_help, exit 2), so, like --help, it never touches the AuthNZ database."""
+    from click.testing import CliRunner
+
+    group = getattr(importlib.import_module(module_name), group_name)
+    _unloaded_store_over_an_empty_database(monkeypatch)
+
+    result = CliRunner().invoke(group, [llm_group], obj={})
+
+    assert (result.exit_code, "Usage:" in result.output) == (2, True)
+    with pytest.raises(ByokResolutionError, match="credential_store_unavailable"):
+        capture_provider_override_call_snapshot("openai")
