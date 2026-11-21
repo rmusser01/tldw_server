@@ -8,6 +8,9 @@ Everything is created inside a uniquely named schema that is dropped afterwards,
 and the unprivileged role is per-run and dropped too, so nothing outside this
 test is touched even when CHAT_RLS_DB_URL points at a reused database.
 
+The server comes from the shared Postgres plugin (``pg_temp_db``), so it runs
+wherever the other Postgres tests do. CHAT_RLS_DB_URL is an optional override:
+
     docker run -d --rm -e POSTGRES_PASSWORD=pw -p 55436:5432 postgres:18-bookworm
     CHAT_RLS_DB_URL=postgresql://postgres:pw@127.0.0.1:55436/postgres
 """
@@ -50,7 +53,7 @@ class _Fixture:
         self.schema = schema
         self.role = role
 
-    def connect_as(self, tenant: str) -> "psycopg.Connection":
+    def connect_as(self, tenant: str) -> psycopg.Connection:
         """Open a connection as the unprivileged role with a tenant bound."""
         conn = psycopg.connect(self.dsn, autocommit=True)
         with conn.cursor() as cur:
