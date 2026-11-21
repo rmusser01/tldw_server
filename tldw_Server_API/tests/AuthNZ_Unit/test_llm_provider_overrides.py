@@ -2823,3 +2823,107 @@ def test_an_llm_group_given_no_subcommand_prints_help_without_the_store(monkeypa
     assert (result.exit_code, "Usage:" in result.output) == (2, True)
     with pytest.raises(ByokResolutionError, match="credential_store_unavailable"):
         capture_provider_override_call_snapshot("openai")
+
+
+def test_a_denied_model_is_refused_on_every_key_and_wins_over_the_allowlist() -> None:
+    """TASK-15582 (owner, 2026-11-21): denied_models is the explicit model disallow, refused on every key; a model off
+    allowed_models is refused only where the allowlist applies. A model on both lists is denied."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import ProviderOverrideCallSnapshot
+
+    snapshot = ProviderOverrideCallSnapshot(
+        "openai",
+        LLMProviderOverride(provider="openai", allowed_models=["gpt-4o", "gpt-4o-mini"], denied_models=["gpt-4o"]),
+    )
+    codes = {
+        (model, allowlist): (snapshot.policy_error(model, allowlist=allowlist) or {}).get("error_code")
+        for model in ("gpt-4o", "gpt-4o-mini", "o3")
+        for allowlist in (True, False)
+    }
+    assert codes == {
+        ("gpt-4o", True): "model_denied", ("gpt-4o", False): "model_denied",
+        ("gpt-4o-mini", True): None, ("gpt-4o-mini", False): None,
+        ("o3", True): "model_not_allowed", ("o3", False): None,
+    }
+
+
+def test_the_module_checks_read_the_store_and_take_the_key() -> None:
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import enforce_provider_override
+
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", allowed_models=["gpt-4o-mini"], denied_models=["gpt-4o"])}
+    )
+    enforce_provider_override("openai", "o3", allowlist=False)
+    with pytest.raises(ByokResolutionError) as refused:
+        enforce_provider_override("openai", "gpt-4o", allowlist=False)
+    assert (
+        validate_provider_override("openai", "o3")["error_code"],
+        validate_provider_override("openai", "o3", allowlist=False),
+        refused.value.policy_code,
+    ) == ("model_not_allowed", None, "model_denied")
+
+
+def test_a_denied_model_is_denied_whatever_its_case_or_anthropic_spelling() -> None:
+    """TASK-15582 (Review Focus 1): a denial errs wide, so another case of a denied ID, or the dotted and dashed
+    spellings of one Claude model, is denied too. The allowlist stays exact."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import ProviderOverrideCallSnapshot
+
+    openai = ProviderOverrideCallSnapshot("openai", LLMProviderOverride(provider="openai", denied_models=["gpt-4o"]))
+    anthropic = ProviderOverrideCallSnapshot(
+        "anthropic", LLMProviderOverride(provider="anthropic", denied_models=["claude-sonnet-4.5"])
+    )
+    cases = ((openai, "GPT-4o"), (openai, "gpt-4o"), (anthropic, "claude-sonnet-4-5"),
+             (anthropic, "Claude-Sonnet-4.5"), (openai, "gpt-4o-mini"))
+    codes = [(snapshot.policy_error(model, allowlist=False) or {}).get("error_code") for snapshot, model in cases]
+    assert codes == ["model_denied", "model_denied", "model_denied", "model_denied", None]
+
+
+def test_with_only_a_denylist_a_call_that_names_no_model_runs() -> None:
+    """TASK-15582 (Review Focus 4): with no model there is nothing to deny, and require_model holds a model-less call
+    to the allowlist only where the allowlist applies."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import ProviderOverrideCallSnapshot
+
+    denying = ProviderOverrideCallSnapshot("openai", LLMProviderOverride(provider="openai", denied_models=["gpt-4o"]))
+    allowing = ProviderOverrideCallSnapshot(
+        "openai", LLMProviderOverride(provider="openai", allowed_models=["gpt-4o-mini"])
+    )
+    denying.enforce(None, require_model=True)
+    allowing.enforce(None, require_model=True, allowlist=False)
+    with pytest.raises(ByokResolutionError) as refused:
+        allowing.enforce(None, require_model=True)
+    assert refused.value.policy_code == "model_not_allowed"
+
+
+def test_a_stored_denylist_that_does_not_parse_fails_its_row() -> None:
+    """TASK-15582 (Review Focus 5): like allowed_models, a corrupt denied_models fails its row, so the store fails
+    closed instead of dropping the denial; entries are trimmed and blanks dropped."""
+    module = importlib.import_module("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides")
+
+    parsed = module._parse_override_row({"provider": "openai", "denied_models": '[" gpt-4o ", ""]'})
+    for raw in ('{"gpt-4o": true}', "[not json", '[["nested"]]'):
+        with pytest.raises(ValueError, match="denied_models"):
+            module._parse_override_row({"provider": "openai", "denied_models": raw})
+    assert parsed.denied_models == ["gpt-4o"]
+
+
+def test_the_server_key_listing_hides_denied_models() -> None:
+    """TASK-15582 (R8): a model refused on every key is not offered, and a denied default falls back."""
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", denied_models=["GPT-4o"])}
+    )
+    entry = apply_llm_provider_overrides_to_listing(
+        {
+            "providers": [
+                {
+                    "name": "openai",
+                    "models": ["gpt-4o", "gpt-4o-mini"],
+                    "models_info": [{"name": "gpt-4o"}, {"name": "gpt-4o-mini"}],
+                    "default_model": "gpt-4o",
+                }
+            ]
+        }
+    )["providers"][0]
+    assert (entry["models"], [m["name"] for m in entry["models_info"]], entry["default_model"]) == (
+        ["gpt-4o-mini"],
+        ["gpt-4o-mini"],
+        "gpt-4o-mini",
+    )

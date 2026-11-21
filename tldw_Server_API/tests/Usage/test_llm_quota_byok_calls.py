@@ -595,9 +595,10 @@ async def test_a_call_that_names_no_model_is_checked_for_provider_disabled_only(
     [
         ({"is_enabled": False}, True, 403, "provider_disabled"),
         ({"allowed_models": ["x"]}, True, 403, "model_not_allowed"),
+        ({"denied_models": ["m1"]}, True, 403, "model_denied"),
         ({}, False, 503, "credential_store_unavailable"),
     ],
-    ids=["provider-disabled", "model-not-allowed", "store-unavailable"],
+    ids=["provider-disabled", "model-not-allowed", "model-denied", "store-unavailable"],
 )
 def test_an_endpoint_that_maps_nothing_answers_with_the_refusals_own_status(override_kwargs, healthy, status, code):
     """TASK-15581 (M7, P1): an endpoint with no mapping of its own reaches the app's ChatConfigurationError handler,
