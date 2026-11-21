@@ -119,13 +119,16 @@ def test_sync_deadline_bounds_dns_before_transport(
 def test_sync_deadline_bounds_retry_sleep_without_late_dispatch(monkeypatch, failure):
     calls = []
     clients = []
+    sleeps = []
+    started = time.monotonic()
+    deadline = started + CUT_BOUND_SECONDS
 
     def handler(request):
         calls.append(request)
         if failure == "network":
             raise httpx.ReadError("synthetic-secret must not escape", request=request)
         status = 429 if failure == "retry_after" else 302
-        return httpx.Response(status, headers={"Retry-After": str(UNCUT_SECONDS)}, content=b"synthetic-secret")
+        return httpx.Response(status, headers={"Retry-After": str(deadline - started)}, content=b"synthetic-secret")
 
     create_async_client = hc.create_async_client
 
@@ -135,14 +138,16 @@ def test_sync_deadline_bounds_retry_sleep_without_late_dispatch(monkeypatch, fai
         return client
 
     monkeypatch.setattr(hc, "create_async_client", owned_client)
-    monkeypatch.setattr(hc, "_decorrelated_jitter_sleep", lambda *_args: UNCUT_SECONDS)
-    started = time.monotonic()
+    jitter = 0.01 if failure == "retry_after" else UNCUT_SECONDS
+    monkeypatch.setattr(hc, "_decorrelated_jitter_sleep", lambda *_args: jitter)
+    # Simulate a monotonic clock that still reports the previous tick after sleeping.
+    monkeypatch.setattr(hc, "time", types.SimpleNamespace(time=time.time, monotonic=lambda: started, sleep=sleeps.append))
     with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
         hc.fetch(
-            method="GET", url=URL, max_response_bytes=4, deadline=started + 0.15,
+            method="GET", url=URL, max_response_bytes=4, deadline=deadline,
             sensitive_observability=True,
         )
-    assert time.monotonic() - started < CUT_BOUND_SECONDS
+    assert sleeps == [pytest.approx(CUT_BOUND_SECONDS)]
     assert len(calls) == 1
     assert clients and all(client.is_closed for client in clients)
 
