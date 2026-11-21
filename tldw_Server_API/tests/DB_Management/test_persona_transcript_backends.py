@@ -155,10 +155,19 @@ def test_turn_bound_keeps_latest_exact_turns(transcript_db, monkeypatch):
     assert db.persona_transcript_store.get_persona_transcript(session, user_id="1")["turns"] == turns[-2:]  # nosec B101
 
 
-def test_evicted_runtime_is_not_recreated_by_late_publication():
+def test_evicted_runtime_is_not_recreated_by_late_publication(monkeypatch):
+    created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return created_at
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.datetime", FixedDateTime)
     manager = SessionManager(max_sessions_per_user=1)
     first = manager.create("1", "persona")
-    manager.create("1", "persona")
+    second = manager.create("1", "persona")
+    assert manager.get(second.session_id) is second  # nosec B101 -- Admission must keep the new runtime.
     assert not manager.publish_transcript(
         user_id="1",
         snapshot={  # nosec B101
