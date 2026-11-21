@@ -183,22 +183,16 @@ class SessionManager:
         for plan_id in drop_ids:
             session.pending_plans.pop(plan_id, None)
 
-    def _enforce_user_session_cap_locked(self, user_id: str) -> None:
+    def _make_room_for_user_session_locked(self, user_id: str) -> None:
         user_sessions = [
-            session
-            for session in self._sessions.values()
+            (session_id, session)
+            for session_id, session in self._sessions.items()
             if session.user_id == user_id
         ]
-        if len(user_sessions) <= self._max_sessions_per_user:
+        if len(user_sessions) < self._max_sessions_per_user:
             return
-        user_sessions.sort(key=lambda s: s.updated_at, reverse=True)
-        keep_ids = {session.session_id for session in user_sessions[: self._max_sessions_per_user]}
-        drop_ids = [
-            session.session_id
-            for session in user_sessions[self._max_sessions_per_user :]
-            if session.session_id not in keep_ids
-        ]
-        for session_id in drop_ids:
+        user_sessions.sort(key=lambda item: item[1].updated_at, reverse=True)
+        for session_id, _ in user_sessions[self._max_sessions_per_user - 1 :]:
             self._sessions.pop(session_id, None)
 
     def create(
@@ -223,9 +217,9 @@ class SessionManager:
                 preferences={"use_memory_context": True},
                 persisted=persisted,
             )
+            self._make_room_for_user_session_locked(user_id)
             self._sessions[sid] = sess
-            self._enforce_user_session_cap_locked(user_id)
-            return self._sessions[sid]
+            return sess
 
     def get(self, session_id: str) -> Session | None:
         with self._lock:

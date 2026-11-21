@@ -1,5 +1,6 @@
 """Behavioral coverage for noncreating Media DB sessions."""
 
+import os
 import sqlite3
 from configparser import ConfigParser
 from contextlib import closing
@@ -273,7 +274,14 @@ def test_existing_only_malformed_database_fails_eagerly_without_schema_repairs(t
     assert pools[-1].get_stats()["closed"]
 
 
-@pytest.mark.parametrize("filename", ["spaces in name.db", "query?and#fragment.db"])
+@pytest.mark.parametrize("filename", [
+    "spaces in name.db",
+    "percent%and#fragment.db",
+    pytest.param(
+        "query?and#fragment.db",
+        marks=pytest.mark.skipif(os.name == "nt", reason="Windows filenames cannot contain '?'"),
+    ),
+])
 def test_existing_only_sqlite_uri_escapes_filename(tmp_path, filename):
     path = tmp_path / filename
     path.touch()
@@ -287,14 +295,15 @@ def test_existing_only_queries_cannot_recreate_a_deleted_database(tmp_path, meth
     path = tmp_path / "media.db"
     path.touch()
     with managed_media_database("42", db_path=str(path), existing_only=True) as db:
+        # Release the open handle so deleting the file forces the next query to reopen it.
+        db.backend.get_pool().clear_thread_local_connection()
         path.unlink()
-        try:
+        with pytest.raises(sqlite3.OperationalError) as caught:
             if method == "execute_query":
                 db.execute_query("SELECT 1")
             else:
                 db.execute_many("CREATE TABLE forbidden (value TEXT)", [()])
-        except (sqlite3.Error, media_db_api.DatabaseError):
-            pass
+        assert (caught.value.sqlite_errorcode & 0xFF) == sqlite3.SQLITE_CANTOPEN
         assert not path.exists()
 
 

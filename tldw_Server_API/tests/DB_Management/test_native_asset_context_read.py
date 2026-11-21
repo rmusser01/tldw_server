@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas import native_fork_schemas as schemas
-from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import owner
+from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import owner, requires_posix_blob_storage
 from tldw_Server_API.tests.DB_Management.test_native_chat_asset_read import committed
 
 pytest_plugins = ("tldw_Server_API.tests.DB_Management.test_native_chat_asset_io",)
@@ -49,6 +49,7 @@ async def reference_case(db, tmp_path, monkeypatch):
     return adapter, cid, claim, payload
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_ordered_shared_reference_context_preserves_original_revision_and_no_writes(
     native_fork_db,
@@ -75,6 +76,7 @@ async def test_ordered_shared_reference_context_preserves_original_revision_and_
     assert schemas.NativeAssetContextV1.model_validate_json(context.model_dump_json()) == context
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "fault",
@@ -216,6 +218,7 @@ def test_context_requires_actual_owned_transaction(native_fork_db):
         native_fork_db.native_assets.read_native_asset_context(owner(), "missing", conn=native_fork_db.get_connection())
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_workspace_context_denies_after_actual_closure_without_mutation(native_fork_db, tmp_path, monkeypatch):
     db = native_fork_db
@@ -301,6 +304,7 @@ def test_context_model_preserves_shared_bytes_with_distinct_roles():
     assert schemas.NativeAssetContextV1.model_validate_json(context.model_dump_json()) == context
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_actual_restore_preserves_shared_context_metadata_and_burned_key(native_fork_db, tmp_path, monkeypatch):
     """Restoration qualifies metadata, not the separately narrower byte reader."""

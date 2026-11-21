@@ -42,12 +42,14 @@ def _runtime_env(tmp_path, database_url, *, backend=None, mode="single_user"):
 
 
 def _run_runtime(tmp_path, env, script):
+    # Send the fixture through stdin to stay within Windows' command-line limit.
     result = subprocess.run(
-        [sys.executable, "-c", script],
+        [sys.executable, "-X", "utf8", "-"],
+        input=script,
         cwd=tmp_path,
         env=env,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         timeout=120,
         check=False,
     )

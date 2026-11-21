@@ -716,3 +716,32 @@ def test_required_auth_teardown_rejects_missing_execution(tmp_path, report, pyte
         capture_output=True, text=True, timeout=10, check=False,
     )
     assert run.returncode == expected, run.stderr  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("mode", "event", "head_repository", "conclusion", "wakes"),
+    [
+        ("on", "pull_request", "owner/repo", "failure", True),
+        ("on", "pull_request", "owner/repo", "cancelled", True),
+        ("on", "pull_request", "owner/repo", "success", False),
+        ("off", "pull_request", "owner/repo", "failure", False),
+        ("on", "push", "owner/repo", "failure", False),
+        ("on", "pull_request", "fork/repo", "failure", False),
+    ],
+)
+def test_server_ci_wake_only_handles_this_repository_pr_failures(mode, event, head_repository, conclusion, wakes):
+    name = "server-ci-queue-wake.yml"
+    assert _triggers(name) == {"workflow_run": {"workflows": ["CI"], "types": ["completed"]}}
+    workflow = _wf(name)
+    assert workflow["permissions"] == {"actions": "write"}
+    job = workflow["jobs"]["wake"]
+    assert _evaluate(job["if"], {
+        "vars.MERGE_QUEUE": mode,
+        "github.event.workflow_run.event": event,
+        "github.event.workflow_run.head_repository.full_name": head_repository,
+        "github.repository": "owner/repo",
+        "github.event.workflow_run.conclusion": conclusion,
+    }) is wakes
+    assert len(job["steps"]) == 1
+    assert "rules/branches/dev" in job["steps"][0]["run"]
+    assert '== "Server CI verdict"' in job["steps"][0]["run"]

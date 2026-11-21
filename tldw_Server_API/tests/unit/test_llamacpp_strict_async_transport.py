@@ -74,10 +74,11 @@ async def upstream(status=200, hold=False, answer=None):
         yield f"http://127.0.0.1:{port}/v1", received, closed, payloads
     finally:
         server.close()
-        await server.wait_closed()
         for task in tuple(handlers):
             task.cancel()
         await asyncio.gather(*handlers, return_exceptions=True)
+        await server.wait_closed()
+        await asyncio.sleep(0)  # Drain the cancelled Windows listener accept.
 
 
 def request_for(url):
@@ -142,9 +143,10 @@ async def test_strict_deadline_retires_socket_without_a_retry(monkeypatch):
     async with upstream(hold=True) as (url, received, closed, payloads):
         bind_endpoint(monkeypatch, url)
         request = request_for(url)
-        request["call_policy"] = replace(request["call_policy"], maximum_timeout_seconds=0.15)
+        request["call_policy"] = replace(request["call_policy"], maximum_timeout_seconds=1.0)
         with pytest.raises(ChatProviderError):
-            await asyncio.wait_for(LlamaCppAdapter().achat(request), 2)
+            await asyncio.wait_for(LlamaCppAdapter().achat(request), 3)
+        assert received.is_set()  # nosec B101 -- The policy deadline must retire an open inference socket.
         await asyncio.wait_for(closed.wait(), 2)
         assert len(payloads) == 1  # nosec B101 -- Pytest checks classification, authority or resource retirement.
 
@@ -345,6 +347,7 @@ async def test_raw_route_disconnect_retires_runtime_operation_monitor_and_real_s
         org_ids=[],
         team_ids=[],
     )
+    before = set(asyncio.all_tasks())
     async with upstream(hold=True) as (url, received, closed, payloads):
         config = {"llama_api": {"api_ip": url}}
         monkeypatch.setattr(moderation, "load_server_config_snapshot", lambda: config)
@@ -416,7 +419,6 @@ async def test_raw_route_disconnect_retires_runtime_operation_monitor_and_real_s
             "server": ("test", 80),
             "client": ("127.0.0.1", 1),
         }
-        before = set(asyncio.all_tasks())
         task = asyncio.create_task(app(scope, messages.get, send))
         try:
             if not disconnect_before_inference:
@@ -431,8 +433,8 @@ async def test_raw_route_disconnect_retires_runtime_operation_monitor_and_real_s
                 review.list_items()["items"],
             ) == ([499], 0 if disconnect_before_inference else 1, [])
             assert len(runtimes) == 1 and runtimes[0]._closed  # nosec B101 -- Pytest checks classification, authority or resource retirement.
-            assert not [t for t in set(asyncio.all_tasks()) - before if not t.done()]  # nosec B101 -- Pytest checks classification, authority or resource retirement.
         finally:
             if not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+    assert not [t for t in set(asyncio.all_tasks()) - before if not t.done()]  # nosec B101 -- Pytest checks classification, authority or resource retirement.

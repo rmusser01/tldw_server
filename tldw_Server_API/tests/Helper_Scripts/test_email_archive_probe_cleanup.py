@@ -1,6 +1,7 @@
 """The disposable archive probe cleanup must reject unrelated resource names."""
 
 import json
+import os
 import runpy
 from pathlib import Path
 from secrets import token_urlsafe
@@ -86,7 +87,8 @@ async def test_setup_and_cleanup_use_matching_configured_port(monkeypatch, tmp_p
     path = tmp_path / "manifest.json"
     created = json.loads(path.read_text())
     assert created["port"] == 5435
-    assert path.stat().st_mode & 0o077 == 0
+    if os.name == "posix":
+        assert path.stat().st_mode & 0o077 == 0
     await provisioner["cleanup"]()
     assert not path.exists()
     assert statements[-3:] == [

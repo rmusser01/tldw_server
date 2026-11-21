@@ -8,7 +8,7 @@ import pytest
 
 from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeAssetContextUpdateV1
 from tldw_Server_API.tests.DB_Management.test_native_asset_context_read import read, reference_case
-from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import owner
+from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import owner, requires_posix_blob_storage
 
 pytest_plugins = ("tldw_Server_API.tests.DB_Management.test_native_chat_asset_io",)
 pytestmark = pytest.mark.integration
@@ -45,6 +45,7 @@ def update(db, cid, request, *, authorized=None):
         return db.native_assets.update_native_asset_context(authorized or owner(), cid, request, conn=conn)
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_removal_changes_only_selected_reference_and_atomic_context_fences(native_fork_db, tmp_path, monkeypatch):
     db = native_fork_db
@@ -72,6 +73,7 @@ async def test_removal_changes_only_selected_reference_and_atomic_context_fences
         assert handle.read() == payload
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "fault",
@@ -120,6 +122,7 @@ async def test_invalid_reviewed_removal_writes_nothing(native_fork_db, tmp_path,
     assert snapshot(db) == before
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_lost_result_reloads_original_owner_context_without_replaying_stale_request(
     native_fork_db, tmp_path, monkeypatch
@@ -138,6 +141,7 @@ async def test_lost_result_reloads_original_owner_context_without_replaying_stal
     assert snapshot(db) == before
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 @pytest.mark.parametrize("boundary", ["reference", "bundle", "history"])
 async def test_failed_mutation_tail_rolls_back_even_when_caller_catches_error(
@@ -179,6 +183,7 @@ async def test_failed_mutation_tail_rolls_back_even_when_caller_catches_error(
     assert after == before
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_caller_rollback_reverts_successful_local_removal(native_fork_db, tmp_path, monkeypatch):
     db = native_fork_db
@@ -206,6 +211,7 @@ def test_removal_requires_original_active_transaction(native_fork_db):
         )
 
 
+@requires_posix_blob_storage
 @pytest.mark.asyncio
 async def test_removal_after_actual_restore_preserves_gone_creation_key(native_fork_db, tmp_path, monkeypatch):
     db = native_fork_db

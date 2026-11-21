@@ -213,7 +213,8 @@ def test_production_flag_keys_also_accept_truthy_values(
     neutral_env.setenv(key, value)
 
     assert runtime_environment().is_production is True
-    assert runtime_environment().source_key == key
+    # Windows treats both spellings as one environment variable.
+    assert runtime_environment({key: value}).source_key == key
 
 
 def test_runtime_environment_sees_env_changes_without_a_cache_reset(neutral_env: pytest.MonkeyPatch) -> None:

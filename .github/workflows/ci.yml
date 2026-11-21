@@ -1,18 +1,21 @@
 name: CI
 
+run-name: ${{ inputs.nightly && 'Server nightly regression' || github.event.pull_request.title || github.ref_name }}
+
 on:
-  # Run on direct pushes to protected branches only
-  push:
-    branches:
-      - main
-  # Run CI for PRs targeting these branches
   pull_request:
-    branches:
-      - main
-      - dev
+    branches: [dev, main]
   workflow_dispatch:
-  release:
-    types: [published]
+    inputs:
+      nightly:
+        description: Run only the broad Linux regression suite on dev
+        type: boolean
+        default: false
+  workflow_call:
+    outputs:
+      qualified:
+        description: Full qualification succeeded on the caller's event SHA
+        value: ${{ jobs.release-qualified.outputs.qualified }}
 
 permissions:
   contents: read
@@ -22,7 +25,7 @@ env:
 
 concurrency:
   # Ensure newer PR commits cancel older queued runs for the same PR.
-  group: ci-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
+  group: ci-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}${{ inputs.nightly && '-nightly' || '' }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
@@ -75,7 +78,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -109,7 +112,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -178,7 +181,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -216,7 +219,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -250,7 +253,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Python
@@ -302,7 +305,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Node.js
@@ -386,7 +389,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
@@ -475,6 +478,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
+      tier: ${{ steps.tier.outputs.tier }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -507,6 +511,74 @@ jobs:
           git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
           mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
+      - name: Choose server CI tier
+        id: tier
+        shell: bash
+        env:
+          DEV_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev' }}
+          NIGHTLY: ${{ github.event_name == 'workflow_dispatch' && inputs.nightly }}
+          BACKEND_CHANGED: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
+        run: |
+          set -euo pipefail
+          if [[ "$NIGHTLY" == true ]]; then
+            if [[ "$GITHUB_REF" != refs/heads/dev ]]; then
+              echo 'Nightly regression must run on dev.' >&2
+              exit 1
+            fi
+            tier=nightly
+          elif [[ "$DEV_PR" == true || "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            case "$BACKEND_CHANGED" in
+              true) tier=light ;;
+              false) tier=unchanged ;;
+              *)
+                echo 'Backend change detection did not report a result.' >&2
+                exit 1
+                ;;
+            esac
+          else
+            tier=release
+          fi
+          echo "tier=$tier" >> "$GITHUB_OUTPUT"
+          echo "Server CI tier: $tier"
+
+  light-backend:
+    name: Server backend smoke
+    needs: [admission, lint, syntax-check, changes]
+    if: >-
+      always() && !cancelled() &&
+      needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
+      needs.changes.result == 'success' && needs.changes.outputs.tier == 'light'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      TLDW_TEST_NO_DOCKER: '1'
+      TEST_MODE: 'true'
+      DISABLE_HEAVY_STARTUP: '1'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
+      - uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.12'
+          use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
+          extras: dev
+      - name: Test chunking and health contracts
+        run: |
+          python -m pytest -q -p pytest_asyncio.plugin -p pytest_timeout --timeout=90 \
+            tldw_Server_API/tests/Chunking/test_chunker_v2.py::TestWordsStrategy \
+            tldw_Server_API/tests/Chunking/test_chunker_v2.py::TestParagraphsStrategy \
+            tldw_Server_API/tests/Chunking/test_chunking_regressions.py \
+            tldw_Server_API/tests/Health/test_readiness_health_sanitizers.py
+
   full-suite-linux-312-shards:
     name: Full Suite shard (Ubuntu / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: ubuntu-24.04
@@ -519,8 +591,7 @@ jobs:
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       needs.changes.result == 'success' &&
-      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') ||
-       needs.changes.outputs.backend_changed == 'true')
+      (needs.changes.outputs.tier == 'nightly' || needs.changes.outputs.tier == 'release')
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -1961,7 +2032,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           # Only the docs shard needs complete history for strict revision dates.
           fetch-depth: ${{ contains(matrix.shard.paths, 'tldw_Server_API/tests/Docs') && '0' || '1' }}
@@ -2253,9 +2324,7 @@ jobs:
         )
       ) &&
       (
-        (github.event_name != 'pull_request' &&
-         github.event_name != 'workflow_run') ||
-        needs.changes.outputs.backend_changed == 'true'
+        needs.changes.outputs.tier == 'nightly' || needs.changes.outputs.tier == 'release'
       )
     steps:
       - name: Check Python 3.12 shard result
@@ -2269,7 +2338,7 @@ jobs:
           echo "Python 3.12 full-suite shards passed."
 
   full-suite-linux-313-shards:
-    # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
+    # Additional platforms run only for full release qualification.
     name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -2281,7 +2350,7 @@ jobs:
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       needs.changes.result == 'success' &&
-      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
+      needs.changes.outputs.tier == 'release'
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -3710,7 +3779,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           # Only the docs shard needs complete history for strict revision dates.
           fetch-depth: ${{ contains(matrix.shard.paths, 'tldw_Server_API/tests/Docs') && '0' || '1' }}
@@ -3945,7 +4014,7 @@ jobs:
           )
         )
       ) &&
-      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
+      (needs.changes.outputs.tier == 'release')
     steps:
       - name: Check Python 3.13 shard result
         shell: bash
@@ -3959,7 +4028,7 @@ jobs:
 
 
   full-suite-macos-312-shards:
-    # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
+    # Additional platforms run only for full release qualification.
     name: Full Suite shard (macos-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: macos-latest
     timeout-minutes: 60
@@ -3971,7 +4040,7 @@ jobs:
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       needs.changes.result == 'success' &&
-      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
+      needs.changes.outputs.tier == 'release'
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -5243,7 +5312,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg (multi-OS)
@@ -5269,8 +5338,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio
 
-      - name: Install Docker Compose CLI for monitoring render contract
-        if: matrix.shard.name == 'core-utils-tooling'
+      - &install_monitoring_compose
+        name: Install Docker Compose CLI for monitoring render contract
+        if: runner.os == 'macOS' && matrix.shard.name == 'core-utils-tooling'
         shell: bash
         run: |
           brew install docker docker-compose
@@ -5413,7 +5483,7 @@ jobs:
           )
         )
       ) &&
-      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
+      (needs.changes.outputs.tier == 'release')
     steps:
       - name: Check macos-latest Python 3.12 shard result
         shell: bash
@@ -5426,7 +5496,7 @@ jobs:
           echo "macos-latest Python 3.12 full-suite shards passed."
 
   full-suite-windows-312-shards:
-    # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
+    # Additional platforms run only for full release qualification.
     name: Full Suite shard (windows-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: windows-latest
     timeout-minutes: 60
@@ -5438,7 +5508,7 @@ jobs:
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       needs.changes.result == 'success' &&
-      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
+      needs.changes.outputs.tier == 'release'
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -6710,7 +6780,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg (multi-OS)
@@ -6875,7 +6945,7 @@ jobs:
           )
         )
       ) &&
-      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
+      (needs.changes.outputs.tier == 'release')
     steps:
       - name: Check windows-latest Python 3.12 shard result
         shell: bash
@@ -6891,11 +6961,11 @@ jobs:
     name: Release Full Suite shard (${{ matrix.os }} / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
-    needs: &release_os_needs [lint, syntax-check]
+    needs: &release_os_needs [lint, syntax-check, changes]
     if: &release_os_condition >-
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
-      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
+      needs.changes.result == 'success' && needs.changes.outputs.tier == 'release'
     strategy:
       fail-fast: false
       max-parallel: 10
@@ -8168,7 +8238,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg (multi-OS)
@@ -8193,6 +8263,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio
+
+      - *install_monitoring_compose
 
       - name: Smoke start server (single-user)
         if: matrix.shard.name == 'core-server-smoke'
@@ -8333,8 +8405,7 @@ jobs:
       always() && !cancelled() &&
       needs.full-suite-linux-312-summary.result == 'success' &&
       needs.changes.result == 'success' &&
-      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') ||
-       needs.changes.outputs.backend_changed == 'true')
+      (needs.changes.outputs.tier == 'nightly' || needs.changes.outputs.tier == 'release')
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
@@ -8344,7 +8415,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || (github.event.pull_request.base.ref == 'main' && github.sha) || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
@@ -8385,3 +8456,112 @@ jobs:
           pytest -q --disable-warnings -p pytest_asyncio.plugin -m rate_limit \
             tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py \
             -rs
+
+  server-ci-verdict:
+    name: Server CI verdict
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    needs:
+      - await_license
+      - changes
+      - http-client-patch-guard
+      - syntax-check
+      - preflight-python-312
+      - shard-coverage
+      - quickstart-dry-run
+      - lint
+      - frontend-lint
+      - wizard-tests
+      - light-backend
+      - full-suite-linux-312-summary
+      - character-chat-rate-limits
+    steps:
+      - name: Require the selected validation to pass
+        shell: bash
+        env:
+          LICENSE: ${{ github.event_name != 'pull_request' || (needs.await_license.result == 'success' && needs.await_license.outputs.license_passed == 'true') }}
+          TIER: ${{ needs.changes.outputs.tier }}
+          CHANGES: ${{ needs.changes.result }}
+          HTTP_GUARD: ${{ needs.http-client-patch-guard.result }}
+          SYNTAX: ${{ needs.syntax-check.result }}
+          PREFLIGHT: ${{ needs.preflight-python-312.result }}
+          SHARD_COVERAGE: ${{ needs.shard-coverage.result }}
+          QUICKSTART: ${{ needs.quickstart-dry-run.result }}
+          LINT: ${{ needs.lint.result }}
+          FRONTEND_LINT: ${{ needs.frontend-lint.result }}
+          WIZARD: ${{ needs.wizard-tests.result }}
+          LIGHT: ${{ needs.light-backend.result }}
+          LINUX: ${{ needs.full-suite-linux-312-summary.result }}
+          RATE_LIMITS: ${{ needs.character-chat-rate-limits.result }}
+        run: |
+          [[ "$LICENSE" == true ]] || { echo "License admission did not pass"; exit 1; }
+          require_success() {
+            for check in "$@"; do
+              if [[ "${!check}" != success ]]; then
+                echo "$check did not pass (${!check})"
+                exit 1
+              fi
+            done
+          }
+          require_success CHANGES HTTP_GUARD SYNTAX PREFLIGHT SHARD_COVERAGE QUICKSTART LINT FRONTEND_LINT WIZARD
+          case "$TIER" in
+            light) require_success LIGHT ;;
+            nightly|release) require_success LINUX RATE_LIMITS ;;
+            unchanged) echo 'No backend regression job selected' ;;
+            *) echo "Unrecognized or missing CI tier: $TIER"; exit 1 ;;
+          esac
+
+  release-package:
+    if: >-
+      always() && !cancelled() &&
+      needs.changes.result == 'success' && needs.changes.outputs.tier == 'release'
+    needs: changes
+    uses: ./.github/workflows/pypi-package.yml
+    with:
+      qualification: true
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
+  release-qualified:
+    name: ${{ github.event.pull_request.base.ref == 'main' && 'Main PR release qualification' || 'Full release qualification' }}
+    if: >-
+      always() &&
+      (github.event_name == 'release' || github.event_name == 'push' ||
+       (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main') ||
+       (github.event_name == 'workflow_dispatch' && !inputs.nightly))
+    needs:
+      - server-ci-verdict
+      - full-suite-linux-313-summary
+      - full-suite-macos-312-summary
+      - full-suite-windows-312-summary
+      - full-suite-os-313-release-shards
+      - full-suite-windows-313-release-shards
+      - release-package
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      qualified: ${{ steps.verdict.outputs.qualified }}
+    steps:
+      - name: Require every release axis and the package check
+        id: verdict
+        shell: bash
+        env:
+          SERVER_CI: ${{ needs.server-ci-verdict.result }}
+          LINUX_313: ${{ needs.full-suite-linux-313-summary.result }}
+          MACOS_312: ${{ needs.full-suite-macos-312-summary.result }}
+          WINDOWS_312: ${{ needs.full-suite-windows-312-summary.result }}
+          MACOS_313: ${{ needs.full-suite-os-313-release-shards.result }}
+          WINDOWS_313: ${{ needs.full-suite-windows-313-release-shards.result }}
+          PACKAGE: ${{ needs.release-package.result == 'success' && needs.release-package.outputs.checked == 'true' && 'success' || 'missing' }}
+        run: |
+          for check in SERVER_CI LINUX_313 MACOS_312 WINDOWS_312 MACOS_313 WINDOWS_313 PACKAGE; do
+            if [[ "${!check}" != success ]]; then
+              echo "$check did not pass (${!check})"
+              exit 1
+            fi
+          done
+          echo 'qualified=true' >> "$GITHUB_OUTPUT"

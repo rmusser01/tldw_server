@@ -12,11 +12,11 @@ from datetime import datetime, timezone
 import pytest
 
 from tldw_Server_API.app.core.Chat.native_fork_projection import AuthorizedNativeOwner
-from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import _expire, owner
+from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import _expire, owner, requires_posix_blob_storage
 from tldw_Server_API.tests.DB_Management.test_native_chat_asset_preparation import case, prepare, row
 
 pytest_plugins = ("tldw_Server_API.tests.DB_Management.test_native_chat_asset_io",)
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, requires_posix_blob_storage]
 
 
 def child(db, *, operation="fork-one"):

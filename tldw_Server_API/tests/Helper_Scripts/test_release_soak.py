@@ -139,7 +139,7 @@ async def test_http_run_measures_workloads_and_rejects_incomplete_evidence(fault
             body = {
                 "artifact_sha256": "a" * 64,
                 "source_revision": "b" * 40,
-                "sampled_at": time.time(),
+                "sampled_at": int(time.time() * 10) / 10 + samples * 0.001,
                 "queue_depth": 0,
                 "db_pool_in_use": 1,
                 "storage_bytes": 200,
@@ -175,7 +175,7 @@ async def test_http_run_measures_workloads_and_rejects_incomplete_evidence(fault
         transport=httpx.ASGITransport(app=application), base_url="http://fixture.local"
     ) as client:
         evidence = await runner.run(profile(), dataset(), client)
-    assert evidence["passed"] is expected
+    assert evidence["passed"] is expected, evidence["failures"]
     assert "NEVER_RETAIN_RESPONSE" not in json.dumps(evidence)
     if expected:
         assert all(phase["workloads"]["terminal-workflow"]["successes"] > 0 for phase in evidence["phases"])

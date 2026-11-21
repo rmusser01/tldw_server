@@ -35,7 +35,12 @@ def test_separate_configured_stores_do_not_share_user_flags(tmp_path: Path) -> N
     for name in ("alpha", "beta"):
         path = tmp_path / name / "system_ops.json"
         key = "synthetic." + name
-        env = {key: value for key, value in os.environ.items() if key in {"HOME", "USER", "PATH", "LANG", "LC_ALL"}}
+        # Windows initializes Winsock through SYSTEMROOT when asyncio is imported.
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key in {"HOME", "USER", "PATH", "LANG", "LC_ALL", "SYSTEMROOT"}
+        }
         env.update(PYTHONPATH=str(ROOT), PYTHONDONTWRITEBYTECODE="1", SYSTEM_OPS_STORE_PATH=str(path))
         child = subprocess.run(  # nosec B603 -- Fixed interpreter/script and controlled private fixture paths.
             [sys.executable, "-B", "-c", CHILD, str(path), key, str(ROOT)],

@@ -11,12 +11,12 @@ import pytest
 from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeScopeV1
 from tldw_Server_API.app.core.Chat.native_fork_projection import AuthorizedNativeOwner
 from tldw_Server_API.app.core.Sync.v2.blob_store import SyncBlobStoreError
-from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import owner
+from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import owner, requires_posix_blob_storage
 from tldw_Server_API.tests.DB_Management.test_native_chat_asset_preparation import row
 from tldw_Server_API.tests.DB_Management.test_native_chat_asset_read import committed, read
 
 pytest_plugins = ("tldw_Server_API.tests.DB_Management.test_native_chat_asset_io",)
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, requires_posix_blob_storage]
 
 
 def records(db):

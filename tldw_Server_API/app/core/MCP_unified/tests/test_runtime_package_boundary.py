@@ -1267,7 +1267,9 @@ def test_root_pypi_package_workflow_is_tldw_server_only() -> None:
     assert not any("apps/mcp-unified" in run_block for run_block in run_blocks)  # nosec B101
     assert not any("mcp_unified[dev]" in run_block for run_block in run_blocks)  # nosec B101
     assert not any("mcp_unified/" in run_block for run_block in run_blocks)  # nosec B101
-    assert "tldw-server-pypi-dist" in upload_names  # nosec B101
+    assert upload_names == [  # nosec B101
+        "${{ inputs.qualification && 'tldw-server-qualified-dist' || 'tldw-server-pypi-dist' }}"
+    ]
 
 
 def test_root_pypi_publish_workflow_is_labeled_for_tldw_server() -> None:
@@ -1279,7 +1281,15 @@ def test_root_pypi_publish_workflow_is_labeled_for_tldw_server() -> None:
 
     assert workflow["name"] == "Publish tldw-server PyPI Package"  # nosec B101
     assert "mcp-unified" not in serialized_workflow  # nosec B101
-    assert "tldw-server-pypi-dist" in serialized_workflow  # nosec B101
+    for job_id in ("publish-testpypi", "publish-pypi"):
+        job = workflow["jobs"][job_id]
+        download_names = [
+            step["with"]["name"]
+            for step in job["steps"]
+            if step.get("uses", "").startswith("actions/download-artifact@")
+        ]
+        assert "qualify" in job["needs"]  # nosec B101
+        assert download_names == ["tldw-server-qualified-dist"]  # nosec B101
 
 
 def test_mcp_unified_publish_workflow_uses_trusted_publishing_for_pypi() -> None:

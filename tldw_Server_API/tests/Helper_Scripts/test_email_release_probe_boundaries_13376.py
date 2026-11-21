@@ -193,7 +193,12 @@ def test_sqlite_guard_overrides_inherited_postgres_target_before_application_imp
     }
 
 
-@pytest.mark.parametrize("unsafe", ["unrelated", "public", "symlink"])
+REQUIRES_PRIVATE_MANIFEST = pytest.mark.skipif(os.name != "posix", reason="Requires POSIX file modes")
+
+
+@pytest.mark.parametrize(
+    "unsafe", [pytest.param("unrelated", marks=REQUIRES_PRIVATE_MANIFEST), "public", "symlink"],
+)
 def test_postgres_guard_rejects_unsafe_manifest_before_creating_root(tmp_path, unsafe):
     manifest = tmp_path / "private.json"
     data = {
@@ -214,6 +219,7 @@ def test_postgres_guard_rejects_unsafe_manifest_before_creating_root(tmp_path, u
     assert observed["roots_created"] == 0
 
 
+@REQUIRES_PRIVATE_MANIFEST
 def test_postgres_guard_accepts_private_generated_target_before_application_imports(tmp_path):
     manifest = tmp_path / "private.json"
     manifest.write_text(json.dumps({
@@ -229,6 +235,7 @@ def test_postgres_guard_accepts_private_generated_target_before_application_impo
     }
 
 
+@REQUIRES_PRIVATE_MANIFEST
 @pytest.mark.parametrize("configured,port,accepted", [
     ("5435", 5435, True), (None, 5435, False), ("5435", 5434, False),
     ("1", True, False), ("65535", 65535, True), ("1", 1, True),

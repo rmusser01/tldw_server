@@ -4660,13 +4660,12 @@ def _fetch_httpx_response(
         response_limit_kwargs.update(deadline=deadline, proxies=proxies)
 
     def _retry_sleep(delay: float) -> None:
-        if deadline is not None:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise NetworkError("TimeoutError")
-            delay = min(delay, remaining)
-        time.sleep(delay)
-        if deadline is not None and time.monotonic() >= deadline:
+        remaining = math.inf if deadline is None else deadline - time.monotonic()
+        if remaining <= 0:
+            raise NetworkError("TimeoutError")
+        time.sleep(min(delay, remaining))
+        # A coarse clock can lag after a sleep that used the whole remaining budget.
+        if deadline is not None and (delay >= remaining or time.monotonic() >= deadline):
             raise NetworkError("TimeoutError")
 
     def _do_once(sc: httpx.Client, target_url: str) -> tuple[httpx.Response | None, str]:

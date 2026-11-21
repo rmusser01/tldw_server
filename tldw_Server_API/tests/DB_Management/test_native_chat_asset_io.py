@@ -24,6 +24,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 pytestmark = pytest.mark.integration
+requires_posix_blob_storage = pytest.mark.skipif(
+    os.name != "posix", reason="Secure blob storage requires POSIX descriptor-relative file operations"
+)
 PAYLOAD = b"native retained bytes"
 NAMESPACE = "a" * 32
 
@@ -180,6 +183,7 @@ def test_candidate_paths_cannot_be_reserved_by_another_operation(native_fork_db:
         )
 
 
+@requires_posix_blob_storage
 def test_verified_publication_leaves_mime_admission_reserved(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -193,6 +197,7 @@ def test_verified_publication_leaves_mime_admission_reserved(
     assert _candidate(db)["storage_key"] is None
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("reservation", ["missing", "pending", "wrong_owner", "wrong_size", "release_started"])
 def test_unconfirmed_or_mismatched_quota_refuses_payload_bytes(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reservation: str
@@ -242,6 +247,7 @@ def test_outer_transaction_refuses_before_filesystem_side_effects(
     assert not (tmp_path / "chat_assets").exists()
 
 
+@requires_posix_blob_storage
 def test_reclamation_removes_unacknowledged_final_and_all_crash_residue(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -279,6 +285,7 @@ def test_reclamation_removes_unacknowledged_final_and_all_crash_residue(
     assert io.reclaim(owner(), "native_fork_v1", "fork-one", "sha256:one", "candidate-one") is False
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("payload_state", ["wrong_hash", "wrong_size"])
 def test_existing_final_content_is_verified_before_publication(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload_state: str
@@ -300,22 +307,35 @@ def test_existing_final_content_is_verified_before_publication(
     assert _candidate(db)["state"] == "reserved"
 
 
-def test_missing_native_link_capability_refuses_payload_io(
-    native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("action", ["chunk", "publish", "reclaim"])
+def test_missing_native_storage_capabilities_refuse_payload_io(
+    native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str
 ) -> None:
     from tldw_Server_API.app.core.Sync.v2.blob_store import SyncBlobStoreError
 
     db = native_fork_db
     generation = _reserve(db)
     io = _io(db, tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        os, "supports_dir_fd", {function for function in os.supports_dir_fd if function.__name__ != "link"}
-    )
+    if os.name == "posix":
+        monkeypatch.setattr(
+            os, "supports_dir_fd", {function for function in os.supports_dir_fd if function.__name__ != "link"}
+        )
+    if action == "reclaim":
+        _expire(db)
     with pytest.raises(SyncBlobStoreError, match="unavailable|unsupported"):
-        _chunk(io, generation)
+        if action == "chunk":
+            _chunk(io, generation)
+        elif action == "publish":
+            _publish(io, generation)
+        else:
+            io.reclaim(owner(), "native_fork_v1", "fork-one", "sha256:one", "candidate-one")
     assert not (tmp_path / "chat_assets").exists()
+    assert _candidate(db)["state"] == ("reclaiming" if action == "reclaim" else "reserved")
+    with db.transaction() as conn:
+        assert conn.execute("SELECT 1 FROM native_chat_quota_intents WHERE intent_kind = 'release'").fetchone() is None
 
 
+@requires_posix_blob_storage
 def test_root_change_before_removal_ack_keeps_quota_unreleased(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -345,6 +365,7 @@ def test_root_change_before_removal_ack_keeps_quota_unreleased(
     assert _candidate(db)["state"] == "reclaiming"
 
 
+@requires_posix_blob_storage
 def test_zero_byte_candidate_refuses_publication_but_can_be_reclaimed(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -360,6 +381,7 @@ def test_zero_byte_candidate_refuses_publication_but_can_be_reclaimed(
     assert io.reclaim(owner(), "native_fork_v1", "fork-one", "sha256:one", "candidate-one") is True
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("stage", ["chunk", "final"])
 def test_reclamation_drains_publisher_and_refuses_waiting_stale_writer(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
@@ -442,6 +464,7 @@ def test_reclamation_drains_publisher_and_refuses_waiting_stale_writer(
     assert not (root / "_uploads" / "upload-one").exists()
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("index,payload", [(True, PAYLOAD), (-1, PAYLOAD), (1, PAYLOAD), (0, b"short")])
 def test_chunk_layout_never_exceeds_reserved_bytes(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, index: Any, payload: bytes
@@ -455,6 +478,7 @@ def test_chunk_layout_never_exceeds_reserved_bytes(
     assert not (tmp_path / "chat_assets" / "_uploads").exists()
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("indexes", [[True], [-1], [1], [0, 0], []])
 def test_final_layout_is_exact_before_any_blob_directory(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, indexes: list[int]
@@ -469,6 +493,7 @@ def test_final_layout_is_exact_before_any_blob_directory(
     assert not (tmp_path / "chat_assets" / "blobs").exists()
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("state", ["prepared", "adopted", "reclaiming", "discarded"])
 def test_nonreserved_candidates_refuse_writes(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str
@@ -523,6 +548,7 @@ def test_concurrent_operations_cannot_share_candidate_paths(native_fork_db: Char
     assert sorted(results) == ["candidate_storage_identity_conflict", "reserved"]
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("path", ["chat_assets", "_uploads", "namespace", "guard"])
 def test_symlinked_roots_and_candidate_paths_fail_without_touching_external_files(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
@@ -558,6 +584,7 @@ def test_symlinked_roots_and_candidate_paths_fail_without_touching_external_file
     assert sorted(p.name for p in external.iterdir()) == ["keep"]
 
 
+@requires_posix_blob_storage
 def test_removal_failure_never_records_release_and_retries_exactly(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -585,6 +612,7 @@ def test_removal_failure_never_records_release_and_retries_exactly(
     assert io.reclaim(owner(), "native_fork_v1", "fork-one", "sha256:one", "candidate-one") is True
 
 
+@requires_posix_blob_storage
 def test_reclaim_descriptor_changed_while_waiting_cannot_ack_removal(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -648,6 +676,7 @@ def _child_physical_publisher(
         channel.close()
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("stage,outcome", [("chunk", "drain"), ("final", "drain"), ("chunk", "die"), ("final", "die")])
 def test_cross_process_publication_drain_and_death_preserve_the_quota_fence(
     native_fork_db: CharactersRAGDB,
@@ -749,6 +778,7 @@ def test_native_storage_cannot_select_another_users_root(
     assert resolved == []
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("stage", ["chunk", "final", "reclaim"])
 def test_named_user_directory_replacement_refuses_ack_and_quota_release(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
@@ -801,6 +831,7 @@ def test_named_user_directory_replacement_refuses_ack_and_quota_release(
         assert conn.execute("SELECT 1 FROM native_chat_quota_intents WHERE intent_kind = 'release'").fetchone() is None
 
 
+@requires_posix_blob_storage
 @pytest.mark.parametrize("upload", ["UPLOAD-ONE", "üpload-one", "upload.one"])
 def test_noncanonical_upload_token_cannot_touch_another_candidates_bytes(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upload: str
@@ -833,6 +864,7 @@ def test_noncanonical_upload_token_cannot_touch_another_candidates_bytes(
     assert _candidate(db)["state"] == "reserved"
 
 
+@requires_posix_blob_storage
 def test_writer_admission_rechecks_lease_after_candidate_lock(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -855,6 +887,7 @@ def test_writer_admission_rechecks_lease_after_candidate_lock(
     assert not (tmp_path / "chat_assets" / "_uploads").exists()
 
 
+@requires_posix_blob_storage
 def test_postgres_operation_lock_wait_rejects_lease_expired_during_admission(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -911,7 +944,15 @@ def test_native_storage_refuses_noncanonical_tenant_even_with_matching_db_owner(
         db.close_connection()
 
 
-@pytest.mark.parametrize("stage", ["before", "chunk", "final", "reclaim"])
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "before",
+        pytest.param("chunk", marks=requires_posix_blob_storage),
+        pytest.param("final", marks=requires_posix_blob_storage),
+        pytest.param("reclaim", marks=requires_posix_blob_storage),
+    ],
+)
 def test_native_storage_keeps_captured_owner_after_client_reassignment(
     native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
@@ -972,6 +1013,7 @@ def test_native_storage_keeps_captured_owner_after_client_reassignment(
         assert conn.execute("SELECT 1 FROM native_chat_quota_intents WHERE intent_kind = 'release'").fetchone() is None
 
 
+@requires_posix_blob_storage
 def test_retention_lease_renews_only_after_actual_empty_candidate_cleanup(native_fork_db, tmp_path, monkeypatch):
     """Reserved candidate has no bytes/charge; actual guarded cleanup still must settle it."""
     from tldw_Server_API.tests.DB_Management.test_native_retention_receipts import KIND, OPERATION, payload, request
