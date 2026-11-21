@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
@@ -8,7 +9,10 @@ import pytest
 
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest, StudyPackSourceSelection
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
-
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.StudyPacks.chapter_browser import browse_deck_cards
+from tldw_Server_API.app.core.StudyPacks.jobs import extract_study_pack_source_items
+from tldw_Server_API.app.core.StudyPacks.media_sections import plan_media_sections
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
@@ -180,15 +184,51 @@ async def test_generate_validated_cards_repairs_malformed_output_exactly_once(
         [
             '```json\n{"cards":[{"front":"What is TCP slow start?","back":"It doubles the congestion window each RTT.","citations":[{"source_type":"note","source_id":"note-1","citation_text":"Slow start doubles the congestion window each RTT."}]}\n```',
             _valid_generation_payload(),
+            '{"supported":[true]}',
         ],
     )
 
     result = await service.generate_validated_cards(bundle, study_pack_request)
 
-    assert len(calls) == 2  # nosec B101
+    assert len(calls) == 3  # nosec B101
     assert result.cards[0].front  # nosec B101
     assert result.cards[0].back  # nosec B101
     assert result.cards[0].citations[0].source_id in {"note-1", "42", "msg-1"}  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected_max_tokens"),
+    [("deepseek", "deepseek-flash", 4_000), ("openai", "gpt-test", 4_000), ("huggingface", "hf-test", 2_048)],
+)
+async def test_generation_repair_and_verification_send_the_model_output_cap(
+    db: CharactersRAGDB,
+    bundle: Any,
+    study_pack_request: StudyPackCreateJobRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    model: str,
+    expected_max_tokens: int,
+):
+    _, service_mod = _load_generation_modules()
+    service = service_mod.StudyPackGenerationService(
+        note_db=db,
+        media_db=SimpleNamespace(),
+        provider=provider,
+        model=model,
+    )
+    responses = iter(("invalid JSON", _valid_generation_payload(), '{"supported":[true]}'))
+    calls = []
+
+    async def fake_chat_call(**kwargs):
+        calls.append((kwargs["api_provider"], kwargs["model"], kwargs["max_tokens"]))
+        return {"choices": [{"message": {"content": next(responses)}}]}
+
+    monkeypatch.setattr(service_mod, "perform_chat_api_call_async", fake_chat_call)
+
+    result = await service.generate_validated_cards(bundle, study_pack_request)
+
+    assert result.repair_attempted  # nosec B101
+    assert calls == [(provider, model, expected_max_tokens)] * 3  # nosec B101
 
 
 async def test_generate_validated_cards_repairs_validation_failures_exactly_once(
@@ -203,14 +243,37 @@ async def test_generate_validated_cards_repairs_validation_failures_exactly_once
         [
             '{"cards":[{"front":"What is TCP slow start?","back":"It doubles the congestion window each RTT.","citations":[]}]}',
             _valid_generation_payload(),
+            '{"supported":[true]}',
         ],
     )
 
     result = await service.generate_validated_cards(bundle, study_pack_request)
 
-    assert len(calls) == 2  # nosec B101
+    assert len(calls) == 3  # nosec B101
     assert result.repair_attempted is True  # nosec B101
     assert result.cards[0].citations[0].source_id == "note-1"  # nosec B101
+
+
+@pytest.mark.parametrize("verdict", ['{"supported":[false]}', '{"supported":[]}', '{"supported":[1]}'])
+async def test_generate_validated_cards_rejects_an_unverified_answer(
+    db: CharactersRAGDB,
+    bundle: Any,
+    study_pack_request: StudyPackCreateJobRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    verdict: str,
+):
+    _, service_mod = _load_generation_modules()
+    contradictory = _valid_generation_payload().replace(
+        "It doubles the congestion window each RTT.", "It halves the congestion window each RTT.",
+    )
+    service, calls = _build_service(db, monkeypatch, [contradictory, verdict] * 2)
+
+    with pytest.raises(service_mod.StudyPackCitationError):
+        await service.generate_validated_cards(bundle, study_pack_request)
+    assert len(calls) == 4  # nosec B101
+    verification_request = json.loads(calls[1]["user_prompt"])
+    assert verification_request[0]["back"] == "It halves the congestion window each RTT."  # nosec B101
+    assert verification_request[0]["quotes"] == ["Slow start doubles the congestion window each RTT."]  # nosec B101
 
 
 def test_validate_citation_payload_preserves_bundle_locator_over_conflicting_model_locator(
@@ -535,3 +598,178 @@ async def test_create_study_pack_from_request_passes_expected_version_when_super
 
     assert captured["pack_id"] == original_pack_id  # nosec B101
     assert captured["expected_version"] == 1  # nosec B101
+
+
+@pytest.mark.parametrize("selection_mode", [
+    "all", "last", "stale", "empty", "empty_without_revision", "nonstudy_section",
+    "bad_repair", "budget", "output_limit", "output_limit_native", "output_limit_budget", "citation_repair", "bad_citation",
+])
+async def test_whole_media_pack_generates_cited_cards_through_the_end(
+    db: CharactersRAGDB,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    selection_mode: str,
+):
+    _, service_mod = _load_generation_modules()
+    media = MediaDatabase(db_path=str(tmp_path / "book.db"), client_id="study-pack-book")
+    first_chapter = "Chapter 1: Seedlings need light."
+    final_chapter = "Chapter 2: Seed banks preserve biodiversity."
+    book = "\n".join([first_chapter, "Plants respond to their environment. " * 450, final_chapter])
+    media_id, _, _ = media.add_media_with_keywords(
+        title="A study guide to plants",
+        content=book,
+        media_type="ebook",
+        keywords=[],
+    )
+    service = service_mod.StudyPackGenerationService(note_db=db, media_db=media, provider="openai", model="test")
+    (item,) = service.source_resolver.resolve([{"source_type": "media", "source_id": str(media_id)}]).items
+    revision, _ = plan_media_sections(item.evidence_text, 12_000)
+    locator = {}
+    indices = [0, 1]
+    if selection_mode in {"last", "stale", "empty", "empty_without_revision"}:
+        indices = [] if selection_mode.startswith("empty") else [1]
+        locator = {
+            "section_indices": [99] if selection_mode == "stale" else indices,
+            "section_revision": "stale" if selection_mode == "stale" else revision,
+        }
+    if selection_mode == "empty_without_revision":
+        locator.pop("section_revision")
+    request = StudyPackCreateJobRequest(
+        title="Plant study guide",
+        workspace_id="ws-1",
+        source_items=[StudyPackSourceSelection(source_type="media", source_id=str(media_id), locator=locator)],
+    )
+    passages: list[str] = []
+
+    repair_prompts = []
+    capped_passages = []
+
+    async def generate(**kwargs):
+        user_prompt = kwargs["messages"][0]["content"]
+        system_prompt = kwargs["system_message"]
+        if system_prompt.startswith("Verify each flashcard"):
+            return {"content": json.dumps({"supported": [True] * len(json.loads(user_prompt))})}
+        is_repair = system_prompt.startswith("You repair")
+        bundle_json = user_prompt.split("Allowed source bundle:\n", 1)[1].split("\n\n", 1)[0]
+        excerpt = json.loads(bundle_json)["items"][0]["evidence_text"]
+        is_capped = selection_mode.startswith("output_limit") and len(excerpt) > 6_100
+        if is_capped:
+            capped_passages.append(excerpt)
+        elif is_repair:
+            repair_prompts.append((system_prompt, user_prompt))
+        else:
+            passages.append(excerpt)
+        citation = excerpt.splitlines()[0][:96].strip()
+        citation_text = citation
+        if final_chapter in excerpt and (
+            selection_mode == "bad_citation" or (selection_mode == "citation_repair" and not is_repair)
+        ):
+            citation_text = first_chapter
+        content = json.dumps({"cards": [{
+            "front": f"What is the focus of section {len(passages)}?",
+            "back": citation,
+            "citations": [{
+                "source_type": "media",
+                "source_id": str(media_id),
+                "citation_text": citation_text,
+                "locator": {"chunk_index": 99, "timestamp_seconds": 120},
+            }],
+        }]})
+        if selection_mode == "bad_repair" and final_chapter in excerpt:
+            content = '{"cards":[]}' if is_repair else "malformed response"
+        if selection_mode == "nonstudy_section" and final_chapter not in excerpt:
+            content = '{"cards":[]}'
+        cap_reason = "MAX_TOKENS" if selection_mode == "output_limit_native" else "length"
+        return {"choices": [{"finish_reason": cap_reason if is_capped else "stop", "message": {"content": content}}]}
+
+    monkeypatch.setattr(service_mod, "perform_chat_api_call_async", generate)
+    if selection_mode == "budget":
+        monkeypatch.setattr(service_mod, "MAX_STUDY_PACK_PASSES", 1)
+    if selection_mode == "output_limit_budget":
+        monkeypatch.setattr(service_mod, "MAX_STUDY_PACK_PASSES", 3)
+    try:
+        if selection_mode == "stale" or selection_mode.startswith("empty"):
+            match = "Review its sections" if selection_mode == "stale" else "Select at least one"
+            with pytest.raises(ValueError, match=match):
+                await service.create_from_request(request)
+            assert passages == []  # nosec B101
+            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
+            return
+        if selection_mode == "budget":
+            with pytest.raises(ValueError, match="too many generation passes"):
+                await service.create_from_request(request)
+            assert not passages  # nosec B101
+            return
+        if selection_mode == "output_limit_budget":
+            with pytest.raises(ValueError, match="too many generation passes"):
+                await service.create_from_request(request)
+            assert len(capped_passages) == 1  # nosec B101
+            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
+            return
+        if selection_mode == "bad_citation":
+            with pytest.raises(ValueError, match="citation_text must match source evidence"):
+                await service.create_from_request(request)
+            assert len(passages) == 3 and len(repair_prompts) == 1  # nosec B101
+            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
+            assert db.get_study_pack(1) is None  # nosec B101
+            return
+        if selection_mode == "bad_repair":
+            with pytest.raises(ValueError, match="repair returned no cards"):
+                await service.create_from_request(request)
+            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
+            return
+        result = await service.create_from_request(request)
+    finally:
+        media.close_connection()
+
+    expected_text = final_chapter if selection_mode == "last" else book
+    assert "".join("".join(passage.split()) for passage in passages) == "".join(expected_text.split())  # nosec B101
+    assert max(map(len, passages)) <= 12_000  # nosec B101
+    citation = db.list_flashcard_citations(result.card_uuids[-1])[0]
+    assert citation["citation_text"] == final_chapter  # nosec B101
+    saved_locator = json.loads(citation["locator"])
+    assert saved_locator["study_pack_chapter"] == {  # nosec B101
+        "section_index": 1,
+        "section_revision": revision,
+        "title": final_chapter,
+        "source_title": "A study guide to plants",
+    }
+    assert "chunk_index" not in saved_locator and "timestamp_seconds" not in saved_locator  # nosec B101
+
+    if selection_mode == "citation_repair":
+        (system_prompt, user_prompt), = repair_prompts
+        assert "citation_text must match source evidence" in user_prompt  # nosec B101
+        assert "verbatim" in system_prompt  # nosec B101
+
+    if selection_mode in {"all", "output_limit", "output_limit_native"}:
+        first_chapter_cards = 2
+        if selection_mode.startswith("output_limit"):
+            assert len(capped_passages) == 1 and not repair_prompts  # nosec B101
+            assert max(map(len, passages)) <= 6_100  # nosec B101
+            first_chapter_cards = 3
+            for uuid, passage in zip(result.card_uuids, passages, strict=True):
+                locator = json.loads(db.list_flashcard_citations(uuid)[0]["locator"])
+                assert item.evidence_text[locator["start_char"]:locator["end_char"]] == passage  # nosec B101
+        assert len(passages) == first_chapter_cards + 1  # nosec B101
+        first_set_id = f"{media_id}:0:{revision}"
+        all_cards = browse_deck_cards(db, result.deck_id, chapter_id=None, limit=20, offset=0)
+        assert all_cards["all_cards_count"] == all_cards["total"] == len(passages)  # nosec B101
+        assert [(chapter["title"], chapter["card_count"]) for chapter in all_cards["chapters"]] == [  # nosec B101
+            (first_chapter, first_chapter_cards),
+            (final_chapter, 1),
+        ]
+        assert [card["uuid"] for card in all_cards["items"]] == result.card_uuids  # nosec B101
+        first_set = browse_deck_cards(db, result.deck_id, chapter_id=first_set_id, limit=20, offset=0)
+        assert [card["uuid"] for card in first_set["items"]] == result.card_uuids[:first_chapter_cards]  # nosec B101
+        assert all(card["deck_id"] == result.deck_id for card in all_cards["items"])  # nosec B101
+
+    pack = db.get_study_pack(result.pack_id)
+    assert pack is not None  # nosec B101
+    snapshot = pack["source_bundle_json"]
+    if isinstance(snapshot, str):
+        snapshot = json.loads(snapshot)
+    assert len(snapshot["items"][0]["evidence_text"]) <= 12_000  # nosec B101
+    (selection,) = extract_study_pack_source_items(snapshot)
+    assert "excerpt_text" not in selection  # nosec B101
+    assert selection["locator"]["section_indices"] == indices  # nosec B101
+    assert selection["locator"]["section_revision"] == revision  # nosec B101

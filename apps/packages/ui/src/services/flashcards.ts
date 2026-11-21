@@ -150,6 +150,17 @@ export type StudyPackSourceSelection = {
   locator?: Record<string, unknown> | null
 }
 
+export type StudyPackMediaSectionsResponse = {
+  revision: string
+  max_generation_passes?: number
+  sections: Array<{
+    index: number
+    title: string
+    character_count: number
+    generation_passes?: number
+  }>
+}
+
 export type StudyPackCreateJobRequest = {
   title: string
   workspace_id?: string | null
@@ -492,6 +503,17 @@ export type FlashcardListResponse = {
   items: Flashcard[]
   count: number
   total?: number | null
+}
+
+export type StudyPackDeckCardsResponse = FlashcardListResponse & {
+  chapters: Array<{
+    id: string
+    title: string
+    source_id: string
+    source_title?: string | null
+    card_count: number
+  }>
+  all_cards_count: number
 }
 
 export type FlashcardReviewRequest = {
@@ -1177,6 +1199,28 @@ export async function createStudyPackJob(
     headers: { "Content-Type": "application/json" },
     body: sanitizeStudyPackRequest(request),
     abortSignal: options?.signal
+  })
+}
+
+export async function getStudyPackMediaSections(
+  mediaId: string,
+  options?: { signal?: AbortSignal }
+): Promise<StudyPackMediaSectionsResponse> {
+  return await bgRequest<StudyPackMediaSectionsResponse, AllowedPath, "GET">({
+    path: `/api/v1/flashcards/study-packs/media/${encodeURIComponent(mediaId)}/sections`,
+    method: "GET",
+    abortSignal: options?.signal
+  })
+}
+
+export async function getStudyPackDeckCards(
+  deckId: number,
+  { chapter_id, limit, offset, signal }: { chapter_id?: string; limit: number; offset: number; signal?: AbortSignal }
+): Promise<StudyPackDeckCardsResponse> {
+  return await bgRequest<StudyPackDeckCardsResponse, AllowedPath, "GET">({
+    path: `/api/v1/flashcards/study-packs/decks/${deckId}/cards${buildQuery({ chapter_id, limit, offset })}`,
+    method: "GET",
+    abortSignal: signal
   })
 }
 

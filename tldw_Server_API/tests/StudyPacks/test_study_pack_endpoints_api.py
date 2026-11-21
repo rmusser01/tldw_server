@@ -8,12 +8,16 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoints
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.StudyPacks.source_resolver import StudySourceResolver
 
 pytestmark = pytest.mark.integration
 
@@ -167,6 +171,60 @@ def test_get_study_pack_detail_returns_persisted_pack(
     assert body["title"] == "Routing Basics"  # nosec B101
 
 
+def test_browse_study_pack_deck_cards_pages_live_chapter_sets(client: TestClient, db: CharactersRAGDB):
+    _, deck_id = _seed_pack(db)
+    original_revision = "a" * 64
+    edited_revision = "b" * 64
+    chapter_cards = []
+    for front, chapter_title, revision in (
+        ("First card", "Chapter 1", original_revision),
+        ("Second card", "Chapter 1", original_revision),
+        ("Deleted card", "Chapter 1", original_revision),
+        ("Intro card", "Introduction", edited_revision),
+    ):
+        uuid = db.add_flashcard({"deck_id": deck_id, "front": front, "back": "Answer"})
+        chapter_cards.append(uuid)
+        db.add_flashcard_citations(uuid, [{
+            "source_type": "media",
+            "source_id": "7",
+            "locator": {"study_pack_chapter": {
+                "section_index": 0,
+                "section_revision": revision,
+                "title": chapter_title,
+                "source_title": "Book",
+            }},
+        }])
+    db.soft_delete_flashcard(chapter_cards[2], expected_version=1)
+    other_device = CharactersRAGDB(db.db_path, client_id="another-device")
+    try:
+        other_device.update_flashcard(chapter_cards[0], {"front": "First card edited"})
+    finally:
+        other_device.close_connection()
+    db.add_flashcard({"deck_id": deck_id, "front": "Uncategorized card", "back": "Answer"})
+    db.add_flashcard({"deck_id": db.add_deck("Other deck"), "front": "Other card", "back": "Answer"})
+
+    path = f"/api/v1/flashcards/study-packs/decks/{deck_id}/cards"
+    response = client.get(path)
+    assert response.status_code == 200  # nosec B101
+    body = response.json()
+    assert body["all_cards_count"] == body["total"] == 4  # nosec B101
+    assert [card["front"] for card in body["items"]] == [  # nosec B101
+        "First card edited", "Second card", "Intro card", "Uncategorized card",
+    ]
+    first_chapter_id = f"7:0:{original_revision}"
+    assert [(c["id"], c["title"], c["card_count"]) for c in body["chapters"]] == [  # nosec B101
+        (first_chapter_id, "Chapter 1", 2),
+        (f"7:0:{edited_revision}", "Introduction", 1),
+    ]
+
+    response = client.get(path, params={"chapter_id": first_chapter_id, "limit": 1, "offset": 1})
+    assert response.status_code == 200  # nosec B101
+    body = response.json()
+    assert (body["count"], body["total"], body["all_cards_count"]) == (1, 2, 4)  # nosec B101
+    assert [card["front"] for card in body["items"]] == ["Second card"]  # nosec B101
+    assert client.get("/api/v1/flashcards/study-packs/decks/9999/cards").status_code == 404  # nosec B101
+
+
 def test_regenerate_study_pack_job_uses_stored_source_bundle(
     client: TestClient,
     db: CharactersRAGDB,
@@ -227,9 +285,18 @@ def test_regenerate_study_pack_returns_400_when_job_payload_is_too_large(
     assert "too large" in response.json()["detail"]  # nosec B101
 
 
+@pytest.mark.parametrize(
+    ("error_code", "expected"),
+    [
+        (None, "Study pack generation failed."),
+        ("study_pack_sections_changed", "The saved source changed. Review its sections again before creating a Study Pack."),
+    ],
+)
 def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(
     client: TestClient,
     jobs_db_path: Path,
+    error_code: str | None,
+    expected: str,
 ):
     jm = _jobs_manager(jobs_db_path)
     job = jm.create_job(
@@ -249,6 +316,7 @@ def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(
     jm.fail_job(
         int(job["id"]),
         error="llm exploded",
+        error_code=error_code,
         retryable=False,
         worker_id="study-pack-test",
         lease_id=str(acquired["lease_id"]),
@@ -259,12 +327,19 @@ def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(
     assert response.status_code == 200  # nosec B101
     body = response.json()
     assert body["job"]["status"] == "failed"  # nosec B101
-    assert body["error"] == "Study pack generation failed."  # nosec B101
+    assert body["error"] == expected  # nosec B101
     assert body["study_pack"] is None  # nosec B101
 
 
 @pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
 @pytest.mark.parametrize("lookup", ["detail", "list"])
+@pytest.mark.parametrize(("error_code", "public_error"), [
+    ("worker_exception", "Study pack generation failed."),
+    (
+        "study_pack_invalid_citations",
+        "The generated cards could not be verified against their sources. No Study Pack was saved.",
+    ),
+])
 def test_quarantined_study_pack_job_is_a_public_terminal_failure(
     client: TestClient,
     jobs_db_path: Path,
@@ -272,6 +347,8 @@ def test_quarantined_study_pack_job_is_a_public_terminal_failure(
     monkeypatch: pytest.MonkeyPatch,
     backend: str,
     lookup: str,
+    error_code: str,
+    public_error: str,
 ):
     """A real quarantined job must stop polling without exposing diagnostics."""
     monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", "1")
@@ -289,7 +366,7 @@ def test_quarantined_study_pack_job_is_a_public_terminal_failure(
     assert jm.fail_job(
         int(job["id"]), error="private backend diagnostic", retryable=True,
         worker_id="study-pack-test", lease_id=str(acquired["lease_id"]),
-        error_code="worker_exception",
+        error_code=error_code,
     )
     assert jm.get_job(int(job["id"]))["status"] == "quarantined"
 
@@ -301,7 +378,7 @@ def test_quarantined_study_pack_job_is_a_public_terminal_failure(
     assert public_job["status"] == "failed"
     assert "private backend diagnostic" not in response.text
     if lookup == "detail":
-        assert body["error"] == "Study pack generation failed."
+        assert body["error"] == public_error
         assert body["study_pack"] is None
     else:
         assert body["total"] == 1
@@ -372,3 +449,40 @@ def test_admin_job_status_reads_completed_pack_from_owner_database(
         app.dependency_overrides.clear()
         admin_db.close_connection()
         owner_db.close_connection()
+
+
+def test_preview_saved_media_sections_returns_titles_without_book_text(client: TestClient, tmp_path, monkeypatch):
+    monkeypatch.setenv("STUDY_PACK_MAX_EVIDENCE_CHARS_PER_SOURCE", "80")
+    media_db = MediaDatabase(db_path=str(tmp_path / "preview.db"), client_id="study-pack-preview")
+    title = "Study guide"
+    book = "# Introduction\nIntroductory material.\nChapter 1: Seedlings\n" + "Seeds germinate with water. " * 8
+    media_id, _, _ = media_db.add_media_with_keywords(title=title, content=book, media_type="ebook", keywords=[])
+    app = client.app
+    assert isinstance(app, FastAPI)  # nosec B101
+
+    async def media_db_with_request_scope():
+        with scoped_context(user_id=1, org_ids=[4], team_ids=[7], is_admin=True, session_role="media_reader"):
+            yield media_db
+
+    original_resolve = StudySourceResolver.resolve
+
+    def resolve_in_worker_equivalent_scope(resolver, selections):
+        scope = get_scope()
+        assert scope is not None and scope.user_id == 1  # nosec B101
+        assert not scope.org_ids and not scope.team_ids and not scope.is_admin  # nosec B101
+        assert scope.session_role == "media_reader"  # nosec B101
+        return original_resolve(resolver, selections)
+
+    app.dependency_overrides[get_media_db_for_user] = media_db_with_request_scope
+    monkeypatch.setattr(StudySourceResolver, "resolve", resolve_in_worker_equivalent_scope)
+    try:
+        response = client.get(f"/api/v1/flashcards/study-packs/media/{media_id}/sections")
+    finally:
+        media_db.close_connection()
+
+    assert response.status_code == 200  # nosec B101
+    preview = response.json()
+    assert [section["title"] for section in preview["sections"]] == ["Introduction", "Chapter 1: Seedlings"]  # nosec B101
+    assert all(section["character_count"] > 0 for section in preview["sections"])  # nosec B101
+    assert "Seeds germinate with water" not in response.text  # nosec B101
+    assert len(preview["revision"]) == 64  # nosec B101
