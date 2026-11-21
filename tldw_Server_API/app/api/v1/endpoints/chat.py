@@ -57,6 +57,7 @@ from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     LegacyProjectionConfirmEnvelopeV1,
 )
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     capture_provider_override_call_snapshot,
@@ -1144,7 +1145,7 @@ def _provider_credential_http_exception_for_code(code: str, message: str | None 
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error_code": code, "message": message or _PROVIDER_CREDENTIAL_MESSAGES[code]},
         )
-    if code in {"provider_disabled", "model_not_allowed"}:
+    if code in ADMIN_POLICY_CODES:
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={

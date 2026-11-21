@@ -69,7 +69,7 @@ class ProviderOverridePolicyError(ByokResolutionError):
     """Typed, sanitized provider-policy denial at the credential boundary."""
 
     def __init__(self, policy_code: str, provider: str) -> None:
-        if policy_code not in {"provider_disabled", "model_not_allowed"}:
+        if policy_code not in {"provider_disabled", "model_not_allowed", "model_denied"}:
             raise ValueError("Unsupported provider override policy error code")
         self.policy_code = policy_code
         super().__init__("invalid_provider_credentials", provider)

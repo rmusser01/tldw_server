@@ -172,7 +172,7 @@ def _bound_execution_target_findings(
 
     Severity: an unusable pinned provider (not configured on this server),
     an admin-disabled provider, or a model outside the admin override's
-    ``allowed_models`` are ERRORS; a model merely absent from the resolved
+    ``allowed_models`` or on its ``denied_models`` are ERRORS; a model merely absent from the resolved
     provider's known list is a WARNING (model lists drift and passthrough
     providers accept new names -- the run may still succeed).
 
@@ -245,7 +245,7 @@ def _bound_execution_target_findings(
             # a disabled provider to input.provider, a blocked model to
             # input.model (falling back to the provider when the model rode
             # the resolved default, since nothing was pinned there).
-            if error_code == "model_not_allowed" and model is not None:
+            if error_code in {"model_not_allowed", "model_denied"} and model is not None:
                 field = "input.model"
             else:
                 field = "input.provider"
@@ -527,7 +527,7 @@ class ScheduledTaskAutomationService:
         """
 
         errors, _warnings = _bound_execution_target_findings(input_map)
-        hard_codes = {"unusable", "provider_disabled", "model_not_allowed"}
+        hard_codes = {"unusable", "provider_disabled", "model_not_allowed", "model_denied"}
         hard = [error for error in errors if error.get("code") in hard_codes]
         if hard:
             detail = "; ".join(
