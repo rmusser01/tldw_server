@@ -800,7 +800,7 @@ List provider overrides.
 Get override for a provider.
 
 ### PUT /admin/llm/providers/overrides/{provider}
-Set override for a provider.
+Set override for a provider. `is_enabled: false` refuses the provider on every key; `allowed_models` lists the models the server's key offers (a user's own key may run others); `denied_models` lists models refused on every key, and wins when a model is on both lists. An empty list clears it.
 
 ### DELETE /admin/llm/providers/overrides/{provider}
 Remove override for a provider.
