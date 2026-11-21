@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { KanbanPlayground } from "../index"
@@ -138,6 +139,21 @@ describe("KanbanPlayground empty-state copy", () => {
       screen.getByRole("button", { name: /Create Board/ })
     ).toBeInTheDocument()
   })
+
+  it.each(["Enter board name", "What is this board for?"])(
+    "accepts Kanban shortcut letters when typing into %s",
+    async (placeholder) => {
+      const user = userEvent.setup()
+      mockQueryResponses(0)
+      render(<KanbanPlayground />)
+
+      await user.keyboard("b")
+      const field = await screen.findByPlaceholderText(placeholder)
+      await user.type(field, "Planning board")
+
+      expect(field).toHaveValue("Planning board")
+    }
+  )
 
   it("shows the board gallery when boards already exist", () => {
     mockQueryResponses(1)
