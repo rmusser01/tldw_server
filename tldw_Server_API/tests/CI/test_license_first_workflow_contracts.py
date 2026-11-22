@@ -1661,6 +1661,7 @@ TEST_SEAM_GATE_SUITES = (
     "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
     "tldw_Server_API/tests/lint/test_owner_scope_ratchet.py",
     "tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py",
+    "tldw_Server_API/tests/CI/test_path_classifier.py",
 )
 
 
@@ -2167,10 +2168,28 @@ def _owner_isolation_job_problems(workflow: dict[str, Any], marked_files: set[st
         problems.append("job does not require PostgreSQL")
     pytest_steps = [step for step in steps if "pytest" in step.get("run", "")]
     listed: set[str] = set()
+    checked: set[str] = set()
+    has_check = False
     for step in pytest_steps:
-        listed |= {t for t in _step_run_tokens(step["run"]) if _OWNER_ISOLATION_PATH_RE.match(t)}
+        # The pytest command, then the junit check ("python - <report> <files> <<'PY'" and its body).
+        command, sep, check = step["run"].partition("python - ")
+        command_tokens = _step_run_tokens(command)
+        listed |= {t for t in command_tokens if _OWNER_ISOLATION_PATH_RE.match(t)}
+        for token in sorted(command_tokens):
+            if token in ("-m", "-k") or token.startswith(("-m=", "-k=", "--deselect", "--ignore")):
+                problems.append(f"pytest command selects a subset with {token}")
+        if sep:
+            has_check = True
+            lines = [line.strip() for line in check.splitlines()]
+            checked |= {t for t in _step_run_tokens(check.split("<<", 1)[0]) if _OWNER_ISOLATION_PATH_RE.match(t)}
+            if "if skipped or missing:" not in lines or "sys.exit(1)" not in lines:
+                problems.append("junit check does not exit non-zero on skipped or missing cases")
+    if not has_check:
+        problems.append("job has no junit skipped/missing check")
     problems += [f"job does not run {path}" for path in sorted(marked_files - listed)]
-    problems += [f"job runs unmarked {path}" for path in sorted(listed - marked_files)]
+    if has_check:
+        problems += [f"junit check does not cover {path}" for path in sorted(marked_files - checked)]
+    problems += [f"job runs unmarked {path}" for path in sorted((listed | checked) - marked_files)]
     gate = jobs["backend-required"]
     if OWNER_ISOLATION_JOB not in gate.get("needs", []):
         problems.append(f"backend-required does not wait for {OWNER_ISOLATION_JOB}")
@@ -2205,11 +2224,14 @@ def test_owner_isolation_contract_fails_when_a_file_leaves_the_job(mutation: str
     marked = _owner_isolation_marked_files()
     path = sorted(marked)[0]
     step = _owner_isolation_pytest_step(workflow)
-    lines = step["run"].splitlines()
+    # Only the pytest command: the junit check lists the files separately and is pinned on its own.
+    command, sep, check = step["run"].partition("python - ")
+    lines = command.splitlines()
     if mutation == "dropped":
-        step["run"] = "\n".join(line for line in lines if path not in line)
+        command = "\n".join(line for line in lines if path not in line)
     else:
-        step["run"] = "\n".join(line.replace(path, f"# {path}") for line in lines)
+        command = "\n".join(line.replace(path, f"# {path}") for line in lines)
+    step["run"] = command + "\n" + sep + check
     assert _owner_isolation_job_problems(workflow, marked) == [f"job does not run {path}"]  # nosec B101
 
 
@@ -2258,6 +2280,7 @@ def test_chacha_owner_scope_flag_lists_every_marked_file():
 
     listed = {g for g in CHACHA_OWNER_SCOPE_GLOBS if g.startswith("tldw_Server_API/tests/") and g.endswith(".py")}
     listed.discard("tldw_Server_API/tests/_plugins/postgres.py")
+    listed.discard("tldw_Server_API/tests/ChaChaNotesDB/conftest.py")
     assert listed == _owner_isolation_marked_files()  # nosec B101
 
 
@@ -2270,4 +2293,54 @@ def test_owner_isolation_contract_fails_when_the_required_check_accepts_more() -
     check["run"] = check["run"].replace("true:true:success|", "true:true:success|true:true:failure|")
     assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
         "required check accepts outcomes other than the three approved ones"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("flag", ["-m", "-k", "--deselect", "--ignore", "-m=", "--deselect="])
+def test_owner_isolation_contract_fails_when_pytest_selects_a_subset(flag: str) -> None:
+    workflow = _backend_required_workflow()
+    step = _owner_isolation_pytest_step(workflow)
+    step["run"] = step["run"].replace("--durations=15", f'--durations=15 {flag} "not postgres"', 1)
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        f"pytest command selects a subset with {flag}"
+    ]
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_the_junit_check_misses_a_file() -> None:
+    workflow = _backend_required_workflow()
+    marked = _owner_isolation_marked_files()
+    path = sorted(marked)[0]
+    step = _owner_isolation_pytest_step(workflow)
+    command, sep, check = step["run"].partition("python - ")
+    step["run"] = command + sep + "\n".join(line for line in check.splitlines() if path not in line)
+    assert _owner_isolation_job_problems(workflow, marked) == [f"junit check does not cover {path}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_the_junit_check_is_deleted() -> None:
+    workflow = _backend_required_workflow()
+    step = _owner_isolation_pytest_step(workflow)
+    step["run"] = step["run"].partition("python - ")[0]
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        "job has no junit skipped/missing check"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("if skipped or missing:", "if skipped:"),
+        ("sys.exit(1)", "sys.exit(0)"),
+    ],
+)
+def test_owner_isolation_contract_fails_when_the_junit_check_stops_failing(old: str, new: str) -> None:
+    workflow = _backend_required_workflow()
+    step = _owner_isolation_pytest_step(workflow)
+    assert old in step["run"]  # nosec B101
+    step["run"] = step["run"].replace(old, new)
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        "junit check does not exit non-zero on skipped or missing cases"
     ]

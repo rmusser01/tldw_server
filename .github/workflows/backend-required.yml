@@ -590,6 +590,7 @@ jobs:
             tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py \
             tldw_Server_API/tests/lint/test_owner_scope_ratchet.py \
             tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py \
+            tldw_Server_API/tests/CI/test_path_classifier.py \
             tldw_Server_API/tests/lint/test_env_vars_docs_ratchet.py \
             tldw_Server_API/tests/Config/test_config_precedence_contract.py \
             tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py \
