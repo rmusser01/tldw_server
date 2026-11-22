@@ -1,0 +1,4 @@
+{
+  "core/DB_Management/ChaChaNotes_DB.py": {"calls": 0, "opt_outs": 4, "reason": "TASK-13950.23: tables without a tenant client_id (skill_registry), or scoped by a parent lock (messages via their conversation; moodboard_notes legacy pre-v63 branch, unreachable after schema init)"},
+  "core/DB_Management/chacha/message_store.py": {"calls": 0, "opt_outs": 2, "reason": "TASK-13950.23: tables without a tenant client_id (skill_registry), or scoped by a parent lock (messages via their conversation; moodboard_notes legacy pre-v63 branch, unreachable after schema init)"}
+}

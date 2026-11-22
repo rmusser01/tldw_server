@@ -36,6 +36,37 @@ TLDW_FRONTEND_GLOBS = [
     "Helper_Scripts/ci/vitest_execution_order_reporter.mjs",
 ]
 
+# Paths that run the required `chacha-owner-isolation` job (TASK-13950.23). The marked test files are
+# listed explicitly; test_license_first_workflow_contracts.py checks the list equals the marked set.
+CHACHA_OWNER_SCOPE_GLOBS = [
+    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "tldw_Server_API/app/core/DB_Management/chacha/**",
+    "tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py",
+    "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py",
+    "tldw_Server_API/app/core/DB_Management/backends/factory.py",
+    "tldw_Server_API/app/core/DB_Management/backends/base.py",
+    "tldw_Server_API/app/core/DB_Management/scope_context.py",
+    "tldw_Server_API/app/core/WebClipper/service.py",
+    "tldw_Server_API/app/core/Character_Chat/chacha_db_provider.py",
+    "tldw_Server_API/app/core/Character_Chat/chat_dictionary.py",
+    "tldw_Server_API/app/core/Chat/history_selection.py",
+    "tldw_Server_API/tests/_plugins/postgres.py",
+    "tldw_Server_API/tests/ChaChaNotesDB/conftest.py",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_chacha_message_store.py",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py",
+    "tldw_Server_API/tests/DB_Management/test_chacha_owner_scope_required.py",
+    "tldw_Server_API/tests/DB_Management/test_chacha_study_tables_rls.py",
+    "tldw_Server_API/tests/DB_Management/test_core_chat_owner_isolation.py",
+    "tldw_Server_API/tests/DB_Management/test_core_chat_rls_postgres.py",
+    "tldw_Server_API/tests/DB_Management/test_local_keyword_merge_survivor.py",
+    "tldw_Server_API/tests/DB_Management/test_note_shared_owner_contract.py",
+    "tldw_Server_API/tests/DB_Management/test_study_suggestion_owner_scope.py",
+    ".github/workflows/backend-required.yml",
+    "Helper_Scripts/ci/path_classifier.py",
+    "pyproject.toml",
+    "uv.lock",
+]
+
 FAMILY_GUARDRAILS_GLOBS = [
     "apps/tldw-frontend/**/family-guardrails*",
     "apps/tldw-frontend/**/option-family-guardrails-wizard*",
@@ -84,6 +115,9 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
     admin_ui_changed = any(_matches_any(path, ADMIN_UI_GLOBS) for path in normalized_paths)
     frontend_changed = any(_matches_any(path, FRONTEND_GLOBS) for path in normalized_paths)
     e2e_changed = tldw_frontend_changed or any(_matches_any(path, E2E_BACKEND_GLOBS) for path in normalized_paths)
+    chacha_owner_scope_changed = any(
+        _matches_any(path, CHACHA_OWNER_SCOPE_GLOBS) for path in normalized_paths
+    )
     security_relevant_changed = backend_changed or any(
         path.endswith(("requirements.txt", "pyproject.toml", "uv.lock")) for path in normalized_paths
     )
@@ -97,4 +131,5 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         "e2e_changed": e2e_changed,
         "security_relevant_changed": security_relevant_changed,
         "coverage_required": coverage_required,
+        "chacha_owner_scope_changed": chacha_owner_scope_changed,
     }

@@ -957,6 +957,8 @@ class ConversationResumeStore:
         owner_client_id: str | None = None,
     ) -> dict[str, Any]:
         """Read owned conversation identity, snapshot, and fences coherently."""
+        if owner_client_id is None and self._db.backend_type == BackendType.POSTGRESQL:
+            owner_client_id = str(self._db.client_id)
         normalized_owner = (
             str(owner_client_id).strip() if owner_client_id is not None else None
         )

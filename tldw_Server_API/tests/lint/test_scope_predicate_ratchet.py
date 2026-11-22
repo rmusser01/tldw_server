@@ -25,8 +25,8 @@ if str(REPO_ROOT) not in sys.path:
 from Helper_Scripts.ci.scope_predicate_ratchet import (  # noqa: E402
     SCOPE_NAMES,
     adds_predicate_on,
-    guarded_scopes,
     diff_against_baseline,
+    guarded_scopes,
     iter_findings,
     read_baseline,
 )
@@ -45,8 +45,8 @@ def test_no_new_conditional_tenant_predicates() -> None:
     added, stale = diff_against_baseline(sorted(iter_findings()), read_baseline())
     assert not added, "new conditional tenant predicates:\n  " + "\n  ".join(added)
     assert not stale, (
-        "baseline entries no longer match the tree (line numbers move; "
-        "regenerate with --write-baseline):\n  " + "\n  ".join(stale)
+        "baseline entries no longer match the tree (entries are keyed by qualified "
+        "name, so line shifts do not change them; regenerate with --write-baseline):\n  " + "\n  ".join(stale)
     )
 
 
@@ -63,7 +63,87 @@ def test_findings_use_posix_baseline_paths_on_windows(tmp_path, monkeypatch) -> 
         return original_relative_to(path, *other)
 
     monkeypatch.setattr(Path, "relative_to", windows_relative_to)
-    assert list(iter_findings(tmp_path)) == ["pkg/query.py:1 if user_id"]
+    assert list(iter_findings(tmp_path)) == ["pkg/query.py::<module> if user_id"]
+
+
+@pytest.fixture
+def _root_at_tmp(tmp_path, monkeypatch) -> None:
+    """Make seeded files relative to tmp_path, as keys are relative to the repo root."""
+    monkeypatch.setattr("Helper_Scripts.ci.scope_predicate_ratchet.REPO_ROOT", tmp_path)
+
+
+def _seed(tmp_path, text: str) -> None:
+    (tmp_path / "pkg").mkdir(exist_ok=True)
+    (tmp_path / "pkg" / "q.py").write_text(text, encoding="utf-8")
+
+
+_BLOCK = '    if user_id:\n        conditions.append("user_id = ?")\n'
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_root_at_tmp")
+def test_keys_survive_a_line_shift(tmp_path) -> None:
+    src = "def f(user_id):\n" + _BLOCK
+    _seed(tmp_path, src)
+    before = list(iter_findings(tmp_path))
+    _seed(tmp_path, "\n" * 5 + src)
+    assert list(iter_findings(tmp_path)) == before == ["pkg/q.py::f if user_id"]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_root_at_tmp")
+def test_duplicate_findings_get_ordinals(tmp_path) -> None:
+    _seed(
+        tmp_path,
+        "class C:\n"
+        "    def m(self, user_id):\n"
+        "        if user_id:\n"
+        '            conditions.append("user_id = ?")\n'
+        "        if user_id:\n"
+        '            conditions.append("user_id = ?")\n',
+    )
+    assert sorted(iter_findings(tmp_path)) == [
+        "pkg/q.py::C.m if user_id",
+        "pkg/q.py::C.m if user_id #2",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_root_at_tmp")
+def test_qualname_sees_defs_nested_in_compound_statements(tmp_path) -> None:
+    _seed(
+        tmp_path,
+        "try:\n"
+        "    class C:\n"
+        "        def m(self, user_id):\n"
+        "            if user_id:\n"
+        '                conditions.append("user_id = ?")\n'
+        "except ImportError:\n"
+        "    pass\n"
+        "async def f(user_id):\n"
+        "    if True:\n"
+        "        def g():\n"
+        "            if user_id:\n"
+        '                conditions.append("user_id = ?")\n'
+        "def h(user_id, kind):\n"
+        "    match kind:\n"
+        "        case \"a\":\n"
+        "            def k():\n"
+        "                if user_id:\n"
+        '                    conditions.append("user_id = ?")\n',
+    )
+    assert sorted(iter_findings(tmp_path)) == [
+        "pkg/q.py::C.m if user_id",
+        "pkg/q.py::f.g if user_id",
+        "pkg/q.py::h.k if user_id",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("_root_at_tmp")
+def test_module_level_finding_uses_module_sentinel(tmp_path) -> None:
+    _seed(tmp_path, 'if user_id:\n    conditions.append("user_id = ?")\n')
+    assert list(iter_findings(tmp_path)) == ["pkg/q.py::<module> if user_id"]
 
 
 @pytest.mark.unit
