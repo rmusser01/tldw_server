@@ -2352,8 +2352,8 @@ class MessageStore:
         """Fetch message projections associated with a Sync v2 stable message ID.
 
         With ``owner_client_id``, only messages in chats that owner holds are
-        returned. A caller that has no Sync state tying the id to an owner must
-        pass it: the match is by id, across every chat the connection can read.
+        returned. On PostgreSQL a None owner is the instance owner (``client_id``).
+        On SQLite a None owner matches by id across every chat the connection can read.
         """
 
         self._db._ensure_message_metadata_table()

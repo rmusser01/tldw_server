@@ -36496,7 +36496,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not note:
             raise ConflictError("Note not found.", entity="notes", entity_id=note_id)  # noqa: TRY003
         if not self._supports_notes_moodboard_studio_v61():
-            # OwnerScope.NOT_APPLICABLE: moodboard_notes has no tenant client_id (pre-v63 SQLite schemas only)
+            # OwnerScope.NOT_APPLICABLE: moodboard_notes has no tenant client_id (legacy pre-v63 branch, unreachable after schema init)
             return self._manage_link(
                 "moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "link",
                 owner_client_id=OwnerScope.NOT_APPLICABLE,
@@ -36626,7 +36626,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not moodboard:
             raise ConflictError("Moodboard not found.", entity="moodboards", entity_id=moodboard_id)  # noqa: TRY003
         if not self._supports_notes_moodboard_studio_v61():
-            # OwnerScope.NOT_APPLICABLE: moodboard_notes has no tenant client_id (pre-v63 SQLite schemas only)
+            # OwnerScope.NOT_APPLICABLE: moodboard_notes has no tenant client_id (legacy pre-v63 branch, unreachable after schema init)
             return self._manage_link(
                 "moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "unlink",
                 owner_client_id=OwnerScope.NOT_APPLICABLE,
