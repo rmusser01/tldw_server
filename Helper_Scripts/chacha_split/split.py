@@ -724,13 +724,9 @@ def _move_into_store(root: Path, manifest: dict, index: dict[str, str], renames:
         extra += ["", *const_lines]
     t_lines[insert_at:insert_at] = extra
     target.write_text("\n".join(t_lines), encoding="utf-8")
-    source.write_text(_drop_unused_imports("\n".join(lines)), encoding="utf-8")
+    source.write_text("\n".join(lines), encoding="utf-8")  # unused imports are left to ruff F401 (C2)
     print(f"moved {len(manifest['names'])} defs into {manifest['store_class']}; imports added: {add}")
     return 0
-
-
-def _drop_unused_imports(text: str) -> str:
-    return text  # ponytail: ruff F401 is the check (C2); the tool never edits the DB module's imports
 
 
 def _take_constants(manifest: dict, tree: ast.Module, original: list[str], lines: list[str]) -> list[tuple[str, list[str]]]:
