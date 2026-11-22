@@ -17,6 +17,7 @@ and this project adheres to Some kind of Versioning
 
 ### Fixed
 
+- **The WebUI's model pickers offer a provider your own key serves, also when the server has no key for it.** `GET /api/v1/llm/providers`, `/llm/providers/{provider_name}`, `/llm/models` and `/llm/models/metadata` read a signed-in user's credentials: each commercial provider the user's own stored key serves at its vendor is listed on that key, usable, with the models that key lists (fetched with the user's key and cached per key). The admin override still hides a disabled provider and a denied model from everyone; a model off `allowed_models` is listed for a user whose own key serves the provider (TASK-15582). The listings stay public, and a request without credentials, or a user without such a key, gets the server's listing unchanged; a user's listing is marked `Cache-Control: private, no-store`. Saving or deleting a key on the LLM Provider Keys settings page refreshes the chat model pickers (TASK-15583).
 - A server-side LLM call to an admin-disabled provider is refused before the gateway asks the provider for its model list, so the provider gets no request and the caller gets `provider_disabled`; an admin refusal that no endpoint maps is answered with its code's own message; and an LLM command group of `tldw-evals` given no subcommand prints its help without reading the AuthNZ database (TASK-15582).
 
 ### Removed
