@@ -322,7 +322,7 @@ def test_smart_and_hybrid_moodboard_reads_are_tenant_scoped(
         assert owner_a.link_note_to_moodboard(hybrid_board, manual_a) is True
 
         if bind_graphs:
-            owner_a.bind_local_moodboard_graph_to_dataset(
+            owner_a.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
                 owner_user_id="moodboard-owner-a",
                 target_dataset_id="moodboard-dataset-a",
             )

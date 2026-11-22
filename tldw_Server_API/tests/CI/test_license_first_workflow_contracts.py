@@ -1662,6 +1662,9 @@ TEST_SEAM_GATE_SUITES = (
     "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
     "tldw_Server_API/tests/lint/test_owner_scope_ratchet.py",
     "tldw_Server_API/tests/lint/test_charactersragdb_delegated_callers_ratchet.py",
+    # The ChaCha split tool and structure pins (TASK-13950.22) guard each move PR.
+    "tldw_Server_API/tests/Helper_Scripts/test_chacha_split.py",
+    "tldw_Server_API/tests/DB_Management/test_chacha_structure_pins.py",
     "tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py",
     "tldw_Server_API/tests/CI/test_path_classifier.py",
 )
