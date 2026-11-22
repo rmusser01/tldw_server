@@ -171,3 +171,29 @@ def test_emitter_writes_github_output(tmp_path, monkeypatch) -> None:
     text = out.read_text(encoding="utf-8")
     assert "frontend_changed=true" in text
     assert "backend_changed=false" in text
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+        "tldw_Server_API/app/core/DB_Management/chacha/message_store.py",
+        "tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py",
+        "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py",
+        "tldw_Server_API/app/core/Character_Chat/chacha_db_provider.py",
+        "tldw_Server_API/tests/_plugins/postgres.py",
+        "tldw_Server_API/tests/DB_Management/test_core_chat_owner_isolation.py",
+        ".github/workflows/backend-required.yml",
+        "Helper_Scripts/ci/path_classifier.py",
+        "pyproject.toml",
+        "uv.lock",
+    ),
+)
+def test_chacha_owner_scope_paths_enable_the_owner_isolation_job(path: str) -> None:
+    assert classify_paths([path])["chacha_owner_scope_changed"] is True
+
+
+def test_unrelated_backend_change_leaves_the_owner_isolation_job_off() -> None:
+    flags = classify_paths(["tldw_Server_API/app/core/RAG/pipeline.py"])
+    assert flags["backend_changed"] is True
+    assert flags["chacha_owner_scope_changed"] is False
