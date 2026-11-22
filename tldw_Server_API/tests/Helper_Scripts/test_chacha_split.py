@@ -491,3 +491,110 @@ def test_check_ignores_a_kwarg_named_like_a_retired_name_on_an_unrelated_call(tm
 def test_check_flags_a_kwarg_fake_of_a_retired_name(tmp_path: Path, call: str) -> None:
     root = _seed(tmp_path, {TEST: f"fake = {call}\n"}, db=CLEAN_DB)
     assert _callers(root, "--check") == 1
+
+
+# --- constants mode (TASK-13950.22 PR D) ---------------------------------------------------------------------------
+
+SCHEMA_SQL = "tldw_Server_API/app/core/DB_Management/chacha/schema_sql.py"
+CONSTANTS_DB = '''
+from typing import ClassVar
+
+_MOD = "x"
+
+
+class CharactersRAGDB:
+    _KEEP = 5
+    _SQL_A = """
+        CREATE TABLE a (
+            id INTEGER
+        );
+    """
+    _SQL_F = f"""
+        SELECT '{_MOD}'
+          FROM t
+    """
+    _A = "xax"
+    _B = _A.replace("x", "y")
+    _TABLES: ClassVar[tuple[str, ...]] = ("a", "b")
+
+    def run(self):
+        return self._SQL_A + self._B
+'''
+MOVED_CONSTANTS = ["_MOD", "_SQL_A", "_SQL_F", "_A", "_B", "_TABLES"]
+
+
+def _constants_manifest(names: list[str]) -> str:
+    manifest = {
+        "task": "T99", "mode": "constants", "source": DB, "target": SCHEMA_SQL, "alias": "schema_sql",
+        "store_class": None, "store_attr": None, "names": [], "shims": [], "constants": names,
+        "rewrites": {}, "renames": {}, "structural": [],
+    }
+    return f"MANIFEST = {manifest!r}\n"
+
+
+def _constants_tree(root: Path, names: list[str] = MOVED_CONSTANTS) -> Path:
+    _seed(root, {MANIFEST_PATH: _constants_manifest(names)}, db=CONSTANTS_DB)
+    _git(root, "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    return root
+
+
+def _constants(root: Path) -> int:
+    return split.main(["constants", str(root / MANIFEST_PATH), "--root", str(root)])
+
+
+def _values(text: str) -> dict[str, str]:
+    """Constant name -> dump of its value, over the module body and the class body."""
+    tree = ast.parse(text)
+    bodies = [tree.body, *(n.body for n in tree.body if isinstance(n, ast.ClassDef))]
+    return {
+        (st.targets[0] if isinstance(st, ast.Assign) else st.target).id: ast.dump(st.value)
+        for body in bodies
+        for st in body
+        if isinstance(st, (ast.Assign, ast.AnnAssign)) and st.value is not None
+    }
+
+
+def test_constants_move_keeps_values_and_class_access(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _constants_tree(tmp_path)
+    assert _constants(root) == 0
+    original, target = _values(CONSTANTS_DB), _values(_text(root, SCHEMA_SQL))
+    assert {n: target[n] for n in MOVED_CONSTANTS} == {n: original[n] for n in MOVED_CONSTANTS}
+    db = _text(root, DB)
+    assert "    from tldw_Server_API.app.core.DB_Management.chacha.schema_sql import (" in db  # the class body
+    assert "\nfrom tldw_Server_API.app.core.DB_Management.chacha.schema_sql import (" in db  # the module
+    assert '_SQL_A = """' not in db and "_KEEP = 5" in db and "ClassVar[" not in _text(root, SCHEMA_SQL)
+    assert "        CREATE TABLE a (\n            id INTEGER\n        );\n" in _text(root, SCHEMA_SQL)  # a string's own lines stay
+    assert _verify(root) == 0
+    assert "constants 6 identical" in capsys.readouterr().out
+    assert diffpairs.main([str(root / MANIFEST_PATH), "--base", "HEAD", "--root", str(root)]) == 0
+
+
+def test_verify_fails_on_an_edited_constant(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _constants_tree(tmp_path)
+    assert _constants(root) == 0
+    (root / SCHEMA_SQL).write_text(_text(root, SCHEMA_SQL).replace('"xax"', '"xaz"'))
+    assert _verify(root) == 1
+    assert "_A: the moved constant differs" in capsys.readouterr().out
+    assert diffpairs.main([str(root / MANIFEST_PATH), "--base", "HEAD", "--root", str(root)]) == 1
+
+
+def test_constants_fail_closed_on_a_foreign_reference(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _constants_tree(tmp_path, [n for n in MOVED_CONSTANTS if n != "_A"])  # _B reads _A, which would stay behind
+    before = _text(root, DB)
+    assert _constants(root) == 1
+    assert "_B: ['_A']" in capsys.readouterr().out
+    assert _text(root, DB) == before and not (root / SCHEMA_SQL).exists()
+
+
+def test_select_schema_sql_adds_what_the_values_read(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db = (
+        CONSTANTS_DB.replace('_SQL_A = """', '_MIGRATION_SQL_Y = """')
+        .replace("_SQL_F = f", "_MIGRATION_SQL_F = f")
+        .replace("    _A = ", "    _MIGRATION_SQL_X = ")
+        .replace("_B = _A.", "_B = _MIGRATION_SQL_X.")
+    )
+    root = _seed(tmp_path, db=db)
+    assert split.main(["select", "schema-sql", "--root", str(root)]) == 0
+    assert capsys.readouterr().out.strip() == "['_MOD', '_MIGRATION_SQL_Y', '_MIGRATION_SQL_F', '_MIGRATION_SQL_X']"

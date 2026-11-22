@@ -125,10 +125,69 @@ def test_context_module_privates_are_pinned() -> None:
     assert imported == set(context.PINNED_MODULE_PRIVATES)  # nosec B101
 
 
-@pytest.mark.parametrize("module", ["tldw_Server_API.app.core.DB_Management.chacha.context"])
+@pytest.mark.parametrize(
+    "module",
+    [
+        "tldw_Server_API.app.core.DB_Management.chacha.context",
+        "tldw_Server_API.app.core.DB_Management.chacha.schema_sql",
+    ],
+)
 def test_new_chacha_modules_import_standalone(module: str) -> None:
     """A fresh interpreter imports the module first, which proves the ChaChaNotes_DB import cycle is safe."""
     result = subprocess.run(  # nosec B603  # fixed argv, no shell
         [sys.executable, "-c", f"import {module}"], capture_output=True, text=True, timeout=300, check=False
     )
     assert result.returncode == 0, result.stderr  # nosec B101
+
+
+# --- schema SQL constants (TASK-13950.22 PR D, R4/R20/R21) ---------------------------------------------------------------
+
+PLACEHOLDER_CONSTANTS = ("RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND", "RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID")
+SCHEMA_SQL_MODULE = "tldw_Server_API.app.core.DB_Management.chacha.schema_sql"
+
+
+def _schema_manifest() -> dict:
+    from Helper_Scripts.chacha_split import split
+
+    repo = Path(__file__).resolve().parents[3]
+    return split.load_manifest(repo / "Helper_Scripts/chacha_split/manifests/t05_schema_sql.py")
+
+
+def test_schema_constants_stay_class_attributes() -> None:
+    """Tests and readers still say ``CharactersRAGDB._X``; the class attribute is the one object ``schema_sql`` holds."""
+    import importlib
+
+    schema_sql = importlib.import_module(SCHEMA_SQL_MODULE)
+    class_names = [n for n in _schema_manifest()["constants"] if n not in PLACEHOLDER_CONSTANTS]
+    assert len(class_names) == 108  # nosec B101
+    for name in class_names:
+        assert getattr(CharactersRAGDB, name) is getattr(schema_sql, name), name  # nosec B101
+
+
+def test_placeholder_constants_are_reexported() -> None:
+    import importlib
+
+    from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB
+
+    schema_sql = importlib.import_module(SCHEMA_SQL_MODULE)
+    for name in PLACEHOLDER_CONSTANTS:
+        assert getattr(ChaChaNotes_DB, name) is getattr(schema_sql, name), name  # nosec B101
+
+
+def test_schema_sql_imports_nothing_from_chachanotes_db() -> None:
+    import importlib
+
+    schema_sql = importlib.import_module(SCHEMA_SQL_MODULE)
+    tree = ast.parse(Path(schema_sql.__file__).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            assert "ChaChaNotes_DB" not in (node.module or "") and all("ChaChaNotes_DB" not in a.name for a in node.names)  # nosec B101
+        elif isinstance(node, ast.Import):
+            assert all("ChaChaNotes_DB" not in a.name for a in node.names)  # nosec B101
+
+
+def test_versions_stay_literal() -> None:
+    """The schema versions are read by the registry pins and the migration ladders; they are not moved or computed."""
+    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 85  # nosec B101
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 91  # nosec B101
+    assert CharactersRAGDB._SCHEMA_NAME == "rag_char_chat_schema"  # nosec B101

@@ -11,6 +11,7 @@ The walk descends while node types, scalar fields and list lengths match. The fi
 recorded as ``(unparse(old), unparse(new))`` and not descended into. A recorded pair is allowed when the old
 side is rooted at ``self``/``cls`` (an attribute, a call on one, or the bare name), or is a manifest rename.
 Any other pair, a changed literal, operator or control flow, exits 1. Exits 0 when every pair is allowed.
+In constants mode each constant's value is walked the same way, and any difference exits 1.
 """
 
 from __future__ import annotations
@@ -112,6 +113,33 @@ def allowed(old: ast.AST, new: ast.AST, renames: dict[str, str]) -> bool:
     )
 
 
+def constant_value(body: list[ast.stmt], name: str) -> ast.expr | None:
+    for node in body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id == name:
+            return node.value
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == name:
+            return node.value
+    return None
+
+
+def check_constants(base_tree: ast.Module, base_class: ast.ClassDef, head_tree: ast.Module, manifest: dict, counts: Counter, bad: list[str]) -> int:
+    """A moved constant keeps its value exactly: any differing node is disallowed (constants mode)."""
+    checked = 0
+    for name in manifest["constants"]:
+        old = constant_value(base_class.body, name) or constant_value(base_tree.body, name)
+        new = constant_value(head_tree.body, name)
+        if old is None or new is None:
+            bad.append(f"{name}: constant missing in {'base' if old is None else 'head'}")
+            continue
+        pairs: list[tuple[ast.AST, ast.AST]] = []
+        walk(old, new, pairs)
+        checked += 1
+        for a, b in pairs:
+            counts[(ast.unparse(a), ast.unparse(b))] += 1
+            bad.append(f"{name}: {ast.unparse(a)[:80]!r} -> {ast.unparse(b)[:80]!r}")
+    return checked
+
+
 def check_manifest(root: Path, ref: str, manifest: dict, counts: Counter, bad: list[str]) -> int:
     functions_mode = manifest["mode"] == "functions"
     base_tree = ast.parse(git_show(root, ref, manifest["source"]))
@@ -121,7 +149,7 @@ def check_manifest(root: Path, ref: str, manifest: dict, counts: Counter, bad: l
     if manifest.get("store_class"):
         head_body = next(n for n in head_tree.body if isinstance(n, ast.ClassDef) and n.name == manifest["store_class"]).body
     renames = manifest.get("renames", {})
-    checked = 0
+    checked = check_constants(base_tree, base_class, head_tree, manifest, counts, bad) if manifest["mode"] == "constants" else 0
     for name in manifest["names"]:
         old = find_def(base_class.body, name)
         new = find_def(head_body, name)
