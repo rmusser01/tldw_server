@@ -563,18 +563,31 @@ def test_chat_autoswitch_cannot_select_disabled_openai_override(
 
 
 @pytest.mark.parametrize(
-    ("own_key", "expected"),
-    [(True, (200, None, ["openai"])), (False, (403, "model_not_allowed", []))],
-    ids=["own-key", "server-key"],
+    ("own_key", "override", "expected"),
+    [
+        (True, {"allowed_models": ["gpt-4.1"]}, (200, None, ["openai"], ["input"])),
+        (False, {"allowed_models": ["gpt-4.1"]}, (403, "model_not_allowed", [], [])),
+        (True, {"is_enabled": False}, (403, "provider_disabled", [], [])),
+        (True, {"denied_models": ["gpt-4o-mini"]}, (403, "model_denied", [], [])),
+    ],
+    ids=["own-key", "server-key", "own-key-provider-disabled", "own-key-model-denied"],
 )
-def test_chat_runs_a_model_off_the_allowlist_only_on_the_users_own_key(
-    authenticated_client, monkeypatch: pytest.MonkeyPatch, own_key: bool, expected: tuple[int, str | None, list[str]]
+def test_chat_refuses_before_moderation_what_the_key_may_not_run(
+    authenticated_client,
+    monkeypatch: pytest.MonkeyPatch,
+    own_key: bool,
+    override: dict[str, Any],
+    expected: tuple[int, str | None, list[str], list[str]],
 ) -> None:
-    """TASK-15582: chat's first check takes only what every key refuses; the credential runtime checks the allowlist
-    once it knows the key, so the user's own key runs a model the server's key does not offer."""
+    """TASK-15582, TASK-15615: a model off allowed_models runs on the user's own key; on the server's key it is
+    refused model_not_allowed before input moderation (and its topic monitoring and audit) runs. A disabled provider
+    and a denied model are refused before moderation on every key. The own-key lookup is asked about a real user."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
     from tldw_Server_API.tests.helpers.llm_quota import users_own_key
 
     dispatch_calls: list[str] = []
+    moderated: list[str] = []
+    asked_user_ids: list[Any] = []
 
     def dispatch(**kwargs: Any):
         dispatch_calls.append(str(kwargs.get("api_endpoint")))
@@ -584,12 +597,23 @@ def test_chat_runs_a_model_off_the_allowlist_only_on_the_users_own_key(
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
 
+    async def moderate(**_kwargs: Any) -> None:
+        moderated.append("input")
+
     _configure_no_dispatch_boundary(monkeypatch, static_calls=[], dispatch_calls=[])
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.moderate_input_messages", moderate)
     if own_key:
         users_own_key(monkeypatch, "openai")
+        own_key_lookup = usage_quota_deps.users_own_key_serves
+
+        async def recording_lookup(user_id: Any, provider: str) -> bool:
+            asked_user_ids.append(user_id)
+            return await own_key_lookup(user_id, provider)
+
+        monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", recording_lookup)
     overrides_module.set_llm_provider_overrides_cache_for_tests(
-        {"openai": LLMProviderOverride(provider="openai", allowed_models=["gpt-4.1"], api_key="server-key")}
+        {"openai": LLMProviderOverride(provider="openai", api_key="server-key", **override)}
     )
 
     response = authenticated_client.post("/api/v1/chat/completions", json=_chat_request())
@@ -599,4 +623,43 @@ def test_chat_runs_a_model_off_the_allowlist_only_on_the_users_own_key(
         response.status_code,
         (response.json().get("detail") or {}).get("error_code"),
         dispatch_calls,
+        moderated,
     ) == expected
+    if expected[0] == 200:
+        # RR1: chat's first check asks about the authenticated user, never None.
+        assert asked_user_ids and None not in asked_user_ids and len(set(asked_user_ids)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("override", "macro", "expected"),
+    [
+        ({"allowed_models": ["gpt-4.1"]}, False, (None, ["openai"])),
+        ({"allowed_models": ["gpt-4.1"]}, True, ("model_not_allowed", [])),
+        ({"allowed_models": ["gpt-4o-mini"]}, False, (None, [])),
+        ({}, False, (None, [])),
+        ({"denied_models": ["gpt-4o-mini"]}, False, ("model_denied", [])),
+        ({"is_enabled": False}, False, ("provider_disabled", [])),
+    ],
+    ids=["off-list-own-key", "off-list-macro", "on-list", "no-lists", "denied", "disabled"],
+)
+async def test_chats_first_check_asks_for_the_users_own_key_only_for_an_off_list_model(
+    monkeypatch: pytest.MonkeyPatch,
+    override: dict[str, Any],
+    macro: bool,
+    expected: tuple[str | None, list[str]],
+) -> None:
+    """TASK-15615 (Review Focus 1, 2): chat's first check asks whether the user's own key serves the provider only
+    when the allowlist alone would refuse, so an ordinary request makes no extra credential read; a macro, which runs
+    later on the server's key, is held to the allowlist without asking (pinned at the helper; the call site's macro
+    flag is unpinned, as on dev)."""
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    asked = users_own_key(monkeypatch, "openai")
+    overrides_module.set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", **override)}
+    )
+
+    error = await chat_endpoint._override_error_before_the_key("openai", "gpt-4o-mini", 7, macro=macro)
+
+    assert ((error or {}).get("error_code"), asked) == expected
