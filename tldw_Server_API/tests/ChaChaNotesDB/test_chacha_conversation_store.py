@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB, InputError
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
 
 
@@ -345,7 +346,7 @@ def test_conversation_store_source_ref_maps_tuple_style_postgres_result():
             return str(value).strip() or None
 
     fake_db = FakeDB()
-    store = ConversationStore(fake_db)
+    store = ConversationStore(ChaChaContext(fake_db))
 
     assert store.get_conversation_by_source_ref("openwebui", "chat-1") == {
         "id": "conversation-1",
@@ -384,7 +385,7 @@ def test_conversation_store_title_exists_uses_postgres_placeholders():
             return str(value).strip() or None
 
     fake_db = FakeDB()
-    store = ConversationStore(fake_db)
+    store = ConversationStore(ChaChaContext(fake_db))
 
     assert store.conversation_title_exists("Existing title") is True
     assert "title = %s" in fake_db.backend.query

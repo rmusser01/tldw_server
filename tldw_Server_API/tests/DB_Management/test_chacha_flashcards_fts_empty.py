@@ -15,7 +15,7 @@ def _make_sqlite_db() -> CharactersRAGDB:
     db._uses_shared_content_backend = False
     db._local = SimpleNamespace(backend_ref=None)
     db.execute_query = MagicMock()
-    db._get_current_utc_timestamp_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
+    db.ctx.utc_now_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
     return db
 
 

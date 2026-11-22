@@ -130,3 +130,122 @@ def test_tests_lists_every_referencing_file_even_after_the_rewrite(tmp_path: Pat
     second = capsys.readouterr().out.splitlines()
     assert {TEST, other} <= set(first) and {TEST, other} <= set(second)
     assert "tldw_Server_API/tests/test_none.py" not in second
+
+
+PATCH_SOURCE = '''
+import inspect
+from types import SimpleNamespace
+from unittest.mock import patch
+
+
+def t1(monkeypatch, db):
+    monkeypatch.setattr(db, "_x", f)
+
+
+def t2():
+    with patch.object(CharactersRAGDB, "_x"):
+        pass
+
+
+@patch.object(CharactersRAGDB, "_x")
+def t3(m):
+    pass
+
+
+def t4(db):
+    db._x = f
+
+
+def t5(db):
+    type(db)._x = f
+
+
+fake = SimpleNamespace(_x=f)
+p = patch("m.CharactersRAGDB._x")
+src = inspect.getsource(CharactersRAGDB._x)
+other = SimpleNamespace(_y=f)
+
+
+def t6(db):
+    db._y = f
+    db.ctx._x = f
+'''
+
+
+def _patches(root: Path, *extra: str) -> int:
+    return split.main(["patches", "--names", "_x", "--root", str(root), *extra])
+
+
+def test_patches_finds_each_patch_form(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _seed(tmp_path, {TEST: PATCH_SOURCE})
+    assert _patches(root) == 1
+    out = capsys.readouterr().out
+    for kind in ("setattr", "patch.object", "assign", "kwarg", "string", "getsource"):
+        assert kind in out, kind
+    assert len([line for line in out.splitlines() if line.startswith(TEST)]) == 8
+    assert "_y" not in out
+
+
+def test_patches_is_empty_on_a_clean_tree(tmp_path: Path) -> None:
+    assert _patches(_seed(tmp_path, {TEST: "def t(db):\n    db.ctx.utc_now_iso = f\n"})) == 0
+
+
+CHECK_PATCHES = {
+    "setattr": 'def t(monkeypatch, db):\n    monkeypatch.setattr(db, "get_x", f)\n',
+    "patch_object": 'def t(db):\n    with mock.patch.object(db, "get_x"):\n        pass\n',
+    "patch_string": 'def t():\n    patch("m.CharactersRAGDB.get_x")\n',
+}
+
+
+@pytest.mark.parametrize("label", sorted(CHECK_PATCHES))
+def test_check_flags_a_string_patch_of_a_retired_name(tmp_path: Path, label: str) -> None:
+    root = _seed(tmp_path, {TEST: CHECK_PATCHES[label]}, db=CLEAN_DB)
+    assert _callers(root, "--check") == 1
+
+
+def test_check_accepts_a_string_patch_on_the_store(tmp_path: Path) -> None:
+    source = (
+        'def t(monkeypatch, db):\n    monkeypatch.setattr(db.s_store, "get_x", f)\n'
+        '    mock.patch.object(db.s_store, "get_x")\n    mock.patch.object(SStore, "get_x")\n'
+        '    store = db.s_store\n    mock.patch.object(store, "get_x")\n'
+    )
+    assert _callers(_seed(tmp_path, {TEST: source}, db=CLEAN_DB), "--check") == 0
+
+
+STORE_SRC = '''
+class S:
+    def __init__(self, db: CharactersRAGDB) -> None:
+        self._db = db
+
+    def f(self):
+        a = self._db._normalize_nullable_text(1)
+        b = self._db.execute_query("q")
+        c = self._db.native_forks.x()
+        d = self._db._ALLOWED_CONVERSATION_STATES
+        e = self._db._ensure_message_metadata_table()
+        g = self._db
+        return self._db.backend_type
+'''
+STORE = "tldw_Server_API/app/core/DB_Management/chacha/s.py"
+
+
+def test_rewire_maps_each_kind_of_db_reach(tmp_path: Path) -> None:
+    root = _seed(tmp_path, {STORE: STORE_SRC})
+    assert split.main(["rewire", "--store", STORE, "--root", str(root)]) == 0
+    out = _text(root, STORE)
+    assert "self._ctx = ctx" in out  # the constructor
+    assert "a = self._ctx.normalize_nullable_text(1)" in out  # CTX_REWRITES
+    assert "b = self._ctx.execute_query(" in out  # CTX_PUBLIC
+    assert "c = self._ctx.db.native_forks.x()" in out  # another store, public
+    assert "d = _ALLOWED_CONVERSATION_STATES" in out  # a constant that became a module constant
+    assert "e = self._ctx.db.ensure_message_metadata_table()" in out  # the one rename
+    assert "g = self._ctx.db\n" in out  # bare receiver
+    assert "return self._ctx.backend_type" in out
+
+
+def test_rewire_fails_closed_on_an_unmapped_private(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    src = STORE_SRC + "\n    def h(self):\n        return self._db._mystery()\n"
+    root = _seed(tmp_path, {STORE: src})
+    assert split.main(["rewire", "--store", STORE, "--root", str(root)]) == 1
+    assert "_mystery" in capsys.readouterr().out
+    assert _text(root, STORE) == textwrap.dedent(src)

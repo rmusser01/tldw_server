@@ -115,7 +115,7 @@ class TestWorkspaceSources:
                 "2026-07-18T18:18:10.003Z",
             ]
         )
-        monkeypatch.setattr(db, "_get_current_utc_timestamp_iso", lambda: next(timestamps))
+        monkeypatch.setattr(db.ctx, "utc_now_iso", lambda: next(timestamps))
         created = db.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video", "review_state": "needs_review",

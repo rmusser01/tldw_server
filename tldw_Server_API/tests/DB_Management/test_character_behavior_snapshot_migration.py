@@ -1392,9 +1392,9 @@ def _postgres_store_db(
     db.client_id = "postgres-store-owner"
     db._owner_user_id = "postgres-store-owner"
     db.db_path_str = "postgresql://recording"
-    db.message_store = MessageStore(db)
+    db.message_store = MessageStore(db.ctx)
     db.conversation_resume_store = ConversationResumeStore(db)
-    db._ensure_message_metadata_table = lambda: None
+    db.ensure_message_metadata_table = lambda: None
     wrapper = BackendConnectionWrapper(db, object(), backend)
     return db, wrapper
 
@@ -1430,7 +1430,7 @@ def test_postgres_backend_wrapper_roundtrips_resume_store_contract() -> None:
 def test_postgres_settings_upsert_locks_conversation_before_replacing_json() -> None:
     backend = _PostgresStoreBackend()
     db, wrapper = _postgres_store_db(backend)
-    store = ConversationStore(db)
+    store = ConversationStore(db.ctx)
     start_index = len(backend.executed)
 
     assert store.upsert_conversation_settings(
@@ -1560,7 +1560,7 @@ def test_sqlite_settings_upsert_rolls_back_when_live_conversation_update_misses(
 def test_postgres_settings_upsert_rejects_stale_expected_version_atomically() -> None:
     backend = _PostgresStoreBackend()
     db, wrapper = _postgres_store_db(backend)
-    store = ConversationStore(db)
+    store = ConversationStore(db.ctx)
 
     assert store.upsert_conversation_settings(
         backend.conversation_id,

@@ -54,8 +54,8 @@ from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
+from functools import cached_property, wraps  # noqa: E402
 from functools import partial as bind_migration
-from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Protocol, TypeAlias, overload  # noqa: E402
 
@@ -77,6 +77,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.workspace_migration_records i
 if TYPE_CHECKING:
     from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
     from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+    from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
     from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
         MAX_CHAT_ATTACHMENT_READ_BYTES,
     )
@@ -125,7 +126,6 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  #
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
     prepare_backend_many_statement,
-    prepare_backend_statement,
     replace_insert_or_ignore,
     transform_sqlite_query_for_postgres,
 )
@@ -1400,10 +1400,6 @@ class CharactersRAGDB:
             "note_attachments",
         }
     )
-    _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
-    _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
-    _ALLOWED_CONVERSATION_SEARCH_ORDER: tuple[str, ...] = ("bm25", "recency", "hybrid", "topic")
-    _DEFAULT_CONVERSATION_STATE = "in-progress"
     _ALLOWED_PERSONA_MODES: tuple[str, ...] = ("session_scoped", "persistent_scoped")
     _DEFAULT_PERSONA_MODE = "session_scoped"
     _ALLOWED_PERSONA_SCOPE_RULE_TYPES: tuple[str, ...] = (
@@ -1415,8 +1411,6 @@ class CharactersRAGDB:
     )
     _ALLOWED_PERSONA_POLICY_RULE_KINDS: tuple[str, ...] = ("mcp_tool", "skill")
     _ALLOWED_PERSONA_SESSION_STATUSES: tuple[str, ...] = ("active", "paused", "closed", "archived")
-    _ALLOWED_CONVERSATION_ASSISTANT_KINDS: tuple[str, ...] = ("character", "persona")
-    _ALLOWED_PERSONA_MEMORY_MODES: tuple[str, ...] = ("read_only", "read_write")
     _WORKSPACE_ACTIVITY_MAX_METADATA_BYTES = 16 * 1024
     _WORKSPACE_CLONE_OPERATION_KIND = "shared_workspace_clone"
     _WORKSPACE_CLONE_RECONCILIATION_MAX = 100
@@ -8817,13 +8811,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
         from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceChatStartupStore
 
+        ctx = self.ctx  # one context, built before the stores that share it
         self.character_store = CharacterStore(self)
-        self.conversation_store = ConversationStore(self)
+        self.conversation_store = ConversationStore(ctx)
         self.native_forks = NativeForkStore(self)
         self.workspace_chat_startups = WorkspaceChatStartupStore(self)
         self.native_assets = NativeChatAssetStore(self)
         self.conversation_resume_store = ConversationResumeStore(self)
-        self.message_store = MessageStore(self)
+        self.message_store = MessageStore(ctx)
         self.chat_imports = ChatImportStore(self)
         self.note_store = NoteStore(self)
         self.note_provenance_store = NoteProvenanceStore(self)
@@ -8886,6 +8881,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def owner_user_id(self) -> str:
         """Return construction-time ownership, independent of writer attribution."""
         return self._owner_user_id
+
+    @cached_property
+    def ctx(self) -> ChaChaContext:
+        """The stores' shared context (R19). Lazy, so a DB built with ``__new__`` reaches it too."""
+        from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+
+        return ChaChaContext(self)
 
     # --- Backend Resolution Helpers ---
     def _resolve_backend(
@@ -9031,15 +9033,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query: str,
         params: tuple | list | dict | None = None,
     ) -> tuple[str, tuple | list | dict | None]:
-        return prepare_backend_statement(
-            self.backend_type,
-            query,
-            params,
-            transformer=self._transform_query_for_backend
-            if self.backend_type == BackendType.POSTGRESQL
-            else None,
-            ensure_returning=False,
-        )
+        return self.ctx.prepare_statement(query, params)
 
     def _prepare_backend_many_statement(
         self,
@@ -22237,7 +22231,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise NotImplementedError(
                 f"Schema initialization not implemented for backend {self.backend_type}"
             )
-        self._ensure_message_metadata_table()
+        self.ensure_message_metadata_table()
         self._ensure_persona_live_voice_session_summaries_table()
         self._ensure_conversation_settings_table()
 
@@ -22389,7 +22383,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if target_version > 67 and current_db_version < target_version:
             legacy_target = max(67, current_db_version)
         self._initialize_schema_sqlite_legacy(target_version=legacy_target)
-        self._ensure_message_metadata_table()
+        self.ensure_message_metadata_table()
         self._ensure_persona_live_voice_session_summaries_table()
         self._ensure_conversation_settings_table()
         if legacy_target == target_version:
@@ -27572,7 +27566,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except BackendDatabaseError as exc:
                 raise SchemaError(f"Failed to ensure PostgreSQL FTS structures: {exc}") from exc  # noqa: TRY003
 
-            self._ensure_message_metadata_table(connection=conn)
+            self.ensure_message_metadata_table(connection=conn)
             self._ensure_persona_live_voice_session_summaries_table(connection=conn)
             self._ensure_conversation_settings_table(connection=conn)
             if target_version >= 71 and current_version < 71:
@@ -27770,7 +27764,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # ----------------------
     # Message metadata (tool calls)
     # ----------------------
-    def _ensure_message_metadata_table(self, *, connection: Any | None = None) -> None:
+    def ensure_message_metadata_table(self, *, connection: Any | None = None) -> None:
         """Ensure the message_metadata table exists for the active backend."""
         if self.backend_type == BackendType.SQLITE:
             self.execute_query(
@@ -28221,36 +28215,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # --- Internal Helpers ---
     def _get_current_utc_timestamp_iso(self) -> str:
-        """
-        Generates the current UTC timestamp in ISO 8601 format with 'Z' for UTC.
-
-        Example: "2023-10-27T10:30:00.123Z"
-
-        Returns:
-            A string representing the current UTC timestamp with millisecond precision.
-        """
-        return datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+        """Forward to ``ctx.utc_now_iso``."""
+        return self.ctx.utc_now_iso()
 
     def _generate_uuid(self) -> str:
-        """
-        Generates a new UUID version 4.
-
-        Returns:
-            A string representation of the UUID.
-        """
-        return str(uuid.uuid4())
+        """Forward to ``ctx.new_uuid``."""
+        return self.ctx.new_uuid()
 
     def _map_table_for_backend(self, table_name: str) -> str:
-        """Map logical table names to backend-specific physical names.
-
-        This avoids name collisions with other modules when sharing a Postgres database.
-        """
-        if self.backend_type == BackendType.POSTGRESQL:
-            mapping = {
-                'keywords': 'chacha_keywords',
-            }
-            return mapping.get(table_name, table_name)
-        return table_name
+        """Forward to ``ctx.map_table``."""
+        return self.ctx.map_table(table_name)
 
     # ----------------------
     # Notes Graph: manual edges (note_edges)
@@ -28355,42 +28329,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _get_current_db_version(self, conn: sqlite3.Connection, table_name: str, pk_col_name: str,
                                 pk_value: Any, *, owner_client_id: str | OwnerScope | None = None) -> int:
-        """
-        Fetches the current version of an active (not soft-deleted) record.
-
-        Used for optimistic locking checks before an update or soft delete.
-
-        Args:
-            conn: The active sqlite3.Connection.
-            table_name: The name of the table to query.
-            pk_col_name: The name of the primary key column.
-            pk_value: The value of the primary key for the record.
-
-        Returns:
-            The version number (integer) of the record if found and active.
-
-        Raises:
-            ConflictError: If the record is not found (with `entity` and `entity_id` attributes
-                           set in the exception) or if the record is found but is soft-deleted.
-        """
-        if not (_SAFE_IDENTIFIER_RE.fullmatch(table_name or "") and _SAFE_IDENTIFIER_RE.fullmatch(pk_col_name or "")):
-            raise CharactersRAGDBError(  # noqa: TRY003
-                f"Unsafe identifier in version lookup: table={table_name!r}, column={pk_col_name!r}"
-            )
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
-        cursor = conn.execute(f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (pk_value,) + owner_params)  # nosec B608
-        row = cursor.fetchone()
-
-        if not row:
-            logger.warning(f"Record not found in {table_name} with {pk_col_name} = {pk_value} for version check.")
-            raise ConflictError(f"Record not found in {table_name}.", entity=table_name, entity_id=pk_value)  # noqa: TRY003
-
-        if row['deleted']:
-            logger.warning(f"Record in {table_name} with {pk_col_name} = {pk_value} is soft-deleted.")
-            raise ConflictError(f"Record is soft-deleted in {table_name}.", entity=table_name, entity_id=pk_value)  # noqa: TRY003
-
-        version: int = row["version"]
-        return version
+        """Forward to ``ctx.current_db_version``."""
+        return self.ctx.current_db_version(
+            conn, table_name, pk_col_name, pk_value, owner_client_id=owner_client_id
+        )
 
     def _ensure_json_string(self, data: list | dict | set | None) -> str | None:
         """
@@ -29298,15 +29240,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @staticmethod
     def _normalize_nullable_text(value: Any) -> str | None:
-        """Normalize optional text fields; returns None for empty/whitespace."""
-        if value is None:
-            return None
-        if isinstance(value, str):
-            stripped = value.strip()
-            return stripped if stripped else None
-        return str(value)
+        """Forward to ``ChaChaContext.normalize_nullable_text``."""
+        from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 
-    _ALLOWED_SCOPE_TYPES: tuple[str, ...] = ("global", "workspace")
+        return ChaChaContext.normalize_nullable_text(value)
 
     # Message count/query helpers are delegated to MessageStore at module bottom.
 
@@ -35012,13 +34949,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _selected_owner_filter(
         self, owner_client_id: str | OwnerScope | None, alias: str = "", *, table: str = "?",
     ) -> tuple[str, tuple[str, ...]]:
-        """Apply the PostgreSQL owner; SQLite IDs label devices. None raises on PostgreSQL."""
-        if not _owner_is_scoped(self.backend_type, owner_client_id, "_selected_owner_filter", table):
-            return "", ()
-        if alias and not _SAFE_IDENTIFIER_RE.fullmatch(alias):
-            raise InputError("Invalid owner filter alias")  # noqa: TRY003
-        column = f"{alias}.client_id" if alias else "client_id"
-        return f" AND {column} = ?", (owner_client_id,)
+        """Forward to ``ctx.owner_filter``."""
+        return self.ctx.owner_filter(owner_client_id, alias, table=table)
 
     def _selected_keyword_link_filter(
         self, link_table: str, alias: str, *, owner_client_id: str | OwnerScope | None,
