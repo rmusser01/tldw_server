@@ -565,7 +565,7 @@ async def recipient_security_harness(
     monkeypatch.setattr(
         chat_target_resolution,
         "validate_provider_override",
-        lambda _provider, _model: None,
+        lambda _provider, _model, **_kwargs: None,
     )
     monkeypatch.setattr(sharing, "_get_repo", lambda: repo)
     monkeypatch.setattr(sharing, "_get_audit_service", lambda: None)

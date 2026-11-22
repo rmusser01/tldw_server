@@ -57,6 +57,7 @@ from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     LegacyProjectionConfirmEnvelopeV1,
 )
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     capture_provider_override_call_snapshot,
@@ -334,7 +335,12 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
-from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context, with_llm_call_context
+from tldw_Server_API.app.core.Usage.llm_call_context import (
+    USER_KEY_SOURCE,
+    call_credential_source,
+    llm_call_context,
+    with_llm_call_context,
+)
 from tldw_Server_API.app.core.Usage.usage_tracker import backfill_legacy_tokens_to_ledger
 
 from . import chat_dictionaries, chat_documents, chat_grammars
@@ -1144,7 +1150,7 @@ def _provider_credential_http_exception_for_code(code: str, message: str | None 
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error_code": code, "message": message or _PROVIDER_CREDENTIAL_MESSAGES[code]},
         )
-    if code in {"provider_disabled", "model_not_allowed"}:
+    if code in ADMIN_POLICY_CODES:
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -4466,7 +4472,9 @@ async def create_chat_completion(
                     if default_model_for_provider:
                         model = default_model_for_provider
                         request_data.model = default_model_for_provider
-                override_error = _llm_provider_overrides.validate_provider_override(provider, model)
+                # Only what every key refuses: credential_runtime.resolve checks the allowlist below, once it knows the
+                # key; a macro runs later as a job on the server's key, so it is held to the allowlist now (TASK-15582).
+                override_error = _llm_provider_overrides.validate_provider_override(provider, model, allowlist=chat_macro_intent is not None)
             except ByokResolutionError as credential_error:
                 raise_detached_error(
                     _provider_credential_http_exception(credential_error)
@@ -5292,7 +5300,7 @@ async def create_chat_completion(
                 if selected_provider != provider:
                     try:
                         refreshed_args, refreshed_model = await rebuild_call_params_for_provider(selected_provider)
-                        override_error = _llm_provider_overrides.validate_provider_override(selected_provider, refreshed_model or model)
+                        override_error = _llm_provider_overrides.validate_provider_override(selected_provider, refreshed_model or model, allowlist=call_credential_source(refreshed_args) != USER_KEY_SOURCE)
                         if override_error:
                             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
                         cleaned_args = refreshed_args

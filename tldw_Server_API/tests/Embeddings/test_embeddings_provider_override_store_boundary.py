@@ -592,8 +592,8 @@ async def test_embedding_override_merges_one_frozen_static_config_at_adapter_bou
     class GatedSnapshot:
         provider = captured.provider
 
-        def enforce(self, model: str | None) -> None:
-            captured.enforce(model)
+        def enforce(self, model: str | None, **kwargs: Any) -> None:
+            captured.enforce(model, **kwargs)
 
         def ensure_healthy(self) -> None:
             captured.ensure_healthy()

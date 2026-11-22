@@ -6581,7 +6581,19 @@ def get_authnz_migrations() -> list[Migration]:
             "Persist external MCP discovery outcomes",
             migration_106_add_mcp_external_discovery_state,
         ),
+        Migration(107, "Add llm_provider_overrides.denied_models", migration_107_add_override_denied_models),
     ]
+
+
+def migration_107_add_override_denied_models(conn: sqlite3.Connection) -> None:
+    """Add ``llm_provider_overrides.denied_models``: models the admin refuses on every key (TASK-15582)."""
+    if not _sqlite_table_exists(conn, "llm_provider_overrides"):
+        logger.info("Migration 107: llm_provider_overrides table not present; skipping")
+        return
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(llm_provider_overrides)").fetchall()}
+    if "denied_models" not in columns:
+        conn.execute("ALTER TABLE llm_provider_overrides ADD COLUMN denied_models TEXT")
+    logger.info("Migration 107: Added llm_provider_overrides.denied_models")
 
 
 def migration_106_add_mcp_external_discovery_state(conn: sqlite3.Connection) -> None:

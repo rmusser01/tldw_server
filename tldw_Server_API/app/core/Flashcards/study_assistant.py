@@ -447,6 +447,7 @@ async def generate_study_assistant_reply(
     from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
         PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     )
+    from tldw_Server_API.app.core.Usage.llm_call_context import USER_KEY_SOURCE
 
     prompt_package = build_study_assistant_prompt_package(
         action=action,
@@ -462,7 +463,11 @@ async def generate_study_assistant_reply(
         )
 
     try:
-        target = resolve_chat_target(requested_provider=provider, requested_model=model)
+        target = resolve_chat_target(
+            requested_provider=provider,
+            requested_model=model,
+            allowlist=getattr(provider_credentials, "credential_source", None) != USER_KEY_SOURCE,
+        )
     except ByokResolutionError as exc:
         raise ChatConfigurationError(message="Provider configuration is unavailable.") from exc
     response = await perform_chat_api_call_async(

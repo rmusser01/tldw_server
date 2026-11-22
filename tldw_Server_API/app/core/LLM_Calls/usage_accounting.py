@@ -362,14 +362,19 @@ async def _accounted_async_stream(
         _record_stream(provider, plan, request, seen, started)
 
 
-def _refuse_admin_disabled(provider: Any, request: Any) -> None:
-    """Refuse a provider or model the admin provider override disables, on any key (TASK-15581).
+def refuse_admin_disabled(provider: Any, request: Any) -> None:
+    """Refuse what the admin provider override disallows for this call's key (TASK-15581, TASK-15582).
+
+    A disabled provider and a denied model are refused on any key; a model off ``allowed_models`` only off the user's
+    own key (credential source ``user``).
 
     Every adapter call passes here, from the gateway or a direct caller, so the owner's rule holds on every path.
     A key test (provider key validation, the admin provider test, the setup check) runs exempt and is not refused.
+    The gateway also calls it before model discovery (TASK-15582).
     """
     if current_llm_call_context().exempt:
         return
+    allowlist = call_credential_source(request) != USER_KEY_SOURCE  # the server-key allowlist (TASK-15582)
     # Imported here: the override module imports the adapter registry, which loads the provider classes.
     from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
     from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import enforce_provider_override
@@ -381,7 +386,7 @@ def _refuse_admin_disabled(provider: Any, request: Any) -> None:
     fallbacks = extra_body.get("models") if name == "openrouter" and isinstance(extra_body, Mapping) else None
     try:
         for model in [request.get("model"), *(fallbacks if isinstance(fallbacks, list) else [])]:
-            enforce_provider_override(name, model)
+            enforce_provider_override(name, model, allowlist=allowlist)
     except ByokResolutionError as error:
         code = getattr(error, "policy_code", None) or error.code
         # A ChatAPIError, which every adapter caller handles: on analyze 'configuration' (a store outage
@@ -395,7 +400,7 @@ def _wrap_chat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def chat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _refuse_admin_disabled(self, request)
+        refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         if user_id is not None:
@@ -420,7 +425,7 @@ def _wrap_achat(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     async def achat(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _refuse_admin_disabled(self, request)
+        refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         if user_id is not None:
@@ -449,7 +454,7 @@ def _wrap_stream(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def stream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _refuse_admin_disabled(self, request)
+        refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         unchecked = user_id is not None and not check_user_sync(user_id)
@@ -475,7 +480,7 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(fn)
     def astream(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _refuse_admin_disabled(self, request)
+        refuse_admin_disabled(self, request)
         source = call_credential_source(request)
         user_id = user_to_check(source)
         plan = _plan_call(source)

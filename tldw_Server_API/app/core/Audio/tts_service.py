@@ -581,6 +581,9 @@ async def tts_provider_credential_scope(
         raise ByokResolutionError("invalid_provider_credentials", provider)
 
     try:
+        # Text-to-speech is outside the LLM rule (ADR-086): like /audio/speech (_resolve_tts_byok), check the override
+        # before any key is resolved, so allowed_models binds every key here (TASK-15582).
+        capture_provider_override_call_snapshot(provider_key).enforce(model)
         provider_config_snapshot = _capture_tts_provider_config(provider_key)
         server_config_snapshot = load_server_config_snapshot()
         user_id, team_ids, org_ids, trusted_base_url_override = (

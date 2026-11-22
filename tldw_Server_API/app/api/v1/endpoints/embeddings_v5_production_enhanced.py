@@ -154,6 +154,7 @@ from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     encode_huggingface_model_path,
     encode_provider_model_path,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.LLM_Calls.providers.base import (
     EmbeddingsAdapterUnavailableError,
 )
@@ -732,6 +733,7 @@ _EMBEDDINGS_CREDENTIAL_ERROR_MESSAGES = {
     "credential_scope_revoked": "The selected provider credential scope is no longer available.",
     "provider_disabled": "The selected provider is disabled by administrator policy.",
     "model_not_allowed": "The selected model is not allowed for this provider.",
+    "model_denied": "The selected model is disabled by administrator policy.",
 }
 _EMBEDDINGS_CREDENTIAL_ERROR_CODES = frozenset(
     {"missing_provider_credentials", *_EMBEDDINGS_CREDENTIAL_ERROR_MESSAGES}
@@ -795,7 +797,7 @@ def _embeddings_credential_http_exception(exc: ByokResolutionError) -> HTTPExcep
     return HTTPException(
         status_code=(
             status.HTTP_403_FORBIDDEN
-            if code in {"provider_disabled", "model_not_allowed"}
+            if code in ADMIN_POLICY_CODES
             else status.HTTP_503_SERVICE_UNAVAILABLE
         ),
         detail={"error_code": code, "message": message},

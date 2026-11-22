@@ -56,6 +56,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, InputError
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
@@ -755,7 +756,7 @@ async def generate_document(
         raise
     except ByokResolutionError as e:
         code = getattr(e, "policy_code", e.code)
-        if code in {"provider_disabled", "model_not_allowed", "credential_scope_revoked"}:
+        if code in ADMIN_POLICY_CODES | {"credential_scope_revoked"}:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={

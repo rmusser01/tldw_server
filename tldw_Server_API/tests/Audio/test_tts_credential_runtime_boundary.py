@@ -56,7 +56,7 @@ def _allow_direct_worker_dispatch_marker(monkeypatch) -> None:
 
 
 class _NoOverrideSnapshot:
-    def enforce(self, _model: str | None) -> None:
+    def enforce(self, _model: str | None, **_kwargs: object) -> None:
         return None
 
     def ensure_healthy(self) -> None:
@@ -2704,3 +2704,43 @@ async def test_tts_fails_closed_when_override_store_is_unhealthy(monkeypatch) ->
         assert exc_info.value.code == "credential_store_unavailable"
     finally:
         llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(original)
+
+@pytest.mark.asyncio
+async def test_streaming_tts_holds_the_users_own_key_to_the_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TASK-15582 (review round 1, I1): text-to-speech is outside the LLM rule (ADR-086). Streaming TTS checks the
+    override before any key is resolved, as /audio/speech does, so a model off allowed_models is refused on the
+    user's own key too, and no key is read."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Audio import tts_service
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError, ResolvedByokCredentials
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    resolved: list[str] = []
+    real_runtime = tts_service.ProviderCredentialRuntime
+
+    async def users_key(provider: str, **_kwargs: object) -> ResolvedByokCredentials:
+        resolved.append(provider)
+        return ResolvedByokCredentials(
+            provider=provider, api_key="sk-user", app_config={}, credential_fields={}, source="user", allowlisted=True
+        )
+
+    monkeypatch.setattr(tts_service, "ProviderCredentialRuntime", lambda **kwargs: real_runtime(**kwargs, resolver=users_key))
+    monkeypatch.setattr(tts_service, "load_server_config_snapshot", lambda: {})
+    monkeypatch.setattr(tts_service, "_capture_tts_provider_config", lambda _provider: {"enabled": True})
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", allowed_models=["tts-1"])}
+    )
+
+    with pytest.raises(ByokResolutionError) as refused:
+        async with tts_service.tts_provider_credential_scope(
+            provider="openai",
+            model="gpt-4o-mini-tts",
+            request=SimpleNamespace(state=SimpleNamespace()),
+            current_user=SimpleNamespace(id=101),
+        ):
+            pass
+    assert (getattr(refused.value, "policy_code", None), resolved) == ("model_not_allowed", [])

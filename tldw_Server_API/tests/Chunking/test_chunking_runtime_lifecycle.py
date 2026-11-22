@@ -242,7 +242,7 @@ async def test_chunking_real_byok_resolution_cannot_mix_config_generations(
         return SharedRepo()
 
     class EmptyOverrideSnapshot:
-        def enforce(self, _model):
+        def enforce(self, _model, **_kwargs):
             return None
 
         def ensure_healthy(self):

@@ -150,3 +150,34 @@ async def test_the_app_answers_an_admin_refusal_and_passes_any_other_configurati
     with pytest.raises(ChatConfigurationError) as passed_on:
         await handler(_build_request(), other)
     assert (response.status_code, passed_on.value) == (403, other)
+
+
+@pytest.mark.asyncio
+async def test_an_admin_refusal_answers_with_its_codes_own_message():
+    """TASK-15582 (minor 3 of #3537's final review): a refusal rebuilt with another message (the privacy-safe rebuild
+    says "Provider configuration is unavailable.") still answers with its code's own message."""
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import PROVIDER_STREAM_ERROR_MESSAGES
+
+    rebuilt = ChatConfigurationError(
+        "Provider configuration is unavailable.", provider="openai", error_code="provider_disabled"
+    )
+    response = await exception_handlers.admin_refusal_exception_handler(_build_request(request_id="req-msg"), rebuilt)
+    assert (response.status_code, json.loads(response.body)["error"]["message"]) == (
+        403,
+        PROVIDER_STREAM_ERROR_MESSAGES["provider_disabled"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_app_passes_a_refusal_on_a_standalone_slides_route_to_the_catch_all():
+    """TASK-15582 (minor 5 of #3537's final review): a standalone Slides route keeps its own redacted error shape, so
+    the app's refusal handler raises the refusal on to the catch-all handler there."""
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+    from tldw_Server_API.app.main import app
+
+    handler = app.exception_handlers[ChatConfigurationError]
+    refusal = ChatConfigurationError("refused", provider="openai", error_code="provider_disabled")
+    with pytest.raises(ChatConfigurationError) as passed_on:
+        await handler(_build_request(path="/api/v1/slides/presentations/p-1"), refusal)
+    assert passed_on.value is refusal
