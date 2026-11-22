@@ -454,8 +454,8 @@ def test_late_chat_override_policy_change_blocks_provider_dispatch(
     dispatch_calls: list[str] = []
     original_validate = chat_endpoint.validate_provider_override
 
-    def gated_validate(provider: str, model: str | None):
-        decision = original_validate(provider, model)
+    def gated_validate(provider: str, model: str | None, **kwargs: Any):
+        decision = original_validate(provider, model, **kwargs)
         validation_complete.set()
         if not release_validation.wait(10):
             raise TimeoutError("chat policy race gate was not released")
@@ -560,3 +560,42 @@ def test_chat_autoswitch_cannot_select_disabled_openai_override(
     assert response.status_code == 403, response.text
     assert response.json()["detail"]["error_code"] == "provider_disabled"
     assert dispatch_calls == []
+
+@pytest.mark.parametrize(
+    ("own_key", "expected"),
+    [(True, (200, None, ["openai"])), (False, (403, "model_not_allowed", []))],
+    ids=["own-key", "server-key"],
+)
+def test_chat_runs_a_model_off_the_allowlist_only_on_the_users_own_key(
+    authenticated_client, monkeypatch: pytest.MonkeyPatch, own_key: bool, expected: tuple[int, str | None, list[str]]
+) -> None:
+    """TASK-15582: chat's first check takes only what every key refuses; the credential runtime checks the allowlist
+    once it knows the key, so the user's own key runs a model the server's key does not offer."""
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    dispatch_calls: list[str] = []
+
+    def dispatch(**kwargs: Any):
+        dispatch_calls.append(str(kwargs.get("api_endpoint")))
+        return {
+            "id": "chatcmpl-own-key", "object": "chat.completion", "created": 1, "model": "gpt-4o-mini",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    _configure_no_dispatch_boundary(monkeypatch, static_calls=[], dispatch_calls=[])
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", dispatch)
+    if own_key:
+        users_own_key(monkeypatch, "openai")
+    overrides_module.set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", allowed_models=["gpt-4.1"], api_key="server-key")}
+    )
+
+    response = authenticated_client.post("/api/v1/chat/completions", json=_chat_request())
+
+    # The refusal's code is read from the body, so the test is not status-only (review round 1, B4).
+    assert (
+        response.status_code,
+        (response.json().get("detail") or {}).get("error_code"),
+        dispatch_calls,
+    ) == expected

@@ -475,8 +475,8 @@ async def test_a_provider_method_nested_in_a_stream_is_not_checked_again(refused
     assert (chunks, checks) == (["hi"], ["body"] if source == "user" else [7, "body"])
 
 
-# An admin override for openai that refuses REQUEST's model "m1", by its reason (TASK-15581).
-_DISABLES = {"provider_disabled": {"is_enabled": False}, "model_not_allowed": {"allowed_models": ["x"]}}
+# An admin override for openai that refuses REQUEST's model "m1" on every key, by its reason (TASK-15581, TASK-15582).
+_DISABLES = {"provider_disabled": {"is_enabled": False}, "model_denied": {"denied_models": ["m1"]}}
 
 
 def _admin_override(**override_kwargs: Any) -> None:
@@ -595,9 +595,10 @@ async def test_a_call_that_names_no_model_is_checked_for_provider_disabled_only(
     [
         ({"is_enabled": False}, True, 403, "provider_disabled"),
         ({"allowed_models": ["x"]}, True, 403, "model_not_allowed"),
+        ({"denied_models": ["m1"]}, True, 403, "model_denied"),
         ({}, False, 503, "credential_store_unavailable"),
     ],
-    ids=["provider-disabled", "model-not-allowed", "store-unavailable"],
+    ids=["provider-disabled", "model-not-allowed", "model-denied", "store-unavailable"],
 )
 def test_an_endpoint_that_maps_nothing_answers_with_the_refusals_own_status(override_kwargs, healthy, status, code):
     """TASK-15581 (M7, P1): an endpoint with no mapping of its own reaches the app's ChatConfigurationError handler,
@@ -671,35 +672,40 @@ def _judge_modules() -> Any:
 
 
 @_judge_modules()
-@pytest.mark.parametrize("own_key", [True, False], ids=["own-key", "server-key"])
-async def test_an_evaluation_judge_refuses_a_disallowed_default_model_on_any_key(monkeypatch, module, own_key) -> None:
-    """TASK-15581: a DEFAULT_MODEL_<PROVIDER> the override does not allow is refused on the run's own key and on the
-    server's, with ChatConfigurationError, which G-Eval does not retry."""
+@pytest.mark.parametrize(
+    ("own_key", "override", "expected"),
+    [(True, {"denied_models": ["gpt-denied"]}, "model_denied"), (False, {"allowed_models": ["x"]}, "model_not_allowed")],
+    ids=["own-key", "server-key"],
+)
+async def test_an_evaluation_judge_refuses_a_disallowed_model_by_key(monkeypatch, module, own_key, override, expected) -> None:
+    """TASK-15581, TASK-15582: on the run's own key a denied DEFAULT_MODEL_<PROVIDER> is refused (the allowlist no
+    longer binds that key); on the server's key, which takes the server config's model, a model off the allowlist is.
+    Both with ChatConfigurationError, which G-Eval does not retry."""
     monkeypatch.setattr(module, "get_adapter_or_raise", lambda _provider: _Provider())
     monkeypatch.setattr(module, "resolve_provider_api_key_from_config", lambda *_args, **_kwargs: "sk-server")
     monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "gpt-denied")
-    _admin_override(**_DISABLES["model_not_allowed"])
+    _admin_override(**override)
     handle = await _handle("user") if own_key else None
 
     def _judge() -> str:
-        """One call with no model, so DEFAULT_MODEL_OPENAI applies."""
+        """One call with no model, so the key's default model applies."""
         return module._call_adapter_text(
             api_endpoint="openai", messages_payload=[{"role": "user", "content": "q"}], provider_credentials=handle
         )
 
     with pytest.raises(ChatConfigurationError) as refusal:
         await asyncio.to_thread(_judge)
-    assert refusal.value.error_code == "model_not_allowed"
+    assert refusal.value.error_code == expected
 
 
-async def test_prompt_studio_refuses_a_disallowed_default_model_on_the_users_key(monkeypatch) -> None:
+async def test_prompt_studio_refuses_a_denied_default_model_on_the_users_key(monkeypatch) -> None:
     """TASK-15581 (from TASK-15576): Prompt Studio's direct adapter call takes DEFAULT_MODEL_<PROVIDER>, which
     resolution never sees; the provider base class refuses it when the override does not allow it."""
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio import test_runner
 
     monkeypatch.setattr(test_runner, "get_adapter_or_raise", lambda _provider: _Provider())
     monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "gpt-denied")
-    _admin_override(**_DISABLES["model_not_allowed"])
+    _admin_override(denied_models=["gpt-denied"])
     handle = await _handle("user")
 
     with pytest.raises(ChatConfigurationError) as refusal:
@@ -707,7 +713,7 @@ async def test_prompt_studio_refuses_a_disallowed_default_model_on_the_users_key
             provider="openai", model=None, messages_payload=[{"role": "user", "content": "q"}], system_message=None,
             temperature=0.0, max_tokens=1, provider_credentials=handle,
         )
-    assert refusal.value.error_code == "model_not_allowed"
+    assert refusal.value.error_code == "model_denied"
 
 
 def _chat_request() -> SimpleNamespace:
@@ -1024,3 +1030,58 @@ async def test_prompt_improvement_on_an_operator_base_url_from_the_server_config
     )
     assert (result.provider, result.model) == ("moonshot", "kimi-k2")
     assert seen == ["user_unmetered"]
+
+@_METHODS
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [("user", None), ("team", "model_not_allowed"), ("org", "model_not_allowed"),
+     ("server_default", "model_not_allowed"), (None, "model_not_allowed")],
+    ids=["user", "team", "org", "server", "no-handle"],
+)
+async def test_a_model_off_the_allowlist_runs_only_on_the_users_own_key(method, source, expected) -> None:
+    """TASK-15582 (owner, 2026-11-21, "Server key only"): allowed_models is what the server's key offers. The user's
+    own key at its vendor runs a model off it; every other key, team and org included (R1), is refused."""
+    _admin_override(allowed_models=["x"])
+    request = dict(REQUEST)
+    if source is not None:
+        request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = await _handle(source)
+    try:
+        await _call(method, request)
+        outcome = None
+    except ChatConfigurationError as refusal:
+        outcome = refusal.error_code
+    assert outcome == expected
+
+
+async def test_the_users_key_at_an_operator_endpoint_is_held_to_the_allowlist() -> None:
+    """TASK-15582 (Review Focus 2): a user key sent off its vendor's host reaches the operator's endpoint, so it is
+    held to the server's allowlist, as ADR-083 counts it (user_unmetered)."""
+    _admin_override(allowed_models=["x"])
+    request = {
+        **REQUEST, "base_url": "https://models.operator.example/v1",
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user"),
+    }
+    with pytest.raises(ChatConfigurationError) as refusal:
+        _Provider().chat(request)
+    assert refusal.value.error_code == "model_not_allowed"
+
+
+async def test_openrouter_fallbacks_on_the_users_own_key_skip_the_allowlist_but_not_the_denylist() -> None:
+    """TASK-15582 (Review Focus 3): each OpenRouter fallback model is checked like the primary, by the call's key."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    class _OpenRouter(_Provider):
+        name = "openrouter"
+
+    set_llm_provider_overrides_cache_for_tests({"openrouter": LLMProviderOverride(
+        provider="openrouter", allowed_models=["openai/gpt-4o-mini"], denied_models=["anthropic/claude-opus-4.1"],
+    )})
+    request = {**REQUEST, "model": "openai/gpt-4o-mini",
+               PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user", provider="openrouter")}
+    served = _OpenRouter().chat({**request, "extra_body": {"models": ["meta-llama/llama-3.1-8b-instruct"]}})
+    with pytest.raises(ChatConfigurationError) as refusal:
+        _OpenRouter().chat({**request, "extra_body": {"models": ["anthropic/claude-opus-4.1"]}})
+    assert (served["choices"][0]["message"]["content"], refusal.value.error_code) == ("hi", "model_denied")

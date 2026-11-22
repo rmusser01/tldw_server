@@ -19,12 +19,13 @@ from tldw_Server_API.app.core.LLM_Calls.provider_identity import provider_lookup
 _PATCHABLE_OVERRIDE_COLUMNS = (
     "is_enabled",
     "allowed_models",
+    "denied_models",
     "config_json",
     "secret_blob",
     "api_key_hint",
 )
 _OVERRIDE_RESULT_COLUMNS = (
-    "provider, is_enabled, allowed_models, config_json, secret_blob, "
+    "provider, is_enabled, allowed_models, denied_models, config_json, secret_blob, "
     "api_key_hint, created_at, updated_at"
 )
 
@@ -178,7 +179,7 @@ class AuthnzLLMProviderOverridesRepo:
         try:
             rows = await self.db_pool.fetchall(
                 """
-                SELECT provider, is_enabled, allowed_models, config_json, secret_blob,
+                SELECT provider, is_enabled, allowed_models, denied_models, config_json, secret_blob,
                        api_key_hint, created_at, updated_at
                 FROM llm_provider_overrides
                 ORDER BY provider
@@ -402,7 +403,7 @@ class AuthnzLLMProviderOverridesRepo:
                         return None
                     cursor = await conn.execute(
                         """
-                        SELECT provider, is_enabled, allowed_models, config_json,
+                        SELECT provider, is_enabled, allowed_models, denied_models, config_json,
                                secret_blob, api_key_hint, created_at, updated_at
                         FROM llm_provider_overrides WHERE provider = ?
                         """,
@@ -434,7 +435,7 @@ class AuthnzLLMProviderOverridesRepo:
                 await conn.execute(query, tuple(values))
                 cursor = await conn.execute(
                     """
-                    SELECT provider, is_enabled, allowed_models, config_json,
+                    SELECT provider, is_enabled, allowed_models, denied_models, config_json,
                            secret_blob, api_key_hint, created_at, updated_at
                     FROM llm_provider_overrides WHERE provider = ?
                     """,

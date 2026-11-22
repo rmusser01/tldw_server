@@ -38,7 +38,7 @@ def test_upgrade_preserves_external_server_and_adds_nullable_discovery(tmp_path,
 def test_discovery_migration_follows_existing_versions_without_collisions():
     versions = [migration.version for migration in get_authnz_migrations()]
     assert versions == sorted(set(versions))  # nosec B101 -- duplicate IDs can skip or corrupt a real upgrade.
-    assert versions[-6:] == [101, 102, 103, 104, 105, 106]  # nosec B101 -- preserve admin, native quota, semantic and provider migrations before MCP discovery.
+    assert versions[-7:] == [101, 102, 103, 104, 105, 106, 107]  # nosec B101 -- preserve admin, native quota, semantic and provider migrations before MCP discovery.
 
 
 @pytest.mark.parametrize("has_server_table", [True, False], ids=["with-mcp", "without-mcp"])
@@ -94,4 +94,4 @@ def test_old_owned_104_upgrades_usage_attribution_without_losing_discovery(tmp_p
         assert conn.execute("SELECT credential_source FROM llm_usage_log WHERE request_id='new-own-key-call'").fetchone() == ("user",)  # nosec B101 -- New settlement writes can retain own-key attribution.
         if has_server_table:
             assert conn.execute("SELECT * FROM mcp_external_servers").fetchall() == server_before  # nosec B101 -- Configuration, revision and real discovery history survive intact.
-        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 106  # nosec B101 -- Normal registry105/106 completes without renumbering incoming migrations.
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 107  # nosec B101 -- Normal registry 105-107 completes without renumbering incoming migrations.

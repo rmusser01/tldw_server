@@ -34,8 +34,9 @@ describe("Knowledge QA error message mapping", () => {
     ],
     [
       "model_not_allowed",
-      "The selected model is not allowed for this provider.",
+      "The selected model is not offered on the server's key for this provider. Your own provider key may serve it.",
     ],
+    ["model_denied", "The selected model is disabled by administrator policy."],
   ])(
     "preserves policy code %s for stream and non-stream failures",
     (code, expected) => {

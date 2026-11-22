@@ -48,7 +48,7 @@ def _oauth_resolution(
 
 
 class _NoOverrideSnapshot:
-    def enforce(self, _model: str | None) -> None:
+    def enforce(self, _model: str | None, **_kwargs: object) -> None:
         return None
 
     def ensure_healthy(self) -> None:

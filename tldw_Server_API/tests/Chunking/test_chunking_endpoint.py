@@ -164,7 +164,7 @@ def isolate_provider_override_store(monkeypatch):
     """Keep endpoint unit tests independent from the app-lifespan AuthNZ store."""
 
     class EmptyOverrideSnapshot:
-        def enforce(self, _model):
+        def enforce(self, _model, **_kwargs):
             return None
 
         def ensure_healthy(self):

@@ -385,6 +385,8 @@ class LLMProviderOverrideRequest(BaseModel):
     """Request to upsert LLM provider overrides."""
     is_enabled: bool | None = None
     allowed_models: list[str] | None = None
+    # Refused on every key; wins over allowed_models, which only the server's key follows (TASK-15582).
+    denied_models: list[str] | None = None
     config: dict[str, Any] | None = None
     api_key: str | None = None
     credential_fields: dict[str, Any] | None = None
@@ -398,6 +400,7 @@ class LLMProviderOverrideResponse(BaseModel):
     provider: str
     is_enabled: bool | None = None
     allowed_models: list[str] | None = None
+    denied_models: list[str] | None = None
     config: dict[str, Any] | None = None
     credential_fields: dict[str, Any] | None = None
     has_api_key: bool = False

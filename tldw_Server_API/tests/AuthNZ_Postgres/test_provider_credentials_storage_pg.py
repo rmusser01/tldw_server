@@ -80,3 +80,21 @@ async def test_provider_credential_tables_keep_their_rls_posture_postgres(test_d
         )
         == []
     )
+
+
+@pytest.mark.asyncio
+async def test_the_denylist_round_trips_through_the_repo_postgres(test_db_pool) -> None:
+    """TASK-15582: the PostgreSQL ensure adds llm_provider_overrides.denied_models, and the repo writes and reads it."""
+    from datetime import datetime, timezone
+
+    from tldw_Server_API.app.core.Provider_Credentials.repos.llm_provider_overrides_repo import (
+        AuthnzLLMProviderOverridesRepo,
+    )
+
+    assert await ensure_llm_provider_overrides_pg(test_db_pool) is True
+    repo = AuthnzLLMProviderOverridesRepo(test_db_pool)
+    stored = await repo.patch_override(
+        provider="openai", fields={"denied_models": '["gpt-4o"]'}, updated_at=datetime.now(timezone.utc)
+    )
+    listed = await repo.list_overrides("openai")
+    assert (stored["denied_models"], listed[0]["denied_models"]) == ('["gpt-4o"]', '["gpt-4o"]')

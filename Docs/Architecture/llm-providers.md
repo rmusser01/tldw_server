@@ -18,7 +18,7 @@ All paths under `tldw_Server_API/` unless noted.
 | Routing | `LLM_Calls/routing/` | `model=auto` resolution, rules router, LLM-router prompt/choice |
 | Coordination | `app/core/Chat/chat_service.py` | `perform_chat_api_call[_async]` — provider/model normalization, key merging, base-URL override policy, adapter dispatch |
 | BYOK | `app/core/Provider_Credentials/byok_runtime.py`, `byok_helpers.py` | credential resolution, base-URL allowlists |
-| Admin overrides | `app/services/admin_llm_providers_service.py` + admin routes | provider overrides CRUD + provider test + health |
+| Admin overrides | `app/services/admin_llm_providers_service.py` + admin routes | provider overrides CRUD (`is_enabled`, `allowed_models` for the server's key, `denied_models` for every key) + provider test + health |
 | Local control plane | `app/core/Local_LLM/` | llama.cpp supervisor, process runner, profile store, inventory, acquisition |
 | Discovery routes | `app/api/v1/endpoints/llm_providers.py` | `/llm/health`, providers, models metadata |
 
@@ -30,7 +30,7 @@ All paths under `tldw_Server_API/` unless noted.
 4. `perform_chat_api_call_async` builds the adapter request: BYOK credential binding, config model resolution, and rejection of request-level URL overrides for local providers (base URLs are config-only).
 5. Base-URL overrides apply only for allowlisted providers and trusted callers.
 6. Adapter dispatch: streaming prefers `astream` (falling back to a wrapped sync stream); non-streaming prefers native async, else a bounded sync call on the shared pool.
-7. Every adapter call is wrapped by the accounted base class: admin-override check → quota check → call → record. A provider or model the admin override disables is refused on every key (TASK-15581). Streaming feeds usage from provider `usage` blocks when present, else estimates.
+7. Every adapter call is wrapped by the accounted base class: admin-override check → quota check → call → record. A provider the admin override disables, or a model on its `denied_models`, is refused on every key; a model off its `allowed_models` on every key but the user's own at its vendor (TASK-15581, TASK-15582). Streaming feeds usage from provider `usage` blocks when present, else estimates.
 8. Recording: `log_llm_usage` → cost computation via the pricing catalog (unknown models get a conservative sentinel rate).
 9. SSE assembly: heartbeats, idle timeout, max response size, first-output and partial-save callbacks, a terminal `stream_end` event, and a single `[DONE]`; provider lines normalized on the way through.
 10. Post-turn persistence via callbacks; audit and metrics recorded.

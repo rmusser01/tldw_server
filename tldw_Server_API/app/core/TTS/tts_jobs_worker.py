@@ -150,6 +150,7 @@ def _bounded_tts_credential_failure(exc: Exception) -> TTSJobError:
         "invalid_provider_credentials",
         "missing_provider_credentials",
         "model_not_allowed",
+        "model_denied",
         "provider_disabled",
     }:
         code = "invalid_provider_credentials"

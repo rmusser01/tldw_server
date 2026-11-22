@@ -165,6 +165,7 @@ from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
 )
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     record_byok_missing_credentials,
@@ -349,7 +350,7 @@ MAX_AUTO_SUMMARY_CONTENT_CHARS = 8_000
 def _character_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
     """Map typed credential failures to bounded character-chat responses."""
     code = getattr(exc, "policy_code", exc.code)
-    if code in {"provider_disabled", "model_not_allowed", "credential_scope_revoked"}:
+    if code in ADMIN_POLICY_CODES | {"credential_scope_revoked"}:
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={

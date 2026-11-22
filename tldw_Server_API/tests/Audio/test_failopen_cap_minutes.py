@@ -21,7 +21,7 @@ class _LoggerStub:
 
 
 class _HealthyProviderOverrideSnapshot:
-    def enforce(self, _model):
+    def enforce(self, _model, **_kwargs):
         return None
 
     def server_fallback(self, base_fallback=None):
