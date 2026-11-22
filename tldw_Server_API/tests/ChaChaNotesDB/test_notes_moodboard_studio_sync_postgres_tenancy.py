@@ -1523,8 +1523,8 @@ def test_postgres_studio_diagram_update_rejects_stale_writer_after_lock_wait(
             render_version=1,
         )
         monkeypatch.setattr(
-            db_a,
-            "_get_current_utc_timestamp_iso",
+            db_a.ctx,
+            "utc_now_iso",
             lambda: "2099-01-01T00:00:01.000000+00:00",
         )
 

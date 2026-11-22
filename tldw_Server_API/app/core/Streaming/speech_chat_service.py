@@ -66,6 +66,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     split_system_message,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
@@ -857,11 +858,7 @@ async def run_speech_chat_turn(
         raise
     except ByokResolutionError as exc:
         code = getattr(exc, "policy_code", exc.code)
-        if code in {
-            "provider_disabled",
-            "model_not_allowed",
-            "credential_scope_revoked",
-        }:
+        if code in ADMIN_POLICY_CODES | {"credential_scope_revoked"}:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
@@ -1002,11 +999,7 @@ async def run_speech_chat_turn(
         code = getattr(exc, "policy_code", exc.code)
         status_code = (
             status.HTTP_403_FORBIDDEN
-            if code in {
-                "provider_disabled",
-                "model_not_allowed",
-                "credential_scope_revoked",
-            }
+            if code in ADMIN_POLICY_CODES | {"credential_scope_revoked"}
             else status.HTTP_503_SERVICE_UNAVAILABLE
         )
         raise HTTPException(

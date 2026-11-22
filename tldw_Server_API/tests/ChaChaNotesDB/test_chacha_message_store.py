@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
@@ -76,7 +77,7 @@ def db(tmp_path):
     )
     return {
         "db": instance,
-        "store": MessageStore(instance),
+        "store": MessageStore(instance.ctx),
         "conversation_id": conversation_id,
     }
 
@@ -491,7 +492,7 @@ def test_message_store_preserves_append_order_when_insert_clock_ties(db, monkeyp
     conversation_id = db["conversation_id"]
     same_timestamp = "2026-01-01T00:00:00.000Z"
 
-    monkeypatch.setattr(raw_db, "_get_current_utc_timestamp_iso", lambda: same_timestamp)
+    monkeypatch.setattr(raw_db.ctx, "utc_now_iso", lambda: same_timestamp)
 
     first_id = store.add_message(
         {
@@ -876,7 +877,7 @@ def test_postgres_source_message_projection_is_one_owner_scoped_statement():
             captured["kwargs"] = kwargs
             return _Cursor()
 
-    projection = MessageStore(_PostgresDb()).get_source_message_projection(
+    projection = MessageStore(ChaChaContext(_PostgresDb())).get_source_message_projection(
         "conversation-1",
         max_chars=100,
         owner_user_id="owner-1",
@@ -905,7 +906,7 @@ def test_postgres_source_message_projection_requires_owner_scope():
             raise AssertionError("unscoped PostgreSQL projection must not query")
 
     with pytest.raises(InputError, match="owner_user_id"):
-        MessageStore(_PostgresDb()).get_source_message_projection(
+        MessageStore(ChaChaContext(_PostgresDb())).get_source_message_projection(
             "conversation-1",
             max_chars=20,
         )
@@ -925,7 +926,7 @@ def test_source_message_projection_failure_drops_raw_exception_context():
             raise CharactersRAGDBError(secret)
 
     with pytest.raises(CharactersRAGDBError) as exc_info:
-        MessageStore(_FailingDb()).get_source_message_projection(
+        MessageStore(ChaChaContext(_FailingDb())).get_source_message_projection(
             "conversation-1",
             max_chars=20,
         )
@@ -958,7 +959,7 @@ def test_source_message_projection_redacts_delayed_fetch_failure():
     sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
     try:
         with pytest.raises(CharactersRAGDBError) as exc_info:
-            MessageStore(_FailingDb()).get_source_message_projection(
+            MessageStore(ChaChaContext(_FailingDb())).get_source_message_projection(
                 "conversation-1",
                 max_chars=20,
             )

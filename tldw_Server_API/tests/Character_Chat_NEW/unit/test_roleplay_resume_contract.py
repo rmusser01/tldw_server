@@ -41,7 +41,7 @@ def resume_db(request, tmp_path):
             {"id": "prior", "sender": "assistant", "content": "Earlier answer", "parent_message_id": "ancestor"},
         ],
     )
-    assert db.get_roleplay_resume_state(cid)["resume_eligible"] is True
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["resume_eligible"] is True
     yield db, cid
     db.close_connection()
     if request.param == "postgres":
@@ -49,7 +49,7 @@ def resume_db(request, tmp_path):
 
 
 def fence(db, cid):
-    state = db.get_roleplay_resume_state(cid)
+    state = db.conversation_resume_store.get_roleplay_resume_state(cid)
     return {
         "version": 1,
         "snapshot_digest": state["behavior_snapshot"]["digest"],
@@ -60,7 +60,7 @@ def fence(db, cid):
 
 
 def append(db, cid, request):
-    return db.append_idempotent_user_message(
+    return db.conversation_resume_store.append_idempotent_user_message(
         cid, request, owner_client_id="alice", build_messages=format_roleplay_resume_messages
     )
 
@@ -104,11 +104,11 @@ def test_conflicting_reuse_never_changes_the_accepted_input(resume_db, change):
         altered["content"] = "Replacement"
     if change == "expected":
         altered["expected"] = fence(db, cid)
-    before = db.get_roleplay_resume_state(cid)["history_version"]
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"]
     with pytest.raises(RoleplayResumeConflictError) as caught:
         append(db, cid, altered)
     assert caught.value.code == "idempotency_conflict"
-    assert db.get_roleplay_resume_state(cid)["history_version"] == before
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before
 
 
 @pytest.mark.parametrize(
@@ -144,7 +144,7 @@ def test_original_fence_rejects_drift_without_a_user_or_branch(resume_db, mutati
             }
         )
     elif mutation == "settings":
-        db.upsert_conversation_settings(cid, db.get_roleplay_resume_state(cid)["settings"])
+        db.upsert_conversation_settings(cid, db.conversation_resume_store.get_roleplay_resume_state(cid)["settings"])
     elif mutation == "metadata":
         db.add_message_metadata("ancestor", extra={"changed": True})
     elif mutation.startswith("snapshot-"):
@@ -158,11 +158,11 @@ def test_original_fence_rejects_drift_without_a_user_or_branch(resume_db, mutati
                 )
     elif mutation == "tail":
         request["expected"]["tail"] = {"message_id": "ancestor", "message_version": 1}
-    before = (db.count_messages_for_conversation(cid), db.get_roleplay_resume_state(cid)["history_version"])
+    before = (db.count_messages_for_conversation(cid), db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"])
     with pytest.raises(RoleplayResumeConflictError):
         append(db, cid, request)
     assert db.get_message_by_id("chosen-user") is None
-    assert (db.count_messages_for_conversation(cid), db.get_roleplay_resume_state(cid)["history_version"]) == before
+    assert (db.count_messages_for_conversation(cid), db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"]) == before
 
 
 def test_retired_owner_cannot_append_or_replay(resume_db):
@@ -171,7 +171,7 @@ def test_retired_owner_cannot_append_or_replay(resume_db):
     append(db, cid, request)
     for mid in ("chosen-user", "new-user"):
         with pytest.raises(NotFoundError):
-            db.append_idempotent_user_message(
+            db.conversation_resume_store.append_idempotent_user_message(
                 cid, {**request, "message_id": mid}, owner_client_id="bob", build_messages=format_roleplay_resume_messages
             )
     assert db.count_messages_for_conversation(cid) == 3
@@ -243,9 +243,9 @@ def test_original_replay_does_not_rewrite_or_recheck_later_source_changes(resume
     else:
         with db.transaction() as conn:
             conn.execute("DELETE FROM conversation_behavior_snapshots WHERE conversation_id = ?", (cid,))
-    before = (db.count_messages_for_conversation(cid), db.get_roleplay_resume_state(cid)["history_version"])
+    before = (db.count_messages_for_conversation(cid), db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"])
     assert append(db, cid, request) == receipt
-    assert (db.count_messages_for_conversation(cid), db.get_roleplay_resume_state(cid)["history_version"]) == before
+    assert (db.count_messages_for_conversation(cid), db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"]) == before
 
 
 @pytest.mark.parametrize(
@@ -313,11 +313,11 @@ def test_corrupted_original_receipt_cannot_claim_another_acknowledgment(resume_d
         conn.execute(
             "UPDATE messages SET history_admission_json = ? WHERE id = ?", (json.dumps(authority), "chosen-user")
         )
-    before = db.get_roleplay_resume_state(cid)["history_version"]
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"]
     with pytest.raises(RoleplayResumeConflictError) as caught:
         append(db, cid, request)
     assert caught.value.code == "idempotency_conflict"
-    assert db.get_roleplay_resume_state(cid)["history_version"] == before
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before
     assert db.count_messages_for_conversation(cid) == 3
 
 
@@ -397,7 +397,7 @@ def completion_request(db, cid):
 def test_prepare_generation_uses_frozen_prompt_exact_branch_and_saved_model(resume_db, monkeypatch):
     db, cid = resume_db
     request = completion_request(db, cid)
-    state = db.get_roleplay_resume_state(cid)
+    state = db.conversation_resume_store.get_roleplay_resume_state(cid)
     card_id = int(state["behavior_snapshot"]["payload"]["participants"][0]["source"]["id"])
     with db.transaction() as conn:
         conn.execute(
@@ -464,7 +464,7 @@ def test_prepare_generation_refuses_every_original_fence_drift(resume_db, mutati
             }
         )
     elif mutation == "settings":
-        db.upsert_conversation_settings(cid, db.get_roleplay_resume_state(cid)["settings"])
+        db.upsert_conversation_settings(cid, db.conversation_resume_store.get_roleplay_resume_state(cid)["settings"])
     elif mutation == "input-edit":
         db.update_message("chosen-user", {"content": "Different input"}, 1)
     elif mutation == "input-delete":
@@ -476,10 +476,10 @@ def test_prepare_generation_refuses_every_original_fence_drift(resume_db, mutati
     else:
         with db.transaction() as conn:
             conn.execute("DELETE FROM conversation_behavior_snapshots WHERE conversation_id = ?", (cid,))
-    before = (db.count_messages_for_conversation(cid), db.get_roleplay_resume_state(cid)["history_version"])
+    before = (db.count_messages_for_conversation(cid), db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"])
     with pytest.raises(RoleplayResumeConflictError):
         prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
-    assert (db.count_messages_for_conversation(cid), db.get_roleplay_resume_state(cid)["history_version"]) == before
+    assert (db.count_messages_for_conversation(cid), db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"]) == before
     assert db.get_message_by_id("chosen-assistant") is None
 
 
@@ -713,7 +713,7 @@ def test_saved_context_source_identity_is_distinct_from_fork_address(resume_db, 
     )
 
     db, cid = resume_db
-    state = db.get_roleplay_resume_state(cid)
+    state = db.conversation_resume_store.get_roleplay_resume_state(cid)
     original_source = state["behavior_snapshot"]["payload"]["participants"][0]["source"]["id"]
     if snapshot_bound:
         state["conversation"].update(
@@ -757,14 +757,14 @@ def test_resume_commit_saves_one_exact_reply_and_replays_original_receipt(resume
     request = completion_request(db, cid)
     prepared = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     content = "Original generated answer.\n  Keep spaces.  "
-    result = db.commit_roleplay_resume_generation(cid, prepared, content, owner_client_id="alice")
+    result = db.conversation_resume_store.commit_roleplay_resume_generation(cid, prepared, content, owner_client_id="alice")
     assert result["saved"] is True
     assert result["assistant_content"] == content
     assert result["assistant_message_id"] == "chosen-assistant"
     assert db.get_message_by_id("chosen-assistant")["parent_message_id"] == "chosen-user"
     assert db.count_messages_for_conversation(cid) == 4
     db.update_message("chosen-assistant", {"content": "Later edited answer"}, 1)
-    assert db.commit_roleplay_resume_generation(cid, prepared, content, owner_client_id="alice") == result
+    assert db.conversation_resume_store.commit_roleplay_resume_generation(cid, prepared, content, owner_client_id="alice") == result
     replay = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
     assert replay["completed"] == result
     assert db.count_messages_for_conversation(cid) == 4
@@ -804,7 +804,7 @@ def test_changes_during_generation_refuse_assistant_commit_without_a_branch(resu
             }
         )
     elif mutation == "settings":
-        db.upsert_conversation_settings(cid, db.get_roleplay_resume_state(cid)["settings"])
+        db.upsert_conversation_settings(cid, db.conversation_resume_store.get_roleplay_resume_state(cid)["settings"])
     elif mutation == "input-edit":
         db.update_message("chosen-user", {"content": "Another input"}, 1)
     elif mutation == "input-delete":
@@ -814,11 +814,11 @@ def test_changes_during_generation_refuse_assistant_commit_without_a_branch(resu
     else:
         with db.transaction() as conn:
             conn.execute("DELETE FROM conversation_behavior_snapshots WHERE conversation_id = ?", (cid,))
-    before = db.get_roleplay_resume_state(cid)["history_version"]
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"]
     with pytest.raises(RoleplayResumeConflictError):
-        db.commit_roleplay_resume_generation(cid, prepared, "Retained generated reply", owner_client_id="alice")
+        db.conversation_resume_store.commit_roleplay_resume_generation(cid, prepared, "Retained generated reply", owner_client_id="alice")
     assert db.get_message_by_id("chosen-assistant") is None
-    assert db.get_roleplay_resume_state(cid)["history_version"] == before
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before
 
 
 @pytest.mark.parametrize("recursive", [False, True])
@@ -854,7 +854,7 @@ def test_regex_timeout_rejects_resume_before_user_admission(resume_db, monkeypat
         return original(self, pattern, text)
 
     monkeypatch.setattr(WorldBookEntry, "_search_pattern", search)
-    before = db.get_roleplay_resume_state(cid)["history_version"]
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"]
     with pytest.raises(RoleplayResumeConflictError) as caught:
         append(
             db,
@@ -867,7 +867,7 @@ def test_regex_timeout_rejects_resume_before_user_admission(resume_db, monkeypat
         )
     assert caught.value.code == "resume_context_unsupported"
     assert db.get_message_by_id("timeout-user") is None
-    assert db.get_roleplay_resume_state(cid)["history_version"] == before
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before
 
 
 @pytest.mark.parametrize(
@@ -890,7 +890,7 @@ def test_materialized_note_controls_do_not_coerce_suppression(resume_db, key, va
     )
 
     db, cid = resume_db
-    state = db.get_roleplay_resume_state(cid)
+    state = db.conversation_resume_store.get_roleplay_resume_state(cid)
     settings = deepcopy(state["settings"])
     values = deepcopy(state["materialized_settings"]["values"])
     values["behavior_controls"]["author_note"][key] = value
@@ -922,11 +922,11 @@ def test_materialized_note_controls_do_not_coerce_suppression(resume_db, key, va
         )
         assert "Suppressed frozen note" not in str(prepared["messages"])
     else:
-        before = db.get_roleplay_resume_state(cid)["history_version"]
+        before = db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"]
         with pytest.raises(RoleplayResumeConflictError):
             append(db, cid, request)
         assert db.get_message_by_id("control-input") is None
-        assert db.get_roleplay_resume_state(cid)["history_version"] == before
+        assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before
 
 
 @pytest.mark.parametrize(
@@ -948,7 +948,7 @@ def test_original_completion_request_rejects_stored_numeric_coercion(resume_db, 
     db, cid = resume_db
     request = completion_request(db, cid)
     prepared = prepare_roleplay_resume(db, cid, request, owner_client_id="alice")
-    db.commit_roleplay_resume_generation(cid, prepared, "Original reply", owner_client_id="alice")
+    db.conversation_resume_store.commit_roleplay_resume_generation(cid, prepared, "Original reply", owner_client_id="alice")
     with db.transaction() as conn:
         raw = conn.execute(
             "SELECT history_admission_json FROM messages WHERE id = ?",
@@ -987,7 +987,7 @@ def test_unsupported_saved_sampling_refuses_before_input_admission(resume_db):
         provider="local-llm",
         model="local-test",
     )
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     assert before["resume_eligible"] is True
     assert before["effective_completion"]["sampling"]["repetition_penalty"] == 1.2
     with pytest.raises(RoleplayResumeConflictError, match="resume_sampling_unsupported"):
@@ -1001,7 +1001,7 @@ def test_unsupported_saved_sampling_refuses_before_input_admission(resume_db):
             },
         )
     assert db.get_message_by_id("sampling-user") is None
-    assert db.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
 
 
 @pytest.mark.parametrize("position", [None, {"mode": "depth", "depth": 1}])
@@ -1029,7 +1029,7 @@ def test_saved_note_position_preserves_first_present_alias(resume_db, position):
         conversation_settings=settings,
     )
     context, messages = build_roleplay_resume_messages(
-        db.get_roleplay_resume_state(cid), [{"role": "user", "content": "Continue."}]
+        db.conversation_resume_store.get_roleplay_resume_state(cid), [{"role": "user", "content": "Continue."}]
     )
     legacy = _inject_author_note_from_settings(
         [
@@ -1076,7 +1076,7 @@ def test_saved_builtin_presets_preserve_live_semantics_without_live_definitions(
         provider="local-llm",
         model="local-test",
     )
-    state = db.get_roleplay_resume_state(cid)
+    state = db.conversation_resume_store.get_roleplay_resume_state(cid)
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Reloaded current builtin behavior")
@@ -1113,7 +1113,7 @@ def test_old_note_alias_materialization_refuses_before_append(resume_db, monkeyp
             conversation_settings=settings,
         )
         with db.transaction() as conn:
-            state = db.get_roleplay_resume_state(cid, conn=conn)
+            state = db.conversation_resume_store.get_roleplay_resume_state(cid, conn=conn)
             rebuilt = factory.materialize_roleplay_behavior_settings(
                 conn,
                 conversation=state["conversation"],
@@ -1125,7 +1125,7 @@ def test_old_note_alias_materialization_refuses_before_append(resume_db, monkeyp
             db.upsert_conversation_settings(cid, {**state["settings"], "roleplayBehaviorV1": rebuilt}, conn=conn)
     if memory_only:
         with db.transaction() as conn:
-            state = db.get_roleplay_resume_state(cid, conn=conn)
+            state = db.conversation_resume_store.get_roleplay_resume_state(cid, conn=conn)
             merged = {**state["settings"], "promptPreset": "st_default"}
             rebuilt = factory.materialize_roleplay_behavior_settings(
                 conn,
@@ -1136,7 +1136,7 @@ def test_old_note_alias_materialization_refuses_before_append(resume_db, monkeyp
                 changed_keys={"promptPreset"},
             )
             db.upsert_conversation_settings(cid, {**merged, "roleplayBehaviorV1": rebuilt}, conn=conn)
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     assert before["resume_eligible"] is True
     values = before["materialized_settings"]["values"]
     assert values["memory"]["author_note_position"] == settings["authorNotePlacement"]
@@ -1153,7 +1153,7 @@ def test_old_note_alias_materialization_refuses_before_append(resume_db, monkeyp
             },
         )
     assert db.get_message_by_id("historical-input") is None
-    assert db.get_roleplay_resume_state(cid)["settings"] == before["settings"]
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["settings"] == before["settings"]
 
 
 @pytest.mark.parametrize(
@@ -1191,7 +1191,7 @@ def test_unrepresentable_provider_behavior_refuses_before_input(resume_db, provi
         sampling=sampling,
         conversation_settings=settings,
     )
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     assert before["resume_eligible"] is True
     with pytest.raises(RoleplayResumeConflictError, match=reason):
         append(
@@ -1204,7 +1204,7 @@ def test_unrepresentable_provider_behavior_refuses_before_input(resume_db, provi
             },
         )
     assert db.get_message_by_id("unsupported-provider-input") is None
-    assert db.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
 
 
 @pytest.mark.parametrize(
@@ -1272,7 +1272,7 @@ def test_vendor_history_tool_mapping_is_admitted_only_when_representable(resume_
         == call["extra_metadata" if legacy else "tool_calls"]
     )
     assert db.get_message_metadata("tool-result")["extra"] == result["extra_metadata"]
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     assert before["resume_eligible"] is True
     request = {
         "message_id": "tool-next-input",
@@ -1300,7 +1300,7 @@ def test_vendor_history_tool_mapping_is_admitted_only_when_representable(resume_
         with pytest.raises(RoleplayResumeConflictError, match="resume_context_unsupported"):
             append(db, cid, request)
         assert db.get_message_by_id("tool-next-input") is None
-        assert db.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
+        assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
 
 
 @pytest.mark.parametrize(
@@ -1359,7 +1359,7 @@ def test_resume_history_requires_closed_inert_tool_replay(resume_db, damage):
                 "tool_call_id": ("other-call" if damage == "unmatched-result" else "history-call"),
             },
         )
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     request = {
         "message_id": "closed-tool-input",
         "content": "Continue.",
@@ -1372,7 +1372,7 @@ def test_resume_history_requires_closed_inert_tool_replay(resume_db, damage):
         with pytest.raises(RoleplayResumeConflictError, match="resume_context_unsupported"):
             append(db, cid, request)
         assert db.get_message_by_id("closed-tool-input") is None
-        assert db.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
+        assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
 
 
 def test_character_creation_metadata_failure_rolls_back_initial_messages(resume_db, monkeypatch):
@@ -1456,7 +1456,7 @@ def test_anthropic_tool_history_must_retain_its_actual_provider_shape(resume_db,
             result,
         ],
     )
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     request = {
         "message_id": "shape-next-input",
         "content": "Continue.",
@@ -1469,7 +1469,7 @@ def test_anthropic_tool_history_must_retain_its_actual_provider_shape(resume_db,
         with pytest.raises(RoleplayResumeConflictError, match="resume_context_unsupported"):
             append(db, cid, request)
         assert db.get_message_by_id("shape-next-input") is None
-        assert db.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
+        assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
 
 
 def test_character_creation_failed_initial_insertion_rolls_back(resume_db, monkeypatch):
@@ -1604,7 +1604,7 @@ def test_unbacked_null_tool_result_refuses_before_new_input(resume_db, malformed
     if malformed:
         extra["content_placeholder_reason"] = "function_call"
     db.add_message_metadata("null-result", extra=extra)
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     request = {
         "message_id": "null-next-input",
         "content": "Continue.",
@@ -1614,7 +1614,7 @@ def test_unbacked_null_tool_result_refuses_before_new_input(resume_db, malformed
         with pytest.raises(RoleplayResumeConflictError, match="resume_context_unsupported"):
             append(db, cid, request)
         assert db.get_message_by_id("null-next-input") is None
-        assert db.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
+        assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
     else:
         assert append(db, cid, request)["parent_message_id"] == "null-result"
 
@@ -1683,7 +1683,7 @@ async def test_actual_saved_placeholder_is_checked_before_h1_input_admission(res
         "history_owner_client_id": "alice",
         "history_inputs": [await prepare_native_history_message(message, cid, _process_content_for_db_sync)],
     }
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     before_count = db.count_messages_for_conversation(cid)
 
     async def build():
@@ -1703,7 +1703,7 @@ async def test_actual_saved_placeholder_is_checked_before_h1_input_admission(res
             await build()
         assert failure.value.status_code == 409
         assert db.count_messages_for_conversation(cid) == before_count
-        assert db.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
+        assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before["history_version"]
     else:
         assert (await build())[4][-1]["content"] == "Next H1 input"
         assert db.count_messages_for_conversation(cid) == before_count + 1
@@ -1723,7 +1723,7 @@ def test_resume_history_byte_gate_precedes_full_payload_read(resume_db, monkeypa
         initial_messages=[{"id": "budget-prior", "sender": "assistant", "content": "😀"}],
     )
     assert db.get_message_metadata("budget-prior") is None
-    before = deepcopy(db.get_roleplay_resume_state(cid))
+    before = deepcopy(db.conversation_resume_store.get_roleplay_resume_state(cid))
     request = {"message_id": "budget-input", "content": "Continue", "expected": fence(db, cid)}
     monkeypatch.setattr(roleplay_resume_contract, "MAX_ROLEPLAY_PROMPT_BYTES", byte_limit)
     full_reads = []
@@ -1744,13 +1744,13 @@ def test_resume_history_byte_gate_precedes_full_payload_read(resume_db, monkeypa
     )
     assert db.get_message_by_id("budget-input") is None
     assert db.count_messages_for_conversation(cid) == 1
-    assert db.get_roleplay_resume_state(cid) == before
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid) == before
 
 
 def test_prepare_returns_rows_and_the_character_chat_wrapper_formats(resume_db):
     db, cid = resume_db
     request = completion_request(db, cid)
-    rows = db.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
+    rows = db.conversation_resume_store.prepare_roleplay_resume_generation(cid, request, owner_client_id="alice")
     assert set(rows) == {"conversation_id", "input_message_id", "input_message_version", "assistant_message_id",
                          "fence", "effective_completion", "history_authority", "state", "history"}
     assert isinstance(rows["history"], RoleplayResumeHistory) and rows["history"].authority == rows["history_authority"]
@@ -1761,24 +1761,24 @@ def test_prepare_returns_rows_and_the_character_chat_wrapper_formats(resume_db):
 
 def test_append_runs_the_injected_builder_before_inserting(resume_db):
     db, cid = resume_db
-    before = deepcopy(db.get_roleplay_resume_state(cid))
+    before = deepcopy(db.conversation_resume_store.get_roleplay_resume_state(cid))
     def refuse(state, history, proposed_input):
         assert (proposed_input, isinstance(history, RoleplayResumeHistory)) == ("Continue", True)
         raise RoleplayResumeConflictError("resume_context_too_large")
     with pytest.raises(RoleplayResumeConflictError) as caught:
-        db.append_idempotent_user_message(
+        db.conversation_resume_store.append_idempotent_user_message(
             cid, {"message_id": "refused-input", "content": "Continue", "expected": fence(db, cid)},
             owner_client_id="alice", build_messages=refuse,
         )
     assert caught.value.code == "resume_context_too_large"
     assert db.get_message_by_id("refused-input") is None
-    assert db.get_roleplay_resume_state(cid) == before
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid) == before
 
 
 def test_append_without_a_builder_is_a_type_error(resume_db):
     db, cid = resume_db
     with pytest.raises(TypeError, match="build_messages"):
-        db.append_idempotent_user_message(
+        db.conversation_resume_store.append_idempotent_user_message(
             cid, {"message_id": "no-builder", "content": "Continue", "expected": fence(db, cid)}, owner_client_id="alice"
         )
 
@@ -1791,7 +1791,7 @@ def test_formatting_history_selection_errors_become_resume_context_unsupported(r
         raise HistorySelectionError("legacy_review_required")
     monkeypatch.setattr(chat_service, "_format_selected_history_messages", legacy)
     with pytest.raises(RoleplayResumeConflictError) as caught:
-        format_roleplay_resume_messages(db.get_roleplay_resume_state(cid, owner_client_id="alice"),
+        format_roleplay_resume_messages(db.conversation_resume_store.get_roleplay_resume_state(cid, owner_client_id="alice"),
                                         RoleplayResumeHistory(snapshot=None, content=[], authority={}))
     assert caught.value.code == "resume_context_unsupported"
 

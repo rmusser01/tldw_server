@@ -342,8 +342,8 @@ def test_ensure_studio_document_accepts_identical_storage_normalized_retry(
     first = service._ensure_studio_document(**fields)
     first_accepted_at = first["accepted_provenance_json"]["accepted_at"]
     monkeypatch.setattr(
-        db,
-        "_get_current_utc_timestamp_iso",
+        db.ctx,
+        "utc_now_iso",
         lambda: "2031-01-02T03:04:05.000000Z",
     )
     second = service._ensure_studio_document(**fields)

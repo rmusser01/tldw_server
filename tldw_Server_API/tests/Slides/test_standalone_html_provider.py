@@ -644,9 +644,10 @@ async def test_unrelated_aggregate_unavailability_does_not_disable_stored_target
     [
         ({"is_enabled": False}, True, "standalone_html_provider_disabled"),
         ({"allowed_models": ["another-model"]}, True, "standalone_html_model_not_allowed"),
+        ({"denied_models": ["casesensitive-model"]}, True, "standalone_html_model_denied"),
         ({}, False, "standalone_html_provider_unavailable"),
     ],
-    ids=["provider-disabled", "model-not-allowed", "store-unavailable"],
+    ids=["provider-disabled", "model-not-allowed", "model-denied", "store-unavailable"],
 )
 async def test_an_admin_disabled_provider_or_model_fails_before_network(
     provider_module: ModuleType,

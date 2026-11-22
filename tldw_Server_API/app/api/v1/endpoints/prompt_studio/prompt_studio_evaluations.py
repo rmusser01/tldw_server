@@ -47,6 +47,7 @@ from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import Database
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     record_byok_missing_credentials,
@@ -96,7 +97,7 @@ _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS = (
 def _prompt_studio_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
     """Map credential policy/storage failures to bounded Prompt Studio responses."""
     code = getattr(exc, "policy_code", exc.code)
-    if code in {"provider_disabled", "model_not_allowed", "credential_scope_revoked"}:
+    if code in ADMIN_POLICY_CODES | {"credential_scope_revoked"}:
         message = (
             "The active credential scope is no longer available."
             if code == "credential_scope_revoked"

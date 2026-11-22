@@ -2032,7 +2032,7 @@ def test_start_new_chat_session_creates_atomic_resumable_snapshot(db, monkeypatc
     conv_id, _, _, _ = start_new_chat_session(db, char_id, "Alice")
 
     assert conv_id is not None
-    state = db.get_roleplay_resume_state(conv_id)
+    state = db.conversation_resume_store.get_roleplay_resume_state(conv_id)
     assert state["behavior_snapshot"]["status"] == "valid"
     assert state["resume_eligible"] is True
     assert state["settings_version"] == 1

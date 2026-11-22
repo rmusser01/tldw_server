@@ -468,7 +468,7 @@ def prepare_roleplay_resume(
     db: CharactersRAGDB, conversation_id: str, request: dict[str, Any], *, owner_client_id: str
 ) -> dict[str, Any]:
     """Freeze the owner-read rows from the store, then format the dispatch prompt here."""
-    prepared: dict[str, Any] = db.prepare_roleplay_resume_generation(  # type: ignore[attr-defined]
+    prepared: dict[str, Any] = db.conversation_resume_store.prepare_roleplay_resume_generation(  # type: ignore[attr-defined]
         conversation_id, request, owner_client_id=owner_client_id
     )
     if "completed" in prepared:

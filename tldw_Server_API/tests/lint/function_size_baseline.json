@@ -22,7 +22,7 @@
   "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced:_create_embedding_legacy": {"lines": 675, "params": 6, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced:create_embeddings_with_circuit_breaker": {"lines": 347, "params": 6, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified:batch_evaluate": {"lines": 547, "params": 5, "reason": null},
-  "tldw_Server_API.app.api.v1.endpoints.llm_providers:get_configured_providers": {"lines": 662, "params": 2, "reason": null},
+  "tldw_Server_API.app.api.v1.endpoints.llm_providers:get_configured_providers": {"lines": 664, "params": 3, "reason": "passes the requesting user's own-key handles through to the commercial listing (TASK-15583)"},
   "tldw_Server_API.app.api.v1.endpoints.media.document_references:_split_references_with_meta": {"lines": 360, "params": 2, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.media.document_references:get_document_references": {"lines": 387, "params": 9, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.media.process_audios:process_audios_endpoint": {"lines": 357, "params": 8, "reason": null},

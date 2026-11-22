@@ -29,9 +29,16 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.exceptions import ConversationSettingsTargetMissing
 
 if TYPE_CHECKING:
-    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 
 _CONVERSATION_SEARCH_FIELDS: tuple[str, ...] = ("title", "content")
+_ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
+_ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
+_ALLOWED_CONVERSATION_SEARCH_ORDER: tuple[str, ...] = ("bm25", "recency", "hybrid", "topic")
+_DEFAULT_CONVERSATION_STATE = "in-progress"
+_ALLOWED_CONVERSATION_ASSISTANT_KINDS: tuple[str, ...] = ("character", "persona")
+_ALLOWED_PERSONA_MEMORY_MODES: tuple[str, ...] = ("read_only", "read_write")
+_ALLOWED_SCOPE_TYPES: tuple[str, ...] = ("global", "workspace")
 
 
 
@@ -70,8 +77,8 @@ def _is_sha256_hex(value: Any) -> bool:
 class ConversationStore:
     """Focused persistence seam for conversation lifecycle and settings behavior."""
 
-    def __init__(self, db: CharactersRAGDB) -> None:
-        self._db = db
+    def __init__(self, ctx: ChaChaContext) -> None:
+        self._ctx = ctx
 
     @staticmethod
     def _result_row_to_dict(row: Any, result: Any | None = None) -> dict[str, Any] | None:
@@ -100,8 +107,8 @@ class ConversationStore:
 
     def _ensure_conversation_settings_table(self, *, connection: Any | None = None) -> None:
         """Ensure the conversation_settings table exists for the active backend."""
-        if self._db.backend_type == BackendType.SQLITE:
-            self._db.execute_query(
+        if self._ctx.backend_type == BackendType.SQLITE:
+            self._ctx.execute_query(
                 """
                 CREATE TABLE IF NOT EXISTS conversation_settings(
                   conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
@@ -115,10 +122,10 @@ class ConversationStore:
             )
             return
 
-        if self._db.backend_type == BackendType.POSTGRESQL:
-            if self._db.backend.table_exists("conversation_settings", connection=connection):
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
+            if self._ctx.backend.table_exists("conversation_settings", connection=connection):
                 return
-            self._db.backend.execute(
+            self._ctx.backend.execute(
                 """
                 CREATE TABLE IF NOT EXISTS conversation_settings(
                   conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
@@ -133,7 +140,7 @@ class ConversationStore:
 
         raise NotImplementedError(
             "conversation_settings table creation not supported for backend "
-            f"{self._db.backend_type.value}"
+            f"{self._ctx.backend_type.value}"
         )
 
     def upsert_conversation_settings(
@@ -154,9 +161,9 @@ class ConversationStore:
             if conn is None:
                 self._ensure_conversation_settings_table()
             payload = json.dumps(settings)
-            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
             with transaction as transaction_conn:
-                if self._db.backend_type == BackendType.POSTGRESQL:
+                if self._ctx.backend_type == BackendType.POSTGRESQL:
                     locked = transaction_conn.execute(
                         """
                         SELECT id FROM conversations
@@ -167,7 +174,7 @@ class ConversationStore:
                     ).fetchone()
                     if locked is None:
                         return False
-                if self._db._CURRENT_SCHEMA_VERSION < 65:
+                if self._ctx.code_schema_version < 65:
                     if expected_settings_version is not None:
                         raise ConflictError(
                             "Conversation settings versioning is unavailable before schema v65.",
@@ -261,8 +268,8 @@ class ConversationStore:
         """Fetch settings, returning None only for a missing row; raise on read failure."""
         try:
             self._ensure_conversation_settings_table()
-            if self._db.backend_type == BackendType.SQLITE:
-                cursor = self._db.execute_query(
+            if self._ctx.backend_type == BackendType.SQLITE:
+                cursor = self._ctx.execute_query(
                     "SELECT settings_json, settings_version, last_modified "
                     "FROM conversation_settings WHERE conversation_id = ?",
                     (conversation_id,),
@@ -272,7 +279,7 @@ class ConversationStore:
                     return None
                 settings_json, settings_version, last_modified = row
             else:
-                result = self._db.backend.execute(
+                result = self._ctx.backend.execute(
                     "SELECT settings_json, settings_version, last_modified "
                     "FROM conversation_settings WHERE conversation_id = %s",
                     (conversation_id,),
@@ -298,15 +305,15 @@ class ConversationStore:
 
     def _normalize_conversation_state(self, state: str | None) -> str:
         if state is None:
-            return self._db._DEFAULT_CONVERSATION_STATE
+            return _DEFAULT_CONVERSATION_STATE
         if not isinstance(state, str):
             raise InputError(f"Conversation state must be a string. Got: {state!r}")  # noqa: TRY003
         normalized = state.strip().lower()
         if not normalized:
             raise InputError("Conversation state cannot be empty.")  # noqa: TRY003
-        if normalized not in self._db._ALLOWED_CONVERSATION_STATES:
+        if normalized not in _ALLOWED_CONVERSATION_STATES:
             raise InputError(
-                f"Invalid conversation state '{state}'. Allowed: {', '.join(self._db._ALLOWED_CONVERSATION_STATES)}"
+                f"Invalid conversation state '{state}'. Allowed: {', '.join(_ALLOWED_CONVERSATION_STATES)}"
             )  # noqa: TRY003
         return normalized
 
@@ -320,10 +327,10 @@ class ConversationStore:
         normalized = character_scope.strip().lower()
         if not normalized:
             raise InputError("Conversation character scope cannot be empty.")  # noqa: TRY003
-        if normalized not in self._db._ALLOWED_CONVERSATION_CHARACTER_SCOPES:
+        if normalized not in _ALLOWED_CONVERSATION_CHARACTER_SCOPES:
             raise InputError(
                 "Invalid conversation character scope "
-                f"'{character_scope}'. Allowed: {', '.join(self._db._ALLOWED_CONVERSATION_CHARACTER_SCOPES)}"
+                f"'{character_scope}'. Allowed: {', '.join(_ALLOWED_CONVERSATION_CHARACTER_SCOPES)}"
             )  # noqa: TRY003
         return normalized
 
@@ -365,9 +372,9 @@ class ConversationStore:
         if scope_type is None:
             scope_type = "global"
         scope_type = scope_type.strip().lower()
-        if scope_type not in self._db._ALLOWED_SCOPE_TYPES:
+        if scope_type not in _ALLOWED_SCOPE_TYPES:
             raise InputError(
-                f"Invalid scope_type '{scope_type}'. Allowed: {', '.join(self._db._ALLOWED_SCOPE_TYPES)}"
+                f"Invalid scope_type '{scope_type}'. Allowed: {', '.join(_ALLOWED_SCOPE_TYPES)}"
             )  # noqa: TRY003
         if scope_type == "workspace":
             if not workspace_id:
@@ -385,9 +392,9 @@ class ConversationStore:
         persona_memory_mode: Any,
     ) -> tuple[str | None, str | None, int | None, str | None]:
         """Canonicalize the effective assistant binding, retaining Character precedence."""
-        normalized_kind = self._db._normalize_nullable_text(assistant_kind)
-        normalized_assistant_id = self._db._normalize_nullable_text(assistant_id)
-        normalized_memory_mode = self._db._normalize_nullable_text(persona_memory_mode)
+        normalized_kind = self._ctx.normalize_nullable_text(assistant_kind)
+        normalized_assistant_id = self._ctx.normalize_nullable_text(assistant_id)
+        normalized_memory_mode = self._ctx.normalize_nullable_text(persona_memory_mode)
 
         if normalized_kind is None:
             normalized_kind = "character" if character_id is not None else None
@@ -399,9 +406,9 @@ class ConversationStore:
             )  # noqa: TRY003
 
         normalized_kind = normalized_kind.strip().lower()
-        if normalized_kind not in self._db._ALLOWED_CONVERSATION_ASSISTANT_KINDS:
+        if normalized_kind not in _ALLOWED_CONVERSATION_ASSISTANT_KINDS:
             raise InputError(
-                f"Invalid assistant_kind '{normalized_kind}'. Allowed: {', '.join(self._db._ALLOWED_CONVERSATION_ASSISTANT_KINDS)}"
+                f"Invalid assistant_kind '{normalized_kind}'. Allowed: {', '.join(_ALLOWED_CONVERSATION_ASSISTANT_KINDS)}"
             )  # noqa: TRY003
 
         if normalized_kind == "character":
@@ -431,9 +438,9 @@ class ConversationStore:
 
         if normalized_memory_mode is not None:
             normalized_memory_mode = normalized_memory_mode.strip().lower()
-            if normalized_memory_mode not in self._db._ALLOWED_PERSONA_MEMORY_MODES:
+            if normalized_memory_mode not in _ALLOWED_PERSONA_MEMORY_MODES:
                 raise InputError(
-                    f"Invalid persona_memory_mode '{normalized_memory_mode}'. Allowed: {', '.join(self._db._ALLOWED_PERSONA_MEMORY_MODES)}"
+                    f"Invalid persona_memory_mode '{normalized_memory_mode}'. Allowed: {', '.join(_ALLOWED_PERSONA_MEMORY_MODES)}"
                 )  # noqa: TRY003
 
         return "persona", normalized_assistant_id, None, normalized_memory_mode
@@ -479,8 +486,8 @@ class ConversationStore:
         Returns:
             True only for the exact placeholder with no persona profile behind it.
         """
-        kind = self._db._normalize_nullable_text(assistant_kind)
-        identity = self._db._normalize_nullable_text(assistant_id)
+        kind = self._ctx.normalize_nullable_text(assistant_kind)
+        identity = self._ctx.normalize_nullable_text(assistant_id)
         if (
             character_id is not None
             or kind is None
@@ -488,9 +495,9 @@ class ConversationStore:
             or identity != RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID
         ):
             return False
-        profile = self._db.get_persona_profile(
+        profile = self._ctx.db.get_persona_profile(
             RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID,
-            user_id=self._db.owner_user_id,
+            user_id=self._ctx.owner_user_id,
             include_deleted=True,
         )
         return profile is None
@@ -521,20 +528,20 @@ class ConversationStore:
         if create_request_fingerprint is not None and not _is_sha256_hex(create_request_fingerprint):
             raise InputError("create_request_fingerprint must be a lowercase SHA-256 hex digest.")
         startup_json = encode_assistant_startup(assistant_startup) if assistant_startup is not None else None
-        conv_id = conv_data.get("id") or self._db._generate_uuid()
+        conv_id = conv_data.get("id") or self._ctx.new_uuid()
         root_id = conv_data.get("root_id") or conv_id
 
-        client_id = conv_data.get("client_id") or self._db.client_id
+        client_id = conv_data.get("client_id") or self._ctx.client_id
         if not client_id:
             raise InputError(
                 "Client ID is required for conversation (either in conv_data or DB instance)."
             )  # noqa: TRY003
 
         state = self._normalize_conversation_state(conv_data.get("state"))
-        topic_label = self._db._normalize_nullable_text(conv_data.get("topic_label"))
-        cluster_id = self._db._normalize_nullable_text(conv_data.get("cluster_id"))
-        source = self._db._normalize_nullable_text(conv_data.get("source"))
-        external_ref = self._db._normalize_nullable_text(conv_data.get("external_ref"))
+        topic_label = self._ctx.normalize_nullable_text(conv_data.get("topic_label"))
+        cluster_id = self._ctx.normalize_nullable_text(conv_data.get("cluster_id"))
+        source = self._ctx.normalize_nullable_text(conv_data.get("source"))
+        external_ref = self._ctx.normalize_nullable_text(conv_data.get("external_ref"))
         assistant_kind, assistant_id, character_id, persona_memory_mode = (
             self._normalize_conversation_assistant_identity(
                 character_id=conv_data.get("character_id"),
@@ -548,7 +555,7 @@ class ConversationStore:
             conv_data.get("workspace_id"),
         )
 
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._ctx.utc_now_iso()
         # Only client-id creates name the fingerprint column, so ordinary inserts are unchanged.
         fingerprint_column = ", create_request_fingerprint" if create_request_fingerprint is not None else ""
         fingerprint_placeholder = ", ?" if create_request_fingerprint is not None else ""
@@ -560,7 +567,7 @@ class ConversationStore:
                                            scope_type, workspace_id, assistant_startup_json{fingerprint_column}) \
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{fingerprint_placeholder}) \
                 """  # nosec B608 - fixed column names, values are bound parameters
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             params = (
                 conv_id,
                 root_id,
@@ -615,7 +622,7 @@ class ConversationStore:
         if create_request_fingerprint is not None:
             params = (*params, create_request_fingerprint)
         try:
-            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
             with transaction as transaction_conn:
                 transaction_conn.execute(query, params)
             logger.info(f"Added conversation ID: {conv_id}.")
@@ -648,7 +655,7 @@ class ConversationStore:
             "SELECT * FROM conversations WHERE id = ? AND deleted = 0"
         )
         try:
-            cursor = self._db.execute_query(query, (conversation_id,), read_only=True)
+            cursor = self._ctx.execute_query(query, (conversation_id,), read_only=True)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError as exc:
@@ -659,7 +666,7 @@ class ConversationStore:
         self, conversation_id: str, destination: tuple[str, str | None], *, conn: Any,
     ) -> bool:
         """Fence receipt-bound admission before any explicit or implicit chat lock."""
-        store = self._db.workspace_chat_startups
+        store = self._ctx.db.workspace_chat_startups
         associated = store.has_receipt(conversation_id, conn=conn)
         if associated and destination[0] == "workspace":
             workspace = store.lock_receipt_workspace(destination[1], conn=conn)
@@ -676,19 +683,19 @@ class ConversationStore:
 
         owned = True
         try:
-            self._db.workspace_chat_startups.require_outermost()
+            self._ctx.db.workspace_chat_startups.require_outermost()
         except WorkspaceStartupError:
             owned = False
         for attempt in range(2):
             try:
-                with self._db.transaction(preserve_existing=True) as conn:
+                with self._ctx.transaction(preserve_existing=True) as conn:
                     result = mutation(conn)
             except _ReceiptAdmissionChanged as error:
                 if not owned or attempt == 1:
                     raise
                 # Managers can log a failed rollback without closing the unit.
                 try:
-                    self._db.workspace_chat_startups.require_outermost()
+                    self._ctx.db.workspace_chat_startups.require_outermost()
                 except WorkspaceStartupError:
                     raise error from None
             else:
@@ -699,7 +706,7 @@ class ConversationStore:
         self, conversation_id: str, preflight: Any, current: Any, associated: bool, *, conn: Any,
     ) -> None:
         """Never discover and acquire a new Workspace lock after locking the chat."""
-        final_associated = self._db.workspace_chat_startups.has_receipt(conversation_id, conn=conn)
+        final_associated = self._ctx.db.workspace_chat_startups.has_receipt(conversation_id, conn=conn)
         if final_associated != associated or ((associated or final_associated) and (
             preflight is None or current is None
             or (preflight["scope_type"], preflight["workspace_id"]) != (current["scope_type"], current["workspace_id"])
@@ -749,7 +756,7 @@ class ConversationStore:
         )
         normalized_scope_type, normalized_workspace_id = self._normalize_scope(scope_type, workspace_id)
         normalized_state = self._normalize_sync_conversation_state(state)
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._ctx.utc_now_iso()
         normalized_title = None if title is None else str(title)
         normalized_root_id = str(root_id).strip() if root_id else normalized_id
 
@@ -771,10 +778,10 @@ class ConversationStore:
             persona_memory_mode,
             normalized_title,
             normalized_state,
-            self._db._normalize_nullable_text(topic_label),
-            self._db._normalize_nullable_text(cluster_id),
-            self._db._normalize_nullable_text(source),
-            self._db._normalize_nullable_text(external_ref),
+            self._ctx.normalize_nullable_text(topic_label),
+            self._ctx.normalize_nullable_text(cluster_id),
+            self._ctx.normalize_nullable_text(source),
+            self._ctx.normalize_nullable_text(external_ref),
             rating,
             now,
             now,
@@ -796,7 +803,7 @@ class ConversationStore:
                 inserted = conn.execute(query, params)
                 if inserted.rowcount == 0:
                     current_query = "SELECT * FROM conversations WHERE id = ?"
-                    if self._db.backend_type == BackendType.POSTGRESQL:
+                    if self._ctx.backend_type == BackendType.POSTGRESQL:
                         current_query += " FOR UPDATE"
                     current = conn.execute(current_query, (normalized_id,)).fetchone()
                     if current is None:
@@ -831,7 +838,7 @@ class ConversationStore:
                         (*params[1:13], *params[14:], startup_json, normalized_id),
                     )
                     after = conn.execute("SELECT * FROM conversations WHERE id = ?", (normalized_id,)).fetchone()
-                    self._db.workspace_chat_startups.invalidate_changed_binding(
+                    self._ctx.db.workspace_chat_startups.invalidate_changed_binding(
                         normalized_id, dict(current), dict(after), conn=conn,
                     )
             self._run_receipt_admission(replace)
@@ -862,7 +869,7 @@ class ConversationStore:
         if object_revision < 1:
             raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
 
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._ctx.utc_now_iso()
         query = """
             UPDATE conversations
                SET deleted = ?,
@@ -876,7 +883,7 @@ class ConversationStore:
                AND native_creation_operation_id IS NULL
         """
         try:
-            with self._db.transaction() as conn:
+            with self._ctx.transaction() as conn:
                 cursor = conn.execute(query, (True, now, object_revision, sync_client_id, normalized_id))
                 if cursor.rowcount == 0:
                     protected = conn.execute(
@@ -950,10 +957,10 @@ class ConversationStore:
             raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
 
         owner = str(sync_client_id)
-        lock_suffix = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
-        now = self._db._get_current_utc_timestamp_iso()
+        lock_suffix = " FOR UPDATE" if self._ctx.backend_type == BackendType.POSTGRESQL else ""
+        now = self._ctx.utc_now_iso()
         try:
-            with self._db.transaction() as conn:
+            with self._ctx.transaction() as conn:
                 row = conn.execute(
                     "SELECT deleted, scope_type, required_projection_version, native_bundle_json, "
                     "native_creation_operation_kind, native_creation_operation_id "
@@ -998,7 +1005,7 @@ class ConversationStore:
         normalized_id = str(conversation_id).strip()
         if not normalized_id:
             return False
-        row = self._db.execute_query(
+        row = self._ctx.execute_query(
             "SELECT scope_type, required_projection_version, native_bundle_json, "
             "native_creation_operation_kind, native_creation_operation_id "
             "FROM conversations WHERE id = ? AND client_id = ?",
@@ -1029,13 +1036,13 @@ class ConversationStore:
         include_deleted: bool = False,
     ) -> dict[str, Any] | None:
         """Fetch one conversation by imported source identity scoped to a client."""
-        normalized_source = self._db._normalize_nullable_text(source)
-        normalized_ref = self._db._normalize_nullable_text(external_ref)
+        normalized_source = self._ctx.normalize_nullable_text(source)
+        normalized_ref = self._ctx.normalize_nullable_text(external_ref)
         if not normalized_source or not normalized_ref:
             return None
 
-        client_filter = self._db.client_id if client_id is None else client_id
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        client_filter = self._ctx.client_id if client_id is None else client_id
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             if client_filter is not None and not include_deleted:
                 query = (
                     "SELECT * FROM conversations "
@@ -1065,7 +1072,7 @@ class ConversationStore:
                 )
                 params = [normalized_source, normalized_ref]
             try:
-                result = self._db.backend.execute(query, tuple(params))
+                result = self._ctx.backend.execute(query, tuple(params))
                 return self._result_row_to_dict(result.first, result)
             except CharactersRAGDBError as exc:
                 logger.error(f"Database error fetching conversation source ref {normalized_source}:{normalized_ref}: {exc}")
@@ -1100,7 +1107,7 @@ class ConversationStore:
             )
             params = [normalized_source, normalized_ref]
         try:
-            cursor = self._db.execute_query(query, tuple(params))
+            cursor = self._ctx.execute_query(query, tuple(params))
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError as exc:
@@ -1114,12 +1121,12 @@ class ConversationStore:
         include_deleted: bool = False,
     ) -> bool:
         """Return whether an exact conversation title exists for the selected client."""
-        normalized_title = self._db._normalize_nullable_text(title)
+        normalized_title = self._ctx.normalize_nullable_text(title)
         if not normalized_title:
             return False
 
-        client_filter = self._db.client_id if client_id is None else client_id
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        client_filter = self._ctx.client_id if client_id is None else client_id
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             if client_filter is not None and not include_deleted:
                 query = (
                     "SELECT id FROM conversations "
@@ -1137,7 +1144,7 @@ class ConversationStore:
                 query = "SELECT id FROM conversations WHERE title = %s LIMIT 1"
                 params = [normalized_title]
             try:
-                result = self._db.backend.execute(query, tuple(params))
+                result = self._ctx.backend.execute(query, tuple(params))
                 return bool(result.first)
             except CharactersRAGDBError as exc:
                 logger.error(f"Database error checking conversation title {normalized_title}: {exc}")
@@ -1156,7 +1163,7 @@ class ConversationStore:
             query = "SELECT id FROM conversations WHERE title = ? LIMIT 1"
             params = [normalized_title]
         try:
-            cursor = self._db.execute_query(query, tuple(params))
+            cursor = self._ctx.execute_query(query, tuple(params))
             return cursor.fetchone() is not None
         except CharactersRAGDBError as exc:
             logger.error(f"Database error checking conversation title {normalized_title}: {exc}")
@@ -1169,7 +1176,7 @@ class ConversationStore:
         offset: int = 0,
         client_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        client_filter = self._db.client_id if client_id is None else client_id
+        client_filter = self._ctx.client_id if client_id is None else client_id
         query = "SELECT * FROM conversations WHERE character_id = ? AND deleted = 0"
         params: list[Any] = [character_id]
         if client_filter is not None:
@@ -1178,7 +1185,7 @@ class ConversationStore:
         query += " ORDER BY last_modified DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         try:
-            cursor = self._db.execute_query(query, tuple(params))
+            cursor = self._ctx.execute_query(query, tuple(params))
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as exc:
             logger.error(f"Database error fetching conversations for character ID {character_id}: {exc}")
@@ -1204,7 +1211,7 @@ class ConversationStore:
         character_scope_clause = self._conversation_character_scope_clause(character_scope)
         if character_scope_clause:
             clauses.append(character_scope_clause)
-        normalized_workspace_id = self._db._normalize_nullable_text(workspace_id)
+        normalized_workspace_id = self._ctx.normalize_nullable_text(workspace_id)
         normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
         clauses.append("scope_type = ?")
         params.append(normalized_scope)
@@ -1213,7 +1220,7 @@ class ConversationStore:
             params.append(normalized_workspace_id)
         query = f"SELECT COUNT(*) as cnt FROM conversations WHERE {' AND '.join(clauses)}"  # nosec B608
         try:
-            cursor = self._db.execute_query(query, tuple(params))
+            cursor = self._ctx.execute_query(query, tuple(params))
             row = cursor.fetchone()
             return int(row["cnt"] if row else 0)
         except CharactersRAGDBError as exc:
@@ -1243,7 +1250,7 @@ class ConversationStore:
         character_scope_clause = self._conversation_character_scope_clause(character_scope)
         if character_scope_clause:
             clauses.append(character_scope_clause)
-        normalized_workspace_id = self._db._normalize_nullable_text(workspace_id)
+        normalized_workspace_id = self._ctx.normalize_nullable_text(workspace_id)
         normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
         clauses.append("scope_type = ?")
         params.append(normalized_scope)
@@ -1257,7 +1264,7 @@ class ConversationStore:
         )
         params.extend([limit, offset])
         try:
-            cursor = self._db.execute_query(query, tuple(params), read_only=True)
+            cursor = self._ctx.execute_query(query, tuple(params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as exc:
             logger.error(f"Database error listing conversations for client_id {client_id}: {exc}")
@@ -1278,7 +1285,7 @@ class ConversationStore:
             deleted_clause = "1 = 1"
         else:
             deleted_clause = "deleted = 0"
-        normalized_workspace_id = self._db._normalize_nullable_text(workspace_id)
+        normalized_workspace_id = self._ctx.normalize_nullable_text(workspace_id)
         normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
         query = (
             f"SELECT COUNT(1) FROM conversations WHERE client_id = ? AND character_id = ? AND {deleted_clause} "  # nosec B608
@@ -1289,7 +1296,7 @@ class ConversationStore:
             query += " AND workspace_id = ?"
             params.append(normalized_workspace_id)
         try:
-            cursor = self._db.execute_query(query, tuple(params))
+            cursor = self._ctx.execute_query(query, tuple(params))
             row = cursor.fetchone()
             if row is None:
                 return 0
@@ -1306,7 +1313,7 @@ class ConversationStore:
     def get_conversation_cluster(self, cluster_id: str) -> dict[str, Any] | None:
         query = "SELECT * FROM conversation_clusters WHERE cluster_id = ?"
         try:
-            cursor = self._db.execute_query(query, (cluster_id,))
+            cursor = self._ctx.execute_query(query, (cluster_id,))
             row = cursor.fetchone()
             if not row:
                 return None
@@ -1340,7 +1347,7 @@ class ConversationStore:
         else:
             deleted_clause = "deleted = 0"
 
-        normalized_workspace_id = self._db._normalize_nullable_text(workspace_id)
+        normalized_workspace_id = self._ctx.normalize_nullable_text(workspace_id)
         normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
         query = (
             "SELECT * FROM conversations "  # nosec B608
@@ -1354,7 +1361,7 @@ class ConversationStore:
         query += "ORDER BY last_modified DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         try:
-            cursor = self._db.execute_query(query, tuple(params))
+            cursor = self._ctx.execute_query(query, tuple(params))
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as exc:
             logger.error(
@@ -1399,12 +1406,12 @@ class ConversationStore:
                 tag_val = tag_val.astimezone(timezone.utc).isoformat()
             update_data["topic_last_tagged_at"] = tag_val
 
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._ctx.utc_now_iso()
 
         try:
-            with self._db.transaction() as conn:
+            with self._ctx.transaction() as conn:
                 current_query = "SELECT * FROM conversations WHERE id = ?"
-                if self._db.backend_type == BackendType.POSTGRESQL:
+                if self._ctx.backend_type == BackendType.POSTGRESQL:
                     current_query += " FOR UPDATE"
                 current_state = conn.execute(
                     current_query,
@@ -1490,7 +1497,7 @@ class ConversationStore:
                     params_for_set_clause.append(update_data["state"])
                 if "topic_label" in update_data:
                     fields_to_update_sql.append("topic_label = ?")
-                    params_for_set_clause.append(self._db._normalize_nullable_text(update_data.get("topic_label")))
+                    params_for_set_clause.append(self._ctx.normalize_nullable_text(update_data.get("topic_label")))
                 if "topic_label_source" in update_data:
                     fields_to_update_sql.append("topic_label_source = ?")
                     params_for_set_clause.append(update_data.get("topic_label_source"))
@@ -1500,17 +1507,17 @@ class ConversationStore:
                 if "topic_last_tagged_message_id" in update_data:
                     fields_to_update_sql.append("topic_last_tagged_message_id = ?")
                     params_for_set_clause.append(
-                        self._db._normalize_nullable_text(update_data.get("topic_last_tagged_message_id"))
+                        self._ctx.normalize_nullable_text(update_data.get("topic_last_tagged_message_id"))
                     )
                 if "cluster_id" in update_data:
                     fields_to_update_sql.append("cluster_id = ?")
-                    params_for_set_clause.append(self._db._normalize_nullable_text(update_data.get("cluster_id")))
+                    params_for_set_clause.append(self._ctx.normalize_nullable_text(update_data.get("cluster_id")))
                 if "source" in update_data:
                     fields_to_update_sql.append("source = ?")
-                    params_for_set_clause.append(self._db._normalize_nullable_text(update_data.get("source")))
+                    params_for_set_clause.append(self._ctx.normalize_nullable_text(update_data.get("source")))
                 if "external_ref" in update_data:
                     fields_to_update_sql.append("external_ref = ?")
-                    params_for_set_clause.append(self._db._normalize_nullable_text(update_data.get("external_ref")))
+                    params_for_set_clause.append(self._ctx.normalize_nullable_text(update_data.get("external_ref")))
 
                 if assistant_update_requested:
                     binding = (
@@ -1586,7 +1593,7 @@ class ConversationStore:
 
                 if assistant_update_requested:
                     after = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
-                    self._db.workspace_chat_startups.invalidate_changed_binding(
+                    self._ctx.db.workspace_chat_startups.invalidate_changed_binding(
                         conversation_id, dict(current_state), dict(after), conn=conn,
                     )
 
@@ -1629,24 +1636,24 @@ class ConversationStore:
         Trash, and ``restore_conversation`` brings back exactly the messages
         that were active when it was trashed.
         """
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._ctx.utc_now_iso()
         next_version_val = expected_version + 1
         query = (
             "UPDATE conversations SET deleted = 1, last_modified = ?, version = ?, client_id = ? "
             "WHERE id = ? AND version = ? AND deleted = 0"
         )
-        params = (now, next_version_val, self._db.client_id, conversation_id, expected_version)
+        params = (now, next_version_val, self._ctx.client_id, conversation_id, expected_version)
 
         try:
-            with self._db.transaction() as conn:
-                self._db.native_forks.mark_child_gone(self._db.client_id, conversation_id, conn=conn)
+            with self._ctx.transaction() as conn:
+                self._ctx.db.native_forks.mark_child_gone(self._ctx.client_id, conversation_id, conn=conn)
                 try:
-                    current_db_version = self._db._get_current_db_version(
+                    current_db_version = self._ctx.current_db_version(
                         conn,
                         "conversations",
                         "id",
                         conversation_id,
-                        owner_client_id=self._db.client_id,
+                        owner_client_id=self._ctx.client_id,
                     )
                 except ConflictError:
                     record_status = conn.execute(
@@ -1708,14 +1715,14 @@ class ConversationStore:
         Only the conversation row is undeleted. Message ``deleted`` flags are
         not touched, so messages deleted individually stay deleted.
         """
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._ctx.utc_now_iso()
         next_version_val = expected_version + 1
         query = (
             "UPDATE conversations "
             "SET deleted = 0, last_modified = ?, version = ?, client_id = ? "
             "WHERE id = ? AND version = ? AND deleted = 1"
         )
-        params = (now, next_version_val, self._db.client_id, conversation_id, expected_version)
+        params = (now, next_version_val, self._ctx.client_id, conversation_id, expected_version)
 
         try:
             def restore(conn: Any) -> bool:
@@ -1744,20 +1751,20 @@ class ConversationStore:
                 )
                 protected = any(preflight[column] is not None for column in protected_columns)
                 if protected:
-                    if preflight["client_id"] != self._db.client_id:
+                    if preflight["client_id"] != self._ctx.client_id:
                         raise ConflictError("native_conversation_owner_mismatch", entity="conversations", entity_id=conversation_id)
                     if preflight["scope_type"] == "workspace":
-                        workspace_lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+                        workspace_lock = " FOR UPDATE" if self._ctx.backend_type == BackendType.POSTGRESQL else ""
                         workspace = conn.execute(
                             "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = ? "
                             "AND system_operation_state IS NULL AND native_chat_admission_closed = ?" + workspace_lock,  # nosec B608 - fixed backend-only lock suffix.
-                            (preflight["workspace_id"], self._db.client_id, False, False),
+                            (preflight["workspace_id"], self._ctx.client_id, False, False),
                         ).fetchone()
                         if workspace is None:
                             raise ConflictError("workspace_native_unavailable", entity="workspaces", entity_id=preflight["workspace_id"])
                     elif preflight["scope_type"] != "global":
                         raise ConflictError("native_conversation_scope_invalid", entity="conversations", entity_id=conversation_id)
-                conversation_lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+                conversation_lock = " FOR UPDATE" if self._ctx.backend_type == BackendType.POSTGRESQL else ""
                 record_status = conn.execute(
                     f"SELECT {restore_columns} FROM conversations WHERE id = ?{conversation_lock}",  # nosec B608 - fixed column list and backend-only lock suffix.
                     (conversation_id,),
@@ -1834,10 +1841,10 @@ class ConversationStore:
     def hard_delete_conversation(self, conversation_id: str) -> bool:
         """Burn native and Workspace receipts in their shared lock order before deletion."""
         try:
-            with self._db.transaction() as conn:
-                self._db.native_forks.mark_child_gone(self._db.client_id, conversation_id, conn=conn)
-                self._db.workspace_chat_startups.lock_conversation(conversation_id, conn=conn)
-                self._db.workspace_chat_startups.mark_hard_deleted(conversation_id, conn=conn)
+            with self._ctx.transaction() as conn:
+                self._ctx.db.native_forks.mark_child_gone(self._ctx.client_id, conversation_id, conn=conn)
+                self._ctx.db.workspace_chat_startups.lock_conversation(conversation_id, conn=conn)
+                self._ctx.db.workspace_chat_startups.mark_hard_deleted(conversation_id, conn=conn)
                 rowcount = conn.execute(
                     "DELETE FROM conversations WHERE id = ?",
                     (conversation_id,),
@@ -1860,7 +1867,7 @@ class ConversationStore:
             logger.warning("Empty title_query provided for conversation search. Returning empty list.")
             return []
 
-        client_filter = self._db.client_id if client_id is None else client_id
+        client_filter = self._ctx.client_id if client_id is None else client_id
         normalized_character_scope = self._normalize_conversation_character_scope(character_scope)
 
         def _title_search_sort_key(row: dict[str, Any]) -> tuple[float, float, str]:
@@ -1878,7 +1885,7 @@ class ConversationStore:
             recency_key = -(sort_dt.astimezone(timezone.utc).timestamp()) if sort_dt is not None else 0.0
             return (-(row.get("bm25_norm") or 0), recency_key, row.get("id") or "")
 
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             tsquery = FTSQueryTranslator.normalize_query(title_query, "postgresql")
             if not tsquery:
                 logger.debug("Conversation title query normalized to empty tsquery for input '{}'", title_query)
@@ -1908,7 +1915,7 @@ class ConversationStore:
             if filters:
                 base_query += " AND " + " AND ".join(filters)
 
-            cursor = self._db.execute_query(base_query, tuple(params_list))
+            cursor = self._ctx.execute_query(base_query, tuple(params_list))
             rows = [dict(row) for row in cursor.fetchall()]
             if not rows:
                 return []
@@ -1951,7 +1958,7 @@ class ConversationStore:
             WHERE {where_clause}
         """.format_map(locals())  # nosec B608
 
-        cursor = self._db.execute_query(select_query, tuple(params_filters))
+        cursor = self._ctx.execute_query(select_query, tuple(params_filters))
         rows = [dict(row) for row in cursor.fetchall()]
         if not rows:
             return []
@@ -1971,10 +1978,10 @@ class ConversationStore:
         normalized = order_by.strip().lower()
         if not normalized:
             raise InputError("Conversation search order cannot be empty.")  # noqa: TRY003
-        if normalized not in self._db._ALLOWED_CONVERSATION_SEARCH_ORDER:
+        if normalized not in _ALLOWED_CONVERSATION_SEARCH_ORDER:
             raise InputError(
                 "Invalid conversation search order "
-                f"'{order_by}'. Allowed: {', '.join(self._db._ALLOWED_CONVERSATION_SEARCH_ORDER)}"
+                f"'{order_by}'. Allowed: {', '.join(_ALLOWED_CONVERSATION_SEARCH_ORDER)}"
             )  # noqa: TRY003
         return normalized
 
@@ -2027,7 +2034,7 @@ class ConversationStore:
                 )
             )
 
-        normalized_workspace_id = self._db._normalize_nullable_text(workspace_id)
+        normalized_workspace_id = self._ctx.normalize_nullable_text(workspace_id)
         normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
         filters.append(f"{alias}.scope_type = ?")
         params.append(normalized_scope)
@@ -2132,7 +2139,7 @@ class ConversationStore:
         """
         probe = f"SELECT 1 FROM {fts_table} WHERE {fts_table} MATCH ? LIMIT 1"  # nosec B608 - fixed table names
         try:
-            self._db.get_connection().execute(probe, (query,)).fetchone()
+            self._ctx.get_connection().execute(probe, (query,)).fetchone()
         except sqlite3.OperationalError as exc:
             literal_query = self._sqlite_fts_literal_for_operational_error(query, exc)
             if literal_query is None:
@@ -2162,7 +2169,7 @@ class ConversationStore:
         params: list[Any] = []
         owner_clause = " AND mc.client_id = ?" if client_filter is not None else ""
 
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             tsquery = FTSQueryTranslator.normalize_query(query, "postgresql")
             if not tsquery:
                 return None
@@ -2226,7 +2233,7 @@ class ConversationStore:
         messages: dict[Any, dict[str, Any]] = {}
         if refs:
             placeholders = ",".join(["?"] * len(refs))
-            if self._db.backend_type == BackendType.POSTGRESQL:
+            if self._ctx.backend_type == BackendType.POSTGRESQL:
                 message_query = (
                     "SELECT m.id AS match_ref, m.id AS message_id, m.content AS content "  # nosec B608
                     f"FROM messages m WHERE m.id IN ({placeholders}) AND m.deleted = FALSE"
@@ -2236,7 +2243,7 @@ class ConversationStore:
                     "SELECT m.rowid AS match_ref, m.id AS message_id, m.content AS content "  # nosec B608
                     f"FROM messages m WHERE m.rowid IN ({placeholders}) AND m.deleted = 0"
                 )
-            cursor = self._db.execute_query(message_query, tuple(refs))
+            cursor = self._ctx.execute_query(message_query, tuple(refs))
             for message_row in cursor.fetchall():
                 fetched = dict(message_row)
                 messages[fetched["match_ref"]] = fetched
@@ -2272,16 +2279,16 @@ class ConversationStore:
         scope_type: str | None = None,
         workspace_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        client_filter = self._db.client_id if client_id is None else client_id
+        client_filter = self._ctx.client_id if client_id is None else client_id
         safe_query = (query or "").strip() or None
 
         if date_field not in {"last_modified", "created_at"}:
             raise InputError("date_field must be 'last_modified' or 'created_at'")  # noqa: TRY003
 
-        keyword_table = self._db._map_table_for_backend("keywords")
+        keyword_table = self._ctx.map_table("keywords")
         use_deleted_text_search = safe_query is not None and (include_deleted or deleted_only)
 
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(c.last_modified, c.created_at)"
             base_query = "SELECT c.*, 0.0 AS bm25_raw FROM conversations c WHERE TRUE"
             params: list[Any] = []
@@ -2326,7 +2333,7 @@ class ConversationStore:
             params.extend(filter_params)
             if filters:
                 base_query += " AND " + " AND ".join(filters)
-            cursor = self._db.execute_query(base_query, tuple(params))
+            cursor = self._ctx.execute_query(base_query, tuple(params))
             return [dict(row) for row in cursor.fetchall()]
 
         date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(NULLIF(c.last_modified,''), c.created_at)"
@@ -2378,7 +2385,7 @@ class ConversationStore:
             base_query += " AND " + " AND ".join(filters)
 
         try:
-            cursor = self._db.execute_query(base_query, tuple(params))
+            cursor = self._ctx.execute_query(base_query, tuple(params))
         except CharactersRAGDBError as exc:
             literal_query = (
                 self._sqlite_fts_literal_after_parse_error(safe_query, exc)
@@ -2388,7 +2395,7 @@ class ConversationStore:
             if literal_query is None:
                 raise
             params[0] = literal_query
-            cursor = self._db.execute_query(base_query, tuple(params))
+            cursor = self._ctx.execute_query(base_query, tuple(params))
         return [dict(row) for row in cursor.fetchall()]
 
     def search_conversations_page(
@@ -2428,7 +2435,7 @@ class ConversationStore:
         Content search covers live conversations only: with ``include_deleted``
         or ``deleted_only`` the query stays a title, topic and state text search.
         """
-        client_filter = self._db.client_id if client_id is None else client_id
+        client_filter = self._ctx.client_id if client_id is None else client_id
         safe_query = (query or "").strip() or None
 
         if date_field not in {"last_modified", "created_at"}:
@@ -2454,7 +2461,7 @@ class ConversationStore:
             normalized_bm25_weight = bm25_weight / total_weight
             normalized_recency_weight = recency_weight / total_weight
 
-        keyword_table = self._db._map_table_for_backend("keywords")
+        keyword_table = self._ctx.map_table("keywords")
         use_deleted_text_search = safe_query is not None and (include_deleted or deleted_only)
         # The query to match against message text, or None when content search does not apply.
         content_query = safe_query if "content" in search_fields and not use_deleted_text_search else None
@@ -2471,7 +2478,7 @@ class ConversationStore:
                 return [], 0, 0.0
             match_joins, match_join_params = resolved_joins
 
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(c.last_modified, c.created_at)"
             bm25_expr = "0.0"
             where_clauses = ["TRUE"]
@@ -2627,13 +2634,13 @@ class ConversationStore:
             and normalized_order in {"bm25", "hybrid", "topic"}
         )
         try:
-            count_cursor = self._db.execute_query(count_query, tuple(count_params))
+            count_cursor = self._ctx.execute_query(count_query, tuple(count_params))
             count_row = count_cursor.fetchone()
         except CharactersRAGDBError as exc:
             # Content search resolved its MATCH expressions up front, so it never retries here.
             literal_query = (
                 self._sqlite_fts_literal_after_parse_error(safe_query, exc)
-                if self._db.backend_type == BackendType.SQLITE
+                if self._ctx.backend_type == BackendType.SQLITE
                 and safe_query
                 and not use_deleted_text_search
                 and not use_content_search
@@ -2644,7 +2651,7 @@ class ConversationStore:
                 raise
             # Count, global rank, and page rows must all search the same literal.
             count_params[0] = base_params[0] = literal_query
-            count_cursor = self._db.execute_query(count_query, tuple(count_params))
+            count_cursor = self._ctx.execute_query(count_query, tuple(count_params))
             count_row = count_cursor.fetchone()
 
         if count_row is None:
@@ -2657,7 +2664,7 @@ class ConversationStore:
 
         max_bm25 = 0.0
         if total > 0 and needs_global_bm25:
-            if self._db.backend_type == BackendType.POSTGRESQL:
+            if self._ctx.backend_type == BackendType.POSTGRESQL:
                 max_query = (
                     f"WITH candidate_rows AS ({base_query}) "  # nosec B608
                     "SELECT COALESCE(MAX(bm25_raw), 0.0) AS max_bm25 FROM candidate_rows"
@@ -2672,7 +2679,7 @@ class ConversationStore:
                 max_params = list(base_params)
 
             try:
-                max_cursor = self._db.execute_query(max_query, tuple(max_params))
+                max_cursor = self._ctx.execute_query(max_query, tuple(max_params))
                 max_row = max_cursor.fetchone()
             except CharactersRAGDBError as exc:
                 logger.error("Error fetching paged conversation search max bm25: {}", exc)
@@ -2723,7 +2730,7 @@ class ConversationStore:
         )  # nosec B608
 
         try:
-            cursor = self._db.execute_query(page_query, tuple(page_params))
+            cursor = self._ctx.execute_query(page_query, tuple(page_params))
             rows = [dict(row) for row in cursor.fetchall()]
             if content_query is not None:
                 self._attach_conversation_match_details(rows, content_query)

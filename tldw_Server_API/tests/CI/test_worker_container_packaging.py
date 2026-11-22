@@ -67,3 +67,17 @@ def test_worker_build_covers_declared_local_package_inputs(dockerfile: str) -> N
         ):
             missing.append(str(path))
     assert not missing, f"Declared package inputs omitted from builder: {missing}"
+
+
+@pytest.mark.unit
+def test_production_image_installs_the_kitten_tts_extra() -> None:
+    manifest = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    dockerfile = (ROOT / "Dockerfiles" / "Dockerfile.prod").read_text()
+    assert manifest["project"]["optional-dependencies"]["TTS_kitten_tts"]
+    assert 'pip install --prefix=/install ".[TTS_kitten_tts]"' in dockerfile
+
+
+@pytest.mark.unit
+def test_production_image_prepares_a_runtime_kitten_tts_cache() -> None:
+    dockerfile = (ROOT / "Dockerfiles" / "Dockerfile.prod").read_text()
+    assert "install -d -o appuser -g appuser /app/cache/kitten_tts" in dockerfile

@@ -222,7 +222,7 @@ def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
     assert "canonical_json" not in body["behavior_snapshot"]
     assert "payload" not in body["behavior_snapshot"]
 
-    state = character_db.get_roleplay_resume_state(body["id"])
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(body["id"])
     participants = state["behavior_snapshot"]["payload"]["participants"]
     assert [participant["source"]["id"] for participant in participants] == [
         str(sources["primary_id"]),
@@ -330,7 +330,7 @@ def test_configured_defaults_and_generation_aliases_create_valid_effective_setti
         },
     )
 
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     expected_sampling = {
         "temperature": 0.25,
         "top_p": 0.55,
@@ -387,7 +387,7 @@ def test_api_omitted_sampling_preserves_character_generation_defaults(
     )
 
     assert response.status_code == 201, response.text
-    state = character_db.get_roleplay_resume_state(response.json()["id"])
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(response.json()["id"])
     assert state["effective_completion"]["sampling"] == {
         "temperature": 0.25,
         "top_p": 0.55,
@@ -430,7 +430,7 @@ def test_api_partial_sampling_override_merges_with_character_generation_defaults
     )
 
     assert response.status_code == 201, response.text
-    state = character_db.get_roleplay_resume_state(response.json()["id"])
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(response.json()["id"])
     assert state["effective_completion"]["sampling"] == {
         "temperature": 0.9,
         "top_p": 0.55,
@@ -472,7 +472,7 @@ def test_creation_materializes_effective_builtin_prompt_preset(
         model="local-test",
     )
 
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     materialized = state["behavior_snapshot"]["payload"]["participants"][0][
         "prompt"
     ]["prompt_relevant_extensions"]["prompt_preset"]
@@ -525,7 +525,7 @@ def test_prompt_preset_id_is_trimmed_or_rejected_before_materialization(
         provider="local-llm",
         model="local-test",
     )
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["settings"]["chatPresetOverrideId"] == "st_default"
     materialized = state["behavior_snapshot"]["payload"]["participants"][0][
         "prompt"
@@ -574,7 +574,7 @@ def test_invalid_provider_or_model_is_explicitly_ineligible(
         },
     )
 
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["resume_eligible"] is False
     assert state["resume_ineligible_reason"] == "incomplete_effective_settings"
     assert state["effective_completion"] is None
@@ -597,7 +597,7 @@ def test_explicit_provider_model_mutation_repairs_incomplete_resume_authority(
         provider="definitely-not-a-provider",
         model="missing-model",
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert before["resume_eligible"] is False
     assert before["materialized_settings"] is None
 
@@ -613,7 +613,7 @@ def test_explicit_provider_model_mutation_repairs_incomplete_resume_authority(
     )
 
     assert response.status_code == 200, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["resume_eligible"] is True
     assert after["settings_version"] == before["settings_version"] + 1
     assert after["effective_completion"]["provider"] == "local-llm"
@@ -653,7 +653,7 @@ def test_incomplete_greeting_selection_freezes_text_for_later_completion_repair(
         json={"index": 1},
     )
     assert selected.status_code == 200, selected.text
-    selected_state = character_db.get_roleplay_resume_state(conversation_id)
+    selected_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert selected_state["resume_eligible"] is False
     assert selected_state["materialized_settings"] is None
     assert "roleplayPendingGreetingV1" in selected_state["settings"]
@@ -681,7 +681,7 @@ def test_incomplete_greeting_selection_freezes_text_for_later_completion_repair(
     )
 
     assert repaired.status_code == 200, repaired.text
-    repaired_state = character_db.get_roleplay_resume_state(conversation_id)
+    repaired_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert repaired_state["resume_eligible"] is True
     assert "roleplayPendingGreetingV1" not in repaired_state["settings"]
     greeting = repaired_state["materialized_settings"]["values"]["greeting"]
@@ -724,7 +724,7 @@ def test_generic_settings_greeting_selection_freezes_for_later_completion_repair
         json={"settings": {"greetingSelectionId": "greeting:1:selected"}},
     )
     assert selected.status_code == 200, selected.text
-    selected_state = character_db.get_roleplay_resume_state(conversation_id)
+    selected_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     pending = selected_state["settings"]["roleplayPendingGreetingV1"]
     assert pending["values"]["greeting"]["content"] == (
         "Generic selected before repair"
@@ -745,7 +745,7 @@ def test_generic_settings_greeting_selection_freezes_for_later_completion_repair
     )
 
     assert repaired.status_code == 200, repaired.text
-    repaired_state = character_db.get_roleplay_resume_state(conversation_id)
+    repaired_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert repaired_state["resume_eligible"] is True
     assert repaired_state["materialized_settings"]["values"]["greeting"][
         "content"
@@ -783,7 +783,7 @@ def test_generic_settings_replaces_and_clears_pending_greeting_authority(
         json={"settings": {"greetingSelectionId": "greeting:1:selected"}},
     )
     assert first.status_code == 200, first.text
-    first_state = character_db.get_roleplay_resume_state(conversation_id)
+    first_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     first_pending = first_state["settings"]["roleplayPendingGreetingV1"]
 
     replacement = test_client.put(
@@ -792,7 +792,7 @@ def test_generic_settings_replaces_and_clears_pending_greeting_authority(
         json={"settings": {"greetingSelectionId": "greeting:0:selected"}},
     )
     assert replacement.status_code == 200, replacement.text
-    replacement_state = character_db.get_roleplay_resume_state(conversation_id)
+    replacement_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     replacement_pending = replacement_state["settings"]["roleplayPendingGreetingV1"]
     assert replacement_pending["digest"] != first_pending["digest"]
     assert replacement_pending["values"]["greeting"]["content"] == (
@@ -810,7 +810,7 @@ def test_generic_settings_replaces_and_clears_pending_greeting_authority(
         },
     )
     assert cleared.status_code == 200, cleared.text
-    cleared_state = character_db.get_roleplay_resume_state(conversation_id)
+    cleared_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert cleared_state["settings"].get("greetingSelectionId") is None
     assert "roleplayPendingGreetingV1" not in cleared_state["settings"]
 
@@ -820,7 +820,7 @@ def test_generic_settings_replaces_and_clears_pending_greeting_authority(
         json={"settings": {"provider": "local-llm", "model": "local-test"}},
     )
     assert repaired.status_code == 200, repaired.text
-    repaired_state = character_db.get_roleplay_resume_state(conversation_id)
+    repaired_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert repaired_state["resume_eligible"] is True
     assert "greeting" not in repaired_state["materialized_settings"]["values"]
 
@@ -854,7 +854,7 @@ def test_tampered_incomplete_greeting_freeze_fails_repair_atomically(
         json={"index": 1},
     )
     assert selected.status_code == 200, selected.text
-    selected_state = character_db.get_roleplay_resume_state(conversation_id)
+    selected_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     tampered_settings = dict(selected_state["settings"])
     pending = dict(tampered_settings["roleplayPendingGreetingV1"])
     pending_values = dict(pending["values"])
@@ -868,7 +868,7 @@ def test_tampered_incomplete_greeting_freeze_fails_repair_atomically(
             "UPDATE conversation_settings SET settings_json = ? WHERE conversation_id = ?",
             (json.dumps(tampered_settings), conversation_id),
         )
-    before_repair = character_db.get_roleplay_resume_state(conversation_id)
+    before_repair = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     repaired = test_client.put(
         f"/api/v1/chats/{conversation_id}/settings",
@@ -882,7 +882,7 @@ def test_tampered_incomplete_greeting_freeze_fails_repair_atomically(
     )
 
     assert repaired.status_code in {400, 409, 422}, repaired.text
-    after_repair = character_db.get_roleplay_resume_state(conversation_id)
+    after_repair = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after_repair["settings_version"] == before_repair["settings_version"]
     assert after_repair["settings"] == before_repair["settings"]
     assert after_repair["resume_eligible"] is False
@@ -905,7 +905,7 @@ def test_client_cannot_supply_pending_greeting_authority(
         provider="definitely-not-a-provider",
         model="missing-model",
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = test_client.put(
         f"/api/v1/chats/{conversation_id}/settings",
@@ -922,7 +922,7 @@ def test_client_cannot_supply_pending_greeting_authority(
     )
 
     assert response.status_code == 422, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -947,7 +947,7 @@ def test_pin_writer_preserves_ineligibility_when_completion_is_unresolved(
             {"id": "incomplete-pin-target", "sender": "user", "content": "Pin me"},
         ],
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert before["resume_eligible"] is False
 
     response = test_client.put(
@@ -958,7 +958,7 @@ def test_pin_writer_preserves_ineligibility_when_completion_is_unresolved(
     )
 
     assert response.status_code == 200, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["resume_eligible"] is False
     assert after["resume_ineligible_reason"] == "incomplete_effective_settings"
     assert after["effective_completion"] is None
@@ -985,7 +985,7 @@ def test_incomplete_completion_does_not_bypass_reference_validation(
         provider="definitely-not-a-provider",
         model="missing-model",
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = test_client.put(
         f"/api/v1/chats/{conversation_id}/settings",
@@ -998,7 +998,7 @@ def test_incomplete_completion_does_not_bypass_reference_validation(
     )
 
     assert response.status_code in {400, 404, 422}, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -1073,7 +1073,7 @@ def test_drift_retry_freezes_initial_provider_model_and_sampling(
     )
 
     assert call_count == 4
-    assert character_db.get_roleplay_resume_state(conversation_id)[
+    assert character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "effective_completion"
     ] == {
         "provider": "local-llm",
@@ -1185,7 +1185,7 @@ def test_ordinary_token_settings_remain_allowed(character_db):
         },
     )
 
-    settings = character_db.get_roleplay_resume_state(conversation_id)["settings"]
+    settings = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["settings"]
     assert settings["token"] == "ordinary prompt metadata"
     assert settings["nested"]["token_budget"] == 512
     assert settings["nested"]["tokenBudget"] == 256
@@ -1283,7 +1283,7 @@ def test_forged_readiness_is_invalid_on_store_and_api_reads(
             (json.dumps(forged), conversation_id),
         )
 
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["resume_eligible"] is False
     assert state["resume_ineligible_reason"] == "invalid_effective_settings"
     assert state["effective_completion"] is None
@@ -1329,7 +1329,7 @@ def test_stored_readiness_does_not_depend_on_current_provider_inventory(
     monkeypatch.setattr(adapter_registry, "get_registry", deployment_probe)
     monkeypatch.setattr(chat_service, "is_model_known_for_provider", deployment_probe)
 
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["resume_eligible"] is True
     assert state["effective_completion"]["model"] == "local-test"
     response = test_client.get(
@@ -1367,7 +1367,7 @@ def test_source_mutation_and_deployment_default_changes_do_not_change_creation_b
     assert response.status_code == 201, response.text
     conversation_id = response.json()["id"]
     before_bytes = _snapshot_storage_bytes(character_db, conversation_id)
-    before_state = character_db.get_roleplay_resume_state(conversation_id)
+    before_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     before_effective = before_state["effective_completion"]
     settings = before_state["settings"]
     assert settings["presetScope"] == "chat"
@@ -1417,7 +1417,7 @@ def test_source_mutation_and_deployment_default_changes_do_not_change_creation_b
     monkeypatch.setenv("CHAR_CHAT_TEMPERATURE", "1.8")
 
     assert _snapshot_storage_bytes(character_db, conversation_id) == before_bytes
-    assert character_db.get_roleplay_resume_state(conversation_id)["effective_completion"] == before_effective
+    assert character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["effective_completion"] == before_effective
 
 
 @pytest.mark.integration
@@ -1569,7 +1569,7 @@ def test_startup_visibility_preserves_snapshot_resume_restore_and_greeting(
     )
     raw = db.get_conversation_by_id(cid)["assistant_startup_json"]
     stored = _snapshot_storage_bytes(db, cid)
-    state = db.get_roleplay_resume_state(cid)
+    state = db.conversation_resume_store.get_roleplay_resume_state(cid)
     path = f"/api/v1/chats/{cid}"
     before = test_client.get(path, headers=auth_headers)
     assert before.status_code == 200, before.text
@@ -1592,7 +1592,7 @@ def test_startup_visibility_preserves_snapshot_resume_restore_and_greeting(
         for field in ("behavior_snapshot", "resume_eligible", "resume_ineligible_reason", "settings_version", "history_version", "tail"):
             assert restored.json()[field] == before.json()[field]
     assert _snapshot_storage_bytes(db, cid) == stored
-    after = db.get_roleplay_resume_state(cid)
+    after = db.conversation_resume_store.get_roleplay_resume_state(cid)
     assert {key: value for key, value in after.items() if key != "conversation"} == {
         key: value for key, value in state.items() if key != "conversation"
     }
@@ -1682,7 +1682,7 @@ def test_creation_partial_sampling_merges_character_defaults_and_remains_stable(
 
     monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "changed-provider")
     monkeypatch.setenv("CHAR_CHAT_MODEL", "changed-model")
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     assert state["behavior_snapshot"]["status"] == "valid"
     assert state["resume_eligible"] is True
@@ -1794,7 +1794,7 @@ def test_postgres_style_creation_drift_retries_one_complete_source_view_and_samp
         model="local-test",
     )
 
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert call_count == 4
     assert state["behavior_snapshot"]["payload"]["participants"][0][
         "generation_defaults"
@@ -1865,7 +1865,7 @@ def test_creation_greeting_seed_uses_same_stabilized_source_as_snapshot(
 
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     messages = character_db.get_messages_for_conversation(conversation_id)
     assert call_count == 4
     assert state["behavior_snapshot"]["payload"]["participants"][0]["greeting"][
@@ -1939,7 +1939,7 @@ def test_module_creator_greeting_seed_uses_same_stabilized_source_as_snapshot(
     )
 
     assert conversation_id is not None
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     messages = character_db.get_messages_for_conversation(conversation_id)
     assert call_count == 4
     assert state["behavior_snapshot"]["payload"]["participants"][0]["greeting"][
@@ -2017,7 +2017,7 @@ def test_legacy_import_workflow_delegates_to_atomic_creation(character_db, monke
     )
 
     assert returned_character_id == character_id
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["behavior_snapshot"]["status"] == "valid"
     assert state["resume_eligible"] is True
 
@@ -2038,7 +2038,7 @@ def test_legacy_sync_projection_stays_explicitly_non_resumable(
         character_id=character_id,
     )
 
-    state = character_db.get_roleplay_resume_state("sync-character-conversation")
+    state = character_db.conversation_resume_store.get_roleplay_resume_state("sync-character-conversation")
 
     assert state["behavior_snapshot"]["status"] == "missing"
     assert state["resume_eligible"] is False
@@ -2122,7 +2122,7 @@ def test_behavior_settings_materialize_references_and_noop_advances_version(
     assert updated.status_code == 200, updated.text
     assert "roleplayResumeV1" not in updated.json()["settings"]
     assert "roleplayBehaviorV1" not in updated.json()["settings"]
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["settings_version"] == 2
     materialized = state["materialized_settings"]
     assert materialized["schema_version"] == 1
@@ -2173,7 +2173,7 @@ def test_behavior_settings_materialize_references_and_noop_advances_version(
             "UPDATE world_book_entries SET content = ? WHERE id = ?",
             ("Changed after settings materialization.", sources["world_book_entry_id"]),
         )
-    assert character_db.get_roleplay_resume_state(conversation_id)[
+    assert character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "materialized_settings"
     ] == materialized
 
@@ -2183,7 +2183,7 @@ def test_behavior_settings_materialize_references_and_noop_advances_version(
         json={"settings": mutation},
     )
     assert replay.status_code == 200, replay.text
-    replay_state = character_db.get_roleplay_resume_state(conversation_id)
+    replay_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert replay_state["settings_version"] == 3
     assert replay_state["materialized_settings"] == materialized
 
@@ -2224,7 +2224,7 @@ def test_unknown_behavior_reference_rejects_without_settings_version_change(
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before_state = character_db.get_roleplay_resume_state(conversation_id)
+    before_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     before_settings_bytes = _snapshot_storage_bytes(character_db, conversation_id)[1]
 
     response = test_client.put(
@@ -2234,7 +2234,7 @@ def test_unknown_behavior_reference_rejects_without_settings_version_change(
     )
 
     assert response.status_code in {400, 404, 409, 422}, response.text
-    after_state = character_db.get_roleplay_resume_state(conversation_id)
+    after_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after_state["settings_version"] == before_state["settings_version"] == 1
     assert _snapshot_storage_bytes(character_db, conversation_id)[1] == before_settings_bytes
 
@@ -2263,7 +2263,7 @@ def test_history_version_advances_for_ancestor_and_branch_with_stable_tail_and_r
             },
         ],
     )
-    initial = character_db.get_roleplay_resume_state(conversation_id)
+    initial = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert initial["history_version"] == 3
     assert initial["tail"] == {"message_id": "history-tail", "message_version": 1}
 
@@ -2272,7 +2272,7 @@ def test_history_version_advances_for_ancestor_and_branch_with_stable_tail_and_r
         {"content": "Edited ancestor"},
         expected_version=1,
     )
-    edited = character_db.get_roleplay_resume_state(conversation_id)
+    edited = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert edited["history_version"] == 4
     assert edited["tail"] == initial["tail"]
 
@@ -2281,7 +2281,7 @@ def test_history_version_advances_for_ancestor_and_branch_with_stable_tail_and_r
         {"parent_message_id": None},
         expected_version=1,
     )
-    branched = character_db.get_roleplay_resume_state(conversation_id)
+    branched = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert branched["history_version"] == 5
     assert branched["tail"] == {
         "message_id": "history-tail",
@@ -2295,12 +2295,12 @@ def test_history_version_advances_for_ancestor_and_branch_with_stable_tail_and_r
                 expected_version=2,
                 conn=conn,
             )
-            assert character_db.get_roleplay_resume_state(
+            assert character_db.conversation_resume_store.get_roleplay_resume_state(
                 conversation_id,
                 conn=conn,
             )["history_version"] == 6
             raise RuntimeError("rollback history mutation")
-    assert character_db.get_roleplay_resume_state(conversation_id) == branched
+    assert character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id) == branched
 
 
 @pytest.mark.integration
@@ -2327,7 +2327,7 @@ def test_creation_v1_materialized_authority_binds_immutable_snapshot_and_default
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
 
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     materialized = state["materialized_settings"]
     assert state["settings_version"] == 1
     assert materialized["schema_version"] == 1
@@ -2356,7 +2356,7 @@ def test_creation_v1_materialized_authority_binds_immutable_snapshot_and_default
         json={"settings": {"provider": "local-llm", "model": "local-test"}},
     )
     assert provider_only.status_code == 200, provider_only.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == 2
     assert after["materialized_settings"]["values"]["base_snapshot"] == materialized[
         "values"
@@ -2443,7 +2443,7 @@ def test_resumable_sources_and_settings_reject_credentials_recursively_and_atomi
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     rejected_patch = test_client.put(
         f"/api/v1/chats/{conversation_id}/settings",
@@ -2459,7 +2459,7 @@ def test_resumable_sources_and_settings_reject_credentials_recursively_and_atomi
         },
     )
     assert rejected_patch.status_code in {400, 422}, rejected_patch.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"] == 1
     assert after["settings"] == before["settings"]
 
@@ -2512,7 +2512,7 @@ def test_materialized_controls_cover_prompt_consumers_and_direct_writers(
         json={"settings": patch},
     )
     assert updated.status_code == 200, updated.text
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     controls = state["materialized_settings"]["values"]["behavior_controls"]
     assert controls["turn_taking_mode"] == "round_robin"
     assert controls["greeting"] == {
@@ -2541,7 +2541,7 @@ def test_materialized_controls_cover_prompt_consumers_and_direct_writers(
         json={"index": 1},
     )
     assert selected.status_code == 200, selected.text
-    after_greeting = character_db.get_roleplay_resume_state(conversation_id)
+    after_greeting = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after_greeting["settings_version"] == state["settings_version"] + 1
     assert after_greeting["materialized_settings"]["values"]["behavior_controls"][
         "greeting"
@@ -2564,7 +2564,7 @@ def test_materialized_controls_cover_prompt_consumers_and_direct_writers(
         expected_settings_version=after_greeting["settings_version"],
         expected_history_version=after_greeting["history_version"],
     )
-    after_summary = character_db.get_roleplay_resume_state(conversation_id)
+    after_summary = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after_summary["settings_version"] == after_greeting["settings_version"] + 1
     assert after_summary["materialized_settings"]["values"]["behavior_controls"][
         "auto_summary"
@@ -2628,7 +2628,7 @@ def test_greeting_writer_uses_transactional_conversation_identity(
     assert response.status_code == 200, response.text
     assert seen["conversation"]["character_id"] == current["character_id"]
     assert response.json()["greeting_preview"] == "Current greeting"
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["materialized_settings"]["values"]["greeting"]["content"] == (
         "Current greeting"
     )
@@ -2645,7 +2645,7 @@ def test_auto_summary_writer_uses_transactional_conversation_identity(
     conversation_id, stale, current = _create_writer_identity_race_chat(character_db)
     import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as sessions
 
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     seen: dict[str, object] = {}
 
     def _capture(settings, **kwargs):
@@ -2695,7 +2695,7 @@ def test_auto_summary_writer_rejects_stale_derivation_fences(
     )
     import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as sessions
 
-    derived_from = character_db.get_roleplay_resume_state(conversation_id)
+    derived_from = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     if stale_fence == "settings":
         changed_settings = dict(derived_from["settings"])
         changed_settings["turnTakingMode"] = "single"
@@ -2713,7 +2713,7 @@ def test_auto_summary_writer_rejects_stale_derivation_fences(
                 "content": "Three",
             }
         )
-    before_write = character_db.get_roleplay_resume_state(conversation_id)
+    before_write = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     sessions._persist_auto_summary_to_settings(
         character_db,
@@ -2729,7 +2729,7 @@ def test_auto_summary_writer_rejects_stale_derivation_fences(
         expected_history_version=derived_from["history_version"],
     )
 
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before_write["settings_version"]
     assert after["history_version"] == before_write["history_version"]
     assert "summary" not in after["settings"]
@@ -2764,7 +2764,7 @@ def test_greeting_reselection_reloads_when_primary_character_changes(
         json={"index": 0},
     )
     assert first.status_code == 200, first.text
-    assert character_db.get_roleplay_resume_state(conversation_id)[
+    assert character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "materialized_settings"
     ]["values"]["greeting"]["content"] == "Old primary greeting"
 
@@ -2783,7 +2783,7 @@ def test_greeting_reselection_reloads_when_primary_character_changes(
 
     assert selected.status_code == 200, selected.text
     assert selected.json()["greeting_preview"] == "New primary greeting"
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["materialized_settings"]["values"]["greeting"]["content"] == (
         "New primary greeting"
     )
@@ -2834,7 +2834,7 @@ def test_pin_edit_acquires_conversation_before_message_metadata_locks(
         with_message=True,
     )
     order: list[str] = []
-    real_resume = character_db.get_roleplay_resume_state
+    real_resume = character_db.conversation_resume_store.get_roleplay_resume_state
 
     def record_message_lock(*_args, **_kwargs):
         order.append("message")
@@ -2859,7 +2859,7 @@ def test_pin_edit_acquires_conversation_before_message_metadata_locks(
         raising=False,
     )
     monkeypatch.setattr(
-        character_db,
+        character_db.conversation_resume_store,
         "get_roleplay_resume_state",
         record_conversation_lock,
     )
@@ -2876,6 +2876,7 @@ def test_pin_edit_acquires_conversation_before_message_metadata_locks(
 
 
 def test_postgres_message_edit_lock_uses_for_update() -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
     from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 
     class _Result:
@@ -2895,7 +2896,7 @@ def test_postgres_message_edit_lock_uses_for_update() -> None:
         backend_type = BackendType.POSTGRESQL
 
     conn = _Connection()
-    MessageStore(_Database()).lock_message_for_edit("message-1", conn=conn)
+    MessageStore(ChaChaContext(_Database())).lock_message_for_edit("message-1", conn=conn)
 
     assert len(conn.calls) == 1
     assert "FOR UPDATE" in conn.calls[0][0]
@@ -2903,6 +2904,7 @@ def test_postgres_message_edit_lock_uses_for_update() -> None:
 
 
 def test_postgres_pin_edit_creates_and_locks_metadata_row() -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
     from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 
     class _Result:
@@ -2922,7 +2924,7 @@ def test_postgres_pin_edit_creates_and_locks_metadata_row() -> None:
         backend_type = BackendType.POSTGRESQL
 
     conn = _Connection()
-    MessageStore(_Database()).lock_message_metadata_for_edit("message-1", conn=conn)
+    MessageStore(ChaChaContext(_Database())).lock_message_metadata_for_edit("message-1", conn=conn)
 
     assert len(conn.calls) == 2
     assert "ON CONFLICT(message_id) DO NOTHING" in conn.calls[0][0]
@@ -2957,7 +2959,7 @@ def test_persona_overlay_reference_enforces_explicit_owner_atomically(
             """,
             ("other-persona", "different-user", "Private Persona", "session_scoped", 1),
         )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = test_client.put(
         f"/api/v1/chats/{conversation_id}/settings",
@@ -2975,7 +2977,7 @@ def test_persona_overlay_reference_enforces_explicit_owner_atomically(
     )
 
     assert response.status_code in {400, 404, 422}, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -3036,7 +3038,7 @@ def test_pin_writer_rebuilds_materialized_controls_once(
             {"id": "pin-target", "sender": "user", "content": "Keep this turn"},
         ],
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = test_client.put(
         "/api/v1/messages/pin-target",
@@ -3045,7 +3047,7 @@ def test_pin_writer_rebuilds_materialized_controls_once(
         json={"pinned": True},
     )
     assert response.status_code == 200, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     message = character_db.get_message_by_id("pin-target")
     assert message["version"] == 2
     assert after["history_version"] == before["history_version"] + 1
@@ -3082,7 +3084,7 @@ def test_pin_writer_rejects_stale_repeat_without_advancing_any_fence(
         json={"pinned": True},
     )
     assert first.status_code == 200, first.text
-    before_repeat = character_db.get_roleplay_resume_state(conversation_id)
+    before_repeat = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     repeated = test_client.put(
         "/api/v1/messages/pin-stale-target",
@@ -3092,7 +3094,7 @@ def test_pin_writer_rejects_stale_repeat_without_advancing_any_fence(
     )
 
     assert repeated.status_code == 409, repeated.text
-    after_repeat = character_db.get_roleplay_resume_state(conversation_id)
+    after_repeat = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert character_db.get_message_by_id("pin-stale-target")["version"] == 2
     assert after_repeat["history_version"] == before_repeat["history_version"]
     assert after_repeat["settings_version"] == before_repeat["settings_version"]
@@ -3118,7 +3120,7 @@ def test_pin_writer_semantic_noop_still_advances_each_fence_once(
             {"id": "pin-noop-target", "sender": "user", "content": "Keep me"},
         ],
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = test_client.put(
         "/api/v1/messages/pin-noop-target",
@@ -3128,7 +3130,7 @@ def test_pin_writer_semantic_noop_still_advances_each_fence_once(
     )
 
     assert response.status_code == 200, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert character_db.get_message_by_id("pin-noop-target")["version"] == 2
     assert character_db.get_message_metadata("pin-noop-target")["extra"]["pinned"] is False
     assert after["history_version"] == before["history_version"] + 1
@@ -3157,7 +3159,7 @@ def test_pin_writer_delete_race_rolls_back_all_fences(
             {"id": "pin-race-target", "sender": "user", "content": "Keep me"},
         ],
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     real_update_message = character_db.update_message
 
     def delete_before_conditional_update(
@@ -3189,7 +3191,7 @@ def test_pin_writer_delete_race_rolls_back_all_fences(
     )
 
     assert response.status_code == 409, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     message = character_db.get_message_by_id("pin-race-target")
     assert bool(message["deleted"]) is False
     assert message["version"] == 1
@@ -3219,7 +3221,7 @@ def test_content_edit_rejects_conversation_deleted_before_transaction(
             {"id": "deleted-conversation-edit", "sender": "user", "content": "Old"},
         ],
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     real_transaction = character_db.transaction
     transaction_calls = 0
 
@@ -3285,7 +3287,7 @@ def test_pin_writer_rejects_deleted_message_without_mutating_settings(
         ],
     )
     assert character_db.soft_delete_message("pin-deleted-target", 1)
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = test_client.put(
         "/api/v1/messages/pin-deleted-target",
@@ -3295,7 +3297,7 @@ def test_pin_writer_rejects_deleted_message_without_mutating_settings(
     )
 
     assert response.status_code == 409, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     deleted = character_db.get_message_by_id(
         "pin-deleted-target",
         include_deleted=True,
@@ -3328,7 +3330,7 @@ def test_combined_content_pin_update_rolls_back_on_materialization_failure(
             {"id": "pin-atomic-failure", "sender": "user", "content": "Original"},
         ],
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     import tldw_Server_API.app.api.v1.endpoints.character_messages as messages_endpoint
 
     def _fail_materialization(*_args, **_kwargs):
@@ -3348,7 +3350,7 @@ def test_combined_content_pin_update_rolls_back_on_materialization_failure(
 
     assert response.status_code in {400, 409, 422}, response.text
     message = character_db.get_message_by_id("pin-atomic-failure")
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert message["content"] == "Original"
     assert message["version"] == 1
     assert character_db.get_message_metadata("pin-atomic-failure") is None
@@ -3376,7 +3378,7 @@ def test_combined_content_pin_update_advances_each_fence_once(
             {"id": "pin-atomic-success", "sender": "user", "content": "Original"},
         ],
     )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = test_client.put(
         "/api/v1/messages/pin-atomic-success",
@@ -3388,7 +3390,7 @@ def test_combined_content_pin_update_advances_each_fence_once(
     assert response.status_code == 200, response.text
     message = character_db.get_message_by_id("pin-atomic-success")
     metadata = character_db.get_message_metadata("pin-atomic-success")
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert message["content"] == "Updated atomically"
     assert message["version"] == 2
     assert metadata["extra"]["pinned"] is True
@@ -3414,7 +3416,7 @@ def test_oversize_materialized_mutation_rolls_back_settings_version(
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = test_client.put(
         f"/api/v1/chats/{conversation_id}/settings",
@@ -3432,7 +3434,7 @@ def test_oversize_materialized_mutation_rolls_back_settings_version(
         },
     )
     assert response.status_code in {400, 413, 422}, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -3472,7 +3474,7 @@ def test_large_valid_internal_authority_does_not_consume_public_settings_budget(
         json={"settings": {"turnTakingMode": "single"}},
     )
     assert materialized.status_code == 200, materialized.text
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert len(
         json.dumps(before["settings"], sort_keys=True, separators=(",", ":")).encode(
             "utf-8"
@@ -3500,7 +3502,7 @@ def test_large_valid_internal_authority_does_not_consume_public_settings_budget(
         )
 
     assert response.status_code == 200, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"] + 1
     assert after["resume_eligible"] is True
 
@@ -3552,7 +3554,7 @@ def test_generic_settings_rejects_invalid_internal_authority_atomically(
         )
         assert expanded.status_code == 200, expanded.text
 
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     settings = dict(state["settings"])
     if internal_mutation == "pending_digest":
         pending = dict(settings["roleplayPendingGreetingV1"])
@@ -3572,7 +3574,7 @@ def test_generic_settings_rejects_invalid_internal_authority_atomically(
             "UPDATE conversation_settings SET settings_json = ? WHERE conversation_id = ?",
             (json.dumps(settings), conversation_id),
         )
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = test_client.put(
         f"/api/v1/chats/{conversation_id}/settings",
@@ -3581,7 +3583,7 @@ def test_generic_settings_rejects_invalid_internal_authority_atomically(
     )
 
     assert response.status_code in {400, 409, 413, 422}, response.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -3632,7 +3634,7 @@ def test_duplicate_world_book_references_materialize_with_one_lookup(
     assert response.status_code == 200, response.text
     assert materialize_book.call_count == 1
     assert materialize_book.call_args.args[1] == [world_book_id]
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert [
         book["id"]
         for book in state["materialized_settings"]["values"]["world_books"]
@@ -3671,7 +3673,7 @@ def test_participant_removal_prunes_nonparticipant_memory_authority(
         },
     )
     assert memory.status_code == 200, memory.text
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     removed = test_client.put(
         f"/api/v1/chats/{conversation_id}/settings",
@@ -3684,7 +3686,7 @@ def test_participant_removal_prunes_nonparticipant_memory_authority(
     )
 
     assert removed.status_code == 200, removed.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"] + 1
     values = after["materialized_settings"]["values"]
     assert [item["source"]["id"] for item in values["participants"]] == [
@@ -3727,7 +3729,7 @@ def test_replayed_greeting_selection_reuses_frozen_content_and_rejects_malformed
         json={"index": 1},
     )
     assert selected.status_code == 200, selected.text
-    frozen = character_db.get_roleplay_resume_state(conversation_id)
+    frozen = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     frozen_greeting = frozen["materialized_settings"]["values"]["greeting"]
     assert frozen_greeting["content"] == "Frozen alternate"
 
@@ -3743,7 +3745,7 @@ def test_replayed_greeting_selection_reuses_frozen_content_and_rejects_malformed
         json={"index": 1},
     )
     assert replayed.status_code == 200, replayed.text
-    replayed_state = character_db.get_roleplay_resume_state(conversation_id)
+    replayed_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert replayed_state["settings_version"] == frozen["settings_version"] + 1
     assert replayed_state["materialized_settings"]["values"]["greeting"] == frozen_greeting
 
@@ -3755,7 +3757,7 @@ def test_replayed_greeting_selection_reuses_frozen_content_and_rejects_malformed
         },
     )
     assert whitespace_replay.status_code == 200, whitespace_replay.text
-    whitespace_state = character_db.get_roleplay_resume_state(conversation_id)
+    whitespace_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert whitespace_state["settings_version"] == replayed_state["settings_version"] + 1
     whitespace_values = whitespace_state["materialized_settings"]["values"]
     assert whitespace_values["greeting"] == frozen_greeting
@@ -3772,7 +3774,7 @@ def test_replayed_greeting_selection_reuses_frozen_content_and_rejects_malformed
             },
         )
         assert malformed.status_code in {400, 422}, malformed.text
-        assert character_db.get_roleplay_resume_state(conversation_id)[
+        assert character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
             "settings_version"
         ] == whitespace_state["settings_version"]
 
@@ -4256,7 +4258,7 @@ def test_participant_mutation_caps_combined_new_world_books_before_entry_expansi
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     real_select = character_conversation_factory._select_rows
     entry_query_count = 0
@@ -4284,7 +4286,7 @@ def test_participant_mutation_caps_combined_new_world_books_before_entry_expansi
 
     assert response.status_code in {400, 413, 422}, response.text
     assert entry_query_count == 0
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -4322,7 +4324,7 @@ def test_participant_addition_budgets_frozen_and_new_exemplars_together(
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     if budget_kind == "count":
         monkeypatch.setattr(
             character_conversation_factory,
@@ -4381,7 +4383,7 @@ def test_participant_addition_budgets_frozen_and_new_exemplars_together(
     assert response.status_code in {400, 413, 422}, response.text
     assert "exemplar" in response.text.lower()
     assert detail_query_count == 0
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -4422,7 +4424,7 @@ def test_participant_addition_budgets_frozen_and_new_world_book_entries_together
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     if budget_kind == "count":
         monkeypatch.setattr(
             character_conversation_factory,
@@ -4481,7 +4483,7 @@ def test_participant_addition_budgets_frozen_and_new_world_book_entries_together
     assert response.status_code in {400, 413, 422}, response.text
     assert "world-book entries" in response.text.lower()
     assert detail_query_count == 0
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -4542,7 +4544,7 @@ def test_participant_addition_reuses_frozen_shared_world_book_without_expansion(
 
     assert response.status_code == 200, response.text
     assert detail_query_count == 0
-    participants = character_db.get_roleplay_resume_state(conversation_id)[
+    participants = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "materialized_settings"
     ]["values"]["participants"]
     assert [participant["world_books"][0]["id"] for participant in participants] == [
@@ -4570,7 +4572,7 @@ def test_context_mutation_applies_one_entry_budget_across_direct_world_books(
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     world_books = WorldBookService(character_db)
     book_ids = []
     for index in range(2):
@@ -4614,7 +4616,7 @@ def test_context_mutation_applies_one_entry_budget_across_direct_world_books(
     assert "world-book entries" in updated.text.lower()
     # The aggregate preflight covers both IDs before either book's entries expand.
     assert detail_query_count == 0
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -4642,7 +4644,7 @@ def test_resume_readiness_requires_materialized_authority_bound_to_snapshot(
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     settings = dict(before["settings"])
 
     if binding_mutation == "missing":
@@ -4665,7 +4667,7 @@ def test_resume_readiness_requires_materialized_authority_bound_to_snapshot(
             (json.dumps(settings), conversation_id),
         )
 
-    state = character_db.get_roleplay_resume_state(conversation_id)
+    state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["resume_eligible"] is False
     assert state["resume_ineligible_reason"] == "invalid_effective_settings"
     assert state["effective_completion"] is None
@@ -4712,7 +4714,7 @@ def test_greeting_materialization_uses_live_nonempty_ordered_deduped_picker(
         json={"index": 1},
     )
     assert selected.status_code == 200, selected.text
-    greeting = character_db.get_roleplay_resume_state(conversation_id)[
+    greeting = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "materialized_settings"
     ]["values"]["greeting"]
     assert greeting["content"] == "Goodbye"
@@ -4743,7 +4745,7 @@ def test_preset_scope_chat_without_override_materializes_builtin_default(
         json={"settings": {"presetScope": "chat"}},
     )
     assert updated.status_code == 200, updated.text
-    preset = character_db.get_roleplay_resume_state(conversation_id)[
+    preset = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "materialized_settings"
     ]["values"]["prompt_preset"]
     assert preset["preset_id"] == "default"
@@ -4773,7 +4775,7 @@ def test_preset_scope_character_ignores_retained_chat_override(
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert before["settings"]["chatPresetOverrideId"] == "snapshot-cinematic"
     initial_preset = before["behavior_snapshot"]["payload"]["participants"][0][
         "prompt"
@@ -4787,7 +4789,7 @@ def test_preset_scope_character_ignores_retained_chat_override(
     )
 
     assert updated.status_code == 200, updated.text
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings"]["chatPresetOverrideId"] == "snapshot-cinematic"
     assert after["materialized_settings"]["values"]["behavior_controls"][
         "preset_scope"
@@ -4828,7 +4830,7 @@ def test_creation_freezes_active_persona_memory_entries(
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     frozen = before["behavior_snapshot"]["payload"]["participants"][0][
         "default_memory"
     ]["persona_memory_entries"]
@@ -4841,7 +4843,7 @@ def test_creation_freezes_active_persona_memory_entries(
             "UPDATE persona_memory_entries SET content = ?, version = version + 1 WHERE id = ?",
             ("Mutable replacement.", memory_id),
         )
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["behavior_snapshot"]["payload"] == before["behavior_snapshot"][
         "payload"
     ]
@@ -4886,7 +4888,7 @@ def test_participant_mutation_freezes_active_persona_memory_entries(
         json={"settings": {"participantCharacterIds": [primary_id, secondary_id]}},
     )
     assert updated.status_code == 200, updated.text
-    frozen_state = character_db.get_roleplay_resume_state(conversation_id)
+    frozen_state = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     secondary = next(
         participant
         for participant in frozen_state["materialized_settings"]["values"][
@@ -4904,7 +4906,7 @@ def test_participant_mutation_freezes_active_persona_memory_entries(
             "UPDATE persona_memory_entries SET content = ?, version = version + 1 WHERE id = ?",
             ("Mutable replacement pact.", memory_id),
         )
-    assert character_db.get_roleplay_resume_state(conversation_id)[
+    assert character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "materialized_settings"
     ] == frozen_state["materialized_settings"]
 
@@ -4935,7 +4937,7 @@ def test_world_book_cap_applies_to_participant_and_conversation_context_union(
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     with mock.patch.object(
         character_conversation_factory,
@@ -4954,7 +4956,7 @@ def test_world_book_cap_applies_to_participant_and_conversation_context_union(
 
     assert updated.status_code in {400, 413, 422}, updated.text
     assert materialize_book.call_count == 0
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -4978,7 +4980,7 @@ def test_postgres_style_settings_materialization_rejects_sustained_source_drift(
     )
     assert created.status_code == 201, created.text
     conversation_id = created.json()["id"]
-    before = character_db.get_roleplay_resume_state(conversation_id)
+    before = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     call_count = 0
 
     def _drifting_book(*_args, **_kwargs):
@@ -5012,7 +5014,7 @@ def test_postgres_style_settings_materialization_rejects_sustained_source_drift(
 
     assert updated.status_code in {400, 409, 422}, updated.text
     assert call_count == 4
-    after = character_db.get_roleplay_resume_state(conversation_id)
+    after = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["settings"] == before["settings"]
 
@@ -5049,7 +5051,7 @@ def test_module_creator_materializes_database_owner_memory(
     assert conversation_id is not None
     conversation = character_db.get_conversation_by_id(conversation_id)
     assert conversation["client_id"] == owner_user_id
-    participant = character_db.get_roleplay_resume_state(conversation_id)[
+    participant = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "behavior_snapshot"
     ]["payload"]["participants"][0]
     assert [
@@ -5087,7 +5089,7 @@ def test_factory_derives_owner_from_scoped_database(
 
     conversation = character_db.get_conversation_by_id(conversation_id)
     assert conversation["client_id"] == owner_user_id
-    participant = character_db.get_roleplay_resume_state(conversation_id)[
+    participant = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "behavior_snapshot"
     ]["payload"]["participants"][0]
     assert [
@@ -5152,7 +5154,7 @@ def test_module_creator_uses_database_owner_for_postgres_custom_preset(
     )
 
     assert conversation_id is not None
-    preset = character_db.get_roleplay_resume_state(conversation_id)[
+    preset = character_db.conversation_resume_store.get_roleplay_resume_state(conversation_id)[
         "behavior_snapshot"
     ]["payload"]["participants"][0]["prompt"]["prompt_relevant_extensions"][
         "prompt_preset"

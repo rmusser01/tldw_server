@@ -4428,7 +4428,7 @@ class ChatbookService:
         """Lock, validate, and CAS one OpenWebUI settings mutation."""
         try:
             with self.db.transaction() as conn:
-                resume_state = self.db.get_roleplay_resume_state(
+                resume_state = self.db.conversation_resume_store.get_roleplay_resume_state(
                     conversation_id,
                     conn=conn,
                     lock_for_update=True,

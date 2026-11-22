@@ -50,6 +50,7 @@ from tldw_Server_API.app.core.http_client import create_async_client as async_ht
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.gateway import _validate_provider_model_selection
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
@@ -1049,7 +1050,7 @@ def _resolve_provider_and_model_for_request(request_data: Any) -> tuple[str, str
 def _messages_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
     """Map typed credential failures to bounded Messages API responses."""
     code = getattr(exc, "policy_code", exc.code)
-    if code in {"provider_disabled", "model_not_allowed"}:
+    if code in ADMIN_POLICY_CODES:
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={

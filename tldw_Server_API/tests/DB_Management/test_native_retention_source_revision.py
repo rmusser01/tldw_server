@@ -166,7 +166,7 @@ def test_actual_history_aba_cannot_reuse_original_source_revision(native_fork_db
 
 def test_hard_delete_same_id_same_clock_recreation_retires_original_source(native_fork_db, monkeypatch):
     db = native_fork_db
-    monkeypatch.setattr(db, "_get_current_utc_timestamp_iso", lambda: "2026-10-12T12:00:00.000Z")
+    monkeypatch.setattr(db.ctx, "utc_now_iso", lambda: "2026-10-12T12:00:00.000Z")
     cid = db.add_conversation({"id": "reused-source", "character_id": None, "title": "Empty"})
     original = capture(db, cid)
     assert db.hard_delete_conversation(cid)

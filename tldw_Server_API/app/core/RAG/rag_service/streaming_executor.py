@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatBadRequestError,
     ChatConfigurationError,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_REFUSAL_STATUS
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES, ADMIN_REFUSAL_STATUS
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
@@ -73,7 +73,10 @@ _RAG_PROVIDER_ERROR_MESSAGES = {
     "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
     "credential_scope_revoked": "The selected provider credential scope is no longer available.",
     "provider_disabled": "The selected provider is disabled by administrator policy.",
-    "model_not_allowed": "The selected model is not allowed for this provider.",
+    "model_not_allowed": (
+        "The selected model is not offered on the server's key for this provider. Your own provider key may serve it."
+    ),
+    "model_denied": "The selected model is disabled by administrator policy.",
     "provider_configuration_invalid": "The selected provider configuration is invalid.",
     "provider_unavailable": "The selected provider is currently unavailable.",
 }
@@ -99,7 +102,7 @@ def classify_rag_provider_error(exc: BaseException) -> tuple[str, int, str] | No
     if isinstance(exc, ByokResolutionError):
         code = getattr(exc, "policy_code", exc.code)
         code = code if code in _RAG_PROVIDER_ERROR_MESSAGES else "provider_configuration_invalid"
-        status_code = 403 if code in {"provider_disabled", "model_not_allowed"} else 503
+        status_code = 403 if code in ADMIN_POLICY_CODES else 503
         return code, status_code, _RAG_PROVIDER_ERROR_MESSAGES[code]
     if isinstance(exc, ChatBadRequestError):
         code = "provider_request_invalid"

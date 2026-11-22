@@ -284,7 +284,7 @@ async def test_knowledge_qa_routes_isolate_configured_server_credentials_at_adap
     release_adapter_calls = asyncio.Event()
 
     class HealthyAbsentOverrideSnapshot:
-        def enforce(self, _model: str | None) -> None:
+        def enforce(self, _model: str | None, **_kwargs: object) -> None:
             return None
 
         def ensure_healthy(self) -> None:

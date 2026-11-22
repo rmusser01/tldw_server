@@ -1001,6 +1001,7 @@ class ChatConfigurationError(ChatAPIError):
             # An admin provider override refused the call at the provider base class (TASK-15581).
             "provider_disabled",
             "model_not_allowed",
+            "model_denied",
             "credential_store_unavailable",
         }
     )
@@ -1093,6 +1094,7 @@ class ProviderCredentialTerminalError(RuntimeError):
             "provider_unavailable",
             "provider_disabled",
             "model_not_allowed",
+            "model_denied",
         }
     )
 
