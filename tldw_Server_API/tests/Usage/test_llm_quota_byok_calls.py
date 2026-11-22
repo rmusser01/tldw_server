@@ -1031,6 +1031,7 @@ async def test_prompt_improvement_on_an_operator_base_url_from_the_server_config
     assert (result.provider, result.model) == ("moonshot", "kimi-k2")
     assert seen == ["user_unmetered"]
 
+
 @_METHODS
 @pytest.mark.parametrize(
     ("source", "expected"),

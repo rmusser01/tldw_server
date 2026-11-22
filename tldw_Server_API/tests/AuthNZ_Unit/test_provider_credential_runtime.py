@@ -2079,6 +2079,7 @@ async def test_authoritative_runtime_cannot_publish_after_waiter_cleanup_close(m
         await runtime.close()
         await original_gather(caller, return_exceptions=True)
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("source", "app_config", "expected"),
