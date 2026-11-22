@@ -81,6 +81,7 @@ import {
 } from "@/hooks/playground";
 // TldwButton moved to extracted sub-components
 import { useAntdNotification } from "@/hooks/useAntdNotification";
+import { startSavedChat } from "@/hooks/chat/start-saved-chat";
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog";
 import { usePlaygroundSessionStore } from "@/store/playground-session";
 import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope";
@@ -4271,6 +4272,8 @@ export const PlaygroundForm = ({
     closeComposerPopoversExcept("model");
     setOpenModelSettings(true);
   }, [closeComposerPopoversExcept, setOpenModelSettings]);
+  // `/new` takes the header's New chat path (CC-11).
+  const startNewChat = React.useCallback(() => void startSavedChat({ clearChat, setTemporaryChat, setSelectedCharacter }), [clearChat, setSelectedCharacter, setTemporaryChat]);
   const {
     showSlashMenu,
     slashActiveIndex,
@@ -4279,15 +4282,10 @@ export const PlaygroundForm = ({
     resolveSubmissionIntent,
     activeImageCommand,
     handleSlashCommandSelect: slashHandleSelect,
+    runStandaloneCommand,
   } = useSlashCommands({
-    chatMode,
-    setChatMode,
-    webSearch,
-    setWebSearch,
-    handleImageUpload,
-    imageBackendDefaultTrimmed,
-    imageBackendLabel,
-    currentMessage: form.values.message,
+    chatMode, setChatMode, webSearch, setWebSearch, handleImageUpload, imageBackendDefaultTrimmed, imageBackendLabel,
+    currentMessage: form.values.message, onNewChat: startNewChat, clearSourceDraft: composerInput.clearDraft,
   });
 
   const handleSlashCommandSelect = React.useCallback(
@@ -4395,6 +4393,7 @@ export const PlaygroundForm = ({
     setLastSubmittedContext,
     estimateTokensForText: estimateTokensForText as any,
     resolveSubmissionIntent,
+    runStandaloneCommand,
     queueSubmission,
     getSubmitDisabledReason,
     validateSelectedChatModelsAvailability,

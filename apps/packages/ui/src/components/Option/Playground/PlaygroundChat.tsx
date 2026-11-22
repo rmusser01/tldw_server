@@ -61,6 +61,9 @@ import {
 } from "@/hooks/useVisualIdentityResolver"
 import { VISUAL_IDENTITY_EXPRESSION_OPTIONS } from "@/utils/visual-identity-expressions"
 import { savedReplyActionAvailability, savedReplyRegenerateUnavailableReason, savedReplyStatusOffersActions } from "@/hooks/chat/saved-reply-actions"
+import { variantBranchCursor } from "@/utils/newest-leaf-path"
+import { isReplyRequestPending } from "@/hooks/chat/pending-reply"
+import { usePageAssist } from "@/context"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 
 type TimelineBlock =
@@ -236,6 +239,9 @@ export const PlaygroundChat = ({
   // CM-01: a saved reply the server cannot regenerate or continue says so up front.
   const savedReplyActions = savedReplyActionAvailability({ historySelection, messages, temporaryChat })
   const savedStatusActions = savedReplyStatusOffersActions(historySelection, messages)
+  // G19: the reply bubble a request is filling offers Stop before streaming starts.
+  const { controller: requestController } = usePageAssist()
+  const requestPending = isReplyRequestPending(requestController, messages)
   const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const confirmSensitiveValues = React.useCallback(async () => {
     if (typeof window === "undefined" || typeof window.confirm !== "function") {
@@ -1180,7 +1186,8 @@ export const PlaygroundChat = ({
         const variants = message?.variants || []
         const currentIndex = message?.activeVariantIndex ?? variants.length - 1
         const candidate = variants[currentIndex + (direction === "prev" ? -1 : 1)]
-        if (candidate?.id) void historySelection.choose({ kind: "after_message", message_id: candidate.id })
+        // CM-N2: show the rest of that alternative's branch, not just the reply.
+        if (candidate?.id) void historySelection.choose(variantBranchCursor(historySelection, candidate.id))
         return
       }
       setMessages((prev) =>
@@ -1387,7 +1394,7 @@ export const PlaygroundChat = ({
             onFollowUp={onPrepareResearchFollowUp}
           />
         </React.Suspense>
-        <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} renderBlock={(block, blockIndex) => {
+        <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} log={{ label: t("playground:aria.chatTranscript", "Chat messages"), busy: streaming || requestPending }} renderBlock={(block, blockIndex) => {
           if (block.kind === "single") {
             const message = messages[block.index]
             const previousUserMessage = previousUserMessageByIndex.get(block.index) ?? null
@@ -1443,6 +1450,7 @@ export const PlaygroundChat = ({
                 toolCalls={message?.toolCalls}
                 toolResults={message?.toolResults}
                 isStreaming={streaming && block.index === messages.length - 1}
+                isPending={requestPending && block.index === messages.length - 1}
                 reasoningTimeTaken={message?.reasoning_time_taken}
                 openReasoning={openReasoning}
                 modelImage={message?.modelImage}

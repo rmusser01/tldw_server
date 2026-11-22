@@ -597,6 +597,37 @@ class NotesListResponse(BaseModel):
         return _default_offset_pagination_aliases(self)
 
 
+# A text search orders by relevance unless another sort is asked for (NL-07).
+NoteSearchSortBy = Literal["relevance", "last_modified", "created_at", "title"]
+
+
+class NoteSearchSnippetSegment(BaseModel):
+    text: str = Field(..., description="A run of plain excerpt text; render it as text, never as markup")
+    match: bool = Field(..., description="True when this run is a matched search term")
+
+
+class NoteSearchResult(NoteResponse):
+    snippet: list[NoteSearchSnippetSegment] | None = Field(
+        default=None,
+        description=(
+            "A short excerpt of the note body around the search match, split into runs; `match` marks "
+            "the matched terms. Null when only the title matched, for tag-only and title-only searches."
+        ),
+    )
+
+
+class NotesSearchResponse(NotesListResponse):
+    notes: list[NoteSearchResult] | None = Field(
+        default=None,
+        description="Deprecated copy of `items`; null when the request passes legacy_aliases=false",
+    )
+    items: list[NoteSearchResult]
+    results: list[NoteSearchResult] | None = Field(
+        default=None,
+        description="Deprecated copy of `items`; null when the request passes legacy_aliases=false",
+    )
+
+
 class NotesExportResponse(BaseModel):
     notes: list[NoteResponse]
     data: list[NoteResponse]

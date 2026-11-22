@@ -1,6 +1,6 @@
 import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { requestScopeFields } from "./service-prompts"
-import type { ScopedRequestOptions } from "../TldwApiClient"
+import type { NoteSearchParams, ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import { requestOwnedPrompt } from "@/services/prompt-owner-request"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
@@ -117,17 +117,18 @@ export const collectionsMethods = {
   async searchNotes(
     this: TldwApiClientCore,
     query: string,
-    params?: { limit?: number; offset?: number },
+    params?: NoteSearchParams,
     options?: ScopedRequestOptions,
   ): Promise<any> {
     const normalized = query.trim()
     if (!normalized) {
-      return await this.listNotes(params, options)
+      return await this.listNotes({ limit: params?.limit, offset: params?.offset }, options)
     }
     const queryString = buildQuery({
       query: normalized,
       limit: params?.limit,
       offset: params?.offset,
+      legacy_aliases: params?.legacy_aliases,
     })
     return await bgRequest<any>({
       ...requestScopeFields(options?.requestScope),

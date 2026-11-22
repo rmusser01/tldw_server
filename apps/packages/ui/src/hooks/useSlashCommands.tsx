@@ -1,58 +1,20 @@
 import React from "react"
-import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
-import { isRecoverableAuthConfigError } from "@/services/auth-errors"
-import { useConnectionStore } from "@/store/connection"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useStorage } from "@plasmohq/storage/hook"
-
-type ServerSlashCommand = {
-  id?: string | number
-  command?: string
-  name?: string
-  label?: string
-  description?: string
-  keywords?: string[]
-  permissions?: string[] | string
-  required_permissions?: string[] | string
-  requiredPermissions?: string[] | string
-  permission?: string
-  allowed?: boolean
-  enabled?: boolean
-}
-
-type ServerCommandsResponse = {
-  commands?: ServerSlashCommand[]
-  data?: ServerSlashCommand[]
-  results?: ServerSlashCommand[]
-  permissions?: string[]
-  user_permissions?: string[]
-  userPermissions?: string[]
-  allowed_commands?: string[]
-  allowedCommands?: string[]
-}
+import {
+  buildServerSlashCommands,
+  mergeSlashCommands,
+  normalizeSlashCommandName,
+  useServerSlashCommandPayload,
+  type SlashCommandMeta
+} from "@/hooks/chat/server-slash-commands"
+import type { SlashCommandItem } from "@/types/slash-command"
 
 const SLASH_MENU_REGEX = /^\s*\/([\w-]*)$/
 const SLASH_COMMAND_REGEX = /^\/+([^\s/]+)(?:\s+([\s\S]*))?$/
 
-export interface SlashCommandItem {
-  id: string
-  command: string
-  label: string
-  description?: string
-  keywords?: string[]
-  action?: () => void
-  insertText?: string
-  source?: "server" | "local"
-}
-
-type SlashCommandMeta = {
-  label: string
-  description: string
-  keywords: string[]
-  insertText?: string
-}
+export type { SlashCommandItem }
 
 interface UseSlashCommandsOptions {
   chatMode: string
@@ -77,109 +39,7 @@ interface UseSlashCommandsResult {
   handleSlashCommandSelect: (command: SlashCommandItem) => void
 }
 
-const normalizeCommand = (value: string) =>
-  value.replace(/^\/+/, "").trim().toLowerCase()
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === "object" && !Array.isArray(value)
-
-const normalizeStringArray = (value?: unknown): string[] => {
-  if (value == null) return []
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => String(item).trim())
-      .filter((item) => item.length > 0)
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim()
-    return trimmed ? [trimmed] : []
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return [String(value)]
-  }
-  return []
-}
-
-const isServerSlashCommand = (value: unknown): value is ServerSlashCommand => {
-  if (!isRecord(value)) return false
-  const id = value.id
-  if (id != null && typeof id !== "string" && typeof id !== "number") {
-    return false
-  }
-  const stringFields = ["command", "name", "label", "description"] as const
-  for (const field of stringFields) {
-    const fieldValue = value[field]
-    if (fieldValue != null && typeof fieldValue !== "string") {
-      return false
-    }
-  }
-  const booleanFields = ["allowed", "enabled"] as const
-  for (const field of booleanFields) {
-    const fieldValue = value[field]
-    if (fieldValue != null && typeof fieldValue !== "boolean") {
-      return false
-    }
-  }
-  return true
-}
-
-const extractServerCommands = (payload: unknown): ServerSlashCommand[] => {
-  if (Array.isArray(payload)) {
-    return payload.filter(isServerSlashCommand)
-  }
-  if (!isRecord(payload)) return []
-  if (Array.isArray(payload.commands)) {
-    return payload.commands.filter(isServerSlashCommand)
-  }
-  if (Array.isArray(payload.data)) {
-    return payload.data.filter(isServerSlashCommand)
-  }
-  if (Array.isArray(payload.results)) {
-    return payload.results.filter(isServerSlashCommand)
-  }
-  return []
-}
-
-const extractPermissions = (payload: unknown): string[] => {
-  if (!isRecord(payload)) return []
-  const perms =
-    payload.permissions || payload.user_permissions || payload.userPermissions
-  return normalizeStringArray(perms)
-}
-
-const extractAllowedCommands = (
-  payload: unknown
-): string[] | null => {
-  if (!isRecord(payload)) return null
-  const allowed = payload.allowed_commands || payload.allowedCommands
-  const list = normalizeStringArray(allowed)
-  return list.length > 0 ? list.map(normalizeCommand) : null
-}
-
-const normalizeServerCommandsPayload = (
-  payload: unknown
-): ServerCommandsResponse | null => {
-  if (payload == null) return null
-  if (Array.isArray(payload)) {
-    return { commands: payload.filter(isServerSlashCommand) }
-  }
-  if (!isRecord(payload)) return null
-  const hasCommandArray =
-    Array.isArray(payload.commands) ||
-    Array.isArray(payload.data) ||
-    Array.isArray(payload.results)
-  const commands = extractServerCommands(payload)
-  const permissions = extractPermissions(payload)
-  const allowedCommands = extractAllowedCommands(payload)
-  if (!hasCommandArray && permissions.length === 0 && !allowedCommands) {
-    return null
-  }
-  return {
-    ...(hasCommandArray ? { commands } : {}),
-    ...(permissions.length ? { permissions } : {}),
-    ...(allowedCommands ? { allowed_commands: allowedCommands } : {})
-  }
-}
+const normalizeCommand = normalizeSlashCommandName
 
 /**
  * Hook for managing slash command autocomplete in the chat composer.
@@ -196,36 +56,13 @@ export const useSlashCommands = ({
 }: UseSlashCommandsOptions): UseSlashCommandsResult => {
   const { t } = useTranslation(["common", "sidepanel"])
   const isOnline = useServerOnline()
-  const checkConnection = useConnectionStore((state) => state.checkOnce)
   const [imageBackendDefault] = useStorage("imageBackendDefault", "")
   const imageBackendDefaultTrimmed = React.useMemo(
     () => (imageBackendDefault || "").trim(),
     [imageBackendDefault]
   )
   const [slashActiveIndex, setSlashActiveIndex] = React.useState(0)
-  const { data: serverPayload } = useQuery({
-    queryKey: ["tldw:chat:slashCommands"],
-    queryFn: async (): Promise<ServerCommandsResponse | null> => {
-      try {
-        const payload = (await tldwClient.listChatCommands()) as unknown
-        const normalized = normalizeServerCommandsPayload(payload)
-        if (!normalized && payload != null) {
-          console.warn("Unable to parse slash commands response:", payload)
-        }
-        return normalized
-      } catch (error) {
-        if (isRecoverableAuthConfigError(error)) {
-          void checkConnection().catch(() => null)
-          return null
-        }
-        throw error
-      }
-    },
-    enabled: isOnline,
-    staleTime: 60_000,
-    retry: (failureCount, error) =>
-      !isRecoverableAuthConfigError(error) && failureCount < 2
-  })
+  const serverPayload = useServerSlashCommandPayload(isOnline)
 
   const fallbackMeta = React.useMemo<Record<string, SlashCommandMeta>>(
     () => ({
@@ -310,73 +147,15 @@ export const useSlashCommands = ({
     [fallbackMeta, localActions]
   )
 
-  const serverCommands = React.useMemo<SlashCommandItem[]>(() => {
-    if (!serverPayload) return []
-    const commands = extractServerCommands(serverPayload)
-    if (commands.length === 0) return []
-    const allowedCommands = extractAllowedCommands(serverPayload)
-    const userPermissions = extractPermissions(serverPayload)
+  const serverCommands = React.useMemo<SlashCommandItem[]>(
+    () => buildServerSlashCommands(serverPayload, fallbackCommands),
+    [fallbackCommands, serverPayload]
+  )
 
-    return commands
-      .map((command, index) => {
-        const commandName = normalizeCommand(
-          command.command || command.name || ""
-        )
-        if (!commandName) return null
-        if (command.allowed === false || command.enabled === false) return null
-        if (
-          allowedCommands &&
-          !allowedCommands.includes(commandName)
-        ) {
-          return null
-        }
-        const requiredPermissions = normalizeStringArray(
-          command.required_permissions ||
-            command.requiredPermissions ||
-            command.permissions ||
-            command.permission
-        )
-        if (requiredPermissions.length > 0) {
-          if (!userPermissions || userPermissions.length === 0) {
-            return null
-          }
-          if (
-            !requiredPermissions.every((perm) =>
-              userPermissions.includes(perm)
-            )
-          ) {
-            return null
-          }
-        }
-        const fallback = fallbackMeta[commandName as keyof typeof fallbackMeta]
-        return {
-          id: String(command.id ?? `server-${commandName}-${index}`),
-          command: commandName,
-          label: command.label || command.name || fallback?.label || commandName,
-          description:
-            command.description || fallback?.description || undefined,
-          keywords: normalizeStringArray(command.keywords || fallback?.keywords),
-          insertText: fallback?.insertText,
-          action: localActions[commandName as keyof typeof localActions],
-          source: "server"
-        }
-      })
-      .filter(Boolean) as SlashCommandItem[]
-  }, [fallbackMeta, localActions, serverPayload])
-
-  const slashCommands = React.useMemo(() => {
-    if (!isOnline || serverCommands.length === 0) {
-      return fallbackCommands
-    }
-    const merged = new Map<string, SlashCommandItem>()
-    serverCommands.forEach((command) => merged.set(command.command, command))
-    fallbackCommands.forEach((command) => {
-      if (!merged.has(command.command)) {
-        merged.set(command.command, command)
-      }
-    })
-    return Array.from(merged.values())
-  }, [fallbackCommands, isOnline, serverCommands])
+  const slashCommands = React.useMemo(
+    () => (isOnline ? mergeSlashCommands(serverCommands, fallbackCommands) : fallbackCommands),
+    [fallbackCommands, isOnline, serverCommands]
+  )
 
   const slashCommandLookup = React.useMemo(
     () => new Map(slashCommands.map((command) => [command.command, command])),

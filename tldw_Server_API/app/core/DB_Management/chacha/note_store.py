@@ -48,6 +48,84 @@ if TYPE_CHECKING:
 # Whitelists for note list ordering; values are interpolated into ORDER BY.
 _NOTE_LIST_SORT_COLUMNS = frozenset({"last_modified", "created_at", "title"})
 _NOTE_LIST_SORT_DIRECTIONS = {"asc": "ASC", "desc": "DESC"}
+# A search with no sort (or "relevance") orders by bm25 / ts_rank.
+NOTE_SEARCH_RELEVANCE_SORT = "relevance"
+
+# Search snippets (NL-07): private-use markers wrap each matched term. Note text
+# that holds the same characters is stripped of them before it is marked
+# (PostgreSQL) or after its excerpt is aligned with an unmarked copy (SQLite), so
+# note text never forges a highlight.
+_SNIPPET_OPEN = "\ue000"
+_SNIPPET_CLOSE = "\ue001"
+_SNIPPET_MARKERS = _SNIPPET_OPEN + _SNIPPET_CLOSE
+_SNIPPET_ELLIPSIS = "…"
+_SNIPPET_TOKENS = 24
+# The longest excerpt returned, in characters (ellipses included).
+NOTE_SEARCH_SNIPPET_MAX_CHARS = 240
+# ts_headline parses the whole document; read at most this much of a note body.
+_SNIPPET_SOURCE_MAX_CHARS = 20_000
+# The search endpoint pages at most 100 notes.
+_SNIPPET_MAX_NOTES = 100
+_SNIPPET_MARKER_RE = re.compile(f"({_SNIPPET_OPEN}|{_SNIPPET_CLOSE})")
+
+
+def note_search_snippet_segments(marked: str | None) -> list[dict[str, Any]] | None:
+    """Split a marked FTS excerpt into ``{"text", "match"}`` segments.
+
+    ``marked`` wraps each matched term in the private snippet markers. Runs of
+    whitespace (newlines included) collapse to one space, and the text is cut
+    at ``NOTE_SEARCH_SNIPPET_MAX_CHARS`` with a trailing ellipsis. Returns None
+    when nothing in the excerpt matched (a title-only hit), so callers show the
+    note's first line instead.
+    """
+    if not marked:
+        return None
+    segments: list[dict[str, Any]] = []
+    budget = NOTE_SEARCH_SNIPPET_MAX_CHARS
+    in_match = False
+    flattened = re.sub(r"\s+", " ", str(marked)).strip()
+    for part in _SNIPPET_MARKER_RE.split(flattened):
+        if part in (_SNIPPET_OPEN, _SNIPPET_CLOSE):
+            in_match = part == _SNIPPET_OPEN
+            continue
+        if not part:
+            continue
+        if len(part) > budget:
+            part = part[: max(budget - len(_SNIPPET_ELLIPSIS), 0)].rstrip() + _SNIPPET_ELLIPSIS
+        budget -= len(part)
+        if segments and segments[-1]["match"] == in_match:
+            segments[-1]["text"] += part
+        else:
+            segments.append({"text": part, "match": in_match})
+        if budget <= 0:
+            break
+    if not any(segment["match"] for segment in segments):
+        return None
+    return segments
+
+
+def _keep_inserted_snippet_markers(marked: str | None, plain: str | None) -> str | None:
+    """Return ``marked`` with the note's own marker characters removed (SQLite).
+
+    ``marked`` is the FTS excerpt ``plain`` with the highlight markers
+    inserted. Walking both, a character that ``plain`` also has at that point
+    is note text (kept, unless it is a marker character); any other character
+    is an inserted marker. Returns None when the two do not line up.
+    """
+    if marked is None or plain is None:
+        return None
+    kept: list[str] = []
+    position = 0
+    for char in marked:
+        if position < len(plain) and char == plain[position]:
+            position += 1
+            if char not in _SNIPPET_MARKERS:
+                kept.append(char)
+        elif char in _SNIPPET_MARKERS:
+            kept.append(char)
+        else:
+            return None
+    return "".join(kept) if position == len(plain) else None
 
 
 class NoteStore:
@@ -1924,11 +2002,12 @@ class NoteStore:
         except BackendDatabaseError as e:
             raise CharactersRAGDBError(f"Backend error updating note studio diagram manifest: {e}") from e  # noqa: TRY003
 
-    def _note_list_order_clause(self, sort_by: str, sort_order: str) -> str:
+    def _note_list_order_clause(self, sort_by: str, sort_order: str, alias: str = "") -> str:
         """Build a whitelisted ORDER BY clause for note listings.
 
         ``id`` breaks ties so that LIMIT/OFFSET pages never overlap or skip
-        notes that share a timestamp or title.
+        notes that share a timestamp or title. ``alias`` qualifies the columns
+        when the notes table is joined (search queries join ``notes_fts``).
         """
         column = str(sort_by or "").strip().lower()
         direction = _NOTE_LIST_SORT_DIRECTIONS.get(str(sort_order or "").strip().lower())
@@ -1936,11 +2015,43 @@ class NoteStore:
             raise InputError(  # noqa: TRY003
                 f"Unsupported note sort: sort_by={sort_by!r}, sort_order={sort_order!r}"
             )
+        prefix = f"{alias}." if alias else ""
         if column == "title":
-            primary = self._db._case_insensitive_order_expression("title", direction)
+            primary = self._db._case_insensitive_order_expression(f"{prefix}title", direction)
         else:
-            primary = f"{column} {direction}"
-        return f"ORDER BY {primary}, id ASC"
+            primary = f"{prefix}{column} {direction}"
+        return f"ORDER BY {primary}, {prefix}id ASC"
+
+    def _note_search_order(
+        self, sort_by: str | None, sort_order: str | None, alias: str, relevance_clause: str
+    ) -> tuple[str, str]:
+        """Return ``(extra_select, order_clause)`` for a note search (NL-07).
+
+        No sort, or ``relevance``, keeps ``relevance_clause``. Any other sort is
+        whitelisted by ``_note_list_order_clause``. A PostgreSQL title sort also
+        selects its ``LOWER(title)`` key, because ``SELECT DISTINCT`` (tag
+        searches) only orders by expressions in the select list.
+        """
+        if sort_by is None or str(sort_by).strip().lower() == NOTE_SEARCH_RELEVANCE_SORT:
+            return "", relevance_clause
+        order_clause = self._note_list_order_clause(sort_by, sort_order or "desc", alias)
+        extra_select = ""
+        if self._db.backend_type == BackendType.POSTGRESQL and str(sort_by).strip().lower() == "title":
+            extra_select = f", LOWER({alias}.title) AS note_title_sort_key"
+        return extra_select, order_clause
+
+    def _text_match_filter(self, text_query: str | None) -> tuple[str, list[Any]]:
+        """A case-insensitive title-or-content substring filter, or nothing for blank text.
+
+        LIKE wildcards in the text match literally.
+        """
+        term = str(text_query or "").strip()
+        if not term:
+            return "", []
+        # SQLite LIKE ignores ASCII case; PostgreSQL needs ILIKE.
+        operator = "ILIKE" if self._db.backend_type == BackendType.POSTGRESQL else "LIKE"
+        pattern = f"%{self._escape_like(term)}%"
+        return f" AND (title {operator} ? ESCAPE '\\' OR content {operator} ? ESCAPE '\\')", [pattern, pattern]
 
     def list_notes(
         self,
@@ -1950,6 +2061,7 @@ class NoteStore:
         only_deleted: bool = False,
         sort_by: str = "last_modified",
         sort_order: str = "desc",
+        text_query: str | None = None,
     ) -> list[dict[str, Any]]:
         """List notes, most recently modified first by default.
 
@@ -1960,6 +2072,8 @@ class NoteStore:
         ``sort_by`` is one of ``last_modified``, ``created_at`` or ``title``
         (case-insensitive) and ``sort_order`` is ``asc`` or ``desc``. The whole
         result set is ordered before ``limit``/``offset`` apply.
+
+        ``text_query`` keeps notes whose title or content contains it, ignoring case.
 
         Raises:
             InputError: If ``sort_by`` or ``sort_order`` is not supported.
@@ -1973,6 +2087,9 @@ class NoteStore:
         elif not include_deleted:
             where_clause += " AND deleted = ?"
             params.append(False if self._db.backend_type == BackendType.POSTGRESQL else 0)
+        text_clause, text_params = self._text_match_filter(text_query)
+        where_clause += text_clause
+        params.extend(text_params)
 
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         where_clause += owner_clause
@@ -2050,14 +2167,19 @@ class NoteStore:
         offset: int = 0,
         sort_by: str = "last_modified",
         sort_order: str = "desc",
+        text_query: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List only soft-deleted notes (trash), ordered like ``list_notes``."""
+        """List only soft-deleted notes (trash), ordered like ``list_notes``.
+
+        ``text_query`` keeps notes whose title or content contains it, ignoring case.
+        """
         return self.list_notes(
             limit=limit,
             offset=offset,
             only_deleted=True,
             sort_by=sort_by,
             sort_order=sort_order,
+            text_query=text_query,
         )
 
     def get_notes_batch(self, note_ids: list[str], include_deleted: bool = True) -> list[dict[str, Any]]:
@@ -2251,8 +2373,10 @@ class NoteStore:
     # Note counting
     # ------------------------------------------------------------------
 
-    def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int:
-        """Count notes by deletion scope.
+    def count_notes(
+        self, include_deleted: bool = False, only_deleted: bool = False, text_query: str | None = None
+    ) -> int:
+        """Count notes by deletion scope, optionally only those matching ``text_query``.
 
         Defaults to active-note count only.
         """
@@ -2264,6 +2388,9 @@ class NoteStore:
         elif not include_deleted:
             where_clause += " AND deleted = ?"
             params.append(False if self._db.backend_type == BackendType.POSTGRESQL else 0)
+        text_clause, text_params = self._text_match_filter(text_query)
+        where_clause += text_clause
+        params.extend(text_params)
 
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         where_clause += owner_clause
@@ -2277,9 +2404,9 @@ class NoteStore:
             logger.error(f"Error counting notes: {exc}")
             raise
 
-    def count_deleted_notes(self) -> int:
-        """Return count of soft-deleted notes."""
-        return self.count_notes(only_deleted=True)
+    def count_deleted_notes(self, text_query: str | None = None) -> int:
+        """Return count of soft-deleted notes, optionally only those matching ``text_query``."""
+        return self.count_notes(only_deleted=True, text_query=text_query)
 
     def count_user_notes(self, include_deleted: bool = True) -> int:
         """Count total notes for seedless query gate."""
@@ -2836,9 +2963,21 @@ class NoteStore:
     # ------------------------------------------------------------------
 
     def search_notes(
-        self, search_term: str, limit: int = 10, offset: int = 0, *, match_any: bool = False
+        self,
+        search_term: str,
+        limit: int = 10,
+        offset: int = 0,
+        *,
+        match_any: bool = False,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Search note text, retaining literal phrases unless RAG requests term matching."""
+        """Search note text, retaining literal phrases unless RAG requests term matching.
+
+        Results come in relevance order (bm25 / ts_rank, then most recently
+        modified). ``sort_by`` ``last_modified``, ``created_at`` or ``title``
+        with ``sort_order`` orders the whole result in SQL instead (NL-07).
+        """
         # ponytail: bound questions to 64 lexical terms; semantic expansion stays in RAG.
         terms = list(dict.fromkeys(re.findall(r"\w+", search_term[:MAX_FTS_QUERY_LENGTH])))[:64] if match_any else []
         if match_any and not terms:
@@ -2861,6 +3000,12 @@ class NoteStore:
                 logger.debug("Empty notes search term; returning no results.")
                 return []
             owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
+            sort_select, order_clause = self._note_search_order(
+                sort_by, sort_order, "n", "ORDER BY rank DESC, n.last_modified DESC, n.id ASC"
+            )
+            fallback_select, fallback_order = self._note_search_order(
+                sort_by, sort_order, "n", "ORDER BY n.last_modified DESC, n.id ASC"
+            )
             tsquery = (
                 " | ".join(f"'{term}'" for term in terms)
                 if match_any
@@ -2872,11 +3017,11 @@ class NoteStore:
                 fallback_match = " OR ".join([fallback_match] * len(terms))
                 fallback_values = tuple(value for term in terms for value in ["%" + term.replace("_", "\\_") + "%"] * 2)
             fallback_query = """
-                SELECT n.*
+                SELECT n.*{fallback_select}
                 FROM notes n
                 WHERE n.deleted = FALSE{owner_clause}
                   AND ({fallback_match})
-                ORDER BY n.last_modified DESC
+                {fallback_order}
                 LIMIT ? OFFSET ?
             """.format_map(
                 locals()
@@ -2888,11 +3033,11 @@ class NoteStore:
                 return [dict(row) for row in cursor.fetchall()]
 
             query = """
-                SELECT n.*, ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) AS rank
+                SELECT n.*, ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) AS rank{sort_select}
                 FROM notes n
                 WHERE n.deleted = FALSE{owner_clause}
                   AND n.notes_fts_tsv @@ to_tsquery('english', ?)
-                ORDER BY rank DESC, n.last_modified DESC
+                {order_clause}
                 LIMIT ? OFFSET ?
             """.format_map(
                 locals()
@@ -2911,6 +3056,9 @@ class NoteStore:
 
         safe_literal = search_term.replace('"', '""')
         safe_search_term = " OR ".join(f'"{term}"' for term in terms) if match_any else f'"{safe_literal}"'
+        _, order_clause = self._note_search_order(
+            sort_by, sort_order, "main", "ORDER BY bm25_score, main.last_modified DESC, main.id ASC"
+        )
 
         query = """
                 SELECT main.*, bm25(notes_fts) AS bm25_score
@@ -2918,15 +3066,83 @@ class NoteStore:
                 JOIN notes AS main ON notes_fts.rowid = main.rowid
                 WHERE notes_fts MATCH ?
                   AND main.deleted = 0
-                ORDER BY bm25_score, main.last_modified DESC
+                {order_clause}
                 LIMIT ? OFFSET ?
-                """
+                """.format_map(locals())  # nosec B608 - whitelisted ORDER BY; values stay bound.
         try:
             cursor = self._db.execute_query(query, (safe_search_term, limit, offset))
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as e:
             logger.error(f"Error searching notes for '{search_term}': {e}")
             raise
+
+    def note_search_snippets(self, search_term: str, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """Return a short, highlighted body excerpt for each note on a search page (NL-07).
+
+        Reads only the owner's live notes among ``note_ids``, matched with the
+        same phrase (SQLite) or tsquery (PostgreSQL) as ``search_notes``. Each
+        value is a list of ``{"text", "match"}`` segments (see
+        ``note_search_snippet_segments``). A note whose body has no match, such
+        as a title-only hit, is left out.
+        """
+        term = str(search_term or "").strip()
+        ids = list(dict.fromkeys(str(note_id) for note_id in note_ids if note_id))[:_SNIPPET_MAX_NOTES]
+        if not term or not ids:
+            return {}
+        placeholders = ", ".join(["?"] * len(ids))
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            tsquery = FTSQueryTranslator.normalize_query(term, "postgresql")
+            if not tsquery:
+                return {}
+            owner_clause, owner_params = self._owner_filter("n")
+            options = (
+                f"StartSel={_SNIPPET_OPEN}, StopSel={_SNIPPET_CLOSE}, MaxWords={_SNIPPET_TOKENS}, "
+                f"MinWords={_SNIPPET_TOKENS // 2}, MaxFragments=1"
+            )
+            # The note's own marker characters are removed before marking.
+            query = (
+                "SELECT n.id AS id, ts_headline('english', translate(LEFT(n.content, ?), ?, ''), "  # nosec B608
+                "to_tsquery('english', ?), ?) "
+                f"AS marked FROM notes n WHERE n.deleted = FALSE{owner_clause} AND n.id IN ({placeholders})"
+            )
+            params: tuple[Any, ...] = (
+                _SNIPPET_SOURCE_MAX_CHARS,
+                _SNIPPET_MARKERS,
+                tsquery,
+                options,
+                *owner_params,
+                *ids,
+            )
+        else:
+            phrase = '"' + term.replace('"', '""') + '"'
+            # Column 1 is the body; the title already shows in the row. The
+            # unmarked copy tells inserted markers from the note's own.
+            query = (
+                "SELECT main.id AS id, snippet(notes_fts, 1, ?, ?, ?, ?) AS marked, "  # nosec B608
+                "snippet(notes_fts, 1, '', '', ?, ?) AS plain "
+                "FROM notes_fts JOIN notes AS main ON notes_fts.rowid = main.rowid "
+                f"WHERE notes_fts MATCH ? AND main.deleted = 0 AND main.id IN ({placeholders})"
+            )
+            params = (
+                _SNIPPET_OPEN,
+                _SNIPPET_CLOSE,
+                _SNIPPET_ELLIPSIS,
+                _SNIPPET_TOKENS,
+                _SNIPPET_ELLIPSIS,
+                _SNIPPET_TOKENS,
+                phrase,
+                *ids,
+            )
+        rows = self._db.execute_query(query, params, read_only=True).fetchall()
+        snippets: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            marked = row["marked"]
+            if self._db.backend_type != BackendType.POSTGRESQL:
+                marked = _keep_inserted_snippet_markers(marked, row["plain"])
+            segments = note_search_snippet_segments(marked)
+            if segments:
+                snippets[str(row["id"])] = segments
+        return snippets
 
     @staticmethod
     def _escape_like(value: str) -> str:
@@ -2937,8 +3153,13 @@ class NoteStore:
 
         # SQLite LIKE ignores ASCII case; PostgreSQL needs ILIKE.
         operator = "ILIKE" if self._db.backend_type == BackendType.POSTGRESQL else "LIKE"
-        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        owner_clause, owner_params = self._owner_filter()
         return operator, owner_clause, owner_params
+
+    def _owner_filter(self, alias: str = "") -> tuple[str, tuple[str, ...]]:
+        """Return the PostgreSQL owner predicate for this db's client (empty on SQLite)."""
+
+        return self._db._selected_owner_filter(self._db.client_id, alias)
 
     def search_note_titles(self, search_term: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
         """Find live notes whose title contains ``search_term`` (case-insensitive).
@@ -3058,31 +3279,54 @@ class NoteStore:
         limit: int = 10,
         offset: int = 0,
         match: str = "all",
+        *,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
     ) -> list[dict[str, Any]]:
         """Search notes with an optional FTS query and keyword-token filter.
 
         Tokens match keywords exactly (case-insensitive); ``match`` is "all"
-        (every token, the default) or "any" (at least one).
+        (every token, the default) or "any" (at least one). With a query the
+        order is relevance; tokens alone list the most recently modified first.
+        ``sort_by``/``sort_order`` order the whole result in SQL instead, as
+        in ``search_notes`` (NL-07).
         """
         tokens = dedupe_keywords(t for t in keyword_tokens if isinstance(t, str))
         if not tokens:
             if not search_term or not str(search_term).strip():
                 return []
-            return self.search_notes(search_term=str(search_term), limit=limit, offset=offset)
+            return self.search_notes(
+                search_term=str(search_term), limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order
+            )
 
         keyword_table = self._db._map_table_for_backend("keywords")
         like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table)
+        has_query = bool(search_term and str(search_term).strip())
+        # ``n.id`` breaks ties, so pages never overlap or skip notes.
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            relevance_clause = (
+                "ORDER BY rank DESC, n.last_modified DESC, n.id ASC"
+                if has_query
+                else "ORDER BY n.last_modified DESC, n.id ASC"
+            )
+        else:
+            relevance_clause = (
+                "ORDER BY bm25(notes_fts), n.last_modified DESC, n.id ASC"
+                if has_query
+                else "ORDER BY n.last_modified DESC, n.id ASC"
+            )
+        sort_select, order_clause = self._note_search_order(sort_by, sort_order, "n", relevance_clause)
 
         if self._db.backend_type == BackendType.POSTGRESQL:
             note_scope, note_owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
             keyword_scope, keyword_owner_params = self._db._selected_owner_filter(self._db.client_id, "k")
-            if search_term and str(search_term).strip():
+            if has_query:
                 tsquery = FTSQueryTranslator.normalize_query(str(search_term), 'postgresql')
                 if not tsquery:
                     logger.debug("Notes search term normalized to empty tsquery for input '{}'", search_term)
                     return []
                 query = """
-                    SELECT DISTINCT n.*, ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) AS rank
+                    SELECT DISTINCT n.*, ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) AS rank{sort_select}
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
@@ -3090,7 +3334,7 @@ class NoteStore:
                       AND k.deleted = FALSE
                       AND n.notes_fts_tsv @@ to_tsquery('english', ?)
                       AND ({like_clause})
-                    ORDER BY rank DESC, n.last_modified DESC
+                    {order_clause}
                     LIMIT ? OFFSET ?
                 """.format_map(
                     locals()
@@ -3098,14 +3342,14 @@ class NoteStore:
                 params = (tsquery, *note_owner_params, *keyword_owner_params, tsquery, *like_params, limit, offset)
             else:
                 query = """
-                    SELECT DISTINCT n.*
+                    SELECT DISTINCT n.*{sort_select}
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
                     WHERE n.deleted = FALSE{note_scope}{keyword_scope}
                       AND k.deleted = FALSE
                       AND ({like_clause})
-                    ORDER BY n.last_modified DESC
+                    {order_clause}
                     LIMIT ? OFFSET ?
                 """.format_map(
                     locals()
@@ -3114,7 +3358,7 @@ class NoteStore:
             cursor = self._db.execute_query(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
-        if search_term and str(search_term).strip():
+        if has_query:
             safe_literal = str(search_term).replace('"', '""')
             safe_search_term = f'"{safe_literal}"'
             query = """
@@ -3127,7 +3371,7 @@ class NoteStore:
                       AND n.deleted = 0
                       AND k.deleted = 0
                       AND ({like_clause})
-                    ORDER BY bm25(notes_fts), n.last_modified DESC
+                    {order_clause}
                     LIMIT ? OFFSET ?
                     """.format_map(locals())  # nosec B608
             params = (safe_search_term, *like_params, limit, offset)
@@ -3140,7 +3384,7 @@ class NoteStore:
                     WHERE n.deleted = 0
                       AND k.deleted = 0
                       AND ({like_clause})
-                    ORDER BY n.last_modified DESC
+                    {order_clause}
                     LIMIT ? OFFSET ?
                     """.format_map(locals())  # nosec B608
             params = (*like_params, limit, offset)

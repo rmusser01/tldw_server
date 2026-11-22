@@ -210,9 +210,15 @@ const OPENAPI_SPEC = {
 
 export const createFakeTldwServer = ({
   catalog = DEFAULT_CATALOG,
-  nativeCompletion = false
+  nativeCompletion = false,
+  chatCommands = []
 }: {
   catalog?: FakeCatalog
+  /**
+   * What `GET /api/v1/chat/commands` lists. The real server lists none until
+   * chat commands are enabled, and only the ones the user may run.
+   */
+  chatCommands?: Array<{ name: string; description: string }>
   /**
    * Advertise `native_completion_v1` on send captures, like the real server
    * without Sync v2, so a saved chat's turns are settled by the server (D7).
@@ -597,6 +603,9 @@ export const createFakeTldwServer = ({
     }
     if (path === "/api/v1/health" || path.startsWith("/api/v1/health/")) {
       return json({ status: "healthy", ok: true })
+    }
+    if (path === "/api/v1/chat/commands" && method === "GET") {
+      return json({ commands: chatCommands })
     }
     if (path === "/api/v1/llm/providers") {
       return json({

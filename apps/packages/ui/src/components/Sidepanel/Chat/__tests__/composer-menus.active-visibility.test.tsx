@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SlashCommandMenu } from "../SlashCommandMenu"
 import { MentionsMenu } from "../MentionsMenu"
 import { MentionsDropdown } from "@/components/Option/Playground/MentionsDropdown"
+import { comboboxOptionId } from "@/hooks/useComposerCombobox"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -95,5 +96,27 @@ describe("composer menu active-option visibility", () => {
     expect(visible.mock.contexts).toContain(
       screen.getByText("Item 11").closest("button")
     )
+  })
+})
+
+// AX-12: the menus are listboxes of options with ids the textarea can point
+// at; the listbox itself never carries aria-activedescendant.
+describe("composer menu listbox markup (AX-12)", () => {
+  it.each(["slash", "mentions"])("renders the %s menu as a labelled listbox of identified options", (kind) => {
+    render(
+      kind === "slash" ? (
+        <SlashCommandMenu open commands={items} activeIndex={2} listboxId="menu-under-test" {...actions} />
+      ) : (
+        <MentionsMenu open items={items} activeIndex={2} listboxId="menu-under-test" {...actions} />
+      )
+    )
+    const listbox = screen.getByRole("listbox", { name: kind === "slash" ? "Commands" : "Mentions" })
+    expect(listbox).toHaveAttribute("id", "menu-under-test")
+    expect(listbox).not.toHaveAttribute("aria-activedescendant")
+    const options = screen.getAllByRole("option")
+    expect(options).toHaveLength(items.length)
+    expect(options[2]).toHaveAttribute("id", comboboxOptionId("menu-under-test", 2))
+    expect(options[2]).toHaveAttribute("aria-selected", "true")
+    expect(options[0]).toHaveAttribute("aria-selected", "false")
   })
 })

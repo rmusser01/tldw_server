@@ -1,5 +1,5 @@
 import React from "react"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ComposerTextarea } from "../ComposerTextarea"
 import userEvent from "@testing-library/user-event"
@@ -8,7 +8,10 @@ import useDynamicTextareaSize from "@/hooks/useDynamicTextareaSize"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key
+    t: (_key: string, fallback?: string | { defaultValue?: string; count?: number }) =>
+      typeof fallback === "string"
+        ? fallback
+        : (fallback?.defaultValue ?? _key).replace("{{count}}", String(fallback?.count ?? ""))
   })
 }))
 
@@ -152,5 +155,65 @@ describe("composer action focus preserves input geometry", () => {
       await user.click(screen.getByRole("button", { name: "Outside composer" }))
       expect(screen.getByTestId("chat-input")).toHaveStyle({ minHeight: "44px" })
     } finally { view.unmount() }
+  })
+})
+
+// AX-12: the slash menu is a listbox the textarea (a textbox, not a
+// combobox) controls, so a screen reader hears each command while arrowing
+// and how many there are.
+describe("ComposerTextarea slash suggestions", () => {
+  const commands = [
+    { id: "slash-search", command: "search", label: "Search", description: "Search your knowledge" },
+    { id: "slash-web", command: "web", label: "Web search" }
+  ]
+
+  it("points the textbox into the slash menu's listbox of options", async () => {
+    const view = render(
+      <ComposerTextarea {...(createProps({ showSlashMenu: true, slashCommands: commands, slashActiveIndex: 0 }) as any)} />
+    )
+    const textarea = screen.getByRole("textbox", { name: "Message input" })
+    expect(textarea).not.toHaveAttribute("role")
+    expect(textarea).not.toHaveAttribute("aria-expanded")
+    expect(textarea).toHaveAttribute("aria-autocomplete", "list")
+    const listbox = screen.getByRole("listbox")
+    expect(textarea).toHaveAttribute("aria-controls", listbox.id)
+    const options = within(listbox).getAllByRole("option")
+    expect(options).toHaveLength(2)
+    expect(options.map((option) => option.id).every(Boolean)).toBe(true)
+    expect(textarea).toHaveAttribute("aria-activedescendant", options[0].id)
+    expect(options[0]).toHaveAttribute("aria-selected", "true")
+    await waitFor(() => expect(screen.getByTestId("suggestion-count-status")).toHaveTextContent("2 commands"))
+
+    view.rerender(
+      <ComposerTextarea {...(createProps({ showSlashMenu: true, slashCommands: commands, slashActiveIndex: 1 }) as any)} />
+    )
+    expect(textarea).toHaveAttribute("aria-activedescendant", within(screen.getByRole("listbox")).getAllByRole("option")[1].id)
+  })
+
+  it("controls nothing while the menu is closed", () => {
+    render(<ComposerTextarea {...(createProps() as any)} />)
+    const textarea = screen.getByRole("textbox", { name: "Message input" })
+    expect(textarea).toHaveAttribute("aria-autocomplete", "list")
+    expect(textarea).not.toHaveAttribute("aria-controls")
+    expect(textarea).not.toHaveAttribute("aria-activedescendant")
+  })
+
+  it("picks a command without taking focus from the textarea", () => {
+    const onSlashSelect = vi.fn()
+    render(
+      <ComposerTextarea {...(createProps({ showSlashMenu: true, slashCommands: commands, onSlashSelect }) as any)} />
+    )
+    const option = screen.getAllByRole("option")[1]
+    expect(option).not.toHaveAttribute("tabindex")
+    expect(fireEvent.mouseDown(option)).toBe(false)
+    fireEvent.click(option)
+    expect(onSlashSelect).toHaveBeenCalledWith(commands[1])
+  })
+
+  it("announces when no command matches", async () => {
+    render(<ComposerTextarea {...(createProps({ showSlashMenu: true, slashCommands: [] }) as any)} />)
+    expect(screen.getByRole("textbox", { name: "Message input" })).not.toHaveAttribute("aria-controls")
+    expect(screen.queryByRole("listbox")).toBeNull()
+    await waitFor(() => expect(screen.getByTestId("suggestion-count-status")).toHaveTextContent("No results found"))
   })
 })
