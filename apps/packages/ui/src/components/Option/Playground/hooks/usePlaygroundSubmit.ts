@@ -18,6 +18,7 @@ import {
 } from "../usage-metrics"
 import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
 import { executeSlashCommand } from "@/hooks/playground/useSlashCommands"
+import type { SlashCommandItem } from "@/types/slash-command"
 import type { ComposerDraftOwnership } from "@/components/Chat/composer/hooks/useComposerText"
 import {
   isChatSubmitSuccess,
@@ -101,6 +102,8 @@ export type UsePlaygroundSubmitDeps = {
   setLastSubmittedContext: (ctx: any) => void
   estimateTokensForText: (text: string) => number
   resolveSubmissionIntent: (message: string) => any
+  /** Runs `/new` and `/prompt` (the slash hook's `runStandaloneCommand`). */
+  runStandaloneCommand?: (command: SlashCommandItem, argument: string, setMessage: (value: string) => void) => void
   queueSubmission: (args: PlaygroundQueueSubmissionArgs) => unknown
   getSubmitDisabledReason?: () => string | null
   validateSelectedChatModelsAvailability: (models: string[]) => boolean
@@ -200,6 +203,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     setLastSubmittedContext,
     estimateTokensForText,
     resolveSubmissionIntent,
+    runStandaloneCommand,
     queueSubmission,
     getSubmitDisabledReason,
     validateSelectedChatModelsAvailability,
@@ -383,6 +387,12 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           webSearch,
           chatMode === "rag" ? "normal" : "rag"
         )
+      }
+      // `/new` and `/prompt` run on their own and send nothing; the runner
+      // clears this chat's saved draft so the command text is not left in it.
+      if (intent.slashCommand?.standalone) {
+        if (draftOwnership.isCurrent()) runStandaloneCommand?.(intent.slashCommand, intent.message, (value) => form.setFieldValue("message", value))
+        return
       }
       if (intent.handled && !intent.invalidImageCommand) {
         if (!draftOwnership.normalizeMessage(intent.message)) return

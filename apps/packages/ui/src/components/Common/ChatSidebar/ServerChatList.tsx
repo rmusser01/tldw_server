@@ -46,10 +46,16 @@ import {
   type SidebarServerChatFilterValue
 } from "@/services/settings/ui-settings"
 import { ServerChatRow } from "./ServerChatRow"
+import { exportServerChat } from "@/services/chat-transcript-export"
+import { runChatExport } from "@/components/Common/chat-export-action"
+import type { TranscriptFormat } from "@/utils/chat-transcript"
 import { CHAT_RECENCY_GROUP_LABELS, groupChatsByRecency } from "./chat-history-groups"
 import { showMovedToTrashNotice } from "./server-chat-trash-notice"
 import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
 
+const FolderPickerModal = React.lazy(
+  () => import("@/components/Sidepanel/Chat/FolderPickerModal")
+)
 const BulkFolderPickerModal = React.lazy(
   () => import("@/components/Sidepanel/Chat/BulkFolderPickerModal")
 )
@@ -168,6 +174,8 @@ export function ServerChatList({
     [selectedChatIds]
   )
   const [bulkFolderPickerOpen, setBulkFolderPickerOpen] = React.useState(false)
+  // A row's "Add to folder…" edits that one chat's folders (CS-09).
+  const [folderChatId, setFolderChatId] = React.useState<string | null>(null)
   const [bulkTagPickerOpen, setBulkTagPickerOpen] = React.useState(false)
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] =
     React.useState(false)
@@ -195,6 +203,7 @@ export function ServerChatList({
     setEditingTopicChat(null)
     setSelectedChatIds([])
     setBulkFolderPickerOpen(false)
+    setFolderChatId(null)
     setBulkTagPickerOpen(false)
     setBulkDeleteConfirmOpen(false)
   })
@@ -549,6 +558,7 @@ export function ServerChatList({
     setEditingTopicChat(null)
     setSelectedChatIds([])
     setBulkFolderPickerOpen(false)
+    setFolderChatId(null)
     setBulkTagPickerOpen(false)
     setBulkDeleteConfirmOpen(false)
     setIsBulkDeleting(false)
@@ -1215,6 +1225,44 @@ export function ServerChatList({
     setBulkFolderPickerOpen(false)
   }, [])
 
+  // CS-09: export reads the saved chat from the server, so it works for chats
+  // that have no copy on this device.
+  const handleExportChat = React.useCallback(
+    async (chat: ServerChatHistoryItem, format: TranscriptFormat) => {
+      const action = captureAction([chat.id])
+      if (!action) return
+      await runChatExport({
+        chatId: chat.id,
+        t,
+        isCurrent: action.isCurrent,
+        run: () => exportServerChat(chat.id, format, {
+          title: chat.title,
+          requestScope: action.requestScope
+        })
+      })
+    },
+    [captureAction, t]
+  )
+
+  const handleEditFolders = React.useCallback(
+    (chat: ServerChatHistoryItem) => {
+      if (folderApiAvailable === false) {
+        message.error(
+          t(
+            "sidepanel:folderPicker.notAvailable",
+            "Folder organization is not available on this server"
+          )
+        )
+        return
+      }
+      const action = captureAction([chat.id])
+      if (!action) return
+      managementAction.current = action
+      setFolderChatId(chat.id)
+    },
+    [captureAction, folderApiAvailable, t]
+  )
+
   const handleBulkTagPickerClose = React.useCallback(() => {
     setBulkTagPickerOpen(false)
   }, [])
@@ -1491,6 +1539,8 @@ export function ServerChatList({
       onRenameChat={handleRenameChat}
       onCreateTable={handleCreateTable}
       onEditTopic={handleEditTopic}
+      onExportChat={handleExportChat}
+      onEditFolders={handleEditFolders}
       onDeleteChat={isTrashView ? handleHardDeleteChat : handleMoveChatToTrash}
       onRestoreChat={handleRestoreChat}
       onUpdateState={handleUpdateState}
@@ -1909,6 +1959,14 @@ export function ServerChatList({
             conversationIds={selectedConversationIds}
             onClose={handleBulkFolderPickerClose}
             onSuccess={clearSelection}
+          />
+        )}
+        {folderChatId && managementAction.current?.isCurrent() && (
+          <FolderPickerModal
+            open
+            conversationId={folderChatId}
+            operation={managementAction.current}
+            onClose={() => setFolderChatId(null)}
           />
         )}
         {bulkTagPickerOpen && managementAction.current?.isCurrent() && (

@@ -87,18 +87,47 @@ separate worktrees, red test first, then merged into the wave branch.
 
 ### Wave 6: medium items, no decisions
 
-- Notes: NL-04 (row density, no raw UUIDs), NL-05 (bulk actions and Trash at
-  scale), NL-07 (search relevance), NL-14 (Graph for newcomers).
-- Chat: CM-03 (b) side-panel Continue and actions on saved markers, CM-12
-  fork lineage, CM-N2 for older branched chats.
-- Navigation: CS-09 per-chat Export (from the server) and Move to folder on
-  the full page; XP-06 ⌘K finds and creates notes and chats (first slice).
-- Composer and layout: CO-01 phone navigation with CO-N1; CC-11 slice (a):
-  `/new`, `/prompt` and server commands.
-- Accessibility: AX-11 transcript live region, AX-12 suggestion comboboxes;
-  measure AX-04 and XS-15 live.
-- XP-03 provenance, XS-13 side-panel quick-save slice 1, XP-04 "Chat about
-  this note" (after #3226, see below).
+Started 2026-11-13 on `ux/burndown-wave6` from dev @ 4b6b9ec446 (#3461).
+
+**Lane 6A — Notes list, bulk and Trash**
+- NL-04: a plain-text one-line preview, a "From chat" link instead of the
+  conversation id and message id, batch-resolved chat titles, relative dates
+  and denser rows. Moving search above Views waits for decision 16 (NL-12).
+- NL-05: select all on the page and all matching, a running bulk state with
+  progress, failures with Retry, and in Trash checkboxes, search and
+  "Restore selected". Restore stays in Trash. Undo for bulk delete waits for
+  decision 8.
+
+**Lane 6B — Notes search, Graph and ⌘K**
+- NL-07: a backend snippet and server-side sort, "Best match" while a query is
+  active, and the snippet in the row.
+- NL-14: tag labels, a node legend, a "Graph settings" popover with plain
+  labels, and a hint when the focus note is a fallback. The cap and filters
+  wait for decision 15 (NL-11).
+- XP-06 slice 1: Chats and Notes groups in the global palette, and "New note".
+
+**Lane 6C — Chat**
+- CM-03 (b): Continue and saved-status actions in the side panel.
+- CM-12: a fork keeps its parent, with a title, lineage and a way back.
+- CM-N2: legacy branched chats default to the newest-leaf path, with a hint
+  that alternative replies exist.
+- The full-page pending Stop (a Wave 5 follow-up).
+- CS-09: per-chat Export (read from the server) and Move to folder on the
+  full page, plus a visible ⋯ on side-panel tabs.
+
+**Lane 6D — Composer and accessibility**
+- CO-01 with CO-N1: a slim top bar in phone focus mode (chat list, title, New
+  chat, Exit focus).
+- CC-11 slice (a): `/new`, `/prompt` and the server commands in the WebUI.
+- AX-11: a narrower transcript live region.
+- AX-12: the slash, mention and wikilink suggestions become comboboxes.
+
+**Moved out of Wave 6:**
+- XP-03, XS-13 slice 1 and XP-04 go to Wave 8. They edit the files #3226
+  rewrites (`NotesEditorHeader.tsx`, `NotesDockPanel.tsx`,
+  `NoteQuickSaveModal.tsx`, `notes-capture.ts`), and the re-triage puts them
+  after #3226.
+- Measuring AX-04 and XS-15 goes to Wave 7, with decisions 12 and 14.
 
 ### Wave 7: after owner decisions
 
@@ -119,6 +148,49 @@ the tag-match follow-up, NL-06, NL-10, XP-09, XP-12, XP-18, AX-04.
   migration.
 
 ## Owner decisions
+
+**Answered 2026-11-19:** the owner accepted the recommended answer for every
+question below ("go with your recommendations"):
+
+1. CC-08: keep the redesign's names ("Search & Context", "Runtime") and
+   update the glossary to match. The Modes menu's toggles move to where they
+   belong.
+2. CC-10: search stays in the composer, with its own height cap. Sources are
+   shown first; the generated answer is opt-in.
+3. Sizes: 32px controls on desktop, through the size tokens, and 44px on
+   touch. D9 and D10 are dropped (the redesign replaced them).
+4. Web "@" attaches a note's content as a removable chip. `/note` does the
+   same.
+5. XP-01: a temporary chat's answer may be saved to Notes.
+6. XP-11: the chat list leaves routes that aren't chat.
+7. XP-13: adopt the review's glossary (Character, Persona, Buddy and the
+   product name).
+8. XP-17 and AX-06: soft deletes get a persistent inline Undo, and only
+   permanent deletes ask for confirmation. Message delete keeps its confirm.
+9. Merge `text-subtle` into `text-muted` in the light theme.
+10. XS-12: "Open dashboard" becomes "Flashcards".
+11. XP-09: one "Open in full page" action. The extension may open a configured
+    WebUI.
+12. XP-12: align the side-panel composer's strings and menus only; no
+    rebuild.
+13. XP-18: a server-side pin field for conversations and notes. UI mode stays
+    per surface.
+14. AX-04: in short viewports the composer's toolbar row collapses first; the
+    input and Send stay.
+15. NL-11: add Graph filters and raise the All-notes cap to 500. Picking a
+    note re-centres the graph and opens a preview, without leaving Graph.
+16. NL-12: keep the Inbox view.
+17. NL-06: Trash is auto-purged after 30 days. A permanent delete reaches
+    Sync v2 devices as an id-only tombstone, as in the #3198 rule.
+18. NL-10: server-side pins. Folders go with the notes epic E7 (#3131).
+19. Saved filters always match all of their tags.
+20. #3182: the outbox migration is approved. The current save behaviour stays
+    until it lands.
+21. #3071/#3159: the recommendation was to leave this to the owner, so it
+    stays open. Finishing P5 and CM-14 still waits on it.
+
+The original questions:
+
 
 Chat and composer:
 1. CC-08 names: the review's glossary ("Knowledge", "Compare models",
@@ -230,11 +302,83 @@ merged on top.
 - **Shortcuts:** the side panel's Ctrl+E ("chat with current page") and the
   full page's Mod+E (Switch model) share a help label.
 
+## Wave 6 log
+
+The four lanes were built in the Wave 5 worktrees on new branches, merged into
+`ux/burndown-wave6`, reviewed per lane, and their review fixes merged on top.
+
+**Integration:**
+- Lanes 6A and 6B both changed `NotesListPanel.tsx` and
+  `useNotesListManagement.tsx`. The merge keeps 6B's search snippet in front
+  of 6A's plain-text preview, and 6A's `oldestFirst` is folded into 6B's
+  `NotesPageFetchOptions`. The OpenAPI fingerprint was regenerated.
+- A Wave 5 regression was fixed: CO-03 removed the Composer pill, but
+  `Playground.responsive-parity.guard` still required it. That guard reads
+  source files and isn't in a CI shard, so it went unnoticed.
+- The log test for unknown search sorts now only requires that nothing is
+  logged at WARNING or above, because request logging echoes the query at
+  INFO.
+
+**Choices made during integration:**
+- **Notes search:**
+  - Unknown `sort_by` and `sort_order` values fall back to relevance and
+    desc, with no 422.
+  - Relevance pages end with `id ASC`, so paging is stable.
+  - `include_snippets=false` skips the excerpts.
+  - Note text can't forge a highlight.
+- **Graph wording:** the English values of the existing keys were reworded:
+  "Distance from focus", "Most items shown", "Rings" and the focus hint.
+- **⌘K "New note":** opens `/notes?new=<nonce>`.
+- **Notes list and Trash:**
+  - Restore stays in Trash, and row Restore is disabled while a bulk run is
+    active.
+  - "Select all matching" pages oldest first and is capped at 1000.
+- **Chat export:** JSON is `format: "tldw-chat-export"`, `version: 1`, with
+  every message, and `images_omitted` when the chat has images. Markdown
+  follows the newest path and says when alternatives are omitted.
+- **Folders:** "Add to folder…" (one chat) shows and edits the chat's current
+  folders.
+- **Composer:**
+  - The composer and Notes textareas keep the textbox role, with
+    `aria-autocomplete`, `aria-controls` and `aria-activedescendant` on the
+    textbox. `role=combobox` isn't allowed on a textarea.
+  - ☰ in the phone Focus bar opens the chat list in a drawer, without
+    changing the saved layout.
+  - `/new` and `/prompt` are standalone. Any text after `/new` moves to the
+    new chat, and `/prompt <text>` searches the picker.
+  - Server commands are fetched when the slash menu first opens and are
+    listed after the local commands.
+- **AX-11:**
+  - There is one polite log on the message rows, busy while a reply is
+    pending or streaming, with one "Response complete" status outside it.
+  - Hiding per-message chrome from the announced text was tried and
+    reverted: it duplicated reply text in the DOM. It is a follow-up.
+  - The empty log has no height, so the e2e checks for it use
+    `toBeAttached()`.
+
+### Follow-ups from Wave 6
+
+- **AX-11 and AX-12:**
+  - Keep the per-message chrome (name, time, toolbar) out of the announced
+    text.
+  - Verify the log and busy handling and the textbox autocomplete pattern
+    with NVDA+Chrome and VoiceOver+Safari.
+- **XP-06 slice 2:** recent items for an empty query, "Create note <q>", and
+  Enter in the note title moving to the body. Also: the extension's options
+  layout passes no palette content providers.
+- **Chat export:** offer images (`include_images`) as an option.
+- **Flaky locally under load:** `MessageActionsBar.real-popover.test.tsx`,
+  which passes alone.
+- **Waiting on owner decisions:**
+  - NL-11 Graph cap and filters (decision 15);
+  - moving notes search above Views (decision 16);
+  - Undo for bulk delete (decision 8).
+
 ## Status
 
 | Wave | Status |
 |---|---|
-| 5 | Integrated and reviewed; PR pending |
-| 6 | Not started |
-| 7 | Waiting on owner decisions |
+| 5 | Landed (#3461, 2026-11-13) |
+| 6 | In progress |
+| 7 | Decisions answered 2026-11-19; not started |
 | 8 | Blocked |

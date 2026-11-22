@@ -663,6 +663,35 @@ class TestNoteStoreSoftDelete:
         assert active_id not in deleted_ids
 
 
+    def test_list_deleted_notes_filters_by_title_or_content(self, store):
+        """Trash search (NL-05): a case-insensitive substring of the title or content."""
+        trashed = {}
+        for title, content in [("Budget 2026", "numbers"), ("Groceries", "milk and BUDGET"), ("Travel", "plans")]:
+            note_id = store.add_note(title=title, content=content)
+            note = store.get_note_by_id(note_id)
+            assert store.soft_delete_note(note_id, expected_version=note["version"]) is True
+            trashed[title] = note_id
+        store.add_note(title="Budget active", content="not in trash")
+
+        matches = store.list_deleted_notes(text_query="budget")
+
+        assert {row["id"] for row in matches} == {trashed["Budget 2026"], trashed["Groceries"]}
+        assert store.count_deleted_notes(text_query="budget") == 2
+        assert store.count_deleted_notes(text_query="  ") == 3
+        assert store.count_deleted_notes() == 3
+
+    def test_list_deleted_notes_text_query_matches_like_wildcards_literally(self, store):
+        literal_id = store.add_note(title="100% done", content="x")
+        other_id = store.add_note(title="Year 2026", content="y_z")
+        for note_id in (literal_id, other_id):
+            note = store.get_note_by_id(note_id)
+            assert store.soft_delete_note(note_id, expected_version=note["version"]) is True
+
+        assert [row["id"] for row in store.list_deleted_notes(text_query="0%")] == [literal_id]
+        assert [row["id"] for row in store.list_deleted_notes(text_query="y_z")] == [other_id]
+        assert {row["id"] for row in store.list_deleted_notes(text_query="_")} == {other_id}
+
+
 class TestNoteStoreSearch:
     def test_search_notes(self, store):
         store.add_note(title="Searchable Item", content="Unique searchable content xyz123")
