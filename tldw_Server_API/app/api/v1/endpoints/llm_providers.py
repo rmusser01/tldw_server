@@ -1861,6 +1861,13 @@ async def _users_listing(user_id: Any, **options: Any) -> dict[str, Any]:
         # ponytail: one own-key lookup per cloud provider (a store read each when BYOK is on); list the user's
         # stored providers once if listings show up in profiles.
         for provider in sorted(CLOUD_MODEL_PROVIDERS):
+            try:
+                snapshot = _llm_provider_overrides.capture_provider_override_call_snapshot(provider)
+                disabled = snapshot.policy_error(None, allowlist=False) is not None
+            except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+                disabled = True  # a store outage lists nothing on a user's key; the server's listing handles it
+            if disabled:
+                continue  # a disabled provider's stored key is never touched (a lookup can refresh an OAuth token)
             handle = await users_own_key_credentials(user_id, provider, policy=False)
             if handle is not None:
                 own_keys[provider] = handle
