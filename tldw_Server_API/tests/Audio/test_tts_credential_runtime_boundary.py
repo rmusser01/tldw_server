@@ -2705,6 +2705,7 @@ async def test_tts_fails_closed_when_override_store_is_unhealthy(monkeypatch) ->
     finally:
         llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(original)
 
+
 @pytest.mark.asyncio
 async def test_streaming_tts_holds_the_users_own_key_to_the_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     """TASK-15582 (review round 1, I1): text-to-speech is outside the LLM rule (ADR-086). Streaming TTS checks the

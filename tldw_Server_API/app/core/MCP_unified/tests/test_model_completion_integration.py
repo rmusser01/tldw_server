@@ -1462,6 +1462,7 @@ async def test_cancelled_noncooperative_egress_remains_owned_and_cannot_dispatch
     finally:
         await drain_call(port, call, gate)
 
+
 async def test_the_users_own_key_at_its_vendor_runs_a_model_off_the_allowlist(composed):
     """TASK-15582: after the scope check, the user's own key at the vendor's host is not held to the server's
     allowlist; the bounded transport sends it, and nothing else is refused."""

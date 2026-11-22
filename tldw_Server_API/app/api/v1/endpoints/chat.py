@@ -394,6 +394,28 @@ async def _own_key_before_the_hosted_plan(current_user: Any, provider: str, bill
     return await _usage_quota_deps.users_own_key_serves(getattr(current_user, "id", None), provider)
 
 
+async def _override_error_before_the_key(
+    provider: str, model: str | None, user_id: Any, *, macro: bool
+) -> dict[str, str] | None:
+    """Chat's first admin-override check, made before input moderation and before the call's key is resolved.
+
+    A disabled provider and a denied model are refused on every key. A model off ``allowed_models`` is refused unless
+    the user's own key serves the provider (``users_own_key_serves``, asked only then), so a request the server's key
+    would refuse is refused before moderation runs. A macro runs later as a job on the server's key, so it is always
+    held to the list (TASK-15582, TASK-15615). ``credential_runtime.resolve`` checks the list again on the key it
+    resolves. Raises ``ByokResolutionError("credential_store_unavailable")`` when the store cannot be read.
+    """
+    error = _llm_provider_overrides.validate_provider_override(provider, model)
+    if (
+        error is not None
+        and error.get("error_code") == "model_not_allowed"
+        and not macro
+        and await _usage_quota_deps.users_own_key_serves(user_id, provider)
+    ):
+        return None
+    return error
+
+
 async def _enter_the_hosted_plans_enforcer(billing_org_id: Any, estimated_tokens: int) -> LimitEnforcer | None:
     """Enter the hosted plan's LLM-token enforcer for this request; None when its lookup fails (fail-open).
 
@@ -4472,9 +4494,9 @@ async def create_chat_completion(
                     if default_model_for_provider:
                         model = default_model_for_provider
                         request_data.model = default_model_for_provider
-                # Only what every key refuses: credential_runtime.resolve checks the allowlist below, once it knows the
-                # key; a macro runs later as a job on the server's key, so it is held to the allowlist now (TASK-15582).
-                override_error = _llm_provider_overrides.validate_provider_override(provider, model, allowlist=chat_macro_intent is not None)
+                override_error = await _override_error_before_the_key(
+                    provider, model, runtime_user_id, macro=chat_macro_intent is not None
+                )
             except ByokResolutionError as credential_error:
                 raise_detached_error(
                     _provider_credential_http_exception(credential_error)

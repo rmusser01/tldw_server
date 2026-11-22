@@ -369,6 +369,7 @@ def test_study_version_conflict_still_stops_before_dispatch_or_new_messages(stud
     assert provider_boundary.calls == []
     assert [row["id"] for row in route.client.get(route.path).json()["messages"]] == [prior["id"]]
 
+
 @pytest.mark.integration
 @pytest.mark.parametrize(("stored", "expected"), [(True, (200, 1)), (False, (400, 0))], ids=["own-key", "server-key"])
 def test_a_model_off_the_allowlist_runs_only_on_the_users_own_key(
