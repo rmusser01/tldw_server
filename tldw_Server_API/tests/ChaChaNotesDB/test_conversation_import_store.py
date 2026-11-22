@@ -20,7 +20,7 @@ from tldw_Server_API.app.core.Chat.conversation_import import (
     DEFAULT_CONVERSATION_STATE,
     import_fingerprint_from_authority,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, UniqueConstraintError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -332,11 +332,13 @@ def test_malformed_fingerprint_is_refused_before_any_write(db: CharactersRAGDB, 
 def test_owner_is_the_argument_never_a_field_of_the_payload(db: CharactersRAGDB) -> None:
     conversation = _conversation(client_id="999", scope_type="workspace", workspace_id="ws", deleted=1, version=7)
     messages = [_message("m1", None, client_id="999", deleted=1, version=9, conversation_id="someone-elses")]
-    _import(db, messages, conversation=conversation, owner_client_id="42")
+    # On PostgreSQL the message store locks chats to the instance owner, so the argument must be that owner.
+    owner = "42" if db.backend_type == BackendType.SQLITE else db.client_id
+    _import(db, messages, conversation=conversation, owner_client_id=owner)
     row = db.get_conversation_by_id(CHAT_ID)
-    assert (row["client_id"], row["scope_type"], row["workspace_id"], row["version"]) == ("42", "global", None, 1)
+    assert (row["client_id"], row["scope_type"], row["workspace_id"], row["version"]) == (owner, "global", None, 1)
     message = db.get_message_by_id("m1")
-    assert (message["client_id"], message["conversation_id"], message["version"]) == ("42", CHAT_ID, 1)
+    assert (message["client_id"], message["conversation_id"], message["version"]) == (owner, CHAT_ID, 1)
     assert not message["deleted"]
 
 

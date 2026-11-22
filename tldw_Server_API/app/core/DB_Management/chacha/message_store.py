@@ -72,6 +72,8 @@ class MessageStore:
         self, conn: Any, conversation_id: str, owner_client_id: str | None = None, *, include_deleted: bool = False
     ) -> None:
         """Serialize the conversation before locking message rows or metadata."""
+        if owner_client_id is None and self._db.backend_type == BackendType.POSTGRESQL:
+            owner_client_id = str(self._db.client_id)
         query = "SELECT id FROM conversations WHERE id = ?"
         if not include_deleted:
             query += " AND deleted = FALSE"
@@ -2354,6 +2356,8 @@ class MessageStore:
         """
 
         self._db._ensure_message_metadata_table()
+        if owner_client_id is None and self._db.backend_type == BackendType.POSTGRESQL:
+            owner_client_id = str(self._db.client_id)
         deleted_clause = "" if include_deleted else "AND m.deleted = FALSE AND c.deleted = FALSE"
         owner_clause = "" if owner_client_id is None else "AND c.client_id = ?"
         query = (

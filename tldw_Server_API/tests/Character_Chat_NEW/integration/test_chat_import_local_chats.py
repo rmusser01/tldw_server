@@ -42,6 +42,7 @@ from tldw_Server_API.app.api.v1.endpoints import chat as chat_api
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
@@ -137,6 +138,10 @@ def _client(
     sync_service: Any = None,
     limiter: CharacterRateLimiter | None = None,
 ) -> TestClient:
+    if db.backend_type == BackendType.POSTGRESQL and str(user_id) != db.client_id:
+        # Production binds the request's store to the request user, and on PostgreSQL the message
+        # store locks chats to that instance owner.
+        db = CharactersRAGDB(db.db_path_str, client_id=str(user_id), backend=db.backend)
     app = FastAPI()
     # As in main.py: each request owns its PostgreSQL checkout and returns it when the response ends.
     app.add_middleware(ChaChaOperationMiddleware)
