@@ -249,7 +249,9 @@ class KeywordStore:
         try:
             with self._db.transaction() as conn:
                 self._db._require_selected_owner_row(conn, "keywords", keyword_id, self._db.client_id)
-                current_version = self._db._get_current_db_version(conn, keyword_table, "id", keyword_id)
+                current_version = self._db._get_current_db_version(
+                    conn, keyword_table, "id", keyword_id, owner_client_id=self._db.client_id,
+                )
                 if current_version != expected_version:
                     raise ConflictError(  # noqa: TRY003, TRY301
                         f"Keyword {keyword_id} version mismatch (db={current_version}, expected={expected_version}).",
@@ -564,7 +566,7 @@ class KeywordStore:
                 for keyword_id in sorted((source_keyword_id, target_keyword_id)):
                     self._db._require_selected_owner_row(conn, "keywords", keyword_id, self._db.client_id)
                 source_version = self._db._get_current_db_version(
-                    conn, keyword_table, "id", source_keyword_id
+                    conn, keyword_table, "id", source_keyword_id, owner_client_id=self._db.client_id,
                 )
                 if source_version != expected_source_version:
                     raise ConflictError(  # noqa: TRY003, TRY301
@@ -577,7 +579,7 @@ class KeywordStore:
                     )
 
                 target_version = self._db._get_current_db_version(
-                    conn, keyword_table, "id", target_keyword_id
+                    conn, keyword_table, "id", target_keyword_id, owner_client_id=self._db.client_id,
                 )
                 if (
                     expected_target_version is not None
@@ -743,7 +745,10 @@ class KeywordStore:
             # e.g., 'fru' should match 'fruit'. FTS5 uses '*' for prefix queries.
             fts_query = f"{search_term}*"
             try:
-                return self._db._search_generic_items_fts("keywords_fts", "keywords", "keyword", fts_query, limit)
+                return self._db._search_generic_items_fts(
+                    "keywords_fts", "keywords", "keyword", fts_query, limit,
+                    owner_client_id=self._db.client_id,
+                )
             except CharactersRAGDBError as exc:
                 msg = str(exc).lower()
                 if "fts" in msg or "match" in msg or "syntax" in msg:

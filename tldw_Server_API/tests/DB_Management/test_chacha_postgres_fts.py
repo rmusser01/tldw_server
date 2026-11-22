@@ -11,7 +11,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha.character_store import CharacterStore
 from tldw_Server_API.app.core.DB_Management.chacha.keyword_store import KeywordStore
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, OwnerScope
 
 
 class _CursorStub:
@@ -187,7 +187,10 @@ def test_manage_link_postgres_uses_on_conflict():
 
     db.transaction = fake_transaction  # type: ignore[assignment]
 
-    assert db._manage_link("flashcard_keywords", "card_id", 1, "keyword_id", 2, "link") is True
+    # The test checks the INSERT shape only; a stub connection cannot prove ownership.
+    assert db._manage_link(
+        "flashcard_keywords", "card_id", 1, "keyword_id", 2, "link", owner_client_id=OwnerScope.NOT_APPLICABLE
+    ) is True
 
     insert_calls = [sql.lower() for sql in conn.calls if sql.lower().startswith("insert into flashcard_keywords")]
     assert insert_calls, "expected insert into flashcard_keywords to be executed"

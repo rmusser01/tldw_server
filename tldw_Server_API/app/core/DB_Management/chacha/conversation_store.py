@@ -1646,6 +1646,7 @@ class ConversationStore:
                         "conversations",
                         "id",
                         conversation_id,
+                        owner_client_id=self._db.client_id,
                     )
                 except ConflictError:
                     record_status = conn.execute(
