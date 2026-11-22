@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
 # Non-sensitive test API key used only in tests.
 TEST_API_KEY = "test-api-key-1234567890"
@@ -29,12 +30,12 @@ def client(monkeypatch):
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
 
     # Stub speech chat service to avoid heavy STT/LLM/TTS
-    from tldw_Server_API.app.core.Streaming import speech_chat_service
     from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
         SpeechChatRequest,
         SpeechChatResponse,
         SpeechChatTiming,
     )
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
 
     async def _fake_run_speech_chat_turn(
         *,
@@ -58,7 +59,7 @@ def client(monkeypatch):
 
     # Bypass AuthNZ for these endpoint-level tests by overriding the
     # request-user dependency with a lightweight single-user stub.
-    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
     async def _fake_get_request_user() -> User:
         # Minimal single-user stub; auth details are exercised elsewhere.
@@ -78,6 +79,9 @@ def client(monkeypatch):
 
 
 def test_audio_chat_endpoint_success(client: TestClient):
+    # The scope guard uses the settings snapshot, which can predate this fixture.
+    api_key = get_settings().SINGLE_USER_API_KEY
+    assert api_key
     payload = {
         "session_id": None,
         "input_audio": _encode_silence_base64(),
@@ -87,7 +91,7 @@ def test_audio_chat_endpoint_success(client: TestClient):
     r = client.post(
         "/api/v1/audio/chat",
         json=payload,
-        headers={"X-API-KEY": TEST_API_KEY},
+        headers={"X-API-KEY": api_key},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -102,7 +106,6 @@ def test_audio_chat_endpoint_success(client: TestClient):
 
 def test_audio_chat_endpoint_concurrency_limit(monkeypatch, client: TestClient):
     # Patch can_start_stream to force a quota failure
-    from tldw_Server_API.app.api.v1.endpoints import audio as audio_module
 
     async def _deny(_user_id: int):
         return False, "Concurrent streams limit reached (1)"

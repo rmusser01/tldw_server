@@ -222,6 +222,11 @@ KittenTTS is a local English-only ONNX provider that uses static preset voices a
 - Required local deps: `onnxruntime`, `phonemizer-fork`, `espeakng_loader`, `huggingface_hub`
 - Security model: downloads are pinned to immutable Hugging Face commit hashes through `model_revision`
 
+The production API image installs the `TTS_kitten_tts` extra and prepares a
+writable model cache at `/app/cache/kitten_tts`. If `TLDW_CONFIG_FILE` points
+to a custom `config.txt`, add the provider entry below to
+`tts_providers_config.yaml` alongside that file and restart the server.
+
 Configuration example:
 
 ```yaml

@@ -8,6 +8,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
+import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as _Summarization_General_Lib
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.schemas.translate_schemas import (
@@ -16,29 +17,26 @@ from tldw_Server_API.app.api.v1.schemas.translate_schemas import (
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import resolve_provider_api_key_from_config
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
     render_service_prompt_part,
     resolve_service_prompt,
 )
-import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as _Summarization_General_Lib
 
 router = APIRouter(tags=["Translation"])
 
 
 def _get_default_provider() -> str:
-    """Get the default LLM provider from config."""
+    """Select the first configured translation provider."""
     try:
-        config = load_and_log_configs()
-        # Check for a configured default provider
-        if config:
-            # Check common provider sections
-            for provider in ["openai", "anthropic", "openrouter", "groq", "deepseek"]:
-                section = config.get(provider, {})
-                if section.get("api_key"):
-                    return provider
-        return "openai"  # Fallback default
+        config = load_and_log_configs() or {}
+        for provider in ("openai", "anthropic", "openrouter", "groq", "deepseek"):
+            api_key = resolve_provider_api_key_from_config(provider, config)
+            if isinstance(api_key, str) and api_key.strip():
+                return provider
     except Exception:
         return "openai"
+    return "openai"
 
 
 @router.post(
