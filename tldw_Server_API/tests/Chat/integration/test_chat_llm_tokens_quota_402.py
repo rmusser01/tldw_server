@@ -484,3 +484,37 @@ def test_a_failed_hosted_plan_lookup_withholds_failover_but_not_the_own_key_requ
     assert "hi" in response.text
     own_key_failover.provider_manager.get_available_provider.assert_not_called()
     assert own_key_failover.dispatched == ["openai"]
+
+
+
+@pytest.mark.parametrize(
+    ("own_key", "expected"),
+    [(True, (200, None, ["anthropic"])), (False, (403, "model_not_allowed", []))],
+    ids=["own-key-fallback", "server-key-fallback"],
+)
+def test_a_failover_runs_a_model_off_the_allowlist_only_on_the_users_own_key(
+    authenticated_client, own_key_failover, monkeypatch, own_key, expected
+):
+    """TASK-15616 (#3544's final review, M3): the health check fails openai over to anthropic, whose default model is
+    off anthropic's allowed_models. On the user's own anthropic key the fallback dispatches; on the server's key it is
+    refused model_not_allowed. chat.py's failover check takes the allowlist from the fallback key's source."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    own_key_failover.install("health_switch")
+    if own_key:
+        users_own_key(monkeypatch, "anthropic", api_key="sk-users-anthropic-key")
+    set_llm_provider_overrides_cache_for_tests(
+        {"anthropic": LLMProviderOverride(provider="anthropic", allowed_models=["claude-only-this"])}
+    )
+
+    response = authenticated_client.post("/api/v1/chat/completions", json=_failover_request(False).model_dump())
+
+    assert (
+        response.status_code,
+        (response.json().get("detail") or {}).get("error_code"),
+        own_key_failover.dispatched,
+    ) == expected
