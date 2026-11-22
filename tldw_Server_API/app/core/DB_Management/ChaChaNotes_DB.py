@@ -80,7 +80,6 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
         MAX_CHAT_ATTACHMENT_READ_BYTES,
     )
-    from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import GraphConnection
     from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskConnection
     from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
@@ -1091,32 +1090,6 @@ class CharactersRAGDB:
         def get_message_metadata(
             self, message_id: str, *, conn: Any | None = None, strict: bool = False
         ) -> dict[str, Any] | None: ...
-
-        def bind_local_moodboard_graph_to_dataset(
-            self, *, owner_user_id: str, target_dataset_id: str, conn: GraphConnection | None = None
-        ) -> dict[str, int]: ...
-
-        def bind_local_studio_graph_to_dataset(
-            self, *, owner_user_id: str, target_dataset_id: str, conn: GraphConnection | None = None
-        ) -> dict[str, int]: ...
-
-        def page_moodboards_for_sync_bootstrap(
-            self, *, owner_user_id: str, dataset_id: str, after_sync_id: str | None = None, limit: int = 100
-        ) -> list[dict[str, Any]]: ...
-
-        def page_moodboard_placements_for_sync_bootstrap(
-            self,
-            *,
-            owner_user_id: str,
-            dataset_id: str,
-            after_moodboard_sync_id: str | None = None,
-            after_note_id: str | None = None,
-            limit: int = 100,
-        ) -> list[dict[str, Any]]: ...
-
-        def page_studio_documents_for_sync_bootstrap(
-            self, *, owner_user_id: str, dataset_id: str, after_note_id: str | None = None, limit: int = 100
-        ) -> list[dict[str, Any]]: ...
 
         def create_note_studio_document(
             self,
@@ -47689,21 +47662,6 @@ for _task_store_method in (
         _delegate_store_method("task_store", _task_store_method),
     )
 
-
-for _moodboard_sync_store_method in (
-    "resolve_moodboard_compatibility_dataset_id",
-    "resolve_studio_compatibility_dataset_id",
-    "bind_local_moodboard_graph_to_dataset",
-    "bind_local_studio_graph_to_dataset",
-    "page_moodboards_for_sync_bootstrap",
-    "page_moodboard_placements_for_sync_bootstrap",
-    "page_studio_documents_for_sync_bootstrap",
-):
-    setattr(
-        CharactersRAGDB,
-        _moodboard_sync_store_method,
-        _delegate_store_method("moodboard_sync_store", _moodboard_sync_store_method),
-    )
 
 CharactersRAGDB.resolve_moodboard_compatibility_dataset_id = _resolve_moodboard_compatibility_dataset_id  # type: ignore[method-assign]
 CharactersRAGDB.resolve_studio_compatibility_dataset_id = _resolve_studio_compatibility_dataset_id  # type: ignore[method-assign]

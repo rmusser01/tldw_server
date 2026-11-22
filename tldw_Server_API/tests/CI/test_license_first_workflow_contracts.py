@@ -1649,6 +1649,22 @@ def test_backend_required_enforces_isolation_ratchets():
         assert suite in gate["run"]  # nosec B101 - regression assertion
 
 
+@pytest.mark.unit
+def test_ratchet_step_has_no_comment_inside_a_continued_command() -> None:
+    """A `#` line right after a `\\` line ends the command in bash; every later path would run as its own command."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    problems = []
+    for job_name, job in workflow["jobs"].items():
+        for step in job.get("steps", []):
+            lines = str(step.get("run", "")).splitlines()
+            problems += [
+                f"{job_name} / {step.get('name')}: run line {n + 1}: {line.strip()}"
+                for n, line in enumerate(lines)
+                if n and line.lstrip().startswith("#") and lines[n - 1].rstrip().endswith("\\")
+            ]
+    assert problems == [], "\n".join(problems)  # nosec B101
+
+
 # TASK-13950.6 and .19: the production-detector, test-seam and test-mode branch ratchets and the startup-guard /
 # AuthNZ-refusal tests. The contract lives here, not in the files it guards, so dropping a
 # file from the step cannot also drop its own assertion.
@@ -1662,6 +1678,9 @@ TEST_SEAM_GATE_SUITES = (
     "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
     "tldw_Server_API/tests/lint/test_owner_scope_ratchet.py",
     "tldw_Server_API/tests/lint/test_charactersragdb_delegated_callers_ratchet.py",
+    # The ChaCha split tool and structure pins (TASK-13950.22) guard each move PR.
+    "tldw_Server_API/tests/Helper_Scripts/test_chacha_split.py",
+    "tldw_Server_API/tests/DB_Management/test_chacha_structure_pins.py",
     "tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py",
     "tldw_Server_API/tests/CI/test_path_classifier.py",
 )
