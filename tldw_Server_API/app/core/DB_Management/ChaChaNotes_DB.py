@@ -36,6 +36,7 @@ The library requires a `client_id` upon initialization, which is used to attribu
 changes in the `sync_log` and in individual records.
 """
 # Imports
+import enum  # noqa: E402
 import hashlib  # noqa: E402
 import json  # noqa: E402
 import math  # noqa: E402
@@ -396,6 +397,32 @@ class ConflictError(CharactersRAGDBError):
         if self.entity_id:
             details.append(f"ID: {self.entity_id}")
         return f"{base} ({', '.join(details)})" if details else base
+
+
+class OwnerScopeRequiredError(CharactersRAGDBError):
+    """A PostgreSQL owner-scoped helper was called with no owner and no opt-out."""
+
+    def __init__(self, helper: str, table: str):
+        super().__init__(f"{helper} needs an owner on PostgreSQL (table {table})")
+
+
+class OwnerScope(enum.Enum):
+    """Explicit opt-out from owner scoping on PostgreSQL.
+
+    NOT_APPLICABLE: the table has no tenant ``client_id``, or a parent lock taken
+    with the owner in this transaction already proved ownership.
+    """
+
+    NOT_APPLICABLE = "not_applicable"
+
+
+def _owner_is_scoped(backend_type: Any, owner_client_id: str | OwnerScope | None, helper: str, table: str) -> bool:
+    """Say whether to apply an owner predicate; raise on PostgreSQL when none was given."""
+    if backend_type != BackendType.POSTGRESQL or owner_client_id is OwnerScope.NOT_APPLICABLE:
+        return False
+    if owner_client_id is None:
+        raise OwnerScopeRequiredError(helper, table)
+    return True
 
 
 SOURCE_VIEW_MAX_COUNT = 100
@@ -19467,8 +19494,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Clear the retired Sync placeholder persona from every owner's chats.
 
         One PostgreSQL database holds every owner's chats, and `conversations`
-        has a forced tenant policy. A role that bypasses row-level security (the
-        documented superuser setup) sees all rows. A table owner that does not
+        has a forced tenant policy. Startup refuses a SUPERUSER or BYPASSRLS role
+        for the content backend, but this migration can still run under an admin
+        DSN, and such a role sees all rows. A table owner that does not
         bypass it would repair only the rows its session happens to see and then
         record the version, leaving the other owners' chats broken for good. So
         the policy is lifted for the owner inside this transaction, behind an
@@ -28362,7 +28390,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return [lst[i:i + size] for i in range(0, len(lst), size)]
 
     def _get_current_db_version(self, conn: sqlite3.Connection, table_name: str, pk_col_name: str,
-                                pk_value: Any, *, owner_client_id: str | None = None) -> int:
+                                pk_value: Any, *, owner_client_id: str | OwnerScope | None = None) -> int:
         """
         Fetches the current version of an active (not soft-deleted) record.
 
@@ -28385,7 +28413,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(  # noqa: TRY003
                 f"Unsafe identifier in version lookup: table={table_name!r}, column={pk_col_name!r}"
             )
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
         cursor = conn.execute(f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (pk_value,) + owner_params)  # nosec B608
         row = cursor.fetchone()
 
@@ -28873,7 +28901,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             with self.transaction() as conn:
-                current_db_version = self._get_current_db_version(conn, "skill_registry", "name", name)
+                current_db_version = self._get_current_db_version(
+                    conn, "skill_registry", "name", name,
+                    owner_client_id=OwnerScope.NOT_APPLICABLE,  # OwnerScope.NOT_APPLICABLE: skill_registry has no client_id
+                )
                 if current_db_version != expected_version:
                     raise ConflictError(
                         f"Skill '{name}' was modified (db has {current_db_version}, expected {expected_version}).",
@@ -28939,7 +28970,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             with self.transaction() as conn:
                 try:
-                    current_db_version = self._get_current_db_version(conn, "skill_registry", "name", name)
+                    current_db_version = self._get_current_db_version(
+                        conn, "skill_registry", "name", name,
+                        owner_client_id=OwnerScope.NOT_APPLICABLE,  # OwnerScope.NOT_APPLICABLE: skill_registry has no client_id
+                    )
                 except ConflictError:
                     check_deleted = conn.execute(
                         "SELECT deleted, version FROM skill_registry WHERE name = ?",
@@ -35011,9 +35045,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # - soft_delete: UPDATE SET deleted = 1, last_modified, version, client_id WHERE id/name = ? AND version = ? AND deleted = 0.
     # - search: Use respective FTS table.
 
-    def _selected_owner_filter(self, owner_client_id: str | None, alias: str = "") -> tuple[str, tuple[str, ...]]:
-        """Apply an explicitly requested PostgreSQL owner; SQLite IDs label devices."""
-        if owner_client_id is None or self.backend_type != BackendType.POSTGRESQL:
+    def _selected_owner_filter(
+        self, owner_client_id: str | OwnerScope | None, alias: str = "", *, table: str = "?",
+    ) -> tuple[str, tuple[str, ...]]:
+        """Apply the PostgreSQL owner; SQLite IDs label devices. None raises on PostgreSQL."""
+        if not _owner_is_scoped(self.backend_type, owner_client_id, "_selected_owner_filter", table):
             return "", ()
         if alias and not _SAFE_IDENTIFIER_RE.fullmatch(alias):
             raise InputError("Invalid owner filter alias")  # noqa: TRY003
@@ -35021,10 +35057,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return f" AND {column} = ?", (owner_client_id,)
 
     def _selected_keyword_link_filter(
-        self, link_table: str, alias: str, *, owner_client_id: str | None,
+        self, link_table: str, alias: str, *, owner_client_id: str | OwnerScope | None,
     ) -> tuple[str, tuple[str, ...]]:
-        """Scope both ends of the explicitly requested keyword relationship."""
-        if owner_client_id is None or self.backend_type != BackendType.POSTGRESQL:
+        """Scope both ends of the keyword relationship. None raises on PostgreSQL."""
+        if not _owner_is_scoped(self.backend_type, owner_client_id, "_selected_keyword_link_filter", link_table):
             return "", ()
         parents = {
             "note_keywords": ("notes", "note_id"),
@@ -35045,11 +35081,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
     def _require_selected_owner_row(
-        self, conn: Any, table_name: str, item_id: Any, owner_client_id: str | None,
+        self, conn: Any, table_name: str, item_id: Any, owner_client_id: str | OwnerScope | None,
         *, include_deleted: bool = False,
     ) -> None:
-        """Lock an explicitly scoped parent until its existing transaction completes."""
-        if owner_client_id is None or self.backend_type != BackendType.POSTGRESQL or item_id is None:
+        """Lock a scoped parent until its existing transaction completes. None raises on PostgreSQL."""
+        if item_id is None:
+            return
+        if not _owner_is_scoped(self.backend_type, owner_client_id, "_require_selected_owner_row", table_name):
             return
         if table_name == "messages":
             # Message client IDs may name sync devices. Its conversation owns it.
@@ -35079,7 +35117,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise ConflictError("Referenced record not found", entity=table_name, entity_id=item_id)  # noqa: TRY003
 
     def _add_generic_item(self, table_name: str, unique_col_name: str, item_data: dict[str, Any], main_col_value: str,
-                          other_fields_map: dict[str, str], *, owner_client_id: str | None = None) -> int | None:
+                          other_fields_map: dict[str, str], *, owner_client_id: str | OwnerScope | None = None) -> int | None:
         """
         Internal helper to add items to tables with an auto-increment ID and a unique text column.
 
@@ -35110,7 +35148,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For other database errors.
         """
         now = self._get_current_utc_timestamp_iso()
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
         client_id_to_use = owner_client_id if owner_params else item_data.get('client_id', self.client_id)
 
         other_cols = list(other_fields_map.keys())
@@ -35211,7 +35249,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise
         return None  # Should not be reached if exceptions are raised properly
 
-    def _get_generic_item_by_id(self, table_name: str, item_id: int, *, owner_client_id: str | None = None) -> dict[str, Any] | None:
+    def _get_generic_item_by_id(self, table_name: str, item_id: int, *, owner_client_id: str | OwnerScope | None = None) -> dict[str, Any] | None:
         """
         Internal helper: Retrieves a non-deleted item by its auto-increment integer ID.
 
@@ -35226,7 +35264,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         table_name = self._map_table_for_backend(table_name)
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
         query = f"SELECT * FROM {table_name} WHERE id = ? AND deleted = 0{owner_clause}"  # nosec B608
         try:
             cursor = self.execute_query(query, (item_id,) + owner_params)
@@ -35236,7 +35274,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"Database error fetching {table_name} ID {item_id}: {e}")
             raise
 
-    def _get_generic_item_by_unique_text(self, table_name: str, unique_col_name: str, value: str, *, owner_client_id: str | None = None) -> dict[str, Any] | None:
+    def _get_generic_item_by_unique_text(self, table_name: str, unique_col_name: str, value: str, *, owner_client_id: str | OwnerScope | None = None) -> dict[str, Any] | None:
         """
         Internal helper: Retrieves a non-deleted item by a unique text column value.
         Assumes the column has `COLLATE NOCASE` if case-insensitive search is desired.
@@ -35254,7 +35292,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         unique_match_sql = self._unique_text_match_sql(table_name, unique_col_name)
         table_name = self._map_table_for_backend(table_name)
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
         query = f"SELECT * FROM {table_name} WHERE {unique_match_sql} AND deleted = 0{owner_clause}"  # nosec B608
         try:
             cursor = self.execute_query(query, (value,) + owner_params)
@@ -35288,7 +35326,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _case_insensitive_order_clause(self, column: str, direction: str | None = None) -> str:
         return f"ORDER BY {self._case_insensitive_order_expression(column, direction)}"
 
-    def _list_generic_items(self, table_name: str, order_by_col: str, limit: int = 100, offset: int = 0, *, owner_client_id: str | None = None) -> list[dict[str, Any]]:
+    def _list_generic_items(self, table_name: str, order_by_col: str, limit: int = 100, offset: int = 0, *, owner_client_id: str | OwnerScope | None = None) -> list[dict[str, Any]]:
         """
         Internal helper: Lists non-deleted items from a table, with specified ordering.
 
@@ -35315,7 +35353,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             order_expression = self._case_insensitive_order_expression(base.strip(), direction.strip() or None)
 
         table_name = self._map_table_for_backend(table_name)
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
         query = f"SELECT * FROM {table_name} WHERE deleted = 0{owner_clause} ORDER BY {order_expression} LIMIT ? OFFSET ?"  # nosec B608
         try:
             cursor = self.execute_query(query, owner_params + (limit, offset), read_only=True)
@@ -35327,7 +35365,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _update_generic_item(self, table_name: str, item_id: int | str,
                              update_data: dict[str, Any], expected_version: int,
                              allowed_fields: list[str], pk_col_name: str = "id",
-                             unique_col_name_in_data: str | None = None, *, owner_client_id: str | None = None) -> bool | None:
+                             unique_col_name_in_data: str | None = None, *, owner_client_id: str | OwnerScope | None = None) -> bool | None:
         """
         Internal helper: Updates an item in a table using optimistic locking.
 
@@ -35354,7 +35392,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not update_data:
             raise InputError(f"No data provided for update of {table_name} ID {item_id}.")  # noqa: TRY003
 
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
         now = self._get_current_utc_timestamp_iso()
         fields_to_update_sql = []
         params_for_set_clause = []
@@ -35454,7 +35492,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # No implicit return None, function should return True or raise.
 
     def _soft_delete_generic_item(self, table_name: str, item_id: int | str,
-                                  expected_version: int, pk_col_name: str = "id", *, owner_client_id: str | None = None) -> bool | None:
+                                  expected_version: int, pk_col_name: str = "id", *, owner_client_id: str | OwnerScope | None = None) -> bool | None:
         """
         Internal helper: Soft-deletes an item in a table using optimistic locking.
 
@@ -35476,7 +35514,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         logical_table_name = table_name
         table_name = self._map_table_for_backend(table_name)
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
         now = self._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
@@ -35553,7 +35591,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # No implicit return None.
 
     def _search_generic_items_fts(self, fts_table_name: str, main_table_name: str, fts_match_cols_or_table: str,
-                                  search_term: str, limit: int = 10, *, owner_client_id: str | None = None) -> list[dict[str, Any]]:
+                                  search_term: str, limit: int = 10, *, owner_client_id: str | OwnerScope | None = None) -> list[dict[str, Any]]:
         """
         Internal helper: Performs FTS search on tables like keywords, notes, collections.
 
@@ -35594,7 +35632,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
                 return []
 
-            owner_clause, owner_params = self._selected_owner_filter(owner_client_id, "main")
+            owner_clause, owner_params = self._selected_owner_filter(owner_client_id, "main", table=main_table_name)
             fts_column = f"{fts_table_name}_tsv"
             query = """
                 SELECT main.*, ts_rank(main.{fts_column}, to_tsquery('english', ?)) AS rank
@@ -36192,7 +36230,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             with self.transaction() as conn:
-                current_db_version = self._get_current_db_version(conn, "moodboards", "id", moodboard_id)
+                current_db_version = self._get_current_db_version(conn, "moodboards", "id", moodboard_id, owner_client_id=str(self.client_id))
                 if current_db_version != expected_version:
                     raise ConflictError(  # noqa: TRY003, TRY301
                         f"Moodboard ID {moodboard_id} update failed: version mismatch "
@@ -36458,7 +36496,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not note:
             raise ConflictError("Note not found.", entity="notes", entity_id=note_id)  # noqa: TRY003
         if not self._supports_notes_moodboard_studio_v61():
-            return self._manage_link("moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "link")
+            # OwnerScope.NOT_APPLICABLE: moodboard_notes has no tenant client_id (pre-v63 SQLite schemas only)
+            return self._manage_link(
+                "moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "link",
+                owner_client_id=OwnerScope.NOT_APPLICABLE,
+            )
         owner = str(self.client_id)
         dataset = str(moodboard["dataset_id"])
         now = self._get_current_utc_timestamp_iso()
@@ -36584,7 +36626,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not moodboard:
             raise ConflictError("Moodboard not found.", entity="moodboards", entity_id=moodboard_id)  # noqa: TRY003
         if not self._supports_notes_moodboard_studio_v61():
-            return self._manage_link("moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "unlink")
+            # OwnerScope.NOT_APPLICABLE: moodboard_notes has no tenant client_id (pre-v63 SQLite schemas only)
+            return self._manage_link(
+                "moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "unlink",
+                owner_client_id=OwnerScope.NOT_APPLICABLE,
+            )
         owner = str(self.client_id)
         dataset = str(moodboard["dataset_id"])
         now = self._get_current_utc_timestamp_iso()
@@ -36888,16 +36934,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # --- Linking Table Methods (with manual sync_log entries) ---
     def _manage_link(self, link_table: str, col1_name: str, col1_val: Any, col2_name: str, col2_val: Any,
-                     operation: str, *, owner_client_id: str | None = None) -> bool:
+                     operation: str, *, owner_client_id: str | OwnerScope | None = None) -> bool:
         """Helper to add ('link') or remove ('unlink') entries from a linking table."""
         now_iso = self._get_current_utc_timestamp_iso()
         sync_payload_dict: dict[str, Any] = {}
         log_sync_entry = False
         rows_affected = 0
 
+        scoped = _owner_is_scoped(self.backend_type, owner_client_id, "_manage_link", link_table)
         try:
             with self.transaction() as conn:
-                if owner_client_id is not None and self.backend_type == BackendType.POSTGRESQL:
+                if scoped:
                     parents = {
                         "note_keywords": "notes",
                         "conversation_keywords": "conversations",
@@ -45874,6 +45921,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             expected_version,
             allowed_fields,
             pk_col_name="id",
+            owner_client_id=str(self.client_id),
         )
 
     def soft_delete_writing_session(self, session_id: str, expected_version: int) -> bool | None:
@@ -45891,7 +45939,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ConflictError: If the session is missing or version-mismatched.
             CharactersRAGDBError: For database errors.
         """
-        return self._soft_delete_generic_item("writing_sessions", session_id, expected_version, pk_col_name="id")
+        return self._soft_delete_generic_item(
+            "writing_sessions", session_id, expected_version, pk_col_name="id", owner_client_id=str(self.client_id),
+        )
 
     def restore_writing_session(
         self,
@@ -46176,7 +46226,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "version_parent_id": "version_parent_id",
             "is_default": "is_default",
         }
-        return self._add_generic_item("writing_templates", "name", item_data, template_name, other_fields_map)
+        return self._add_generic_item(
+            "writing_templates", "name", item_data, template_name, other_fields_map, owner_client_id=str(self.client_id),
+        )
 
     def get_writing_template_by_name(self, name: str) -> dict[str, Any] | None:
         """
@@ -46192,7 +46244,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         template_name = self._normalize_writing_name(name, "Template")
-        row = self._get_generic_item_by_unique_text("writing_templates", "name", template_name)
+        row = self._get_generic_item_by_unique_text(
+            "writing_templates", "name", template_name, owner_client_id=str(self.client_id),
+        )
         if not row:
             return None
         item = dict(row)
@@ -46312,6 +46366,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             allowed_fields,
             pk_col_name="name",
             unique_col_name_in_data="name",
+            owner_client_id=str(self.client_id),
         )
 
     def soft_delete_writing_template(self, name: str, expected_version: int) -> bool | None:
@@ -46330,7 +46385,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         template_name = self._normalize_writing_name(name, "Template")
-        return self._soft_delete_generic_item("writing_templates", template_name, expected_version, pk_col_name="name")
+        return self._soft_delete_generic_item(
+            "writing_templates", template_name, expected_version, pk_col_name="name", owner_client_id=str(self.client_id),
+        )
 
     def add_writing_theme(
         self,
@@ -46384,7 +46441,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "is_default": "is_default",
             "order_index": "order_index",
         }
-        return self._add_generic_item("writing_themes", "name", item_data, theme_name, other_fields_map)
+        return self._add_generic_item(
+            "writing_themes", "name", item_data, theme_name, other_fields_map, owner_client_id=str(self.client_id),
+        )
 
     def get_writing_theme_by_name(self, name: str) -> dict[str, Any] | None:
         """
@@ -46400,7 +46459,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         theme_name = self._normalize_writing_name(name, "Theme")
-        row = self._get_generic_item_by_unique_text("writing_themes", "name", theme_name)
+        row = self._get_generic_item_by_unique_text(
+            "writing_themes", "name", theme_name, owner_client_id=str(self.client_id),
+        )
         return dict(row) if row else None
 
     def list_writing_themes(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
@@ -46487,6 +46548,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             allowed_fields,
             pk_col_name="name",
             unique_col_name_in_data="name",
+            owner_client_id=str(self.client_id),
         )
 
     def soft_delete_writing_theme(self, name: str, expected_version: int) -> bool | None:
@@ -46505,7 +46567,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         theme_name = self._normalize_writing_name(name, "Theme")
-        return self._soft_delete_generic_item("writing_themes", theme_name, expected_version, pk_col_name="name")
+        return self._soft_delete_generic_item(
+            "writing_themes", theme_name, expected_version, pk_col_name="name", owner_client_id=str(self.client_id),
+        )
 
     # --- Writing Wordcloud Methods ---
     def _normalize_wordcloud_status(self, status: str) -> str:
