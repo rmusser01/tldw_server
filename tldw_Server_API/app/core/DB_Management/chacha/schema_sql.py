@@ -7205,3 +7205,7 @@ _HISTORY_PROJECTIONS_SCHEMA_SQL = """
             PRIMARY KEY (client_id, owner_key, conversation_id, projection_id)
         )
     """
+
+_LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
+
+_NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE = 128

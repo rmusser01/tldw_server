@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 
@@ -400,7 +401,7 @@ class TestWorkspaceSources:
 
         with db.transaction() as conn:
             changes_before = conn.total_changes
-            db._ensure_workspace_subresource_schema_sqlite(conn)
+            sqlite_schema._ensure_workspace_subresource_schema_sqlite(db.ctx, conn)
             assert conn.total_changes == changes_before
 
 

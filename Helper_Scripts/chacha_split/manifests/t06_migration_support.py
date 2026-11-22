@@ -1,0 +1,27 @@
+# TASK-13950.22 PR E: migration support helpers (shared by the SQLite and PostgreSQL steps) move to chacha/migrations/support.py. Apply with t06_sqlite_schema.py.
+MANIFEST = {
+    "task": "T6",
+    "mode": "functions",
+    "source": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "target": "tldw_Server_API/app/core/DB_Management/chacha/migrations/support.py",
+    "alias": "migration_support",
+    "doc": "Helpers shared by the schema-migration steps, moved out of CharactersRAGDB (TASK-13950.22).",
+    "store_class": None,
+    "store_attr": None,
+    "names": [
+        "_web_clipper_v56_rekey_plan",
+        "_notes_link_v58_transform_row",
+        "_validate_notes_link_v58_unique",
+        "_note_task_v60_migration_checkpoint",
+        "_legacy_sync_timestamp_v61",
+        "_notes_studio_envelope_size_v61",
+        "_legacy_note_hash_v61",
+        "_migration_v65_checkpoint",
+        "_native_fork_schema_is_installed",
+    ],
+    "shims": [],
+    "constants": [],
+    "rewrites": {},
+    "renames": {},
+    "structural": [],
+}

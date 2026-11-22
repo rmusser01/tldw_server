@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -439,9 +440,9 @@ def test_sqlite_v60_upgrade_rejects_exact_v59_source_catalog_drift_before_ddl(
 
     checkpoints: list[str] = []
     monkeypatch.setattr(
-        CharactersRAGDB,
+        migration_support,
         "_note_task_v60_migration_checkpoint",
-        lambda _db, stage: checkpoints.append(stage),
+        lambda stage: checkpoints.append(stage),
     )
     with pytest.raises(CharactersRAGDBError, match="v59 SQLite source catalog drifted"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
@@ -771,16 +772,11 @@ def test_sqlite_v60_injected_failure_rolls_back_original_graph_and_version(
     db_path = tmp_path / f"rollback-{stage}.sqlite"
     _prepare_v59_database(db_path)
 
-    def fail_at_stage(self: CharactersRAGDB, current_stage: str) -> None:
+    def fail_at_stage(current_stage: str) -> None:
         if current_stage == stage:
             raise SchemaError(f"injected v60 {stage} failure")
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_note_task_v60_migration_checkpoint",
-        fail_at_stage,
-        raising=False,
-    )
+    monkeypatch.setattr(migration_support, "_note_task_v60_migration_checkpoint", fail_at_stage)
     with pytest.raises(CharactersRAGDBError, match=f"injected v60 {stage} failure"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
@@ -803,18 +799,14 @@ def test_sqlite_v60_same_path_concurrent_openers_complete_one_migration(
     start = threading.Barrier(2)
     checkpoint_lock = threading.Lock()
     checkpoints: list[str] = []
-    original_checkpoint = CharactersRAGDB._note_task_v60_migration_checkpoint
+    original_checkpoint = migration_support._note_task_v60_migration_checkpoint
 
-    def track_checkpoint(_db: CharactersRAGDB, stage: str) -> None:
+    def track_checkpoint(stage: str) -> None:
         with checkpoint_lock:
             checkpoints.append(stage)
         original_checkpoint(stage)
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_note_task_v60_migration_checkpoint",
-        track_checkpoint,
-    )
+    monkeypatch.setattr(migration_support, "_note_task_v60_migration_checkpoint", track_checkpoint)
 
     def open_same_path() -> int:
         start.wait(timeout=10)

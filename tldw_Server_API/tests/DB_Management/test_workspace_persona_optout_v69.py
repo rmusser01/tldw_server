@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError
 
 pytestmark = pytest.mark.integration
@@ -288,13 +289,13 @@ def test_sqlite_initialization_failure_does_not_commit_optout(
             conn.execute("CREATE INDEX unexpected_studio_index ON note_studio_documents(note_id)")
     legacy.close_all_connections()
 
-    def fail_late(self: CharactersRAGDB, conn: Any = None) -> None:
+    def fail_late(_owner: object, conn: Any = None) -> None:
         """Fail after legacy helpers which use executescript have already run."""
         raise CharactersRAGDBError("late initialization failure")
 
     with monkeypatch.context() as failing:
         if failure == "late_initializer":
-            failing.setattr(CharactersRAGDB, "_self_heal_character_cards_fts_sqlite", fail_late)
+            failing.setattr(sqlite_schema, "_self_heal_character_cards_fts_sqlite", fail_late)
         elif failure == "generic_initializer":
             failing.setattr(CharactersRAGDB, "_ensure_conversation_settings_table", fail_late)
         with pytest.raises(CharactersRAGDBError, match="catalog drifted|late initialization failure"):

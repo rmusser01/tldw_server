@@ -68,7 +68,7 @@ core.DB_Management -> core.CodeGraph: 1
 core.DB_Management -> core.Collections: 1
 core.DB_Management -> core.Evaluations: 3  # bump: Evaluations_DB reads RunStatus and the recipe-run models that moved from api.v1.schemas into core.Evaluations; core.DB_Management -> api.v1.schemas falls by the same 2 (TASK-13950.15)
 core.DB_Management -> core.Explainer: 1
-core.DB_Management -> core.Flashcards: 4
+core.DB_Management -> core.Flashcards: 6  # bump: chacha.context needs sanitize_flashcard_text_for_search and chacha.sqlite_schema needs scheduler_settings_to_json; ChaChaNotes_DB still imports from Flashcards (TASK-13950.22 T6)
 core.DB_Management -> core.Ingestion_Media_Processing: 9
 core.DB_Management -> core.Jobs: 3
 core.DB_Management -> core.Monitoring: 1
@@ -80,7 +80,7 @@ core.DB_Management -> core.Prompt_Management: 7
 core.DB_Management -> core.RAG: 6
 core.DB_Management -> core.RPG: 6
 core.DB_Management -> core.Sharing: 5
-core.DB_Management -> core.Sync_Contracts: 31  # bump: chacha.context needs canonical_json_bytes and the moodboard-studio canonical JSON helper; ChaChaNotes_DB still imports from Sync_Contracts (TASK-13950.22 T4); was 29: Sync contracts moved out of core.Sync so DB_Management no longer imports the Sync package; not DB-loading, pinned by test_db_management_logic_imports (TASK-13950.16)
+core.DB_Management -> core.Sync_Contracts: 34  # bump: chacha.sqlite_schema and chacha.migrations.support need the note-link, moodboard-studio and task contract helpers the moved SQLite helpers use, and chacha.context needs the task contract for canonicalize_legacy_task_v60; ChaChaNotes_DB still imports from Sync_Contracts (TASK-13950.22 T6); was 31: chacha.context needs canonical_json_bytes and the moodboard-studio canonical JSON helper (TASK-13950.22 T4); was 29: Sync contracts moved out of core.Sync so DB_Management no longer imports the Sync package; not DB-loading, pinned by test_db_management_logic_imports (TASK-13950.16)
 core.DB_Management -> core.VN_Assets: 1
 core.DB_Management -> core.Visual_Identities: 1
 core.DB_Management -> core.Watchlists: 2

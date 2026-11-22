@@ -13,6 +13,7 @@ import os  # For :memory: check
 # Third-Party Imports
 #
 # Local Imports
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -256,7 +257,7 @@ class TestMessageMetadata:
     def test_migration_v12_to_v13_creates_table(self, db_path, client_id, monkeypatch):
         def initialize_historical(db):
             with db.transaction() as conn:
-                db._apply_schema_v4(conn)
+                sqlite_schema._apply_schema_v4(db.ctx, conn)
                 steps = db._sqlite_linear_migration_steps()
                 for prior in range(4, 12):
                     steps[prior](conn)
@@ -1426,7 +1427,7 @@ class TestTransactions:
         assert len(db_instance.list_character_cards()) == initial_count
         assert db_instance.get_character_card_by_name(card_data_name) is None
 
-    def test_transaction_context_manager_uses_begin_immediate(self):
+    def test_transaction_context_manager_uses_begin_immediate(self, monkeypatch):
         class _RecordingConnection:
             def __init__(self) -> None:
                 self.in_transaction = False
@@ -1448,7 +1449,7 @@ class TestTransactions:
 
         conn = _RecordingConnection()
         db = CharactersRAGDB.__new__(CharactersRAGDB)
-        db._ensure_sqlite_backend = lambda: None
+        monkeypatch.setattr(sqlite_schema, "_ensure_sqlite_backend", lambda _ctx: None)
         db.get_connection = lambda: conn
 
         with TransactionContextManager(db):

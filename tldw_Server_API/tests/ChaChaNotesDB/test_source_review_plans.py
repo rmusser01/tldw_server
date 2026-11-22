@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackSourceSelection
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -640,7 +641,7 @@ def test_source_review_schema_ensure_replaces_legacy_due_order_index(
     )
 
     with source_review_db.transaction() as conn:
-        source_review_db._ensure_source_review_schema_sqlite(conn)
+        sqlite_schema._ensure_source_review_schema_sqlite(source_review_db.ctx, conn)
 
     index_sql = source_review_db.execute_query(
         """

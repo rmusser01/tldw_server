@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -1305,7 +1306,7 @@ def test_message_fts_normalization_failure_restores_previous_triggers(db):
     connection.set_authorizer(deny_update_trigger)
     try:
         with pytest.raises(CharactersRAGDBError, match="Failed ensuring messages FTS triggers") as error:
-            instance._ensure_messages_fts_triggers_sqlite(connection)
+            sqlite_schema._ensure_messages_fts_triggers_sqlite(instance.ctx, connection)
     finally:
         connection.set_authorizer(None)
     assert isinstance(error.value.__cause__, sqlite3.DatabaseError)
@@ -1335,7 +1336,7 @@ def test_message_fts_normalization_does_not_commit_caller_pending_work(db):
     connection.execute("BEGIN")
     try:
         connection.execute("UPDATE messages SET ranking = 19 WHERE id = ?", (message_id,))
-        instance._ensure_messages_fts_triggers_sqlite(connection)
+        sqlite_schema._ensure_messages_fts_triggers_sqlite(instance.ctx, connection)
         assert connection.in_transaction
         assert instance.get_message_by_id(message_id)["ranking"] == 19
     finally:

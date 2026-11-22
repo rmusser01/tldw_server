@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -33,7 +34,7 @@ def _create_character(db: CharactersRAGDB, name: str = "Exemplar Test Character"
 def test_migration_v21_to_v22_creates_exemplar_tables(db_path: Path, monkeypatch):
     def initialize_historical_v21(db):
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 21):
                 steps[version](conn)

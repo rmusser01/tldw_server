@@ -11,6 +11,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -1208,15 +1209,11 @@ def test_postgres_v60_checkpoint_failure_restores_exact_populated_v59_state(
         assert before["version"] == 59
         assert before["target_remnants"] == []
 
-        def fail_at_stage(_db: CharactersRAGDB, current_stage: str) -> None:
+        def fail_at_stage(current_stage: str) -> None:
             if current_stage == stage:
                 raise SchemaError(f"injected PostgreSQL v60 {stage} failure")
 
-        monkeypatch.setattr(
-            CharactersRAGDB,
-            "_note_task_v60_migration_checkpoint",
-            fail_at_stage,
-        )
+        monkeypatch.setattr(migration_support, "_note_task_v60_migration_checkpoint", fail_at_stage)
         with pytest.raises(SchemaError, match=f"injected PostgreSQL v60 {stage} failure"):
             with db.transaction() as conn:
                 db._migrate_from_v59_to_v60_postgres(conn)
@@ -1246,10 +1243,10 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
     record_lock = threading.Lock()
     checkpoints: list[str] = []
     verify_threads: list[int] = []
-    original_checkpoint = CharactersRAGDB._note_task_v60_migration_checkpoint
+    original_checkpoint = migration_support._note_task_v60_migration_checkpoint
     original_verify = CharactersRAGDB._verify_note_task_schema_postgres
 
-    def track_checkpoint(_db: CharactersRAGDB, stage: str) -> None:
+    def track_checkpoint(stage: str) -> None:
         with record_lock:
             checkpoints.append(stage)
         original_checkpoint(stage)
@@ -1259,11 +1256,7 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
             verify_threads.append(threading.get_ident())
         original_verify(db, conn)
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_note_task_v60_migration_checkpoint",
-        track_checkpoint,
-    )
+    monkeypatch.setattr(migration_support, "_note_task_v60_migration_checkpoint", track_checkpoint)
     monkeypatch.setattr(
         CharactersRAGDB,
         "_verify_note_task_schema_postgres",

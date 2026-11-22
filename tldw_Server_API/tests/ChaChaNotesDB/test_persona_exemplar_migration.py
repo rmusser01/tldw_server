@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -19,7 +19,7 @@ def db_path(tmp_path: Path) -> Path:
 def test_migration_v32_to_latest_creates_persona_exemplar_table(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 32):
                 steps[version](conn)

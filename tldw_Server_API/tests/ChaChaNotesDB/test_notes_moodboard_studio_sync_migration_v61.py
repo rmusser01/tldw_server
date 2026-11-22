@@ -15,6 +15,8 @@ from uuid import UUID
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import (
     MoodboardSyncStore,
 )
@@ -287,7 +289,7 @@ def _legacy_diagram_manifest() -> dict[str, object]:
 
 def _relevant_catalog(db: CharactersRAGDB) -> dict[str, object]:
     with db.transaction() as conn:
-        return db._notes_moodboard_studio_catalog_snapshot_sqlite(conn)
+        return sqlite_schema._notes_moodboard_studio_catalog_snapshot_sqlite(db.ctx, conn)
 
 
 def test_sqlite_schema_authority_is_v63_and_version_update_is_last() -> None:
@@ -558,12 +560,12 @@ def test_v61_legacy_studio_never_rebinds_historical_state_to_a_later_note_head(
         assert studio["source_diagnostic_code"] is not None  # nosec B101
         assert studio["companion_content_hash"] == legacy["companion_content_hash"]  # nosec B101
         provenance = studio["accepted_provenance_json"]
-        assert provenance["accepted_at"] == db._legacy_sync_timestamp_v61(  # nosec B101
+        assert provenance["accepted_at"] == migration_support._legacy_sync_timestamp_v61(  # nosec B101
             legacy["last_modified"]
         )
         current = db.get_note_by_id(note_id)
         assert current is not None  # nosec B101
-        current_hash = db._legacy_note_hash_v61(current)
+        current_hash = migration_support._legacy_note_hash_v61(db.ctx, current)
         retained_binding_hash = (
             studio["note_hash"]
             if edited_note == "parent"
@@ -756,16 +758,11 @@ def test_v61_injected_failure_rolls_back_complete_v61_catalog_data_and_version(
     _prepare_v62_product_database(db_path)
     before = _database_dump(db_path)
 
-    def fail_at_stage(self: CharactersRAGDB, current_stage: str) -> None:
+    def fail_at_stage(current_stage: str) -> None:
         if current_stage == stage:
             raise SchemaError(f"injected v61 {stage} failure")
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_notes_moodboard_studio_v61_migration_checkpoint",
-        fail_at_stage,
-        raising=False,
-    )
+    monkeypatch.setattr(sqlite_schema, "_notes_moodboard_studio_v61_migration_checkpoint", fail_at_stage)
     with pytest.raises(CharactersRAGDBError, match=f"injected v61 {stage} failure"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
@@ -788,21 +785,17 @@ def test_v61_rejects_post_copy_data_loss_or_corruption_and_restores_exact_v61(
     db_path = tmp_path / "copy-proof-corruption.sqlite"
     _prepare_v62_product_database(db_path)
     before = _database_dump(db_path)
-    original_copy = CharactersRAGDB._copy_notes_moodboard_studio_graph_v61_sqlite
+    original_copy = sqlite_schema._copy_notes_moodboard_studio_graph_v61_sqlite
 
     def copy_then_corrupt(
-        self: CharactersRAGDB,
+        ctx: object,
         conn: sqlite3.Connection,
     ) -> object:
-        proof = original_copy(self, conn)
+        proof = original_copy(ctx, conn)
         conn.execute(corrupt_copy)
         return proof
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_copy_notes_moodboard_studio_graph_v61_sqlite",
-        copy_then_corrupt,
-    )
+    monkeypatch.setattr(sqlite_schema, "_copy_notes_moodboard_studio_graph_v61_sqlite", copy_then_corrupt)
 
     with pytest.raises(CharactersRAGDBError, match="copy verification"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
@@ -854,10 +847,10 @@ def test_v61_streaming_proof_is_batch_independent_and_never_materializes_rows() 
     first = _Connection()
     second = _Connection()
     try:
-        proof_one = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+        proof_one = sqlite_schema._notes_moodboard_studio_v61_streaming_query_proof_sqlite(db.ctx,
             first, "SELECT payload FROM product", page_size=1
         )
-        proof_three = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+        proof_three = sqlite_schema._notes_moodboard_studio_v61_streaming_query_proof_sqlite(db.ctx,
             second, "SELECT payload FROM product", page_size=3
         )
         cursor = first.execute("SELECT payload FROM product")
@@ -910,15 +903,15 @@ def test_v61_copy_streams_all_large_product_selects_with_fetchmany(
     _prepare_v60_product_database(db_path, board_count=3)
     original_connect = sqlite3.connect
     streamed_queries: list[str] = []
-    original_streaming_rows = CharactersRAGDB._notes_moodboard_studio_v61_streaming_rows_sqlite
+    original_streaming_rows = sqlite_schema._notes_moodboard_studio_v61_streaming_rows_sqlite
     tracking = False
 
-    def tracked_streaming_rows(self, conn, query, params=(), *, page_size=None):
+    def tracked_streaming_rows(ctx, conn, query, params=(), *, page_size=None):
         nonlocal tracking
         previous = tracking
         tracking = True
         try:
-            yield from original_streaming_rows(self, conn, query, params, page_size=page_size)
+            yield from original_streaming_rows(ctx, conn, query, params, page_size=page_size)
         finally:
             tracking = previous
 
@@ -964,11 +957,7 @@ def test_v61_copy_streams_all_large_product_selects_with_fetchmany(
         kwargs["factory"] = _Connection
         return original_connect(*args, **kwargs)
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_notes_moodboard_studio_v61_streaming_rows_sqlite",
-        tracked_streaming_rows,
-    )
+    monkeypatch.setattr(sqlite_schema, "_notes_moodboard_studio_v61_streaming_rows_sqlite", tracked_streaming_rows)
     monkeypatch.setattr(sqlite3, "connect", tracked_connect)
     db = CharactersRAGDB(str(db_path), client_id=OWNER)
     db.close_all_connections()
@@ -1854,7 +1843,7 @@ def test_current_v63_studio_helper_verifies_drift_instead_of_repairing(
     with pytest.raises(CharactersRAGDBError, match="Studio.*catalog drifted"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    source = inspect.getsource(CharactersRAGDB._ensure_note_studio_schema_sqlite)
+    source = inspect.getsource(sqlite_schema._ensure_note_studio_schema_sqlite)
     assert "CREATE TABLE IF NOT EXISTS note_studio_documents" not in source
     assert "_verify_notes_moodboard_studio_schema_sqlite" in source
 

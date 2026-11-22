@@ -61,7 +61,7 @@ def _fake_postgres_initializer(
         if name.startswith("_ensure_"):
             monkeypatch.setattr(db, name, lambda *_args, **_kwargs: None)
     monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: False)
-    monkeypatch.setattr(db, "_repair_conversation_assistant_identity", lambda _conn: None)
+    monkeypatch.setattr(db, "repair_conversation_assistant_identity", lambda _conn: None)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
         lambda backend, _timeout: backend.transaction(),
