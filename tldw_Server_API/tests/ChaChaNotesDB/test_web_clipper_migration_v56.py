@@ -11,6 +11,7 @@ from uuid import UUID, uuid1, uuid4
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import QueryResult
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
     CharactersRAGDB,
@@ -447,7 +448,7 @@ def test_postgres_fresh_schema_decouples_public_clip_id_from_note_fk() -> None:
     db._backend = backend
     db._uses_shared_content_backend = False
 
-    db._ensure_web_clipper_schema_postgres(object())
+    postgres_schema._ensure_web_clipper_schema_postgres(db.ctx, object())
 
     document_ddl = next(
         statement

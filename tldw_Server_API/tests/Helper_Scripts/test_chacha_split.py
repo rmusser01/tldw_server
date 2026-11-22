@@ -717,6 +717,18 @@ def test_classmethod_with_moved_cls_refs_becomes_static(tmp_path: Path) -> None:
     assert "mod_a._k(2)" in _text(root, DB)
 
 
+def test_classmethod_static_context_member_is_reached_through_the_module(tmp_path: Path) -> None:
+    """The context imports ChaChaNotes_DB, so a moved body names the context module and never imports the class at top level."""
+    db = FN_DB.replace("return cls._s(x) + 1", "return cls._p(x) + 1")
+    root = _fn_tree(tmp_path, db=db, a=["_k"], rewrites={"_p": "ctx.pure"})
+    assert _functions(root) == 0
+    mod = _text(root, MOD_A)
+    assert "return chacha_context.ChaChaContext.pure(x) + 1" in mod
+    assert "from tldw_Server_API.app.core.DB_Management.chacha import context as chacha_context" in mod
+    assert "import ChaChaContext" not in mod
+    assert _fn_verify(root) == 0
+
+
 def test_classmethod_with_other_cls_use_fails_closed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     db = FN_DB.replace("return cls._s(x) + 1", "return cls(x)")
     root = _fn_tree(tmp_path, db=db, a=["_k"])

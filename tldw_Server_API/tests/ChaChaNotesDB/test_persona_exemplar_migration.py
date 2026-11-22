@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -144,23 +144,23 @@ def test_postgres_initializer_uses_postgres_safe_v33_migration(monkeypatch):
         with backend.transaction():
             yield migration_connection
 
-    def schema_version(conn, *, lock=False):
+    def schema_version(_ctx, conn, *, lock=False):
         version_reads.append((conn, lock))
         return 32
 
     monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", coordinator)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
-    monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", schema_version)
+    monkeypatch.setattr(postgres_schema, "_ensure_postgres_fts", lambda _ctx, conn: None)
 
     class _ReachedV35(Exception):
         pass
 
-    def _record_script(script: str, conn, expected_version=None):
+    def _record_script(_ctx, script: str, conn, expected_version=None):
         applied_scripts.append(script)
         if expected_version == 35:
             raise _ReachedV35
 
-    monkeypatch.setattr(db, "_apply_postgres_migration_script", _record_script)
+    monkeypatch.setattr(postgres_schema, "_apply_postgres_migration_script", _record_script)
 
     with pytest.raises(_ReachedV35):
         db._initialize_schema_postgres()

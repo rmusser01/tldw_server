@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, TypeAlias, TypeVar
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendConnectionWrapper,
     BackendType,
@@ -4019,7 +4020,7 @@ class TaskStore:
                 "task_event_read_state, note_task_reconciliation_state, task_projection_drifts "
                 "IN ACCESS EXCLUSIVE MODE",
             )
-            self._db._verify_note_task_schema_postgres(transaction_conn)
+            postgres_schema._verify_note_task_schema_postgres(self._db.ctx, transaction_conn)
             for table, _ordering in self._BIND_TABLE_ORDER:
                 self._execute(
                     transaction_conn,
@@ -4034,7 +4035,7 @@ class TaskStore:
                     transaction_conn,
                     f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",  # nosec B608
                 )
-            self._db._verify_note_task_schema_postgres(transaction_conn)
+            postgres_schema._verify_note_task_schema_postgres(self._db.ctx, transaction_conn)
 
         def _execute_bind_body(transaction_conn: TaskConnection) -> dict[str, int]:
             _prepare_postgres(transaction_conn)
@@ -4185,7 +4186,7 @@ class TaskStore:
             except Exception:  # noqa: BLE001 - rollback must cover every failed bind
                 self._execute(transaction_conn, "ROLLBACK TO SAVEPOINT bind_local_task_graph")
                 self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_task_graph")
-                self._db._verify_note_task_schema_postgres(transaction_conn)
+                postgres_schema._verify_note_task_schema_postgres(self._db.ctx, transaction_conn)
                 raise
             self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_task_graph")
             return result

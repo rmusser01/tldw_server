@@ -8,7 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -103,21 +103,21 @@ def test_postgres_initializer_routes_schema_v66_through_v67(
         coordinator_calls.append((backend, lock_timeout))
         return migration_transaction
 
-    def schema_version(connection: object, *, lock: bool = False) -> int:
+    def schema_version(_ctx: object, connection: object, *, lock: bool = False) -> int:
         version_reads.append((connection, lock))
         return 66
 
     monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", coordinator)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: True)
-    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
-    monkeypatch.setattr(db, "_ensure_note_graph_suggestion_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", schema_version)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_notes_moodboard_studio_schema_postgres", lambda _ctx, _conn: True)
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_progress_row", lambda _ctx, _conn, _phase: {"status": "complete"})
+    monkeypatch.setattr(postgres_schema, "_ensure_note_graph_suggestion_schema_postgres", lambda _ctx, _conn: None)
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_configure_notes_moodboard_studio_v61_postgres_transaction",
-        lambda _conn: None,
+        lambda _ctx, _conn: None,
     )
 
     def _reached_v67(conn: object) -> None:

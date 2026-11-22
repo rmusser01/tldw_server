@@ -11,12 +11,14 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     SchemaError,
 )
+from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
 
 pytestmark = pytest.mark.unit
 
@@ -29,17 +31,18 @@ EVENT_ID = "33333333-3333-4333-8333-333333333333"
 
 def test_postgres_initializer_preserves_v60_v61_and_v62_steps_before_current_v63() -> None:
     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 63
-    source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
-    assert "target_version = self._POSTGRES_SCHEMA_VERSION" in source
-    assert "_migrate_from_v59_to_v60_postgres" in source
-    assert "_migrate_from_v60_to_v61_postgres" in source
-    assert "_migrate_from_v61_to_v62_postgres" in source
-    assert "_migrate_from_v62_to_v63_postgres" in source
-    assert "_verify_note_task_schema_postgres" in source
+    fn = ladder.postgres_init_function()
+    assert {"_POSTGRES_SCHEMA_VERSION", "postgres_schema_version"} & ladder.loaded_names(fn)
+    called = set(ladder.names(ladder.ladder_calls(fn)))
+    assert "_migrate_from_v59_to_v60_postgres" in called
+    assert "_migrate_from_v60_to_v61_postgres" in called
+    assert "_migrate_from_v61_to_v62_postgres" in called
+    assert "_migrate_from_v62_to_v63_postgres" in called
+    assert "_verify_note_task_schema_postgres" in called
 
 
 def test_postgres_v60_ddl_is_fixed_and_scopes_graph_plus_authority() -> None:
-    statements = CharactersRAGDB._note_task_v60_postgres_ddl()
+    statements = postgres_schema._note_task_v60_postgres_ddl()
     sql = " ".join("\n".join(statements).split()).lower()
 
     assert len(statements) == 8
@@ -63,7 +66,7 @@ def test_postgres_v60_ddl_is_fixed_and_scopes_graph_plus_authority() -> None:
     assert "bigint not null default 1" in sql
     assert "timestamptz not null" in sql
 
-    indexes = CharactersRAGDB._note_task_v60_postgres_indexes()
+    indexes = postgres_schema._note_task_v60_postgres_indexes()
     assert (
         "CREATE INDEX idx_task_events_scope_task_created ON "
         "task_events(owner_user_id,dataset_id,task_id,created_at,id)"
@@ -97,7 +100,7 @@ def test_postgres_v60_migration_uses_fixed_lock_and_version_last_order() -> None
 
 
 def test_postgres_v60_frees_only_fixed_v59_constraint_collisions() -> None:
-    assert CharactersRAGDB._note_task_v59_postgres_constraint_collisions() == (
+    assert postgres_schema._note_task_v59_postgres_constraint_collisions() == (
         ("note_tasks", "note_tasks_pkey"),
         ("note_tasks", "note_tasks_projection_status_check"),
         ("note_tasks", "note_tasks_status_check"),
@@ -107,7 +110,7 @@ def test_postgres_v60_frees_only_fixed_v59_constraint_collisions() -> None:
         ("task_event_read_state", "task_event_read_state_pkey"),
         ("note_task_reconciliation_state", "note_task_reconciliation_state_pkey"),
     )
-    source = inspect.getsource(CharactersRAGDB._rename_note_task_v59_postgres_constraints)
+    source = inspect.getsource(postgres_schema._rename_note_task_v59_postgres_constraints)
     assert "ALTER TABLE {table_name} RENAME CONSTRAINT {constraint_name}" in source
     assert "TO {constraint_name}_v59" in source
 
@@ -115,7 +118,7 @@ def test_postgres_v60_frees_only_fixed_v59_constraint_collisions() -> None:
 def test_postgres_v60_uses_effective_schema_owner_and_exact_table_owner() -> None:
     for method in (
         CharactersRAGDB._migrate_from_v59_to_v60_postgres,
-        CharactersRAGDB._verify_note_task_schema_postgres,
+        postgres_schema._verify_note_task_schema_postgres,
     ):
         source = inspect.getsource(method).replace(" ", "")
         assert (
@@ -153,7 +156,7 @@ def _canonical_postgres_v59_source_authority() -> tuple[list[dict[str, object]],
 def test_postgres_v59_source_authority_accepts_only_reviewed_catalog() -> None:
     relation_rows, policy_rows = _canonical_postgres_v59_source_authority()
 
-    assert CharactersRAGDB._verify_note_task_v59_authority_catalog(
+    assert postgres_schema._verify_note_task_v59_authority_catalog(
         relation_rows, policy_rows
     ) == ("notes",)
 
@@ -226,11 +229,11 @@ def test_postgres_v59_source_authority_drift_matrix_fails_closed(drift: str) -> 
         policy_rows[0]["check_expression"] = "true"
 
     with pytest.raises(SchemaError, match="v59 PostgreSQL source authority"):
-        CharactersRAGDB._verify_note_task_v59_authority_catalog(relation_rows, policy_rows)
+        postgres_schema._verify_note_task_v59_authority_catalog(relation_rows, policy_rows)
 
 
 def test_postgres_v60_verifier_enumerates_full_catalog_and_pg18_not_null_rows() -> None:
-    source = inspect.getsource(CharactersRAGDB._verify_note_task_schema_postgres)
+    source = inspect.getsource(postgres_schema._verify_note_task_schema_postgres)
 
     for catalog in ("pg_class", "pg_attribute", "pg_constraint", "pg_index", "pg_policies"):
         assert catalog in source
@@ -252,7 +255,7 @@ def test_postgres_v60_verifier_enumerates_full_catalog_and_pg18_not_null_rows() 
 
 
 def test_postgres_v60_catalog_comparisons_fail_closed_on_security_drift() -> None:
-    source = inspect.getsource(CharactersRAGDB._verify_note_task_schema_postgres)
+    source = inspect.getsource(postgres_schema._verify_note_task_schema_postgres)
 
     assert "set(constraints) != expected_constraint_names" in source
     assert "not bool(row.get(\"constraint_validated\"))" in source

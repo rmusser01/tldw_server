@@ -11,6 +11,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -107,7 +108,7 @@ def _restore_reviewed_postgres_v59_task_source(db: CharactersRAGDB) -> None:
         ):
             db.backend.execute(f"DROP TABLE {table}", connection=conn)  # nosec B608
         db.backend.execute("DROP INDEX uq_notes_owner_id", connection=conn)
-        statements = db._convert_sqlite_schema_to_postgres_statements(
+        statements = postgres_schema._convert_sqlite_schema_to_postgres_statements(db.ctx,
             db._MIGRATION_SQL_V47_TO_V48_POSTGRES
         )
         for statement in statements:
@@ -1167,7 +1168,7 @@ def test_postgres_populated_v59_upgrade_matches_fresh_v60_catalog(
 
         assert _postgres_v60_task_catalog_snapshot(db) == fresh_catalog
         with db.transaction() as conn:
-            db._verify_note_task_schema_postgres(conn)
+            postgres_schema._verify_note_task_schema_postgres(db.ctx, conn)
             task = conn.execute(
                 "SELECT owner_user_id,dataset_id,id,note_id FROM note_tasks WHERE id=?",
                 (task_id,),
@@ -1244,21 +1245,21 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
     checkpoints: list[str] = []
     verify_threads: list[int] = []
     original_checkpoint = migration_support._note_task_v60_migration_checkpoint
-    original_verify = CharactersRAGDB._verify_note_task_schema_postgres
+    original_verify = postgres_schema._verify_note_task_schema_postgres
 
     def track_checkpoint(stage: str) -> None:
         with record_lock:
             checkpoints.append(stage)
         original_checkpoint(stage)
 
-    def track_verify(db: CharactersRAGDB, conn: object) -> None:
+    def track_verify(ctx: object, conn: object) -> None:
         with record_lock:
             verify_threads.append(threading.get_ident())
-        original_verify(db, conn)
+        original_verify(ctx, conn)
 
     monkeypatch.setattr(migration_support, "_note_task_v60_migration_checkpoint", track_checkpoint)
     monkeypatch.setattr(
-        CharactersRAGDB,
+        postgres_schema,
         "_verify_note_task_schema_postgres",
         track_verify,
     )

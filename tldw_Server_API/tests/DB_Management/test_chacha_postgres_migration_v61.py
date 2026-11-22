@@ -20,7 +20,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -69,18 +69,18 @@ def test_postgres_initializer_routes_schema_v60_through_v61(
         coordinator_calls.append((backend, lock_timeout))
         return migration_transaction
 
-    def _schema_version(conn: object, *, lock: bool = False) -> int:
+    def _schema_version(_ctx: object, conn: object, *, lock: bool = False) -> int:
         schema_version_reads.append((conn, lock))
         return 60
 
     monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", _schema_migration)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", _schema_version)
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", _schema_version)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, _conn: None)
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_configure_notes_moodboard_studio_v61_postgres_transaction",
-        lambda _conn: None,
+        lambda _ctx, _conn: None,
     )
 
     def _reached_v61(_conn: object) -> None:
@@ -110,11 +110,11 @@ def test_postgres_v61_migration_uses_only_reviewed_policy_block_and_versions_las
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     applied: list[tuple[str, int]] = []
     versions = iter((60, 61))
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn: next(versions))
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _conn: next(versions))
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_apply_postgres_migration_script",
-        lambda script, _conn, *, expected_version: applied.append((script, expected_version)),
+        lambda _ctx, script, _conn, *, expected_version: applied.append((script, expected_version)),
     )
 
     db._migrate_from_v60_to_v61_postgres(object())

@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
@@ -69,20 +70,20 @@ def _fake_postgres_initializer(
 
     monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", target_version)
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_get_schema_version_postgres",
-        lambda _conn, lock=False: current_version,
+        lambda _ctx, _conn, lock=False: current_version,
     )
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: True)
-    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
-    monkeypatch.setattr(db, "_ensure_note_graph_suggestion_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_ensure_note_semantic_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_notes_moodboard_studio_schema_postgres", lambda _ctx, _conn: True)
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_progress_row", lambda _ctx, _conn, _phase: {"status": "complete"})
+    monkeypatch.setattr(postgres_schema, "_ensure_note_graph_suggestion_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_ensure_note_semantic_schema_postgres", lambda _ctx, _conn: None)
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_configure_notes_moodboard_studio_v61_postgres_transaction",
-        lambda _conn: None,
+        lambda _ctx, _conn: None,
     )
     return db
 
@@ -332,9 +333,9 @@ def test_postgres_v87_migration_failure_rolls_back_table_and_version(
                 connection=conn,
             )
         monkeypatch.setattr(
-            db,
+            postgres_schema,
             "_convert_sqlite_schema_to_postgres_statements",
-            lambda _script: [
+            lambda _ctx, _script: [
                 f"CREATE TABLE {_TABLE}(id TEXT PRIMARY KEY)",
                 "SELECT value FROM missing_v87_relation",
             ],

@@ -6,6 +6,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
@@ -53,7 +54,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
             )
 
         with db.transaction() as conn:
-            db._ensure_workspace_subresource_schema_postgres(conn)
+            postgres_schema._ensure_workspace_subresource_schema_postgres(db.ctx, conn)
 
         column_rows = list(
             backend.execute(
@@ -112,7 +113,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
             """
         )
         with db.transaction() as conn:
-            db._ensure_workspace_subresource_schema_postgres(conn)
+            postgres_schema._ensure_workspace_subresource_schema_postgres(db.ctx, conn)
 
         cleaned = list(
             backend.execute(

@@ -8,6 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
@@ -25,7 +26,7 @@ def test_chacha_sequence_sync_advances_its_own_keywords(pg_database_config):
                 (501, str(uuid.uuid4()), "sequence-ownership-fixture", "1"),
                 connection=conn,
             )
-            chacha._sync_postgres_sequences(conn)
+            postgres_schema._sync_postgres_sequences(chacha.ctx, conn)
             next_id = backend.execute(
                 "SELECT nextval(pg_get_serial_sequence(%s, %s))",
                 ("chacha_keywords", "id"), connection=conn,
@@ -172,7 +173,7 @@ def test_chacha_empty_owner_preserves_character_sequence_high_water(
                     ("character_cards", "id", called),
                     connection=conn,
                 )
-                db._sync_postgres_sequences(conn)
+                postgres_schema._sync_postgres_sequences(db.ctx, conn)
             assert db.add_character_card({"name": "High-water character"}) == expected
         finally:
             db.close_connection()
@@ -191,7 +192,7 @@ def test_chacha_explicit_character_id_still_advances_serial(pg_restricted_backen
                     ("Imported-style character", "910016"),
                     connection=conn,
                 )
-                db._sync_postgres_sequences(conn)
+                postgres_schema._sync_postgres_sequences(db.ctx, conn)
             assert db.add_character_card({"name": "Following character"}) == 702
         finally:
             db.close_connection()
@@ -213,7 +214,7 @@ def test_chacha_sync_preserves_arbitrary_foreign_serial(pg_restricted_backend):
                     "SELECT setval('unrelated_sequence_fixture_id_seq', 701)",
                     connection=conn,
                 )
-                db._sync_postgres_sequences(conn)
+                postgres_schema._sync_postgres_sequences(db.ctx, conn)
                 state = pg_restricted_backend.execute(
                     "SELECT last_value, is_called FROM unrelated_sequence_fixture_id_seq",
                     connection=conn,
@@ -253,7 +254,7 @@ def test_chacha_sync_continues_after_table_error_without_settling_caller(
                         (str(uuid.uuid4()), "Pending keyword", "910016"),
                         connection=conn,
                     )
-                    db._sync_postgres_sequences(conn)
+                    postgres_schema._sync_postgres_sequences(db.ctx, conn)
                     assert (
                         execute(
                             "SELECT count(*) FROM character_cards",

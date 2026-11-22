@@ -26,7 +26,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     ConversationResumeStore,
 )
@@ -1868,17 +1868,17 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
     migration_connection, coordinator_calls = _record_postgres_coordinator(monkeypatch, backend)
     version_reads: list[tuple[object, bool]] = []
 
-    def schema_version(connection: object, *, lock: bool = False) -> int:
+    def schema_version(_ctx: object, connection: object, *, lock: bool = False) -> int:
         version_reads.append((connection, lock))
         return 64
 
-    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: True)
-    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
-    monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
-    monkeypatch.setattr(db, "_ensure_study_pack_schema_postgres", lambda conn: None)
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", schema_version)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_notes_moodboard_studio_schema_postgres", lambda _ctx, conn: True)
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_progress_row", lambda _ctx, _conn, _phase: {"status": "complete"})
+    monkeypatch.setattr(postgres_schema, "_ensure_postgres_fts", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_ensure_study_pack_schema_postgres", lambda _ctx, conn: None)
     applied: list[str] = []
 
     class _ReachedV65(Exception):
@@ -1979,15 +1979,15 @@ def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
     migration_connection, coordinator_calls = _record_postgres_coordinator(monkeypatch, backend)
     version_reads: list[tuple[object, bool]] = []
 
-    def schema_version(connection: object, *, lock: bool = False) -> int:
+    def schema_version(_ctx: object, connection: object, *, lock: bool = False) -> int:
         version_reads.append((connection, lock))
         return 64
 
-    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: True)
-    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", schema_version)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_notes_moodboard_studio_schema_postgres", lambda _ctx, conn: True)
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_progress_row", lambda _ctx, _conn, _phase: {"status": "complete"})
 
     def _fail_checkpoint(_ctx: object, stage: str) -> None:
         assert stage == "schema-created"

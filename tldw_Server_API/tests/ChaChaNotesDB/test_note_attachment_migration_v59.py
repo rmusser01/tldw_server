@@ -14,12 +14,13 @@ from uuid import uuid4
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, QueryResult
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     SchemaError,
 )
+from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
 
 pytestmark = pytest.mark.unit
 
@@ -113,7 +114,7 @@ def _raw_insert(conn: sqlite3.Connection, **overrides: object) -> None:
 
 def test_postgres_v4_conversion_namespaces_keyword_indexes() -> None:
     db = object.__new__(CharactersRAGDB)
-    statements = db._convert_sqlite_schema_to_postgres_statements(db._FULL_SCHEMA_SQL_V4)
+    statements = postgres_schema._convert_sqlite_schema_to_postgres_statements(db.ctx, db._FULL_SCHEMA_SQL_V4)
     keyword_index = next(
         statement
         for statement in statements
@@ -128,7 +129,7 @@ def test_postgres_v59_accepts_effective_current_schema_owner_role() -> None:
         CharactersRAGDB._migrate_from_v58_to_v59_postgres
     )
     verification_source = inspect.getsource(
-        CharactersRAGDB._verify_note_attachment_schema_postgres
+        postgres_schema._verify_note_attachment_schema_postgres
     )
 
     assert "pg_has_role(current_user, namespace_row.nspowner, 'USAGE')" in migration_source
@@ -914,12 +915,13 @@ def test_postgres_v59_rejects_preexisting_registry_before_version_advance() -> N
 
 
 def test_postgres_initializer_locks_schema_version_before_v59_migration() -> None:
-    source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
-    assert "_get_schema_version_postgres(conn, lock=True)" in source
-    assert "if current_version < 59:" in source
-    assert source.index("_get_schema_version_postgres(conn, lock=True)") < source.index(
-        "_migrate_from_v58_to_v59_postgres(conn)"
-    )
+    fn = ladder.postgres_init_function()
+    calls = ladder.ladder_calls(fn)
+    order = ladder.names(calls)
+    first_lock = calls[order.index("_get_schema_version_postgres")]
+    assert first_lock.kwargs == {"lock": True}
+    assert "_migrate_from_v58_to_v59_postgres" in ladder.names(ladder.branch_calls(fn, 59))
+    assert order.index("_get_schema_version_postgres") < order.index("_migrate_from_v58_to_v59_postgres")
 
 
 def test_live_postgres_tenancy_test_delegates_availability_to_shared_fixture() -> None:
@@ -938,7 +940,7 @@ def test_postgres_v59_catalog_verifier_rejects_type_or_check_drift(drift: str) -
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="catalog|schema|registry"):
-        db._verify_note_attachment_schema_postgres(object())
+        postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 def test_postgres_v59_catalog_verifier_rejects_check_with_or_true() -> None:
@@ -946,7 +948,7 @@ def test_postgres_v59_catalog_verifier_rejects_check_with_or_true() -> None:
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="check catalog drifted"):
-        db._verify_note_attachment_schema_postgres(object())
+        postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 def test_postgres_v59_catalog_verifier_rejects_live_predicate_with_and_false() -> None:
@@ -954,21 +956,21 @@ def test_postgres_v59_catalog_verifier_rejects_live_predicate_with_and_false() -
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="index catalog drifted"):
-        db._verify_note_attachment_schema_postgres(object())
+        postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 def test_postgres_v59_catalog_verifier_accepts_canonical_catalog_render() -> None:
     backend = _PostgresCatalogBackend(drift="canonical_catalog_render")
     db = _postgres_db(backend)
 
-    db._verify_note_attachment_schema_postgres(object())
+    postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 def test_postgres_v59_catalog_verifier_supports_pg18_not_null_catalog_rows() -> None:
     backend = _PostgresCatalogBackend(drift="pg18_not_null_constraints")
     db = _postgres_db(backend)
 
-    db._verify_note_attachment_schema_postgres(object())
+    postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 def test_postgres_v59_catalog_verifier_rejects_extra_non_null_constraint() -> None:
@@ -976,7 +978,7 @@ def test_postgres_v59_catalog_verifier_rejects_extra_non_null_constraint() -> No
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="constraint catalog drifted"):
-        db._verify_note_attachment_schema_postgres(object())
+        postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 def test_postgres_v59_catalog_verifier_rejects_cross_owner_rls_drift() -> None:
@@ -984,7 +986,7 @@ def test_postgres_v59_catalog_verifier_rejects_cross_owner_rls_drift() -> None:
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="RLS policy catalog drifted"):
-        db._verify_note_attachment_schema_postgres(object())
+        postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 @pytest.mark.parametrize(
@@ -998,7 +1000,7 @@ def test_postgres_v59_catalog_verifier_rejects_incomplete_catalog_identity(
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="catalog|schema|registry|constraint|foreign key"):
-        db._verify_note_attachment_schema_postgres(object())
+        postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 def test_postgres_v59_catalog_verifier_rejects_extra_attachment_policy() -> None:
@@ -1006,7 +1008,7 @@ def test_postgres_v59_catalog_verifier_rejects_extra_attachment_policy() -> None
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="RLS policy catalog drifted"):
-        db._verify_note_attachment_schema_postgres(object())
+        postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 def test_postgres_v59_catalog_verifier_rejects_canonical_policy_or_true() -> None:
@@ -1014,7 +1016,7 @@ def test_postgres_v59_catalog_verifier_rejects_canonical_policy_or_true() -> Non
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="RLS policy catalog drifted"):
-        db._verify_note_attachment_schema_postgres(object())
+        postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 @pytest.mark.parametrize(
@@ -1026,14 +1028,14 @@ def test_postgres_v59_catalog_verifier_requires_exact_policy_metadata(drift: str
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="RLS policy catalog drifted"):
-        db._verify_note_attachment_schema_postgres(object())
+        postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
 
 def test_postgres_v59_catalog_verifier_uses_complete_fixed_catalog_queries() -> None:
     backend = _PostgresCatalogBackend()
     db = _postgres_db(backend)
 
-    db._verify_note_attachment_schema_postgres(object())
+    postgres_schema._verify_note_attachment_schema_postgres(db.ctx, object())
 
     statements = [statement for statement, _ in backend.calls]
     column_query = next(

@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
 from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase, utcnow_iso
@@ -91,7 +92,7 @@ def test_postgres_v4_bootstrap_namespaces_keyword_indexes(
 
     try:
         with backend.transaction() as conn:
-            db._apply_schema_v4_postgres(conn)
+            postgres_schema._apply_schema_v4_postgres(db.ctx, conn)
             assert backend.table_exists("chacha_keywords", connection=conn)
             assert not backend.table_exists("keywords", connection=conn)
     finally:

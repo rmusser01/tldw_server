@@ -4,7 +4,8 @@ from datetime import datetime
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 
@@ -276,7 +277,7 @@ class TestWorkspaceSources:
         backend = RecordingBackend()
         db = type("RecordingDB", (), {"backend": backend})()
 
-        CharactersRAGDB._ensure_workspace_subresource_schema_postgres(db, object())
+        postgres_schema._ensure_workspace_subresource_schema_postgres(ChaChaContext(db), object())
 
         backfill = next(
             statement

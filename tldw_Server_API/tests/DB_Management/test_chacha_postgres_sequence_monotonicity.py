@@ -7,6 +7,7 @@ import pytest
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import _mint
 from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import (
@@ -36,7 +37,7 @@ def sequence_db(pg_restricted_backend):
 
 def maintain(db, conn):
     """The registered migrations pass the same caller-owned raw connection."""
-    db._sync_postgres_sequences(conn._connection)
+    postgres_schema._sync_postgres_sequences(db.ctx, conn._connection)
 
 
 def allocate(conn):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import threading
 from collections.abc import Callable
 from dataclasses import replace
@@ -18,11 +17,13 @@ from tldw_Server_API.app.core.DB_Management.backends import base as backend_erro
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import ensure_chacha_rls
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     InputError,
 )
+from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
 
 pytestmark = pytest.mark.integration
 
@@ -189,17 +190,16 @@ def test_postgres_v53_to_v54_saved_view_checkpoint_creates_table_and_forced_poli
     # Replaying the whole initializer from v53 on a current catalog is not a
     # real predecessor: v56's WebClipper check expects the pre-v57 keys and
     # fails closed. Run the v53->v54 step itself on a catalog missing it.
-    initializer = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
-    step = initializer.index("if current_version < 54:")
-    assert initializer.index("_ensure_workspace_source_saved_view_schema_postgres(conn)", step) < initializer.index(
-        "_set_schema_version_postgres(conn, 54)", step
+    step = ladder.names(ladder.branch_calls(ladder.postgres_init_function(), 54))
+    assert step.index("_ensure_workspace_source_saved_view_schema_postgres") < step.index(
+        "_set_schema_version_postgres"
     )
 
     backend, seed = _database(pg_database_config)
     try:
         with backend.transaction() as conn:
             backend.execute("DROP TABLE workspace_source_saved_views", connection=conn)
-            seed._ensure_workspace_source_saved_view_schema_postgres(conn)
+            postgres_schema._ensure_workspace_source_saved_view_schema_postgres(seed.ctx, conn)
 
         assert backend.table_exists("workspace_source_saved_views")
         _assert_forced_active_workspace_policy(backend)

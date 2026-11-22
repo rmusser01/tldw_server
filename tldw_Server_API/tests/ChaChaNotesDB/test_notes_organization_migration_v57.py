@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import re
 from pathlib import Path
 
@@ -12,11 +11,12 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     QueryResult,
 )
-from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     SchemaError,
 )
+from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
 
 _V57_LOCKED_TABLES = (
     "chacha_keywords",
@@ -293,25 +293,19 @@ def test_postgres_v55_to_v57_installs_full_rls_after_both_migrations(
 ) -> None:
     backend = _MigrationBackend()
     db = _postgres_db(backend)
-    import tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB as chacha_module
 
     monkeypatch.setattr(
-        chacha_module,
+        postgres_schema,
         "build_chacha_rls_sql",
         lambda: ["SELECT 'full chacha rls policy set'"],
-        raising=False,
     )
 
-    db._ensure_chacha_rls_postgres(object())
+    postgres_schema._ensure_chacha_rls_postgres(db.ctx, object())
 
     assert backend.calls == [("SELECT 'full chacha rls policy set'", None)]
-    initializer_source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
-    assert initializer_source.index("self._migrate_from_v55_to_v56_postgres(conn)") < (
-        initializer_source.index("self._migrate_from_v56_to_v57_postgres(conn)")
-    )
-    assert initializer_source.index("self._migrate_from_v56_to_v57_postgres(conn)") < (
-        initializer_source.index("self._ensure_chacha_rls_postgres(conn)")
-    )
+    order = ladder.names(ladder.ladder_calls(ladder.postgres_init_function()))
+    assert order.index("_migrate_from_v55_to_v56_postgres") < order.index("_migrate_from_v56_to_v57_postgres")
+    assert order.index("_migrate_from_v56_to_v57_postgres") < order.index("_ensure_chacha_rls_postgres")
 
 
 @pytest.mark.parametrize(
@@ -403,7 +397,7 @@ def test_postgres_folder_startup_dedupe_and_index_are_owner_scoped() -> None:
     backend = _MigrationBackend()
     db = _postgres_db(backend)
 
-    db._ensure_note_folder_schema_postgres(object())
+    postgres_schema._ensure_note_folder_schema_postgres(db.ctx, object())
 
     sql = "\n".join(statement for statement, _ in backend.calls)
     assert "PARTITION BY client_id, LOWER(path)" in sql

@@ -1267,7 +1267,7 @@ SELECT_EXCLUDED = frozenset(
         "_get_db_version", "_sqlite_linear_migration_steps", "_run_sqlite_linear_migration_step", "_sqlite_table_names",
         "_sqlite_column_names", "_sqlite_index_names", "_apply_postgres_migration_script", "_get_schema_version_postgres",
         "_set_schema_version_postgres", "_initialize_schema", "_initialize_schema_sqlite", "_initialize_schema_postgres",
-        "_sqlite_schema_init_lock_for_path", "_ensure_bootstrap_for_backend",
+        "_sqlite_schema_init_lock_for_path", "_ensure_bootstrap_for_backend", "repair_conversation_assistant_identity",
     }
 )  # fmt: skip
 SELECT_INIT = ("_initialize_schema_sqlite_legacy", "_postgres_schema_is_current")
@@ -1497,7 +1497,7 @@ def fn_replacement(attr: str, recv: str, env: FnEnv) -> tuple[str, bool]:
     if recv == "cls":  # R24: only a static member of the context, or a schema_sql constant
         member = rewrite.split(".", 1)[1] if rewrite and rewrite.split(".", 1)[0] in {"ctx", "ChaChaContext"} else None
         if member in env.ctx_static:
-            return f"ChaChaContext.{member}", False
+            return f"chacha_context.ChaChaContext.{member}", False  # the module, not the class: the context imports ChaChaNotes_DB, so a top-level class import cycles
         if attr in env.schema_consts:
             return f"schema_sql.{attr}", False
         raise Unmapped(attr)
@@ -1905,8 +1905,8 @@ def run_functions(root: Path, manifest_paths: list[Path]) -> int:
                 continue
             if n in KNOWN_MODULES:
                 lines_out.add(_module_import(n, KNOWN_MODULES[n]))
-            elif n == "ChaChaContext":
-                lines_out.add(f"from {PKG}.context import ChaChaContext")
+            elif n == "chacha_context":
+                lines_out.add(f"from {PKG} import context as chacha_context")
             elif n in {m["alias"] for m in manifests} | {mv.alias for mv in env.index.values()}:
                 move = next(mv for mv in env.index.values() if mv.alias == n)
                 if move.target != manifest["target"]:
