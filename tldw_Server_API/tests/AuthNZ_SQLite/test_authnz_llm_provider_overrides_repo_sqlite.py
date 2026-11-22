@@ -558,7 +558,6 @@ async def test_the_denylist_round_trips_through_the_repo_sqlite(tmp_path, monkey
     assert (stored["denied_models"], listed[0]["denied_models"]) == ('["gpt-4o"]', '["gpt-4o"]')
 
 
-
 @pytest.mark.asyncio
 async def test_an_admin_sets_and_clears_denied_models_through_the_real_repo_sqlite(tmp_path, monkeypatch) -> None:
     """TASK-15616 (#3544's final review, M3): the admin API's service writes denied_models to the real repo, and each

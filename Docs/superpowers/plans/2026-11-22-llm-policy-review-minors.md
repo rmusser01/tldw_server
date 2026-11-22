@@ -12,7 +12,7 @@
 
 **Base:** `origin/fix/llm-policy-review-minors-15615` at `10c8b30c8d` (`dev` at `7f0d18bedd`, #3544 merged, plus the commit filing the four tasks). Every line number below is at that commit; Task 4 merges `origin/dev` and then cites #3554's head `6428b61fc3`. Draft PR #3555 targets `dev`.
 
-**Rulings (review round 1, 2026-11-22):** the independent dry run (`review_15615.md`) found 0 Blocker, 0 Important and 7 Minor. Every `Expected:` it ran matched. Its rulings are at the end of this plan, under "Rulings (review round 1, 2026-11-22)", and they override the task text where they differ. #3554 merged at 2026-11-22T16:22Z (`332e8ddd90`), so Task 4's check of `origin/dev` finds it.
+**Rulings (review round 1, 2026-11-22):** the independent dry run found 0 Blocker, 0 Important and 7 Minor. Every `Expected:` it ran matched. Its rulings are at the end of this plan, under "Rulings (review round 1, 2026-11-22)", and they override the task text where they differ. #3554 merged at 2026-11-22T16:22Z (`332e8ddd90`), so Task 4's check of `origin/dev` finds it.
 
 ## The rules the code implements (owner decisions, settled)
 
@@ -140,7 +140,7 @@ Expected: `zsh -n <scratchpad>/run15615.zsh` prints nothing, and `ls <scratchpad
 - [ ] **Step 3: Copy the plan, check it, commit.** Copy this plan to `Docs/superpowers/plans/2026-11-22-llm-policy-review-minors.md`.
 
 ```bash
-grep -n -E '(brief|plan|final_review|impl_report|design_review)_[0-9a-z_]*\.md' Docs/superpowers/plans/2026-11-22-llm-policy-review-minors.md
+grep -n -E '(brief|plan|final_review|impl_report|design_review|review|pr_body)_[0-9a-z_]*\.md' Docs/superpowers/plans/2026-11-22-llm-policy-review-minors.md
 grep -n -E ' +$' Docs/superpowers/plans/2026-11-22-llm-policy-review-minors.md
 git add Docs/superpowers/plans/2026-11-22-llm-policy-review-minors.md
 git commit -m "docs(plans): the plan for TASK-15615 to TASK-15618
@@ -847,7 +847,7 @@ Expected: `tests/lint` 0 failed, the function-size and endpoint-monkeypatch ratc
 
 ## Rulings (review round 1, 2026-11-22)
 
-The independent dry run (`review_15615.md`): Ready to execute; 0 Blocker, 0 Important, 7 Minor. Every `Expected:` it ran matched. These rulings override the task text above.
+The independent dry run: Ready to execute; 0 Blocker, 0 Important, 7 Minor. Every `Expected:` it ran matched. These rulings override the task text above.
 
 | # | Finding | Ruling |
 |---|---|---|

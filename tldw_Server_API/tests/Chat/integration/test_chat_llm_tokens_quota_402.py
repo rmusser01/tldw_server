@@ -486,7 +486,6 @@ def test_a_failed_hosted_plan_lookup_withholds_failover_but_not_the_own_key_requ
     assert own_key_failover.dispatched == ["openai"]
 
 
-
 @pytest.mark.parametrize(
     ("own_key", "expected"),
     [(True, (200, None, ["anthropic"])), (False, (403, "model_not_allowed", []))],
