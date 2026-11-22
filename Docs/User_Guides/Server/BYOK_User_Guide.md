@@ -175,7 +175,7 @@ operator turned off, or a model it denied, is offered to no one; a model it only
 server's key offers (`allowed_models`) is offered to you, because chat runs it on your key (the four paths named
 under Usage Quotas still refuse it). Your listing never shows another user's keys or models. Saving or deleting a
 key on the LLM Provider Keys settings page refreshes the chat model pickers at once; other pages that list
-providers catch up within a minute. See `Docs/API-related/Providers_API_Documentation.md`.
+providers update the next time they are opened. See `Docs/API-related/Providers_API_Documentation.md`.
 
 ## Org/Team Shared Keys (Manager Role)
 
