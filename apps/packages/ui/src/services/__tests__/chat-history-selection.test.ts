@@ -877,6 +877,33 @@ it("revalidates frozen native selection before dispatch and passes original leas
   expect(candidate).toHaveBeenCalledWith("child")
   await expect(service.commitNativeFork(prepared, candidate)).rejects.toThrow("fork_preparation_consumed")
 })
+it("creates a native branch that names its parent chat and the message it starts from (CM-12)", async () => {
+  const native = owner()
+  const rows = [
+    {id: "u", revision: "1", parent_id: null, role: "user", settled: true},
+    {id: "a", revision: "1", parent_id: "u", role: "assistant", settled: true}
+  ]
+  const selectedView = {...view, cursor: {kind: "after_message" as const, message_id: "a"}}
+  calls.capture.mockResolvedValue({...plainCapture(), rows,
+    selected_content: [{id: "u", revision: "1", message: "Question", images: []}, {id: "a", revision: "1", message: "Answer", images: []}],
+    snapshot: {...plainCapture().snapshot, nodes: rows}, view: selectedView})
+  const input = await service.captureNativeForkSelection(native, selectedView)
+  const value = {operation_id: "lineage-op", owner_key: "native-key", destination_owner_key: "native-key", input}
+  const {historyDigest} = await import("@/db/dexie/history-selection")
+  const prepared = await service.prepareNativeFork(native, {...value, request_digest: historyDigest(value)})
+  calls.create.mockResolvedValue({id: "child"})
+  calls.append
+    .mockResolvedValueOnce({id: "child-u", conversation_id: "child", parent_message_id: null, sender: "user"})
+    .mockResolvedValueOnce({id: "child-a", conversation_id: "child", parent_message_id: "child-u", sender: "assistant"})
+  expect(await service.commitNativeFork(prepared, vi.fn(), {title: "Trip plan — branch at message 2"}))
+    .toMatchObject({state: "legacy_completed", child_id: "child"})
+  expect(calls.create).toHaveBeenCalledWith(expect.objectContaining({
+    title: "Trip plan — branch at message 2",
+    parent_conversation_id: "chat",
+    forked_from_message_id: "a",
+    character_id: null
+  }), expect.anything())
+})
 it("rejects changed context before any native write", async () => {
   const {native, request} = await nativeRequest()
   calls.capture.mockResolvedValue({...plainCapture(), snapshot: {...plainCapture().snapshot, fences: {conversation: "changed", history: "1", settings: "1"}}})

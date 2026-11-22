@@ -1084,6 +1084,7 @@ const PromptSelectForOwner: React.FC<Props & {
       returnFocusSelectorRef.current = normalizeFocusSelector(
         detail?.returnFocusSelector
       )
+      if (detail?.search) setSearchText(detail.search)
       setDropdownOpen(true)
     }
 

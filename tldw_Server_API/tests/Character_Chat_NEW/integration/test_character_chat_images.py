@@ -144,8 +144,12 @@ def test_character_rejects_incomplete_images_before_provider(
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
 
     png = (Path(__file__).resolve().parents[4] / "apps/packages/ui/src/public/icon/128.png").read_bytes()
-    chat_id = character_db.add_conversation({"client_id": "2" if fault == "foreign" else "1", "title": "Private image"})
-    character_db.add_message(
+    seeding = character_db
+    if fault == "foreign":
+        # The other owner writes through their own instance: the message store locks chats to the instance owner.
+        seeding = CharactersRAGDB(db_path=character_db.db_path_str, client_id="2", backend=character_db.backend)
+    chat_id = seeding.add_conversation({"client_id": seeding.client_id, "title": "Private image"})
+    seeding.add_message(
         {
             "conversation_id": chat_id,
             "sender": "user",

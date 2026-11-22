@@ -20,6 +20,20 @@ const messageOptionState = {
 }
 
 let selectedCharacter: { id: string; name: string } | null = null
+const forkParent = vi.hoisted(() => ({ value: null as { id: string; title: string } | null, requested: [] as unknown[] }))
+const chatFiles = vi.hoisted(() => ({ exportServerChat: vi.fn(), success: vi.fn(), error: vi.fn(), loading: vi.fn(), destroy: vi.fn() }))
+vi.mock("@/services/chat-transcript-export", () => ({
+  exportServerChat: (...args: unknown[]) => chatFiles.exportServerChat(...args),
+  ChatExportTooLargeError: class ChatExportTooLargeError extends Error {}
+}))
+vi.mock("@/components/Sidepanel/Chat/FolderPickerModal", () => ({
+  default: ({ open, conversationId, operation }: { open: boolean; conversationId: string; operation?: { requestScope: { userId: string }; isCurrent: () => boolean } }) =>
+    open ? <div data-testid="folder-picker" data-chat={conversationId} data-user={operation?.requestScope.userId}
+      data-current={String(operation?.isCurrent())} /> : null
+}))
+vi.mock("@/services/service-prompts", () => ({
+  resolveServicePromptScope: async () => ({ config: { serverUrl: "https://chat.test", authMode: "multi-user" }, userId: "U1" })
+}))
 
 const mockT = (
   key: string,
@@ -56,6 +70,7 @@ vi.mock("antd", () => ({
   Input: ({ value, onChange, placeholder }: any) => (
     <input value={value} onChange={onChange} placeholder={placeholder} />
   ),
+  message: { success: chatFiles.success, error: chatFiles.error, loading: chatFiles.loading, destroy: chatFiles.destroy },
   InputNumber: ({ value, onChange }: any) => (
     <input
       type="number"
@@ -91,8 +106,19 @@ vi.mock("@/db", () => ({
   updateHistory: vi.fn().mockResolvedValue(undefined)
 }))
 
+vi.mock("@/hooks/chat/useForkParentChat", () => ({
+  useForkParentChat: (chatId: unknown) => {
+    forkParent.requested.push(chatId)
+    return forkParent.value
+  }
+}))
+
 vi.mock("../ChatHeader", () => ({
   ChatHeader: ({
+    parentChatTitle,
+    onOpenParentChat,
+    onExportChat,
+    onEditFolders,
     onOpenCommandPalette,
     onStartSavedChat,
     onStartTemporaryChat,
@@ -105,8 +131,23 @@ vi.mock("../ChatHeader", () => ({
     onStartCharacterChat?: () => void
     persistenceKind?: string
     activeCharacterName?: string | null
+    parentChatTitle?: string | null
+    onOpenParentChat?: () => void
+    onExportChat?: (format: "markdown" | "json") => void
+    onEditFolders?: () => void
   }) => (
     <div>
+      {onExportChat ? (
+        <button type="button" onClick={() => onExportChat("json")}>Export JSON</button>
+      ) : null}
+      {onEditFolders ? (
+        <button type="button" onClick={() => onEditFolders()}>Add to folder</button>
+      ) : null}
+      {onOpenParentChat ? (
+        <button type="button" onClick={() => onOpenParentChat()}>
+          Back to {parentChatTitle}
+        </button>
+      ) : null}
       <output data-testid="header-persistence">{persistenceKind}</output>
       <button type="button" onClick={() => onOpenCommandPalette?.()}>
         Open command palette
@@ -144,6 +185,79 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     revokeConversationShareLink: vi.fn()
   }
 }))
+
+describe("Header branch lineage (CM-12)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    messageOptionState.serverChatId = "branch-chat"
+    messageOptionState.temporaryChat = false
+    forkParent.value = null
+    forkParent.requested = []
+    locationPathname = "/chat"
+  })
+
+  it("leads from a branch back to the chat it came from through the chat's address", () => {
+    forkParent.value = { id: "trip", title: "Trip plan" }
+    render(<Header />)
+    expect(forkParent.requested.at(-1)).toBe("branch-chat")
+    fireEvent.click(screen.getByRole("button", { name: "Back to Trip plan" }))
+    expect(navigateMock).toHaveBeenCalledWith("/chat?chat=trip")
+  })
+
+  it("looks up no lineage off the chat page or in a temporary chat", () => {
+    locationPathname = "/notes"
+    render(<Header />)
+    expect(forkParent.requested.at(-1)).toBeNull()
+  })
+
+  it("offers no way back for a chat that isn't a branch", () => {
+    render(<Header />)
+    expect(screen.queryByRole("button", { name: /^Back to/ })).not.toBeInTheDocument()
+  })
+})
+
+describe("Header per-chat Export and Move to folder (CS-09)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    messageOptionState.serverChatId = "saved-chat"
+    messageOptionState.temporaryChat = false
+    forkParent.value = null
+    locationPathname = "/chat"
+  })
+
+  it("exports the open saved chat from the server", async () => {
+    chatFiles.exportServerChat.mockResolvedValue(undefined)
+    render(<Header />)
+    fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
+    await vi.waitFor(() =>
+      expect(chatFiles.exportServerChat).toHaveBeenCalledWith("saved-chat", "json", expect.any(Object))
+    )
+    await vi.waitFor(() => expect(chatFiles.success).toHaveBeenCalledWith(expect.objectContaining({ content: "Chat exported." })))
+  })
+
+  it("says when the export fails", async () => {
+    chatFiles.exportServerChat.mockRejectedValue(new Error("HTTP 503"))
+    render(<Header />)
+    fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
+    await vi.waitFor(() => expect(chatFiles.error).toHaveBeenCalledWith(expect.objectContaining({ content: "Couldn't export this chat. Try again." })))
+  })
+
+  it("edits the open saved chat's folders for the current account", async () => {
+    render(<Header />)
+    fireEvent.click(screen.getByRole("button", { name: "Add to folder" }))
+    const picker = await screen.findByTestId("folder-picker")
+    expect(picker).toHaveAttribute("data-chat", "saved-chat")
+    expect(picker).toHaveAttribute("data-user", "U1")
+    expect(picker).toHaveAttribute("data-current", "true")
+  })
+
+  it("offers neither for a chat that isn't saved on the server", () => {
+    messageOptionState.serverChatId = null
+    render(<Header />)
+    expect(screen.queryByRole("button", { name: "Export JSON" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Add to folder" })).toBeNull()
+  })
+})
 
 describe("Header character mode sequencing", () => {
   beforeEach(() => {

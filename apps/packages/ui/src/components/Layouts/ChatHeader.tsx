@@ -5,6 +5,11 @@ import {
   Bell,
   BellOff,
   CogIcon,
+  CornerUpLeft,
+  Download,
+  FileJson,
+  FileText,
+  FolderInput,
   House,
   LoaderCircle,
   Menu,
@@ -77,6 +82,16 @@ type ChatHeaderProps = {
   notificationState?: HeaderNotificationState
   onRetryNotifications?: () => void | Promise<void>
   renderAccountMenu?: (onClose: () => void) => React.ReactNode
+  /**
+   * The title of the chat this one was branched from (CM-12); an empty title
+   * reads "Untitled". With `onOpenParentChat`, the header leads back to it.
+   */
+  parentChatTitle?: string | null
+  onOpenParentChat?: () => void
+  /** Export the open saved chat from the server (CS-09). */
+  onExportChat?: (format: "markdown" | "json") => void
+  /** Choose the folders the open saved chat belongs to (CS-09). */
+  onEditFolders?: () => void
 }
 
 const toText = (value: unknown): string =>
@@ -116,7 +131,11 @@ export function ChatHeader({
   onOpenNotifications,
   notificationState = "active",
   onRetryNotifications,
-  renderAccountMenu
+  renderAccountMenu,
+  parentChatTitle = null,
+  onOpenParentChat,
+  onExportChat,
+  onEditFolders
 }: ChatHeaderProps) {
   const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false)
   const headerMenuTriggerRef = React.useRef<HTMLButtonElement>(null)
@@ -485,6 +504,39 @@ export function ChatHeader({
           }
         ]
       : []),
+    ...(onExportChat
+      ? [
+          {
+            key: "export",
+            label: toText(t("sidepanel:contextMenu.export", "Export")),
+            icon: <Download className="size-4" aria-hidden="true" />,
+            children: [
+              {
+                key: "export-markdown",
+                label: toText(t("common:chatSidebar.exportMarkdown", "Markdown")),
+                icon: <FileText className="size-4" aria-hidden="true" />,
+                onClick: () => runMenuAction(() => onExportChat("markdown"))
+              },
+              {
+                key: "export-json",
+                label: toText(t("common:chatSidebar.exportJson", "JSON")),
+                icon: <FileJson className="size-4" aria-hidden="true" />,
+                onClick: () => runMenuAction(() => onExportChat("json"))
+              }
+            ]
+          }
+        ]
+      : []),
+    ...(onEditFolders
+      ? [
+          {
+            key: "add-to-folder",
+            label: toText(t("common:chatSidebar.addToFolder", "Add to folder…")),
+            icon: <FolderInput className="size-4" aria-hidden="true" />,
+            onClick: () => runMenuAction(onEditFolders)
+          }
+        ]
+      : []),
     ...(onStartTemporaryChat
       ? [
           {
@@ -660,6 +712,34 @@ export function ChatHeader({
             )}
           </h2>
           {sessionBadges}
+          {parentChatTitle != null && onOpenParentChat ? (
+            <p
+              className="flex min-w-0 max-w-full items-center gap-1 text-[11px] text-text-muted"
+              data-testid="chat-header-parent-chat"
+            >
+              <span className="shrink-0">
+                {toText(t("playground:header.branchedFrom", "Branched from"))}
+              </span>
+              <button
+                type="button"
+                onClick={onOpenParentChat}
+                aria-label={toText(
+                  t("playground:header.backToParentChat", "Back to parent chat: {{title}}", {
+                    title:
+                      parentChatTitle.trim() ||
+                      toText(t("option:header.untitledChat", "Untitled"))
+                  } as any)
+                )}
+                className={`inline-flex min-w-0 items-center gap-1 rounded text-text-muted underline-offset-2 hover:text-text hover:underline ${focusRingClasses}`}
+              >
+                <CornerUpLeft className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">
+                  {parentChatTitle.trim() ||
+                    toText(t("option:header.untitledChat", "Untitled"))}
+                </span>
+              </button>
+            </p>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
           <button

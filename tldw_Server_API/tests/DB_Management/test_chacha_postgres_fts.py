@@ -11,7 +11,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha.character_store import CharacterStore
 from tldw_Server_API.app.core.DB_Management.chacha.keyword_store import KeywordStore
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, OwnerScope
 
 
 class _CursorStub:
@@ -187,7 +187,10 @@ def test_manage_link_postgres_uses_on_conflict():
 
     db.transaction = fake_transaction  # type: ignore[assignment]
 
-    assert db._manage_link("flashcard_keywords", "card_id", 1, "keyword_id", 2, "link") is True
+    # The test checks the INSERT shape only; a stub connection cannot prove ownership.
+    assert db._manage_link(
+        "flashcard_keywords", "card_id", 1, "keyword_id", 2, "link", owner_client_id=OwnerScope.NOT_APPLICABLE
+    ) is True
 
     insert_calls = [sql.lower() for sql in conn.calls if sql.lower().startswith("insert into flashcard_keywords")]
     assert insert_calls, "expected insert into flashcard_keywords to be executed"
@@ -314,6 +317,61 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
         assert lookup.startswith("SELECT id, keyword FROM keywords") and "client_id = ?" in lookup
         assert "selected-" in lookup_params and db.client_id not in lookup_params
         assert 7 in params
+
+
+@pytest.mark.parametrize("mode", ["fts", "fallback", "keyword_fts", "keyword_only"])
+def test_postgres_notes_relevance_order_breaks_ties_by_id(monkeypatch, mode):
+    """Notes that tie on rank and date page in one stable order (NL-07 review)."""
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    db = _make_postgres_db()
+    store = NoteStore(db)
+    statements = []
+
+    def execute(query, params):
+        statements.append((query, params))
+        if query.startswith("SELECT id, keyword FROM keywords"):
+            return SimpleNamespace(fetchall=lambda: [{"id": 7, "keyword": "Tag"}])
+        return SimpleNamespace(fetchall=lambda: [{"id": "owned-note"}], fetchone=lambda: {"cnt": 1})
+
+    monkeypatch.setattr(db, "execute_query", execute)
+    monkeypatch.setattr(db, "_map_table_for_backend", lambda name: name)
+    if mode == "fallback":
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.DB_Management.chacha.note_store.FTSQueryTranslator.normalize_query",
+            lambda *args: "",
+        )
+    if mode in ("fts", "fallback"):
+        store.search_notes("needle", limit=3, offset=2)
+    else:
+        store.search_notes_with_keywords("needle" if mode.endswith("fts") else None, ["tag"], limit=3, offset=2)
+    flat = " ".join(statements[-1][0].split())
+    order_clause = flat[flat.rindex("ORDER BY") : flat.rindex("LIMIT")].strip()
+    assert order_clause.endswith("n.id ASC"), order_clause
+
+
+def test_postgres_note_snippets_strip_marker_characters_and_cap_the_source(monkeypatch):
+    """ts_headline reads at most 20k characters, with the marker characters removed first."""
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    db = _make_postgres_db()
+    store = NoteStore(db)
+    statements = []
+
+    def execute(query, params, **_kwargs):
+        statements.append((query, params))
+        return SimpleNamespace(fetchall=lambda: [{"id": "n1", "marked": "the \ue000needle\ue001 here"}])
+
+    monkeypatch.setattr(db, "execute_query", execute)
+
+    snippets = store.note_search_snippets("needle", ["n1"])
+
+    assert snippets == {"n1": [{"text": "the ", "match": False}, {"text": "needle", "match": True}, {"text": " here", "match": False}]}
+    query, params = statements[-1]
+    flat = " ".join(query.split())
+    assert "ts_headline('english', translate(LEFT(n.content, ?), ?, ''), to_tsquery('english', ?), ?)" in flat
+    assert params[0] == 20_000
+    assert params[1] == "\ue000\ue001"
 
 
 @pytest.mark.parametrize("counting", [False, True])

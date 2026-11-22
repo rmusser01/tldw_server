@@ -15,6 +15,7 @@ export type {
   NotesEditorMode,
   NotesInputMode,
   NotesSortOption,
+  NotesBrowseSortOption,
   KeywordPickerSortMode,
   KeywordFrequencyTone,
   KeywordManagementItem,
@@ -43,3 +44,14 @@ export type {
   NotesTocEntry,
   NoteWithKeywords,
 } from './notes-manager-utils'
+
+/** Options for fetching one page of the notes list or of a search. */
+export type NotesPageFetchOptions = {
+  /** False to skip match excerpts: gathering ids for select-all or export needs none. */
+  includeSnippets?: boolean
+  /**
+   * Oldest first, so notes edited while every page is read keep their place.
+   * Applies to the library and Trash; a search keeps the server's order.
+   */
+  oldestFirst?: boolean
+}

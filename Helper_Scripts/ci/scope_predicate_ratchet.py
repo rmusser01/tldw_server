@@ -93,8 +93,38 @@ def adds_predicate_on(block: list[ast.stmt], name: str) -> bool:
     return False
 
 
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def qualified_name(tree: ast.Module, lineno: int) -> str:
+    """Return ``"Class.method"``, ``"outer.inner"`` or ``"<module>"`` for *lineno*.
+
+    The chain is the enclosing function and class definitions whose line span
+    contains *lineno*, outermost first, through any statement nesting.
+    """
+    chain: list[str] = []
+
+    def descend(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, _SCOPES):
+                if child.lineno <= lineno <= (child.end_lineno or child.lineno):
+                    chain.append(child.name)
+                    descend(child)
+                    return
+            # Nodes without a position (e.g. match_case) are descended into unconditionally.
+            elif not hasattr(child, "end_lineno") or child.lineno <= lineno <= (child.end_lineno or child.lineno):
+                descend(child)
+
+    descend(tree)
+    return ".".join(chain) or "<module>"
+
+
 def iter_findings(root: Path = APP_ROOT) -> Iterator[str]:
-    """Yield ``"relative/path.py:LINE if <scope>"`` for each conditional predicate."""
+    """Yield ``"relative/path.py::<qualname> if <scope>"`` per conditional predicate.
+
+    A repeated key takes ``" #2"``, ``" #3"`` ... in ``(lineno, col_offset)``
+    order, so keys never contain a line number.
+    """
     for path in sorted(root.rglob("*.py")):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -102,13 +132,19 @@ def iter_findings(root: Path = APP_ROOT) -> Iterator[str]:
             raise RatchetError(f"could not read {path}: {exc}") from exc
         except SyntaxError as exc:
             raise RatchetError(f"could not parse {path}: {exc}") from exc
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        hits: dict[str, list[tuple[int, int]]] = {}
         for node in ast.walk(tree):
             if not isinstance(node, ast.If):
                 continue
             for name in sorted(guarded_scopes(node.test)):
                 if not adds_predicate_on(node.body, name):
                     continue
-                yield f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno} if {name}"
+                key = f"{rel}::{qualified_name(tree, node.lineno)} if {name}"
+                hits.setdefault(key, []).append((node.lineno, node.col_offset))
+        for key, positions in hits.items():
+            for n, _ in enumerate(sorted(positions), start=1):
+                yield key if n == 1 else f"{key} #{n}"
 
 
 def read_baseline(path: Path = BASELINE_PATH) -> set[str]:
@@ -129,8 +165,8 @@ def diff_against_baseline(
 ) -> tuple[list[str], list[str]]:
     """Return ``(added, stale)``, each sorted.
 
-    Stale entries fail too: a line number that no longer holds a conditional
-    predicate would otherwise keep covering whatever moves onto that line.
+    Stale entries fail too: a key whose function no longer holds a conditional
+    predicate would otherwise keep covering whatever is added under that name.
     """
     live = set(current)
     return sorted(live - baseline), sorted(baseline - live)
@@ -159,7 +195,8 @@ def main(argv: list[str] | None = None) -> int:
             "# system worker, such as list_all_schedules(user_id=None), is the shape\n"
             "# to prefer when an unscoped read is genuinely needed.\n"
             "#\n"
-            "# Line numbers move, so regenerate when you touch a listed file:\n"
+            "# Entries are keyed by qualified name, so line shifts do not change them;\n"
+            "# regenerate when you add, remove or rename a listed function:\n"
             "#   python Helper_Scripts/ci/scope_predicate_ratchet.py --write-baseline\n"
             + "\n".join(current)
             + "\n",
@@ -184,7 +221,8 @@ def main(argv: list[str] | None = None) -> int:
         for entry in stale:
             print(f"  {entry}", file=sys.stderr)
         print(
-            "\nUsually a line number moved. Regenerate with --write-baseline.",
+            "\nEntries are keyed by qualified name, so line shifts do not stale them;\n"
+            "a function was renamed, moved or fixed. Regenerate with --write-baseline.",
             file=sys.stderr,
         )
     if added or stale:

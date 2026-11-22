@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.owner_isolation]
 
 
 _DELEGATED_MESSAGE_METHODS = {

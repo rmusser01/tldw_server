@@ -25,7 +25,12 @@ const io = vi.hoisted(() => ({
   messageError: vi.fn(),
   messageInfo: vi.fn(),
   messageSuccess: vi.fn(),
-  messageWarning: vi.fn()
+  messageWarning: vi.fn(),
+  exportServerChat: vi.fn()
+}))
+vi.mock("@/services/chat-transcript-export", () => ({
+  exportServerChat: (...args: unknown[]) => io.exportServerChat(...args),
+  ChatExportTooLargeError: class ChatExportTooLargeError extends Error {}
 }))
 
 vi.mock("react-i18next", () => ({
@@ -47,7 +52,8 @@ vi.mock("react-i18next", () => ({
 }))
 vi.mock("antd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("antd")>()
-  return { ...actual, message: { ...actual.message, error: io.messageError, success: io.messageSuccess, info: io.messageInfo, warning: io.messageWarning } }
+  return { ...actual, message: { ...actual.message, error: io.messageError, success: io.messageSuccess, info: io.messageInfo, warning: io.messageWarning,
+    loading: vi.fn(), destroy: vi.fn() } }
 })
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -692,5 +698,54 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
     const { textbox } = await openRenameDialog(longTab.label)
     expect(textbox).toHaveValue(fullTitle)
     expect(io.getTitleById).toHaveBeenCalledWith("mirror-long")
+  })
+})
+
+describe("side-panel tab menu: visible button and server export (CS-09)", () => {
+  beforeEach(() => {
+    io.getChat.mockReset().mockImplementation(async (id: string) => ({ id, title: serverTitles[id] }))
+    io.getTitleById.mockReset().mockImplementation(async (id: string) => localTitles[id] ?? "")
+    io.exportServerChat.mockReset().mockResolvedValue(undefined)
+    io.messageError.mockReset()
+    io.messageSuccess.mockReset()
+  })
+  afterEach(() => {
+    document.body.innerHTML = ""
+  })
+
+  it("opens the same menu from a visible button on the tab", async () => {
+    renderSidebar()
+    const button = screen.getByRole("button", { name: "Chat actions: Quarterly plan" })
+    expect(button).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "true"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
+    expect(await screen.findByRole("dialog", { name: "Rename conversation" })).toBeInTheDocument()
+  })
+
+  it("exports a chat saved only on the server, reading it from the server", async () => {
+    const serverOnly: SidepanelChatTab = { ...serverTab, historyId: null }
+    renderSidebar({ tabs: [serverOnly, localTab] })
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Quarterly plan" }))
+    fireEvent.mouseEnter(await screen.findByRole("menuitem", { name: /^Export/ }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Export as Markdown" }))
+    await waitFor(() =>
+      expect(io.exportServerChat).toHaveBeenCalledWith("chat-1", "markdown", {
+        title: "Quarterly plan",
+        requestScope: owner.snapshot.requestScope
+      })
+    )
+    await waitFor(() => expect(io.messageSuccess).toHaveBeenCalledWith(expect.objectContaining({ content: "Chat exported." })))
+    expect(io.messageError).not.toHaveBeenCalled()
+  })
+
+  it("says when the server export fails", async () => {
+    io.exportServerChat.mockRejectedValue(new Error("HTTP 503"))
+    renderSidebar()
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Quarterly plan" }))
+    fireEvent.mouseEnter(await screen.findByRole("menuitem", { name: /^Export/ }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Export as JSON" }))
+    await waitFor(() => expect(io.messageError).toHaveBeenCalledWith(expect.objectContaining({ content: "Couldn't export this chat. Try again." })))
+    expect(io.exportServerChat).toHaveBeenCalledWith("chat-1", "json", expect.any(Object))
   })
 })

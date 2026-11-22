@@ -62,6 +62,7 @@ import {
 } from '@web/components/notifications/NotificationLifecycleProvider';
 import { NotificationToastBridge } from '@web/components/notifications/NotificationToastBridge';
 import { CommandPaletteHost } from '@/components/Common/CommandPaletteHost';
+import { useCommandPaletteContentProviders } from '@/components/Common/command-palette-content-providers';
 import { openModelSelector } from '@/utils/model-selector-events';
 import {
   useConnectionActions,
@@ -413,7 +414,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     }
   };
 
+  // ⌘K finds saved chats and notes (XP-06).
+  const commandPaletteContentProviders = useCommandPaletteContentProviders();
   const commandPaletteProps = {
+    contentProviders: commandPaletteContentProviders,
     onNewChat: clearChat,
     onToggleRag: () => setChatMode(chatMode === 'rag' ? 'normal' : 'rag'),
     onToggleWebSearch: () => setWebSearch(!webSearch),

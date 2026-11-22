@@ -1497,10 +1497,16 @@ export const prepareNativeFork = async (
   })
   return prepared
 }
-/** Multi-request legacy copy: acknowledged completion is not an atomic receipt. Never replay. */
+/**
+ * Multi-request legacy copy: acknowledged completion is not an atomic receipt. Never replay.
+ *
+ * The child records its parent chat and the last copied message, so the
+ * branch keeps its lineage (CM-12); `lineage.title` names it.
+ */
 export const commitNativeFork = async (
   prepared: NativeForkPrepared,
-  onCandidate: (childId: string) => Promise<unknown> | unknown
+  onCandidate: (childId: string) => Promise<unknown> | unknown,
+  lineage?: { title?: string | null }
 ): Promise<ForkResult> => {
   const capability = nativeForkPreparations.get(prepared)
   if (!capability) return fail("fork_preparation_consumed")
@@ -1515,9 +1521,13 @@ export const commitNativeFork = async (
   try {
     assertOwnerLease(owner, options)
     dispatched = true
+    const { input } = prepared.request
+    const forkedFrom = input.kind === "normal" ? input.selection.messages.at(-1)?.id ?? null : null
     const child = await tldwClient.createChat(
       {
-        title: "Forked conversation",
+        title: lineage?.title?.trim() || "Forked conversation",
+        parent_conversation_id: owner.conversation_id,
+        forked_from_message_id: forkedFrom,
         character_id: null,
         assistant_kind: null,
         assistant_id: null,

@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.Chat.history_selection import (
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.owner_isolation]
 
 ALICE = "1"
 BOB = "2"

@@ -14,7 +14,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseBackend
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-pytestmark = [pytest.mark.integration, pytest.mark.postgres]
+pytestmark = [pytest.mark.integration, pytest.mark.postgres, pytest.mark.owner_isolation]
 
 STUDY_TABLES = (
     "decks",

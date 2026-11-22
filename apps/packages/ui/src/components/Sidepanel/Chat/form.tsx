@@ -110,6 +110,7 @@ import { PromptAssistComposerAction } from "@/components/Chat/composer/PromptAss
 import { ContextChips } from "@/components/Sidepanel/Chat/ContextChips"
 import { SlashCommandMenu } from "@/components/Sidepanel/Chat/SlashCommandMenu"
 import { MentionsMenu, type MentionMenuItem } from "@/components/Sidepanel/Chat/MentionsMenu"
+import { useComposerCombobox } from "@/hooks/useComposerCombobox"
 import {
   shouldEnableOptionalResource,
   useChatSurfaceCoordinatorStore
@@ -1905,6 +1906,9 @@ export const SidepanelForm = ({
   }, [filteredTabs, mentionQuery, staticMentionItems, tabMentionsEnabled])
 
   const showMentionMenu = Boolean(mentionPosition) && tabMentionsEnabled
+  // The textarea points into whichever suggestion menu shows (AX-12).
+  const slashCombobox = useComposerCombobox({ open: showSlashMenu, count: filteredSlashCommands.length, activeIndex: slashActiveIndex })
+  const mentionCombobox = useComposerCombobox({ open: showMentionMenu, count: mentionItems.length, activeIndex: mentionActiveIndex })
 
   React.useEffect(() => {
     if (!showMentionMenu) {
@@ -3815,11 +3819,9 @@ export const SidepanelForm = ({
                             activeIndex={slashActiveIndex}
                             onActiveIndexChange={setSlashActiveIndex}
                             onSelect={handleSlashCommandPick}
-                            emptyLabel={t(
-                              "common:commandPalette.noResults",
-                              "No results found"
-                            )}
+                            emptyLabel={t("common:commandPalette.noResults", "No results found")}
                             className="relative mx-3 mb-2"
+                            listboxId={slashCombobox.listboxId}
                           />
                           <MentionsMenu
                             open={showMentionMenu}
@@ -3827,11 +3829,9 @@ export const SidepanelForm = ({
                             activeIndex={mentionActiveIndex}
                             onActiveIndexChange={setMentionActiveIndex}
                             onSelect={handleMentionSelect}
-                            emptyLabel={t(
-                              "sidepanel:composer.noMentions",
-                              "No matches found"
-                            )}
+                            emptyLabel={t("sidepanel:composer.noMentions", "No matches found")}
                             className="relative mx-3 mb-2"
+                            listboxId={mentionCombobox.listboxId}
                           />
                           <textarea
                             id="textarea-message"
@@ -3840,6 +3840,7 @@ export const SidepanelForm = ({
                             data-testid="chat-input"
                             className="w-full resize-none border-0 bg-transparent px-3 py-2 text-body text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 dark:ring-0"
                             aria-label={t("sidepanel:composer.messageAriaLabel", "Message input")}
+                            {...(showMentionMenu ? mentionCombobox : slashCombobox).inputProps}
                             onPaste={handlePaste}
                             rows={1}
                             style={{ minHeight: `${textareaMinHeight}px` }}

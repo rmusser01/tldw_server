@@ -977,6 +977,27 @@
   "commandPalette_categoryRecent": {
     "message": "Recent"
   },
+  "commandPalette_categoryChats": {
+    "message": "Chats"
+  },
+  "commandPalette_categoryNotes": {
+    "message": "Notes"
+  },
+  "commandPalette_searchingContent": {
+    "message": "Searching chats and notes…"
+  },
+  "commandPalette_contentSearchFailed": {
+    "message": "Chats and notes could not be searched."
+  },
+  "commandPalette_newNote": {
+    "message": "New note"
+  },
+  "commandPalette_untitledChat": {
+    "message": "Untitled chat"
+  },
+  "commandPalette_untitledNote": {
+    "message": "Untitled note"
+  },
   "featureHints_knowledge_title": {
     "message": "Search your knowledge"
   },
@@ -2233,5 +2254,29 @@
   },
   "regenerateMessage_failed": {
     "message": "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
+  },
+  "chatSidebar_chatSettings": {
+    "message": "Chat settings"
+  },
+  "chatSidebar_addToFolder": {
+    "message": "Add to folder…"
+  },
+  "chatSidebar_exportMarkdown": {
+    "message": "Markdown"
+  },
+  "chatSidebar_exportJson": {
+    "message": "JSON"
+  },
+  "chatSidebar_exportSuccess": {
+    "message": "Chat exported."
+  },
+  "chatSidebar_exportFailed": {
+    "message": "Couldn't export this chat. Try again."
+  },
+  "chatSidebar_exporting": {
+    "message": "Exporting chat…"
+  },
+  "chatSidebar_exportTooLarge": {
+    "message": "This chat is too large to export here. Use Chatbooks to export it."
   }
 }

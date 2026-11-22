@@ -27,8 +27,9 @@ test.describe("Chat Workflow", () => {
       await chatPage.goto()
       await chatPage.waitForReady()
 
-      // Verify the main transcript surface is visible
-      await expect(chatPage.messageList).toBeVisible()
+      // The transcript log holds only the message rows (AX-11); before the
+      // first message it is present but empty, with no height.
+      await expect(chatPage.messageList).toBeAttached()
 
       // Verify chat input is available
       const input = await chatPage.getChatInput()

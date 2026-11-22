@@ -78,7 +78,7 @@ describe("note chat backlinks without raw ids (XP-14)", () => {
     expect(container).not.toHaveTextContent(MESSAGE_ID)
   })
 
-  it("shows 'Linked chat' in the note list instead of the conversation and message ids", () => {
+  it("shows 'From chat' in the note list instead of the conversation and message ids (NL-04)", () => {
     const notes: NoteListItem[] = [
       {
         id: "n-linked",
@@ -112,13 +112,14 @@ describe("note chat backlinks without raw ids (XP-14)", () => {
         onOpenSettings={vi.fn()}
         onOpenHealth={vi.fn()}
         onRestoreNote={vi.fn()}
+        onOpenLinkedChat={vi.fn()}
         onExportAllMd={vi.fn()}
         onExportAllCsv={vi.fn()}
         onExportAllJson={vi.fn()}
       />
     )
 
-    expect(screen.getByText("Linked chat")).toBeInTheDocument()
+    expect(screen.getByText("From chat")).toBeInTheDocument()
     expect(container).not.toHaveTextContent(CONVERSATION_ID)
     expect(container).not.toHaveTextContent(MESSAGE_ID)
   })

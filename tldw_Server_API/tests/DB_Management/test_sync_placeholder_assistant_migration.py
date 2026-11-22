@@ -224,8 +224,9 @@ def test_interrupted_upgrade_rolls_back_the_repair_and_the_version(
 def shared_postgres(request: pytest.FixtureRequest) -> Iterator[Callable[[str], CharactersRAGDB]]:
     """Open handles for different owners on one PostgreSQL database.
 
-    ``superuser`` is the documented deployment: the role bypasses row-level
-    security. ``restricted_owner`` owns the tables without bypassing it, so the
+    ``superuser`` is the test admin role, which bypasses row-level security: a
+    migration or test case, not a documented deployment (deployments run a
+    NOSUPERUSER NOBYPASSRLS role). ``restricted_owner`` owns the tables without bypassing it, so the
     forced policies hide every other owner's rows from an ordinary statement.
     """
     opened: list[CharactersRAGDB] = []
