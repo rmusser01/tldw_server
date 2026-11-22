@@ -548,6 +548,7 @@ jobs:
       # The scope-predicate ratchet (TASK-13950.23) is keyed by qualified name.
       # The ChaCha owner-scope ratchet (TASK-13950.23) does the same for its call and opt-out counts.
       # The delegated-caller ratchet (TASK-13950.22) does the same for its per-file call counts.
+      # The ChaCha split tool and structure pins (TASK-13950.22) guard each move PR.
       # inputs.base_sha is set only on a dispatch (the merge queue passes dev's tip).
       - name: Enforce CI contracts and code ratchets
         if: needs.changes.outputs.backend_changed == 'true'
@@ -591,7 +592,6 @@ jobs:
             tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py \
             tldw_Server_API/tests/lint/test_owner_scope_ratchet.py \
             tldw_Server_API/tests/lint/test_charactersragdb_delegated_callers_ratchet.py \
-            # The ChaCha split tool and structure pins (TASK-13950.22) guard each move PR.
             tldw_Server_API/tests/Helper_Scripts/test_chacha_split.py \
             tldw_Server_API/tests/DB_Management/test_chacha_structure_pins.py \
             tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py \

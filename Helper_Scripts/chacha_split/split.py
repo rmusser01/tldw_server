@@ -160,6 +160,19 @@ def apply(text: str, edits: list[tuple[int, int, str]]) -> str:
     return raw.decode("utf-8")
 
 
+def references(tree: ast.Module, names: set[str]) -> bool:
+    """Any mention of a name: an attribute, a string (probe or patch target), or a class def."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in names:
+            return True
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value in names or any(node.value.endswith(f".{n}") for n in names):
+                return True
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names:
+            return True
+    return False
+
+
 def _spec_mock(tree: ast.Module) -> bool:
     return any(
         isinstance(n, ast.Call)
@@ -181,11 +194,14 @@ def run(root: Path, attr: str, wanted: set[str], check: bool, show_tests: bool) 
         print(f"collision {name}: another app class defines it; not rewritten")
     problems = rewritten = 0
     touched: list[str] = []
+    referencing: list[str] = []
     for key, path in _py_files(root):
         text, tree = _parse(path)
         if _is_store_module(key, tree, names):
             continue
         hits, notes = scan(tree, names, attr, key == DB_MODULE)
+        if not check and key.startswith(SCANNED[1]) and (hits or references(tree, names)):
+            referencing.append(key)
         if not check:
             for note in notes:
                 print(f"note {key}:{note}")
@@ -211,7 +227,7 @@ def run(root: Path, attr: str, wanted: set[str], check: bool, show_tests: bool) 
         return 1 if problems else 0
     print(f"rewrote {rewritten} sites in {len(touched)} files")
     if show_tests:
-        print("\n".join(k for k in touched if k.startswith(SCANNED[1])))
+        print("\n".join(referencing))  # every test file naming one, so a re-run lists the same files
     return 0
 
 

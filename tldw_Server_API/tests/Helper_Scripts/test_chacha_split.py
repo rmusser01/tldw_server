@@ -100,9 +100,15 @@ def test_check_flags_a_fake_without_the_store_attribute(tmp_path: Path, capsys: 
 
 
 def test_check_flags_assignment_and_class_receiver_references(tmp_path: Path) -> None:
-    for source in ("def f(db):\n    db.get_x = print\n", "ref = CharactersRAGDB.get_x\n", 'p = "m.CharactersRAGDB.get_x"\n'):
-        root = _seed(tmp_path / str(abs(hash(source))), {TEST: source}, db=CLEAN_DB)
-        assert _callers(root, "--check") == 1, source
+    sources = {
+        "assign": "def f(db):\n    db.get_x = print\n",
+        "class_ref": "ref = CharactersRAGDB.get_x\n",
+        "patch_string": 'p = "m.CharactersRAGDB.get_x"\n',
+        "probe": 'ok = hasattr(db, "get_x")\nfn = getattr(db, "get_x", None)\n',
+    }
+    for label, source in sources.items():
+        root = _seed(tmp_path / label, {TEST: source}, db=CLEAN_DB)
+        assert _callers(root, "--check") == 1, label
 
 
 def test_check_passes_when_nothing_is_left(tmp_path: Path) -> None:
@@ -113,3 +119,14 @@ def test_check_passes_when_nothing_is_left(tmp_path: Path) -> None:
     assert _callers(root, "--check") == 1  # DB_SRC still calls self.get_x()
     assert _callers(root) == 0
     assert _callers(root, "--check") == 0
+
+
+def test_tests_lists_every_referencing_file_even_after_the_rewrite(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    other = "tldw_Server_API/tests/test_other.py"
+    root = _seed(tmp_path, {TEST: "def f(db):\n    db.get_x()\n", other: "def g(db):\n    db.s_store.get_x()\n", "tldw_Server_API/tests/test_none.py": "x = 1\n"})
+    assert _callers(root, "--tests") == 0
+    first = capsys.readouterr().out.splitlines()
+    assert _callers(root, "--tests") == 0
+    second = capsys.readouterr().out.splitlines()
+    assert {TEST, other} <= set(first) and {TEST, other} <= set(second)
+    assert "tldw_Server_API/tests/test_none.py" not in second
