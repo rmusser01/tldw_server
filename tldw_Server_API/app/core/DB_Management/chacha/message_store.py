@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     FTSQueryTranslator,
     InputError,
+    OwnerScope,
     logger,
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
@@ -72,6 +73,8 @@ class MessageStore:
         self, conn: Any, conversation_id: str, owner_client_id: str | None = None, *, include_deleted: bool = False
     ) -> None:
         """Serialize the conversation before locking message rows or metadata."""
+        if owner_client_id is None and self._db.backend_type == BackendType.POSTGRESQL:
+            owner_client_id = str(self._db.client_id)
         query = "SELECT id FROM conversations WHERE id = ?"
         if not include_deleted:
             query += " AND deleted = FALSE"
@@ -2349,11 +2352,13 @@ class MessageStore:
         """Fetch message projections associated with a Sync v2 stable message ID.
 
         With ``owner_client_id``, only messages in chats that owner holds are
-        returned. A caller that has no Sync state tying the id to an owner must
-        pass it: the match is by id, across every chat the connection can read.
+        returned. On PostgreSQL a None owner is the instance owner (``client_id``).
+        On SQLite a None owner matches by id across every chat the connection can read.
         """
 
         self._db._ensure_message_metadata_table()
+        if owner_client_id is None and self._db.backend_type == BackendType.POSTGRESQL:
+            owner_client_id = str(self._db.client_id)
         deleted_clause = "" if include_deleted else "AND m.deleted = FALSE AND c.deleted = FALSE"
         owner_clause = "" if owner_client_id is None else "AND c.client_id = ?"
         query = (
@@ -2920,11 +2925,13 @@ class MessageStore:
                     self._validate_live_message_parent(
                         transaction_conn, conversation_id, update_data["parent_message_id"]
                     )
+                # OwnerScope.NOT_APPLICABLE: _lock_message_conversation locked the conversation with the owner above
                 current_db_version = self._db._get_current_db_version(
                     transaction_conn,
                     "messages",
                     "id",
                     message_id,
+                    owner_client_id=OwnerScope.NOT_APPLICABLE,
                 )
 
                 if current_db_version != expected_version:
@@ -3016,11 +3023,13 @@ class MessageStore:
             with transaction as transaction_conn:
                 conversation_id = self._lock_message_conversation(transaction_conn, message_id)
                 try:
+                    # OwnerScope.NOT_APPLICABLE: _lock_message_conversation locked the conversation with the owner above
                     current_db_version = self._db._get_current_db_version(
                         transaction_conn,
                         "messages",
                         "id",
                         message_id,
+                        owner_client_id=OwnerScope.NOT_APPLICABLE,
                     )
                 except ConflictError:
                     check_status_cursor = transaction_conn.execute(

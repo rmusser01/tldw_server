@@ -1470,12 +1470,17 @@ def test_legacy_non_leaf_delete_semantics_stay_explicitly_unchanged(history_api)
 @pytest.fixture
 def native_mutation_api(history_db, credentialed_test_client, auth_headers):
     """Exercise real HTTP mutation on the standard SQLite/Postgres fixture."""
-    db, _seed = history_db
+    seeded, _seed = history_db
+    # Bind the instance to the request user, as production does: on PostgreSQL the message store
+    # locks chats to the instance owner.
+    postgres = seeded.backend_type == BackendType.POSTGRESQL
+    db = CharactersRAGDB(db_path=seeded.db_path_str, client_id="1", backend=seeded.backend if postgres else None)
     client = credentialed_test_client
     cid = db.add_conversation({"character_id": None, "title": "Native mutation HTTP", "client_id": "1"})
     client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     yield client, db, cid, {**auth_headers, "X-TLDW-Expected-User-ID": "1"}
     client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+    db.close_connection()
 
 
 @pytest.mark.parametrize("mutation", [None, "metadata", "image"])

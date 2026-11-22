@@ -4,7 +4,7 @@ A helper such as ``_selected_owner_filter(owner_client_id)`` that returns ``""``
 None quietly turns a tenant-scoped query into an unscoped one. This freezes, per module, how many
 call sites such helpers have and how many calls opt out explicitly with ``OwnerScope.NOT_APPLICABLE``
 in owner_scope_baseline.json, each a ceiling ``{"calls": int, "opt_outs": int, "reason": ...}``.
-A later task fixes the helpers and shrinks the ceilings with ``--tighten``.
+The helpers now raise or derive the owner; shrink the ceilings with ``--tighten`` as call sites go.
 
 A function in SCOPED_MODULES is a drop-on-None helper when it has a parameter in OWNER_PARAMS and an
 ``if`` testing ``<param> is None`` (directly or inside a BoolOp) whose body is exactly one ``return``,
