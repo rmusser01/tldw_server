@@ -1,5 +1,5 @@
 {
   "delegated_methods": {"count": 293, "reason": null},
-  "methods": {"count": 864, "reason": "TASK-13950.22 T3: lazy ctx cached_property (R19) so __new__-built DBs reach the context"},
-  "private_member_reaches": {"count": 488, "reason": "#3157 data-loss fix: NoteStore.bump_note_version scopes its conditional version bump to the owner and stamps last_modified, through the same db helpers every NoteStore write uses"}
+  "methods": {"count": 857, "reason": null},
+  "private_member_reaches": {"count": 305, "reason": null}
 }

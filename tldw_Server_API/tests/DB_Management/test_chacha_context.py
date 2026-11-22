@@ -7,6 +7,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
+    InputError,
     OwnerScope,
     OwnerScopeRequiredError,
 )
@@ -87,3 +88,48 @@ def test_helpers_match_the_db_forwarders(db) -> None:
 def test_db_forwarders_follow_a_context_patch(db, monkeypatch) -> None:
     monkeypatch.setattr(db.ctx, "utc_now_iso", lambda: "T")
     assert db._get_current_utc_timestamp_iso() == "T"
+
+
+def test_keyword_link_filter_and_require_owner_row_by_backend(db, pg) -> None:
+    assert db.ctx.keyword_link_filter("note_keywords", "nk", owner_client_id="1") == ("", ())
+    sql, params = pg.ctx.keyword_link_filter("note_keywords", "nk", owner_client_id="7")
+    assert params == ("7", "7")
+    assert "owner_parent.id = nk.note_id" in sql and "chacha_keywords owner_keyword" in sql
+    with pytest.raises(OwnerScopeRequiredError, match="_selected_keyword_link_filter"):
+        pg.ctx.keyword_link_filter("note_keywords", "nk", owner_client_id=None)
+    with pytest.raises(InputError):
+        pg.ctx.keyword_link_filter("note_keywords", "n k", owner_client_id="7")
+    assert db.ctx.require_owner_row(None, "notes", 1, None) is None  # SQLite: no row lock, conn untouched
+    assert pg.ctx.require_owner_row(None, "notes", None, None) is None  # no item, nothing to lock
+    with pytest.raises(OwnerScopeRequiredError, match="_require_selected_owner_row"):
+        pg.ctx.require_owner_row(None, "notes", 1, None)
+    with pytest.raises(InputError):
+        pg.ctx.require_owner_row(None, "widgets", 1, "7")
+
+
+def test_order_and_match_helpers_by_backend(db, pg) -> None:
+    assert db.ctx.case_insensitive_order_expression("kw.keyword", "DESC") == "kw.keyword COLLATE NOCASE DESC"
+    assert pg.ctx.case_insensitive_order_expression("kw.keyword") == "LOWER(kw.keyword)"
+    assert pg.ctx.case_insensitive_order_clause("path", "ASC") == "ORDER BY LOWER(path) ASC"
+    with pytest.raises(InputError):
+        db.ctx.case_insensitive_order_expression("name; DROP TABLE x")
+    assert db.ctx.unique_text_match_sql("keywords", "keyword") == "keyword = ?"
+    assert pg.ctx.unique_text_match_sql("keywords", "keyword") == "LOWER(keyword) = LOWER(?)"
+    assert pg.ctx.unique_text_match_sql("notes", "title") == "title = ?"
+
+
+def test_pure_helpers_match_the_db_forwarders(db) -> None:
+    assert db.ctx.chunk_list([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]
+    assert db.ctx.note_task_v60_hash({"a": 1}) == db._note_task_v60_hash({"a": 1}) == CharactersRAGDB._note_task_v60_hash({"a": 1})
+    assert db.ctx.canonical_json_text_v61({"b": 1, "a": 2}) == db._canonical_json_text_v61({"b": 1, "a": 2})
+    assert db.ctx.is_unique_violation(Exception("UNIQUE constraint failed: x")) is db._is_unique_violation(Exception("UNIQUE constraint failed: x"))
+    assert db.ctx.is_unique_violation(ValueError("other")) is False
+    row = {"id": 1, "blob": '{"k": 1}', "bad": "{"}
+    assert db.ctx.deserialize_row_fields(row, ["blob", "bad"]) == {"id": 1, "blob": {"k": 1}, "bad": None}
+    assert db.ctx.deserialize_row_fields(None, ["blob"]) is None
+
+
+def test_runtime_schema_version_reads_the_db(db) -> None:
+    assert db.ctx.runtime_schema_version is None
+    db._runtime_schema_version = 81
+    assert db.ctx.runtime_schema_version == 81

@@ -86,7 +86,7 @@ class MoodboardSyncStore:
         owner = str(owner_user_id).strip()
         if not owner:
             raise InputError("Graph owner cannot be empty.")  # noqa: TRY003
-        if not self._db._supports_notes_moodboard_studio_v61():
+        if not self._db.supports_notes_moodboard_studio_v61():
             return self._LOCAL_UNBOUND
         if self._db.backend_type == BackendType.POSTGRESQL and owner != str(self._db.client_id):
             raise ConflictError(
@@ -209,7 +209,7 @@ class MoodboardSyncStore:
         conn: GraphConnection | None,
     ) -> dict[str, int]:
         owner, target = self._validated_scope(owner_user_id, target_dataset_id)
-        if not self._db._supports_notes_moodboard_studio_v61():
+        if not self._db.supports_notes_moodboard_studio_v61():
             raise ConflictError(
                 "Graph binding is unavailable for this backend schema.",
                 entity="notes",

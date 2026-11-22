@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
@@ -83,7 +84,7 @@ def db(tmp_path):
 
 @pytest.fixture()
 def store(db):
-    return NoteStore(db)
+    return NoteStore(db.ctx)
 
 
 def test_note_store_owns_delegated_methods_without_monolith_duplicates(db, monkeypatch):
@@ -284,7 +285,7 @@ def test_postgres_source_note_projection_requires_owner_scope():
             raise AssertionError("unscoped PostgreSQL projection must not query")
 
     with pytest.raises(InputError, match="owner_user_id"):
-        NoteStore(_PostgresDb()).get_source_note_projection("note-1", max_chars=20)
+        NoteStore(ChaChaContext(_PostgresDb())).get_source_note_projection("note-1", max_chars=20)
 
 
 def test_source_note_projection_marks_nul_text_invalid(store, db):
@@ -319,7 +320,7 @@ def test_source_note_projection_failure_is_fixed_and_redacted():
     sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
     try:
         with pytest.raises(CharactersRAGDBError) as exc_info:
-            NoteStore(_FailingDb()).get_source_note_projection(
+            NoteStore(ChaChaContext(_FailingDb())).get_source_note_projection(
                 "note-1",
                 max_chars=20,
             )
@@ -352,7 +353,7 @@ def test_source_note_projection_redacts_delayed_fetch_failure():
     sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
     try:
         with pytest.raises(CharactersRAGDBError) as exc_info:
-            NoteStore(_FailingDb()).get_source_note_projection(
+            NoteStore(ChaChaContext(_FailingDb())).get_source_note_projection(
                 "note-1",
                 max_chars=20,
             )
@@ -834,7 +835,7 @@ def test_postgres_note_insert_duplicate_reports_exact_note_conflict(db):
         def __getattr__(self, name):
             return getattr(db, name)
 
-    store = NoteStore(PostgresInsertFacade())
+    store = NoteStore(ChaChaContext(PostgresInsertFacade()))
     store.add_note("Original", "body", note_id="duplicate-id")
     with pytest.raises(ConflictError, match="Note with ID 'duplicate-id' already exists"):
         store.add_note("Replacement", "new body", note_id="duplicate-id")

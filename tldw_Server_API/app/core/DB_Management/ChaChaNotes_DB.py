@@ -194,7 +194,6 @@ from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract imp
     legacy_source_diagnostic as moodboard_studio_legacy_source_diagnostic,
 )
 from tldw_Server_API.app.core.Sync_Contracts.notes_task_contract import (  # noqa: E402
-    canonical_json_bytes,
     notes_task_object_hash,
     parse_notes_task_v1,
 )
@@ -329,13 +328,6 @@ def _build_scheduler_next_interval_previews(
 
 
 # --- Order-by validation helpers (defense in depth) ---
-_ORDER_BY_COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$")
-_ORDER_BY_EXPR_RE = re.compile(
-    r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?"
-    r"(?:\s+COLLATE\s+NOCASE)?"
-    r"(?:\s+(?:ASC|DESC))?$",
-    re.IGNORECASE,
-)
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CHAT_GRAMMAR_VALIDATION_STATUSES = frozenset({"unchecked", "valid", "invalid"})
 
@@ -8826,7 +8818,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.conversation_resume_store = ConversationResumeStore(self)
         self.message_store = MessageStore(ctx)
         self.chat_imports = ChatImportStore(self)
-        self.note_store = NoteStore(self)
+        self.note_store = NoteStore(ctx)
         self.note_provenance_store = NoteProvenanceStore(self)
         self.moodboard_sync_store = MoodboardSyncStore(self)
         self.note_attachment_store = NoteAttachmentStore(self)
@@ -8835,7 +8827,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.note_graph_suggestion_store = NoteGraphSuggestionStore(self)
         self.note_semantic_store = NoteSemanticStore(self)
         self.task_store = TaskStore(self)
-        self.keyword_store = KeywordStore(self)
+        self.keyword_store = KeywordStore(ctx)
         self.persona_state_store = PersonaStateStore(self)
         from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import PersonaTranscriptStore
         self.persona_transcript_store = PersonaTranscriptStore(self)
@@ -13366,7 +13358,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @staticmethod
     def _note_task_v60_hash(value: object) -> str:
-        return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+        """Forward to ``ChaChaContext.note_task_v60_hash``."""
+        from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+
+        return ChaChaContext.note_task_v60_hash(value)
 
     def _canonicalize_legacy_task_v60(
         self, row: Mapping[str, Any], *, owner_user_id: str
@@ -14517,7 +14512,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @staticmethod
     def _canonical_json_text_v61(value: object) -> str:
-        return canonical_moodboard_studio_json_bytes(value).decode("utf-8")
+        """Forward to ``ChaChaContext.canonical_json_text_v61``."""
+        from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+
+        return ChaChaContext.canonical_json_text_v61(value)
 
     @staticmethod
     def _legacy_sync_timestamp_v61(value: object) -> str:
@@ -20543,7 +20541,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if missing:
             raise SchemaError(f"Notes semantic v86 PostgreSQL schema is incomplete: {missing}")
 
-    def _supports_notes_moodboard_studio_v61(self) -> bool:
+    def supports_notes_moodboard_studio_v61(self) -> bool:
         """Return whether this database instance has the v61 product catalog revision."""
         if self.backend_type == BackendType.POSTGRESQL:
             cached = getattr(self, "_runtime_schema_version", None)
@@ -20732,62 +20730,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             params = (clip_id, 0)
         cursor = self.execute_query(query, params)
         return [dict(row) for row in cursor.fetchall()]
-
-    def _invalidate_note_clipper_sidecars(
-        self,
-        note_id: str,
-        *,
-        conn: sqlite3.Connection,
-        deleted: bool,
-    ) -> None:
-        deleted_value = True if self.backend_type == BackendType.POSTGRESQL else 1
-        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
-        flag_value = deleted_value if deleted else active_value
-        now = self._get_current_utc_timestamp_iso()
-
-        owner_clause = "client_id = ? AND " if self.backend_type == BackendType.POSTGRESQL else ""
-        owner_params: tuple[Any, ...] = (self.client_id,) if owner_clause else ()
-        document = conn.execute(
-            f"SELECT clip_id FROM note_clipper_documents WHERE {owner_clause}note_id = ?",  # nosec B608
-            (*owner_params, note_id),
-        ).fetchone()
-        if document is None:
-            return
-        clip_id = document["clip_id"]
-        conn.execute(
-            f"UPDATE note_clipper_documents SET deleted = ?, last_modified = ? "  # nosec B608
-            f"WHERE {owner_clause}clip_id = ?",
-            (flag_value, now, *owner_params, clip_id),
-        )
-        conn.execute(
-            f"UPDATE note_clipper_workspace_placements SET deleted = ?, last_modified = ? "  # nosec B608
-            f"WHERE {owner_clause}clip_id = ?",
-            (flag_value, now, *owner_params, clip_id),
-        )
-
-    def _delete_note_clipper_sidecars(self, note_id: str, *, conn: sqlite3.Connection) -> None:
-        owner_clause = "client_id = ? AND " if self.backend_type == BackendType.POSTGRESQL else ""
-        owner_params: tuple[Any, ...] = (self.client_id,) if owner_clause else ()
-        document = conn.execute(
-            f"SELECT clip_id FROM note_clipper_documents WHERE {owner_clause}note_id = ?",  # nosec B608
-            (*owner_params, note_id),
-        ).fetchone()
-        if document is None:
-            conn.execute(
-                f"DELETE FROM note_clipper_workspace_placements "  # nosec B608
-                f"WHERE {owner_clause}source_note_id = ?",
-                (*owner_params, note_id),
-            )
-            return
-        clip_id = document["clip_id"]
-        conn.execute(
-            f"DELETE FROM note_clipper_workspace_placements WHERE {owner_clause}clip_id = ?",  # nosec B608
-            (*owner_params, clip_id),
-        )
-        conn.execute(
-            f"DELETE FROM note_clipper_documents WHERE {owner_clause}clip_id = ?",  # nosec B608
-            (*owner_params, clip_id),
-        )
 
     def upsert_note_clipper_document(
         self,
@@ -28315,8 +28257,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # Notes Graph: batch query helpers
     # ----------------------
 
-    _SQLITE_PARAM_LIMIT = 900  # stay well under 999
-
     def get_manual_edges_for_notes(self, user_id: str, note_ids: list[str]) -> list[dict[str, Any]]:
         """Return all manual edges touching any of *note_ids* for *user_id*."""
         if str(user_id) != str(self.client_id):
@@ -28327,11 +28267,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
 
     # Note graph helper methods are delegated to NoteStore at module bottom.
-
-    @staticmethod
-    def _chunk_list(lst: list, size: int) -> list[list]:
-        """Split *lst* into sub-lists of at most *size* elements."""
-        return [lst[i:i + size] for i in range(0, len(lst), size)]
 
     def _get_current_db_version(self, conn: sqlite3.Connection, table_name: str, pk_col_name: str,
                                 pk_value: Any, *, owner_client_id: str | OwnerScope | None = None) -> int:
@@ -28359,11 +28294,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return json.dumps(data)
 
     def _is_unique_violation(self, error: Exception) -> bool:
-        """Return True if the provided backend error represents a unique constraint violation."""
-        if isinstance(error, UniqueConstraintError):
-            return True
-        message = str(error).lower()
-        return "unique constraint" in message or "duplicate key" in message
+        """Forward to ``ctx.is_unique_violation``."""
+        return self.ctx.is_unique_violation(error)
 
     # ----------------------
     # Skill registry
@@ -29166,35 +29098,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise
 
     def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: Sequence[str]) -> dict[str, Any] | None:
-        """
-        Converts a sqlite3.Row object to a dictionary, deserializing specified JSON fields.
-
-        If a field listed in `json_fields` contains a string, it attempts to
-        parse it as JSON. If parsing fails, the field value is set to None
-        and a warning is logged.
-
-        Args:
-            row: The sqlite3.Row object to convert. If None, returns None.
-            json_fields: A sequence of field names that should be treated as JSON strings
-                         and deserialized.
-
-        Returns:
-            A dictionary representing the row with specified fields deserialized,
-            or None if the input `row` is None.
-        """
-        if not row:
-            return None
-        item = dict(row)
-        for field in json_fields:
-            if field in item and isinstance(item[field], str):
-                try:
-                    item[field] = json.loads(item[field])
-                except json.JSONDecodeError:
-                    pk_val = item.get('id') or item.get('uuid', 'N/A')  # Try to get an identifier
-                    logger.warning(
-                        f"Failed to decode JSON for field '{field}' in row (ID: {pk_val}). Value: '{item[field][:100]}...'")
-                    item[field] = None  # Or sensible default
-        return item
+        """Forward to ``ctx.deserialize_row_fields``."""
+        return self.ctx.deserialize_row_fields(row, json_fields)
 
     _CHARACTER_CARD_JSON_FIELDS = ['alternate_greetings', 'tags', 'extensions']
     _STUDY_PACK_JSON_FIELDS = ['source_bundle_json', 'generation_options_json']
@@ -34958,67 +34863,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Forward to ``ctx.owner_filter``."""
         return self.ctx.owner_filter(owner_client_id, alias, table=table)
 
-    def _selected_keyword_link_filter(
-        self, link_table: str, alias: str, *, owner_client_id: str | OwnerScope | None,
-    ) -> tuple[str, tuple[str, ...]]:
-        """Scope both ends of the keyword relationship. None raises on PostgreSQL."""
-        if not _owner_is_scoped(self.backend_type, owner_client_id, "_selected_keyword_link_filter", link_table):
-            return "", ()
-        parents = {
-            "note_keywords": ("notes", "note_id"),
-            "conversation_keywords": ("conversations", "conversation_id"),
-            "collection_keywords": ("keyword_collections", "collection_id"),
-            "flashcard_keywords": ("flashcards", "card_id"),
-        }
-        parent_table, parent_column = parents[link_table]
-        if not _SAFE_IDENTIFIER_RE.fullmatch(alias):
-            raise InputError("Invalid keyword link alias")  # noqa: TRY003
-        keyword_table = self._map_table_for_backend("keywords")
-        return (
-            f" AND EXISTS (SELECT 1 FROM {parent_table} owner_parent "  # nosec B608
-            f"WHERE owner_parent.id = {alias}.{parent_column} AND owner_parent.client_id = ?)"
-            f" AND EXISTS (SELECT 1 FROM {keyword_table} owner_keyword "
-            f"WHERE owner_keyword.id = {alias}.keyword_id AND owner_keyword.client_id = ?)",
-            (owner_client_id, owner_client_id),
-        )
-
     def _require_selected_owner_row(
         self, conn: Any, table_name: str, item_id: Any, owner_client_id: str | OwnerScope | None,
         *, include_deleted: bool = False,
     ) -> None:
-        """Lock a scoped parent until its existing transaction completes. None raises on PostgreSQL."""
-        if item_id is None:
-            return
-        if not _owner_is_scoped(self.backend_type, owner_client_id, "_require_selected_owner_row", table_name):
-            return
-        if table_name == "messages":
-            # Message client IDs may name sync devices. Its conversation owns it.
-            # Match the existing message-edit lock order: message, then conversation.
-            row = conn.execute(
-                "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE FOR UPDATE",
-                (item_id,),
-            ).fetchone()
-            if row is not None:
-                try:
-                    self._require_selected_owner_row(conn, "conversations", row["conversation_id"], owner_client_id)
-                except ConflictError:
-                    row = None
-            if row is None:
-                raise ConflictError("Referenced message not found", entity="messages", entity_id=item_id)  # noqa: TRY003
-            return
-        if table_name not in {"notes", "conversations", "keywords", "keyword_collections", "note_folders", "study_packs", "flashcards"}:
-            raise InputError("Unsupported Notes parent table")  # noqa: TRY003
-        lookup_column = "uuid" if table_name == "flashcards" else "id"
-        table_name = self._map_table_for_backend(table_name)
-        deleted_clause = "" if include_deleted else " AND deleted = FALSE"
-        row = conn.execute(
-            f"SELECT id FROM {table_name} WHERE {lookup_column} = ? AND client_id = ?{deleted_clause} FOR UPDATE",  # nosec B608
-            (item_id, owner_client_id),
-        ).fetchone()
-        if row is None:
-            raise ConflictError("Referenced record not found", entity=table_name, entity_id=item_id)  # noqa: TRY003
+        """Forward to ``ctx.require_owner_row``."""
+        self.ctx.require_owner_row(conn, table_name, item_id, owner_client_id, include_deleted=include_deleted)
 
-    def _add_generic_item(self, table_name: str, unique_col_name: str, item_data: dict[str, Any], main_col_value: str,
+    def add_generic_item(self, table_name: str, unique_col_name: str, item_data: dict[str, Any], main_col_value: str,
                           other_fields_map: dict[str, str], *, owner_client_id: str | OwnerScope | None = None) -> int | None:
         """
         Internal helper to add items to tables with an auto-increment ID and a unique text column.
@@ -35151,32 +35003,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise
         return None  # Should not be reached if exceptions are raised properly
 
-    def _get_generic_item_by_id(self, table_name: str, item_id: int, *, owner_client_id: str | OwnerScope | None = None) -> dict[str, Any] | None:
-        """
-        Internal helper: Retrieves a non-deleted item by its auto-increment integer ID.
-
-        Args:
-            table_name: The database table name.
-            item_id: The integer ID of the item.
-
-        Returns:
-            A dictionary of the item's data if found and active, else None.
-
-        Raises:
-            CharactersRAGDBError: For database errors.
-        """
-        table_name = self._map_table_for_backend(table_name)
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
-        query = f"SELECT * FROM {table_name} WHERE id = ? AND deleted = 0{owner_clause}"  # nosec B608
-        try:
-            cursor = self.execute_query(query, (item_id,) + owner_params)
-            row = cursor.fetchone()
-            return dict(row) if row else None
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error fetching {table_name} ID {item_id}: {e}")
-            raise
-
-    def _get_generic_item_by_unique_text(self, table_name: str, unique_col_name: str, value: str, *, owner_client_id: str | OwnerScope | None = None) -> dict[str, Any] | None:
+    def get_generic_item_by_unique_text(self, table_name: str, unique_col_name: str, value: str, *, owner_client_id: str | OwnerScope | None = None) -> dict[str, Any] | None:
         """
         Internal helper: Retrieves a non-deleted item by a unique text column value.
         Assumes the column has `COLLATE NOCASE` if case-insensitive search is desired.
@@ -35205,66 +35032,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise
 
     def _unique_text_match_sql(self, table_name: str, column: str) -> str:
-        """Return the equality predicate for a unique text column.
-
-        Keywords and keyword collections are case-insensitive (TASK-13950.5). SQLite
-        gets that from the columns' ``COLLATE NOCASE``; PostgreSQL strips NOCASE and
-        indexes ``LOWER(keyword)``/``LOWER(name)`` instead, so it compares ``LOWER`` too.
-        """
-        if table_name in {"keywords", "keyword_collections"} and self.backend_type == BackendType.POSTGRESQL:
-            return f"LOWER({column}) = LOWER(?)"
-        return f"{column} = ?"
+        """Forward to ``ctx.unique_text_match_sql``."""
+        return self.ctx.unique_text_match_sql(table_name, column)
 
     def _case_insensitive_order_expression(self, column: str, direction: str | None = None) -> str:
-        column_clean = (column or '').strip()
-        if not _ORDER_BY_COLUMN_RE.match(column_clean):
-            raise InputError(f"Invalid order-by column: {column!r}")  # noqa: TRY003
-        direction_clean = (direction or '').strip()
-        direction_clause = f" {direction_clean}" if direction_clean else ""
-        if self.backend_type == BackendType.POSTGRESQL:
-            return f"LOWER({column_clean}){direction_clause}"
-        return f"{column_clean} COLLATE NOCASE{direction_clause}"
+        """Forward to ``ctx.case_insensitive_order_expression``."""
+        return self.ctx.case_insensitive_order_expression(column, direction)
 
     def _case_insensitive_order_clause(self, column: str, direction: str | None = None) -> str:
-        return f"ORDER BY {self._case_insensitive_order_expression(column, direction)}"
+        """Forward to ``ctx.case_insensitive_order_clause``."""
+        return self.ctx.case_insensitive_order_clause(column, direction)
 
-    def _list_generic_items(self, table_name: str, order_by_col: str, limit: int = 100, offset: int = 0, *, owner_client_id: str | OwnerScope | None = None) -> list[dict[str, Any]]:
-        """
-        Internal helper: Lists non-deleted items from a table, with specified ordering.
-
-        Args:
-            table_name: The database table name.
-            order_by_col: The column (and direction) to order by (e.g., "name ASC", "keyword COLLATE NOCASE DESC").
-            limit: Maximum number of items.
-            offset: Number of items to skip.
-
-        Returns:
-            A list of item dictionaries.
-
-        Raises:
-            CharactersRAGDBError: For database errors.
-        """
-        order_by_clean = (order_by_col or "").strip()
-        if not _ORDER_BY_EXPR_RE.match(order_by_clean):
-            raise InputError(f"Invalid order-by expression: {order_by_col!r}")  # noqa: TRY003
-        order_expression = order_by_clean
-        collate_match = re.search(r"\s+COLLATE\s+NOCASE", order_by_clean, flags=re.IGNORECASE)
-        if collate_match:
-            base = order_by_clean[:collate_match.start()]
-            direction = order_by_clean[collate_match.end():]
-            order_expression = self._case_insensitive_order_expression(base.strip(), direction.strip() or None)
-
-        table_name = self._map_table_for_backend(table_name)
-        owner_clause, owner_params = self._selected_owner_filter(owner_client_id, table=table_name)
-        query = f"SELECT * FROM {table_name} WHERE deleted = 0{owner_clause} ORDER BY {order_expression} LIMIT ? OFFSET ?"  # nosec B608
-        try:
-            cursor = self.execute_query(query, owner_params + (limit, offset), read_only=True)
-            return [dict(row) for row in cursor.fetchall()]
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error listing {table_name}: {e}")
-            raise
-
-    def _update_generic_item(self, table_name: str, item_id: int | str,
+    def update_generic_item(self, table_name: str, item_id: int | str,
                              update_data: dict[str, Any], expected_version: int,
                              allowed_fields: list[str], pk_col_name: str = "id",
                              unique_col_name_in_data: str | None = None, *, owner_client_id: str | OwnerScope | None = None) -> bool | None:
@@ -35393,7 +35172,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise
         # No implicit return None, function should return True or raise.
 
-    def _soft_delete_generic_item(self, table_name: str, item_id: int | str,
+    def soft_delete_generic_item(self, table_name: str, item_id: int | str,
                                   expected_version: int, pk_col_name: str = "id", *, owner_client_id: str | OwnerScope | None = None) -> bool | None:
         """
         Internal helper: Soft-deletes an item in a table using optimistic locking.
@@ -35491,81 +35270,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 exc_info=True)
             raise
         # No implicit return None.
-
-    def _search_generic_items_fts(self, fts_table_name: str, main_table_name: str, fts_match_cols_or_table: str,
-                                  search_term: str, limit: int = 10, *, owner_client_id: str | OwnerScope | None = None) -> list[dict[str, Any]]:
-        """
-        Internal helper: Performs FTS search on tables like keywords, notes, collections.
-
-        Assumes the main table's PK is `id` (for keywords, collections) or `rowid` maps
-        correctly (for notes via `content_rowid='rowid'`).
-        The join condition is `fts.rowid = main.id` or `fts.rowid = main.rowid` depending on FTS setup.
-        Schema shows `content_rowid='id'` for keywords/collections and `content_rowid='rowid'` for notes.
-        This helper uses `fts.rowid = main.id` which is fine for keywords/collections.
-        For notes, `search_notes` uses `fts.rowid = main.rowid` which is correct.
-        This helper is mainly for tables where PK `id` is the FTS `rowid`.
-
-        Args:
-            fts_table_name: Name of the FTS virtual table.
-            main_table_name: Name of the main content table.
-            fts_match_cols_or_table: The column(s) in FTS table to match against (e.g., "keyword"),
-                                     or the FTS table name if using table-name matching
-                                     (e.g., "notes_fts MATCH ?").
-            search_term: The FTS search query string.
-            limit: Max number of results.
-
-        Returns:
-            List of matching item dictionaries from the main table. Can be empty.
-
-        Raises:
-            CharactersRAGDBError: For database search errors.
-        """
-        # The join condition ON fts.rowid = main.id is generally for tables where 'id' is an alias for rowid
-        # or FTS is configured with content_rowid='id'.
-        # For tables like 'notes' where 'id' is TEXT UUID and FTS uses 'rowid', the join is different.
-        # This helper as written is best for keywords and keyword_collections.
-        if self.backend_type == BackendType.POSTGRESQL:
-            tsquery = FTSQueryTranslator.normalize_query(search_term, 'postgresql')
-            if not tsquery:
-                logger.debug(
-                    "Generic FTS query normalized to empty tsquery for table '{}' with input '{}'",
-                    main_table_name,
-                    search_term,
-                )
-                return []
-
-            owner_clause, owner_params = self._selected_owner_filter(owner_client_id, "main", table=main_table_name)
-            fts_column = f"{fts_table_name}_tsv"
-            query = """
-                SELECT main.*, ts_rank(main.{fts_column}, to_tsquery('english', ?)) AS rank
-                FROM {main_table_name} main
-                WHERE main.deleted = FALSE{owner_clause}
-                  AND main.{fts_column} @@ to_tsquery('english', ?)
-                ORDER BY rank DESC, main.last_modified DESC
-                LIMIT ?
-            """.format_map(locals())  # nosec B608
-            try:
-                cursor = self.execute_query(query, (tsquery,) + owner_params + (tsquery, limit))
-                return [dict(row) for row in cursor.fetchall()]
-            except CharactersRAGDBError as exc:
-                logger.error("PostgreSQL FTS search failed for table '{}': {}", main_table_name, exc)
-                raise
-
-        # Use explicit table-name for MATCH and bm25() for SQLite FTS5 compatibility
-        query = """
-            SELECT main.*
-            FROM {fts_table_name}, {main_table_name} main
-            WHERE {fts_table_name}.rowid = main.id
-              AND {fts_table_name} MATCH ? AND main.deleted = 0
-            ORDER BY bm25({fts_table_name})
-            LIMIT ?
-        """.format_map(locals())  # nosec B608
-        try:
-            cursor = self.execute_query(query, (search_term, limit))
-            return [dict(row) for row in cursor.fetchall()]
-        except CharactersRAGDBError as e:
-            logger.error(f"Error searching {main_table_name} for '{search_term}': {e}")
-            raise
 
     # Keywords
     # Keyword CRUD/search methods and note-count helper are delegated to extracted stores at module bottom.
@@ -35831,7 +35535,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> None:
         if (
             self.backend_type == BackendType.POSTGRESQL
-            and self._supports_notes_moodboard_studio_v61()
+            and self.supports_notes_moodboard_studio_v61()
         ):
             conn.execute(
                 "SELECT set_config('app.current_dataset_id', ?, true)",
@@ -35857,7 +35561,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         legacy_params = (moodboard_name, description_value, smart_rule_json, now, now, deleted_value, self.client_id, 1)
         try:
             with self.transaction() as conn:
-                if not self._supports_notes_moodboard_studio_v61():
+                if not self.supports_notes_moodboard_studio_v61():
                     cursor = conn.execute(legacy_query, legacy_params)
                     legacy_moodboard_id = cursor.lastrowid
                     if legacy_moodboard_id is None:
@@ -35936,7 +35640,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_moodboard_by_id(self, moodboard_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
         params: list[Any] = [moodboard_id]
         scope = ""
-        if self._supports_notes_moodboard_studio_v61():
+        if self.supports_notes_moodboard_studio_v61():
             owner = str(self.client_id)
             with self.transaction() as conn:
                 dataset = self.resolve_moodboard_compatibility_dataset_id(
@@ -35974,7 +35678,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         predicates: list[str] = []
         params: list[Any] = []
-        if self._supports_notes_moodboard_studio_v61():
+        if self.supports_notes_moodboard_studio_v61():
             owner = str(self.client_id)
             with self.transaction() as conn:
                 dataset = self.resolve_moodboard_compatibility_dataset_id(
@@ -36028,7 +35732,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> int:
         predicates: list[str] = []
         params: list[Any] = []
-        if self._supports_notes_moodboard_studio_v61():
+        if self.supports_notes_moodboard_studio_v61():
             owner = str(self.client_id)
             with self.transaction() as conn:
                 dataset = self.resolve_moodboard_compatibility_dataset_id(
@@ -36069,7 +35773,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not update_data:
             raise InputError("No data provided for moodboard update.")  # noqa: TRY003
 
-        if self._supports_notes_moodboard_studio_v61():
+        if self.supports_notes_moodboard_studio_v61():
             return self._update_moodboard_v61(
                 moodboard_id=moodboard_id,
                 update_data=update_data,
@@ -36108,7 +35812,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         all_set_values.extend([now, next_version_val, self.client_id])
         scope_clause = ""
         where_values: list[Any] = [moodboard_id, expected_version]
-        if self._supports_notes_moodboard_studio_v61():
+        if self.supports_notes_moodboard_studio_v61():
             owner = str(self.client_id)
             dataset = self.resolve_moodboard_compatibility_dataset_id(owner_user_id=owner)
             fields_to_update_sql.extend(["canonical_revision = ?", "canonical_hash = ?"])
@@ -36304,7 +36008,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 scope_clause = ""
                 scope_params: tuple[Any, ...] = ()
-                if self._supports_notes_moodboard_studio_v61():
+                if self.supports_notes_moodboard_studio_v61():
                     owner = str(self.client_id)
                     dataset = self.resolve_moodboard_compatibility_dataset_id(
                         owner_user_id=owner, conn=conn
@@ -36336,7 +36040,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 deleted_val = True if self.backend_type == BackendType.POSTGRESQL else 1
                 lineage_sql = ""
                 lineage_params: tuple[Any, ...] = ()
-                if self._supports_notes_moodboard_studio_v61():
+                if self.supports_notes_moodboard_studio_v61():
                     revision = int(row["canonical_revision"]) + 1
                     try:
                         smart_rule = (
@@ -36397,9 +36101,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         note = self.get_note_by_id(note_id=note_id)
         if not note:
             raise ConflictError("Note not found.", entity="notes", entity_id=note_id)  # noqa: TRY003
-        if not self._supports_notes_moodboard_studio_v61():
+        if not self.supports_notes_moodboard_studio_v61():
             # OwnerScope.NOT_APPLICABLE: moodboard_notes has no tenant client_id (legacy pre-v63 branch, unreachable after schema init)
-            return self._manage_link(
+            return self.manage_link(
                 "moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "link",
                 owner_client_id=OwnerScope.NOT_APPLICABLE,
             )
@@ -36527,9 +36231,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         moodboard = self.get_moodboard_by_id(moodboard_id)
         if not moodboard:
             raise ConflictError("Moodboard not found.", entity="moodboards", entity_id=moodboard_id)  # noqa: TRY003
-        if not self._supports_notes_moodboard_studio_v61():
+        if not self.supports_notes_moodboard_studio_v61():
             # OwnerScope.NOT_APPLICABLE: moodboard_notes has no tenant client_id (legacy pre-v63 branch, unreachable after schema init)
-            return self._manage_link(
+            return self.manage_link(
                 "moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "unlink",
                 owner_client_id=OwnerScope.NOT_APPLICABLE,
             )
@@ -36686,7 +36390,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             deleted_false_value,
             owner_user_id,
         ]
-        if self._supports_notes_moodboard_studio_v61():
+        if self.supports_notes_moodboard_studio_v61():
             manual_select += " AND mn.owner_user_id = ? AND mn.dataset_id = ?"
             select_queries[0] = manual_select
             params.extend((owner_user_id, dataset_id))
@@ -36747,7 +36451,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             f"WITH combined AS ({union_query}) "  # nosec B608
             "SELECT COUNT(DISTINCT id) AS total FROM combined"
         )
-        if self._supports_notes_moodboard_studio_v61():
+        if self.supports_notes_moodboard_studio_v61():
             with self.transaction() as conn:
                 dataset = moodboard.get("dataset_id")
                 if dataset is not None:
@@ -36808,7 +36512,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "LIMIT ? OFFSET ?"
         )
         page_params = (*union_params, limit, offset)
-        if self._supports_notes_moodboard_studio_v61():
+        if self.supports_notes_moodboard_studio_v61():
             with self.transaction() as conn:
                 dataset = moodboard.get("dataset_id")
                 if dataset is not None:
@@ -36835,7 +36539,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return paged
 
     # --- Linking Table Methods (with manual sync_log entries) ---
-    def _manage_link(self, link_table: str, col1_name: str, col1_val: Any, col2_name: str, col2_val: Any,
+    def manage_link(self, link_table: str, col1_name: str, col1_val: Any, col2_name: str, col2_val: Any,
                      operation: str, *, owner_client_id: str | OwnerScope | None = None) -> bool:
         """Helper to add ('link') or remove ('unlink') entries from a linking table."""
         now_iso = self._get_current_utc_timestamp_iso()
@@ -36843,7 +36547,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         log_sync_entry = False
         rows_affected = 0
 
-        scoped = _owner_is_scoped(self.backend_type, owner_client_id, "_manage_link", link_table)
+        scoped = _owner_is_scoped(self.backend_type, owner_client_id, "manage_link", link_table)
         try:
             with self.transaction() as conn:
                 if scoped:
@@ -45816,7 +45520,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "Session",
                 )
         allowed_fields = ["name", "payload_json", "schema_version", "version_parent_id"]
-        return self._update_generic_item(
+        return self.update_generic_item(
             "writing_sessions",
             session_id,
             update_data,
@@ -45841,7 +45545,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ConflictError: If the session is missing or version-mismatched.
             CharactersRAGDBError: For database errors.
         """
-        return self._soft_delete_generic_item(
+        return self.soft_delete_generic_item(
             "writing_sessions", session_id, expected_version, pk_col_name="id", owner_client_id=str(self.client_id),
         )
 
@@ -46128,7 +45832,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "version_parent_id": "version_parent_id",
             "is_default": "is_default",
         }
-        return self._add_generic_item(
+        return self.add_generic_item(
             "writing_templates", "name", item_data, template_name, other_fields_map, owner_client_id=str(self.client_id),
         )
 
@@ -46146,7 +45850,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         template_name = self._normalize_writing_name(name, "Template")
-        row = self._get_generic_item_by_unique_text(
+        row = self.get_generic_item_by_unique_text(
             "writing_templates", "name", template_name, owner_client_id=str(self.client_id),
         )
         if not row:
@@ -46260,7 +45964,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "Template",
                 )
         allowed_fields = ["name", "payload_json", "schema_version", "version_parent_id", "is_default"]
-        return self._update_generic_item(
+        return self.update_generic_item(
             "writing_templates",
             template_name,
             update_data,
@@ -46287,7 +45991,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         template_name = self._normalize_writing_name(name, "Template")
-        return self._soft_delete_generic_item(
+        return self.soft_delete_generic_item(
             "writing_templates", template_name, expected_version, pk_col_name="name", owner_client_id=str(self.client_id),
         )
 
@@ -46343,7 +46047,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "is_default": "is_default",
             "order_index": "order_index",
         }
-        return self._add_generic_item(
+        return self.add_generic_item(
             "writing_themes", "name", item_data, theme_name, other_fields_map, owner_client_id=str(self.client_id),
         )
 
@@ -46361,7 +46065,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         theme_name = self._normalize_writing_name(name, "Theme")
-        row = self._get_generic_item_by_unique_text(
+        row = self.get_generic_item_by_unique_text(
             "writing_themes", "name", theme_name, owner_client_id=str(self.client_id),
         )
         return dict(row) if row else None
@@ -46442,7 +46146,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "is_default",
             "order_index",
         ]
-        return self._update_generic_item(
+        return self.update_generic_item(
             "writing_themes",
             theme_name,
             update_data,
@@ -46469,7 +46173,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         theme_name = self._normalize_writing_name(name, "Theme")
-        return self._soft_delete_generic_item(
+        return self.soft_delete_generic_item(
             "writing_themes", theme_name, expected_version, pk_col_name="name", owner_client_id=str(self.client_id),
         )
 
@@ -47352,7 +47056,7 @@ def _get_note_studio_document_v61_scoped(
     self: CharactersRAGDB,
     note_id: str,
 ) -> dict[str, Any] | None:
-    if not self._supports_notes_moodboard_studio_v61():
+    if not self.supports_notes_moodboard_studio_v61():
         return self.note_store.get_note_studio_document(note_id)
     with self.transaction() as conn:
         return self.note_store._fetch_note_studio_document_row(note_id, conn=conn)

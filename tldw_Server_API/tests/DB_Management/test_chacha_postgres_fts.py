@@ -35,7 +35,7 @@ def _make_postgres_db() -> CharactersRAGDB:
     db._backend.backend_type = BackendType.POSTGRESQL
     db._CHARACTER_CARD_JSON_FIELDS = []
     db.character_store = CharacterStore(db)
-    db.keyword_store = KeywordStore(db)
+    db.keyword_store = KeywordStore(db.ctx)
 
     class _TxConn:
         _connection = None
@@ -188,7 +188,7 @@ def test_manage_link_postgres_uses_on_conflict():
     db.transaction = fake_transaction  # type: ignore[assignment]
 
     # The test checks the INSERT shape only; a stub connection cannot prove ownership.
-    assert db._manage_link(
+    assert db.manage_link(
         "flashcard_keywords", "card_id", 1, "keyword_id", 2, "link", owner_client_id=OwnerScope.NOT_APPLICABLE
     ) is True
 
@@ -275,7 +275,7 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
     from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 
     db = _make_postgres_db()
-    store = NoteStore(db)
+    store = NoteStore(db.ctx)
     statements = []
 
     def selected_owner(owner_client_id, alias="", *, table="?"):
@@ -325,7 +325,7 @@ def test_postgres_notes_relevance_order_breaks_ties_by_id(monkeypatch, mode):
     from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 
     db = _make_postgres_db()
-    store = NoteStore(db)
+    store = NoteStore(db.ctx)
     statements = []
 
     def execute(query, params):
@@ -355,7 +355,7 @@ def test_postgres_note_snippets_strip_marker_characters_and_cap_the_source(monke
     from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 
     db = _make_postgres_db()
-    store = NoteStore(db)
+    store = NoteStore(db.ctx)
     statements = []
 
     def execute(query, params, **_kwargs):
@@ -380,7 +380,7 @@ def test_postgres_notes_all_tags_filter_uses_owned_active_keyword_ids(monkeypatc
     from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 
     db = _make_postgres_db()
-    store = NoteStore(db)
+    store = NoteStore(db.ctx)
     statements = []
 
     def selected_owner(owner_client_id, alias="", *, table="?"):
@@ -536,7 +536,7 @@ def test_postgres_note_keyword_queries_filter_both_endpoints(postgres_db, operat
             """
         )
         postgres_db.execute_query = lambda query, params, **kwargs: connection.execute(query, params)
-        store = NoteStore(postgres_db)
+        store = NoteStore(postgres_db.ctx)
         if operation == "single":
             assert [row["id"] for row in store.get_keywords_for_note("own")] == [1]
         elif operation == "foreign-note":
@@ -555,7 +555,7 @@ def test_postgres_question_search_preserves_owner_and_matches_literal_terms(monk
 
     db = _make_postgres_db()
     db.execute_query = MagicMock(return_value=_CursorStub([{"id": "owned-note"}]))
-    store = NoteStore(db)
+    store = NoteStore(db.ctx)
 
     assert store.search_notes("Vega? next review date", limit=3, match_any=True) == [{"id": "owned-note"}]
     sql, params = db.execute_query.call_args[0]
