@@ -11,8 +11,9 @@ import click
 class LLMStoreGroup(click.Group):
     """Load the provider-override store before one of ``llm_commands`` runs, and keep it fresh until exit.
 
-    Every LLM call refuses while the store is unloaded, and nothing else loads it in a CLI process. A request for help (an option, or an LLM group
-    given no subcommand) and shell completion skip the load, so they never need the AuthNZ database.
+    Every LLM call refuses while the store is unloaded, and nothing else loads it in a CLI process. A request for help
+    (an option, or an LLM group given no subcommand) and shell completion skip the load, so they never need the AuthNZ
+    database.
     """
 
     def __init__(self, *args: Any, llm_commands: Iterable[str] = (), **kwargs: Any) -> None:

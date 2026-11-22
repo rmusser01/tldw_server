@@ -556,3 +556,24 @@ async def test_the_denylist_round_trips_through_the_repo_sqlite(tmp_path, monkey
     listed = await repo.list_overrides("openai")
 
     assert (stored["denied_models"], listed[0]["denied_models"]) == ('["gpt-4o"]', '["gpt-4o"]')
+
+
+@pytest.mark.asyncio
+async def test_an_admin_sets_and_clears_denied_models_through_the_real_repo_sqlite(tmp_path, monkeypatch) -> None:
+    """TASK-15616 (#3544's final review, M3): the admin API's service writes denied_models to the real repo, and each
+    response, and a later read, comes back through the store's refresh and _parse_override_row, with nothing stubbed.
+    Padding and blanks are dropped; an empty list clears the column (Review Focus 5)."""
+    from tldw_Server_API.app.api.v1.schemas.admin_schemas import LLMProviderOverrideRequest
+    from tldw_Server_API.app.services import admin_llm_providers_service as service
+
+    await _open_sqlite_override_repo(tmp_path, monkeypatch)
+
+    written = await service.upsert_override("openai", LLMProviderOverrideRequest(denied_models=[" gpt-4o ", "", "o1"]))
+    read_back = await service.get_override("openai")
+    cleared = await service.upsert_override("openai", LLMProviderOverrideRequest(denied_models=[]))
+
+    assert (written.denied_models, read_back.denied_models, cleared.denied_models) == (
+        ["gpt-4o", "o1"],
+        ["gpt-4o", "o1"],
+        None,
+    )
