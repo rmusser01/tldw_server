@@ -194,7 +194,6 @@ from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract imp
     legacy_source_diagnostic as moodboard_studio_legacy_source_diagnostic,
 )
 from tldw_Server_API.app.core.Sync_Contracts.notes_task_contract import (  # noqa: E402
-    canonical_json_bytes,  # noqa: F401  # re-exported: chacha.context reads it here, so it adds no layering import
     notes_task_object_hash,
     parse_notes_task_v1,
 )

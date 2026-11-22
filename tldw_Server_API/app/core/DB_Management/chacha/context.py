@@ -38,9 +38,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     OwnerScope,
     UniqueConstraintError,
     _owner_is_scoped,
-    canonical_json_bytes,
-    canonical_moodboard_studio_json_bytes,
 )
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (
+    canonical_json_bytes as moodboard_studio_canonical_json_bytes,
+)
+from tldw_Server_API.app.core.Sync_Contracts.notes_task_contract import canonical_json_bytes
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -325,7 +327,7 @@ class ChaChaContext:
     @staticmethod
     def canonical_json_text_v61(value: object) -> str:
         """Return the canonical moodboard/Studio JSON text of ``value``."""
-        return canonical_moodboard_studio_json_bytes(value).decode("utf-8")
+        return moodboard_studio_canonical_json_bytes(value).decode("utf-8")
 
     @staticmethod
     def note_task_v60_hash(value: object) -> str:
