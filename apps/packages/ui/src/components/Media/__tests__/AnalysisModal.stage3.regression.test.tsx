@@ -157,7 +157,7 @@ vi.mock('@/hooks/useAntdMessage', () => ({
 }))
 
 const streamChunk = (text: string) =>
-  `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}`
+  `data: ${JSON.stringify({ tldw_media_source_sha256: "a".repeat(64), choices: [{ delta: { content: text } }] })}`
 
 describe('AnalysisModal stage 3 regression coverage', () => {
   beforeEach(() => {
@@ -192,7 +192,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="Source text"
       />,
     )
     expect(screen.getByRole('button', { name: 'Summary' })).toBeVisible()
@@ -227,7 +226,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="media body"
         onAnalysisGenerated={vi.fn()}
       />
     )
@@ -266,7 +264,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="media body"
         onAnalysisGenerated={vi.fn()}
       />
     )
@@ -302,7 +299,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="media body"
         onAnalysisGenerated={vi.fn()}
       />
     )
@@ -328,7 +324,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="media body"
         onAnalysisGenerated={vi.fn()}
       />
     )
@@ -349,6 +344,50 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         })
       )
     })
+  })
+
+  it('generates and saves an analysis using only the stored media ID', async () => {
+    mocks.bgStream.mockImplementation(async function* () { yield streamChunk('Book analysis') })
+    mocks.bgRequest.mockResolvedValue({ analysis: 'Book analysis' })
+    const onGenerated = vi.fn()
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} onAnalysisGenerated={onGenerated} />)
+    const button = screen.getByRole('button', { name: 'Generate Analysis' })
+    await waitFor(() => expect(button).not.toBeDisabled())
+    fireEvent.click(button)
+    await waitFor(() => expect(onGenerated).toHaveBeenCalled())
+    expect(mocks.bgStream.mock.calls[0][0].path).toBe('/api/v1/chat/completions/media/42')
+    expect(JSON.stringify(mocks.bgStream.mock.calls[0][0].body).length).toBeLessThan(4096)
+    expect(mocks.bgRequest.mock.calls[0][0].body).not.toHaveProperty('content')
+    expect(mocks.bgRequest.mock.calls[0][0].body.source_sha256).toBe('a'.repeat(64))
+  })
+
+  it('reports a size rejection without retrying generation or saving', async () => {
+    mocks.bgStream.mockImplementation(() => { throw Object.assign(new Error('Payload too large'), { status: 413 }) })
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} />)
+    const button = screen.getByRole('button', { name: 'Generate Analysis' })
+    await waitFor(() => expect(button).not.toBeDisabled())
+    fireEvent.click(button)
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith(
+      'This item is too large to analyze in one request. Choose a model with a larger context window or split the item into smaller parts.'
+    ))
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it('asks to rerun if the item changed before saving', async () => {
+    mocks.bgStream.mockImplementation(async function* () { yield streamChunk('Old analysis') })
+    mocks.bgRequest.mockRejectedValue({
+      status: 409,
+      details: { detail: { code: 'media_analysis_source_changed' } }
+    })
+    const onGenerated = vi.fn()
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} onAnalysisGenerated={onGenerated} />)
+    const button = screen.getByRole('button', { name: 'Generate Analysis' })
+    await waitFor(() => expect(button).not.toBeDisabled())
+    fireEvent.click(button)
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith(
+      'This item changed during analysis. Run the analysis again.'
+    ))
+    expect(onGenerated).not.toHaveBeenCalled()
   })
 
   it('preserves preset/custom prompt behavior and sends expected request body', async () => {
@@ -375,7 +414,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={onClose}
         mediaId={42}
-        mediaContent="media body"
         onAnalysisGenerated={onAnalysisGenerated}
       />
     )
@@ -405,7 +443,7 @@ describe('AnalysisModal stage 3 regression coverage', () => {
 
     expect(mocks.bgStream).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: '/api/v1/chat/completions',
+        path: '/api/v1/chat/completions/media/42',
         method: 'POST',
         body: expect.objectContaining({
           stream: true,
@@ -416,7 +454,7 @@ describe('AnalysisModal stage 3 regression coverage', () => {
             }),
             expect.objectContaining({
               role: 'user',
-              content: 'CUSTOM PREFIX\n\nmedia body'
+              content: 'CUSTOM PREFIX'
             })
           ]
         })
@@ -429,7 +467,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
           path: '/api/v1/media/42/versions',
           method: 'POST',
           body: expect.objectContaining({
-            content: 'media body',
             analysis_content: 'Generated analysis output',
             prompt: expect.stringContaining('Act as a critical reviewer.')
           })
@@ -469,7 +506,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="media body"
         onAnalysisGenerated={onAnalysisGenerated}
       />
     )
@@ -527,7 +563,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="media body"
         onAnalysisGenerated={onAnalysisGenerated}
       />
     )
@@ -575,7 +610,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="media body"
         onAnalysisGenerated={onAnalysisGenerated}
       />
     )
@@ -596,40 +630,12 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     )
   })
 
-  it('recovers missing media content from a cache-busted detail request', async () => {
-    mocks.bgRequest.mockImplementation(
-      async (request: { path?: string; method?: string }) => {
-        if (
-          request.method === 'GET' &&
-          request.path?.startsWith('/api/v1/media/42?include_content=true')
-        ) {
-          return { content: { text: 'Recovered media body' } }
-        }
-        return {}
-      }
-    )
-
-    render(
-      <AnalysisModal
-        open
-        onClose={vi.fn()}
-        mediaId={42}
-        mediaContent=""
-        onAnalysisGenerated={vi.fn()}
-      />
-    )
-
-    await waitFor(() => {
+  it('does not fetch media content to open the analysis modal', async () => {
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} />)
+    await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Generate Analysis' })).not.toBeDisabled()
-    })
-    expect(mocks.bgRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        method: 'GET',
-        path: expect.stringMatching(
-          /^\/api\/v1\/media\/42\?include_content=true&include_versions=false&cache_bust=\d+$/
-        )
-      })
     )
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -643,7 +649,7 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     mocks.bgRequest.mockRejectedValue(failure)
     const onClose = vi.fn(), onGenerated = vi.fn()
     try {
-      render(<AnalysisModal open onClose={onClose} mediaId={42} mediaContent="Original source" onAnalysisGenerated={onGenerated} />)
+      render(<AnalysisModal open onClose={onClose} mediaId={42} onAnalysisGenerated={onGenerated} />)
       const button = screen.getByRole('button', { name: 'Generate Analysis' })
       await waitFor(() => expect(button).not.toBeDisabled())
       fireEvent.click(button)
@@ -677,7 +683,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="media body"
         onAnalysisGenerated={vi.fn()}
       />
     )
@@ -712,7 +717,6 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         open
         onClose={vi.fn()}
         mediaId={42}
-        mediaContent="Body"
         onAnalysisGenerated={generated}
       />,
     )
@@ -745,13 +749,13 @@ describe('AnalysisModal stage 3 regression coverage', () => {
     mocks.bgStream.mockImplementation(async function* () { yield streamChunk('Incomplete prefix'); throw new Error('Stream interrupted') });
     mocks.bgRequest.mockRejectedValue(new Error('Fallback unavailable'));
     const onGenerated = vi.fn();
-    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" onAnalysisGenerated={onGenerated} />);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} onAnalysisGenerated={onGenerated} />);
     const button = screen.getByRole('button', { name: 'Generate Analysis' });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
     await waitFor(() => expect(mocks.messageError).toHaveBeenCalled());
     expect(mocks.bgRequest.mock.calls.filter(([request]) => request.method === 'POST' && request.path.endsWith('/versions'))).toEqual([]);
-    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/chat/completions', body: expect.objectContaining({ stream: false }), abortSignal: expect.any(AbortSignal) }));
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/chat/completions/media/42', body: expect.objectContaining({ stream: false }), abortSignal: expect.any(AbortSignal) }));
     expect(onGenerated).not.toHaveBeenCalled();
   });
 
@@ -764,7 +768,7 @@ describe('AnalysisModal stage 3 regression coverage', () => {
       return new Promise(resolve => { release = resolve });
     });
     const onGenerated = vi.fn();
-    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" onAnalysisGenerated={onGenerated} />);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} onAnalysisGenerated={onGenerated} />);
     const button = screen.getByRole('button', { name: 'Generate Analysis' });
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);

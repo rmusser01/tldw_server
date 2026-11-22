@@ -11,8 +11,7 @@ import { parseProviderQualifiedModelSelection, resolveApiProviderForModel } from
 import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import { DEFAULT_ANALYSIS_SUMMARY_PROMPT } from "@/utils/default-prompts"
 import {
-  extractMediaDetailAnalysis,
-  extractMediaDetailContent
+  extractMediaDetailAnalysis
 } from "@/utils/media-detail-content"
 
 interface AnalysisTimeoutConfig {
@@ -31,7 +30,6 @@ interface AnalysisModalProps {
   open: boolean
   onClose: () => void
   mediaId: string | number
-  mediaContent: string
   onAnalysisGenerated?: (analysisText: string, prompt?: string) => void
 }
 
@@ -56,12 +54,13 @@ const normalizePersistedModelSelection = (value: unknown): string => {
   }
 }
 
-const extractStreamDelta = (chunk: string): string | null => {
-  if (!chunk) return null
+const readAnalysisFrame = (chunk: string): {
+  delta: string | null
+  sourceHash?: string
+} | null => {
   let payload = chunk.trim()
-  if (!payload) return null
-  if (payload.startsWith("data:")) payload = payload.slice(5).trim()
-  if (!payload || payload === "[DONE]") return null
+  if (payload.startsWith('data:')) payload = payload.slice(5).trim()
+  if (!payload || payload === '[DONE]') return null
   try {
     const parsed = JSON.parse(payload)
     const delta =
@@ -69,10 +68,25 @@ const extractStreamDelta = (chunk: string): string | null => {
       parsed?.choices?.[0]?.message?.content ??
       parsed?.choices?.[0]?.text ??
       parsed?.content
-    return typeof delta === "string" ? delta : null
+    return {
+      delta: typeof delta === 'string' ? delta : null,
+      sourceHash: parsed?.tldw_media_source_sha256,
+    }
   } catch {
     return null
   }
+}
+
+const getAnalysisErrorCode = (error: unknown): string | undefined => {
+  const failure = error as { code?: string; details?: { detail?: { code?: string } } } | null
+  return failure?.details?.detail?.code || failure?.code
+}
+
+const isAnalysisSizeError = (error: unknown): boolean => {
+  const code = getAnalysisErrorCode(error)
+  return (error as { status?: number } | null)?.status === 413 || code === 'media_analysis_too_large' ||
+    code === 'media_analysis_context_too_large' || code === 'context_length_exceeded' ||
+    code === 'model_context_window_exceeded'
 }
 
 export function AnalysisModal(props: AnalysisModalProps) {
@@ -85,7 +99,6 @@ function OwnedAnalysisModal({
   open,
   onClose,
   mediaId,
-  mediaContent,
   onAnalysisGenerated
 }: AnalysisModalProps) {
   const operation = useMemo(() => quickIngestAuthority.capture({ sessionBound: false }), [])
@@ -108,7 +121,6 @@ function OwnedAnalysisModal({
   >(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [analysisPreview, setAnalysisPreview] = useState("")
-  const [recoveredMediaContent, setRecoveredMediaContent] = useState("")
   const [cancelledGeneration, setCancelledGeneration] = useState(false)
   const activeAbortControllerRef = useRef<AbortController | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -183,40 +195,6 @@ function OwnedAnalysisModal({
       ? first.id
       : undefined
   }, [models, selectedModelKey])
-  const effectiveMediaContent = mediaContent.trim()
-    ? mediaContent
-    : recoveredMediaContent
-
-  useEffect(() => {
-    if (!open) return
-    if (mediaContent.trim()) {
-      setRecoveredMediaContent(mediaContent)
-      return
-    }
-
-    let cancelled = false
-    setRecoveredMediaContent("")
-    ;(async () => {
-      try {
-        const detail = await bgRequest<any>({
-          servicePromptConfig: operation.requestScope.config,
-          abortSignal: operation.signal,
-          path: `/api/v1/media/${mediaId}?include_content=true&include_versions=false&cache_bust=${Date.now()}` as any,
-          method: 'GET' as any
-        })
-        if (!cancelled) {
-          setRecoveredMediaContent(extractMediaDetailContent(detail))
-        }
-      } catch {
-        // Keep generation disabled when the selected media body is unavailable.
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [mediaContent, mediaId, open, operation])
-
   useEffect(() => {
     if (!open) {
       setAnalysisPreview("")
@@ -359,11 +337,6 @@ function OwnedAnalysisModal({
   }
 
   const handleGenerate = async () => {
-    if (!effectiveMediaContent || !effectiveMediaContent.trim()) {
-      messageApi.warning(t('mediaPage.noContentForAnalysis', 'No content available for analysis'))
-      return
-    }
-
     const effectiveModel = effectiveModelKey
     if (!effectiveModel) {
       messageApi.warning(
@@ -391,9 +364,8 @@ function OwnedAnalysisModal({
     timerRef.current = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000))
     }, 1000)
-    const saveAsVersion = async (analysisText: string) => {
-      if (!mediaId) return false
-      if (!effectiveMediaContent || !effectiveMediaContent.trim()) return false
+    const saveAsVersion = async (analysisText: string, sourceHash?: string) => {
+      if (!mediaId || !sourceHash || !/^[0-9a-f]{64}$/.test(sourceHash)) return false
       try {
         let savedDetail = await bgRequest<any>({
           servicePromptConfig: operation.requestScope.config,
@@ -402,8 +374,8 @@ function OwnedAnalysisModal({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: {
-            content: String(effectiveMediaContent || ''),
             analysis_content: analysisText,
+            source_sha256: sourceHash,
             prompt: systemPrompt
           }
         })
@@ -444,6 +416,7 @@ function OwnedAnalysisModal({
         }
         return matches
       } catch (err) {
+        if (getAnalysisErrorCode(err) === 'media_analysis_source_changed') throw err
         console.error('Failed to save analysis as version:', err)
         return false
       }
@@ -454,6 +427,7 @@ function OwnedAnalysisModal({
       if (signal.aborted) return
       operation.assertCurrent()
       const { requestTimeoutMs, streamIdleTimeoutMs } = await getAnalysisTimeouts()
+      const analysisPath = `/api/v1/chat/completions/media/${mediaId}` as const
       const requestBody = {
         model: normalizedModel || effectiveModel,
         ...(resolvedApiProvider ? { api_provider: resolvedApiProvider } : {}),
@@ -461,20 +435,22 @@ function OwnedAnalysisModal({
           { role: 'system', content: systemPrompt },
           {
             role: 'user',
-            content: `${userPrefix ? userPrefix + '\n\n' : ''}${effectiveMediaContent}`
+            content: userPrefix
           }
         ]
       }
 
       let analysisText = ''
+      let sourceHash: string | undefined
       let streamError: unknown = null
 
       try {
         let lastPreviewAt = 0
         let streamedText = ""
+        let firstFrame = true
         for await (const chunk of bgStream({
           servicePromptConfig: operation.requestScope.config,
-          path: '/api/v1/chat/completions',
+          path: analysisPath,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: { ...requestBody, stream: true },
@@ -484,7 +460,13 @@ function OwnedAnalysisModal({
           if (cancelledByUserRef.current || signal.aborted) {
             return
           }
-          const delta = extractStreamDelta(chunk)
+          const frame = readAnalysisFrame(chunk)
+          if (!frame) continue
+          if (firstFrame) {
+            sourceHash = frame.sourceHash
+            firstFrame = false
+          }
+          const { delta } = frame
           if (delta) {
             streamedText += delta
             analysisText = streamedText
@@ -502,6 +484,7 @@ function OwnedAnalysisModal({
         if (cancelledByUserRef.current || signal.aborted || isAbortError(err)) {
           return
         }
+        if (isAnalysisSizeError(err) || getAnalysisErrorCode(err) === 'media_analysis_no_content') throw err
         streamError = err
       }
 
@@ -511,7 +494,7 @@ function OwnedAnalysisModal({
         const resp = await bgRequest<any>({
           abortSignal: signal,
           servicePromptConfig: operation.requestScope.config,
-          path: '/api/v1/chat/completions',
+          path: analysisPath,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: { ...requestBody, stream: false },
@@ -519,6 +502,7 @@ function OwnedAnalysisModal({
         })
         analysisText =
           resp?.choices?.[0]?.message?.content || resp?.content || ''
+        sourceHash = resp?.tldw_media_source_sha256
         if (analysisText) setAnalysisPreview(analysisText)
       }
       if (cancelledByUserRef.current || signal.aborted) return
@@ -528,7 +512,7 @@ function OwnedAnalysisModal({
         return
       }
 
-      const persisted = await saveAsVersion(analysisText)
+      const persisted = await saveAsVersion(analysisText, sourceHash)
       if (cancelledByUserRef.current || signal.aborted) return
       if (persisted) {
         onAnalysisGenerated?.(analysisText, systemPrompt)
@@ -540,7 +524,18 @@ function OwnedAnalysisModal({
       if (cancelledByUserRef.current || signal.aborted || isAbortError(err)) {
         return
       }
-      if (isTimeoutError(err)) {
+      if (getAnalysisErrorCode(err) === 'media_analysis_source_changed') {
+        messageApi.error(t('mediaPage.analysisSourceChanged', 'This item changed during analysis. Run the analysis again.'))
+      } else if (getAnalysisErrorCode(err) === 'media_analysis_no_content') {
+        messageApi.warning(t('mediaPage.noContentForAnalysis', 'No content available for analysis'))
+      } else if (getAnalysisErrorCode(err) === 'media_analysis_too_large') {
+        messageApi.error(t('mediaPage.analysisItemSizeLimit', 'This item exceeds the analysis size limit. Split it into smaller parts.'))
+      } else if (isAnalysisSizeError(err)) {
+        messageApi.error(t(
+          'mediaPage.analysisTooLarge',
+          'This item is too large to analyze in one request. Choose a model with a larger context window or split the item into smaller parts.'
+        ))
+      } else if (isTimeoutError(err)) {
         messageApi.error(buildTimeoutMessage())
       } else {
         const errorText = String((err as Error)?.message || err || '').toLowerCase()
@@ -553,7 +548,7 @@ function OwnedAnalysisModal({
             : t('mediaPage.analysisGenerateFailed', 'Failed to generate analysis')
         )
       }
-      console.warn('Analysis generation failed:', isTimeoutError(err) ? 'timeout' : 'provider_failure')
+      console.warn('Analysis generation failed:', isAnalysisSizeError(err) ? 'too_large' : isTimeoutError(err) ? 'timeout' : 'provider_failure')
     } finally {
       if (activeAbortControllerRef.current === abortController) {
         clearGenerationTimer()
@@ -590,8 +585,6 @@ function OwnedAnalysisModal({
           loading={generating}
           onClick={handleGenerate}
           disabled={
-            !effectiveMediaContent ||
-            !effectiveMediaContent.trim() ||
             !effectiveModelKey
           }
         >

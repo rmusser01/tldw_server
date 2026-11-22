@@ -176,7 +176,7 @@ vi.mock("@/hooks/useAntdMessage", () => ({
 }));
 
 const streamChunk = (text: string) =>
-  `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}`;
+  `data: ${JSON.stringify({ tldw_media_source_sha256: "a".repeat(64), choices: [{ delta: { content: text } }] })}`;
 
 describe("AnalysisModal explicit model with the mounted shared owner", () => {
   beforeEach(() => {
@@ -209,7 +209,6 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
           open
           onClose={vi.fn()}
           mediaId={42}
-          mediaContent="Original source"
         />
       </>,
     );
@@ -260,7 +259,7 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
     let resolveCatalog!: (models: Catalog) => void;
     const pending = new Promise<Catalog>((resolve) => { resolveCatalog = resolve; });
     mocks.getChatModels.mockReturnValue(pending);
-    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} />);
     const select = screen.getByRole("combobox", { name: "Model" });
     expect(select).toHaveAttribute("data-selected-value", selected);
     await act(async () => {
@@ -293,7 +292,7 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
     mocks.getChatModels.mockResolvedValue(providers.map((provider, index) => ({
       id: "shared-model", name: `Candidate ${index}`, provider,
     })));
-    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} />);
     await screen.findByRole("option", { name: "Candidate 0" });
     expect(screen.getByRole("button", { name: "Generate Analysis" })).toBeDisabled();
     expect(screen.getByRole("combobox", { name: "Model" })).toHaveAttribute("data-selected-value", "");
@@ -316,7 +315,7 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
     mocks.getChatModels.mockResolvedValue([
       { id: "custom-openai-api:shared-model", name: "Conflicting model", provider: "ollama" },
     ]);
-    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" />);
+    render(<AnalysisModal open onClose={vi.fn()} mediaId={42} />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("button", { name: "Generate Analysis" })).toBeDisabled();
     expect(mocks.bgStream).not.toHaveBeenCalled();
@@ -330,7 +329,7 @@ describe("AnalysisModal explicit model with the mounted shared owner", () => {
       const { setSelectedModel } = useSelectedModel();
       return <button onClick={() => void setSelectedModel("tldw:custom-openai-api:new-choice")}>Choose newer</button>;
     }
-    render(<><ExistingOwner /><AnalysisModal open onClose={vi.fn()} mediaId={42} mediaContent="Original source" /></>);
+    render(<><ExistingOwner /><AnalysisModal open onClose={vi.fn()} mediaId={42} /></>);
     fireEvent.click(screen.getByRole("button", { name: "Choose newer" }));
     await act(async () => {
       resolveCatalog([{ id: "gemma3:1b", provider: "ollama" }, { id: "new-choice", provider: "custom-openai-api" }]);

@@ -18,6 +18,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict, defaultdict, deque
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache, partial
@@ -40,6 +41,7 @@ from fastapi import (
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     TokenScopeGuard,
@@ -49,6 +51,11 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     rbac_rate_limit,
     require_expected_user,
     resolve_user_id_for_request,
+)
+from tldw_Server_API.app.api.v1.utils.media_analysis import (
+    media_source_sha256,
+    prepare_analysis_text,
+    read_saved_media_text,
 )
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     HistoryCaptureRequestV1,
@@ -172,6 +179,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
     queue_is_active,
     resolve_input_moderation_chat_type,
+    resolve_model_context_window,
     resolve_moderation_chat_type,
     resolve_provider_and_model,
     resolve_provider_api_key,
@@ -288,7 +296,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.Usage.llm_budget_guard import enforce_llm_budget
-from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
+from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ, SYSTEM_LOGS
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, get_billing_enforcer
 from tldw_Server_API.app.core.Chat import command_router
 from tldw_Server_API.app.core.Chat.command_authorization import (
@@ -1182,22 +1190,12 @@ def _attach_credential_runtime_cleanup(
     stream_error_state: dict[str, Any] | None = None,
     *,
     sanitize_provider_errors: bool = True,
+    initial_metadata: dict[str, Any] | None = None,
 ) -> Any:
     """Keep credentials alive through streaming and release them on termination."""
     body_iterator = response.body_iterator
 
     async def iterator():
-        if not sanitize_provider_errors:
-            try:
-                async for chunk in body_iterator:
-                    yield chunk
-            finally:
-                try:
-                    await _close_provider_stream_iterator(body_iterator)
-                finally:
-                    await runtime.close()
-            return
-
         error_emitted = False
 
         async def emit(chunk: Any):
@@ -1219,6 +1217,12 @@ def _attach_credential_runtime_cleanup(
             yield _provider_stream_error_frame_for_code(error_code) if error_code else chunk
 
         try:
+            if initial_metadata is not None:
+                yield sse_data(initial_metadata)
+            if not sanitize_provider_errors:
+                async for chunk in body_iterator:
+                    yield chunk
+                return
             for chunk in initial_chunks:
                 async for emitted_chunk in emit(chunk):
                     yield emitted_chunk
@@ -3525,6 +3529,27 @@ async def _persist_system_message_if_needed(
         _release_system_message_lock(conversation_id)
 
 
+def _chat_completion_dependencies(endpoint_id: str) -> list:
+    return [
+        Depends(require_expected_user),
+        Depends(rbac_rate_limit("chat.create")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id=endpoint_id, count_as="call")),
+        Depends(get_auth_principal),  # Establish AuthPrincipal/AuthContext early for guardrails
+        Depends(enforce_llm_budget),  # Hard budget stop before handler runs
+        Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),  # Billing: daily API call limit
+    ]
+
+
+@router.post(
+    "/completions/media/{media_analysis_id:int}",
+    response_model=ChatCompletionResponse,
+    summary="Analyze a saved media item",
+    tags=["chat"],
+    dependencies=_chat_completion_dependencies("media.analysis"),
+    openapi_extra={"parameters": [
+        {"name": "media_analysis_id", "in": "path", "required": True, "schema": {"type": "integer", "minimum": 1}},
+    ]},
+)
 @router.post(
     "/completions",
     response_model=ChatCompletionResponse,
@@ -3565,14 +3590,7 @@ async def _persist_system_message_if_needed(
         status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service temporarily unavailable or misconfigured (e.g., provider API key issue)."},
         status.HTTP_504_GATEWAY_TIMEOUT: {"description": "Upstream LLM provider timed out."},
     },
-    dependencies=[
-        Depends(require_expected_user),
-        Depends(rbac_rate_limit("chat.create")),
-        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
-        Depends(get_auth_principal),  # Establish AuthPrincipal/AuthContext early for guardrails
-        Depends(enforce_llm_budget),  # Hard budget stop before handler runs
-        Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),  # Billing: daily API call limit
-    ]
+    dependencies=_chat_completion_dependencies("chat.completions"),
 )
 async def create_chat_completion(
     request: Request,  # Request object for audit logging, rate limiting, and provider state access
@@ -3602,6 +3620,8 @@ async def create_chat_completion(
         Response: A StreamingResponse (for streaming requests) or JSONResponse containing the LLM completion payload or an error body; raises HTTPException for client/server errors.
     """
     current_loop = asyncio.get_running_loop()
+    media_analysis_id = request.path_params.get("media_analysis_id")
+    analyzed_source_sha256: str | None = None
 
     # Generate unique request ID for tracking and set it in context
     request_id = set_request_id()
@@ -3624,9 +3644,24 @@ async def create_chat_completion(
     explicit_provider_requested = bool(str(raw_api_provider_input or "").strip())
     auto_model_requested = str(raw_model_input or "").strip().lower() == "auto"
     explicit_model_requested = bool(str(raw_model_input or "").strip()) and not auto_model_requested
+    if media_analysis_id is not None:
+        if not 1 <= media_analysis_id <= 2**63 - 1:
+            raise HTTPException(404, "Media item not found.")
+        await RequirePermission(MEDIA_READ)(await get_auth_principal(request))
+        if (
+            request_data.conversation_id
+            or request_data.character_id
+            or request_data.tldw_history_selection_v1
+            or request_data.tldw_history_server_existing_input_v1
+        ):
+            raise HTTPException(400, "Media analysis requires a standalone completion.")
+        request_data.save_to_db = False
+        if request_data.max_tokens is None:
+            request_data.max_tokens = 4096
     strict_model_selection = _should_enforce_strict_model_selection()
     allow_provider_fallback_for_request = (
         ENABLE_PROVIDER_FALLBACK
+        and media_analysis_id is None
         and not (strict_model_selection and explicit_model_requested)
     )
     routing_decision = None
@@ -3860,7 +3895,12 @@ async def create_chat_completion(
 
             # Slash command handling: compute, moderate, then optionally inject
             try:
-                if command_router.commands_enabled() and request_data and request_data.messages:
+                if (
+                    media_analysis_id is None
+                    and command_router.commands_enabled()
+                    and request_data
+                    and request_data.messages
+                ):
                     # Locate the most recent user message text
                     last_user_idx = None
                     last_text = None
@@ -4141,6 +4181,27 @@ async def create_chat_completion(
                         detail="Request payload too large.",
                     ) from None
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request.") from None
+
+            if media_analysis_id is not None:
+                message = request_data.messages[-1]
+                if message.role != "user" or not isinstance(message.content, str):
+                    raise HTTPException(400, "Media analysis requires a plain-text user message.")
+                async with asynccontextmanager(get_media_db_for_user)(request, current_user) as media_db:
+                    text = await asyncio.to_thread(
+                        read_saved_media_text, media_db, media_analysis_id, owner_user_id=current_user.id,
+                    )
+                message.content = prepare_analysis_text(message.content, text)
+                analyzed_source_sha256 = media_source_sha256(text)
+                # Charge for the full prompt while retaining the regular ingress limits above.
+                request_json = json.dumps(request_data.model_dump(), ensure_ascii=False)
+                context_window = resolve_model_context_window(selected_provider or provider, selected_model or model)
+                if isinstance(context_window, int) and context_window > 0 and (
+                    estimate_tokens_from_json(request_json) + (request_data.max_tokens or 0) > context_window
+                ):
+                    raise HTTPException(413, detail={
+                        "code": "media_analysis_context_too_large",
+                        "message": "This item is too large for the selected model. Choose a larger context window or split the item.",
+                    })
 
             # Apply rate limiting after slash command mutation so estimates are accurate.
             #
@@ -5937,6 +5998,11 @@ async def create_chat_completion(
                     alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
                     for header_key, header_value in alias_headers.items():
                         stream_response.headers[header_key] = header_value
+                    initial_metadata = None
+                    if analyzed_source_sha256 is not None:
+                        initial_metadata = {"tldw_media_source_sha256": analyzed_source_sha256}
+                    elif history_admission is not None:
+                        initial_metadata = {"tldw_history_admission_v1": history_admission}
                     _attach_credential_runtime_cleanup(
                         stream_response,
                         credential_runtime,
@@ -5945,20 +6011,9 @@ async def create_chat_completion(
                         sanitize_provider_errors=(
                             not trusted_terminal_local_response
                         ),
+                        initial_metadata=initial_metadata,
                     )
                     credential_runtime_owned_by_stream = True
-                    if history_admission is not None:
-                        accepted_stream = stream_response.body_iterator
-                        async def with_history_admission():
-                            try:
-                                yield "data: " + json.dumps({"tldw_history_admission_v1": history_admission}) + "\n\n"
-                                async for chunk in accepted_stream:
-                                    yield chunk
-                            finally:
-                                close = getattr(accepted_stream, "aclose", None)
-                                if close is not None:
-                                    await close()
-                        stream_response.body_iterator = with_history_admission()
                     return stream_response
 
                 else:  # Non-streaming
@@ -6132,6 +6187,8 @@ async def create_chat_completion(
                     alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
                     if history_admission is not None:
                         encoded_payload["tldw_history_admission_v1"] = history_admission
+                    if analyzed_source_sha256 is not None:
+                        encoded_payload["tldw_media_source_sha256"] = analyzed_source_sha256
                     return JSONResponse(content=encoded_payload, headers=alias_headers or None)
 
             # --- Exception Handling --- Improved with structured error handling

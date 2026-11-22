@@ -1056,3 +1056,64 @@ class TestParameterValidation:
             headers=auth_headers
         )
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("window, stream, source_length, prompt, expected_status, error_code", [
+    (1_000_000, False, 1_405_967, "", 200, None),
+    (1_000_000, True, 1_405_967, "", 200, None),
+    (16_384, True, 1_405_967, "", 413, "media_analysis_context_too_large"),
+    (1_000_000, True, 0, "", 422, "media_analysis_no_content"),
+    (1_000_000, False, 100, "/time", 200, None),
+])
+def test_saved_media_analysis_dispatches_the_whole_book_only_when_it_fits(
+    monkeypatch, test_client, auth_headers, window, stream, source_length, prompt, expected_status, error_code
+):
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+    from tldw_Server_API.app.core.Chat import chat_service, rate_limiter
+
+    monkeypatch.setattr(rate_limiter.get_rate_limiter().config, "per_user_tokens_per_minute", 1_000_000)
+    text = "x" * source_length
+    dispatched = []
+
+    async def media_db(_request, current_user):
+        assert current_user.id == 1
+        yield object()
+
+    def call_provider(**kwargs):
+        dispatched.extend(kwargs["messages_payload"])
+        if stream:
+            return iter([
+                'data: {"choices":[{"delta":{"content":"book analyzed"}}]}\n\n',
+                "data: [DONE]\n\n",
+            ])
+        return {"choices": [{"message": {"role": "assistant", "content": "book analyzed"}}]}
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+    monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+    monkeypatch.setattr(chat_endpoint, "get_media_db_for_user", media_db)
+    monkeypatch.setattr(chat_endpoint, "read_saved_media_text", lambda _db, media_id, **_kwargs: text if media_id == 42 else "")
+    monkeypatch.setattr(chat_endpoint, "resolve_model_context_window", lambda *_args: window)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", call_provider)
+    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", call_provider)
+
+    response = test_client.post(
+        "/api/v1/chat/completions/media/42",
+        headers=auth_headers,
+        json={
+            "model": "openai/gpt-4o-mini", "stream": stream,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+    )
+    assert response.status_code == expected_status, response.text
+    if expected_status == 200:
+        assert _message_text(dispatched[-1]) == (f"{prompt}\n\n{text}" if prompt else text)
+        metadata = (
+            json.loads(response.text.splitlines()[0].removeprefix("data: "))
+            if stream else response.json()
+        )
+        assert metadata["tldw_media_source_sha256"] == chat_endpoint.media_source_sha256(text)
+    else:
+        assert response.json()["detail"]["code"] == error_code
+        assert dispatched == []

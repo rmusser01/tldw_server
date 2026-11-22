@@ -541,6 +541,16 @@ def test_media_source_projection_is_explicit_bounded_and_uses_current_precedence
         assert "limit 1" in sql
         assert "dv.deleted = 0" in sql
         assert "t.deleted = 0" in sql
+
+        edited_text = "  Edited book text.\n"
+        db.apply_media_item_update(media_id=media_id, fields={"content": edited_text})
+        edited = lookup_repo.source_projection_by_id(media_id, max_chars=24, current_content_only=True)
+        assert edited["source_text"] == edited_text
+        assert edited["media_type"] == "text"
+
+        db.apply_media_item_update(media_id=media_id, fields={"content": ""})
+        empty = lookup_repo.source_projection_by_id(media_id, max_chars=24, current_content_only=True)
+        assert empty["source_text"] == ""
     finally:
         db.close_connection()
 
@@ -631,6 +641,37 @@ def test_postgres_media_source_projection_extracts_normalized_text_before_bound(
     assert "substr( coalesce(" in sql
     assert captured["params"] == (21, 9, "owner-1")
     assert captured["kwargs"] == {"log_errors": False}
+
+
+@pytest.mark.unit
+def test_postgres_saved_media_can_lock_the_active_owned_content() -> None:
+    captured = []
+
+    class _Cursor:
+        @staticmethod
+        def fetchone():
+            return {"id": 9, "media_type": "text", "source_text": "edited", "source_invalid": False}
+
+    class _PostgresSession:
+        backend_type = SimpleNamespace(name="POSTGRESQL")
+
+        @staticmethod
+        def execute_query(query, params, **kwargs):
+            captured.append((" ".join(str(query).split()).lower(), params, kwargs))
+            return _Cursor()
+
+    row = MediaLookupRepository(_PostgresSession()).source_projection_by_id(
+        9, max_chars=20, owner_user_id="owner-1", current_content_only=True, for_update=True,
+    )
+
+    assert row["source_text"] == "edited"
+    [(sql, params, kwargs)] = captured
+    assert "substr( m.content," in sql
+    assert "coalesce(cast(m.owner_user_id as text), m.client_id) = ?" in sql
+    assert "for no key update of m" in sql
+    assert "join" not in sql
+    assert params == (21, 9, "owner-1")
+    assert kwargs == {"log_errors": False}
 
 
 @pytest.mark.unit

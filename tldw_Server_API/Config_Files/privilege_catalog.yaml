@@ -443,6 +443,21 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/chat-completions
+  - id: media.analysis
+    description: Analyze text from a saved media item owned by the caller.
+    resource_tags:
+      - media
+      - read
+      - llm
+    sensitivity_tier: high
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates: []
+    doc_url: https://docs.example.com/privileges/media-analysis
   - id: chat.commands.list
     description: List available chat slash commands and brief descriptions.
     resource_tags:
