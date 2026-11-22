@@ -20,7 +20,7 @@ All paths under `tldw_Server_API/` unless noted.
 | BYOK | `app/core/Provider_Credentials/byok_runtime.py`, `byok_helpers.py` | credential resolution, base-URL allowlists |
 | Admin overrides | `app/services/admin_llm_providers_service.py` + admin routes | provider overrides CRUD (`is_enabled`, `allowed_models` for the server's key, `denied_models` for every key) + provider test + health |
 | Local control plane | `app/core/Local_LLM/` | llama.cpp supervisor, process runner, profile store, inventory, acquisition |
-| Discovery routes | `app/api/v1/endpoints/llm_providers.py` | `/llm/health`, providers, models metadata |
+| Discovery routes | `app/api/v1/endpoints/llm_providers.py` | `/llm/health`, providers, models metadata; public, and a signed-in user's listing puts each provider the user's own key serves on that key (TASK-15583) |
 
 ## Streamed chat turn with usage/cost (dataflow)
 
