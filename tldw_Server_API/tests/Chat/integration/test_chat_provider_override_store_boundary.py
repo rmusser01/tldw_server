@@ -561,6 +561,7 @@ def test_chat_autoswitch_cannot_select_disabled_openai_override(
     assert response.json()["detail"]["error_code"] == "provider_disabled"
     assert dispatch_calls == []
 
+
 @pytest.mark.parametrize(
     ("own_key", "expected"),
     [(True, (200, None, ["openai"])), (False, (403, "model_not_allowed", []))],

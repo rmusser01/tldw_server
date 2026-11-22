@@ -1327,6 +1327,7 @@ def test_huggingface_rejects_in_band_error_without_body_leak(
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
 
+
 @pytest.mark.asyncio
 @_MODEL_SOURCES
 async def test_a_model_off_the_allowlist_runs_on_the_users_own_key(

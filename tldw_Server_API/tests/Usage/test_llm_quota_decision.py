@@ -437,6 +437,7 @@ async def test_enforce_on_own_key_asks_once_and_admits_only_with_a_handle(monkey
             await usage_quota_deps.enforce_llm_quota_on_own_key(1, provider)
     assert asked == ["openai", "anthropic"]
 
+
 async def test_an_own_key_keeps_its_handle_for_a_model_off_the_allowlist(monkeypatch) -> None:
     """TASK-15582: the own-key boundary resolves the user's key for a model the server's key does not offer."""
     from tldw_Server_API.app.core.Provider_Credentials import provider_credential_runtime as runtime_module
