@@ -147,7 +147,7 @@ async def test_foreign_native_owner_rejected_before_any_input_append(frozen_chat
 
 def captured_payload(chat):
     """Read the actual accepted canonical snapshot through the owner boundary."""
-    state = chat.db.get_roleplay_resume_state(chat.conversation_id, owner_client_id="1")
+    state = chat.db.conversation_resume_store.get_roleplay_resume_state(chat.conversation_id, owner_client_id="1")
     payload = deepcopy(state["behavior_snapshot"]["payload"])
     chat.db.close_connection()
     return payload
@@ -165,7 +165,7 @@ def clone_captured_chat(chat, payload):
         conversation_id = chat.db.add_conversation({
             "character_id": chat.character_id, "title": "Historical frozen lore",
         }, conn=conn)
-        chat.db.put_behavior_snapshot(conversation_id, snapshot, conn=conn)
+        chat.db.conversation_resume_store.put_behavior_snapshot(conversation_id, snapshot, conn=conn)
     chat.db.close_connection()
     copied = vars(chat).copy()
     copied["conversation_id"] = conversation_id
@@ -477,7 +477,7 @@ def assign_preview_dictionary(chat, *, probability=1.0, timed_effects=None):
         dictionary_id, key="ALIAS742", content="ORBIT-742", probability=probability, timed_effects=timed_effects
     )
     with chat.db.transaction() as conn:
-        state = chat.db.get_roleplay_resume_state(chat.conversation_id, conn=conn, owner_client_id="1")
+        state = chat.db.conversation_resume_store.get_roleplay_resume_state(chat.conversation_id, conn=conn, owner_client_id="1")
         settings = deepcopy(state["settings"])
         settings["chat_dictionary_ids"] = [dictionary_id]
         settings["roleplayBehaviorV1"] = materialize_roleplay_behavior_settings(

@@ -75,7 +75,7 @@ def save_workspace_chat_model_selection(
         return
     try:
         with chat_db.transaction() as conn:
-            state = chat_db.get_roleplay_resume_state(
+            state = chat_db.conversation_resume_store.get_roleplay_resume_state(
                 conversation_id,
                 conn=conn,
                 lock_for_update=True,

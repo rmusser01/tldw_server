@@ -157,8 +157,8 @@ def test_imported_branches_read_as_a_parent_graph_not_as_legacy_history(db: Char
 
 def test_import_advances_the_history_version_once_per_message(db: CharactersRAGDB) -> None:
     _import(db)
-    assert db.get_roleplay_resume_state(CHAT_ID)["history_version"] == 5
-    assert db.get_roleplay_resume_state(CHAT_ID)["message_count"] == 4
+    assert db.conversation_resume_store.get_roleplay_resume_state(CHAT_ID)["history_version"] == 5
+    assert db.conversation_resume_store.get_roleplay_resume_state(CHAT_ID)["message_count"] == 4
 
 
 def test_imported_text_is_searchable(db: CharactersRAGDB) -> None:

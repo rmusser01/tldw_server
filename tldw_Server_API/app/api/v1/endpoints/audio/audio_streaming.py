@@ -821,11 +821,11 @@ def _persist_audio_chat_settings(
         )
         return bool(db.upsert_conversation_settings(conversation_id, final_settings))
 
-    if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
+    if callable(getattr(getattr(db, "conversation_resume_store", None), "get_roleplay_resume_state", None)) and callable(
         getattr(db, "transaction", None)
     ):
         with db.transaction() as conn:
-            resume_state = db.get_roleplay_resume_state(
+            resume_state = db.conversation_resume_store.get_roleplay_resume_state(
                 conversation_id,
                 conn=conn,
                 lock_for_update=True,

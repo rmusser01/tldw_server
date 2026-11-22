@@ -103,6 +103,7 @@ def _settings_at_public_limit(
 
 def test_openwebui_metadata_merge_uses_settings_version_cas():
     class _StubDB:
+        conversation_resume_store = property(lambda self: self)
         def __init__(self) -> None:
             self.expected_settings_version = None
 
@@ -162,6 +163,7 @@ def test_openwebui_metadata_merge_uses_settings_version_cas():
 
 def test_openwebui_metadata_merge_converts_cas_conflict_to_controlled_failure():
     class _ConflictingDB:
+        conversation_resume_store = property(lambda self: self)
         def get_conversation_settings(self, conversation_id: str):
             return {"settings": {}, "settings_version": 6}
 
@@ -211,14 +213,14 @@ def test_openwebui_metadata_merge_rejects_public_limit_overflow_atomically(
     openwebui_service,
 ):
     conversation_id = _seed_roleplay_conversation(openwebui_service)
-    state = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    state = openwebui_service.db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     bounded = _settings_at_public_limit(dict(state["settings"]))
     assert openwebui_service.db.upsert_conversation_settings(
         conversation_id,
         bounded,
         expected_settings_version=state["settings_version"],
     )
-    before = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    before = openwebui_service.db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     plan = SimpleNamespace(
         source_metadata={},
         history_current_id="message-1",
@@ -231,7 +233,7 @@ def test_openwebui_metadata_merge_rejects_public_limit_overflow_atomically(
         "external-1",
     )
 
-    after = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    after = openwebui_service.db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings"] == before["settings"]
     assert after["settings_version"] == before["settings_version"]
     assert after["history_version"] == before["history_version"]
@@ -241,7 +243,7 @@ def test_openwebui_import_mapping_rejects_public_limit_overflow_atomically(
     openwebui_service,
 ):
     conversation_id = _seed_roleplay_conversation(openwebui_service)
-    state = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    state = openwebui_service.db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     bounded = _settings_at_public_limit(
         dict(state["settings"]),
         public_updates={
@@ -259,7 +261,7 @@ def test_openwebui_import_mapping_rejects_public_limit_overflow_atomically(
         bounded,
         expected_settings_version=state["settings_version"],
     )
-    before = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    before = openwebui_service.db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     assert not openwebui_service._record_openwebui_import_mapping(
         conversation_id,
@@ -267,7 +269,7 @@ def test_openwebui_import_mapping_rejects_public_limit_overflow_atomically(
         source_format="openwebui_json",
     )
 
-    after = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    after = openwebui_service.db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings"] == before["settings"]
     assert after["settings_version"] == before["settings_version"]
     assert after["history_version"] == before["history_version"]

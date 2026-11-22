@@ -6,6 +6,7 @@ import inspect
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import ConversationResumeStore
 from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import MoodboardSyncStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -19,6 +20,14 @@ RETIRED = {
         "page_moodboards_for_sync_bootstrap",
         "page_moodboard_placements_for_sync_bootstrap",
         "page_studio_documents_for_sync_bootstrap",
+    ),
+    ConversationResumeStore: (
+        "append_idempotent_user_message",
+        "prepare_roleplay_resume_generation",
+        "commit_roleplay_resume_generation",
+        "put_behavior_snapshot",
+        "get_conversation_behavior_snapshot",
+        "get_roleplay_resume_state",
     ),
 }
 
