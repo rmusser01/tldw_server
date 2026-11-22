@@ -464,6 +464,12 @@ review fixes went on top. The lanes were then merged into
     XP-06 test waits longer.
   - The frontend tests were rerun under Node 20, the version CI uses. Before
     the merge, the NL-05 Notes → Trash → Notes test failed there.
+- **CI fixes on #3559 (2026-11-22):**
+  - The real-server cockpit spec opens the Tools tray before it checks the
+    MCP control. Its CC-08 update closed the tray after the web-search step,
+    and the MCP control lives in the tray. It was rerun locally against a
+    live server: 6 passed, and the check fails the same way as CI without it.
+  - pre-commit's whitespace nits in `note-mentions.ts` and `ocr.ts` are fixed.
 
 **Choices made during review and integration:**
 - **Delete and Undo (7C):**

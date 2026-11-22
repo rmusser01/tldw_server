@@ -1971,6 +1971,8 @@ test.describe('/chat cockpit real-server parity', () => {
     await contextRail.getByRole('button', { name: 'Add sources from Search & Context' }).click();
     await expect(page.getByRole('heading', { name: 'Search & Context', exact: true })).toBeVisible();
 
+    // The MCP control lives in the Tools tray, which closeToolsTray shut above.
+    await ensureComposerOptionsVisible(page);
     const mcpToggle = page.getByTestId('mcp-tools-toggle');
     await expect(mcpToggle).toHaveAccessibleName(
       /MCP tools|MCP tools unavailable|MCP tools are offline|MCP tools: None|Not checked yet/i
