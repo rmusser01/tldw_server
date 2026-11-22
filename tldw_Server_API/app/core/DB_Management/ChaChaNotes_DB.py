@@ -28961,9 +28961,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 try:
                     current_db_version = self._get_current_db_version(
-                    conn, "skill_registry", "name", name,
-                    owner_client_id=OwnerScope.NOT_APPLICABLE,  # OwnerScope.NOT_APPLICABLE: skill_registry has no client_id
-                )
+                        conn, "skill_registry", "name", name,
+                        owner_client_id=OwnerScope.NOT_APPLICABLE,  # OwnerScope.NOT_APPLICABLE: skill_registry has no client_id
+                    )
                 except ConflictError:
                     check_deleted = conn.execute(
                         "SELECT deleted, version FROM skill_registry WHERE name = ?",
