@@ -475,8 +475,8 @@ def test_create_source_review_plan_persists_bundle_and_occurrences_atomically(
 ) -> None:
     created_at = "2026-07-09T12:00:00.000Z"
     monkeypatch.setattr(
-        source_review_db,
-        "_get_current_utc_timestamp_iso",
+        source_review_db.ctx,
+        "utc_now_iso",
         lambda: created_at,
     )
     schedule = compute_source_review_schedule(
@@ -569,8 +569,8 @@ def test_source_review_plan_and_due_lists_have_stable_pagination_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        source_review_db,
-        "_get_current_utc_timestamp_iso",
+        source_review_db.ctx,
+        "utc_now_iso",
         lambda: "2026-07-09T12:00:00.000Z",
     )
     plan_ids = [
@@ -706,8 +706,8 @@ def test_start_source_review_occurrence_is_idempotent_and_stores_thin_metadata(
     started_at = "2026-07-09T13:00:00.000Z"
     timestamps = iter((created_at, started_at))
     monkeypatch.setattr(
-        source_review_db,
-        "_get_current_utc_timestamp_iso",
+        source_review_db.ctx,
+        "utc_now_iso",
         lambda: next(timestamps),
     )
     plan_id = _create_source_review_plan(source_review_db)
@@ -789,8 +789,8 @@ def test_complete_source_review_occurrence_updates_metadata_and_completion_sourc
     completed_at = "2026-07-09T14:00:00.000Z"
     timestamps = iter((created_at, started_at, completed_at))
     monkeypatch.setattr(
-        source_review_db,
-        "_get_current_utc_timestamp_iso",
+        source_review_db.ctx,
+        "utc_now_iso",
         lambda: next(timestamps),
     )
     plan_id = _create_source_review_plan(source_review_db)
@@ -821,8 +821,8 @@ def test_skip_source_review_occurrence_updates_timestamp_client_and_version(
     skipped_at = "2026-07-09T13:00:00.000Z"
     timestamps = iter((created_at, skipped_at))
     monkeypatch.setattr(
-        source_review_db,
-        "_get_current_utc_timestamp_iso",
+        source_review_db.ctx,
+        "utc_now_iso",
         lambda: next(timestamps),
     )
     plan_id = _create_source_review_plan(source_review_db)
@@ -972,8 +972,8 @@ def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
     deleted_at = "2026-07-09T13:00:00.000Z"
     timestamps = iter((created_at, deleted_at))
     monkeypatch.setattr(
-        source_review_db,
-        "_get_current_utc_timestamp_iso",
+        source_review_db.ctx,
+        "utc_now_iso",
         lambda: next(timestamps),
     )
     plan_id = _create_source_review_plan(

@@ -133,7 +133,7 @@ def test_search_character_cards_postgres_uses_tsquery(monkeypatch: pytest.Monkey
 
 def test_list_flashcards_postgres_translates_fts(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _make_postgres_db()
-    db._get_current_utc_timestamp_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
+    db.ctx.utc_now_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
     db.execute_query = MagicMock(return_value=_CursorStub([]))
 
     result = db.list_flashcards(q="alchemy", limit=10, offset=0)
@@ -165,7 +165,7 @@ def test_manage_link_postgres_uses_on_conflict():
 
     db = _make_postgres_db()
     db.client_id = "pg-test"
-    db._get_current_utc_timestamp_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
+    db.ctx.utc_now_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
 
     class _Cursor:
         def __init__(self, rowcount: int = 0):
@@ -202,7 +202,7 @@ def test_set_flashcard_tags_postgres_uses_on_conflict():
 
     db = _make_postgres_db()
     db.client_id = "pg-test"
-    db._get_current_utc_timestamp_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
+    db.ctx.utc_now_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
 
     class _Cursor:
         def __init__(self, *, rows: Optional[List[Any]] = None, rowcount: int = 0):
@@ -278,7 +278,7 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
     store = NoteStore(db)
     statements = []
 
-    def selected_owner(owner_client_id, alias=""):
+    def selected_owner(owner_client_id, alias="", *, table="?"):
         # Distinct bindings prove the returned predicate and parameters travel
         # together; production policy still selects the unchanged single owner.
         return f" AND {alias}.client_id = ?", (f"selected-{alias}",)
@@ -289,9 +289,9 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
             return SimpleNamespace(fetchall=lambda: [{"id": 7, "keyword": "Tag"}])
         return SimpleNamespace(fetchall=lambda: [{"id": "owned-note"}], fetchone=lambda: {"cnt": 1})
 
-    monkeypatch.setattr(db, "_selected_owner_filter", selected_owner)
+    monkeypatch.setattr(db.ctx, "owner_filter", selected_owner)
     monkeypatch.setattr(db, "execute_query", execute)
-    monkeypatch.setattr(db, "_map_table_for_backend", lambda name: name)
+    monkeypatch.setattr(db.ctx, "map_table", lambda name: name)
     if mode == "fallback":
         monkeypatch.setattr(
             "tldw_Server_API.app.core.DB_Management.chacha.note_store.FTSQueryTranslator.normalize_query",
@@ -335,7 +335,7 @@ def test_postgres_notes_relevance_order_breaks_ties_by_id(monkeypatch, mode):
         return SimpleNamespace(fetchall=lambda: [{"id": "owned-note"}], fetchone=lambda: {"cnt": 1})
 
     monkeypatch.setattr(db, "execute_query", execute)
-    monkeypatch.setattr(db, "_map_table_for_backend", lambda name: name)
+    monkeypatch.setattr(db.ctx, "map_table", lambda name: name)
     if mode == "fallback":
         monkeypatch.setattr(
             "tldw_Server_API.app.core.DB_Management.chacha.note_store.FTSQueryTranslator.normalize_query",
@@ -383,7 +383,7 @@ def test_postgres_notes_all_tags_filter_uses_owned_active_keyword_ids(monkeypatc
     store = NoteStore(db)
     statements = []
 
-    def selected_owner(owner_client_id, alias=""):
+    def selected_owner(owner_client_id, alias="", *, table="?"):
         return f" AND {alias}.client_id = ?", (f"selected-{alias}",)
 
     def execute(query, params):
@@ -393,9 +393,9 @@ def test_postgres_notes_all_tags_filter_uses_owned_active_keyword_ids(monkeypatc
             return SimpleNamespace(fetchall=lambda: rows)
         return SimpleNamespace(fetchall=lambda: [], fetchone=lambda: {"cnt": 0})
 
-    monkeypatch.setattr(db, "_selected_owner_filter", selected_owner)
+    monkeypatch.setattr(db.ctx, "owner_filter", selected_owner)
     monkeypatch.setattr(db, "execute_query", execute)
-    monkeypatch.setattr(db, "_map_table_for_backend", lambda name: name)
+    monkeypatch.setattr(db.ctx, "map_table", lambda name: name)
     if counting:
         store.count_notes_matching_keywords(None, ["Rag", "baking", "rag"], match="all")
     else:

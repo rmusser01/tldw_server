@@ -1131,7 +1131,7 @@ class TestKeywordsAndCollections:
         def _map_table(name: str) -> str:
             return "mapped_keywords" if name == "keywords" else name
 
-        monkeypatch.setattr(db_instance, "_map_table_for_backend", _map_table)
+        monkeypatch.setattr(db_instance.ctx, "map_table", _map_table)
         assert db_instance.soft_delete_keyword(1, expected_version=1) is True
         row = conn.execute("SELECT deleted, version FROM mapped_keywords WHERE id = 1").fetchone()
         deleted_val = row["deleted"] if isinstance(row, dict) else row[0]

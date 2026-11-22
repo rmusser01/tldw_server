@@ -649,7 +649,7 @@ def test_note_and_organization_changes_preserve_caller_rollback(note_owners, mod
 def test_foreign_version_change_between_lookup_and_mutation_does_not_transfer_note(note_owners, monkeypatch):
     f = note_owners
     before = f.bob.get_note_by_id(f.own)
-    original = f.bob._get_current_db_version
+    original = f.bob.ctx.current_db_version
 
     def reassign(conn, table, column, item, **kwargs):
         version = original(conn, table, column, item, **kwargs)
@@ -657,7 +657,7 @@ def test_foreign_version_change_between_lookup_and_mutation_does_not_transfer_no
             conn.execute("UPDATE notes SET client_id=? WHERE id=?", ("2", f.own))
         return version
 
-    monkeypatch.setattr(f.bob, "_get_current_db_version", reassign)
+    monkeypatch.setattr(f.bob.ctx, "current_db_version", reassign)
     with pytest.raises(ConflictError):
         f.bob.update_note(f.own, {"content": "Must not transfer back"}, expected_version=1)
     assert f.bob.get_note_by_id(f.own) == before

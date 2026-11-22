@@ -174,7 +174,7 @@ class PersonaTranscriptStore:
         return result
 
     def _query(self, conn: Any, sql: str, params: tuple[Any, ...]) -> Any:
-        query, values = self.db._prepare_backend_statement(sql, params)
+        query, values = self.db.ctx.prepare_statement(sql, params)
         return conn.execute(query, values or ())
 
     def get_persona_transcript(self, session_id: str, *, user_id: str, renew: bool = False) -> dict[str, Any] | None:

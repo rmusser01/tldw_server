@@ -52,7 +52,7 @@ def _controlled_clock(db: CharactersRAGDB, *, step: timedelta) -> Iterator[None]
         return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
     with pytest.MonkeyPatch.context() as patcher:
-        patcher.setattr(db, "_get_current_utc_timestamp_iso", _now)
+        patcher.setattr(db.ctx, "utc_now_iso", _now)
         yield
 
 

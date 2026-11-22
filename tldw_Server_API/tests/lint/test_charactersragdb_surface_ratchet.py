@@ -15,7 +15,8 @@ charactersragdb_surface_baseline.json, each a ceiling ``{"count": int, "reason":
     literal tuple or list counts once per element.
   * private_member_reaches: in every module under core/DB_Management/chacha/, an
     attribute ``_x`` (single leading underscore, not a dunder) read, written or deleted
-    on the db object, where the db object is ``self._db`` or a name ``db``; plus
+    on the db object, where the db object is a name ``db`` or ``ctx`` or any attribute
+    named ``db``, ``_db``, ``ctx`` or ``_ctx`` (R14: ``self._ctx.db._x`` must not hide a reach); plus
     ``getattr``/``setattr``/``hasattr``/``delattr`` on the db object with a literal ``"_x"``;
     plus, in a store class whose ``__getattr__`` forwards to ``self._db``, every
     ``self._x`` the class does not define itself (a ``def``, a class attribute or a
@@ -29,8 +30,8 @@ import alias or ``ChaChaNotes_DB.CharactersRAGDB``; assignment, ``del``, ``setat
 mentions either name are walked.
 
 Known limits: a class-body alias (``get_all = list_all``) is not counted as a method, and
-the private-reach matcher keys on the names ``db`` and ``self._db``, so an alias with any
-other name (``d = self._db; d._x``) is not counted.
+the private-reach matcher keys on those names, so an alias with any
+other name (``d = self._ctx.db; d._x``) is not counted.
 
 Growth fails: move the method into its chacha/ store and call the store, or use the
 db's public API instead of a private member. If growth is unavoidable, raise the count
@@ -213,11 +214,17 @@ def _scan(tree: ast.Module) -> tuple[Counter[str], int, dict[str, str]]:
     return delegated, other, names
 
 
+DB_NAMES = frozenset({"db", "ctx"})
+DB_ATTRS = frozenset({"db", "_db", "ctx", "_ctx"})
+# The two stores that take the ChaChaContext reach no private DB member at all (R14).
+ZERO_REACH_STORES = ("core/DB_Management/chacha/conversation_store.py", "core/DB_Management/chacha/message_store.py")
+
+
 def _is_db(node: ast.AST) -> bool:
-    """``db`` or ``self._db``: how chacha/ code names the CharactersRAGDB it wraps."""
+    """How chacha/ code names the CharactersRAGDB it wraps, or the context in front of it (R14)."""
     if isinstance(node, ast.Name):
-        return node.id == "db"
-    return isinstance(node, ast.Attribute) and node.attr == "_db" and _is_self(node.value)
+        return node.id in DB_NAMES
+    return isinstance(node, ast.Attribute) and node.attr in DB_ATTRS
 
 
 def _is_self(node: ast.AST) -> bool:
@@ -505,6 +512,29 @@ def test_a_new_private_reach_fails(tmp_path: Path, reach: str) -> None:
     assert problem.startswith("private_member_reaches: count 5 > ceiling 4"), problem
 
 
+@pytest.mark.parametrize(
+    "reach", ["self._ctx.db._x", "ctx.db._x", "self._ctx._db", "self.db._x", "ctx._x"]
+)
+def test_a_reach_through_a_context_or_db_attribute_counts(tmp_path: Path, reach: str) -> None:
+    store = _STORE.replace("        return db._backend", f"        {reach}\n        return db._backend")
+
+    assert _measure_seeded(tmp_path, store=store)["private_member_reaches"] == {"count": 5}
+
+
+@pytest.mark.parametrize("call", ["self._ctx.db.public()", "self._ctx.map_table('t')"])
+def test_a_public_call_through_the_context_adds_nothing(tmp_path: Path, call: str) -> None:
+    store = _STORE.replace("        return db._backend", f"        {call}\n        return db._backend")
+
+    assert _measure_seeded(tmp_path, store=store)["private_member_reaches"] == {"count": 4}
+
+
+def test_an_alias_of_the_db_is_a_known_limit(tmp_path: Path) -> None:
+    """M4: an alias under another name is not counted, as the module docstring says."""
+    store = _STORE.replace("        return db._backend", "        d = self._ctx.db\n        d._x\n        return db._backend")
+
+    assert _measure_seeded(tmp_path, store=store)["private_member_reaches"] == {"count": 4}
+
+
 def test_a_reach_through_a_forwarding_getattr_fails(tmp_path: Path) -> None:
     store = _STORE.replace("        self._prepare()", "        self._prepare()\n        self._commit()")
 
@@ -565,6 +595,30 @@ def test_charactersragdb_surface_does_not_grow() -> None:
 
     assert not problems, "\n".join(problems)
     _ceilings.warn_if_tightenable(SURFACE, measure(), baseline)
+
+
+def test_zero_reach_stores_stay_at_zero() -> None:
+    reaches = sources(REPO_ROOT)["private_member_reaches"]
+
+    found = {key: n for key, n in reaches.items() if key.startswith(ZERO_REACH_STORES)}
+
+    assert not found, f"these stores must reach no private DB member; use the ChaChaContext: {found}"
+
+
+def test_the_context_reaches_only_pinned_db_members() -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.context import PINNED_DB_PRIVATES
+
+    tree = ast.parse((REPO_ROOT / "tldw_Server_API/app/core/DB_Management/chacha/context.py").read_text(encoding="utf-8"))
+    reached = {
+        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute) and _private(node.attr) and _is_db(node.value)
+    }
+    reached |= {
+        node.args[1].value
+        for node in ast.walk(tree)
+        if _reaches_privately(node) and isinstance(node, ast.Call)
+    }
+
+    assert reached == set(PINNED_DB_PRIVATES)
 
 
 def test_raised_surface_ceilings_carry_a_new_reason() -> None:

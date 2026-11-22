@@ -2876,6 +2876,7 @@ def test_pin_edit_acquires_conversation_before_message_metadata_locks(
 
 
 def test_postgres_message_edit_lock_uses_for_update() -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
     from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 
     class _Result:
@@ -2895,7 +2896,7 @@ def test_postgres_message_edit_lock_uses_for_update() -> None:
         backend_type = BackendType.POSTGRESQL
 
     conn = _Connection()
-    MessageStore(_Database()).lock_message_for_edit("message-1", conn=conn)
+    MessageStore(ChaChaContext(_Database())).lock_message_for_edit("message-1", conn=conn)
 
     assert len(conn.calls) == 1
     assert "FOR UPDATE" in conn.calls[0][0]
@@ -2903,6 +2904,7 @@ def test_postgres_message_edit_lock_uses_for_update() -> None:
 
 
 def test_postgres_pin_edit_creates_and_locks_metadata_row() -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
     from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
 
     class _Result:
@@ -2922,7 +2924,7 @@ def test_postgres_pin_edit_creates_and_locks_metadata_row() -> None:
         backend_type = BackendType.POSTGRESQL
 
     conn = _Connection()
-    MessageStore(_Database()).lock_message_metadata_for_edit("message-1", conn=conn)
+    MessageStore(ChaChaContext(_Database())).lock_message_metadata_for_edit("message-1", conn=conn)
 
     assert len(conn.calls) == 2
     assert "ON CONFLICT(message_id) DO NOTHING" in conn.calls[0][0]

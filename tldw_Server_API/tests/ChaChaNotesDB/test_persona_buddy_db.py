@@ -447,7 +447,7 @@ def test_restore_persona_profile_uses_backend_aware_deleted_filter_for_postgres(
 
     monkeypatch.setattr(type(db_instance), "backend_type", BackendType.POSTGRESQL)
     monkeypatch.setattr(db_instance, "transaction", _fake_transaction)
-    monkeypatch.setattr(db_instance, "_prepare_backend_statement", lambda query, params: (query, params))
+    monkeypatch.setattr(db_instance.ctx, "prepare_statement", lambda query, params: (query, params))
 
     assert db_instance.restore_persona_profile(
         persona_id="persona-1",

@@ -17,7 +17,7 @@ def incarnation(db, cid):
 
 def test_server_issues_identity_preserves_restore_and_retires_same_id(native_fork_db, monkeypatch):
     db = native_fork_db
-    monkeypatch.setattr(db, "_get_current_utc_timestamp_iso", lambda: "2026-10-12T12:00:00.000Z")
+    monkeypatch.setattr(db.ctx, "utc_now_iso", lambda: "2026-10-12T12:00:00.000Z")
     cid = db.add_conversation({"id": "original", "character_id": None, "source_incarnation_id": "copied-authority"})
     original = incarnation(db, cid)
     assert original and original != "copied-authority"
