@@ -2394,6 +2394,7 @@ async def test_restore_chat_session_maps_conflict_error_to_409() -> None:
 @pytest.mark.asyncio
 async def test_already_active_restore_checks_protected_workspace_lifecycle() -> None:
     class ActiveRestoreDb(_BrokenChatSessionDb):
+        conversation_resume_store = property(lambda self: self)
         def restore_conversation(self, *args: Any, require_already_active: bool = False, **kwargs: Any) -> None:
             if require_already_active:
                 raise self.exc

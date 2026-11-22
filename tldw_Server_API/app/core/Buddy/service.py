@@ -289,7 +289,7 @@ class BuddyService:
             CharactersRAGDBError: If reading the conversation state fails.
         """
         try:
-            resume = self.db.get_roleplay_resume_state(conversation_id, owner_client_id=self.user_id)
+            resume = self.db.conversation_resume_store.get_roleplay_resume_state(conversation_id, owner_client_id=self.user_id)
         except NotFoundError as exc:
             raise BuddyNotFoundError("Target unavailable") from exc
         settings = resume.get("settings") or {}

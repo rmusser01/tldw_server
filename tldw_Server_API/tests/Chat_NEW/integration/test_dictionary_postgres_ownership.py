@@ -191,19 +191,19 @@ def test_native_capture_refuses_foreign_legacy_assignment_before_binding(native_
         conn.execute("INSERT INTO dictionary_entries(dictionary_id,key,content) VALUES (?,?,?)",
                      (foreign, "PRIVATE_TOKEN", "BOB_SECRET"))
     with chat.alice.transaction() as conn:
-        state = chat.alice.get_roleplay_resume_state(chat.cid, conn=conn, lock_for_update=True,
+        state = chat.alice.conversation_resume_store.get_roleplay_resume_state(chat.cid, conn=conn, lock_for_update=True,
                                                    owner_client_id="1")
         assert state["materialized_settings"] is not None  # nosec B101 - usable native baseline
         assert chat.alice.upsert_conversation_settings(
             chat.cid, {**state["settings"], "chat_dictionary_ids": [foreign]}, conn=conn,
             expected_settings_version=state["settings_version"],
         )  # nosec B101 - exact legacy assignment CAS succeeded
-    before = chat.alice.get_roleplay_resume_state(chat.cid, owner_client_id="1")
+    before = chat.alice.conversation_resume_store.get_roleplay_resume_state(chat.cid, owner_client_id="1")
     assert before["settings"]["chat_dictionary_ids"] == [foreign]  # nosec B101 - fixture admission verified
     count = before["message_count"]
     response = capture(chat)
     assert response.status_code == 409, response.text  # nosec B101 - foreign assignment refusal
-    after = chat.alice.get_roleplay_resume_state(chat.cid, owner_client_id="1")
+    after = chat.alice.conversation_resume_store.get_roleplay_resume_state(chat.cid, owner_client_id="1")
     assert after["settings"] == before["settings"]  # nosec B101 - no legacy write
     assert after["settings_version"] == before["settings_version"]  # nosec B101 - no CAS mutation
     assert after["message_count"] == count  # nosec B101 - no append
@@ -270,7 +270,7 @@ def assign_native(chat, ids):
     response = chat.client.put(f"/api/v1/chats/{chat.cid}/settings?scope_type=global",
                                headers=chat.headers, json={"settings": {"chat_dictionary_ids": ids}})
     assert response.status_code == 200, response.text  # nosec B101 - actual owner writer
-    return chat.alice.get_roleplay_resume_state(chat.cid, owner_client_id="1")
+    return chat.alice.conversation_resume_store.get_roleplay_resume_state(chat.cid, owner_client_id="1")
 
 
 @pytest.mark.parametrize("marker", [None, "2"])
@@ -288,10 +288,10 @@ def test_unproven_pg_materialized_plan_refuses_without_silent_refresh(native_cat
         assert chat.alice.upsert_conversation_settings(
             chat.cid, settings, conn=conn, expected_settings_version=state["settings_version"],
         )  # nosec B101 - exact historical/corrupt persisted envelope fixture
-    before = chat.alice.get_roleplay_resume_state(chat.cid, owner_client_id="1")
+    before = chat.alice.conversation_resume_store.get_roleplay_resume_state(chat.cid, owner_client_id="1")
     response = capture(chat)
     assert response.status_code == 409, response.text  # nosec B101 - no implicit owner adoption
-    after = chat.alice.get_roleplay_resume_state(chat.cid, owner_client_id="1")
+    after = chat.alice.conversation_resume_store.get_roleplay_resume_state(chat.cid, owner_client_id="1")
     assert after["settings"] == before["settings"]  # nosec B101 - no implicit catalog refresh
     assert after["settings_version"] == before["settings_version"]  # nosec B101 - no legacy write
     assert after["message_count"] == before["message_count"]  # nosec B101 - no append
@@ -331,7 +331,7 @@ def test_public_settings_cannot_supply_catalog_owner_authority(native_catalog_ch
                                headers=chat.headers, json={"settings": {
                                    "roleplayBehaviorV1": build_materialized_behavior_settings(values)}})
     assert response.status_code == 422, response.text  # nosec B101 - protected field is server owned
-    after = chat.alice.get_roleplay_resume_state(chat.cid, owner_client_id="1")
+    after = chat.alice.conversation_resume_store.get_roleplay_resume_state(chat.cid, owner_client_id="1")
     assert after["settings"] == state["settings"]  # nosec B101 - no forged plan write
 
 

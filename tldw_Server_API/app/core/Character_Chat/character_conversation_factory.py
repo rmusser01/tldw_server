@@ -2358,7 +2358,7 @@ def bind_legacy_assigned_dictionaries(
         snapshot_to_wire,
     )
 
-    state = db.get_roleplay_resume_state(conversation_id, conn=conn, lock_for_update=True, owner_client_id=owner_user_id)
+    state = db.conversation_resume_store.get_roleplay_resume_state(conversation_id, conn=conn, lock_for_update=True, owner_client_id=owner_user_id)
     conversation = state["conversation"]
     if (conversation.get("scope_type") or "global", conversation.get("workspace_id")) != (scope_type, workspace_id):
         raise HistorySelectionError("scope_mismatch")

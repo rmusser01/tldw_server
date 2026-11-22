@@ -7055,7 +7055,7 @@ def _persist_knowledge_qa_share_links(
 ) -> None:
     try:
         with db.transaction() as conn:
-            resume_state = db.get_roleplay_resume_state(
+            resume_state = db.conversation_resume_store.get_roleplay_resume_state(
                 conversation_id,
                 conn=conn,
                 lock_for_update=True,

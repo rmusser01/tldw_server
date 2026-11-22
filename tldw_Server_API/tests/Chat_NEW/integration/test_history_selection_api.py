@@ -714,14 +714,14 @@ def test_unsupported_saved_context_rejects_before_provider_or_admission(history_
     elif kind == "skills":
         monkeypatch.setattr(db, "history_skills_may_be_visible", lambda: True)
     else:
-        original = db.get_roleplay_resume_state
+        original = db.conversation_resume_store.get_roleplay_resume_state
 
         def with_unsupported_context(*args, **kwargs):
             state = original(*args, **kwargs)
             state["settings"] = {"conversationContext": {"world_book_ids": [1]}}
             return state
 
-        monkeypatch.setattr(db, "get_roleplay_resume_state", with_unsupported_context)
+        monkeypatch.setattr(db.conversation_resume_store, "get_roleplay_resume_state", with_unsupported_context)
     response = client.post("/api/v1/chat/completions", headers=headers, json=request)
     assert response.status_code == 409, response.text
     assert response.json()["detail"] == {
@@ -810,7 +810,7 @@ def test_saved_materialized_context_rejects_in_owner_transaction_without_writes(
         prompt_preset_id="st_default",
     )
     with db.transaction() as conn:
-        state = db.get_roleplay_resume_state(cid, conn=conn, owner_client_id="1")
+        state = db.conversation_resume_store.get_roleplay_resume_state(cid, conn=conn, owner_client_id="1")
     settings = state["settings"]
     values = settings["roleplayBehaviorV1"]["values"]
     if invalid == "author_note":
@@ -823,13 +823,13 @@ def test_saved_materialized_context_rejects_in_owner_transaction_without_writes(
     body = capture(client, cid, headers).json()
     selection = resolve_history_selection(body["snapshot"], body["view"], "send", "invalid-materialized")["selection"]
     reads = []
-    original = db.get_roleplay_resume_state
+    original = db.conversation_resume_store.get_roleplay_resume_state
 
     def checked_read(*args, **kwargs):
         reads.append(kwargs.get("conn") is not None and kwargs.get("lock_for_update") is True)
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(db, "get_roleplay_resume_state", checked_read)
+    monkeypatch.setattr(db.conversation_resume_store, "get_roleplay_resume_state", checked_read)
     response = client.post(
         "/api/v1/chat/completions",
         headers=headers,
@@ -1030,7 +1030,7 @@ def test_seeded_character_opening_is_an_owned_assistant_root(
     assert body["selected_content"][0]["message"] == raw
     assert db.get_message_by_id(mid)["content"] == raw
     assert messages[0]["sender"] == "assistant"
-    state = db.get_roleplay_resume_state(cid)
+    state = db.conversation_resume_store.get_roleplay_resume_state(cid)
     effective = state["effective_completion"]
     assert (
         effective["provider"],
@@ -1521,7 +1521,7 @@ def test_actual_put_and_native_delete_use_conversation_first_order(native_mutati
     writing, release, started, lock_attempt = (threading.Event() for _ in range(4))
     advance = db.message_store._advance_history_version
     lock = db.message_store._lock_message_conversation
-    resume = db.get_roleplay_resume_state
+    resume = db.conversation_resume_store.get_roleplay_resume_state
 
     def pause_after_first_write(conn, conversation_id):
         if not writing.is_set():
@@ -1541,7 +1541,7 @@ def test_actual_put_and_native_delete_use_conversation_first_order(native_mutati
 
     monkeypatch.setattr(db.message_store, "_advance_history_version", pause_after_first_write)
     monkeypatch.setattr(db.message_store, "_lock_message_conversation", observe_lock)
-    monkeypatch.setattr(db, "get_roleplay_resume_state", observe_resume)
+    monkeypatch.setattr(db.conversation_resume_store, "get_roleplay_resume_state", observe_resume)
 
     def request(kind, second=False):
         from fastapi.testclient import TestClient
