@@ -11,7 +11,7 @@ export async function processImageForOCR(imageData: string): Promise<string> {
             return ""
         }
 
-        const lang = await getOCRLanguageToUse() 
+        const lang = await getOCRLanguageToUse()
         const isOCROffline = isOfflineOCR(lang)
 
         const workerPath = `${OCR_CDN_BASE}/worker.min.js`

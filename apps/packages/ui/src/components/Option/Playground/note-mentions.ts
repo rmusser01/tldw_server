@@ -109,4 +109,3 @@ export const readNoteRows = (response: unknown): NoteRow[] => {
       content: typeof row.content === "string" ? row.content : null
     }))
 }
-
