@@ -455,12 +455,15 @@ review fixes went on top. The lanes were then merged into
   one-name guard allowlists only the /knowledge page title.
 - **`getNote`:** it lives only on the Notes domain client. A delegating copy
   on `TldwApiClientBase` failed the client ownership guard.
-- **Dev merge (2026-11-22):** dev @ 251bcc7484, with #3526, merged without
-  conflicts. Wave 7 was built on an earlier Wave 6 head, so this also brings
-  Wave 6's CI fixes: the NL-05 selection reset now happens during render, and
-  the XP-06 test waits longer. The frontend tests were rerun under Node 20,
-  the version CI uses. Before the merge, the NL-05 Notes → Trash → Notes test
-  failed there.
+- **Dev merges (2026-11-22):** dev @ cee4433eb2 is merged in. It brings
+  #3526, the ChaCha owner-scope work (TASK-13950.23) and the first
+  CharactersRAGDB shrink (TASK-13950.22). The only conflict was the OpenAPI
+  fingerprint, which was regenerated from the merged tree.
+  - Wave 7 was built on an earlier Wave 6 head, so this also brings Wave 6's
+    CI fixes: the NL-05 selection reset now happens during render, and the
+    XP-06 test waits longer.
+  - The frontend tests were rerun under Node 20, the version CI uses. Before
+    the merge, the NL-05 Notes → Trash → Notes test failed there.
 
 **Choices made during review and integration:**
 - **Delete and Undo (7C):**
@@ -542,7 +545,7 @@ review fixes went on top. The lanes were then merged into
   - Not built: `time_range` on `GET /notes/graph` is documented but can't be
     reached, because a nested `Query()` model returns 422.
   - It needs a flat parameter, and a seed query for libraries over the cap.
-  - It needs an issue.
+  - Filed as #3558.
 - **Graph build:** `generate_graph` still runs on the event loop. The
   suggestion routes show the `run_in_threadpool` plus
   `release_context_connection` pattern.
