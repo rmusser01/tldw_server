@@ -4,6 +4,7 @@ import uuid
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -209,15 +210,15 @@ class TestCountUserNotes:
         assert db.count_user_notes(include_deleted=False) == 1
 
 
-# ---------- _chunk_list ----------
+# ---------- ChaChaContext.chunk_list ----------
 
 class TestChunkList:
     def test_empty(self):
-        assert CharactersRAGDB._chunk_list([], 10) == []
+        assert ChaChaContext.chunk_list([], 10) == []
 
     def test_exact_size(self):
-        assert CharactersRAGDB._chunk_list([1, 2, 3], 3) == [[1, 2, 3]]
+        assert ChaChaContext.chunk_list([1, 2, 3], 3) == [[1, 2, 3]]
 
     def test_smaller_chunks(self):
-        result = CharactersRAGDB._chunk_list([1, 2, 3, 4, 5], 2)
+        result = ChaChaContext.chunk_list([1, 2, 3, 4, 5], 2)
         assert result == [[1, 2], [3, 4], [5]]

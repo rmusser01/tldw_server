@@ -249,3 +249,245 @@ def test_rewire_fails_closed_on_an_unmapped_private(tmp_path: Path, capsys: pyte
     assert split.main(["rewire", "--store", STORE, "--root", str(root)]) == 1
     assert "_mystery" in capsys.readouterr().out
     assert _text(root, STORE) == textwrap.dedent(src)
+
+
+# --- store mode, verify, diffpairs, check, tests (TASK-13950.22 PR C2) ----------------------------
+
+import ast  # noqa: E402
+import subprocess  # noqa: E402  # nosec B404  # seeded tmp git repos, fixed argv
+
+from Helper_Scripts.chacha_split import diffpairs  # noqa: E402
+
+MANIFEST_PATH = "Helper_Scripts/chacha_split/manifests/t99_s.py"
+S_STORE = "tldw_Server_API/app/core/DB_Management/chacha/s_store.py"
+STORE_DB = '''
+import time
+
+
+class CharactersRAGDB:
+    def __init__(self):
+        self.s_store = object()
+
+    def keep(self):
+        return self._moved(1)
+
+    def _moved(self, a):
+        """Doc."""
+        if self.backend_type == 1:
+            return self._map_table_for_backend(a)
+        return time.time() + self.client_id + self._renamed(a) + len(str(self))
+
+    def _renamed(self, a):
+        return a
+
+    def tick(self):
+        return time.time()
+'''
+STORE_MODULE = """
+class SStore:
+    def __init__(self, ctx):
+        self._ctx = ctx
+
+    def other(self):
+        return self._ctx.db._moved(2)
+"""
+MANIFEST_SRC = (
+    'MANIFEST = {"task": "T99", "mode": "store", "source": "%s", "target": "%s", "alias": None,\n'
+    '            "store_class": "SStore", "store_attr": "s_store", "names": ["_moved"], "shims": [],\n'
+    '            "rewrites": {}, "renames": {"_renamed": "renamed"}, "structural": []}\n' % (DB, S_STORE)
+)
+GIT = ["git", "-c", "user.name=chacha-split-test", "-c", "user.email=chacha-split-test@example.invalid", "-c", "commit.gpgsign=false"]
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run([*GIT, *args], cwd=root, check=True, capture_output=True)  # nosec B603 B607
+
+
+def _store_tree(root: Path, manifest: str = MANIFEST_SRC, files: dict[str, str] | None = None) -> Path:
+    _seed(root, {S_STORE: STORE_MODULE, MANIFEST_PATH: manifest, **(files or {})}, db=STORE_DB)
+    _git(root, "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    return root
+
+
+def _store(root: Path) -> int:
+    return split.main(["store", str(root / MANIFEST_PATH), "--root", str(root)])
+
+
+def _verify(root: Path) -> int:
+    return split.main(["verify", str(root / MANIFEST_PATH), "--base", "HEAD", "--root", str(root)])
+
+
+def test_store_moves_a_method_and_rewrites_its_receivers(tmp_path: Path) -> None:
+    root = _store_tree(tmp_path, files={TEST: "def f(db):\n    return db._moved(3) + db._renamed(1)\n"})
+    assert _store(root) == 0
+    store = _text(root, S_STORE)
+    assert "def _moved(self, a):" in store
+    assert "self._ctx.backend_type == 1" in store and "self._ctx.map_table(a)" in store
+    assert "self._ctx.client_id" in store and "self._ctx.db.renamed(a)" in store  # a rename
+    assert "len(str(self._ctx.db))" in store  # a bare self
+    assert "import time" in store
+    assert "self._moved(2)" in store and "_ctx.db._moved" not in store  # the store calls itself
+    db = _text(root, DB)
+    assert "def _moved" not in db and "self.s_store._moved(1)" in db
+    assert "def renamed(self, a)" in db and "_renamed" not in db
+    assert "db.s_store._moved(3) + db.renamed(1)" in _text(root, TEST)
+
+
+def test_store_fails_closed_on_an_unmapped_private(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _store_tree(tmp_path)
+    (root / DB).write_text(STORE_DB.replace("self._renamed(a)", "self._mystery(a)"))
+    before = _text(root, S_STORE)
+    assert _store(root) == 1
+    assert "_mystery" in capsys.readouterr().out
+    assert _text(root, S_STORE) == before
+
+
+def test_verify_passes_on_tool_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _store_tree(tmp_path)
+    assert _store(root) == 0
+    assert _verify(root) == 0
+    assert "moved 1 identical" in capsys.readouterr().out
+
+
+def test_verify_fails_on_a_hand_edit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _store_tree(tmp_path)
+    assert _store(root) == 0
+    (root / S_STORE).write_text(_text(root, S_STORE).replace("time.time()", "time.time() + 1"))
+    assert _verify(root) == 1
+    assert "_moved" in capsys.readouterr().out
+
+
+def test_verify_fails_on_an_edited_remaining_def_unless_structural(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _store_tree(tmp_path)
+    assert _store(root) == 0
+    (root / DB).write_text(_text(root, DB).replace("return self.s_store._moved(1)", "return 5"))
+    assert _verify(root) == 1
+    assert "keep" in capsys.readouterr().out
+    (root / MANIFEST_PATH).write_text(MANIFEST_SRC.replace('"structural": []', '"structural": ["keep"]'))
+    assert _verify(root) == 0
+    assert "structural ['keep']" in capsys.readouterr().out
+
+
+def test_manifest_is_read_without_import(tmp_path: Path) -> None:
+    path = tmp_path / "t98_bad.py"
+    path.write_text('MANIFEST = {"names": [__import__("os").getcwd()]}\n')
+    with pytest.raises(SystemExit, match="literal"):
+        split.load_manifest(path)
+
+
+def test_diffpairs_lists_receiver_rewrites_and_fails_elsewhere(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _store_tree(tmp_path)
+    assert _store(root) == 0
+    args = [str(root / MANIFEST_PATH), "--base", "HEAD", "--root", str(root)]
+    assert diffpairs.main(args) == 0
+    out = capsys.readouterr().out
+    assert "self._map_table_for_backend  ->  self._ctx.map_table" in out and "DISALLOWED" not in out
+    (root / S_STORE).write_text(_text(root, S_STORE).replace("== 1", "== 2"))
+    assert diffpairs.main(args) == 1
+
+
+def test_diffpairs_shares_no_code_with_split() -> None:
+    tree = ast.parse(Path(diffpairs.__file__).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            assert "split" not in (node.module or "").split(".")[-1:] and all(a.name != "split" for a in node.names)
+        if isinstance(node, ast.Import):
+            assert all("split" not in a.name.split(".")[-1:] for a in node.names)
+
+
+FUNCTIONS_MANIFEST = (
+    'MANIFEST = {"task": "T99", "mode": "functions", "source": "%s", "target": "%s", "alias": "mod",\n'
+    '            "store_class": None, "store_attr": None, "names": ["_helper"], "shims": [],\n'
+    '            "rewrites": {}, "renames": {}, "structural": []}\n' % (DB, "tldw_Server_API/app/core/DB_Management/chacha/mod.py")
+)
+MOD = "tldw_Server_API/app/core/DB_Management/chacha/mod.py"
+
+
+def _functions_tree(root: Path, base_def: str, head_def: str) -> list[str]:
+    _seed(root, {MANIFEST_PATH: FUNCTIONS_MANIFEST, MOD: head_def}, db="class CharactersRAGDB:\n" + base_def)
+    _git(root, "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    return [str(root / MANIFEST_PATH), "--base", "HEAD", "--root", str(root)]
+
+
+def test_diffpairs_accepts_a_static_move(tmp_path: Path) -> None:
+    base = "    @staticmethod\n    def _helper(x):\n        return x + 1\n"
+    assert diffpairs.main(_functions_tree(tmp_path / "ok", base, "def _helper(x):\n    return x + 1\n")) == 0
+    assert diffpairs.main(_functions_tree(tmp_path / "bad", base, "def _helper(x):\n    return x + 2\n")) == 1
+
+
+def test_diffpairs_accepts_a_classmethod_move(tmp_path: Path) -> None:
+    base = "    @classmethod\n    def _helper(cls, x):\n        return cls._k(x) + 1\n"
+    assert diffpairs.main(_functions_tree(tmp_path / "ok", base, "def _helper(x):\n    return mod.k(x) + 1\n")) == 0
+    assert diffpairs.main(_functions_tree(tmp_path / "bad", base, "def _helper(x):\n    return mod.k(x) + 2\n")) == 1
+
+
+def test_diffpairs_accepts_a_renamed_attribute(tmp_path: Path) -> None:
+    base = "    def _helper(self, x):\n        return self.y._old(x)\n"
+    head = "def _helper(ctx, x):\n    return ctx.y.new(x)\n"
+    manifest = FUNCTIONS_MANIFEST.replace('"renames": {}', '"renames": {"_old": "new"}')
+    args = _functions_tree(tmp_path, base, head)
+    (tmp_path / MANIFEST_PATH).write_text(manifest)
+    assert diffpairs.main(args) == 0
+
+
+def test_patches_watches_module_names_the_moved_bodies_import(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _store_tree(tmp_path)
+    assert _store(root) == 0
+    source = (
+        "from x import ChaChaNotes_DB\n"
+        "def t1(monkeypatch):\n    monkeypatch.setattr('m.ChaChaNotes_DB.time', f)\n"
+        "def t2():\n    patch('m.ChaChaNotes_DB.time')\n"
+        "def t3():\n    setattr(ChaChaNotes_DB, 'time', f)\n"
+        "def t4(monkeypatch):\n    monkeypatch.setattr('m.ChaChaNotes_DB.sleep', f)\n"
+    )
+    (root / TEST).parent.mkdir(parents=True, exist_ok=True)
+    (root / TEST).write_text(source)
+    assert split.main(["patches", str(root / MANIFEST_PATH), "--root", str(root)]) == 1
+    out = capsys.readouterr().out
+    hits = [line for line in out.splitlines() if line.startswith(TEST)]
+    assert len(hits) == 3 and all("time" in line for line in hits), out
+    assert "both sides" in out  # the DB module still reads ``time``
+
+
+def test_patches_watches_constants_the_moved_bodies_read(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db = STORE_DB.replace("    def keep", "    _LIMIT = 5\n\n    def keep").replace("time.time()", "self._LIMIT")
+    manifest = MANIFEST_SRC.replace('"rewrites": {}', '"rewrites": {"_LIMIT": "ctx.limit"}')
+    root = _store_tree(tmp_path, manifest, {TEST: 'def t(monkeypatch):\n    monkeypatch.setattr(CharactersRAGDB, "_LIMIT", 9)\n'})
+    (root / DB).write_text(db)
+    assert _store(root) == 0
+    assert "self._ctx.limit" in _text(root, S_STORE)  # the manifest decision
+    assert split.main(["patches", str(root / MANIFEST_PATH), "--root", str(root)]) == 1
+    assert "_LIMIT" in capsys.readouterr().out
+
+
+def test_check_lists_an_untouched_reference_to_a_moved_name(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _store_tree(tmp_path, files={TEST: "def f(db):\n    return db._moved(1)\n"})
+    assert _store(root) == 0
+    assert split.main(["check", str(root / MANIFEST_PATH), "--root", str(root)]) == 0
+    (root / TEST).write_text("def f(db):\n    return db._moved(1)\n    x = db._renamed\n")
+    assert split.main(["check", str(root / MANIFEST_PATH), "--root", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert "_moved" in out and "_renamed" in out
+
+
+def test_tests_lists_files_referencing_moved_names(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    other = "tldw_Server_API/tests/test_other.py"
+    root = _store_tree(tmp_path, files={TEST: "db._moved(1)\n", other: "db._renamed(1)\n", "tldw_Server_API/tests/test_none.py": "x = 1\n"})
+    assert split.main(["tests", str(root / MANIFEST_PATH), "--root", str(root)]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert {TEST, other} <= set(out) and "tldw_Server_API/tests/test_none.py" not in out
+
+
+def test_check_ignores_a_kwarg_named_like_a_retired_name_on_an_unrelated_call(tmp_path: Path) -> None:
+    root = _seed(tmp_path, {TEST: "def t():\n    run(get_x=1)\n"}, db=CLEAN_DB)
+    assert _callers(root, "--check") == 0
+
+
+@pytest.mark.parametrize("call", ["SimpleNamespace(get_x=f)", "types.SimpleNamespace(get_x=f)", "MagicMock(get_x=f)", "mock.Mock(get_x=f)"])
+def test_check_flags_a_kwarg_fake_of_a_retired_name(tmp_path: Path, call: str) -> None:
+    root = _seed(tmp_path, {TEST: f"fake = {call}\n"}, db=CLEAN_DB)
+    assert _callers(root, "--check") == 1

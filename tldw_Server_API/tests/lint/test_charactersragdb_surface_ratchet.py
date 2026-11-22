@@ -216,8 +216,13 @@ def _scan(tree: ast.Module) -> tuple[Counter[str], int, dict[str, str]]:
 
 DB_NAMES = frozenset({"db", "ctx"})
 DB_ATTRS = frozenset({"db", "_db", "ctx", "_ctx"})
-# The two stores that take the ChaChaContext reach no private DB member at all (R14).
-ZERO_REACH_STORES = ("core/DB_Management/chacha/conversation_store.py", "core/DB_Management/chacha/message_store.py")
+# The stores that take the ChaChaContext reach no private DB member at all (R14).
+ZERO_REACH_STORES = (
+    "core/DB_Management/chacha/conversation_store.py",
+    "core/DB_Management/chacha/message_store.py",
+    "core/DB_Management/chacha/note_store.py",
+    "core/DB_Management/chacha/keyword_store.py",
+)
 
 
 def _is_db(node: ast.AST) -> bool:

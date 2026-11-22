@@ -1921,7 +1921,7 @@ def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns
     )
 
     assert db.get_moodboard_by_id(1) is None  # nosec B101
-    assert NoteStore(db).get_note_studio_document(STUDIO_NOTE_ID) is None  # nosec B101
+    assert NoteStore(db.ctx).get_note_studio_document(STUDIO_NOTE_ID) is None  # nosec B101
     assert TaskStore(db).resolve_task_compatibility_dataset_id(
         owner_user_id=OWNER
     ) == DATASET_A
@@ -1941,7 +1941,7 @@ def test_moodboard_missing_generated_id_rolls_back_native_insert(
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", schema_version)
     db = CharactersRAGDB(str(tmp_path / "missing-moodboard-id.sqlite"), client_id=OWNER)
     try:
-        assert db._supports_notes_moodboard_studio_v61() is (schema_version >= 61)
+        assert db.supports_notes_moodboard_studio_v61() is (schema_version >= 61)
         existing_id = db.add_moodboard(name="Keep board")
         assert isinstance(existing_id, int)
         before = [dict(row) for row in db.execute_query("SELECT * FROM moodboards ORDER BY id").fetchall()]

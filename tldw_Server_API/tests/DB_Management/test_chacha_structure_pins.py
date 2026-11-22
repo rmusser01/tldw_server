@@ -54,8 +54,15 @@ CONTEXT_SURFACE = frozenset(
         "transaction", "get_connection", "execute_query", "execute_many",
         "utc_now_iso", "new_uuid", "normalize_nullable_text", "map_table", "owner_filter",
         "current_db_version", "prepare_statement",
+        "keyword_link_filter", "require_owner_row", "case_insensitive_order_expression", "case_insensitive_order_clause",
+        "unique_text_match_sql", "is_unique_violation", "chunk_list", "canonical_json_text_v61", "note_task_v60_hash",
+        "deserialize_row_fields", "runtime_schema_version",
     }
 )  # fmt: skip
+
+
+# Renamed names whose old spelling is still a DB attribute: none (a rename removes the private name).
+LEGACY_FORWARDERS: frozenset[str] = frozenset()
 
 
 def test_ctx_exists_on_a_db_built_without_init() -> None:
@@ -84,6 +91,24 @@ def test_every_split_rewrite_target_is_a_context_member() -> None:
 
     for target in (*split.CTX_REWRITES.values(), *split.CTX_PUBLIC):
         assert hasattr(ChaChaContext, target), target  # nosec B101
+
+
+def test_every_split_module_constant_and_db_rename_resolves() -> None:
+    """The constants and renames ``rewire`` and ``store`` emit must exist, or the rewritten store breaks at call time."""
+    from Helper_Scripts.chacha_split import split
+
+    chacha = Path(CharactersRAGDB.__module__.replace(".", "/") + ".py").parent / "chacha"
+    repo = Path(__file__).resolve().parents[3]
+    for constant, module in split.CTX_MODULE_CONSTANTS.items():
+        tree = ast.parse((repo / chacha / f"{module}.py").read_text(encoding="utf-8"))
+        defined = {
+            t.id for n in tree.body if isinstance(n, (ast.Assign, ast.AnnAssign))
+            for t in (n.targets if isinstance(n, ast.Assign) else [n.target]) if isinstance(t, ast.Name)
+        }
+        assert constant in defined, f"{constant} is not defined in {module}"  # nosec B101
+    for old, new in {**split.CTX_DB_RENAMES, **split.all_renames(repo)}.items():
+        assert hasattr(CharactersRAGDB, new), f"{old} -> {new}: no such member on CharactersRAGDB"  # nosec B101
+        assert old not in vars(CharactersRAGDB) or old in LEGACY_FORWARDERS, f"{old} should be gone"  # nosec B101
 
 
 def test_context_module_privates_are_pinned() -> None:

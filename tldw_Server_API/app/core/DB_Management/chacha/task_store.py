@@ -132,7 +132,7 @@ class TaskStore:
                 conn,
                 "LOCK TABLE note_task_scope_authority IN SHARE MODE",
             )
-        flag_aware = self._db._supports_notes_moodboard_studio_v61()
+        flag_aware = self._db.supports_notes_moodboard_studio_v61()
         authority_query = (
             "SELECT dataset_id FROM note_task_scope_authority "
             "WHERE owner_user_id = ? AND task_graph_bound = ?"
@@ -3806,7 +3806,7 @@ class TaskStore:
                 entity_id=owner,
             )  # noqa: TRY003
 
-        flag_aware = self._db._supports_notes_moodboard_studio_v61()
+        flag_aware = self._db.supports_notes_moodboard_studio_v61()
         authority_query = (
             "SELECT dataset_id FROM note_task_scope_authority "
             "WHERE owner_user_id = ? AND task_graph_bound = ?"
@@ -3847,7 +3847,7 @@ class TaskStore:
         if not owner or not target or target == self._LOCAL_UNBOUND:
             raise InputError("A non-sentinel owner and target dataset are required.")  # noqa: TRY003
         postgres = self._db.backend_type == BackendType.POSTGRESQL
-        flag_aware = self._db._supports_notes_moodboard_studio_v61()
+        flag_aware = self._db.supports_notes_moodboard_studio_v61()
         if postgres and owner != str(self._db.client_id):
             raise ConflictError(
                 "Task owner does not match the authenticated PostgreSQL client.",
