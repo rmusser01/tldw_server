@@ -464,6 +464,10 @@ review fixes went on top. The lanes were then merged into
     XP-06 test waits longer.
   - The frontend tests were rerun under Node 20, the version CI uses. Before
     the merge, the NL-05 Notes → Trash → Notes test failed there.
+  - Dev @ 37cc558814 (#3557, TASK-13950.22 c2) followed. It moves the note
+    and keyword stores onto ChaChaContext. The only conflict was the two
+    keyword-token filter calls in `note_store.py`: dev's
+    `self._ctx.map_table(...)` with Wave 7's `required_tokens` argument.
 - **CI fixes on #3559 (2026-11-22):**
   - The real-server cockpit spec opens the Tools tray before it checks the
     MCP control. Its CC-08 update closed the tray after the web-search step,
