@@ -14,7 +14,6 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.chacha import schema_sql
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
@@ -107,11 +106,6 @@ def _sqlite_index_names(conn: sqlite3.Connection, table_name: str) -> set[str]:
     if query is None:
         raise ValueError(f"Unsupported SQLite index introspection: {table_name}")
     return {str(row[1]) for row in conn.execute(query).fetchall()}
-
-
-def _ensure_sqlite_backend(ctx) -> None:
-    if ctx.backend_type != BackendType.SQLITE:
-        return
 
 
 def _apply_schema_v4(ctx, conn: sqlite3.Connection):

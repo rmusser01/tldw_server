@@ -911,8 +911,15 @@ def test_a_reference_through_a_moved_module_is_not_rewritten_again(tmp_path: Pat
     root = _fn_tree(tmp_path, a=["_b"], files={TEST: "def f(db, conn):\n    return db._b(conn)\n"})
     assert _functions(root) == 0
     once = _text(root, TEST)
-    names = {"_b"}
     tree = ast.parse(once)
     env = split.FnEnv({}, {"_b": split.FnMove("mod_a", MOD_A, False, False)}, {}, {}, frozenset(), frozenset(), frozenset())
     edits, _, problems = split._callsite_edits(once, tree, env, False, set(), True)
-    assert not edits and not problems and names
+    assert not edits and not problems  # ``mod_a._b(db.ctx, conn)`` is left alone
+    assert "mod_a._b(db.ctx, conn)" in once and once.count("ctx") == 1
+
+
+def test_a_body_using_super_fails_closed_naming_the_def(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db = FN_DB.replace("        return x + 1\n", "        return x + 1\n\n    def _sup(self):\n        return super().keep()\n", 1)
+    root = _fn_tree(tmp_path, db=db, a=["_sup"])
+    assert _functions(root) == 1
+    assert "_sup: " in capsys.readouterr().out and not (root / MOD_A).exists()

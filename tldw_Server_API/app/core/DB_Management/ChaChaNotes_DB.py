@@ -1344,12 +1344,11 @@ class CharactersRAGDB:
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     from tldw_Server_API.app.core.DB_Management.chacha.schema_sql import (  # noqa: F401
-        _LOCAL_UNBOUND_TASK_DATASET_ID,
-        _NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE,
         _CHAT_MACROS_SCHEMA_SQL,
         _FTS_CONFIG,
         _FULL_SCHEMA_SQL_V4,
         _HISTORY_PROJECTIONS_SCHEMA_SQL,
+        _LOCAL_UNBOUND_TASK_DATASET_ID,
         _MIGRATION_SQL_V4_TO_V5,
         _MIGRATION_SQL_V5_TO_V6,
         _MIGRATION_SQL_V6_TO_V7,
@@ -1446,6 +1445,7 @@ class CharactersRAGDB:
         _NOTE_TASK_SCOPE_AUTHORITY_TABLE,
         _NOTE_TASK_V60_RELATIONS,
         _NOTE_TASK_V60_TABLES,
+        _NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE,
         _NOTES_MOODBOARD_STUDIO_V61_RELATIONS,
         _POSTGRES_SEQUENCE_TABLES,
         _RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL,
@@ -35552,7 +35552,6 @@ class TransactionContextManager:
         self.is_outermost_transaction = False
 
     def __enter__(self) -> sqlite3.Connection:
-        sqlite_schema._ensure_sqlite_backend(self.db.ctx)
         self.conn = self.db.get_connection()
         if not self.conn.in_transaction:
             begin_immediate_if_needed(self.conn)
@@ -35573,7 +35572,6 @@ class TransactionContextManager:
         return self.conn
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        sqlite_schema._ensure_sqlite_backend(self.db.ctx)
         if not self.conn:  # Should not happen if __enter__ succeeded
             logger.error("Transaction context: Connection is None in __exit__.")
             return False # Re-raise exception if any
@@ -35621,8 +35619,8 @@ class TransactionContextManager:
         return False
 
 
-from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support  # noqa: E402
 
 #
 # End of ChaChaNotes_DB.py

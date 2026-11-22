@@ -1,5 +1,6 @@
 # TASK-13950.22 PR E: SQLite schema helpers move to chacha/sqlite_schema.py. Regenerate the names with `split.py select sqlite-schema` (the four leaf shims are added by hand), then run `split.py constants` on t06_schema_sql_extra.py and `split.py functions` on this file and t06_migration_support.py together.
-# The three structural defs are the class forwarders of pure helpers that became ChaChaContext static members (hand edit, A.3: pure -> a context member).
+# _ensure_sqlite_backend is a structural deletion: a no-op whose two TransactionContextManager calls were removed by hand (fix round 1).
+# The other structural defs are the class forwarders of pure helpers that became ChaChaContext static members (hand edit, A.3: pure -> a context member).
 MANIFEST = {
     "task": "T6",
     "mode": "functions",
@@ -14,7 +15,6 @@ MANIFEST = {
         "_sqlite_table_names",
         "_sqlite_column_names",
         "_sqlite_index_names",
-        "_ensure_sqlite_backend",
         "_apply_schema_v4",
         "_quoted_sqlite_identifier",
         "_notes_graph_schema_sqlite",
@@ -107,6 +107,7 @@ MANIFEST = {
         "_legacy_moodboard_rule_v61": "legacy_moodboard_rule_v61"
 },
     "structural": [
+        "_ensure_sqlite_backend",
         "_canonicalize_legacy_task_v60",
         "_note_task_v60_json_safe",
         "_build_flashcard_search_shadow_fields",

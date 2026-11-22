@@ -1705,6 +1705,7 @@ def _moved_edits(raw: list[bytes], node: ast.FunctionDef | ast.AsyncFunctionDef,
         return edits, unmapped, [f"{node.lineno}: decorators {[ast.unparse(d) for d in node.decorator_list]} (only staticmethod and classmethod move)"]
     recv = "cls" if kind == "classmethod" else "self"
     calls = {id(c.func): c for c in ast.walk(node) if isinstance(c, ast.Call)}
+    problems += [f"{c.lineno}: super() cannot move out of the class" for c in calls.values() if isinstance(c.func, ast.Name) and c.func.id == "super"]
     handled: set[int] = set()
     for n in ast.walk(node):
         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == recv:
@@ -1931,7 +1932,7 @@ def run_functions(root: Path, manifest_paths: list[Path]) -> int:
         if 0 < start < len(lines) and not lines[start - 1].strip() and not lines[start].strip():
             del lines[start]
     footer = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].startswith("# End of")), None)
-    block = [_module_import(a, _dotted(mv.target)) + "  # noqa: E402" for a, mv in sorted({mv.alias: mv for mv in env.index.values() if mv.alias in used or mv.alias in {m["alias"] for m in manifests}}.items())]
+    block = sorted(_module_import(a, _dotted(mv.target)) + "  # noqa: E402" for a, mv in {mv.alias: mv for mv in env.index.values() if mv.alias in used or mv.alias in {m["alias"] for m in manifests}}.items())  # import order, as ruff I wants it
     at = len(lines) if footer is None else footer - (1 if footer and lines[footer - 1] == "#" else 0)
     while at and not lines[at - 1].strip():  # two blank lines after the class, one before the footer
         at -= 1

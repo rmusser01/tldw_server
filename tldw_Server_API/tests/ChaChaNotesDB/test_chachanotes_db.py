@@ -1427,7 +1427,7 @@ class TestTransactions:
         assert len(db_instance.list_character_cards()) == initial_count
         assert db_instance.get_character_card_by_name(card_data_name) is None
 
-    def test_transaction_context_manager_uses_begin_immediate(self, monkeypatch):
+    def test_transaction_context_manager_uses_begin_immediate(self):
         class _RecordingConnection:
             def __init__(self) -> None:
                 self.in_transaction = False
@@ -1449,7 +1449,6 @@ class TestTransactions:
 
         conn = _RecordingConnection()
         db = CharactersRAGDB.__new__(CharactersRAGDB)
-        monkeypatch.setattr(sqlite_schema, "_ensure_sqlite_backend", lambda _ctx: None)
         db.get_connection = lambda: conn
 
         with TransactionContextManager(db):
