@@ -133,7 +133,8 @@ Started 2026-11-13 on `ux/burndown-wave6` from dev @ 4b6b9ec446 (#3461).
 
 Started 2026-11-19, after the owner's answers (see "Owner decisions"). It is
 built on `ux/burndown-wave7`, from the Wave 6 head 45188b5e13, while #3526
-lands. The numbers in brackets are the decision numbers.
+landed. Dev, with #3526, was merged in on 2026-11-22. The numbers in brackets
+are the decision numbers.
 
 **Lane 7A — Composer names, search and size**
 - CC-08 [1]:
@@ -454,6 +455,12 @@ review fixes went on top. The lanes were then merged into
   one-name guard allowlists only the /knowledge page title.
 - **`getNote`:** it lives only on the Notes domain client. A delegating copy
   on `TldwApiClientBase` failed the client ownership guard.
+- **Dev merge (2026-11-22):** dev @ 251bcc7484, with #3526, merged without
+  conflicts. Wave 7 was built on an earlier Wave 6 head, so this also brings
+  Wave 6's CI fixes: the NL-05 selection reset now happens during render, and
+  the XP-06 test waits longer. The frontend tests were rerun under Node 20,
+  the version CI uses. Before the merge, the NL-05 Notes → Trash → Notes test
+  failed there.
 
 **Choices made during review and integration:**
 - **Delete and Undo (7C):**
@@ -573,6 +580,6 @@ review fixes went on top. The lanes were then merged into
 | Wave | Status |
 |---|---|
 | 5 | Landed (#3461, 2026-11-13) |
-| 6 | PR #3526 landing |
-| 7 | In progress |
+| 6 | Landed (#3526, 2026-11-22) |
+| 7 | Integrated, PR pending |
 | 8 | Blocked |
