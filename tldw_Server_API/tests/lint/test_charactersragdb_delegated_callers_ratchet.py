@@ -59,7 +59,7 @@ def last_identifier(node: ast.expr) -> str:
 
 def counts(name: str, receiver: ast.expr) -> bool:
     ident = last_identifier(receiver)
-    if not RECEIVER.search(ident) or ident.lower().endswith("store") or ident == "asyncio":
+    if not RECEIVER.search(ident) or ident.lower().endswith("store"):
         return False
     return name not in COLLISIONS or ident in LITERAL_RECEIVERS
 
@@ -120,9 +120,10 @@ def test_each_receiver_shape_counts(tmp_path: Path) -> None:
     assert measure(_seed(tmp_path / "app", src)) == {API: {"calls": 6}}
 
 
-def test_store_and_asyncio_receivers_do_not_count(tmp_path: Path) -> None:
-    src = "db.note_store.add_note()\nasyncio.add_note()\nloop.add_note()\n"
-    assert measure(_seed(tmp_path / "app", src)) == {}
+def test_store_receivers_do_not_count(tmp_path: Path) -> None:
+    src = "db_store.add_note()\nself.chacha_note_store.add_note()\nasyncio.add_note()\nloop.add_note()\n"
+    assert measure(_seed(tmp_path / "a", src)) == {}
+    assert measure(_seed(tmp_path / "b", "db.add_note()\n")) == {API: {"calls": 1}}
 
 
 def test_collision_names_count_only_on_literal_receivers(tmp_path: Path) -> None:

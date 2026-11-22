@@ -454,6 +454,12 @@ def test_delegated_names_lists_each_bound_name() -> None:
     }
 
 
+def test_delegated_names_fails_closed_on_an_unnameable_binding() -> None:
+    unnamed = _DB + 'setattr(CharactersRAGDB, make_name(), _delegate_store_method("note_store", "x"))\n'
+    with pytest.raises(ValueError, match="cannot name"):
+        delegated_names(ast.parse(unnamed))
+
+
 @pytest.mark.parametrize(
     "registration",
     [
