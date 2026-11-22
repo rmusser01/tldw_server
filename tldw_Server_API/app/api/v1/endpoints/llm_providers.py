@@ -4,16 +4,18 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from time import monotonic as _vision_cache_time
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from loguru import logger
 
 import tldw_Server_API.app.core.LLM_Calls.adapter_registry as llm_adapter_registry
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import users_own_key_credentials
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.config_llm_providers import (
     ALL_SUPPORTED_PROVIDER_NAMES_LIST,
@@ -54,6 +56,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     provider_requires_api_key,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
+    CLOUD_MODEL_PROVIDERS,
     has_model_listing,
     inventory_endpoint_scope,
 )
@@ -82,6 +85,7 @@ from tldw_Server_API.app.core.Security.egress import (
     ConfiguredEndpointScope,
     URLPolicyResult,
 )
+import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
 import tldw_Server_API.app.core.Image_Generation.listing as _listing
 import tldw_Server_API.app.core.LLM_Calls.provider_model_inventory as _provider_model_inventory
 import tldw_Server_API.app.core.LLM_Calls.provider_readiness as __provider_readiness
@@ -729,6 +733,37 @@ _LISTING_DISCOVERY_WORKERS = 4
 _CommercialListing = tuple[Optional[str], bool, Optional[ModelDiscoveryResult]]
 
 
+def _listing_on_key(
+    provider_name: str,
+    api_key: str | None,
+    app_config: dict[str, Any] | None,
+    refresh_openrouter: bool,
+    *,
+    endpoint_provenance: str | None = None,
+) -> _CommercialListing:
+    """(API key, configured, live inventory) for a commercial provider listed on ``api_key``.
+
+    The key is the server's, or the requesting user's own (TASK-15583); discovery runs as chat's does on it (the
+    gateway's ``_provider_inventory_endpoint``). Its cache is keyed by the key's SHA-256 digest, so a listing only
+    ever shows a model list fetched with the key it is listed on.
+    """
+    if not api_key:
+        return None, False, None
+    if not has_model_listing(provider_name):
+        return api_key, True, None  # no listing: the configured models are shown, as before
+    base_url = _provider_model_inventory.resolve_provider_models_base_url(
+        provider_name, app_config, credentials_resolved=True,
+    )
+    if base_url is None:
+        return api_key, True, ModelDiscoveryResult("unsupported")
+    scope = inventory_endpoint_scope(provider_name, base_url, endpoint_provenance=endpoint_provenance)
+    scope_option: dict[str, Any] = {"configured_endpoint": scope} if scope is not None else {}
+    return api_key, True, _provider_model_inventory.discover_provider_models(
+        provider_name, api_key, base_url=base_url,
+        force_refresh=refresh_openrouter and provider_name == "openrouter", **scope_option,
+    )
+
+
 def _resolve_commercial_listing(
     provider_name: str,
     provider_info: dict[str, Any],
@@ -736,11 +771,20 @@ def _resolve_commercial_listing(
     api_keys_by_provider: dict[str, Any],
     override: Any,
     refresh_openrouter: bool,
+    own_key: Any = None,
 ) -> _CommercialListing:
     """(API key, configured, live inventory) for one commercial listing entry.
 
+    With ``own_key`` (the requesting user's own-key handle, TASK-15583) the provider is listed on that key, unless
+    the admin disabled it.
+
     Raises ByokResolutionError when the credential store itself is unavailable.
     """
+    if own_key is not None and not (override is not None and override.is_enabled is False):
+        return _listing_on_key(
+            provider_name, valid_provider_api_key(own_key.api_key), own_key.app_config, refresh_openrouter,
+            endpoint_provenance=own_key.endpoint_provenance,
+        )
     section_name = provider_info.get('section')
     api_key_field = provider_info.get('api_key_field')
     config_key = None
@@ -769,19 +813,10 @@ def _resolve_commercial_listing(
         api_key_value = valid_provider_api_key(fallback.api_key)
     if not api_key_value:
         return None, False, None
-    if not has_model_listing(provider_name):
-        return api_key_value, True, None  # no listing: the configured models are shown, as before
     fallback_config = fallback.app_config if fallback is not None else static.app_config
-    base_url = _provider_model_inventory.resolve_provider_models_base_url(
-        provider_name, dict(fallback_config) if fallback_config is not None else None, credentials_resolved=True,
-    )
-    if base_url is None:
-        return api_key_value, True, ModelDiscoveryResult("unsupported")
-    scope = inventory_endpoint_scope(provider_name, base_url)
-    scope_option: dict[str, Any] = {"configured_endpoint": scope} if scope is not None else {}
-    return api_key_value, True, _provider_model_inventory.discover_provider_models(
-        provider_name, api_key_value, base_url=base_url,
-        force_refresh=refresh_openrouter and provider_name == "openrouter", **scope_option,
+    return _listing_on_key(
+        provider_name, api_key_value, dict(fallback_config) if fallback_config is not None else None,
+        refresh_openrouter,
     )
 
 
@@ -801,6 +836,7 @@ def _resolve_commercial_listings(
     api_keys_by_provider: dict[str, Any],
     provider_overrides: Any,
     refresh_openrouter: bool,
+    own_keys: Mapping[str, Any] | None = None,
 ) -> dict[str, _CommercialListing] | None:
     """Resolve every listed commercial provider, discovering concurrently (review I5).
 
@@ -828,6 +864,7 @@ def _resolve_commercial_listings(
         provider_name, provider_info, override = job
         return _resolve_commercial_listing(
             provider_name, provider_info, config_parser, api_keys_by_provider, override, refresh_openrouter,
+            (own_keys or {}).get(provider_name),
         )
 
     try:
@@ -840,12 +877,13 @@ def _resolve_commercial_listings(
 def get_configured_providers(
     include_deprecated: bool = False,
     refresh_openrouter: bool = False,
+    own_keys: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Get list of configured LLM providers with their models from the config file.
 
-    Returns:
-        Dictionary containing provider information
+    ``own_keys`` (provider -> the requesting user's own-key handle) lists each of those commercial providers on
+    that key instead of the server's (TASK-15583). Returns a dictionary containing provider information.
     """
     try:
         config_parser = _config.load_comprehensive_config()
@@ -1146,6 +1184,7 @@ def get_configured_providers(
         commercial_listings = (
             _resolve_commercial_listings(
                 provider_mappings, config_parser, api_keys_by_provider, provider_overrides, refresh_openrouter,
+                own_keys,
             )
             if credential_store_available else None
         )
@@ -1504,6 +1543,7 @@ def get_configured_providers(
 async def get_configured_providers_async(
     include_deprecated: bool = False,
     refresh_openrouter: bool = False,
+    own_keys: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run provider discovery in a worker thread to avoid blocking the event loop."""
     loop = asyncio.get_running_loop()
@@ -1513,6 +1553,7 @@ async def get_configured_providers_async(
             get_configured_providers,
             include_deprecated=include_deprecated,
             refresh_openrouter=refresh_openrouter,
+            own_keys=own_keys,
         ),
     )
 
@@ -1763,6 +1804,79 @@ def _llamacpp_supervisor_from_request(request: Request | None) -> Any | None:
     manager = getattr(request.app.state, "llm_manager", None)
     return getattr(manager, "llamacpp_supervisor", None)
 
+
+async def listing_user_id(request: Request, response: Response) -> int | None:
+    """The requesting user's id for a provider listing (TASK-15583), or None.
+
+    The listings stay public: a request with no credentials, or one the auth layer refuses (any HTTPException),
+    gets the server's listing, never an error. A principal with no user (a service) is no user. Every listing
+    varies by credential, and a user's is private, so a shared cache neither stores a user's listing nor serves one
+    caller's to another.
+    """
+    response.headers["Vary"] = "Authorization, X-API-KEY, Cookie"
+    try:
+        principal = await _auth_deps.get_auth_principal(request)
+    except HTTPException:
+        return None
+    user_id = getattr(principal, "user_id", None)
+    if not isinstance(user_id, int):
+        return None
+    response.headers["Cache-Control"] = "private, no-store"
+    return user_id
+
+
+def _own_key_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """A provider entry listed on the requesting user's own key, held only to what every key refuses (TASK-15583).
+
+    The owner's 2026-11-21 decision (TASK-15582): a disabled provider and a model on ``denied_models`` are refused
+    on every key, a model off ``allowed_models`` only on the server's, so it stays. The override's ``config`` (its
+    model list, default and ranking) shapes the server key's offer and is not applied.
+    """
+    snapshot = _llm_provider_overrides.capture_provider_override_call_snapshot(str(entry.get("name") or ""))
+    models = [m for m in entry.get("models") or [] if snapshot.policy_error(m, allowlist=False) is None]
+    default_model = entry.get("default_model")
+    return {
+        **entry,
+        "enabled": snapshot.policy_error(None, allowlist=False) is None,
+        "models": models,
+        "models_info": [
+            info for info in entry.get("models_info") or [] if isinstance(info, dict) and info.get("name") in models
+        ],
+        "default_model": default_model if default_model in models else (models[0] if models else None),
+    }
+
+
+async def _users_listing(user_id: Any, **options: Any) -> dict[str, Any]:
+    """The provider listing for one requester, with the admin provider override applied (TASK-15583).
+
+    Each commercial provider the user's own stored key serves (``users_own_key_credentials``: BYOK on, the provider
+    allowlisted, an active key, the vendor's host) is listed on that key: its readiness and models come from that
+    key's own model list. The handle is asked for without the override check (``policy=False``): this listing applies
+    the override itself (``_resolve_commercial_listing`` skips a disabled provider; ``_own_key_entry`` refuses what
+    every key refuses), so a denied default model cannot hide the provider. Every other entry, and the whole listing
+    for a request with no user (anonymous, or a direct call), is the server's, exactly as before.
+    """
+    own_keys: dict[str, Any] = {}
+    if isinstance(user_id, int):
+        # ponytail: one own-key lookup per cloud provider (a store read each when BYOK is on); list the user's
+        # stored providers once if listings show up in profiles.
+        for provider in sorted(CLOUD_MODEL_PROVIDERS):
+            handle = await users_own_key_credentials(user_id, provider, policy=False)
+            if handle is not None:
+                own_keys[provider] = handle
+    listing = await get_configured_providers_async(**options, own_keys=own_keys)
+    if not own_keys:
+        return _llm_provider_overrides.apply_llm_provider_overrides_to_listing(listing)
+    providers: list[Any] = []
+    for entry in listing.get("providers", []):
+        if isinstance(entry, dict) and entry.get("name") in own_keys:
+            providers.append(_own_key_entry(entry))
+        else:
+            applied = _llm_provider_overrides.apply_llm_provider_overrides_to_listing({"providers": [entry]})
+            providers += applied["providers"]
+    return {**listing, "providers": providers}
+
+
 #######################################################################################################################
 #
 # Endpoints:
@@ -1771,7 +1885,10 @@ def _llamacpp_supervisor_from_request(request: Request | None) -> Any | None:
     summary="Get configured LLM providers",
     description="Returns a list of all configured LLM providers with their models from config",
     response_model=dict[str, Any])
-async def get_llm_providers(include_deprecated: bool = False):
+async def get_llm_providers(
+    include_deprecated: bool = False,
+    user_id: int | None = Depends(listing_user_id),
+):
     """
     Get all configured LLM providers and their models.
 
@@ -1780,9 +1897,11 @@ async def get_llm_providers(include_deprecated: bool = False):
         - providers: List of provider configurations
         - default_provider: The default provider name
         - total_configured: Number of configured providers
+
+    A signed-in user's listing puts each provider the user's own key serves on that key (TASK-15583).
     """
     try:
-        result = await get_configured_providers_async(include_deprecated=include_deprecated)
+        result = await _users_listing(user_id, include_deprecated=include_deprecated)
 
         # Inject Diagnostics UI interval bounds from server config if available
         try:
@@ -1810,8 +1929,6 @@ async def get_llm_providers(include_deprecated: bool = False):
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             # Best-effort; omit diagnostics_ui on failure
             pass
-
-        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
 
         if result['total_configured'] == 0:
             logger.warning("No LLM providers are configured")
@@ -1887,16 +2004,17 @@ async def get_models_metadata(
         None,
         description="Optional output modality filter (repeatable).",
     ),
+    user_id: int | None = Depends(listing_user_id),
 ):
     try:
         type_filters = _normalize_filter_values(model_type)
         input_filters = _normalize_filter_values(input_modality)
         output_filters = _normalize_filter_values(output_modality)
-        result = await get_configured_providers_async(
+        result = await _users_listing(
+            user_id,
             include_deprecated=include_deprecated,
             refresh_openrouter=refresh_openrouter,
         )
-        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
         flattened: list[dict[str, Any]] = []
         for provider in result.get('providers', []):
             provider_is_configured = bool(provider.get('is_configured'))
@@ -1972,7 +2090,11 @@ async def get_models_metadata(
     summary="Get specific provider details",
     description="Returns details for a specific LLM provider",
     response_model=dict[str, Any])
-async def get_provider_details(provider_name: str, include_deprecated: bool = False):
+async def get_provider_details(
+    provider_name: str,
+    include_deprecated: bool = False,
+    user_id: int | None = Depends(listing_user_id),
+):
     """
     Get details for a specific LLM provider.
 
@@ -1983,8 +2105,7 @@ async def get_provider_details(provider_name: str, include_deprecated: bool = Fa
         Provider details including models and configuration
     """
     try:
-        result = await get_configured_providers_async(include_deprecated=include_deprecated)
-        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
+        result = await _users_listing(user_id, include_deprecated=include_deprecated)
 
         # Find the specific provider
         for provider in result['providers']:
@@ -2029,6 +2150,7 @@ async def get_all_models(
         None,
         description="Optional output modality filter (repeatable).",
     ),
+    user_id: int | None = Depends(listing_user_id),
 ):
     """
     Get all available models from all configured providers.
@@ -2040,8 +2162,7 @@ async def get_all_models(
         type_filters = _normalize_filter_values(model_type)
         input_filters = _normalize_filter_values(input_modality)
         output_filters = _normalize_filter_values(output_modality)
-        result = await get_configured_providers_async(include_deprecated=include_deprecated)
-        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
+        result = await _users_listing(user_id, include_deprecated=include_deprecated)
         models: list[str] = []
         for provider in result.get('providers', []):
             provider_name = provider.get('name') or "unknown"
