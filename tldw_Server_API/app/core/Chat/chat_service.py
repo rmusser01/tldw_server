@@ -3124,7 +3124,7 @@ async def build_context_and_messages(
             tuple[dict[str, Any] | None, int | None, dict[str, Any]],
         ]:
             with chat_db.transaction() as conn:
-                state = chat_db.get_roleplay_resume_state(
+                state = chat_db.conversation_resume_store.get_roleplay_resume_state(
                     final_conversation_id,
                     conn=conn,
                     lock_for_update=True,

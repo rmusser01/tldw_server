@@ -518,7 +518,7 @@ def test_character_origin_preserves_factory_behavior_and_lineage(startup_api: Si
     assert (row["root_id"], row["parent_conversation_id"], row["forked_from_message_id"]) == (
         (parent, parent, message) if fork else (cid, None, None)
     )
-    resume = db.get_roleplay_resume_state(cid)
+    resume = db.conversation_resume_store.get_roleplay_resume_state(cid)
     participants = resume["behavior_snapshot"]["payload"]["participants"]
     assert [p["source"]["id"] for p in participants] == [str(startup_api.character_id), str(secondary)]
     assert participants[0]["greeting"]["content"] == "Hello."

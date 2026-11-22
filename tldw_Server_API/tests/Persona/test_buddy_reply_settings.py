@@ -87,7 +87,7 @@ def test_reply_settings_uses_authoritative_roleplay_completion_before_raw_settin
         model="resume-model",
         sampling={"temperature": 0.7, "top_p": 1.0, "repetition_penalty": 1.0, "stop": []},
     )
-    assert db.get_roleplay_resume_state(conversation_id)["resume_eligible"] is True
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["resume_eligible"] is True
     stored = db.get_conversation_settings(conversation_id)["settings"]
     db.upsert_conversation_settings(conversation_id, {**stored, "provider": "openai", "model": "stale-model"})
     with _client(db) as client:

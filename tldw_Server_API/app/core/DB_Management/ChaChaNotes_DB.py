@@ -977,15 +977,6 @@ class CharactersRAGDB:
 
         def get_character_card_by_name(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None: ...
 
-        def get_roleplay_resume_state(
-            self,
-            conversation_id: str,
-            *,
-            conn: Any | None = None,
-            lock_for_update: bool = False,
-            owner_client_id: str | None = None,
-        ) -> dict[str, Any]: ...
-
         def add_conversation(
             self,
             conv_data: dict[str, Any],
@@ -47472,21 +47463,6 @@ for _conversation_store_method in (
         CharactersRAGDB,
         _conversation_store_method,
         _delegate_conversation_store_method(_conversation_store_method),
-    )
-
-
-for _conversation_resume_store_method in (
-    "append_idempotent_user_message",
-    "prepare_roleplay_resume_generation",
-    "commit_roleplay_resume_generation",
-    "put_behavior_snapshot",
-    "get_conversation_behavior_snapshot",
-    "get_roleplay_resume_state",
-):
-    setattr(
-        CharactersRAGDB,
-        _conversation_resume_store_method,
-        _delegate_store_method("conversation_resume_store", _conversation_resume_store_method),
     )
 
 

@@ -346,7 +346,7 @@ def test_capture_neutral_empty_and_exact_selected_text_without_writes(native_db)
     captured = capture_native_fork(db, owner(), capture_request(cid, mid))
     assert [member.id for member in captured.input.selection.messages] == [mid]
     assert captured.retained_context_digest != empty.retained_context_digest
-    assert db.get_roleplay_resume_state(cid)["message_count"] == 1
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["message_count"] == 1
 
 
 def test_capture_scope_mismatch_denied(native_db):

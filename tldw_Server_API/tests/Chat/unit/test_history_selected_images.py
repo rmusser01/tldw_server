@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.Chat.persistence_service import prepare_native_his
 def selected_history():
     db = MagicMock(client_id="alice")
     db.transaction.side_effect = lambda: nullcontext(object())
-    db.get_roleplay_resume_state.return_value = {
+    db.conversation_resume_store.get_roleplay_resume_state.return_value = {
         "conversation": {"id": "conv", "client_id": "alice"},
         "settings": None, "behavior_snapshot": {"status": "missing"},
     }

@@ -4082,9 +4082,9 @@ def _get_completion_settings_row(
     owner_user_id: str,
 ) -> dict[str, Any] | None:
     """Read settings with the history fence observed before prompt derivation."""
-    if not callable(getattr(db, "get_roleplay_resume_state", None)):
+    if not callable(getattr(getattr(db, "conversation_resume_store", None), "get_roleplay_resume_state", None)):
         return db.get_conversation_settings(chat_id)
-    state = db.get_roleplay_resume_state(
+    state = db.conversation_resume_store.get_roleplay_resume_state(
         chat_id,
         owner_client_id=owner_user_id,
     )
@@ -4142,11 +4142,11 @@ def _persist_auto_summary_to_settings(
         # roleplay authority is server-owned and is validated coherently below
         # after locking the resume state.
         _validate_chat_settings_payload(_public_chat_settings(merged_settings))
-        if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
+        if callable(getattr(getattr(db, "conversation_resume_store", None), "get_roleplay_resume_state", None)) and callable(
             getattr(db, "transaction", None)
         ):
             with db.transaction() as conn:
-                resume_state = db.get_roleplay_resume_state(
+                resume_state = db.conversation_resume_store.get_roleplay_resume_state(
                     chat_id,
                     conn=conn,
                     lock_for_update=True,
@@ -4497,7 +4497,7 @@ async def create_workspace_chat_startup(
         with db.transaction():
             projected = _convert_db_conversation_to_response(
                 _attach_conversation_assistant_names(db, dict(result.conversation), owner_id),
-                resume_state=db.get_roleplay_resume_state(result.conversation["id"]), db=db, user_id=owner_id,
+                resume_state=db.conversation_resume_store.get_roleplay_resume_state(result.conversation["id"]), db=db, user_id=owner_id,
             )
         return projected, result.replayed
 
@@ -4627,7 +4627,7 @@ def _client_chat_replay_response(
     logger.debug("Replayed chat session {} for user {}", conversation["id"], owner_id)
     return _convert_db_conversation_to_response(
         _attach_conversation_assistant_names(db, conversation, owner_id),
-        resume_state=db.get_roleplay_resume_state(conversation["id"]),
+        resume_state=db.conversation_resume_store.get_roleplay_resume_state(conversation["id"]),
         db=db, user_id=owner_id,
     )
 
@@ -4901,7 +4901,7 @@ async def create_chat_session(
                 create_request_fingerprint=create_fingerprint,
             )
             if seed_first_message:
-                created_state = db.get_roleplay_resume_state(created_id)
+                created_state = db.conversation_resume_store.get_roleplay_resume_state(created_id)
                 snapshot_payload = (
                     (created_state.get("behavior_snapshot") or {}).get("payload")
                     or {}
@@ -5021,7 +5021,7 @@ async def create_chat_session(
                 created_conv,
                 str(current_user.id),
             ),
-            resume_state=db.get_roleplay_resume_state(created_id),
+            resume_state=db.conversation_resume_store.get_roleplay_resume_state(created_id),
             db=db, user_id=str(current_user.id),
         )
 
@@ -5194,7 +5194,7 @@ def _project_imported_chat(db: CharactersRAGDB, conversation_id: str, owner_id: 
         )
     return _convert_db_conversation_to_response(
         _attach_conversation_assistant_names(db, dict(conversation), owner_id),
-        resume_state=db.get_roleplay_resume_state(conversation_id),
+        resume_state=db.conversation_resume_store.get_roleplay_resume_state(conversation_id),
         db=db, user_id=owner_id,
     )
 
@@ -5633,7 +5633,7 @@ async def get_chat_session(
         scope = _resolve_chat_scope(scope_type, workspace_id)
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
-        resume_state = db.get_roleplay_resume_state(chat_id)
+        resume_state = db.conversation_resume_store.get_roleplay_resume_state(chat_id)
 
         settings_payload: Optional[dict[str, Any]] = None
         if include_settings:
@@ -6299,7 +6299,7 @@ def _saved_native_lore_preview(
                 conn=conn,
                 lock_for_update=True,
             )
-            state = db.get_roleplay_resume_state(chat_id, owner_client_id=owner_id, conn=conn)
+            state = db.conversation_resume_store.get_roleplay_resume_state(chat_id, owner_client_id=owner_id, conn=conn)
             _verify_chat_ownership(state["conversation"], owner_id, chat_id)
             if snapshot.interpretation_status.get("kind") != "parent_graph_v1":
                 raise HistorySelectionError("unsupported_history_context_preview_interpretation")
@@ -6899,7 +6899,7 @@ async def _complete_roleplay_resume(
             try:
                 receipt = await await_owned_worker(
                     run_in_threadpool(
-                        db.commit_roleplay_resume_generation,
+                        db.conversation_resume_store.commit_roleplay_resume_generation,
                         chat_id,
                         prepared,
                         content,
@@ -8325,7 +8325,7 @@ async def update_chat_session(
                 updated_conv,
                 str(current_user.id),
             ),
-            resume_state=db.get_roleplay_resume_state(chat_id),
+            resume_state=db.conversation_resume_store.get_roleplay_resume_state(chat_id),
             db=db, user_id=str(current_user.id),
         )
 
@@ -8460,7 +8460,7 @@ async def update_chat_settings(
         )
 
         with db.transaction() as conn:
-            resume_state = db.get_roleplay_resume_state(
+            resume_state = db.conversation_resume_store.get_roleplay_resume_state(
                 chat_id,
                 conn=conn,
                 lock_for_update=True,
@@ -8849,7 +8849,7 @@ async def restore_chat_session(
                     conversation,
                     str(current_user.id),
                 ),
-                resume_state=db.get_roleplay_resume_state(chat_id),
+                resume_state=db.conversation_resume_store.get_roleplay_resume_state(chat_id),
                 db=db, user_id=str(current_user.id),
             )
 
@@ -8871,7 +8871,7 @@ async def restore_chat_session(
                 restored,
                 str(current_user.id),
             ),
-            resume_state=db.get_roleplay_resume_state(chat_id),
+            resume_state=db.conversation_resume_store.get_roleplay_resume_state(chat_id),
             db=db, user_id=str(current_user.id),
         )
 
@@ -9568,11 +9568,11 @@ async def select_greeting(
     _verify_chat_ownership(conversation, current_user.id, chat_id)
     selected_greeting_text = ""
     try:
-        if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
+        if callable(getattr(getattr(db, "conversation_resume_store", None), "get_roleplay_resume_state", None)) and callable(
             getattr(db, "transaction", None)
         ):
             with db.transaction() as conn:
-                resume_state = db.get_roleplay_resume_state(
+                resume_state = db.conversation_resume_store.get_roleplay_resume_state(
                     chat_id,
                     conn=conn,
                     lock_for_update=True,

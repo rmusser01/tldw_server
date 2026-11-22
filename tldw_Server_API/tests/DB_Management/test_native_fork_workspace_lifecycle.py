@@ -390,14 +390,14 @@ def test_resume_state_retains_snapshot_bound_assistant_identity(db: CharactersRA
             "UPDATE conversations SET character_id = NULL, assistant_kind = ?, assistant_id = ? WHERE id = ?",
             ("character", f"snapshot:{child}", child),
         )
-    assert db.get_roleplay_resume_state(child)["conversation"]["assistant_binding_mode"] is None
+    assert db.conversation_resume_store.get_roleplay_resume_state(child)["conversation"]["assistant_binding_mode"] is None
     with db.transaction() as conn:
         conn.execute(
             "UPDATE conversations SET required_projection_version = ?, "
             "native_creation_operation_kind = ?, native_creation_operation_id = ? WHERE id = ?",
             ("native-fork-v1", "native_fork_v1", "source-fork", child),
         )
-    state = db.get_roleplay_resume_state(child)
+    state = db.conversation_resume_store.get_roleplay_resume_state(child)
     assert state["conversation"]["assistant_binding_mode"] == "snapshot_v1"
 
 

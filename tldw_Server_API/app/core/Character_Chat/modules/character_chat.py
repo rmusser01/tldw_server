@@ -870,7 +870,7 @@ def start_new_chat_session(
             fallback_greeting=fallback_greeting,
         )
 
-        created_state = db.get_roleplay_resume_state(conversation_id_val)
+        created_state = db.conversation_resume_store.get_roleplay_resume_state(conversation_id_val)
         snapshot_payload = (
             (created_state.get("behavior_snapshot") or {}).get("payload") or {}
         )
