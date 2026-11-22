@@ -1509,6 +1509,7 @@ def test_backend_required_enforces_http_usage_guard() -> None:
     [
         "tldw_Server_API/tests/lint/test_function_size_ratchet.py",
         "tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py",
+        "tldw_Server_API/tests/lint/test_charactersragdb_delegated_callers_ratchet.py",
         "tldw_Server_API/tests/lint/test_service_singleton_ratchet.py",
         "tldw_Server_API/tests/lint/test_endpoint_monkeypatch_ratchet.py",
     ],
@@ -1660,6 +1661,7 @@ TEST_SEAM_GATE_SUITES = (
     "tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py",
     "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
     "tldw_Server_API/tests/lint/test_owner_scope_ratchet.py",
+    "tldw_Server_API/tests/lint/test_charactersragdb_delegated_callers_ratchet.py",
     "tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py",
     "tldw_Server_API/tests/CI/test_path_classifier.py",
 )
