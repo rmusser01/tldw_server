@@ -136,8 +136,31 @@ def _store_of(call: ast.Call, wrappers: dict[str, str]) -> str:
     return wrappers.get(name, name)
 
 
+def _bound_names(statement: ast.stmt, loops: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
+    """The attribute name(s) ``statement`` binds onto the class; a loop variable gives its elements."""
+    if isinstance(statement, ast.Assign):
+        return tuple(t.attr for t in statement.targets if isinstance(t, ast.Attribute) and _is_class(t.value))
+    if isinstance(statement, ast.AnnAssign):
+        return (statement.target.attr,)  # type: ignore[union-attr]  # _bound_value checked its shape
+    name = statement.value.args[1]  # type: ignore[attr-defined]  # a setattr(C, name, v) Expr
+    if isinstance(name, ast.Constant) and isinstance(name.value, str):
+        return (name.value,)
+    if isinstance(name, ast.Name) and name.id in loops:
+        return loops[name.id]
+    raise ValueError(f"{DB_MODULE}:{statement.lineno}: cannot name the attribute this binding sets")
+
+
+def delegated_names(tree: ast.Module) -> dict[str, str]:
+    """Every delegated attribute name -> the store attribute it forwards to. Fails closed like ``_bindings``."""
+    return _scan(tree)[2]
+
+
 def _bindings(tree: ast.Module) -> tuple[Counter[str], int]:
     """(delegated bindings per store, other bindings) onto the class from module code. Fails closed."""
+    return _scan(tree)[:2]
+
+
+def _scan(tree: ast.Module) -> tuple[Counter[str], int, dict[str, str]]:
     wrappers = {
         fn.name: _store_of(s.value, {})
         for fn in tree.body
@@ -148,9 +171,10 @@ def _bindings(tree: ast.Module) -> tuple[Counter[str], int]:
     delegates = {DELEGATE, *wrappers}
     counted: set[int] = set()
     delegated: Counter[str] = Counter()
+    names: dict[str, str] = {}
     other = 0
 
-    def visit(statements: list[ast.stmt], times: int | None) -> None:
+    def visit(statements: list[ast.stmt], times: int | None, loops: dict[str, tuple[str, ...]]) -> None:
         nonlocal other
         for statement in statements:
             if isinstance(statement, (ast.FunctionDef, ast.ClassDef)) and statement.name in {*delegates, CLASS}:
@@ -160,7 +184,9 @@ def _bindings(tree: ast.Module) -> tuple[Counter[str], int]:
                 if times is None:
                     raise ValueError(f"{DB_MODULE}:{statement.lineno}: cannot size the loop around this binding")
                 if _is_call_to(value, delegates):
-                    delegated[_store_of(value, wrappers)] += times
+                    store = _store_of(value, wrappers)
+                    delegated[store] += times
+                    names.update(dict.fromkeys(_bound_names(statement, loops), store))
                 else:
                     other += times
                 counted.add(id(value))
@@ -169,19 +195,22 @@ def _bindings(tree: ast.Module) -> tuple[Counter[str], int]:
                 size = None
                 if isinstance(items, (ast.Tuple, ast.List)) and all(isinstance(e, ast.Constant) for e in items.elts):
                     size = len(items.elts)
-                visit(statement.body, None if size is None or times is None else times * size)
-                visit(statement.orelse, times)
+                inner = loops
+                if size is not None and isinstance(statement.target, ast.Name):
+                    inner = {**loops, statement.target.id: tuple(e.value for e in items.elts)}
+                visit(statement.body, None if size is None or times is None else times * size, inner)
+                visit(statement.orelse, times, loops)
             else:
                 for block in _blocks(statement):
-                    visit(block, times)
+                    visit(block, times, loops)
 
-    visit(tree.body, 1)
+    visit(tree.body, 1, {})
     defining = [fn for fn in tree.body if isinstance(fn, ast.FunctionDef) and fn.name in delegates]
     definitions = {id(node) for fn in defining for node in ast.walk(fn)}
     for node in ast.walk(tree):
         if _is_call_to(node, delegates) and id(node) not in counted | definitions:
             raise ValueError(f"{DB_MODULE}:{node.lineno}: cannot attribute this {DELEGATE} call to a {CLASS} binding")
-    return delegated, other
+    return delegated, other, names
 
 
 def _is_db(node: ast.AST) -> bool:
@@ -415,6 +444,14 @@ def test_a_new_delegate_registration_fails(tmp_path: Path) -> None:
 
     assert problem.startswith("delegated_methods: count 4 > ceiling 3"), problem
     assert '"delegated_methods": {"count": 4, "reason": "<why' in problem
+
+
+def test_delegated_names_lists_each_bound_name() -> None:
+    assert delegated_names(ast.parse(_DB)) == {
+        "add_note": "note_store",
+        "get_note": "note_store",
+        "count_notes": "note_store",
+    }
 
 
 @pytest.mark.parametrize(
