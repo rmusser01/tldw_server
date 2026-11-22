@@ -61,7 +61,7 @@ def db(tmp_path):
 
 @pytest.fixture()
 def store(db):
-    return KeywordStore(db)
+    return KeywordStore(db.ctx)
 
 
 def test_keyword_store_owns_delegated_methods_without_monolith_duplicates(db, monkeypatch):

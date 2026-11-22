@@ -11,6 +11,6 @@ def test_list_generic_items_rejects_invalid_order_by(monkeypatch, tmp_path) -> N
     db = CharactersRAGDB(db_path, client_id="test_client")
     try:
         with pytest.raises(InputError):
-            db._list_generic_items("keywords", "name; DROP TABLE keywords; --", limit=10, offset=0)
+            db.keyword_store._list_generic_items("keywords", "name; DROP TABLE keywords; --", limit=10, offset=0)
     finally:
         db.close_all_connections()

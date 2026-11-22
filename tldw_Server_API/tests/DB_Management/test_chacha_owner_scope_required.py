@@ -89,11 +89,11 @@ def test_sqlite_message_edit_ignores_device_labels(tmp_path):
 
 _PG_HELPERS = {
     "_selected_owner_filter": lambda db, conn: db._selected_owner_filter(None),
-    "_selected_keyword_link_filter": lambda db, conn: db._selected_keyword_link_filter(
+    "_selected_keyword_link_filter": lambda db, conn: db.ctx.keyword_link_filter(
         "note_keywords", "nk", owner_client_id=None
     ),
     "_require_selected_owner_row": lambda db, conn: db._require_selected_owner_row(conn, "notes", 1, None),
-    "_manage_link": lambda db, conn: db._manage_link(
+    "manage_link": lambda db, conn: db.manage_link(
         "note_keywords", "note_id", "n", "keyword_id", 1, "link", owner_client_id=None
     ),
 }
@@ -117,7 +117,7 @@ def test_not_applicable_skips_the_predicate_on_postgres(pg_restricted_backend, t
     db = CharactersRAGDB(tmp_path / "n.db", client_id="930298", backend=pg_restricted_backend)
     try:
         assert db._selected_owner_filter(OwnerScope.NOT_APPLICABLE) == ("", ())
-        assert db._selected_keyword_link_filter(
+        assert db.ctx.keyword_link_filter(
             "note_keywords", "nk", owner_client_id=OwnerScope.NOT_APPLICABLE
         ) == ("", ())
     finally:

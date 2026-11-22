@@ -1,0 +1,36 @@
+# TASK-13950.22 PR C2: the keyword store receives the context. Run `split.py store` on this and t04_note_store.py together.
+# structural: the forwarders and the deleted helpers (hand-written, R8), manage_link (its owner-scope label follows the rename), __init__.
+MANIFEST = {
+    "task": "T4",
+    "mode": "store",
+    "source": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "target": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+    "alias": None,
+    "store_class": "KeywordStore",
+    "store_attr": "keyword_store",
+    "names": ["_get_generic_item_by_id", "_list_generic_items", "_search_generic_items_fts"],
+    "shims": [],
+    "constants": ["_ORDER_BY_EXPR_RE"],
+    "rewrites": {},
+    "renames": {
+        "_manage_link": "manage_link",
+        "_add_generic_item": "add_generic_item",
+        "_get_generic_item_by_unique_text": "get_generic_item_by_unique_text",
+        "_soft_delete_generic_item": "soft_delete_generic_item",
+        "_update_generic_item": "update_generic_item",
+    },
+    "structural": [
+        "__init__",
+        "manage_link",
+        "_require_selected_owner_row",
+        "_selected_keyword_link_filter",
+        "_case_insensitive_order_expression",
+        "_case_insensitive_order_clause",
+        "_unique_text_match_sql",
+        "_is_unique_violation",
+        "_canonical_json_text_v61",
+        "_note_task_v60_hash",
+        "_deserialize_row_fields",
+        "_chunk_list",
+    ],
+}
