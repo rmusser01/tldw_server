@@ -319,3 +319,37 @@ def test_a_disabled_provider_gets_no_own_key_lookup(monkeypatch: pytest.MonkeyPa
     entry = _openai_entry(client)
 
     assert ("openai" in looked_up, entry["models"], entry["provider_enabled"], asked) == (False, [], False, [])
+
+
+@pytest.mark.parametrize(
+    ("groq_override", "expected"),
+    [
+        ({"denied_models": ["groq-denied"]}, (["groq-allowed"], True, True)),
+        ({"allowed_models": ["groq-allowed"]}, (["groq-allowed"], True, True)),
+        ({"is_enabled": False}, ([], False, False)),
+    ],
+    ids=["denied-model", "allowlist", "provider-disabled"],
+)
+def test_a_users_own_key_leaves_the_override_on_their_server_key_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    groq_override: dict[str, Any],
+    expected: tuple[list[str], bool, bool],
+) -> None:
+    """TASK-15618 (#3554's final review, M1): user 7 lists OpenAI on their own key, and Groq runs on the server's key.
+    In that mixed listing the Groq entry is still held to the admin override, as for a user with no own key: a denied
+    model and a model off allowed_models are not listed, and a disabled provider is listed unusable."""
+    client, requester = _listing_app(monkeypatch, stored={(7, "openai"): "sk-user-7"})
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {"groq": "sk-server-groq"}
+    )
+    _vendor(monkeypatch, {"sk-user-7": ["gpt-7"], "sk-server-groq": ["groq-allowed", "groq-denied"]})
+    set_llm_provider_overrides_cache_for_tests({"groq": LLMProviderOverride(provider="groq", **groq_override)})
+    requester.user = 7
+
+    body = client.get(_ROUTES[0]).json()
+    groq = next(p for p in body["providers"] if p["name"] == "groq")
+
+    assert (_openai_in(body)["models"], groq["models"], groq.get("enabled"), groq["provider_enabled"]) == (
+        ["gpt-7"],
+        *expected,
+    )
