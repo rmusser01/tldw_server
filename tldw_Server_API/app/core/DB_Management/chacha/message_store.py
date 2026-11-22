@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     FTSQueryTranslator,
     InputError,
+    OwnerScope,
     logger,
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
@@ -2924,11 +2925,13 @@ class MessageStore:
                     self._validate_live_message_parent(
                         transaction_conn, conversation_id, update_data["parent_message_id"]
                     )
+                # OwnerScope.NOT_APPLICABLE: _lock_message_conversation locked the conversation with the owner above
                 current_db_version = self._db._get_current_db_version(
                     transaction_conn,
                     "messages",
                     "id",
                     message_id,
+                    owner_client_id=OwnerScope.NOT_APPLICABLE,
                 )
 
                 if current_db_version != expected_version:
@@ -3020,11 +3023,13 @@ class MessageStore:
             with transaction as transaction_conn:
                 conversation_id = self._lock_message_conversation(transaction_conn, message_id)
                 try:
+                    # OwnerScope.NOT_APPLICABLE: _lock_message_conversation locked the conversation with the owner above
                     current_db_version = self._db._get_current_db_version(
                         transaction_conn,
                         "messages",
                         "id",
                         message_id,
+                        owner_client_id=OwnerScope.NOT_APPLICABLE,
                     )
                 except ConflictError:
                     check_status_cursor = transaction_conn.execute(

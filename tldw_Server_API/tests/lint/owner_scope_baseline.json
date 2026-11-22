@@ -1,5 +1,4 @@
 {
-  "core/DB_Management/ChaChaNotes_DB.py": {"calls": 36, "opt_outs": 0, "reason": null},
-  "core/DB_Management/chacha/keyword_store.py": {"calls": 29, "opt_outs": 0, "reason": null},
-  "core/DB_Management/chacha/note_store.py": {"calls": 37, "opt_outs": 0, "reason": null}
+  "core/DB_Management/ChaChaNotes_DB.py": {"calls": 0, "opt_outs": 4, "reason": "TASK-13950.23: tables without a tenant client_id (skill_registry), or scoped by a parent lock (messages via their conversation; moodboard_notes pre-v63 SQLite only)"},
+  "core/DB_Management/chacha/message_store.py": {"calls": 0, "opt_outs": 2, "reason": "TASK-13950.23: tables without a tenant client_id (skill_registry), or scoped by a parent lock (messages via their conversation; moodboard_notes pre-v63 SQLite only)"}
 }
