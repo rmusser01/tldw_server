@@ -96,6 +96,26 @@ function Resolve-QuickLaunchApiStartDelay {
     return 120
 }
 
+# Exact loopback names only (no case folding, no other 127.x addresses).
+function Test-QuickLaunchLoopbackHost {
+    param([string]$HostName)
+
+    return @("127.0.0.1", "localhost", "::1") -ccontains $HostName
+}
+
+# The host of an http(s) URL, without IPv6 brackets.
+function Get-QuickLaunchUrlHost {
+    param([string]$Url)
+
+    if ($Url -cmatch '^[^:/]+://(?:[^/@]*@)?(?:\[([^\]]*)\]|([^:/]*))') {
+        if ($Matches[1]) {
+            return $Matches[1]
+        }
+        return $Matches[2]
+    }
+    return ""
+}
+
 function Show-Usage {
     Write-Host "Usage: .\quick-launch.ps1 [api|webui|all] [-HostAddress 127.0.0.1] [-Port 8000] [-WebUIPort 8080]"
     Write-Host ""
@@ -112,21 +132,28 @@ function Show-Usage {
     Write-Host "  TLDW_API_PORT        Backend port (default: TLDW_PORT or 8000)"
     Write-Host "  TLDW_PORT            Legacy backend port override"
     Write-Host "  TLDW_WEBUI_PORT      WebUI port (default: 8080)"
-    Write-Host "  TLDW_API_START_DELAY Max seconds 'all' waits for the API's /health (default: 120)"
-    Write-Host "  NEXT_PUBLIC_API_URL  Browser calls this API URL directly (also read from"
-    Write-Host "                       apps/tldw-frontend/.env*); no automatic sign-in"
+    Write-Host "  TLDW_API_START_DELAY Maximum seconds 'all' waits for the API's /health before"
+    Write-Host "                       starting the WebUI (default: 120, minimum: 5)"
+    Write-Host "  NEXT_PUBLIC_API_URL  Browser calls this API URL directly; no automatic sign-in. The"
+    Write-Host "                       production build also reads it from apps/tldw-frontend/.env*"
+    Write-Host "                       (TLDW_WEBUI_DEV=1 ignores those files and uses the API above)"
     Write-Host "  TLDW_WEBUI_DEV       Set to 1 for the hot-reloading Next.js dev server instead of the"
     Write-Host "                       production build (WebUI development; several GB of RAM; no"
     Write-Host "                       automatic sign-in)"
     Write-Host "  TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"
     Write-Host "                       Default 1: the WebUI signs browsers on this computer in with"
     Write-Host "                       SINGLE_USER_API_KEY, so programs on this computer can sign in"
-    Write-Host "                       while it runs. Set 0 (shell or env file) on a shared computer"
-    Write-Host "                       and paste the API key instead."
+    Write-Host "                       while it runs. Set 0 (shell, env file, or apps/tldw-frontend/.env*)"
+    Write-Host "                       on a shared computer and paste the API key instead."
+    Write-Host ""
+    Write-Host "In 'all' mode on a loopback API host the API's cookies drop the Secure flag so sign-in"
+    Write-Host "works over plain http; SESSION_COOKIE_SECURE=1 (shell or env file) keeps it, e.g. behind"
+    Write-Host "a TLS proxy. These settings are read from the shell and $EnvFile only."
     Write-Host ""
     Write-Host "The WebUI is built once and rebuilt when apps/ changes in git or the API address"
-    Write-Host "changes. Zip downloads have no git revision: after updating one,"
-    Write-Host "delete apps/tldw-frontend/.next to rebuild."
+    Write-Host "changes. To force a rebuild, for example after changing other NEXT_PUBLIC_* values or"
+    Write-Host "updating a zip download (which has no git revision),"
+    Write-Host "delete apps/tldw-frontend/.next and launch again."
 }
 
 function Test-Bun {
@@ -191,16 +218,21 @@ function run_api {
     Write-Host "[quick-launch] Health: http://$HostAddress`:$Port/health"
     Write-Host ""
 
-    $env:TLDW_ENV_FILE = $EnvFile
-    Invoke-CheckedNative -FilePath $VenvPython -Arguments @(
-        "-m",
-        "uvicorn",
-        "tldw_Server_API.app.main:app",
-        "--host",
-        $HostAddress,
-        "--port",
-        "$Port"
-    )
+    $SavedEnv = Save-QuickLaunchEnv -Names @("TLDW_ENV_FILE")
+    try {
+        $env:TLDW_ENV_FILE = $EnvFile
+        Invoke-CheckedNative -FilePath $VenvPython -Arguments @(
+            "-m",
+            "uvicorn",
+            "tldw_Server_API.app.main:app",
+            "--host",
+            $HostAddress,
+            "--port",
+            "$Port"
+        )
+    } finally {
+        Restore-QuickLaunchEnv -Saved $SavedEnv
+    }
 }
 
 # Print KEY from dotenv FILE the way the backend reads it (python-dotenv); empty if unreadable.
@@ -271,21 +303,34 @@ function Get-QuickLaunchFrontendTree {
     return "$Tree".Trim()
 }
 
+# Loopback /health probe that never uses a proxy: Invoke-WebRequest follows the system proxy
+# and only PowerShell 6+ has -NoProxy, so use WebRequest with no proxy (works on 5.1 and 7).
+function Test-QuickLaunchApiHealth {
+    param([string]$Url)
+
+    try {
+        $Request = [System.Net.WebRequest]::Create($Url)
+        $Request.Proxy = $null
+        $Request.Timeout = 2000
+        $Request.GetResponse().Close()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 # Wait for /health rather than a fixed sleep: the production WebUI starts within seconds.
+# Called just before the WebUI server starts, so a first-launch build overlaps API boot.
 function Wait-QuickLaunchApi {
     $Url = "http://$ApiUrlHost`:$Port/health"
-    $MaxWait = Resolve-QuickLaunchApiStartDelay
-    Write-Host "[quick-launch] Waiting for the API at $Url ..."
-    for ($Waited = 0; ; $Waited++) {
-        try {
-            Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 | Out-Null
-            return
-        } catch {
-            if ($Waited -ge $MaxWait) {
-                throw "[quick-launch] The API did not answer at $Url within ${MaxWait}s; see the API window, or raise TLDW_API_START_DELAY."
-            }
-            Start-Sleep -Seconds 1
+    $MaxWait = [Math]::Max(5, (Resolve-QuickLaunchApiStartDelay))
+    Write-Host "[quick-launch] Waiting for the API at $Url (up to ${MaxWait}s) ..."
+    $Clock = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not (Test-QuickLaunchApiHealth -Url $Url)) {
+        if ($Clock.Elapsed.TotalSeconds -ge $MaxWait) {
+            throw "[quick-launch] The API did not answer at $Url within ${MaxWait}s; see the API window, or raise TLDW_API_START_DELAY."
         }
+        Start-Sleep -Seconds 1
     }
 }
 
@@ -322,29 +367,56 @@ function Invoke-QuickLaunchWebUIBuild {
     Set-Content -Path $KeyFile -Value $BuildKey
 }
 
-# NEXT_PUBLIC_API_URL in the WebUI's own env files (README tells users to copy
-# .env.local.example) is a user override too: quickstart builds refuse it. Next's order.
-function Use-QuickLaunchFrontendEnvApiUrl {
-    foreach ($File in @(".env.production.local", ".env.local", ".env.production", ".env")) {
-        $Path = Join-Path $WebUIDir $File
-        $Value = Get-QuickLaunchEnvValue -Path $Path -Key "NEXT_PUBLIC_API_URL"
-        if ($Value) {
-            $env:NEXT_PUBLIC_API_URL = $Value
-            Write-Host "[quick-launch] Using NEXT_PUBLIC_API_URL from $Path (the browser calls the API directly)."
-            return
+# "<file><TAB><value>" for -Key exactly as `next build`/`next start` load it from the WebUI's
+# .env.production.local, .env.local, .env.production and .env files: Next's own loader
+# (@next/env, reached through next/package.json), so no venv is needed and parsing, $VAR
+# expansion and shell precedence match Next. Prints only the key, and nothing when the shell
+# sets it or no file does. --env-file stops bun from loading those files itself. The script
+# uses only single quotes: Windows PowerShell 5.1 drops double quotes in native arguments.
+$FrontendEnvReader = 'const { createRequire } = require(''node:module''); const key = process.argv[1]; const nextEnv = createRequire(require.resolve(''next/package.json'', { paths: [process.cwd()] }))(''@next/env''); const { parsedEnv, loadedEnvFiles } = nextEnv.loadEnvConfig(process.cwd(), false, { info() {}, error() {} }, true); const file = loadedEnvFiles.find((f) => f.env && Object.hasOwn(f.env, key)); if (parsedEnv && Object.hasOwn(parsedEnv, key) && file) process.stdout.write(file.path + ''\t'' + parsedEnv[key]);'
+function Get-QuickLaunchFrontendEnv {
+    param([string]$Key)
+
+    $NoEnvFile = New-TemporaryFile
+    $SavedEnv = Save-QuickLaunchEnv -Names @("NODE_ENV")
+    Push-Location $WebUIDir
+    try {
+        $env:NODE_ENV = "production"
+        $Found = & bun "--env-file=$($NoEnvFile.FullName)" -e $FrontendEnvReader $Key
+        if ($LASTEXITCODE -ne 0 -or -not $Found) {
+            return @("", "")
         }
+        return "$Found" -split "`t", 2
+    } finally {
+        Pop-Location
+        Restore-QuickLaunchEnv -Saved $SavedEnv
+        Remove-Item -Path $NoEnvFile.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# NEXT_PUBLIC_API_URL in the WebUI's own env files (README tells users to copy
+# .env.local.example) is a user override too: quickstart builds refuse it.
+function Use-QuickLaunchFrontendEnvApiUrl {
+    $File, $Value = Get-QuickLaunchFrontendEnv -Key "NEXT_PUBLIC_API_URL"
+    if ($Value) {
+        $env:NEXT_PUBLIC_API_URL = $Value
+        Write-Host "[quick-launch] Using NEXT_PUBLIC_API_URL from apps/tldw-frontend/$File (the browser calls the API directly)."
     }
 }
 
 # Like the Docker WebUI, the WebUI server (never the browser bundle) turns SINGLE_USER_API_KEY
 # into a cookie session for browsers on this computer, so nobody pastes a key; programs on this
 # computer can sign in too, hence the loopback-only bind and the TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=0
-# opt-out. Set after the build so the key never reaches it.
+# opt-out (shell, else env file, else the WebUI's .env*, else 1; the default would otherwise
+# mask a .env* value, since Next never overrides a set variable). Set after the build so the
+# key never reaches it. Unset settings still reach Next from the WebUI's .env* files.
 function Set-QuickLaunchRuntimeSignIn {
     Set-QuickLaunchSetting -Name "AUTH_MODE"
     Set-QuickLaunchSetting -Name "SINGLE_USER_API_KEY"
     Set-QuickLaunchSetting -Name "SINGLE_USER_SESSION_COOKIE_NAME"
-    Set-QuickLaunchSetting -Name "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH" -Default "1"
+    $null, $FrontendFlag = Get-QuickLaunchFrontendEnv -Key "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"
+    $FlagDefault = if ($FrontendFlag) { $FrontendFlag } else { "1" }
+    Set-QuickLaunchSetting -Name "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH" -Default $FlagDefault
 
     if ($env:TLDW_WEBUI_EXPOSE_RUNTIME_AUTH -ne "1") {
         Write-Host "[quick-launch] Automatic sign-in is off (TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=$($env:TLDW_WEBUI_EXPOSE_RUNTIME_AUTH)); paste your API key in the WebUI."
@@ -377,8 +449,11 @@ function run_webui {
         if ($env:TLDW_WEBUI_DEV -eq "1") {
             # Developer opt-in: hot reload, but `next dev` holds several GB of RAM.
             $env:NEXT_PUBLIC_API_URL = Resolve-QuickLaunchApiUrl
+            if ($script:ApiStarted) {
+                Wait-QuickLaunchApi
+            }
             Write-Host ""
-            Write-Host "[quick-launch] Starting WebUI dev server (TLDW_WEBUI_DEV=1) at http://127.0.0.1:$WebUIPort"
+            Write-Host "[quick-launch] Starting WebUI dev server (TLDW_WEBUI_DEV=1) on all interfaces, port $WebUIPort; open http://127.0.0.1:$WebUIPort"
             Write-Host "[quick-launch] Using API URL: $($env:NEXT_PUBLIC_API_URL)"
             Write-Host ""
             Set-Location $WebUIDir
@@ -396,7 +471,8 @@ function run_webui {
             # still an optimized `next build`; only its networking profile differs from build:prod.
             $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
             Invoke-QuickLaunchWebUIBuild -BuildScript "build:dev" -ApiUrl $ApiUrl
-            $WebUIHost = "0.0.0.0"
+            # LAN browsers cannot use a loopback API URL, so keep such a WebUI on loopback too.
+            $WebUIHost = if (Test-QuickLaunchLoopbackHost -HostName (Get-QuickLaunchUrlHost -Url $ApiUrl)) { "127.0.0.1" } else { "0.0.0.0" }
             Write-Host "[quick-launch] Using API URL: $ApiUrl"
         } else {
             # Quickstart networking, as in the Docker WebUI: the browser talks only to the WebUI,
@@ -409,8 +485,11 @@ function run_webui {
             Write-Host "[quick-launch] WebUI proxies API requests to: $ApiUrl"
         }
 
+        if ($script:ApiStarted) {
+            Wait-QuickLaunchApi
+        }
         Write-Host ""
-        Write-Host "[quick-launch] Starting WebUI at http://127.0.0.1:$WebUIPort"
+        Write-Host "[quick-launch] Starting WebUI on $WebUIHost`:$WebUIPort; open http://127.0.0.1:$WebUIPort"
         Write-Host "[quick-launch] Next.js warns that `"next start`" does not work with `"output: standalone`"; that warning is expected here."
         Write-Host ""
         Set-Location $WebUIDir
@@ -446,7 +525,7 @@ function run_all {
     # The API window inherits this environment; restore it once the window has started.
     $SavedEnv = Save-QuickLaunchEnv -Names @("SESSION_COOKIE_SECURE", "CSRF_ENABLED")
     try {
-        if ($HostAddress -in @("127.0.0.1", "localhost", "::1")) {
+        if (Test-QuickLaunchLoopbackHost -HostName $HostAddress) {
             # Plain-http loopback, as in Dockerfiles/docker-compose.webui.yml: Secure cookies are
             # not reliably kept over http://127.0.0.1 (Safari), so drop Secure and keep CSRF on.
             # A value from the shell or the env file wins.
@@ -457,7 +536,8 @@ function run_all {
     } finally {
         Restore-QuickLaunchEnv -Saved $SavedEnv
     }
-    Wait-QuickLaunchApi
+    # run_webui waits for the API's /health just before starting the WebUI server.
+    $script:ApiStarted = $true
     run_webui
 }
 

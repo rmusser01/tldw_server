@@ -2,8 +2,10 @@
 
 import ast
 import json
+import os
 import shlex
 import shutil
+import signal
 import socket
 import subprocess  # nosec B404
 import sys
@@ -25,11 +27,26 @@ WEBUI_ENV_NAMES = (
     "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH",
 )
 FRONTEND_ENV_FILES = (".env.production.local", ".env.local", ".env.production", ".env")
-# Stands in for `bun`: logs each call with the env the WebUI would see; builds succeed
-# (writing .next/BUILD_ID) unless FAKE_BUILD_FAILS is set.
+# Stands in for `bun`: logs each `bun run` call with the env the WebUI would see; builds
+# succeed (writing .next/BUILD_ID) unless FAKE_BUILD_FAILS is set. The launcher's `bun -e`
+# frontend .env reader is not logged: it runs on the real bun when FAKE_REAL_BUN is set,
+# otherwise it is emulated (Next's file order, shell values win, prints "file<TAB>value").
 FAKE_BUN_SOURCE = """
 import json, os, pathlib, sys
 args = sys.argv[1:]
+if "-e" in args:
+    real = os.environ.get("FAKE_REAL_BUN")
+    if real:
+        os.execv(real, [real, *args])
+    key = args[-1]
+    if key not in os.environ:
+        from dotenv import dotenv_values
+        for name in (".env.production.local", ".env.local", ".env.production", ".env"):
+            values = dotenv_values(name) if os.path.exists(name) else {}
+            if key in values:
+                sys.stdout.write(name + "\\t" + (values[key] or ""))
+                break
+    sys.exit(0)
 names = os.environ["FAKE_WEBUI_ENV_NAMES"].split(",")
 with open(os.environ["FAKE_BUN_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps({"args": args, "env": {n: os.environ.get(n) for n in names}}) + "\\n")
@@ -39,9 +56,10 @@ if args[:1] == ["run"] and args[1].startswith("build:"):
     pathlib.Path(".next").mkdir(exist_ok=True)
     pathlib.Path(".next/BUILD_ID").write_text("fake-build", encoding="utf-8")
 """
-# Stands in for the venv python: `-m uvicorn` logs its cookie env and serves /health
-# (FAKE_API_MODE=crash exits at once, =unhealthy answers 503), the setup wizard is a
-# no-op, and anything else (the launcher's dotenv/health one-liners) runs for real.
+# Stands in for the venv python: `-m uvicorn` logs its cookie env and serves /health on
+# 127.0.0.1 whatever --host says (FAKE_API_MODE=crash exits at once, =unhealthy answers
+# 503), the setup wizard is a no-op, and anything else (the launcher's dotenv/health
+# one-liners) runs for real.
 FAKE_PYTHON_SOURCE = """
 import json, os, sys
 args = sys.argv[1:]
@@ -59,7 +77,7 @@ if args[:2] == ["-m", "uvicorn"]:
         def log_message(self, *_):
             pass
     port = int(args[args.index("--port") + 1])
-    HTTPServer((args[args.index("--host") + 1], port), Health).serve_forever()
+    HTTPServer(("127.0.0.1", port), Health).serve_forever()
 elif args[:2] == ["-m", "tldw_Server_API.cli.wizard.cli"]:
     sys.exit(0)
 else:
@@ -456,16 +474,23 @@ class ShellLauncherSandbox:
         """Run the launcher in `mode`; return its exit code and combined output."""
         for log in (self.bun_log, self.api_log):
             log.unlink(missing_ok=True)
-        result = subprocess.run(  # nosec B603 B607
+        process = subprocess.Popen(  # nosec B603 B607
             ["bash", str(self.root / "quick-launch.sh"), mode],
             cwd=self.root,
             env={**self.base_env, **extra_env},
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=90,
-            check=False,
+            start_new_session=True,
         )
-        return result.returncode, result.stdout + result.stderr
+        try:
+            output, _ = process.communicate(timeout=90)
+        except subprocess.TimeoutExpired:
+            # Kill the whole group so a hang cannot orphan the fake /health server.
+            os.killpg(process.pid, signal.SIGKILL)
+            output, _ = process.communicate()
+            pytest.fail(f"launcher timed out: {output}")
+        return process.returncode, output
 
     def launch(self, mode: str = "webui", **extra_env: str) -> list[dict]:
         """Run the launcher, require success, and return the bun calls it made."""
@@ -554,6 +579,10 @@ def test_shell_launcher_builds_once_then_serves_production_webui(shell_sandbox) 
         f"the WebUI server should get the Docker-quickstart runtime auth env: {start_env}",
     )
     _require("that warning is expected" in output, "the standalone warning should be explained")
+    _require(
+        "Starting WebUI on 127.0.0.1:8097" in output,
+        f"the start line should show the real bind address: {output}",
+    )
     _require(
         "SESSION_COOKIE_SECURE=0" in output,
         "webui mode should say what to set if the sign-in cookie does not stick",
@@ -654,6 +683,34 @@ def test_shell_launcher_honours_next_public_api_url_override(shell_sandbox) -> N
     )
 
 
+@pytest.mark.parametrize(
+    ("api_url", "bind_host"),
+    [
+        ("http://127.0.0.1:8000", "127.0.0.1"),
+        ("http://localhost:8000/api", "127.0.0.1"),
+        ("http://[::1]:8000", "127.0.0.1"),
+        ("http://127.0.0.2:8000", ZERO_BIND_HOST),
+        ("http://LOCALHOST:8000", ZERO_BIND_HOST),
+        ("http://192.0.2.10:8000", ZERO_BIND_HOST),
+    ],
+)
+def test_shell_launcher_override_binds_loopback_for_loopback_api_url(
+    shell_sandbox, api_url: str, bind_host: str
+) -> None:
+    """LAN browsers cannot use a loopback API URL, so such overrides keep the WebUI on loopback."""
+    code, output = shell_sandbox.run(NEXT_PUBLIC_API_URL=api_url)
+
+    _require(code == 0, f"launcher failed: {output}")
+    _require(
+        shell_sandbox.bun_calls()[-1]["args"] == _start_args(bind_host),
+        f"{api_url} should bind the WebUI to {bind_host}: {shell_sandbox.bun_calls()}",
+    )
+    _require(
+        f"Starting WebUI on {bind_host}:8097" in output,
+        f"the start line should show the real bind address: {output}",
+    )
+
+
 @pytest.mark.parametrize("env_file", FRONTEND_ENV_FILES)
 def test_shell_launcher_reads_api_url_override_from_frontend_env_files(
     shell_sandbox, env_file: str
@@ -668,11 +725,55 @@ def test_shell_launcher_reads_api_url_override_from_frontend_env_files(
 
     _require(code == 0, f"launcher failed: {output}")
     _require(
-        _call_args(calls) == [["run", "build:dev"], _start_args(ZERO_BIND_HOST)]
+        _call_args(calls) == [["run", "build:dev"], _start_args("127.0.0.1")]
         and calls[0]["env"]["NEXT_PUBLIC_API_URL"] == "http://127.0.0.1:8000",
         f"{env_file} should switch the build to advanced networking: {calls}",
     )
     _require(env_file in output, f"the launcher should name {env_file}: {output}")
+    start_env = calls[1]["env"]
+    _require(
+        start_env["SINGLE_USER_API_KEY"] is None and start_env["TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"] is None,
+        f"an override from {env_file} gets no key and no sign-in flag: {start_env}",
+    )
+
+
+def test_shell_launcher_reads_frontend_override_without_venv(shell_sandbox) -> None:
+    """The frontend .env reader needs only bun, so webui mode without a venv still honours it."""
+    (shell_sandbox.webui_dir / ".env.local").write_text(
+        "NEXT_PUBLIC_API_URL=http://127.0.0.1:8000\n", encoding="utf-8"
+    )
+
+    calls = shell_sandbox.launch(TLDW_VENV_DIR=str(shell_sandbox.root / "missing-venv"))
+
+    _require(
+        _call_args(calls)[0] == ["run", "build:dev"],
+        f"without a venv the .env.local override must still be honoured: {calls}",
+    )
+
+
+@pytest.mark.parametrize(
+    ("backend_flag", "expected"),
+    [(None, "0"), ("1", "1")],
+)
+def test_shell_launcher_sign_in_opt_out_from_frontend_env(
+    shell_sandbox, backend_flag: str | None, expected: str
+) -> None:
+    """The flag comes from the shell, else the backend env file, else the WebUI's .env*, else 1."""
+    (shell_sandbox.webui_dir / ".env.local").write_text(
+        "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=0\n", encoding="utf-8"
+    )
+    if backend_flag is not None:
+        shell_sandbox.write_env_file(
+            f"AUTH_MODE=single_user\nSINGLE_USER_API_KEY={TEST_API_KEY}\n"
+            f"TLDW_WEBUI_EXPOSE_RUNTIME_AUTH={backend_flag}\n"
+        )
+
+    calls = shell_sandbox.launch()
+
+    _require(
+        calls[-1]["env"]["TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"] == expected,
+        f"expected the sign-in flag {expected}: {calls[-1]['env']}",
+    )
 
 
 def test_shell_launcher_settings_prefer_shell_then_env_file(shell_sandbox) -> None:
@@ -742,23 +843,42 @@ def test_shell_launcher_explains_missing_sign_in_without_venv(shell_sandbox) -> 
     )
 
 
-def test_shell_launcher_all_mode_relaxes_cookie_security_only_on_loopback(shell_sandbox) -> None:
-    """All mode mirrors the Docker overlay on loopback and never relaxes it elsewhere."""
-    shell_sandbox.launch("all")
+@pytest.mark.parametrize(
+    ("api_host", "relaxed"),
+    [
+        ("127.0.0.1", True),
+        ("localhost", True),
+        ("::1", True),
+        ("127.0.0.2", False),
+        ("LOCALHOST", False),
+        (ZERO_BIND_HOST, False),
+    ],
+)
+def test_shell_launcher_all_mode_relaxes_cookie_security_only_on_loopback(
+    shell_sandbox, api_host: str, relaxed: bool
+) -> None:
+    """All mode mirrors the Docker overlay for exact loopback hosts and never elsewhere."""
+    # The fake API always listens on 127.0.0.1; hosts it cannot answer on time out quickly.
+    shell_sandbox.run("all", TLDW_HOST=api_host, TLDW_API_START_DELAY="1")
+
+    expected = {"SESSION_COOKIE_SECURE": "0", "CSRF_ENABLED": "1"} if relaxed else {
+        "SESSION_COOKIE_SECURE": None,
+        "CSRF_ENABLED": None,
+    }
     _require(
-        shell_sandbox.api_envs() == [{"SESSION_COOKIE_SECURE": "0", "CSRF_ENABLED": "1"}],
-        f"loopback HTTP should get non-Secure cookies with CSRF on: {shell_sandbox.api_envs()}",
+        shell_sandbox.api_envs() == [expected],
+        f"TLDW_HOST={api_host} should give {expected}: {shell_sandbox.api_envs()}",
     )
 
+
+def test_shell_launcher_zero_bind_api_keeps_webui_on_loopback(shell_sandbox) -> None:
+    """With TLDW_HOST=0.0.0.0 the WebUI still binds and proxies on 127.0.0.1."""
     calls = shell_sandbox.launch("all", TLDW_HOST=ZERO_BIND_HOST)
-    _require(
-        shell_sandbox.api_envs() == [{"SESSION_COOKIE_SECURE": None, "CSRF_ENABLED": None}],
-        f"a non-loopback API host must keep the backend cookie defaults: {shell_sandbox.api_envs()}",
-    )
+
     _require(
         calls[-1]["args"] == _start_args("127.0.0.1")
         and calls[-1]["env"]["TLDW_INTERNAL_API_ORIGIN"] == shell_sandbox.origin,
-        f"with TLDW_HOST=0.0.0.0 the WebUI still binds and proxies on 127.0.0.1: {calls}",
+        f"the WebUI should bind and proxy on 127.0.0.1: {calls}",
     )
 
 
@@ -781,15 +901,59 @@ def test_shell_launcher_all_mode_respects_explicit_cookie_security(shell_sandbox
 
 @pytest.mark.parametrize(
     ("api_mode", "message"),
-    [("crash", "The API exited"), ("unhealthy", "did not answer")],
+    [("crash", "The API exited"), ("unhealthy", "did not answer at")],
 )
 def test_shell_launcher_all_mode_waits_for_api_health(shell_sandbox, api_mode: str, message: str) -> None:
-    """All mode waits for /health and fails clearly, before building, if it never comes."""
-    code, output = shell_sandbox.run("all", FAKE_API_MODE=api_mode, TLDW_API_START_DELAY="2")
+    """All mode builds while the API boots, then waits for /health and fails clearly before start."""
+    code, output = shell_sandbox.run("all", FAKE_API_MODE=api_mode, TLDW_API_START_DELAY="0")
 
     _require(code != 0, f"an API that never comes up should fail the launch: {output}")
     _require(message in output, f"the launcher should say '{message}': {output}")
-    _require(shell_sandbox.bun_calls() == [], "the WebUI should not build or start")
+    _require(
+        _call_args(shell_sandbox.bun_calls()) == [["run", "build:prod"]],
+        f"the build overlaps API boot, and nothing starts: {shell_sandbox.bun_calls()}",
+    )
+    if api_mode == "unhealthy":
+        _require("within 5s" in output, f"a 0 maximum wait should be raised to 5s: {output}")
+
+
+def test_shell_launcher_health_probe_ignores_http_proxy(shell_sandbox) -> None:
+    """A proxy in the environment must not make the loopback /health probe fail."""
+    calls = shell_sandbox.launch(
+        "all", http_proxy="http://127.0.0.1:1", HTTP_PROXY="http://127.0.0.1:1", TLDW_API_START_DELAY="5"
+    )
+
+    _require(
+        calls[-1]["args"] == _start_args("127.0.0.1"),
+        f"a healthy API behind an unusable proxy setting should still start the WebUI: {calls}",
+    )
+
+
+def test_shell_launcher_frontend_env_reader_matches_next(shell_sandbox) -> None:
+    """The real `bun -e` reader parses WebUI .env files exactly as Next does ($VAR, comments)."""
+    real_bun = shutil.which("bun")
+    frontend_modules = REPO_ROOT / "apps" / "tldw-frontend" / "node_modules"
+    if real_bun is None or not (frontend_modules / "next" / "package.json").exists():
+        pytest.skip("needs bun and installed WebUI dependencies (apps/tldw-frontend/node_modules)")
+    (shell_sandbox.webui_dir / "node_modules").symlink_to(frontend_modules)
+    env_local = shell_sandbox.webui_dir / ".env.local"
+    env_local.write_text(
+        "HOST_PART=127.0.0.1\nNEXT_PUBLIC_API_URL=http://$HOST_PART:8000 # comment\n", encoding="utf-8"
+    )
+
+    calls = shell_sandbox.launch(FAKE_REAL_BUN=real_bun)
+    _require(
+        calls[0]["args"] == ["run", "build:dev"]
+        and calls[0]["env"]["NEXT_PUBLIC_API_URL"] == "http://127.0.0.1:8000",
+        f"the override should be the value Next loads, not a python-dotenv parse: {calls}",
+    )
+
+    env_local.write_text("TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=0\n", encoding="utf-8")
+    calls = shell_sandbox.launch(FAKE_REAL_BUN=real_bun)
+    _require(
+        calls[-1]["env"]["TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"] == "0",
+        f"the real reader should pass the .env.local opt-out through: {calls[-1]['env']}",
+    )
 
 
 @pytest.mark.parametrize(
@@ -815,6 +979,9 @@ def test_quick_launch_scripts_share_production_webui_contract(path: str) -> None
         "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH",
         "SINGLE_USER_SESSION_COOKIE_NAME",
         "dotenv_values",
+        "loadEnvConfig",
+        "next/package.json",
+        "--env-file=",
         *FRONTEND_ENV_FILES,
         "SESSION_COOKIE_SECURE",
         "CSRF_ENABLED",
@@ -826,7 +993,35 @@ def test_quick_launch_scripts_share_production_webui_contract(path: str) -> None
         "Automatic sign-in is unavailable",
         "programs on this computer can sign in",
         "delete apps/tldw-frontend/.next",
+        "other NEXT_PUBLIC_* values",
+        "TLDW_WEBUI_DEV=1 ignores",
+        "Starting WebUI on",
     ):
+        _require(expected in text, f"{path} should include {expected}")
+
+
+@pytest.mark.parametrize(
+    ("path", "tokens"),
+    [
+        ("quick-launch.sh", ("ProxyHandler({})", "SECONDS")),
+        (
+            "quick-launch.ps1",
+            (
+                "$Request.Proxy = $null",
+                "[System.Diagnostics.Stopwatch]::StartNew()",
+                '-Names @("TLDW_ENV_FILE")',
+                "-ccontains",
+            ),
+        ),
+    ],
+)
+def test_quick_launch_scripts_probe_health_without_proxy_and_by_elapsed_time(
+    path: str, tokens: tuple[str, ...]
+) -> None:
+    """The /health probe bypasses proxies and the wait counts elapsed time (contract only for .ps1)."""
+    text = _read(path)
+
+    for expected in tokens:
         _require(expected in text, f"{path} should include {expected}")
 
 

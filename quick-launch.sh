@@ -17,6 +17,28 @@ WEBUI_PORT="${TLDW_WEBUI_PORT:-8080}"
 WEBUI_DIR="apps/tldw-frontend"
 VENV_PYTHON=""
 api_pid=""
+# Exact loopback names only (no case folding, no other 127.x addresses).
+is_loopback_host() {
+    case "$1" in
+        127.0.0.1 | localhost | ::1) return 0 ;;
+    esac
+    return 1
+}
+
+# Print the host of an http(s) URL, without IPv6 brackets.
+url_host() {
+    local rest="${1#*://}"
+    rest="${rest%%/*}"
+    rest="${rest##*@}"
+    case "$rest" in
+        \[*)
+            rest="${rest#\[}"
+            printf '%s\n' "${rest%%]*}"
+            ;;
+        *) printf '%s\n' "${rest%%:*}" ;;
+    esac
+}
+
 # Browsers and the WebUI reach a 0.0.0.0-bound API through loopback.
 api_url_host="$HOST"
 if [ "$api_url_host" = "0.0.0.0" ]; then
@@ -41,21 +63,28 @@ Environment:
   TLDW_PORT           Legacy backend port override
   TLDW_WEBUI_PORT     WebUI port (default: 8080)
   TLDW_API_START_DELAY
-                      Max seconds 'all' waits for the API's /health (default: 120)
-  NEXT_PUBLIC_API_URL Browser calls this API URL directly (also read from
-                      $WEBUI_DIR/.env*); no automatic sign-in
+                      Maximum seconds 'all' waits for the API's /health before
+                      starting the WebUI (default: 120, minimum: 5)
+  NEXT_PUBLIC_API_URL Browser calls this API URL directly; no automatic sign-in. The
+                      production build also reads it from $WEBUI_DIR/.env*
+                      (TLDW_WEBUI_DEV=1 ignores those files and uses the API above)
   TLDW_WEBUI_DEV      Set to 1 for the hot-reloading Next.js dev server instead of the
                       production build (WebUI development; several GB of RAM; no
                       automatic sign-in)
   TLDW_WEBUI_EXPOSE_RUNTIME_AUTH
                       Default 1: the WebUI signs browsers on this computer in with
                       SINGLE_USER_API_KEY, so programs on this computer can sign in
-                      while it runs. Set 0 (shell or env file) on a shared computer
-                      and paste the API key instead.
+                      while it runs. Set 0 (shell, env file, or $WEBUI_DIR/.env*)
+                      on a shared computer and paste the API key instead.
+
+In 'all' mode on a loopback API host the API's cookies drop the Secure flag so sign-in
+works over plain http; SESSION_COOKIE_SECURE=1 (shell or env file) keeps it, e.g. behind
+a TLS proxy. These settings are read from the shell and $ENV_FILE only.
 
 The WebUI is built once and rebuilt when apps/ changes in git or the API address
-changes. Zip downloads have no git revision: after updating one,
-delete apps/tldw-frontend/.next to rebuild.
+changes. To force a rebuild, for example after changing other NEXT_PUBLIC_* values or
+updating a zip download (which has no git revision),
+delete apps/tldw-frontend/.next and launch again.
 USAGE
 }
 
@@ -167,43 +196,45 @@ start_api_background() {
     echo "[quick-launch] Starting API at http://$HOST:$PORT"
     echo "[quick-launch] Docs:   http://$HOST:$PORT/docs"
     echo "[quick-launch] Health: http://$HOST:$PORT/health"
-    case "$HOST" in
-        127.0.0.1 | localhost | ::1)
-            # Plain-http loopback, as in Dockerfiles/docker-compose.webui.yml: Secure cookies are
-            # not reliably kept over http://127.0.0.1 (Safari), so drop Secure and keep CSRF on.
-            # A value from the shell or the env file wins.
-            export_setting SESSION_COOKIE_SECURE 0
-            export_setting CSRF_ENABLED 1
-            ;;
-    esac
+    if is_loopback_host "$HOST"; then
+        # Plain-http loopback, as in Dockerfiles/docker-compose.webui.yml: Secure cookies are
+        # not reliably kept over http://127.0.0.1 (Safari), so drop Secure and keep CSRF on.
+        # A value from the shell or the env file wins.
+        export_setting SESSION_COOKIE_SECURE 0
+        export_setting CSRF_ENABLED 1
+    fi
     TLDW_ENV_FILE="$ENV_FILE" "$VENV_PYTHON" -m uvicorn \
         tldw_Server_API.app.main:app \
         --host "$HOST" \
         --port "$PORT" &
     api_pid="$!"
-    wait_for_api
 }
 
 # Wait for /health rather than a fixed sleep: the production WebUI starts within seconds.
+# Called just before the WebUI server starts, so a first-launch build overlaps API boot.
+# The probe bypasses http_proxy/HTTP_PROXY: the API is on this computer.
 wait_for_api() {
     local url="http://$api_url_host:$PORT/health"
     local max_wait="${TLDW_API_START_DELAY:-120}"
-    local waited=0
+    local deadline
     case "$max_wait" in
         '' | *[!0-9]*) max_wait=120 ;;
     esac
-    echo "[quick-launch] Waiting for the API at $url ..."
-    until "$VENV_PYTHON" -c "import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=2)" "$url" >/dev/null 2>&1; do
+    if [ "$max_wait" -lt 5 ]; then
+        max_wait=5
+    fi
+    deadline=$((SECONDS + max_wait))
+    echo "[quick-launch] Waiting for the API at $url (up to ${max_wait}s) ..."
+    until "$VENV_PYTHON" -c "import sys, urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open(sys.argv[1], timeout=2)" "$url" >/dev/null 2>&1; do
         if ! kill -0 "$api_pid" 2>/dev/null; then
             echo "[quick-launch] The API exited during startup; see the messages above." >&2
             exit 1
         fi
-        if [ "$waited" -ge "$max_wait" ]; then
+        if [ "$SECONDS" -ge "$deadline" ]; then
             echo "[quick-launch] The API did not answer at $url within ${max_wait}s; see the messages above, or raise TLDW_API_START_DELAY." >&2
             exit 1
         fi
         sleep 1
-        waited=$((waited + 1))
     done
 }
 
@@ -252,30 +283,45 @@ ensure_webui_build() {
     printf '%s\n' "$build_key" >"$key_file"
 }
 
+# Print "<file><TAB><value>" for KEY exactly as `next build`/`next start` load it from the
+# WebUI's .env.production.local, .env.local, .env.production and .env files: Next's own
+# loader (@next/env, reached through next/package.json), so no venv is needed and parsing,
+# $VAR expansion and shell precedence match Next. Prints only KEY, and nothing when the
+# shell sets KEY or no file does. --env-file stops bun from loading those files itself.
+TAB=$'\t'
+FRONTEND_ENV_READER="const { createRequire } = require('node:module'); const key = process.argv[1]; const nextEnv = createRequire(require.resolve('next/package.json', { paths: [process.cwd()] }))('@next/env'); const { parsedEnv, loadedEnvFiles } = nextEnv.loadEnvConfig(process.cwd(), false, { info() {}, error() {} }, true); const file = loadedEnvFiles.find((f) => f.env && Object.hasOwn(f.env, key)); if (parsedEnv && Object.hasOwn(parsedEnv, key) && file) process.stdout.write(file.path + '\t' + parsedEnv[key]);"
+read_frontend_env() {
+    local no_env_file
+    no_env_file="$(mktemp)"
+    (cd "$WEBUI_DIR" && NODE_ENV=production bun --env-file="$no_env_file" -e "$FRONTEND_ENV_READER" "$1") || true
+    rm -f "$no_env_file"
+}
+
 # NEXT_PUBLIC_API_URL in the WebUI's own env files (README tells users to copy
-# .env.local.example) is a user override too: quickstart builds refuse it. Next's order.
+# .env.local.example) is a user override too: quickstart builds refuse it.
 use_frontend_env_api_url() {
-    local file value
-    for file in .env.production.local .env.local .env.production .env; do
-        value="$(read_env_value "$WEBUI_DIR/$file" NEXT_PUBLIC_API_URL)"
-        if [ -n "$value" ]; then
-            export NEXT_PUBLIC_API_URL="$value"
-            echo "[quick-launch] Using NEXT_PUBLIC_API_URL from $WEBUI_DIR/$file (the browser calls the API directly)."
-            return 0
-        fi
-    done
+    local found
+    found="$(read_frontend_env NEXT_PUBLIC_API_URL)"
+    if [ -n "${found#*"$TAB"}" ]; then
+        export NEXT_PUBLIC_API_URL="${found#*"$TAB"}"
+        echo "[quick-launch] Using NEXT_PUBLIC_API_URL from $WEBUI_DIR/${found%%"$TAB"*} (the browser calls the API directly)."
+    fi
 }
 
 # Like the Docker WebUI, the WebUI server (never the browser bundle) turns SINGLE_USER_API_KEY
 # into a cookie session for browsers on this computer, so nobody pastes a key; programs on this
 # computer can sign in too, hence the loopback-only bind and the TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=0
-# opt-out. Set after the build so the key never reaches it.
+# opt-out (shell, else env file, else the WebUI's .env*, else 1; the default would otherwise
+# mask a .env* value, since Next never overrides a set variable). Set after the build so the
+# key never reaches it. Unexported settings still reach Next from the WebUI's .env* files.
 configure_runtime_sign_in() {
-    local reason
+    local reason frontend_flag
     export_setting AUTH_MODE
     export_setting SINGLE_USER_API_KEY
     export_setting SINGLE_USER_SESSION_COOKIE_NAME
-    export_setting TLDW_WEBUI_EXPOSE_RUNTIME_AUTH 1
+    frontend_flag="$(read_frontend_env TLDW_WEBUI_EXPOSE_RUNTIME_AUTH)"
+    frontend_flag="${frontend_flag#*"$TAB"}"
+    export_setting TLDW_WEBUI_EXPOSE_RUNTIME_AUTH "${frontend_flag:-1}"
 
     if [ "$TLDW_WEBUI_EXPOSE_RUNTIME_AUTH" != "1" ]; then
         echo "[quick-launch] Automatic sign-in is off (TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=$TLDW_WEBUI_EXPOSE_RUNTIME_AUTH); paste your API key in the WebUI."
@@ -304,8 +350,11 @@ run_webui() {
     if [ "${TLDW_WEBUI_DEV:-0}" = "1" ]; then
         # Developer opt-in: hot reload, but `next dev` holds several GB of RAM.
         export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://$api_url_host:$PORT}"
+        if [ -n "$api_pid" ]; then
+            wait_for_api
+        fi
         echo ""
-        echo "[quick-launch] Starting WebUI dev server (TLDW_WEBUI_DEV=1) at http://127.0.0.1:$WEBUI_PORT"
+        echo "[quick-launch] Starting WebUI dev server (TLDW_WEBUI_DEV=1) on all interfaces, port $WEBUI_PORT; open http://127.0.0.1:$WEBUI_PORT"
         echo "[quick-launch] Using API URL: $NEXT_PUBLIC_API_URL"
         echo ""
         cd "$WEBUI_DIR"
@@ -323,7 +372,12 @@ run_webui() {
         # still an optimized `next build`; only its networking profile differs from build:prod.
         export NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
         ensure_webui_build "build:dev" "$api_url"
-        webui_host="0.0.0.0"
+        # LAN browsers cannot use a loopback API URL, so keep such a WebUI on loopback too.
+        if is_loopback_host "$(url_host "$api_url")"; then
+            webui_host="127.0.0.1"
+        else
+            webui_host="0.0.0.0"
+        fi
         echo "[quick-launch] Using API URL: $api_url"
     else
         # Quickstart networking, as in the Docker WebUI: the browser talks only to the WebUI,
@@ -336,8 +390,11 @@ run_webui() {
         echo "[quick-launch] WebUI proxies API requests to: $api_url"
     fi
 
+    if [ -n "$api_pid" ]; then
+        wait_for_api
+    fi
     echo ""
-    echo "[quick-launch] Starting WebUI at http://127.0.0.1:$WEBUI_PORT"
+    echo "[quick-launch] Starting WebUI on $webui_host:$WEBUI_PORT; open http://127.0.0.1:$WEBUI_PORT"
     echo "[quick-launch] Next.js warns that \"next start\" does not work with \"output: standalone\"; that warning is expected here."
     echo ""
     cd "$WEBUI_DIR"
