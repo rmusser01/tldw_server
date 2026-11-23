@@ -299,6 +299,8 @@ class NativeCompletionCapabilityV1(HistoryWireModel):
     policy: Literal["selected_history_v1"]
     supported: StrictBool
     reasoning_history_supported: Literal[True] | None = Field(None, exclude_if=lambda value: value is None)
+    # An existing-input completion may carry system-only current messages (decision 22, ADR-068).
+    existing_input_system_messages_supported: Literal[True] | None = Field(None, exclude_if=lambda value: value is None)
     storage_context_digest: str = Field(min_length=1)
 
 

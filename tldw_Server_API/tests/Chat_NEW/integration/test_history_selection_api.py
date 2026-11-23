@@ -1725,8 +1725,12 @@ def test_b02_existing_question_retry_keeps_input_policy(history_api, monkeypatch
     assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - No input or reply added after policy refusal.
 
 
-@pytest.mark.parametrize("text", ["saved question exceeds four characters", "x" * 100001])
-def test_b02_existing_question_obeys_payload_text_limit(history_api, monkeypatch, text):
+@pytest.mark.parametrize("text,instruction", [
+    ("saved question exceeds four characters", None),
+    ("x" * 100001, None),
+    ("ok", "an instruction longer than four characters"),
+])
+def test_b02_existing_question_obeys_payload_text_limit(history_api, monkeypatch, text, instruction):
     from unittest.mock import Mock
 
     from tldw_Server_API.app.api.v1.endpoints import chat
@@ -1741,9 +1745,10 @@ def test_b02_existing_question_obeys_payload_text_limit(history_api, monkeypatch
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json={
         "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
-        "messages": [], "tldw_history_server_existing_input_v1": selection,
+        "messages": [{"role": "system", "content": instruction}] if instruction else [],
+        "tldw_history_server_existing_input_v1": selection,
     })
-    assert response.status_code == 413, response.text  # nosec B101 - Existing-input replay validates real canonical text length.
+    assert response.status_code == 413, response.text  # nosec B101 - The saved question and any instruction obey the payload text limit.
     provider.assert_not_called()
     assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - Rejection has no persistence side effects.
 
@@ -1825,6 +1830,151 @@ def test_b02_existing_question_schema_refuses_ambiguous_or_legacy_intent(history
     response = client.post("/api/v1/chat/completions", headers=headers, json=payload)
     assert response.status_code == 422, response.text  # nosec B101 - Never fall through to a legacy or new-question completion.
     assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - Refusal cannot admit or settle anything.
+
+
+def _plain_saved_question(history_api, question_id: str, text: str):
+    """A plain chat whose saved question has no reply, and its existing-input selection."""
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": question_id, "conversation_id": cid, "sender": "user", "content": text})
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", f"{question_id}-retry")["selection"]
+    return question, selection
+
+
+def test_existing_input_carries_system_only_instructions(history_api, monkeypatch):
+    """Decision 22: a plain-chat Retry keeps its System/Prompt instructions without saving them."""
+    import json
+
+    client, db, cid, headers = history_api
+    question, selection = _plain_saved_question(history_api, "w8-system-question", "W8-SAVED-QUESTION")
+    before = db.get_message_by_id(question)
+    calls = []
+
+    def provider(**kwargs):
+        calls.append(kwargs)
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": "W8-ANSWER"}, "finish_reason": "stop"}]}) + "\n\n"
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [{"role": "system", "content": "W8-PIRATE-INSTRUCTION"}],
+        "tldw_history_server_existing_input_v1": selection,
+    })
+    assert response.status_code == 200, response.text  # nosec B101 - System-only current messages are accepted with existing input.
+    assert len(calls) == 1  # nosec B101 - Exactly one provider execution.
+    assert calls[0]["system_message"] == "W8-PIRATE-INSTRUCTION"  # nosec B101 - The instruction reaches the model as its system prompt, ahead of the history.
+    payload = calls[0]["messages_payload"]
+    assert [m["role"] for m in payload] == ["user"]  # nosec B101 - The saved question is the only conversation turn.
+    assert json.dumps(payload).count("W8-SAVED-QUESTION") == 1  # nosec B101 - The question is model context exactly once.
+    assert "W8-PIRATE-INSTRUCTION" not in json.dumps(payload)  # nosec B101 - The instruction is not replayed as a conversation turn.
+    messages = db.get_messages_for_conversation(cid)
+    assert [m["sender"] for m in messages] == ["user", "assistant"]  # nosec B101 - No system row and no second question are saved.
+    assert db.get_message_by_id(question) == before  # nosec B101 - The saved question is unchanged.
+    assert messages[1]["content"] == "W8-ANSWER"  # nosec B101 - The provider answer is saved.
+    assert messages[1]["parent_message_id"] == question  # nosec B101 - The reply settles under the saved question.
+
+
+@pytest.mark.parametrize("current", [
+    [{"role": "assistant", "content": "not a current turn"}],
+    [{"role": "tool", "content": "not a current turn", "tool_call_id": "call-1"}],
+    [{"role": "system", "content": "instruction"}, {"role": "user", "content": "another question"}],
+    [{"role": "system", "content": [{"type": "text", "text": "list-shaped instruction"}]}],
+    [{"role": "system", "content": "  \n\t "}],
+])
+def test_existing_input_rejects_current_turns_beside_instructions(history_api, monkeypatch, current):
+    from unittest.mock import Mock
+
+    client, db, cid, headers = history_api
+    _question, selection = _plain_saved_question(history_api, "w8-turn-question", "saved question")
+    provider = Mock(side_effect=AssertionError("a refused request must not reach the provider"))
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": current, "tldw_history_server_existing_input_v1": selection,
+    })
+    assert response.status_code == 422, response.text  # nosec B101 - Only system instructions may accompany an existing input.
+    provider.assert_not_called()
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - Refusal admits and settles nothing.
+
+
+@pytest.mark.parametrize("policy", ["pass", "redact", "block", "rewrite-instruction"])
+def test_existing_input_with_instructions_moderates_the_saved_question(history_api, monkeypatch, policy):
+    import json
+
+    from fastapi import HTTPException
+
+    client, db, cid, headers = history_api
+    question, selection = _plain_saved_question(history_api, "w8-policy-question", "W8 policy subject")
+    observed = []
+
+    async def input_policy(**kwargs):
+        messages = kwargs["request_data"].messages
+        observed.append([(m.role, m.content) for m in messages])
+        if policy == "block":
+            raise HTTPException(403, "Blocked by current input policy")
+        if policy == "redact":
+            next(m for m in messages if m.role == "user").content = "Redacted by current input policy"
+        if policy == "rewrite-instruction":
+            next(m for m in messages if m.role == "system").content = "Rewritten instruction"
+
+    def provider(**kwargs):
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": "answer"}, "finish_reason": "stop"}]}) + "\n\n"
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.moderate_input_messages", input_policy)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [{"role": "system", "content": "W8 instruction"}],
+        "tldw_history_server_existing_input_v1": selection,
+    })
+    assert observed == [[("system", "W8 instruction"), ("user", "W8 policy subject")]]  # nosec B101 - Moderation sees the actual saved question after the instructions.
+    if policy != "pass":
+        assert response.status_code == 403, response.text  # nosec B101 - Neither the question nor its instructions are silently rewritten or bypassed.
+        assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - Nothing is settled after the refusal.
+    else:
+        assert response.status_code == 200, response.text  # nosec B101 - An unchanged question passes.
+        assert [m["sender"] for m in db.get_messages_for_conversation(cid)] == ["user", "assistant"]  # nosec B101 - One reply, no instruction row.
+
+
+def test_existing_input_refuses_instructions_in_a_character_chat(history_api, monkeypatch):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
+
+    client, db, _, headers = history_api
+    character = db.add_character_card({"name": "W8 character", "description": "W8-FROZEN-CHARACTER", "client_id": "1"})
+    cid = create_character_conversation(db, conversation_data={"character_id": character},
+        provider="openai", model="gpt-4o-mini", prompt_preset_id="st_default")
+    question = db.add_message({"id": "w8-character-question", "conversation_id": cid, "sender": "user", "content": "saved question"})
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "w8-character-instructions")["selection"]
+    provider = Mock(side_effect=AssertionError("a character Retry must not take live instructions"))
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [{"role": "system", "content": "W8 live instruction"}],
+        "tldw_history_server_existing_input_v1": selection,
+    })
+    assert response.status_code == 409, response.text  # nosec B101 - Decision 22 covers plain chats; a character answers under its frozen context.
+    assert response.json()["detail"]["code"] == "unsupported_history_context_existing_input_instructions"  # nosec B101 - Explicit refusal code.
+    provider.assert_not_called()
+    assert [m["sender"] for m in db.get_messages_for_conversation(cid)] == ["user"]  # nosec B101 - Nothing is settled.
+
+
+def test_native_completion_capture_advertises_existing_input_instructions_on_request(history_api):
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "w8-flag-question", "conversation_id": cid, "sender": "user", "content": "flag"})
+    view = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()["view"]
+    url = f"/api/v1/chat/conversations/{cid}/history/selection"
+    legacy = client.post(f"{url}?include_native_completion=true", headers=headers, json={"purpose": "send", "view": view})
+    opted_in = client.post(f"{url}?include_native_completion=true&include_existing_input_system_messages_support=true",
+                           headers=headers, json={"purpose": "send", "view": view})
+    assert legacy.status_code == 200 and opted_in.status_code == 200, opted_in.text  # nosec B101 - Both captures succeed.
+    assert "existing_input_system_messages_supported" not in legacy.json()["native_completion_v1"]  # nosec B101 - Strict older clients keep the exact earlier shape.
+    assert opted_in.json()["native_completion_v1"]["existing_input_system_messages_supported"] is True  # nosec B101 - Clients can tell that Retry may carry instructions.
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - Capability capture is read-only.
 
 
 def test_b02_existing_question_provider_failure_keeps_exact_saved_input(history_api, monkeypatch):

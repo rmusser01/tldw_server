@@ -5846,6 +5846,77 @@ it.each(["character", "ordinary"])("B02 sidepanel saved-question dispatch is exp
   } else expect(h1.wire).not.toHaveBeenCalled()
 })
 
+it.each([
+  {mode: "reviewed instructions carried", native: {supported: true, existing_input_system_messages_supported: true}, via: "review", sent: [{role: "system", content: "system"}]},
+  {mode: "older server refuses at send", native: {supported: true}, via: "submit", sent: null},
+  {mode: "Sync v2 owner stays client-managed", native: {supported: false}, via: "submit", sent: null}
+])("8B sidepanel plain saved-question Retry: $mode", async ({native, via, sent}) => {
+  h1.native = false
+  mocks.storeState.serverChatCharacterId = null
+  mocks.storeState.serverChatAssistantKind = null
+  const current = h1.controller.getCurrent()
+  current.settingsQualified = true
+  current.view = {...current.view, cursor: {kind: "after_message", message_id: "u-old"}}
+  const fresh = (view: any) => {
+    const result = captureFor(view)
+    result.snapshot.nodes = result.snapshot.nodes.filter(row => row.id === "u-old")
+    result.rows = result.snapshot.nodes
+    result.selected_content = [{id: "u-old", revision: "r1", message: "old question", images: []}]
+    return result
+  }
+  current.capture = fresh(current.view)
+  h1.capture.mockImplementation(async (_id, request) => ({...fresh(request.view), acknowledged_capability: request.required_capability,
+    native_completion_v1: {policy: "selected_history_v1", storage_context_digest: "storage", ...native}}))
+  h1.wire.mockImplementation(async function* () {
+    yield {choices: [{delta: {content: "answer"}}]}
+    yield {tldw_message_id: "existing-answer", tldw_conversation_id: "tracked-chat-1"}
+  })
+  const {result} = renderHook(() => useMessage())
+  // A plain chat offers the saved-question review too, not only a character chat.
+  expect(result.current.getSavedQuestionReview).toEqual(expect.any(Function))
+  const review = {id: "u-old", revision: "r1", text: "old question", model: "qwen", isCurrent: () => true,
+    instructions: ["system"], instructionsSupported: true}
+  let outcome: unknown
+  await act(async () => {
+    outcome = via === "review"
+      ? await result.current.retrySavedQuestion!(review)
+      : await result.current.onSubmit({message: "old question", image: "", historyServerExistingInput: review} as any)
+  })
+  if (sent) {
+    expect(outcome).toEqual({status: "submitted"})
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.wire.mock.calls[0][0].messages).toEqual(sent)
+    expect(h1.wire.mock.calls[0][0].tldw_history_server_existing_input_v1.messages).toEqual([{id: "u-old", revision: "r1"}])
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({view_session_id: "origin"}), "existing-answer")
+  } else {
+    expect(outcome).toMatchObject({status: "failed"})
+    expect(h1.wire).not.toHaveBeenCalled()
+  }
+  expect(h1.append).not.toHaveBeenCalled()
+})
+
+it("8B sidepanel plain saved-question Retry refused by a model setting reports that setting", async () => {
+  const settings = (await import("@/store/model")).useStoreChatModelSettings.getState() as unknown as Record<string, unknown>
+  h1.native = false
+  mocks.storeState.serverChatCharacterId = null
+  mocks.storeState.serverChatAssistantKind = null
+  const current = h1.controller.getCurrent()
+  current.settingsQualified = true
+  current.view = {...current.view, cursor: {kind: "after_message", message_id: "u-old"}}
+  try {
+    settings.topK = 40
+    const {result} = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => { outcome = await result.current.onSubmit({message: "old question", image: "",
+      historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true, instructions: [], instructionsSupported: true}} as any) })
+    // The review shows this code as plain-chat copy (HistorySelectionReview).
+    expect(outcome).toMatchObject({status: "failed", errorMessage: "native_history_setting_unsupported:topK"})
+    expect(h1.wire).not.toHaveBeenCalled()
+  } finally {
+    delete settings.topK
+  }
+})
+
 it("binds Auto native character Sidepanel sends to the current exact catalog provider", async () => {
   const catalog = vi.spyOn(tldwModels, "getModels").mockResolvedValue([
     { id: "gemma3:1b", name: "gemma3:1b", provider: "ollama", type: "chat" }

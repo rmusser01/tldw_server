@@ -100,6 +100,8 @@ export type NativeCompletionCapabilityV1 = {
   readonly policy: "selected_history_v1"
   readonly supported: boolean
   readonly reasoning_history_supported?: true
+  /** An existing-input Retry may carry system-only instructions (decision 22, ADR-068). */
+  readonly existing_input_system_messages_supported?: true
   readonly storage_context_digest: string
 }
 

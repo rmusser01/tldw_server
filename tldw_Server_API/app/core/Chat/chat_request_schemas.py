@@ -763,7 +763,10 @@ class ChatCompletionRequest(BaseModel):
         None, description="ID of the model to use. Specific model compatibility depends on the selected `api_provider`."
     )
     messages: list[ChatCompletionMessageParam] = Field(
-        ..., description="A list of current messages. Empty only for an explicit server-settled existing-input selection.", min_length=0
+        ..., description=(
+            "A list of current messages. With an explicit server-settled existing-input selection it holds only "
+            "system messages (current instructions, never saved) or is empty."
+        ), min_length=0
     )
     frequency_penalty: Optional[float] = Field(
         None, ge=-2.0, le=2.0, description="Frequency penalty parameter (provider support varies)."
@@ -1000,9 +1003,13 @@ class ChatCompletionRequest(BaseModel):
     def validate_history_selection_request(self) -> "ChatCompletionRequest":
         existing = self.tldw_history_server_existing_input_v1
         if existing is not None:
+            # The saved question is the only conversation turn. Current System/Prompt
+            # instructions may come along; they are model context and are never saved.
             if (self.tldw_history_selection_v1 is not None or self.tldw_history_branch is not None
-                    or self.tldw_continuation is not None or self.messages or not self.stream or self.tools):
-                raise ValueError("Existing-input completion requires only its selection, streaming, and no current messages or tools")
+                    or self.tldw_continuation is not None or not self.stream or self.tools
+                    or any(message.role != "system" or not message.content.strip() for message in self.messages)):
+                raise ValueError("Existing-input completion requires only its selection, streaming, "
+                                 "non-blank system-only current messages and no tools")
             if (existing.purpose != "send" or existing.cursor.kind != "after_message"
                     or not existing.messages or existing.cursor.message_id != existing.messages[-1].id):
                 raise ValueError("Existing-input completion requires a selected saved question")

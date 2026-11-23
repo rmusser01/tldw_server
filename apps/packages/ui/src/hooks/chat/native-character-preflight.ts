@@ -1,6 +1,7 @@
 import { getStructuredApiErrorDetail } from "@/services/tldw/api-error";
 import type { ChatModelSettings } from '@/store/model';
 import type { ToolChoice } from '@/store/option';
+import { PlainSavedQuestionRefusal, plainSavedQuestionRefusalMessage } from '@/utils/saved-question-retry';
 import {
   isAutoModelId,
   parseProviderQualifiedModelSelection,
@@ -148,6 +149,10 @@ export const nativeCharacterPreflightMessage = (
     error.cause.message.startsWith("roleplay_resume_")
   )
     return nativeCharacterPreflightMessage(error.cause, t)
+  // A plain saved-question Retry refused before dispatch gets plain-chat copy (8B).
+  if (error instanceof PlainSavedQuestionRefusal) return plainSavedQuestionRefusalMessage(code, t);
+  const plainRefusal = plainSavedQuestionRefusalMessage(code, t);
+  if (plainRefusal && code.startsWith("native_history_existing_input_")) return plainRefusal;
   if (code === "roleplay_resume_server_unsupported")
     return t(
       "playground:composer.roleplayResumeUnsupported",

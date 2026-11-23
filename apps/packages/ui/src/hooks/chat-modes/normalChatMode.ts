@@ -1477,11 +1477,15 @@ const captureNormalHistoryTurn = async (
             buildFriendlyErrorMessage(error, { modelLabel: turn.replyModel?.label })
           )
         : null
+      // A server-settled turn stopped before any text (whitespace counts as none, as in
+      // CM-02) keeps its uncertain record with no reply text (8B).
+      const stoppedServerTurn = turn.persistence === "server" && data.outcome === "stopped" && !data.content.trim()
+      const content = stoppedServerTurn ? "" : data.content
       await saveRecord(
         record(
           turn,
-          data.content,
-          data.content
+          content,
+          content
             ? "generated_unsaved"
             : turn.admission || turn.existingSelection
               ? "accepted_unsent"
@@ -1502,10 +1506,12 @@ const captureNormalHistoryTurn = async (
         )
       )
       // Keep the admitted question selected so a deliberate no-output retry can reuse it.
-      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection) {
+      // The stopped server-settled turn's saved question is shown too, so it can be
+      // reviewed and retried (8B).
+      if (turn.admission && !content && (!data.outcome || stoppedServerTurn) && !turn.existingSelection) {
         const following = controller.followResult(view, turn.admission.input_message_id)
         // A Stop ends at once; following the question may wait on a slow read (CM-02).
-        if (data.stoppedBeforeReply)
+        if (data.stoppedBeforeReply || stoppedServerTurn)
           void Promise.resolve(following).catch(() =>
             console.warn("Could not follow a question stopped before its reply.")
           )
