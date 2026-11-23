@@ -7,6 +7,8 @@
     PYTHONPATH=. $PY -m Helper_Scripts.chacha_split.split verify MANIFEST... --base REF
     PYTHONPATH=. $PY -m Helper_Scripts.chacha_split.split check MANIFEST...
     PYTHONPATH=. $PY -m Helper_Scripts.chacha_split.split tests MANIFEST...
+    PYTHONPATH=. $PY -m Helper_Scripts.chacha_split.split select schema-sql
+    PYTHONPATH=. $PY -m Helper_Scripts.chacha_split.split constants MANIFEST...
 
 ``callers`` rewrites, under tldw_Server_API/app and tldw_Server_API/tests, ``<recv>.<name>`` to
 ``<recv>.<ATTR>.<name>`` and ``getattr/hasattr(<recv>, "<name>", ...)`` to a probe of ``<recv>.<ATTR>``.
@@ -17,7 +19,8 @@ string-argument patches included (``monkeypatch.setattr(db, "n", f)``, ``patch.o
 ``store`` moves the manifest's defs from CharactersRAGDB into a store class, rewriting each ``self.<attr>`` (R8, Appendix A.3),
 applies the manifest's ``renames`` and routes every caller through the store. ``verify`` proves the result against a base ref.
 ``check`` and ``tests`` list what a manifest still leaves behind. A manifest (``manifests/t<NN>_<name>.py``) is one literal, read, never imported.
-Edits use AST positions (UTF-8 byte offsets), applied right to left, so no string value changes.
+``constants`` moves a manifest's class and module constants, values untouched, into a dependency-free module and re-imports them (R4, R20).
+``select schema-sql`` prints those names (A.5). Edits use AST positions (UTF-8 byte offsets), applied right to left, so no string value changes.
 """
 
 from __future__ import annotations
@@ -27,10 +30,12 @@ import ast
 import builtins
 import copy
 import difflib
+import io
 import re
 import subprocess  # nosec B404  # fixed argv, no shell
 import symtable
 import sys
+import tokenize
 from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
@@ -853,7 +858,11 @@ def run_verify(root: Path, manifest_paths: list[Path], base: str) -> int:
     base_defs, head_defs = _defs(_class_node(base_tree, CLASS).body), _defs(_class_node(head_tree, CLASS).body)
     failures: list[str] = []
     moved = 0
+    constants_ok = 0
     for manifest in manifests:
+        if manifest["mode"] == "constants":
+            constants_ok += _verify_constants(root, manifest, base_tree, head_tree, failures)
+            continue
         t_tree = ast.parse((root / manifest["target"]).read_text(encoding="utf-8"))
         store_defs = _defs(_class_node(t_tree, manifest["store_class"]).body)
         for name in manifest["names"]:
@@ -904,6 +913,8 @@ def run_verify(root: Path, manifest_paths: list[Path], base: str) -> int:
             failures.append(f"{name}: a new def on {CLASS} that is not declared structural")
     for line in failures:
         print(line)
+    if constants_ok:
+        print(f"constants {constants_ok} identical")
     print(f"moved {moved} identical; class defs {identical} identical; structural {sorted(set(structural_seen))}")
     return 1 if failures else 0
 
@@ -1014,7 +1025,7 @@ def run_tests(root: Path, manifest_paths: list[Path]) -> int:
     for path in manifest_paths:
         manifest = load_manifest(path)
         names |= {*manifest["names"], *manifest["renames"]}
-    print("\n".join(_word_files(root, names)))
+    print("\n".join(_word_files(root, names)) if names else "")
     return 0
 
 
@@ -1037,6 +1048,212 @@ def run_check(root: Path, manifest_paths: list[Path]) -> int:
     return 1 if bad else 0
 
 
+# --- ``constants`` and ``select schema-sql`` (TASK-13950.22 PR D, R4/R20) ------------------------------------------
+
+SCHEMA_SQL_RX = re.compile(r"(_MIGRATION_SQL_|_FULL_SCHEMA_SQL|_CHAT_MACROS_SCHEMA_SQL|_SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL|_NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE|_HISTORY_PROJECTIONS_SCHEMA_SQL|_RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL|^_FTS_CONFIG$|^_POSTGRES_SEQUENCE_TABLES$|^_SQLITE_(MIGRATION_FIXTURE_DROP|SCHEMA_TABLE_INFO|SCHEMA_INDEX_LIST)_STATEMENTS$|^_NOTE_TASK_V60_(TABLES|RELATIONS)$|^_NOTES_MOODBOARD_STUDIO_V61_RELATIONS$|^_SQLITE_CORE_SCHEMA_TABLES$)")
+SCHEMA_SQL_DOC = (
+    "Dependency-free constants of CharactersRAGDB: schema and migration SQL, and constants that moved "
+    "chacha modules share with the class (TASK-13950.22)."
+)
+INDENT = "    "
+
+
+def _const_name(node: ast.stmt) -> str | None:
+    if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+        return node.targets[0].id
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+        return node.target.id
+    return None
+
+
+def _const_sites(tree: ast.Module) -> dict[str, tuple[str, ast.stmt]]:
+    """Constant name -> (``module`` or ``class``, statement), for the module body and the CharactersRAGDB class body."""
+    sites: dict[str, tuple[str, ast.stmt]] = {}
+    for level, body in (("module", tree.body), ("class", _class_node(tree, CLASS).body)):
+        for st in body:
+            name = _const_name(st)
+            if name:
+                sites[name] = (level, st)
+    return sites
+
+
+def _value_reads(node: ast.stmt) -> set[str]:
+    parts = [node.value, _unwrap_classvar(node)]
+    return {x.id for p in parts if p is not None for x in ast.walk(p) if isinstance(x, ast.Name) and not hasattr(builtins, x.id)}
+
+
+def select_schema_sql(tree: ast.Module) -> list[str]:
+    """Class constants matching SCHEMA_SQL_RX, plus every constant their values read (A.5), in source order."""
+    sites = _const_sites(tree)
+    chosen = {n for n, (level, _) in sites.items() if level == "class" and SCHEMA_SQL_RX.search(n)}
+    todo = list(chosen)
+    while todo:
+        for read in _value_reads(sites[todo.pop()][1]):
+            if read in sites and read not in chosen:
+                chosen.add(read)
+                todo.append(read)
+    return sorted(chosen, key=lambda n: sites[n][1].lineno)
+
+
+def _unwrap_classvar(node: ast.stmt) -> ast.expr | None:
+    """The annotation of an AnnAssign with ``ClassVar[T]`` read as ``T``."""
+    note = getattr(node, "annotation", None)
+    if isinstance(note, ast.Subscript) and ast.unparse(note.value).split(".")[-1] == "ClassVar":
+        return note.slice
+    return note
+
+
+def _continuation_rows(text: str) -> set[int]:
+    """1-based rows that start inside a multi-line string or f-string token: their text is the string's value."""
+    rows: set[int] = set()
+    starts: list[int] = []
+    for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+        if tok.type == tokenize.STRING and tok.start[0] != tok.end[0]:
+            rows.update(range(tok.start[0] + 1, tok.end[0] + 1))
+        elif tok.type == tokenize.FSTRING_START:
+            starts.append(tok.start[0])
+        elif tok.type == tokenize.FSTRING_END:
+            first = starts.pop()
+            rows.update(range(first + 1, tok.end[0] + 1))
+    return rows
+
+
+def _dedent(piece: list[str]) -> list[str]:
+    skip = _continuation_rows("\n".join(piece) + "\n")
+    out: list[str] = []
+    for row, line in enumerate(piece, 1):
+        if row in skip or not line.strip():
+            out.append(line)
+        elif line.startswith(INDENT):
+            out.append(line[len(INDENT) :])
+        else:
+            raise SystemExit(f"cannot dedent line {line!r}")
+    return out
+
+
+def _import_block(module: str, names: list[str], indent: str, noqa: str) -> list[str]:
+    return [f"{indent}from {module} import (  # {noqa}", *(f"{indent}{INDENT}{n}," for n in names), f"{indent})"]
+
+
+def _dotted(path: str) -> str:
+    return path[:-3].replace("/", ".")
+
+
+def _move_constants(root: Path, manifest: dict) -> int:
+    source, target = root / manifest["source"], root / manifest["target"]
+    text = source.read_text(encoding="utf-8")
+    sites = _const_sites(ast.parse(text))
+    names = manifest["constants"]
+    missing = [n for n in names if n not in sites]
+    if missing:
+        print(f"not a constant of {CLASS} or of the module: {missing}")
+        return 1
+    moved = set(names)
+    foreign = {n: sorted(_value_reads(sites[n][1]) - moved) for n in names}
+    foreign = {n: reads for n, reads in foreign.items() if reads}
+    if foreign:
+        print("constants whose value reads a name that does not move (add it to the manifest, or resolve it):")
+        print("\n".join(f"  {n}: {reads}" for n, reads in foreign.items()))
+        return 1
+    # ClassVar[T] -> T first (same line count), then re-locate each statement
+    edits = []
+    for n in names:
+        st = sites[n][1]
+        note = getattr(st, "annotation", None)
+        if note is not None and _unwrap_classvar(st) is not note:
+            edits.append((note.lineno, note.col_offset, note.end_lineno, note.end_col_offset, ast.get_source_segment(text, note.slice)))
+    rewritten = replace_spans(text, edits)
+    lines = _lines(rewritten)
+    new_sites = _const_sites(ast.parse(rewritten))
+    order = sorted(names, key=lambda n: new_sites[n][1].lineno)
+    spans = {}
+    for n in order:
+        start, end = _span(lines, new_sites[n][1])
+        spans[n] = (start, end, new_sites[n][0])
+    pieces: list[str] = []
+    previous_end = None
+    for n in order:
+        start, end, level = spans[n]
+        piece = lines[start:end]
+        if level == "class":
+            piece = _dedent(piece)
+        if previous_end is not None and start != previous_end:
+            pieces.append("")
+        pieces += piece
+        previous_end = end
+    # the source: the first constant of each level becomes the import, the rest are deleted, right to left
+    module_path = _dotted(manifest["target"])
+    first = {level: next(n for n in order if spans[n][2] == level) for level in ("class", "module") if any(spans[n][2] == level for n in order)}
+    for n in sorted(order, key=lambda n: spans[n][0], reverse=True):
+        start, end, level = spans[n]
+        if first[level] == n:
+            names_here = [m for m in order if spans[m][2] == level]
+            block = _import_block(module_path, names_here, INDENT if level == "class" else "", "noqa: F401" if level == "class" else "noqa: E402,F401")
+            lines[start:end] = block
+            continue
+        del lines[start:end]
+        if 0 < start < len(lines) and not lines[start - 1].strip() and not lines[start].strip():
+            del lines[start]
+    header = [f'"""{SCHEMA_SQL_DOC}"""', "", "from __future__ import annotations", ""]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("\n".join([*header, *pieces]) + "\n", encoding="utf-8")
+    source.write_text("\n".join(lines), encoding="utf-8")
+    print(f"moved {len(order)} constants into {manifest['target']}")
+    return 0
+
+
+def run_constants(root: Path, manifest_paths: list[Path]) -> int:
+    for path in manifest_paths:
+        manifest = load_manifest(path)
+        if manifest["mode"] != "constants":
+            print(f"{manifest['task']}: mode {manifest['mode']!r} is not the constants mode")
+            return 1
+        if _move_constants(root, manifest):
+            return 1
+    return 0
+
+
+def run_select(root: Path, group: str) -> int:
+    if group != "schema-sql":
+        print(f"select {group!r} is not implemented yet")
+        return 1
+    print(select_schema_sql(_parse(root / DB_MODULE)[1]))
+    return 0
+
+
+def _verify_constants(root: Path, manifest: dict, base_tree: ast.Module, head_tree: ast.Module, failures: list[str]) -> int:
+    """Each constant equals its base value and annotation (ClassVar read as its argument), and the class or module imports it."""
+    t_tree = ast.parse((root / manifest["target"]).read_text(encoding="utf-8"))
+    base_sites, head_sites = _const_sites(base_tree), _const_sites(head_tree)
+    target = {n: st for st in t_tree.body if (n := _const_name(st))}
+    module = _dotted(manifest["target"])
+    imported: dict[str, set[str]] = {"module": set(), "class": set()}
+    for level, body in (("module", head_tree.body), ("class", _class_node(head_tree, CLASS).body)):
+        for st in body:
+            if isinstance(st, ast.ImportFrom) and st.module == module:
+                imported[level] |= {a.name for a in st.names}
+
+    def shape(st: ast.stmt) -> tuple[str, str]:
+        note = _unwrap_classvar(st)
+        return (ast.dump(note) if note is not None else "", ast.dump(st.value))  # type: ignore[attr-defined]
+
+    identical = 0
+    for name in manifest["constants"]:
+        if name not in base_sites or name not in target:
+            failures.append(f"{name}: missing from the {'base' if name not in base_sites else 'target'}")
+            continue
+        level, old = base_sites[name]
+        if shape(old) != shape(target[name]):
+            failures.append(f"{name}: the moved constant differs from the base")
+        elif name in head_sites:
+            failures.append(f"{name}: still assigned in the source")
+        elif name not in imported[level]:
+            failures.append(f"{name}: not imported by the {level} from {module}")
+        else:
+            identical += 1
+    return identical
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1052,11 +1269,13 @@ def main(argv: list[str] | None = None) -> int:
     verify_cmd = sub.add_parser("verify", help="prove a manifest's move against a base ref")
     verify_cmd.add_argument("--base", required=True)
     manifest_cmds = [patches_cmd, verify_cmd]
-    for label, text in (("store", "move a manifest's defs into its store"), ("check", "list references a manifest leaves"), ("tests", "list test files naming a manifest's names")):
+    select_cmd = sub.add_parser("select", help="print the names a group moves (schema-sql)")
+    select_cmd.add_argument("group")
+    for label, text in (("constants", "move a manifest's constants into its module"), ("store", "move a manifest's defs into its store"), ("check", "list references a manifest leaves"), ("tests", "list test files naming a manifest's names")):
         manifest_cmds.append(sub.add_parser(label, help=text))
     for cmd in manifest_cmds:
         cmd.add_argument("manifests", nargs="*" if cmd is patches_cmd else "+", type=Path)
-    for cmd in (callers, rewire_cmd, *manifest_cmds):
+    for cmd in (callers, rewire_cmd, select_cmd, *manifest_cmds):
         cmd.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     args = parser.parse_args(argv)
     root = args.root.resolve()
@@ -1067,6 +1286,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.manifests and not names:
             parser.error("patches needs --names or a manifest")
         return run_manifest_patches(root, args.manifests, names) if args.manifests else run_patches(root, names)
+    if args.cmd == "select":
+        return run_select(root, args.group)
+    if args.cmd == "constants":
+        return run_constants(root, args.manifests)
     if args.cmd == "store":
         return run_store(root, args.manifests)
     if args.cmd == "verify":

@@ -505,6 +505,12 @@ def test_a_new_method_fails_but_a_typing_stub_does_not(tmp_path: Path) -> None:
     assert problem.startswith("methods: count 6 > ceiling 5"), problem
 
 
+def test_a_class_body_import_is_not_a_method(tmp_path: Path) -> None:
+    imported = _DB.replace("    _shared = 1\n", "    _shared = 1\n    from m import X\n")
+    assert imported != _DB
+    assert _measure_seeded(tmp_path, db=imported) == _SEEDED
+
+
 @pytest.mark.parametrize(
     "reach",
     ["self._db._new()", "db._new", 'hasattr(self._db, "_new")', "self._db._new = 1"],
