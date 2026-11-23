@@ -205,10 +205,6 @@ vi.mock("@/config/platform", () => ({
 import { TldwBillingSettings } from "../TldwBillingSettings"
 import { TldwConnectionSettings } from "../TldwConnectionSettings"
 import { parseSeconds } from "../TldwTimeoutSettings"
-import {
-  cancelRuntimeAuthBootstrapRecovery,
-  reportRuntimeAuthCookieNotKept
-} from "@/services/tldw/runtime-bootstrap-recovery"
 
 const t = ((key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
   if (typeof fallbackOrOptions === "string") return fallbackOrOptions
@@ -569,23 +565,36 @@ describe("settings PR review fixes", () => {
     )
   })
 
-  it("explains how to connect when the browser did not keep the sign-in cookie", () => {
+  it("explains the unkept sign-in cookie until the connection succeeds", async () => {
+    // Fresh modules keep this page-lifetime notice out of the other tests.
+    vi.resetModules()
+    const { TldwConnectionSettings: Settings } = await import("../TldwConnectionSettings")
+    const recovery = await import("@/services/tldw/runtime-bootstrap-recovery")
+    const { useConnectionStore } = await import("@/store/connection")
+    const title = "The sign-in cookie was not kept or not accepted"
     render(
-      <TldwConnectionSettings
+      <Settings
         {...createConnectionProps({ configuredServerUrl: "", authSource: undefined })}
       />
     )
-    expect(screen.queryByText(/did not keep the sign-in cookie/)).toBeNull()
+    expect(screen.queryByText(title)).toBeNull()
 
-    act(() => reportRuntimeAuthCookieNotKept())
+    act(() => recovery.reportRuntimeAuthCookieNotKept())
+    expect(screen.getByText(title)).toBeInTheDocument()
     expect(
-      screen.getByText("This browser did not keep the sign-in cookie")
+      screen.getByText(/Only if you reach tldw solely over http:\/\/localhost/)
     ).toBeInTheDocument()
-    expect(screen.getByText(/SESSION_COOKIE_SECURE=0/)).toBeInTheDocument()
 
-    // Saving a connection retires runtime sign-in, which clears the notice.
-    act(() => cancelRuntimeAuthBootstrapRecovery())
-    expect(screen.queryByText(/did not keep the sign-in cookie/)).toBeNull()
+    // Starting a save retires recovery but must not hide the advice before it succeeds.
+    act(() => recovery.cancelRuntimeAuthBootstrapRecovery())
+    expect(screen.getByText(title)).toBeInTheDocument()
+
+    act(() =>
+      useConnectionStore.setState((store) => ({
+        state: { ...store.state, isConnected: true }
+      }))
+    )
+    expect(screen.queryByText(title)).toBeNull()
   })
 
   it("formats invoice amounts using the invoice currency instead of a hardcoded dollar prefix", () => {

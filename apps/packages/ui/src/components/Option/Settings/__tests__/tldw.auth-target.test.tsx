@@ -54,7 +54,7 @@ vi.mock("@/services/tldw-server", () => ({
 }))
 vi.mock("@/services/api-send", () => ({ apiSend: mocks.apiSend }))
 vi.mock("@/store/connection", () => ({
-  useConnectionStore: { getState: () => ({ checkOnce: vi.fn() }) },
+  useConnectionStore: Object.assign(() => false, { getState: () => ({ checkOnce: vi.fn() }) }),
 }))
 vi.mock("@/components/Common/ServerOverviewHint", () => ({
   ServerOverviewHint: () => null,

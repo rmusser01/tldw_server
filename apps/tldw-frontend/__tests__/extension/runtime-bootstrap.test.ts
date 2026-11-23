@@ -1358,30 +1358,36 @@ describe("runtime-bootstrap chrome shim", () => {
 
   const SIGN_IN_START = Date.parse("2026-11-23T12:00:00Z")
 
-  /** Answer the session POST and profile probe with the given statuses; record POST times in seconds. */
-  const startSignInRecovery = async (statuses: { session: number; probe: number }) => {
+  type SignInStatuses = { session: number; probe: number | "network error" }
+
+  /** Answer the session POST and profile probe as told; record their times in seconds. */
+  const startSignInRecovery = async (statuses: SignInStatuses) => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     process.env.NEXT_PUBLIC_API_URL = "/api"
     setWindowLocation("http://localhost:19769/chat")
-    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.useFakeTimers({ toFake: ["Date", "performance"] })
     vi.setSystemTime(SIGN_IN_START)
     const fetchMock = stubCookieRuntimeFetch()
     const runtimeFetch = fetchMock.getMockImplementation()!
     const postedAt: number[] = []
+    const probedAt: number[] = []
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input)
+      const at = (Date.now() - SIGN_IN_START) / 1000
       if (url === "/api/_tldw-webui/session") {
-        postedAt.push((Date.now() - SIGN_IN_START) / 1000)
+        postedAt.push(at)
         return { ok: statuses.session === 200, status: statuses.session }
       }
       if (url === "/api/v1/users/me/profile") {
+        probedAt.push(at)
+        if (statuses.probe === "network error") throw new TypeError("offline")
         return { ok: statuses.probe === 200, status: statuses.probe }
       }
       return await runtimeFetch(input, init)
     })
     await importAndAwaitBootstrap()
     const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
-    return { client: new TldwApiClient(), postedAt }
+    return { client: new TldwApiClient(), postedAt, probedAt }
   }
 
   /** The disconnected health poll initializes every 5 s; requests add bursts. */
@@ -1395,40 +1401,48 @@ describe("runtime-bootstrap chrome shim", () => {
         client.initialize(),
         client.initialize()
       ])
-      vi.setSystemTime(Date.now() + 5_000)
+      vi.advanceTimersByTime(5_000)
     }
   }
 
-  it("stops signing in once the browser shows it does not keep the session cookie", async () => {
+  it("stops signing in once the sign-in cookie is not kept, even after clicks", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const { client, postedAt } = await startSignInRecovery({
       session: 200,
       probe: 401
     })
 
-    await pollFor(client, 120)
+    await pollFor(client, 60)
+    document.body.click()
+    await pollFor(client, 60)
 
     // The page-load attempt plus one retry, so one racy probe cannot lock the user out.
     expect(postedAt).toEqual([0, 0])
     expect(warn).toHaveBeenCalledTimes(1)
-    expect(String(warn.mock.calls[0][0])).toContain("SESSION_COOKIE_SECURE=0")
+    expect(String(warn.mock.calls[0][0])).toContain("not kept or not accepted")
+    expect(String(warn.mock.calls[0][0])).toContain(
+      "only if you reach tldw solely over http://localhost"
+    )
     const recovery = await import("@/services/tldw/runtime-bootstrap-recovery")
     expect(recovery.isRuntimeAuthCookieNotKept()).toBe(true)
 
-    // Manual API-key sign-in still works and clears the notice.
+    // Manual API-key sign-in still works.
     await client.saveManualSingleUserCredential({
       serverUrl: "http://localhost:19769",
       apiKey: "manual-key",
       persistence: "session"
     })
-    expect(recovery.isRuntimeAuthCookieNotKept()).toBe(false)
     expect((await client.getConfig())?.apiKey).toBe("manual-key")
     expect(postedAt).toEqual([0, 0])
   })
 
-  it.each([403, 503])(
-    "stops signing in when the WebUI refuses runtime sign-in with %i",
-    async (status) => {
+  it.each([
+    [401, 1],
+    [403, 0]
+  ])(
+    "stops signing in when runtime sign-in is refused with %i",
+    async (status, warnings) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
       const { client, postedAt } = await startSignInRecovery({
         session: status,
         probe: 200
@@ -1437,24 +1451,63 @@ describe("runtime-bootstrap chrome shim", () => {
       await pollFor(client, 60)
 
       expect(postedAt).toEqual([0])
+      expect(warn).toHaveBeenCalledTimes(warnings)
+      if (warnings) expect(String(warn.mock.calls[0][0])).toContain("SINGLE_USER_API_KEY")
     }
   )
 
-  it("backs off transient sign-in failures and recovers once the API answers", async () => {
+  it.each([502, 503, 429])(
+    "backs off a %i from the session POST and recovers once the API answers",
+    async (status) => {
+      const statuses = { session: status, probe: 200 }
+      const { client, postedAt } = await startSignInRecovery(statuses)
+
+      await pollFor(client, 200)
+
+      // Page load, first initialize, then 5, 10, 20 and 40 s apart, capped at 60 s.
+      expect(postedAt).toEqual([0, 0, 5, 15, 35, 75, 135, 195])
+      expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+
+      statuses.session = 200
+      await pollFor(client, 60)
+
+      expect(postedAt).toEqual([0, 0, 5, 15, 35, 75, 135, 195, 255])
+      expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
+    }
+  )
+
+  it.each([502, "network error"] as const)(
+    "re-probes instead of minting another session after a %s profile probe",
+    async (failure) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+      const statuses: SignInStatuses = { session: 200, probe: failure }
+      const { client, postedAt, probedAt } = await startSignInRecovery(statuses)
+
+      await pollFor(client, 200)
+
+      expect(postedAt).toEqual([0])
+      expect(probedAt).toEqual([0, 0, 5, 15, 35, 75, 135, 195])
+      expect(warn).not.toHaveBeenCalled()
+
+      statuses.probe = 200
+      await pollFor(client, 60)
+
+      expect(postedAt).toEqual([0])
+      expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
+    }
+  )
+
+  it("keeps retrying on schedule when the wall clock steps back", async () => {
     const statuses = { session: 502, probe: 200 }
     const { client, postedAt } = await startSignInRecovery(statuses)
+    await client.initialize()
+    expect(postedAt).toHaveLength(2)
 
-    await pollFor(client, 200)
+    vi.setSystemTime(Date.now() - 60 * 60_000)
+    vi.advanceTimersByTime(5_000)
+    await client.initialize()
 
-    // Page load, first initialize, then 5, 10, 20 and 40 s apart, capped at 60 s.
-    expect(postedAt).toEqual([0, 0, 5, 15, 35, 75, 135, 195])
-    expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
-
-    statuses.session = 200
-    await pollFor(client, 60)
-
-    expect(postedAt).toEqual([0, 0, 5, 15, 35, 75, 135, 195, 255])
-    expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
+    expect(postedAt).toHaveLength(3)
   })
 
   it("lets a user click retry a backed-off sign-in at once", async () => {
@@ -1472,6 +1525,29 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(postedAt).toEqual([0, 0, 0])
     expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
   })
+
+  it.each(["logout", "manual save"])(
+    "sends no sign-in after a %s during the backoff",
+    async (boundary) => {
+      const { client, postedAt } = await startSignInRecovery({
+        session: 502,
+        probe: 200
+      })
+      await client.initialize()
+
+      if (boundary === "logout") await client.clearCookieSingleUserSession()
+      else
+        await client.saveManualSingleUserCredential({
+          serverUrl: "http://localhost:19769",
+          apiKey: "manual-key",
+          persistence: "session"
+        })
+      document.body.click()
+      await pollFor(client, 120)
+
+      expect(postedAt).toEqual([0, 0])
+    }
+  )
 
   it("does not fetch runtime config for extension protocols", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
