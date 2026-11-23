@@ -1339,6 +1339,28 @@ def _reads_version_attr(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return any(isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id == "cls" and x.attr in VERSION_ATTRS for x in ast.walk(node))
 
 
+# Domains (A.5): a class def in the "other" bucket whose first match in this ordered list is its domain.
+DOMAINS = (
+    ("quiz", re.compile(r"quiz|osce|attempt|question|study_assistant|_fill_blank|levenshtein|remediation")),
+    ("flashcards", re.compile(r"flashcard|deck|review_session|study_pack|suggestion|srs|apkg")),
+    ("workspace", re.compile(r"workspace|clone_target|source_review|saved_view|source_")),
+)
+
+
+def select_domain(root: Path, group: str) -> list[str]:
+    """The names of the "other"-bucket class defs (the 14 false positives count as "other") in a domain, in source order. A name defined twice is listed once (see ``domain_def_count``)."""
+    defs = _all_class_defs(_class_node(_parse(root / DB_MODULE)[1], CLASS))
+    domain = {n for n in defs if (_bucket(n) == "other" or n in SELECT_FALSE_POSITIVES) and next((d for d, rx in DOMAINS if rx.search(n)), None) == group}
+    return sorted(domain, key=lambda n: defs[n].lineno)
+
+
+def domain_def_count(root: Path, group: str) -> int:
+    """How many ``def`` statements the domain has: a name defined under both branches of an ``if`` counts twice."""
+    cls = _class_node(_parse(root / DB_MODULE)[1], CLASS)
+    names = set(select_domain(root, group))
+    return sum(1 for x in ast.walk(cls) if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)) and x.name in names)
+
+
 def select_functions(root: Path, group: str) -> list[str]:
     """The defs a function group moves, in source order: research B's ``t22_defs.py`` + ``t22_closure.py``."""
     cls = _class_node(_parse(root / DB_MODULE)[1], CLASS)
@@ -1396,6 +1418,10 @@ def run_select(root: Path, group: str) -> int:
         print(select_schema_sql(_parse(root / DB_MODULE)[1]))
     elif group in SELECT_GROUPS:
         print(select_functions(root, group))
+    elif group in {d for d, _ in DOMAINS}:
+        names = select_domain(root, group)
+        print(names)
+        print(f"{len(names)} names, {domain_def_count(root, group)} defs", file=sys.stderr)
     else:
         print(f"select {group!r} is not implemented yet")
         return 1
