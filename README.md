@@ -507,7 +507,7 @@ Local single-user:
   - macOS Finder: double-click `quick-launch.command` for the default `all` mode.
   - Windows PowerShell: `.\quick-launch.ps1 [api|webui|all]`
 - These scripts create or update `.venv`, run the `local-single` setup wizard when the API is started, and default to `all`: API at `http://127.0.0.1:8000` plus WebUI at `http://127.0.0.1:8080`.
-- The WebUI is served from a production build, as in the Docker quickstart: the first launch builds it (a few minutes), later launches reuse it until the git revision or API address changes, and the browser signs in with the local single-user key without a manual step. Set `TLDW_WEBUI_DEV=1` to run the hot-reloading dev server instead when working on the WebUI (it uses several GB of RAM).
+- The WebUI is served from a production build, as in the Docker quickstart: the first launch builds it (a few minutes), and later launches reuse it until `apps/` changes in git or the API address changes (after updating a zip download, delete `apps/tldw-frontend/.next`). In this default mode the browser signs in with the local single-user key without a manual step; programs on the same computer can sign in too while it runs, so on a shared computer set `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=0` and paste the key instead. `NEXT_PUBLIC_API_URL` (shell or `apps/tldw-frontend/.env*`) and `TLDW_WEBUI_DEV=1` (hot-reloading dev server, several GB of RAM) still need the key.
 - Use `api` for backend-only startup or `webui` when the API is already running.
 - For manual control, follow [Manual Setup](#manual-setup) below, then start with `python -m uvicorn tldw_Server_API.app.main:app --reload`.
 

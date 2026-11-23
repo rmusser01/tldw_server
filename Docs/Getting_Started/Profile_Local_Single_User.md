@@ -34,7 +34,9 @@ No-`make` shortcut scripts from the repository root:
 
 On macOS, you can also double-click `quick-launch.command` from Finder. These shortcuts create or update `.venv`, run the `local-single` setup wizard when the API is started, and default to `all`: API at `http://127.0.0.1:8000` plus WebUI at `http://127.0.0.1:8080`. Use `api` for backend-only startup or `webui` when the API is already running.
 
-The WebUI is served from a production build, as in the Docker quickstart. The first launch builds it, which takes a few minutes; later launches reuse that build until the git revision or the API address changes (delete `apps/tldw-frontend/.next` to force a rebuild). The browser signs in with the local single-user key without a manual step. Set `TLDW_WEBUI_DEV=1` to run the hot-reloading Next.js dev server instead when you are working on the WebUI; it uses several GB of RAM.
+The WebUI is served from a production build, as in the Docker quickstart. The first launch builds it, which takes a few minutes; later launches reuse that build until something under `apps/` changes in git or the API address changes. A zip download has no git revision, so after updating one, delete `apps/tldw-frontend/.next` to rebuild.
+
+In this default mode the browser signs in with the local single-user key without a manual step. While the WebUI runs, programs on the same computer can sign in to it the same way; on a shared computer, set `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=0` in the shell or in `tldw_Server_API/Config_Files/.env` and paste the API key instead. Automatic sign-in applies only to this default mode: with `NEXT_PUBLIC_API_URL` set (in the shell or in an `apps/tldw-frontend/.env*` file) the browser calls the API directly, and `TLDW_WEBUI_DEV=1` runs the hot-reloading Next.js dev server for WebUI work (it uses several GB of RAM); both still need the key pasted in the WebUI.
 
 PowerShell / manual no-`make` equivalent:
 

@@ -1,7 +1,9 @@
+import { existsSync } from "node:fs"
+
 import { describe, expect, it } from "vitest"
 
 import { resolveBuildProfile } from "../../scripts/resolve-build-profile.mjs"
-import { shapeWebuiBuildEnv } from "../scripts/build-with-profile.mjs"
+import { getNextBuildCommand, shapeWebuiBuildEnv } from "../scripts/build-with-profile.mjs"
 
 describe("resolveBuildProfile", () => {
   it("maps main to production", () => {
@@ -41,5 +43,20 @@ describe("shapeWebuiBuildEnv", () => {
 
     expect(env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE).toBe("advanced")
     expect(env.NEXT_PUBLIC_API_URL).toBe("http://127.0.0.1:8000")
+  })
+})
+
+describe("getNextBuildCommand", () => {
+  it("runs the Next CLI entry with the current runtime, not a platform shim like next.cmd", () => {
+    const { command, args } = getNextBuildCommand("turbopack")
+
+    expect(command).toBe(process.execPath)
+    expect(args[0]).toMatch(/next[\\/]dist[\\/]bin[\\/]next$/)
+    expect(existsSync(args[0])).toBe(true)
+    expect(args.slice(1)).toEqual(["build", "--turbopack"])
+  })
+
+  it("keeps the webpack bundler flag", () => {
+    expect(getNextBuildCommand("webpack").args.slice(1)).toEqual(["build", "--webpack"])
   })
 })
