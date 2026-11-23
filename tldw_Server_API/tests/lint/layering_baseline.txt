@@ -68,7 +68,7 @@ core.DB_Management -> core.CodeGraph: 1
 core.DB_Management -> core.Collections: 1
 core.DB_Management -> core.Evaluations: 3  # bump: Evaluations_DB reads RunStatus and the recipe-run models that moved from api.v1.schemas into core.Evaluations; core.DB_Management -> api.v1.schemas falls by the same 2 (TASK-13950.15)
 core.DB_Management -> core.Explainer: 1
-core.DB_Management -> core.Flashcards: 4
+core.DB_Management -> core.Flashcards: 6  # bump: +2 import statements: chacha.context imports sanitize_flashcard_text_for_search (static member build_flashcard_search_shadow_fields) and chacha.sqlite_schema imports scheduler_settings_to_json (moved body); ChaChaNotes_DB keeps all 4 of its own (TASK-13950.22 T6)
 core.DB_Management -> core.Ingestion_Media_Processing: 9
 core.DB_Management -> core.Jobs: 3
 core.DB_Management -> core.Monitoring: 1
@@ -80,7 +80,7 @@ core.DB_Management -> core.Prompt_Management: 7
 core.DB_Management -> core.RAG: 6
 core.DB_Management -> core.RPG: 6
 core.DB_Management -> core.Sharing: 5
-core.DB_Management -> core.Sync_Contracts: 31  # bump: chacha.context needs canonical_json_bytes and the moodboard-studio canonical JSON helper; ChaChaNotes_DB still imports from Sync_Contracts (TASK-13950.22 T4); was 29: Sync contracts moved out of core.Sync so DB_Management no longer imports the Sync package; not DB-loading, pinned by test_db_management_logic_imports (TASK-13950.16)
+core.DB_Management -> core.Sync_Contracts: 34  # bump: net +3 = +6 new statements, -3 dropped from ChaChaNotes_DB. New: chacha.sqlite_schema x3 (notes_moodboard_studio_contract: the SYNC_ENVELOPE_MAX_BYTES/parse_* group, canonical_json_bytes, legacy_source_diagnostic) and chacha.migrations.support x3 (models.validate_notes_note_upsert_payload, the notes_link validators, notes_moodboard_studio_contract.canonical_json_bytes). Dropped as unused after the move: ChaChaNotes_DB's models, notes_link and notes_task_contract statements; chacha.context is unchanged at 2 (TASK-13950.22 T6); was 31: chacha.context needs canonical_json_bytes and the moodboard-studio canonical JSON helper (TASK-13950.22 T4); was 29: Sync contracts moved out of core.Sync so DB_Management no longer imports the Sync package; not DB-loading, pinned by test_db_management_logic_imports (TASK-13950.16)
 core.DB_Management -> core.VN_Assets: 1
 core.DB_Management -> core.Visual_Identities: 1
 core.DB_Management -> core.Watchlists: 2

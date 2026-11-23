@@ -7,6 +7,7 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -674,7 +675,7 @@ def test_suggestion_generation_link_schema_dedupes_legacy_active_duplicates_befo
     )
 
     with db.transaction() as conn:
-        db._ensure_study_pack_schema_sqlite(conn)
+        sqlite_schema._ensure_study_pack_schema_sqlite(db.ctx, conn)
 
     rows = [
         dict(row)

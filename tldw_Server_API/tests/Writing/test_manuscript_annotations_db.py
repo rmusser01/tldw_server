@@ -8,6 +8,7 @@ import sqlite3
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -113,7 +114,7 @@ def test_sqlite_v50_migration_routes_to_current_schema(tmp_path, monkeypatch):
     db_path = tmp_path / "migrating.db"
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 50):
                 steps[version](conn)

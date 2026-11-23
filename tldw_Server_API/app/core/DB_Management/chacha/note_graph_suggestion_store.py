@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
 
 from ..ChaChaNotes_DB import BackendConnectionWrapper, BackendType
@@ -4984,7 +4985,7 @@ class NoteGraphSuggestionStore:
             "AND name IN ('notes_fts', 'notes_ai', 'notes_au', 'notes_ad')"
         ).fetchall()
         by_name = {str(row["name"]): row for row in rows}
-        table_definition, trigger_definitions = self._db._notes_fts_sqlite_contract()
+        table_definition, trigger_definitions = sqlite_schema._notes_fts_sqlite_contract()
         expected_trigger_definitions = {
             definition.split()[2]: self._normalized_sql(definition)
             for definition in trigger_definitions

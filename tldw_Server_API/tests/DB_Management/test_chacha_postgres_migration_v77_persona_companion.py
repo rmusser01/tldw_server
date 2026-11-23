@@ -49,7 +49,7 @@ def test_postgres_companion_upgrade_finishes_fast_path_and_installs_rls(
     monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: state["version"] == 77)
     monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, **_kwargs: state["version"])
     monkeypatch.setattr(db, "_set_schema_version_postgres", lambda _conn, version: state.update(version=version))
-    monkeypatch.setattr(db, "_repair_conversation_assistant_identity", lambda _conn: None)
+    monkeypatch.setattr(db, "repair_conversation_assistant_identity", lambda _conn: None)
     for version in range(72, 76):
         monkeypatch.setattr(
             db, f"_migrate_from_v{version}_to_v{version + 1}_postgres",

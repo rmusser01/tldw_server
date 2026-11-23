@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, QueryResult
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -23,7 +24,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_graph_update_triggers_name_only_graph_relevant_columns() -> None:
-    sqlite_source = " ".join(inspect.getsource(CharactersRAGDB._notes_graph_schema_sqlite).split())
+    sqlite_source = " ".join(inspect.getsource(sqlite_schema._notes_graph_schema_sqlite).split())
     postgres_statements: list[str] = []
 
     class _RecordingBackend:

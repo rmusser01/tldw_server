@@ -598,3 +598,328 @@ def test_select_schema_sql_adds_what_the_values_read(tmp_path: Path, capsys: pyt
     root = _seed(tmp_path, db=db)
     assert split.main(["select", "schema-sql", "--root", str(root)]) == 0
     assert capsys.readouterr().out.strip() == "['_MOD', '_MIGRATION_SQL_Y', '_MIGRATION_SQL_F', '_MIGRATION_SQL_X']"
+
+
+# --- ``functions`` and ``select`` (TASK-13950.22 PR E) -------------------------------------------------------------
+
+FN_A = "Helper_Scripts/chacha_split/manifests/t99_a.py"
+FN_B = "Helper_Scripts/chacha_split/manifests/t99_b.py"
+CHACHA = "tldw_Server_API/app/core/DB_Management/chacha"
+MOD_A = f"{CHACHA}/mod_a.py"
+MOD_B = f"{CHACHA}/mod_b.py"
+CONTEXT = f"{CHACHA}/context.py"
+FN_DB = '''
+import time
+from typing import Any
+
+LIMIT = 3
+
+
+class CharactersRAGDB:
+    def keep(self, conn):
+        self._b(conn)
+        return self._s(1) + self._k(2)
+
+    def _a(self, conn: Any, x):
+        """Doc."""
+        self._b(conn)
+        self._c()
+        value = self._map_table_for_backend(x) + self.client_id + time.time() + LIMIT
+        return value + len(str(self)) + self._s(x)
+
+    def _b(self, conn):
+        return self._get_current_utc_timestamp_iso()
+
+    def _c(self):
+        return 1
+
+    @staticmethod
+    def _s(x):
+        return x + 1
+
+    @classmethod
+    def _k(cls, x):
+        return cls._s(x) + 1
+'''
+CTX_STATIC = """
+class ChaChaContext:
+    @staticmethod
+    def pure(x):
+        return x
+"""
+
+
+def _fn_manifest(task: str, alias: str, names: list[str], target: str, **extra: object) -> str:
+    fields = {"task": task, "mode": "functions", "source": DB, "target": target, "alias": alias, "store_class": None,
+              "store_attr": None, "names": names, "shims": [], "rewrites": {}, "renames": {}, "structural": [], **extra}
+    return f"MANIFEST = {fields!r}\n"
+
+
+def _fn_tree(root: Path, db: str = FN_DB, a: list[str] | None = None, b: list[str] | None = None, files: dict[str, str] | None = None, **extra: object) -> Path:
+    manifests = {FN_A: _fn_manifest("T99", "mod_a", a if a is not None else ["_a"], MOD_A, **extra)}
+    if b is not None:
+        manifests[FN_B] = _fn_manifest("T99", "mod_b", b, MOD_B)
+    _seed(root, {**manifests, CONTEXT: CTX_STATIC, **(files or {})}, db=db)
+    _git(root, "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    return root
+
+
+def _functions(root: Path) -> int:
+    paths = [str(root / p) for p in (FN_A, FN_B) if (root / p).exists()]
+    return split.main(["functions", *paths, "--root", str(root)])
+
+
+def _fn_verify(root: Path) -> int:
+    paths = [str(root / p) for p in (FN_A, FN_B) if (root / p).exists()]
+    return split.main(["verify", *paths, "--base", "HEAD", "--root", str(root)])
+
+
+def test_self_becomes_ctx_and_mapped_members_rewrite(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, b=["_b", "_c", "_s"])
+    assert _functions(root) == 0
+    mod = _text(root, MOD_A)
+    assert "def _a(ctx, conn: Any, x):" in mod
+    assert "ctx.map_table(x) + ctx.client_id + time.time() + LIMIT" in mod
+    assert "def _a" not in _text(root, DB) and "def _b" not in _text(root, DB)
+
+
+def test_call_to_moved_function_gets_ctx_inserted(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, b=["_b", "_c", "_s"])
+    assert _functions(root) == 0
+    mod = _text(root, MOD_A)
+    assert "mod_b._b(ctx, conn)" in mod and "mod_b._c(ctx)" in mod  # an argument, and none
+    assert "from tldw_Server_API.app.core.DB_Management.chacha import mod_b" in mod
+    assert "ctx.utc_now_iso()" in _text(root, MOD_B)
+
+
+def test_call_inside_one_module_is_not_qualified(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, a=["_a", "_b", "_c", "_s"])
+    assert _functions(root) == 0
+    mod = _text(root, MOD_A)
+    assert "    _b(ctx, conn)" in mod and "    _c(ctx)" in mod and "mod_a." not in mod  # a module does not import itself
+
+
+def test_static_method_moves_without_ctx(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, a=["_s"])
+    assert _functions(root) == 0
+    mod = _text(root, MOD_A)
+    assert "def _s(x):" in mod and "staticmethod" not in mod and "ctx" not in mod
+    assert "mod_a._s(x)" in _text(root, DB) and "mod_a._s(1)" in _text(root, DB)  # called without ctx
+
+
+def test_classmethod_with_moved_cls_refs_becomes_static(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, a=["_s", "_k"])
+    assert _functions(root) == 0
+    mod = _text(root, MOD_A)
+    assert "def _k(x):" in mod and "classmethod" not in mod and "return _s(x) + 1" in mod
+    assert "mod_a._k(2)" in _text(root, DB)
+
+
+def test_classmethod_with_other_cls_use_fails_closed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db = FN_DB.replace("return cls._s(x) + 1", "return cls(x)")
+    root = _fn_tree(tmp_path, db=db, a=["_k"])
+    assert _functions(root) == 1
+    assert "cls is used other than as cls.<name>" in capsys.readouterr().out
+    assert not (root / MOD_A).exists()
+
+
+def test_class_receiver_static_call_is_rewritten(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, a=["_s"], files={TEST: "def f():\n    return CharactersRAGDB._s(1)\n"})
+    assert _functions(root) == 0
+    out = _text(root, TEST)
+    assert "mod_a._s(1)" in out and "import mod_a" in out
+
+
+def test_class_receiver_unbound_call_is_listed_not_rewritten(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _fn_tree(tmp_path, b=["_b", "_c", "_s"], files={TEST: "def f(db):\n    return CharactersRAGDB._b(db, 1)\n"})
+    assert _functions(root) == 0
+    assert "CharactersRAGDB._b(db, 1)" in _text(root, TEST)
+    capsys.readouterr()
+    assert split.main(["check", str(root / FN_A), str(root / FN_B), "--root", str(root)]) == 1
+    assert "CharactersRAGDB._b" in capsys.readouterr().out
+
+
+def test_bare_self_becomes_ctx_db(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, b=["_b", "_c", "_s"])
+    assert _functions(root) == 0
+    assert "len(str(ctx.db))" in _text(root, MOD_A)
+
+
+def test_self_ctx_becomes_ctx(tmp_path: Path) -> None:
+    db = FN_DB.replace("self._c()\n", "self._c()\n        self.ctx.thing()\n", 1)
+    root = _fn_tree(tmp_path, db=db, b=["_b", "_c", "_s"])
+    assert _functions(root) == 0
+    assert "    ctx.thing()" in _text(root, MOD_A) and "self.ctx" not in _text(root, MOD_A)
+
+
+def test_a_body_binding_ctx_fails_closed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _fn_tree(tmp_path, db=FN_DB.replace("value = self._map", "ctx = self._map"))
+    assert _functions(root) == 1
+    assert "binds a name ctx" in capsys.readouterr().out
+
+
+def test_unmapped_private_fails_closed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db = FN_DB.replace("self._c()\n", "self._mystery()\n        self._mystery()\n", 1)
+    root = _fn_tree(tmp_path, db=db, b=["_b", "_c", "_s"])
+    assert _functions(root) == 1
+    out = capsys.readouterr().out
+    assert "self._mystery: 2 uses: _a x2" in out
+    assert not (root / MOD_A).exists() and "def _a" in _text(root, DB)
+
+
+def test_multiline_and_fstring_text_is_not_dedented(tmp_path: Path) -> None:
+    body = '        sql = """\n    SELECT 1\n  FROM t\n"""\n        text = f"""\n   {x}\n  tail"""\n        return sql, text\n'
+    db = FN_DB.replace("        return value + len(str(self)) + self._s(x)\n", body)
+    root = _fn_tree(tmp_path, db=db, b=["_b", "_c", "_s"])
+    assert _functions(root) == 0
+    mod = _text(root, MOD_A)
+    assert '    sql = """\n    SELECT 1\n  FROM t\n"""\n' in mod and '    text = f"""\n   {x}\n  tail"""\n' in mod
+
+
+def test_free_names_import_from_their_source(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, b=["_b", "_c", "_s"])
+    assert _functions(root) == 0
+    mod = _text(root, MOD_A)
+    assert "import time\n" in mod and "from typing import Any" in mod  # the way ChaChaNotes_DB binds them
+    assert f"from {DB[:-3].replace('/', '.')} import LIMIT" in mod  # a module-level name of ChaChaNotes_DB
+
+
+def test_shim_forwards_and_class_call_sites_rewrite(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, a=["_b", "_c"], shims=["_b"])
+    assert _functions(root) == 0
+    db = _text(root, DB)
+    assert "def _b(self, conn):\n        return mod_a._b(self.ctx, conn)\n" in db  # the forwarder stays
+    assert "def _c" not in db
+    assert "mod_a._b(self.ctx, conn)" in db.split("def keep")[1].split("def _a")[0]  # a class call site goes to the module
+    assert "def _b(ctx, conn):" in _text(root, MOD_A)
+
+
+def test_test_call_sites_take_receiver_ctx(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, a=["_b"], files={TEST: "def f(db, conn):\n    return db._b(conn) + db.other._b(conn)\n"})
+    assert _functions(root) == 0
+    assert "mod_a._b(db.ctx, conn) + mod_a._b(db.other.ctx, conn)" in _text(root, TEST)
+
+
+def test_a_call_whose_arguments_start_on_the_next_line_gets_no_trailing_space(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, a=["_b"], files={TEST: "def f(db, conn):\n    return db._b(\n        conn,\n    )\n"})
+    assert _functions(root) == 0
+    assert "mod_a._b(db.ctx,\n        conn," in _text(root, TEST)
+
+
+def test_functions_verify_and_diffpairs_pass_and_fail_on_a_hand_edit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _fn_tree(tmp_path, a=["_a", "_s"], b=["_b", "_c"])
+    assert _functions(root) == 0
+    args = [str(root / FN_A), str(root / FN_B), "--base", "HEAD", "--root", str(root)]
+    assert _fn_verify(root) == 0 and diffpairs.main(args) == 0
+    assert "moved 4 identical" in capsys.readouterr().out
+    (root / MOD_A).write_text(_text(root, MOD_A).replace("x + 1", "x + 2"))
+    assert _fn_verify(root) == 1 and diffpairs.main(args) == 1
+    capsys.readouterr()
+    (root / MOD_A).write_text(_text(root, MOD_A).replace("x + 2", "x + 1"))
+    (root / DB).write_text(_text(root, DB).replace("mod_a._s(1)", "mod_a._s(2)"))
+    assert _fn_verify(root) == 1  # a remaining class def is checked too
+
+
+def test_a_name_in_two_manifests_fails_closed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _fn_tree(tmp_path, a=["_a", "_s"], b=["_b", "_s"])
+    assert _functions(root) == 1
+    assert "_s: listed twice" in capsys.readouterr().out and not (root / MOD_A).exists()
+
+
+def test_patches_lists_a_patch_of_a_moved_name_until_it_targets_the_module(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    source = "def f(monkeypatch, db):\n    monkeypatch.setattr(db, '_b', print)\n    monkeypatch.setattr(mod_a, '_b', print)\n"
+    root = _fn_tree(tmp_path, a=["_b"], files={TEST: source})
+    assert _functions(root) == 0
+    capsys.readouterr()
+    assert split.main(["patches", str(root / FN_A), "--root", str(root)]) == 1
+    out = capsys.readouterr().out
+    assert f"{TEST}:2: setattr _b" in out and f"{TEST}:3" not in out
+
+
+SELECT_DB = '''
+class CharactersRAGDB:
+    def _migrate_from_v1_to_v2_sqlite(self, conn): ...
+    def _migrate_from_v2_to_v3_postgres(self, conn): ...
+    def _ensure_a_schema_sqlite(self, conn):
+        self._helper_sq()
+        self._shared()
+    def _ensure_b_schema_postgres(self, conn):
+        self._helper_pg()
+        self._shared()
+    def _helper_sq(self): ...
+    def _helper_pg(self): ...
+    def _shared(self): ...
+    def _used_by_a_store(self): ...
+    def _ensure_json_string(self): ...
+    def _initialize_schema_sqlite_legacy(self, conn):
+        self._used_by_a_store()
+    def _initialize_schema(self): ...
+    def other(self): ...
+'''
+
+
+def test_select_matches_research_groups_on_a_seed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    store = f"{CHACHA}/a_store.py"
+    root = _seed(tmp_path, {store: "def f(self):\n    return self._db._used_by_a_store()\n"}, db=SELECT_DB)
+
+    def group(name: str) -> list[str]:
+        assert split.main(["select", name, "--root", str(root)]) == 0
+        return ast.literal_eval(capsys.readouterr().out)
+
+    assert group("migrate-sqlite") == ["_migrate_from_v1_to_v2_sqlite"]
+    assert group("migrate-postgres") == ["_migrate_from_v2_to_v3_postgres"]
+    assert group("sqlite-schema") == ["_ensure_a_schema_sqlite", "_helper_sq"]
+    assert group("postgres-schema") == ["_ensure_b_schema_postgres", "_helper_pg"]
+    assert group("migration-support") == ["_shared"]  # called from both sides
+    assert group("init") == ["_initialize_schema_sqlite_legacy"]  # the closure leaves ``_used_by_a_store`` (a store reaches it)
+
+
+def test_constants_fail_closed_on_a_name_that_is_not_a_constant(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _constants_tree(tmp_path, ["_NOPE"])
+    assert _constants(root) == 1
+    assert "['_NOPE']" in capsys.readouterr().out and not (root / SCHEMA_SQL).exists()
+
+
+def test_const_sites_fail_closed_on_a_name_assigned_twice() -> None:
+    tree = ast.parse("class CharactersRAGDB:\n    _A = 1\n    _A = 2\n")
+    with pytest.raises(SystemExit, match="_A is assigned twice at class level"):
+        split._const_sites(tree)
+    assert set(split._const_sites(ast.parse("_A = 1\nclass CharactersRAGDB:\n    _A = 2\n"))) == {"_A"}  # one per level is fine
+
+
+def test_a_name_another_app_class_defines_is_rewritten_only_on_a_db_receiver_in_tests(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    other = "tldw_Server_API/app/core/DB_Management/Other_DB.py"
+    app = "tldw_Server_API/app/api/uses.py"
+    root = _fn_tree(
+        tmp_path,
+        a=["_b"],
+        files={
+            other: "class Other:\n    def _b(self, conn): ...\n",
+            app: "def f(db, conn):\n    return db._b(conn)\n",
+            TEST: "def f(db, thing, conn):\n    return db._b(conn), thing._b(conn)\n",
+        },
+    )
+    assert _functions(root) == 0
+    assert "collision _b" in capsys.readouterr().out
+    assert "db._b(conn)" in _text(root, app)  # app code: left to its own class
+    assert "mod_a._b(db.ctx, conn), thing._b(conn)" in _text(root, TEST)
+
+
+def test_a_reference_through_a_moved_module_is_not_rewritten_again(tmp_path: Path) -> None:
+    root = _fn_tree(tmp_path, a=["_b"], files={TEST: "def f(db, conn):\n    return db._b(conn)\n"})
+    assert _functions(root) == 0
+    once = _text(root, TEST)
+    tree = ast.parse(once)
+    env = split.FnEnv({}, {"_b": split.FnMove("mod_a", MOD_A, False, False)}, {}, {}, frozenset(), frozenset(), frozenset())
+    edits, _, problems = split._callsite_edits(once, tree, env, False, set(), True)
+    assert not edits and not problems  # ``mod_a._b(db.ctx, conn)`` is left alone
+    assert "mod_a._b(db.ctx, conn)" in once and once.count("ctx") == 1
+
+
+def test_a_body_using_super_fails_closed_naming_the_def(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db = FN_DB.replace("        return x + 1\n", "        return x + 1\n\n    def _sup(self):\n        return super().keep()\n", 1)
+    root = _fn_tree(tmp_path, db=db, a=["_sup"])
+    assert _functions(root) == 1
+    assert "_sup: " in capsys.readouterr().out and not (root / MOD_A).exists()

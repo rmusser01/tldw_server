@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.Persona.buddy import ensure_persona_buddy_for_profile
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 
 
 pytestmark = pytest.mark.unit
@@ -40,7 +41,7 @@ def test_migration_v39_to_latest_creates_persona_buddies_table(
         # Current initialization also repairs newer schemas; build only the
         # historical base and real migration steps for this seed database.
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 39):
                 steps[version](conn)

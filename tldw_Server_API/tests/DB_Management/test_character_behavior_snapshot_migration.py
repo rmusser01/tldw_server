@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
     ConversationStore,
 )
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendConnectionWrapper,
     CharactersRAGDB,
@@ -451,11 +452,11 @@ def test_sqlite_v65_checkpoint_failure_rolls_back_all_schema_changes(
     db_path = tmp_path / "character-behavior-rollback.sqlite"
     _create_v64_legacy_database(db_path, monkeypatch)
 
-    def _fail_checkpoint(_self: CharactersRAGDB, stage: str) -> None:
+    def _fail_checkpoint(_ctx: object, stage: str) -> None:
         assert stage == "schema-created"
         raise RuntimeError("injected v65 migration checkpoint failure")
 
-    monkeypatch.setattr(CharactersRAGDB, "_migration_v65_checkpoint", _fail_checkpoint)
+    monkeypatch.setattr(migration_support, "_migration_v65_checkpoint", _fail_checkpoint)
     with pytest.raises(CharactersRAGDBError, match="injected v65 migration checkpoint failure"):
         CharactersRAGDB(db_path=str(db_path), client_id="rollback-owner")
 
@@ -1988,11 +1989,11 @@ def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: True)
     monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
 
-    def _fail_checkpoint(_self: CharactersRAGDB, stage: str) -> None:
+    def _fail_checkpoint(_ctx: object, stage: str) -> None:
         assert stage == "schema-created"
         raise RuntimeError("injected postgres v65 checkpoint failure")
 
-    monkeypatch.setattr(CharactersRAGDB, "_migration_v65_checkpoint", _fail_checkpoint)
+    monkeypatch.setattr(migration_support, "_migration_v65_checkpoint", _fail_checkpoint)
     with pytest.raises(RuntimeError, match="injected postgres v65 checkpoint failure"):
         db._initialize_schema_postgres()
 

@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     QueryResult,
 )
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     SchemaError,
@@ -131,7 +132,7 @@ def test_sqlite_v56_to_v57_is_a_non_destructive_version_step(
 
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             for prior in range(4, 56):
                 db._run_sqlite_linear_migration_step(conn, from_version=prior, target_version=56, initial_version=4)
             assert db._get_db_version(conn) == 56

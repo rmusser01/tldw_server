@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, QueryResult
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -302,20 +302,16 @@ def test_sqlite_v59_post_ddl_failure_rolls_back_registry_and_version(
 ) -> None:
     db_path = tmp_path / "attachments-post-ddl-failure.sqlite"
     _prepare_v58_database(db_path)
-    create_schema = CharactersRAGDB._create_note_attachment_schema_sqlite
+    create_schema = sqlite_schema._create_note_attachment_schema_sqlite
 
-    def fail_after_ddl(self: CharactersRAGDB, conn: sqlite3.Connection) -> None:
-        create_schema(self, conn)
+    def fail_after_ddl(ctx: object, conn: sqlite3.Connection) -> None:
+        create_schema(ctx, conn)
         assert conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'note_attachments'"
         ).fetchone() is not None
         raise SchemaError("injected post-DDL registry failure")
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_create_note_attachment_schema_sqlite",
-        fail_after_ddl,
-    )
+    monkeypatch.setattr(sqlite_schema, "_create_note_attachment_schema_sqlite", fail_after_ddl)
     with pytest.raises(CharactersRAGDBError, match="injected post-DDL registry failure"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 

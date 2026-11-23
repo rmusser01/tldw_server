@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.Characters.test_character_functionality_db import sample_card_data
 
@@ -33,7 +34,7 @@ def character_id(db_instance: CharactersRAGDB) -> int:
 def _initialize_genuine_v31(db: CharactersRAGDB) -> None:
     """Build only registered historical migrations, never downgrade a modern marker."""
     conn = db.get_connection()
-    db._apply_schema_v4(conn)
+    sqlite_schema._apply_schema_v4(db.ctx, conn)
     version = 4
     while version < 31:
         version = db._run_sqlite_linear_migration_step(conn, from_version=version, target_version=31, initial_version=4)

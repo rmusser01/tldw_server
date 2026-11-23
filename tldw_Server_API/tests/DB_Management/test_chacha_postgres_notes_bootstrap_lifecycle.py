@@ -227,7 +227,7 @@ def test_startup_repair_preserves_distinct_schema_and_outer_operation_checkouts(
         outer_raw = outer_state.conn
         with db.backend.transaction() as schema_raw:
             assert schema_raw is not outer_raw
-            db._repair_conversation_assistant_identity(BackendConnectionWrapper(db, schema_raw, db.backend))
+            db.repair_conversation_assistant_identity(BackendConnectionWrapper(db, schema_raw, db.backend))
             assert current_connection_state(db) is outer_state
             assert outer_state.conn is outer_raw
             assert schema_raw.info.transaction_status.name == "INTRANS"

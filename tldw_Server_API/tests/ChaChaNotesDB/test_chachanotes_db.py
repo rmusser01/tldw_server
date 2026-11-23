@@ -13,6 +13,7 @@ import os  # For :memory: check
 # Third-Party Imports
 #
 # Local Imports
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -256,7 +257,7 @@ class TestMessageMetadata:
     def test_migration_v12_to_v13_creates_table(self, db_path, client_id, monkeypatch):
         def initialize_historical(db):
             with db.transaction() as conn:
-                db._apply_schema_v4(conn)
+                sqlite_schema._apply_schema_v4(db.ctx, conn)
                 steps = db._sqlite_linear_migration_steps()
                 for prior in range(4, 12):
                     steps[prior](conn)
@@ -1448,7 +1449,6 @@ class TestTransactions:
 
         conn = _RecordingConnection()
         db = CharactersRAGDB.__new__(CharactersRAGDB)
-        db._ensure_sqlite_backend = lambda: None
         db.get_connection = lambda: conn
 
         with TransactionContextManager(db):

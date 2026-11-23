@@ -15,10 +15,12 @@ from tldw_Server_API.app.core.DB_Management.chacha.conversation_search_snippets 
     build_match_snippet,
     extract_search_terms,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    _CHACHA_NONCRITICAL_EXCEPTIONS,
+from tldw_Server_API.app.core.DB_Management.chacha.schema_sql import (
     RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID,
     RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    _CHACHA_NONCRITICAL_EXCEPTIONS,
     BackendType,
     CharactersRAGDBError,
     ConflictError,

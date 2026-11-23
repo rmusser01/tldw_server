@@ -16,7 +16,7 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -39,10 +39,16 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     UniqueConstraintError,
     _owner_is_scoped,
 )
+from tldw_Server_API.app.core.exceptions import NotesTaskContractError
+from tldw_Server_API.app.core.Flashcards.asset_refs import sanitize_flashcard_text_for_search
 from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (
     canonical_json_bytes as moodboard_studio_canonical_json_bytes,
 )
-from tldw_Server_API.app.core.Sync_Contracts.notes_task_contract import canonical_json_bytes
+from tldw_Server_API.app.core.Sync_Contracts.notes_task_contract import (
+    canonical_json_bytes,
+    notes_task_object_hash,
+    parse_notes_task_v1,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -333,6 +339,65 @@ class ChaChaContext:
     def note_task_v60_hash(value: object) -> str:
         """Return the ``sha256:`` hash of the canonical JSON bytes of ``value``."""
         return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+    @staticmethod
+    def note_task_v60_json_safe(value: Any) -> Any:
+        """Return ``value`` with datetimes as UTC ISO text, recursively through mappings and sequences."""
+        if isinstance(value, datetime):
+            normalized = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+            return normalized.astimezone(timezone.utc).isoformat()
+        if isinstance(value, Mapping):
+            return {str(key): ChaChaContext.note_task_v60_json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [ChaChaContext.note_task_v60_json_safe(item) for item in value]
+        return value
+
+    @staticmethod
+    def build_flashcard_search_shadow_fields(
+        *,
+        front: str | None,
+        back: str | None,
+        notes: str | None,
+    ) -> tuple[str, str, str]:
+        """Return sanitized search shadow text for flashcard FTS."""
+        return (
+            sanitize_flashcard_text_for_search(front),
+            sanitize_flashcard_text_for_search(back),
+            sanitize_flashcard_text_for_search(notes),
+        )
+
+    @staticmethod
+    def canonicalize_legacy_task_v60(
+        row: Mapping[str, Any], *, owner_user_id: str
+    ) -> tuple[str, str | None, str | None]:
+        """Hash representable task data canonically and retain bounded diagnostics otherwise."""
+        source = dict(row)
+        try:
+            metadata = json.loads(str(source.get("metadata_json") or "{}"))
+            if not isinstance(metadata, dict) or set(metadata) - {"due_date", "priority", "estimate"}:
+                raise NotesTaskContractError("legacy task metadata is not canonical")
+            parsed = parse_notes_task_v1(
+                {
+                    "task_id": source["id"], "note_id": source["note_id"],
+                    "title": source["text"], "description": None, "status": source["status"],
+                    "completed_at": source.get("completed_at"), "priority": metadata.get("priority"),
+                    "due_date": metadata.get("due_date"), "estimate": metadata.get("estimate"),
+                    "recurrence": None, "assignee_id": None, "tags": [], "custom": {},
+                },
+                owner_user_id=owner_user_id,
+            )
+            return (
+                notes_task_object_hash(
+                    parsed,
+                    revision=int(source.get("canonical_revision") or source["version"]),
+                    deleted=bool(source["deleted"]),
+                ),
+                None,
+                None,
+            )
+        except (NotesTaskContractError, TypeError, ValueError, json.JSONDecodeError):
+            source_hash = ChaChaContext.note_task_v60_hash({"source": source, "version": 1})
+            return source_hash, "legacy_task_payload_invalid", source_hash
 
     def deserialize_row_fields(self, row: Any, json_fields: Sequence[str]) -> dict[str, Any] | None:
         """

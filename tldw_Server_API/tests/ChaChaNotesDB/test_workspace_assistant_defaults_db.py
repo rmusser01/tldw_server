@@ -13,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceAssistantDefaults
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 
@@ -165,7 +166,7 @@ def test_historical_v48_sqlite_full_upgrade_preserves_workspace_defaults(
     db_path = tmp_path / "historical-v48.db"
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 48):
                 steps[version](conn)
