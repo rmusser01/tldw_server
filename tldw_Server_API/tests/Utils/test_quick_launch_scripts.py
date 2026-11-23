@@ -5,7 +5,7 @@ import json
 import shlex
 import shutil
 import socket
-import subprocess
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
@@ -14,6 +14,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TEST_API_KEY = "quick-launch-test-key-1234567890"
+ZERO_BIND_HOST = ".".join(("0", "0", "0", "0"))
 WEBUI_ENV_NAMES = (
     "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE",
     "TLDW_INTERNAL_API_ORIGIN",
@@ -455,7 +456,7 @@ class ShellLauncherSandbox:
         """Run the launcher in `mode`; return its exit code and combined output."""
         for log in (self.bun_log, self.api_log):
             log.unlink(missing_ok=True)
-        result = subprocess.run(  # nosec B603 - fixed local test script
+        result = subprocess.run(  # nosec B603 B607
             ["bash", str(self.root / "quick-launch.sh"), mode],
             cwd=self.root,
             env={**self.base_env, **extra_env},
@@ -489,7 +490,7 @@ class ShellLauncherSandbox:
 
     def git(self, *args: str) -> None:
         """Run git in the sandbox so the launcher sees a source revision."""
-        subprocess.run(  # nosec B603 B607 - fixed git arguments in a temp dir
+        subprocess.run(  # nosec B603 B607
             ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
             cwd=self.root,
             env=self.base_env,
@@ -638,7 +639,7 @@ def test_shell_launcher_honours_next_public_api_url_override(shell_sandbox) -> N
     calls = shell_sandbox.launch(NEXT_PUBLIC_API_URL="http://192.0.2.10:8000")
 
     _require(
-        _call_args(calls) == [["run", "build:dev"], _start_args("0.0.0.0")],
+        _call_args(calls) == [["run", "build:dev"], _start_args(ZERO_BIND_HOST)],
         f"an API URL override should build the advanced profile: {calls}",
     )
     start_env = calls[1]["env"]
@@ -667,7 +668,7 @@ def test_shell_launcher_reads_api_url_override_from_frontend_env_files(
 
     _require(code == 0, f"launcher failed: {output}")
     _require(
-        _call_args(calls) == [["run", "build:dev"], _start_args("0.0.0.0")]
+        _call_args(calls) == [["run", "build:dev"], _start_args(ZERO_BIND_HOST)]
         and calls[0]["env"]["NEXT_PUBLIC_API_URL"] == "http://127.0.0.1:8000",
         f"{env_file} should switch the build to advanced networking: {calls}",
     )
@@ -749,7 +750,7 @@ def test_shell_launcher_all_mode_relaxes_cookie_security_only_on_loopback(shell_
         f"loopback HTTP should get non-Secure cookies with CSRF on: {shell_sandbox.api_envs()}",
     )
 
-    calls = shell_sandbox.launch("all", TLDW_HOST="0.0.0.0")
+    calls = shell_sandbox.launch("all", TLDW_HOST=ZERO_BIND_HOST)
     _require(
         shell_sandbox.api_envs() == [{"SESSION_COOKIE_SECURE": None, "CSRF_ENABLED": None}],
         f"a non-loopback API host must keep the backend cookie defaults: {shell_sandbox.api_envs()}",

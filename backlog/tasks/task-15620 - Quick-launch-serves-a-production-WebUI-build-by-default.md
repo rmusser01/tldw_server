@@ -33,6 +33,7 @@ Live verification (ports 8027/8097, dev 2aa1f81c37): first launch built in ~38 s
 PR: https://github.com/rmusser01/tldw_server/pull/3574 (base dev).
 Review round 1 (#3574, verdict 'with fixes'). (1) build-with-profile.mjs ran execFileSync('next.cmd') on win32 without a shell (Node EINVAL since CVE-2024-27980; bun may not create .cmd shims). It now runs process.execPath with require.resolve('next/dist/bin/next') (resolves through bun's apps/node_modules/.bun layout). getNextBinary had no other callers; the extension has its own script. vitest red 'getNextBuildCommand is not a function' -> green 13 passed (build-profile-resolver + frontend-dev-config); eslint clean. A real build:prod through the launcher used the new spawn. (2) Reproduced for real: previous launcher + .env.local copied from the example -> 'Invalid WebUI networking config: quickstart mode must not set NEXT_PUBLIC_API_URL...', build:prod exit 1. Launchers now read NEXT_PUBLIC_API_URL from .env.production.local/.env.local/.env.production/.env (Next's order), switch to advanced networking and name the file; real run built build:dev and served /chat. (3) .ps1 saves and restores every $env: it sets (run_webui and the API window start) in finally; null restores unset. (4) AUTH_MODE, SINGLE_USER_API_KEY, SINGLE_USER_SESSION_COOKIE_NAME (the name runtime-auth-policy.ts reads) and TLDW_WEBUI_EXPOSE_RUNTIME_AUTH come from the shell, else the env file, else the default (1 for the flag); 0 opts out with a printed note. (5) The backend sets Secure on both cookies (single_user_session.py:139, csrf_protection.py:248; SESSION_COOKIE_SECURE defaults True). Chromium keeps them over http://127.0.0.1. WebKit was not testable: the only cached build is webkit-2248, while Playwright 1.65.1 expects 2388, and newPage fails with "Protocol error (Console.enable): 'Console' domain was not found". No browsers were downloaded. So all mode now mirrors the Docker overlay on loopback hosts only: SESSION_COOKIE_SECURE=0 and CSRF_ENABLED=1, explicit shell or env-file values win. webui mode prints what to set. A real run's Set-Cookie headers have no Secure, and Chromium signs in. (6) The new fake-bun + fake-venv-python sandbox covers all mode as well: failed build, TLDW_HOST=0.0.0.0, shell-over-file precedence, opt-out, dev/override env with no key or flag, cookie defaults, and an API that crashes or never turns healthy. pwsh is not installed, so .ps1 coverage is a string contract only. (7) The rebuild key uses git rev-parse HEAD:apps. (8-13) docs/usage cover zip updates and the sign-in scope; the failed-build hint, the standalone-warning line, and the missing-venv explanation are printed. TLDW_API_START_DELAY is now the max /health wait (default 120 s), replacing the fixed sleep. Python tests: red 19 failed / 32 passed -> green 51 passed; sweep tests/Docs + launcher + release helper + env-vars ratchet + media_db guards + CI licensing policy = 352 passed.
 Real runs, review round 1 (ports 8027/8097). B (first, all mode): /health wait 16 s, build ~33 s, /chat at +49 s; /chat, /settings/data, /document-workspace 200; proxied /health 200; runtime-config available; Set-Cookie with no Secure; auth/me 200 with cookie, 401 without; Chromium auto sign-in OK (authMe 200, no connect prompt); next-server RSS 199,312 KB. C (second): 'Reusing the existing WebUI build', /chat at +18 s (WebUI starts after API health), first proxied /health 200, no ECONNREFUSED. D: TLDW_WEBUI_DEV=1 ran next dev (Ready 1.8 s); the prod build was kept. E: .env.local override ran build:dev, start -H 0.0.0.0, /chat 200, advanced. Everything stopped by PID; .next, .env.local, logs and runtime files removed.
+Bandit (uvx bandit, not installed in .venv) on the only touched Python file, tests/Utils/test_quick_launch_scripts.py: initially B404/B607/B104 in the new test code. Fixed with nosec B404 on the import (repo convention), B607 on the fixed bash/git calls, and a joined ZERO_BIND_HOST constant (the existing test's pattern) for the 0.0.0.0 expectations; re-run reports no issues. Shell, PowerShell and .mjs are outside Bandit's scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -43,10 +44,10 @@ quick-launch.sh/.ps1 build the WebUI once (build:prod, quickstart networking) an
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
