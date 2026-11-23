@@ -60,6 +60,8 @@ export const importPageAssistData = async (file: File) => {
             db.chatHistories,
             db.messages,
             db.compareStates,
+            // importChatHistoryV2's nested transaction indexes message search tokens.
+            db.searchTokens,
             db.prompts,
             db.sessionFiles,
             db.modelNickname,
