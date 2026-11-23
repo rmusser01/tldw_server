@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -31,6 +32,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
     parse_notes_studio_document_v1,
     studio_result_hash,
 )
+from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
 
 pytestmark = pytest.mark.integration
 
@@ -212,18 +214,18 @@ def _seed_local_unbound_moodboard_studio_graph(
 def test_postgres_v63_migration_contract_is_bounded_and_version_last() -> None:
     source = inspect.getsource(CharactersRAGDB._migrate_from_v62_to_v63_postgres)
     fingerprint_source = inspect.getsource(
-        CharactersRAGDB._postgres_v61_fingerprint_phase_page
+        postgres_schema._postgres_v61_fingerprint_phase_page
     )
     begin_source = inspect.getsource(
-        CharactersRAGDB._begin_notes_moodboard_studio_v61_postgres_transaction
+        postgres_schema._begin_notes_moodboard_studio_v61_postgres_transaction
     )
     configure_source = inspect.getsource(
-        CharactersRAGDB._configure_notes_moodboard_studio_v61_postgres_transaction
+        postgres_schema._configure_notes_moodboard_studio_v61_postgres_transaction
     )
     schema_source = inspect.getsource(
-        CharactersRAGDB._notes_moodboard_studio_v61_postgres_schema_sql
+        postgres_schema._notes_moodboard_studio_v61_postgres_schema_sql
     )
-    initializer_source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
+    initializer_order = ladder.names(ladder.ladder_calls(ladder.postgres_init_function()))
 
     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 63
     assert "lock_timeout" in configure_source
@@ -242,9 +244,13 @@ def test_postgres_v63_migration_contract_is_bounded_and_version_last() -> None:
     assert source.index(
         'verification_phase = f"aggregate_verification:{source_phase}"'
     ) < source.index('if not begin_phase("RLS phase")')
-    assert initializer_source.index(
+    first_lock = ladder.ladder_calls(ladder.postgres_init_function())[
+        initializer_order.index("_get_schema_version_postgres")
+    ]
+    assert first_lock.kwargs == {"lock": True}
+    assert initializer_order.index(
         "_configure_notes_moodboard_studio_v61_postgres_transaction"
-    ) < initializer_source.index("_get_schema_version_postgres(conn, lock=True)")
+    ) < initializer_order.index("_get_schema_version_postgres")
 
 
 @pytest.mark.parametrize("predict", (True, False), ids=("source_prediction", "aggregate"))
@@ -254,6 +260,9 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
 ) -> None:
     class _FakeTime:
         def __init__(self, *samples: float) -> None:
+            self.load(*samples)
+
+        def load(self, *samples: float) -> None:
             self._samples = iter(samples)
 
         def monotonic(self) -> float:
@@ -275,7 +284,7 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
     ]
 
     def source_page(
-        _conn: Any, *, phase: str, progress: dict[str, Any]
+        _ctx: Any, _conn: Any, *, phase: str, progress: dict[str, Any]
     ) -> tuple[list[dict[str, Any]], object | None]:
         assert phase == "note_studio_documents"
         cursor = (
@@ -295,13 +304,13 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
         )
 
     def expected_row(
-        _conn: Any, *, phase: str, row: dict[str, Any]
+        _ctx: Any, _conn: Any, *, phase: str, row: dict[str, Any]
     ) -> dict[str, Any]:
         assert phase == "note_studio_documents"
         return {**row, "canonical_hash": "sha256:" + row["note_id"][-1] * 64}
 
-    db._postgres_v61_source_page = source_page
-    db._postgres_v61_expected_row = expected_row
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_source_page", source_page)
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_expected_row", expected_row)
     empty_fingerprint = "sha256:" + hashlib.sha256().hexdigest()
     progress: dict[str, Any] = {
         "keyset_cursor": None,
@@ -309,11 +318,9 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
         "aggregate_fingerprint": empty_fingerprint,
     }
 
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.time",
-        _FakeTime(0.0, 26.0),
-    )
-    first = db._postgres_v61_fingerprint_phase_page(
+    fake_time = _FakeTime(0.0, 26.0)
+    monkeypatch.setattr(postgres_schema, "time", fake_time)
+    first = postgres_schema._postgres_v61_fingerprint_phase_page(db.ctx,
         None,
         source_phase="note_studio_documents",
         progress=progress,
@@ -328,20 +335,17 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
         "copied_count": first["count"],
         "aggregate_fingerprint": first["fingerprint"],
     }
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.time",
-        _FakeTime(100.0, 100.0),
-    )
-    resumed = db._postgres_v61_fingerprint_phase_page(
+    fake_time.load(100.0, 100.0)
+    resumed = postgres_schema._postgres_v61_fingerprint_phase_page(db.ctx,
         None,
         source_phase="note_studio_documents",
         progress=resumed_progress,
         predict=predict,
     )
-    expected_rows = [expected_row(None, phase="note_studio_documents", row=row) for row in rows]
+    expected_rows = [expected_row(None, None, phase="note_studio_documents", row=row) for row in rows]
     if not predict:
         expected_rows = rows
-    expected_count, expected_fingerprint = db._postgres_v61_progress_fingerprint(
+    expected_count, expected_fingerprint = postgres_schema._postgres_v61_progress_fingerprint(
         empty_fingerprint, expected_rows
     )
     assert resumed == {
@@ -360,7 +364,7 @@ def test_fresh_postgres_schema_is_exact_v63_with_forced_rls(
     try:
         with db.transaction() as conn:
             assert db._get_schema_version_postgres(conn) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
-            db._verify_notes_moodboard_studio_schema_postgres(conn)
+            postgres_schema._verify_notes_moodboard_studio_schema_postgres(db.ctx, conn)
             rows = conn.execute(
                 "SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,"
                 "c.relowner=n.nspowner AS owner_matches_schema "
@@ -398,11 +402,11 @@ def test_postgres_initializer_sets_timeouts_before_actual_first_version_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     observed: list[tuple[str, str]] = []
-    original = CharactersRAGDB._get_schema_version_postgres
+    original = postgres_schema._get_schema_version_postgres
 
-    def observe_lock(self: CharactersRAGDB, conn: Any, *, lock: bool = False) -> int:
+    def observe_lock(ctx: Any, conn: Any, *, lock: bool = False) -> int:
         if lock:
-            settings = self.backend.execute(
+            settings = ctx.backend.execute(
                 "SELECT current_setting('lock_timeout') AS lock_timeout,"
                 "current_setting('statement_timeout') AS statement_timeout",
                 connection=conn,
@@ -410,9 +414,9 @@ def test_postgres_initializer_sets_timeouts_before_actual_first_version_lock(
             observed.append(
                 (str(settings["lock_timeout"]), str(settings["statement_timeout"]))
             )
-        return original(self, conn, lock=lock)
+        return original(ctx, conn, lock=lock)
 
-    monkeypatch.setattr(CharactersRAGDB, "_get_schema_version_postgres", observe_lock)
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", observe_lock)
     backend, db = _open_db(pg_database_config, owner="960016")
     try:
         assert observed
@@ -1288,7 +1292,7 @@ def test_postgres_v61_moodboard_bind_failure_rolls_back_rekey_and_force_rls(
                     target_dataset_id=target,
                     conn=conn,
                 )
-            db._verify_notes_moodboard_studio_schema_postgres(conn)
+            postgres_schema._verify_notes_moodboard_studio_schema_postgres(db.ctx, conn)
 
         state = _postgres_v61_scope_state(backend, owner=owner)
         assert state["moodboards"] == {"local-unbound": 1}
@@ -1800,7 +1804,7 @@ def test_postgres_v61_placement_order_is_board_global_across_resumed_pages(
                 raise RuntimeError("injected placement-page interruption")
 
         monkeypatch.setattr(
-            db,
+            postgres_schema,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
             interrupt_after_first_placement_copy_page,
         )
@@ -1820,7 +1824,7 @@ def test_postgres_v61_placement_order_is_board_global_across_resumed_pages(
         assert partial == [{"copied_count": 128, "status": "running"}]
 
         monkeypatch.setattr(
-            db,
+            postgres_schema,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
             lambda _label: None,
         )
@@ -2100,7 +2104,7 @@ def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
     try:
         _restore_large_postgres_v62_fixture(db, owner=owner, row_count=row_count)
         monkeypatch.setattr(
-            db,
+            postgres_schema,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
             fail_each_stage_once,
         )
@@ -2151,7 +2155,7 @@ def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
             pytest.fail("PostgreSQL v62-to-v63 migration did not converge after fault injection")
 
         with db.transaction() as conn:
-            db._verify_notes_moodboard_studio_schema_postgres(conn)
+            postgres_schema._verify_notes_moodboard_studio_schema_postgres(db.ctx, conn)
             final_progress = {
                 row["phase"]: row
                 for row in conn.execute(
@@ -2225,7 +2229,7 @@ def test_postgres_v61_aggregate_rejects_valid_looking_target_tampering(
     try:
         _restore_large_postgres_v62_fixture(db, owner=owner, row_count=1)
         monkeypatch.setattr(
-            db,
+            postgres_schema,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
             stop_after_copy,
         )
@@ -2240,7 +2244,7 @@ def test_postgres_v61_aggregate_rejects_valid_looking_target_tampering(
                 connection=conn,
             )
         monkeypatch.setattr(
-            db,
+            postgres_schema,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
             lambda _stage: None,
         )
@@ -2279,7 +2283,7 @@ def test_postgres_v61_source_prediction_rejects_consistently_wrong_conversion(
     try:
         _restore_large_postgres_v62_fixture(db, owner=owner, row_count=1)
         monkeypatch.setattr(
-            db,
+            postgres_schema,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
             stop_after_prediction,
         )
@@ -2287,21 +2291,21 @@ def test_postgres_v61_source_prediction_rejects_consistently_wrong_conversion(
             with db.transaction() as conn:
                 db._migrate_from_v62_to_v63_postgres(conn)
 
-        original_expected_row = db._postgres_v61_expected_row
+        original_expected_row = postgres_schema._postgres_v61_expected_row
 
         def consistently_wrong_expected_row(
-            conn: Any, *, phase: str, row: dict[str, Any]
+            ctx: Any, conn: Any, *, phase: str, row: dict[str, Any]
         ) -> dict[str, Any]:
-            expected = original_expected_row(conn, phase=phase, row=row)
+            expected = original_expected_row(ctx, conn, phase=phase, row=row)
             if phase == "moodboards":
                 expected["canonical_hash"] = "sha256:" + "e" * 64
             return expected
 
         monkeypatch.setattr(
-            db, "_postgres_v61_expected_row", consistently_wrong_expected_row
+            postgres_schema, "_postgres_v61_expected_row", consistently_wrong_expected_row
         )
         monkeypatch.setattr(
-            db,
+            postgres_schema,
             "_notes_moodboard_studio_v61_postgres_checkpoint",
             lambda _stage: None,
         )

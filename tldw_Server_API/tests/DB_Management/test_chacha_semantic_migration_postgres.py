@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDimensionState,
     SemanticGenerationState,
@@ -157,10 +158,10 @@ def test_postgres_completed_schema_fast_path_reaches_semantic_target(
         retained = _create_store_configuration(original) if starting_version == 88 else None
         original.close_all_connections()
 
-    def reject_legacy_bootstrap(_self: CharactersRAGDB, _conn: object) -> None:
+    def reject_legacy_bootstrap(_ctx: object, _conn: object) -> None:
         pytest.fail("Completed schemas must not replay legacy reconciliation")
 
-    monkeypatch.setattr(CharactersRAGDB, "_ensure_flashcard_asset_schema_postgres", reject_legacy_bootstrap)
+    monkeypatch.setattr(postgres_schema, "_ensure_flashcard_asset_schema_postgres", reject_legacy_bootstrap)
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
     try:

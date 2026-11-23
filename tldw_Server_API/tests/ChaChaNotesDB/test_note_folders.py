@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
 )
@@ -314,7 +315,7 @@ def test_postgres_note_folder_schema_enforces_case_insensitive_paths() -> None:
     db_instance._backend = backend
     db_instance._uses_shared_content_backend = False
 
-    db_instance._ensure_note_folder_schema_postgres(object())
+    postgres_schema._ensure_note_folder_schema_postgres(db_instance.ctx, object())
 
     assert any(
         "UNIQUE INDEX" in statement
@@ -347,7 +348,7 @@ def test_postgres_note_folder_schema_deduplicates_paths_before_unique_index() ->
     db_instance._backend = backend
     db_instance._uses_shared_content_backend = False
 
-    db_instance._ensure_note_folder_schema_postgres(object())
+    postgres_schema._ensure_note_folder_schema_postgres(db_instance.ctx, object())
 
     lower_unique_index = next(
         index

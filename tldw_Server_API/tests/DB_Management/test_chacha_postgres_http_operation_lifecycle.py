@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import runtime as runtime_module
+from tldw_Server_API.app.core.DB_Management.chacha import schema_sql
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
     ChaChaOperationMiddleware,
     current_connection_state,
@@ -46,7 +47,7 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
     import psycopg
     from psycopg.rows import dict_row
 
-    monkeypatch.setattr(CharactersRAGDB, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
+    monkeypatch.setattr(schema_sql, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     # A real cache rebuild must resolve the same official PostgreSQL database.
     from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as chacha_module

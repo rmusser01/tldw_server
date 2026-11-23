@@ -11,6 +11,7 @@ import pytest
 
 from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -410,7 +411,7 @@ def test_postgres_chat_macro_schema_extension_contract_and_routing():
 
     db = CharactersRAGDB(":memory:", client_id="test_client")
     try:
-        postgres_script = "\n".join(db._convert_sqlite_schema_to_postgres_statements(script))
+        postgres_script = "\n".join(postgres_schema._convert_sqlite_schema_to_postgres_statements(db.ctx, script))
     finally:
         db.close_connection()
     assert "TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP" in postgres_script

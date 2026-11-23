@@ -57,6 +57,7 @@ from tldw_Server_API.app.core.Character_Chat.regex_safety import (
     safe_compile_regex as _safe_compile_regex,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -589,7 +590,7 @@ class ChatDictionaryService:
         try:
             if self.db.backend_type == BackendType.POSTGRESQL:
                 with self.db.transaction() as conn:
-                    self.db._verify_dictionary_schema_postgres(conn)
+                    postgres_schema._verify_dictionary_schema_postgres(self.db.ctx, conn)
                 return
             with self._connection() as conn:
                 conn.execute(
@@ -3088,7 +3089,7 @@ class ChatDictionaryService:
             tenant = conn.execute("SELECT current_setting('app.current_user_id', true) AS owner").fetchone()
             if not catalog_owner or tenant["owner"] != catalog_owner:
                 raise InputError("Assigned dictionaries require the current catalog owner.")
-            db._verify_dictionary_schema_postgres(conn)
+            postgres_schema._verify_dictionary_schema_postgres(db.ctx, conn)
         captured: dict[int, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
         total_entries = 0
         total_bytes = 0

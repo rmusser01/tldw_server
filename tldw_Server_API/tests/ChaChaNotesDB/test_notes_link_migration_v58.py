@@ -13,7 +13,8 @@ from uuid import uuid4
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, QueryResult
-from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -36,8 +37,8 @@ def test_graph_update_triggers_name_only_graph_relevant_columns() -> None:
         backend = _RecordingBackend()
 
     postgres_connection = object()
-    CharactersRAGDB._notes_graph_schema_postgres(
-        _RecordingDatabase(),  # type: ignore[arg-type]
+    postgres_schema._notes_graph_schema_postgres(
+        ChaChaContext(_RecordingDatabase()),  # type: ignore[arg-type]
         postgres_connection,
     )
     postgres_sql = " ".join(" ".join(query.split()) for query in postgres_statements)

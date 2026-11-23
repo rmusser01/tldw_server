@@ -58,6 +58,7 @@ CONTEXT_SURFACE = frozenset(
         "unique_text_match_sql", "is_unique_violation", "chunk_list", "canonical_json_text_v61", "note_task_v60_hash",
         "deserialize_row_fields", "runtime_schema_version",
         "note_task_v60_json_safe", "build_flashcard_search_shadow_fields", "canonicalize_legacy_task_v60",
+        "normalize_postgres_catalog_expression",
     }
 )  # fmt: skip
 
@@ -133,6 +134,7 @@ def test_context_module_privates_are_pinned() -> None:
         "tldw_Server_API.app.core.DB_Management.chacha.schema_sql",
         "tldw_Server_API.app.core.DB_Management.chacha.sqlite_schema",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.support",
+        "tldw_Server_API.app.core.DB_Management.chacha.postgres_schema",
     ],
 )
 def test_new_chacha_modules_import_standalone(module: str) -> None:
@@ -141,6 +143,24 @@ def test_new_chacha_modules_import_standalone(module: str) -> None:
         [sys.executable, "-c", f"import {module}"], capture_output=True, text=True, timeout=300, check=False
     )
     assert result.returncode == 0, result.stderr  # nosec B101
+
+
+def test_ladder_helper_reads_callee_names_and_keywords_by_ast() -> None:
+    from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
+
+    def ladder_fn(self, conn, current_version):
+        self._get_schema_version_postgres(conn, lock=True)
+        if current_version < 7:
+            postgres_schema._first(self.ctx, conn, flag=SOME_NAME)  # noqa: F821
+            self._second(conn)
+        helper(conn)  # noqa: F821
+
+    calls = ladder.ladder_calls(ladder_fn)
+    assert ladder.names(calls) == ["_get_schema_version_postgres", "_first", "_second", "helper"]  # nosec B101
+    assert calls[0].kwargs == {"lock": True}  # nosec B101
+    assert calls[1].kwargs == {"flag": "SOME_NAME"}  # nosec B101
+    assert ladder.names(ladder.branch_calls(ladder_fn, 7)) == ["_first", "_second"]  # nosec B101
+    assert ladder.branch_calls(ladder_fn, 8) == []  # nosec B101
 
 
 # --- schema SQL constants (TASK-13950.22 PR D, R4/R20/R21) ---------------------------------------------------------------

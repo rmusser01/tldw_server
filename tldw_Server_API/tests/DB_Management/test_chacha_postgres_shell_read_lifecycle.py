@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.endpoints import notes, persona
 from tldw_Server_API.app.core.Buddy.service import BuddyService
 from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import schema_sql
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
@@ -34,7 +35,7 @@ def pg_shell(pg_database_config, tmp_path, monkeypatch):
     """Use the official disposable PG database and real production read chains."""
     monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: True)
     # Preserve actual initialization statements, only shorten their lock budget.
-    monkeypatch.setattr(CharactersRAGDB, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
+    monkeypatch.setattr(schema_sql, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(tmp_path / "shell.db", client_id="1", backend=backend)
     try:

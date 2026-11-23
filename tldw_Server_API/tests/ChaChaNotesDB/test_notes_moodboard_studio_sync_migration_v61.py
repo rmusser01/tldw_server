@@ -15,7 +15,7 @@ from uuid import UUID
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
-from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import (
     MoodboardSyncStore,
@@ -1883,8 +1883,8 @@ def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns
     db._uses_shared_content_backend = False
     db._local = threading.local()
     db.client_id = OWNER
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, *, lock=False: 60)
-    db._ensure_note_studio_schema_postgres(object())
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _conn, *, lock=False: 60)
+    postgres_schema._ensure_note_studio_schema_postgres(db.ctx, object())
     assert any("CREATE TABLE IF NOT EXISTS note_studio_documents" in sql for sql in statements)  # nosec B101
     assert all("owner_user_id" not in sql and "dataset_id" not in sql for sql in statements)  # nosec B101
 

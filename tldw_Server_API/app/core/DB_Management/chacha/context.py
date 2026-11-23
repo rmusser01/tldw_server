@@ -336,6 +336,14 @@ class ChaChaContext:
         return moodboard_studio_canonical_json_bytes(value).decode("utf-8")
 
     @staticmethod
+    def normalize_postgres_catalog_expression(value: Any) -> str:
+        """Return a PostgreSQL catalog expression with casts, ``AS``, parentheses, quotes and whitespace removed."""
+        normalized = str(value or "").lower()
+        normalized = re.sub(r"::(?:pg_catalog\.)?(?:text|character varying|bigint|boolean)", "", normalized)
+        normalized = re.sub(r"\bas\b", "", normalized)
+        return re.sub(r'[\s()"]+', "", normalized)
+
+    @staticmethod
     def note_task_v60_hash(value: object) -> str:
         """Return the ``sha256:`` hash of the canonical JSON bytes of ``value``."""
         return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()

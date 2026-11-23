@@ -7,6 +7,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TypeAlias
 
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendConnectionWrapper,
     BackendType,
@@ -262,7 +263,7 @@ class MoodboardSyncStore:
                 + ",".join(self._POSTGRES_BIND_LOCK_TABLES)
                 + " IN ACCESS EXCLUSIVE MODE",
             )
-            self._db._verify_notes_moodboard_studio_schema_postgres(transaction_conn)
+            postgres_schema._verify_notes_moodboard_studio_schema_postgres(self._db.ctx, transaction_conn)
             for table, _ordering in tables:
                 self._execute(
                     transaction_conn,
@@ -277,7 +278,7 @@ class MoodboardSyncStore:
                     transaction_conn,
                     f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",  # nosec B608 - fixed graph table names.
                 )
-            self._db._verify_notes_moodboard_studio_schema_postgres(transaction_conn)
+            postgres_schema._verify_notes_moodboard_studio_schema_postgres(self._db.ctx, transaction_conn)
 
         def bind(transaction_conn: GraphConnection) -> dict[str, int]:
             prepare_postgres_bind(transaction_conn)
@@ -376,7 +377,7 @@ class MoodboardSyncStore:
             except Exception:  # noqa: BLE001 - rollback must restore FORCE RLS/catalog on every failed bind.
                 self._execute(transaction_conn, "ROLLBACK TO SAVEPOINT bind_local_moodboard_studio_graph")
                 self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_moodboard_studio_graph")
-                self._db._verify_notes_moodboard_studio_schema_postgres(transaction_conn)
+                postgres_schema._verify_notes_moodboard_studio_schema_postgres(self._db.ctx, transaction_conn)
                 raise
             self._execute(transaction_conn, "RELEASE SAVEPOINT bind_local_moodboard_studio_graph")
             return result
