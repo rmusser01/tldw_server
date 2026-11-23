@@ -49,7 +49,7 @@ def test_flashcards_basic_flow(db):
 
 
 def test_deck_workspace_id_persists_and_can_move_between_scopes(db):
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     deck_id = db.add_deck("Scoped Deck", "desc", workspace_id="ws-1")
     deck = db.get_deck(deck_id)
@@ -80,7 +80,7 @@ def test_deck_workspace_id_persists_and_can_move_between_scopes(db):
 
 
 def test_flashcard_visibility_defaults_to_general_only_and_honors_explicit_scope(db):
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     general_deck = db.add_deck("General Deck", "desc")
     workspace_deck = db.add_deck("Workspace Deck", "desc", workspace_id="ws-1")
@@ -146,7 +146,7 @@ def test_flashcard_visibility_defaults_to_general_only_and_honors_explicit_scope
 
 
 def test_flashcard_analytics_summary_respects_workspace_visibility(db):
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     general_deck = db.add_deck("General Deck", "desc")
     workspace_deck = db.add_deck("Workspace Deck", "desc", workspace_id="ws-1")

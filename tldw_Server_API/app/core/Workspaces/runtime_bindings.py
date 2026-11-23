@@ -185,7 +185,7 @@ def record_runtime_binding_activity_event(
     user_id: str,
 ) -> None:
     """Record best-effort runtime binding activity without coupling endpoints to payload details."""
-    recorder = getattr(db, "record_workspace_activity_event", None)
+    recorder = getattr(getattr(db, "workspace_store", None), "record_workspace_activity_event", None)
     if not callable(recorder):
         return
     try:

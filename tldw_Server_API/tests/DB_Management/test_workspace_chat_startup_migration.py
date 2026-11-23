@@ -155,7 +155,7 @@ def test_private_schema_and_delete_tombstones(db_factory: Callable[[], Character
         "created_at",
         "invalidated_at",
     }
-    db.upsert_workspace("ws", "Workspace")
+    db.workspace_store.upsert_workspace("ws", "Workspace")
     cid = db.add_conversation({"title": "Accepted", "scope_type": "workspace", "workspace_id": "ws"})
     with db.transaction() as conn:
         conn.execute(

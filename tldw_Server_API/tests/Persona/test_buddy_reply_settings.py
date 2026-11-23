@@ -105,7 +105,7 @@ def test_reply_settings_rechecks_current_attachment_and_target_access(db: Charac
         db: Real disposable SQLite conversation and Buddy database.
         change: Attachment, ownership, membership or deletion transition to exercise.
     """
-    db.upsert_workspace("selected-workspace", "Research")
+    db.workspace_store.upsert_workspace("selected-workspace", "Research")
     conversation_id = db.add_conversation(
         {"title": "Attached", "client_id": "1", "scope_type": "workspace", "workspace_id": "selected-workspace"}
     )

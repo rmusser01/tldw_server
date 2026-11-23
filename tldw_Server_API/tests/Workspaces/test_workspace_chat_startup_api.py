@@ -216,7 +216,7 @@ def test_accept_replay_current_metadata_capacity_and_quota(
         assert _counts(creation_db) == (1, 1)
         with creation_db.transaction():
             creation_db.update_conversation(row["id"], {"title": "Edited"}, row["version"])
-            creation_db.update_workspace("ws", {"assistant_defaults_json": None, "archived": True}, 2)
+            creation_db.workspace_store.update_workspace("ws", {"assistant_defaults_json": None, "archived": True}, 2)
         limiter._limits = replace(limiter._limits, max_chats_per_user=0)
         replay = client.post(_PATH, json=_payload(), headers={"Idempotency-Key": "private-key-accepted"})
         assert replay.status_code == 200
@@ -331,7 +331,7 @@ def test_replay_rechecks_original_persona_after_default_change(
         first = client.post(_PATH, json=_payload(), headers={"Idempotency-Key": "accepted"})
         assert first.status_code == 201
         with creation_db.transaction() as conn:
-            creation_db.update_workspace("ws", {"assistant_defaults_json": None}, 2)
+            creation_db.workspace_store.update_workspace("ws", {"assistant_defaults_json": None}, 2)
             if gate != "disabled":
                 field = "is_active" if gate == "inactive" else "deleted"
                 conn.execute(f"UPDATE persona_profiles SET {field} = ? WHERE id = ?",  # nosec B608

@@ -208,7 +208,7 @@ async def test_actual_workspace_closure_denies_restored_bytes(native_fork_db, tm
     db = native_fork_db
     adapter, _, cid, claim, _ = await committed(db, tmp_path, monkeypatch)
     restore(db, cid)
-    db.upsert_workspace("workspace", "Owned workspace")
+    db.workspace_store.upsert_workspace("workspace", "Owned workspace")
     authorized = AuthorizedNativeOwner(
         "1", owner().owner_key, NativeScopeV1(kind="workspace", workspace_id="workspace")
     )
@@ -223,8 +223,8 @@ async def test_actual_workspace_closure_denies_restored_bytes(native_fork_db, tm
 
     monkeypatch.setattr(db, "soft_delete_conversation", held_cascade)
     with pytest.raises(Exception, match="workspace_delete_incomplete"):
-        db.delete_workspace("workspace", expected_version=1)
-    assert db.get_workspace("workspace")["native_chat_admission_closed"]
+        db.workspace_store.delete_workspace("workspace", expected_version=1)
+    assert db.workspace_store.get_workspace("workspace")["native_chat_admission_closed"]
     before = records(db)
     with pytest.raises(ValueError, match="workspace_native_unavailable"):
         with read(adapter, cid, claim, authorized=authorized):

@@ -238,7 +238,7 @@ def test_unexpected_configuration_value_error_is_not_a_client_validation_error(
 def test_owned_workspace_scope_and_missing_model_fail_closed(persona_chat_client, persona_chat_db):
     client, headers, provider = persona_chat_client
     db = persona_chat_db
-    db.upsert_workspace("turn-workspace", "Research")
+    db.workspace_store.upsert_workspace("turn-workspace", "Research")
     conversation_id = db.add_conversation(
         {"title": "Scoped", "client_id": "1", "scope_type": "workspace", "workspace_id": "turn-workspace"}
     )
@@ -259,7 +259,7 @@ def test_owned_workspace_scope_and_missing_model_fail_closed(persona_chat_client
 def test_access_or_identity_change_during_provider_revokes_publication(persona_chat_client, persona_chat_db, change):
     client, headers, provider = persona_chat_client
     db = persona_chat_db
-    db.upsert_workspace("mutable-workspace", "Research")
+    db.workspace_store.upsert_workspace("mutable-workspace", "Research")
     conversation_id = db.add_conversation(
         {"title": "Mutable", "client_id": "1", "scope_type": "workspace", "workspace_id": "mutable-workspace"}
     )

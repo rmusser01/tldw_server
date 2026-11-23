@@ -229,7 +229,7 @@ def _pending_resources() -> _Resources:
     )
     media.list_operation_owned_clone_media.return_value = [reference]
     media.delete_operation_owned_clone_media.side_effect = lambda **_kwargs: events.append("delete-media") or 1
-    chacha.list_clone_targets_for_reconciliation.return_value = [
+    chacha.workspace_store.list_clone_targets_for_reconciliation.return_value = [
         {
             "id": TARGET_ID,
             "system_operation_id": OPERATION_ID,
@@ -243,11 +243,11 @@ def _pending_resources() -> _Resources:
             "deleted": 0,
         }
     ]
-    chacha.confirm_clone_target_publication.side_effect = lambda **_kwargs: (
+    chacha.workspace_store.confirm_clone_target_publication.side_effect = lambda **_kwargs: (
         events.append("workspace") or {"id": TARGET_ID}
     )
-    chacha.discard_clone_target.side_effect = lambda **_kwargs: events.append("discard-workspace") or True
-    chacha.get_workspace.return_value = None
+    chacha.workspace_store.discard_clone_target.side_effect = lambda **_kwargs: events.append("discard-workspace") or True
+    chacha.workspace_store.get_workspace.return_value = None
     return _Resources(chacha=chacha, media=media, events=events)
 
 
@@ -275,7 +275,7 @@ async def test_completed_job_exposes_owned_media_before_workspace() -> None:
         source_identity="source-12",
         expected_content_hash="b" * 64,
     )
-    resources.chacha.confirm_clone_target_publication.assert_called_once_with(
+    resources.chacha.workspace_store.confirm_clone_target_publication.assert_called_once_with(
         workspace_id=TARGET_ID,
         operation_id=OPERATION_ID,
     )
@@ -295,7 +295,7 @@ async def test_publication_rejects_pending_target_with_wrong_request_fingerprint
         TerminalOperationResultPatchOutcome.APPLIED,
     ]
     resources = _pending_resources()
-    resources.chacha.list_clone_targets_for_reconciliation.return_value[0][
+    resources.chacha.workspace_store.list_clone_targets_for_reconciliation.return_value[0][
         "system_request_fingerprint"
     ] = "different-request-fingerprint"
 
@@ -307,7 +307,7 @@ async def test_publication_rejects_pending_target_with_wrong_request_fingerprint
 
     assert finalized is CloneFinalizationOutcome.DEFERRED
     resources.media.confirm_operation_owned_clone_media.assert_not_called()
-    resources.chacha.confirm_clone_target_publication.assert_not_called()
+    resources.chacha.workspace_store.confirm_clone_target_publication.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -353,7 +353,7 @@ async def test_publication_resumes_after_one_media_row_was_already_promoted() ->
         source_identity="source-13",
         expected_content_hash="c" * 64,
     )
-    resources.chacha.confirm_clone_target_publication.assert_called_once()
+    resources.chacha.workspace_store.confirm_clone_target_publication.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -382,7 +382,7 @@ async def test_publication_defers_when_media_proof_count_does_not_match_result()
 
     assert finalized is CloneFinalizationOutcome.DEFERRED
     resources.media.confirm_operation_owned_clone_media.assert_not_called()
-    resources.chacha.confirm_clone_target_publication.assert_not_called()
+    resources.chacha.workspace_store.confirm_clone_target_publication.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -554,8 +554,8 @@ async def test_publication_replay_requires_re_read_of_public_target() -> None:
             pending=(),
         )
     )
-    resources.chacha.list_clone_targets_for_reconciliation.return_value = []
-    resources.chacha.get_workspace.return_value = {
+    resources.chacha.workspace_store.list_clone_targets_for_reconciliation.return_value = []
+    resources.chacha.workspace_store.get_workspace.return_value = {
         "id": TARGET_ID,
         "deleted": 0,
         "system_operation_id": None,
@@ -571,8 +571,8 @@ async def test_publication_replay_requires_re_read_of_public_target() -> None:
 
     assert finalized is CloneFinalizationOutcome.PUBLISHED
     assert access.calls == []
-    resources.chacha.get_workspace.assert_called_once_with(TARGET_ID)
-    resources.chacha.confirm_clone_target_publication.assert_not_called()
+    resources.chacha.workspace_store.get_workspace.assert_called_once_with(TARGET_ID)
+    resources.chacha.workspace_store.confirm_clone_target_publication.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -642,7 +642,7 @@ async def test_revocation_before_publication_cleans_and_compensates() -> None:
     assert finalized is CloneFinalizationOutcome.COMPENSATED
     assert resources.events == ["delete-media", "discard-workspace"]
     resources.media.confirm_operation_owned_clone_media.assert_not_called()
-    resources.chacha.confirm_clone_target_publication.assert_not_called()
+    resources.chacha.workspace_store.confirm_clone_target_publication.assert_not_called()
     aborting_command, aborted_command = (call.args[0] for call in jobs.patch_terminal_operation_result.call_args_list)
     assert aborting_command.allowed_statuses == ("completed",)
     assert aborting_command.replacement_result == {
@@ -712,7 +712,7 @@ async def test_cleanup_deletes_only_enumerated_owned_media_and_exact_target() ->
         source_identity="source-12",
         expected_content_hash="b" * 64,
     )
-    resources.chacha.discard_clone_target.assert_called_once_with(
+    resources.chacha.workspace_store.discard_clone_target.assert_called_once_with(
         workspace_id=TARGET_ID,
         operation_id=OPERATION_ID,
     )
@@ -791,9 +791,9 @@ async def test_cleanup_replay_fails_closed_when_target_is_public() -> None:
     jobs.get_job_or_archived_by_uuid.return_value = job
     resources = _pending_resources()
     resources.media.list_operation_owned_clone_media.side_effect = [[]]
-    resources.chacha.list_clone_targets_for_reconciliation.return_value = []
-    resources.chacha.discard_clone_target.return_value = False
-    resources.chacha.get_workspace.return_value = {"id": TARGET_ID, "deleted": 0}
+    resources.chacha.workspace_store.list_clone_targets_for_reconciliation.return_value = []
+    resources.chacha.workspace_store.discard_clone_target.return_value = False
+    resources.chacha.workspace_store.get_workspace.return_value = {"id": TARGET_ID, "deleted": 0}
 
     cleaned = await cleanup_shared_workspace_clone(
         job,
@@ -934,8 +934,8 @@ async def test_reconciliation_ignores_nonterminal_and_malformed_jobs() -> None:
         "deferred": 0,
         "invalid": 1,
     }
-    resources.chacha.confirm_clone_target_publication.assert_not_called()
-    resources.chacha.discard_clone_target.assert_not_called()
+    resources.chacha.workspace_store.confirm_clone_target_publication.assert_not_called()
+    resources.chacha.workspace_store.discard_clone_target.assert_not_called()
 
 
 @pytest.mark.asyncio

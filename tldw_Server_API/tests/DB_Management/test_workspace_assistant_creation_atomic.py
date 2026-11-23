@@ -43,8 +43,8 @@ def creation_db(db_factory: Callable[[], CharactersRAGDB], monkeypatch: pytest.M
             "id": f"persona-{suffix}", "name": name, "user_id": "user-1",
             "character_card_id": character, "mode": "session_scoped", "is_active": True,
         })
-    db.upsert_workspace("ws", "Workspace")
-    db.update_workspace("ws", {"assistant_defaults_json": {
+    db.workspace_store.upsert_workspace("ws", "Workspace")
+    db.workspace_store.update_workspace("ws", {"assistant_defaults_json": {
         "assistant_kind": "persona", "assistant_id": "persona-a", "persona_memory_mode": "read_only",
     }}, 1)
     # Finish the read transaction left by the update's returned Workspace row
@@ -105,7 +105,7 @@ def test_resolved_insertion_preserves_identity_title_and_origin(
     insert = getattr(assistant_defaults, "insert_resolved_workspace_conversation", None)
     assert callable(insert), "Missing shared resolved-conversation insertion helper"
     if clear_default:
-        creation_db.update_workspace("ws", {"assistant_defaults_json": None}, 2)
+        creation_db.workspace_store.update_workspace("ws", {"assistant_defaults_json": None}, 2)
     request = ChatSessionCreate(scope_type="workspace", workspace_id="ws", **request_fields)
     payload = {
         "id": "resolved", "root_id": "resolved", "client_id": "user-1",
@@ -233,11 +233,11 @@ def test_unavailable_default_exposes_typed_reason_with_legacy_http_contract(
     elif reason == "persona_feature_disabled":
         monkeypatch.setattr(feature_flags, "is_persona_enabled", lambda: False)
     elif reason == "permission_denied":
-        creation_db.update_workspace("ws", {"assistant_defaults_json": {
+        creation_db.workspace_store.update_workspace("ws", {"assistant_defaults_json": {
             "assistant_kind": "persona", "assistant_id": "inaccessible-persona", "persona_memory_mode": "read_only",
         }}, 2)
     elif reason == "invalid_default":
-        creation_db.update_workspace("ws", {"assistant_defaults_json": {
+        creation_db.workspace_store.update_workspace("ws", {"assistant_defaults_json": {
             "assistant_kind": "persona", "assistant_id": "",
         }}, 2)
     else:
@@ -329,7 +329,7 @@ def test_creation_failure_leaves_no_partial_row(
     with pytest.raises(RuntimeError, match="injected creation failure"):
         _create(creation_db)
     assert creation_db.get_conversation_by_id("created", include_deleted=True) is None
-    assert creation_db.get_workspace("ws")["version"] == 2
+    assert creation_db.workspace_store.get_workspace("ws")["version"] == 2
 
 
 @pytest.mark.parametrize("getter", ["workspace", "persona"])
@@ -337,7 +337,7 @@ def test_locking_getter_requires_connection(creation_db: CharactersRAGDB, getter
     """A locking read must not silently open and release its own transaction."""
     with pytest.raises(InputError):
         if getter == "workspace":
-            creation_db.get_workspace("ws", for_update=True)
+            creation_db.workspace_store.get_workspace("ws", for_update=True)
         else:
             creation_db.get_persona_profile("persona-a", user_id="user-1", for_update=True)
 
@@ -349,7 +349,7 @@ def test_locking_getter_rejects_finished_transaction(creation_db: CharactersRAGD
         pass
     with pytest.raises(InputError):
         if getter == "workspace":
-            creation_db.get_workspace("ws", conn=conn, for_update=True)
+            creation_db.workspace_store.get_workspace("ws", conn=conn, for_update=True)
         else:
             creation_db.get_persona_profile("persona-a", user_id="user-1", conn=conn, for_update=True)
 
@@ -388,8 +388,8 @@ def test_connection_reads_preserve_owner_and_visibility(creation_db: CharactersR
     with creation_db.transaction() as conn:
         conn.execute("UPDATE workspaces SET deleted = 1 WHERE id = ?", ("ws",))
         conn.execute("UPDATE persona_profiles SET deleted = 1 WHERE id = ?", ("persona-a",))
-        assert creation_db.get_workspace("ws", conn=conn, for_update=True) is None
-        assert creation_db.get_workspace("ws", include_deleted=True, conn=conn, for_update=True)["deleted"]
+        assert creation_db.workspace_store.get_workspace("ws", conn=conn, for_update=True) is None
+        assert creation_db.workspace_store.get_workspace("ws", include_deleted=True, conn=conn, for_update=True)["deleted"]
         assert creation_db.get_persona_profile("persona-a", user_id="user-1", conn=conn, for_update=True) is None
         assert creation_db.get_persona_profile(
             "persona-a", user_id="other", include_deleted=True, conn=conn, for_update=True,
@@ -398,7 +398,7 @@ def test_connection_reads_preserve_owner_and_visibility(creation_db: CharactersR
             "persona-a", user_id="user-1", include_deleted=True, conn=conn, for_update=True,
         )["deleted"]
         conn.execute("UPDATE workspaces SET system_operation_state = 'staged' WHERE id = ?", ("ws",))
-        assert creation_db.get_workspace("ws", include_deleted=True, conn=conn, for_update=True) is None
+        assert creation_db.workspace_store.get_workspace("ws", include_deleted=True, conn=conn, for_update=True) is None
 
 
 def _mutate(db: CharactersRAGDB, mutation: str) -> None:
@@ -413,7 +413,7 @@ def _mutate(db: CharactersRAGDB, mutation: str) -> None:
         defaults = None if mutation == "clear" else {
             "assistant_kind": "persona", "assistant_id": "persona-b", "persona_memory_mode": "read_write",
         }
-        db.update_workspace("ws", {"assistant_defaults_json": defaults}, 2)
+        db.workspace_store.update_workspace("ws", {"assistant_defaults_json": defaults}, 2)
 
 
 def _assert_after_mutation(db: CharactersRAGDB, mutation: str, cid: str = "created") -> None:

@@ -31,7 +31,7 @@ def test_host_local_attach_validates_allowlist_and_persists_absolute_path(db, tm
     allowed = tmp_path / "allowed"
     project = allowed / "project"
     project.mkdir(parents=True)
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     root = attach_primary_workspace_root(
         db=db,
@@ -55,7 +55,7 @@ def test_host_local_attach_uses_configured_allowed_roots_when_not_injected(db, t
     allowed = tmp_path / "configured"
     project = allowed / "project"
     project.mkdir(parents=True)
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
     monkeypatch.setattr(
         root_binding_service.config,
         "get_workspace_project_root_allowed_roots",
@@ -79,7 +79,7 @@ def test_host_local_attach_without_expected_version_succeeds_and_increments_work
     allowed = tmp_path / "allowed"
     project = allowed / "project"
     project.mkdir(parents=True)
-    workspace = db.upsert_workspace("ws-1", "Workspace")
+    workspace = db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     root = attach_primary_workspace_root(
         db=db,
@@ -93,14 +93,14 @@ def test_host_local_attach_without_expected_version_succeeds_and_increments_work
     )
 
     assert root["root_id"] == "primary"
-    assert db.get_workspace("ws-1")["version"] == workspace["version"] + 1
+    assert db.workspace_store.get_workspace("ws-1")["version"] == workspace["version"] + 1
 
 
 def test_omitted_root_id_is_idempotent_and_uses_current_root_id(db, tmp_path):
     allowed = tmp_path / "allowed"
     project = allowed / "project"
     project.mkdir(parents=True)
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     first = attach_primary_workspace_root(
         db=db,
@@ -133,7 +133,7 @@ def test_invalid_root_id_raises_input_error(db, tmp_path):
     allowed = tmp_path / "allowed"
     project = allowed / "project"
     project.mkdir(parents=True)
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootInputError):
         attach_primary_workspace_root(
@@ -153,7 +153,7 @@ def test_display_name_longer_than_120_raises_input_error(db, tmp_path):
     allowed = tmp_path / "allowed"
     project = allowed / "project"
     project.mkdir(parents=True)
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootInputError):
         attach_primary_workspace_root(
@@ -172,7 +172,7 @@ def test_display_name_longer_than_120_raises_input_error(db, tmp_path):
 def test_no_host_local_allowed_roots_raises_configuration_error(db, tmp_path):
     project = tmp_path / "project"
     project.mkdir()
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootConfigurationError) as exc_info:
         attach_primary_workspace_root(
@@ -194,7 +194,7 @@ def test_host_local_outside_allowlist_raises_validation_error(db, tmp_path):
     outside = tmp_path / "outside"
     allowed.mkdir()
     outside.mkdir()
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootValidationError) as exc_info:
         attach_primary_workspace_root(
@@ -215,7 +215,7 @@ def test_host_local_outside_missing_path_is_rejected_as_outside_allowlist(db, tm
     allowed = tmp_path / "allowed"
     outside_missing = tmp_path / "outside" / "missing"
     allowed.mkdir()
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootValidationError) as exc_info:
         attach_primary_workspace_root(
@@ -238,7 +238,7 @@ def test_host_local_symlink_root_raises_input_error(db, tmp_path):
     symlink_project = allowed / "linked-project"
     real_project.mkdir(parents=True)
     symlink_project.symlink_to(real_project, target_is_directory=True)
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootInputError) as exc_info:
         attach_primary_workspace_root(
@@ -263,7 +263,7 @@ def test_host_local_allowed_symlink_to_outside_target_raises_input_error(db, tmp
     outside_project.mkdir(parents=True)
     symlink_project.parent.mkdir(parents=True)
     symlink_project.symlink_to(outside_project, target_is_directory=True)
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootInputError) as exc_info:
         attach_primary_workspace_root(
@@ -288,7 +288,7 @@ def test_host_local_outside_symlink_path_is_rejected_as_outside_allowlist(db, tm
     allowed.mkdir()
     target.mkdir(parents=True)
     symlink.symlink_to(target, target_is_directory=True)
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootValidationError) as exc_info:
         attach_primary_workspace_root(
@@ -311,7 +311,7 @@ def test_different_primary_root_without_replace_existing_raises_conflict(db, tmp
     project_two = allowed / "two"
     project_one.mkdir(parents=True)
     project_two.mkdir()
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
     attach_primary_workspace_root(
         db=db,
         workspace_id="ws-1",
@@ -344,7 +344,7 @@ def test_different_primary_root_with_replace_existing_replaces(db, tmp_path):
     project_two = allowed / "two"
     project_one.mkdir(parents=True)
     project_two.mkdir()
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
     attach_primary_workspace_root(
         db=db,
         workspace_id="ws-1",
@@ -371,11 +371,11 @@ def test_different_primary_root_with_replace_existing_replaces(db, tmp_path):
 
     assert root["root_id"] == "replacement"
     assert root["absolute_root"] == str(project_two.resolve())
-    assert db.get_workspace_primary_root("ws-1")["root_id"] == "replacement"
+    assert db.workspace_store.get_workspace_primary_root("ws-1")["root_id"] == "replacement"
 
 
 def test_default_sandbox_resolver_persists_fail_closed_mount_state(db):
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     root = attach_primary_workspace_root(
         db=db,
@@ -434,7 +434,7 @@ class _FailingSandboxMountResolver:
 
 
 def test_sandbox_resolver_invalid_state_is_rejected(db):
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootConfigurationError) as exc_info:
         attach_primary_workspace_root(
@@ -449,11 +449,11 @@ def test_sandbox_resolver_invalid_state_is_rejected(db):
         )
 
     assert exc_info.value.code == "workspace_sandbox_volume_state_invalid"
-    assert db.get_workspace_primary_root("ws-1") is None
+    assert db.workspace_store.get_workspace_primary_root("ws-1") is None
 
 
 def test_sandbox_resolver_volume_id_mismatch_is_rejected(db):
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootConfigurationError) as exc_info:
         attach_primary_workspace_root(
@@ -468,11 +468,11 @@ def test_sandbox_resolver_volume_id_mismatch_is_rejected(db):
         )
 
     assert exc_info.value.code == "workspace_sandbox_volume_id_mismatch"
-    assert db.get_workspace_primary_root("ws-1") is None
+    assert db.workspace_store.get_workspace_primary_root("ws-1") is None
 
 
 def test_sandbox_resolver_exception_is_wrapped_as_configuration_error(db):
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootConfigurationError) as exc_info:
         attach_primary_workspace_root(
@@ -488,11 +488,11 @@ def test_sandbox_resolver_exception_is_wrapped_as_configuration_error(db):
 
     assert exc_info.value.code == "workspace_sandbox_volume_resolver_failed"
     assert "/Users/alice" not in str(exc_info.value)
-    assert db.get_workspace_primary_root("ws-1") is None
+    assert db.workspace_store.get_workspace_primary_root("ws-1") is None
 
 
 def test_ready_sandbox_resolver_repairs_prior_unavailable_retry(db):
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
     first = attach_primary_workspace_root(
         db=db,
         workspace_id="ws-1",
@@ -526,7 +526,7 @@ def test_ready_sandbox_resolver_repairs_prior_unavailable_retry(db):
 def test_sandbox_resolver_accepts_new_non_strict_volume_states(db, state):
     # Non-strict attach records transitional volume states for recovery UI;
     # strict validation below only accepts stable, usable sandbox volumes.
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     root = attach_primary_workspace_root(
         db=db,
@@ -546,7 +546,7 @@ def test_sandbox_resolver_accepts_new_non_strict_volume_states(db, state):
 @pytest.mark.unit
 @pytest.mark.parametrize("state", ["ready"])
 def test_strict_sandbox_validation_accepts_stable_volume_states(db, state):
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     root = attach_primary_workspace_root(
         db=db,
@@ -562,7 +562,7 @@ def test_strict_sandbox_validation_accepts_stable_volume_states(db, state):
 
     assert root["backend"] == "sandbox_volume"
     assert root["sandbox_mount_state"] == state
-    assert db.get_workspace_primary_root("ws-1")["sandbox_mount_state"] == state
+    assert db.workspace_store.get_workspace_primary_root("ws-1")["sandbox_mount_state"] == state
 
 
 @pytest.mark.unit
@@ -571,7 +571,7 @@ def test_strict_sandbox_validation_accepts_stable_volume_states(db, state):
     ["not_configured", "unavailable", "failed", "cleanup_pending"],
 )
 def test_strict_sandbox_validation_fails_closed_for_unusable_volume_states(db, state):
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
     with pytest.raises(WorkspaceRootConfigurationError) as exc_info:
         attach_primary_workspace_root(
@@ -587,10 +587,11 @@ def test_strict_sandbox_validation_fails_closed_for_unusable_volume_states(db, s
         )
 
     assert exc_info.value.code == "workspace_sandbox_volume_resolver_unavailable"
-    assert db.get_workspace_primary_root("ws-1") is None
+    assert db.workspace_store.get_workspace_primary_root("ws-1") is None
 
 
 class _VersionConflictDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def get_workspace(self, workspace_id):
         return {"version": 1}
 
@@ -602,6 +603,7 @@ class _VersionConflictDB:
 
 
 class _LoadConflictDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def get_workspace(self, workspace_id):
         return {"version": 1}
 
@@ -613,6 +615,7 @@ class _LoadConflictDB:
 
 
 class _LoadInputErrorDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def get_workspace(self, workspace_id):
         return {"version": 1}
 
@@ -624,6 +627,7 @@ class _LoadInputErrorDB:
 
 
 class _WorkspaceLoadConflictDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def get_workspace(self, workspace_id):
         raise ConflictError("Workspace 'ws-1' version mismatch.")
 
@@ -635,6 +639,7 @@ class _WorkspaceLoadConflictDB:
 
 
 class _MissingWorkspaceDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def get_workspace(self, workspace_id):
         return None
 
@@ -646,23 +651,24 @@ class _MissingWorkspaceDB:
 
 
 class _RacingAttachDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self, real_db, replacement_root):
         self.real_db = real_db
         self.replacement_root = replacement_root
         self.loaded_workspace_version = None
 
     def get_workspace(self, workspace_id):
-        workspace = self.real_db.get_workspace(workspace_id)
+        workspace = self.real_db.workspace_store.get_workspace(workspace_id)
         self.loaded_workspace_version = workspace["version"]
         return workspace
 
     def get_workspace_primary_root(self, workspace_id):
         assert self.loaded_workspace_version is not None
-        self.real_db.upsert_workspace_primary_root(workspace_id, self.replacement_root)
+        self.real_db.workspace_store.upsert_workspace_primary_root(workspace_id, self.replacement_root)
         return None
 
     def upsert_workspace_primary_root(self, workspace_id, payload):
-        return self.real_db.upsert_workspace_primary_root(workspace_id, payload)
+        return self.real_db.workspace_store.upsert_workspace_primary_root(workspace_id, payload)
 
 
 def test_db_conflict_with_version_text_is_wrapped_as_version_mismatch():
@@ -745,7 +751,7 @@ def test_service_auto_expected_version_prevents_read_before_write_replacement_ra
     allowed = tmp_path / "allowed"
     requested = allowed / "requested"
     requested.mkdir(parents=True)
-    db.upsert_workspace("ws-1", "Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace")
     racing_db = _RacingAttachDB(
         db,
         {"root_id": "other", "backend": "sandbox_volume", "sandbox_volume_id": "volume-other"},
@@ -764,7 +770,7 @@ def test_service_auto_expected_version_prevents_read_before_write_replacement_ra
         )
 
     assert exc_info.value.code == "workspace_version_mismatch"
-    assert db.get_workspace_primary_root("ws-1")["root_id"] == "other"
+    assert db.workspace_store.get_workspace_primary_root("ws-1")["root_id"] == "other"
 
 
 def test_inventory_sandbox_mount_resolver_exception_returns_failure_result():

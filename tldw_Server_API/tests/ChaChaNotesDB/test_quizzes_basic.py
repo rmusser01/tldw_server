@@ -162,7 +162,7 @@ def test_quizzes_basic_flow():
 
 def test_quiz_workspace_id_persists_and_can_move_between_scopes():
     with _temp_chacha_db() as db:
-        db.upsert_workspace("ws-1", "Workspace One")
+        db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
         quiz_id = db.create_quiz(
             name="Scoped Quiz",

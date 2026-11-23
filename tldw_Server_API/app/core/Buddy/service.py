@@ -234,7 +234,7 @@ class BuddyService:
     def resolve_target(self, scope_type: str, scope_id: str) -> dict[str, Any]:
         """Resolve existing private targets; never open a shared owner's DB."""
         if scope_type == "workspace":
-            workspace = self.db.get_workspace(scope_id)
+            workspace = self.db.workspace_store.get_workspace(scope_id)
             if workspace is None or workspace.get("deleted") or str(workspace.get("client_id")) != self.user_id:
                 raise BuddyNotFoundError("Target unavailable")
             return {"title": workspace.get("name") or "Workspace", "workspace_id": scope_id}

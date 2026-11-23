@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperSaveRequest,
     WebClipperSaveResult,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
     CharactersRAGDB,
@@ -32,7 +33,7 @@ class _EmptyCursor:
 @pytest.fixture
 def db(tmp_path):
     database = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="clipper-client")
-    database.upsert_workspace("ws-1", "Research Workspace")
+    database.workspace_store.upsert_workspace("ws-1", "Research Workspace")
     yield database
     database.close_connection()
 
@@ -87,10 +88,11 @@ def test_postgres_web_clipper_reads_bind_authenticated_owner() -> None:
         return _EmptyCursor()
 
     db.execute_query = _execute_query
+    db.workspace_store = WorkspaceStore(db.ctx)
 
     assert db.get_note_clipper_document_by_clip_id("shared-clip") is None
     assert db.get_note_clipper_document_by_note_id(str(uuid4())) is None
-    assert db.list_note_clipper_workspace_placements("shared-clip") == []
+    assert db.workspace_store.list_note_clipper_workspace_placements("shared-clip") == []
 
     assert len(calls) == 3
     for query, params in calls:
@@ -112,21 +114,21 @@ def test_web_clipper_workspace_placement_upsert_is_idempotent(db):
         source_note_version=1,
     )
 
-    first = db.upsert_note_clipper_workspace_placement(
+    first = db.workspace_store.upsert_note_clipper_workspace_placement(
         clip_id="clip-456",
         workspace_id="ws-1",
         workspace_note_id=41,
         source_note_id=note_id,
         source_note_version=1,
     )
-    second = db.upsert_note_clipper_workspace_placement(
+    second = db.workspace_store.upsert_note_clipper_workspace_placement(
         clip_id="clip-456",
         workspace_id="ws-1",
         workspace_note_id=42,
         source_note_id=note_id,
         source_note_version=1,
     )
-    placements = db.list_note_clipper_workspace_placements("clip-456")
+    placements = db.workspace_store.list_note_clipper_workspace_placements("clip-456")
 
     assert first["workspace_note_id"] == 41
     assert second["workspace_note_id"] == 42
@@ -150,7 +152,7 @@ def test_web_clipper_cleanup_follows_canonical_note_deletion(db):
         content_budget={"inline_body_chars": 0},
         source_note_version=1,
     )
-    db.upsert_note_clipper_workspace_placement(
+    db.workspace_store.upsert_note_clipper_workspace_placement(
         clip_id="clip-789",
         workspace_id="ws-1",
         workspace_note_id=99,
@@ -159,13 +161,13 @@ def test_web_clipper_cleanup_follows_canonical_note_deletion(db):
     )
 
     assert db.get_note_clipper_document_by_clip_id("clip-789") is not None
-    assert db.list_note_clipper_workspace_placements("clip-789")
+    assert db.workspace_store.list_note_clipper_workspace_placements("clip-789")
 
     assert db.delete_note(note_id, hard_delete=True) is True
 
     assert db.get_note_clipper_document_by_clip_id("clip-789") is None
     assert db.get_note_clipper_document_by_note_id(note_id) is None
-    assert db.list_note_clipper_workspace_placements("clip-789") == []
+    assert db.workspace_store.list_note_clipper_workspace_placements("clip-789") == []
 
 
 def test_web_clipper_soft_delete_invalidates_and_restore_reactivates_sidecars(db):
@@ -181,7 +183,7 @@ def test_web_clipper_soft_delete_invalidates_and_restore_reactivates_sidecars(db
         content_budget={"inline_body_chars": 500},
         source_note_version=1,
     )
-    db.upsert_note_clipper_workspace_placement(
+    db.workspace_store.upsert_note_clipper_workspace_placement(
         clip_id="clip-soft",
         workspace_id="ws-1",
         workspace_note_id=7,
@@ -191,7 +193,7 @@ def test_web_clipper_soft_delete_invalidates_and_restore_reactivates_sidecars(db
 
     assert db.soft_delete_note(note_id, expected_version=1) is True
     assert db.get_note_clipper_document_by_clip_id("clip-soft") is None
-    assert db.list_note_clipper_workspace_placements("clip-soft") == []
+    assert db.workspace_store.list_note_clipper_workspace_placements("clip-soft") == []
 
     conn = db.get_connection()
     deleted_document = conn.execute(
@@ -210,7 +212,7 @@ def test_web_clipper_soft_delete_invalidates_and_restore_reactivates_sidecars(db
     assert db.restore_note(note_id, expected_version=2) is True
 
     restored_document = db.get_note_clipper_document_by_clip_id("clip-soft")
-    restored_placements = db.list_note_clipper_workspace_placements("clip-soft")
+    restored_placements = db.workspace_store.list_note_clipper_workspace_placements("clip-soft")
     assert restored_document is not None
     assert restored_document["note_id"] == note_id
     assert restored_placements == [
@@ -248,7 +250,7 @@ def test_web_clipper_helpers_use_explicit_transaction_connection(db, monkeypatch
             source_note_version=1,
             conn=conn,
         )
-        placement = db.upsert_note_clipper_workspace_placement(
+        placement = db.workspace_store.upsert_note_clipper_workspace_placement(
             clip_id="clip-txn",
             workspace_id="ws-1",
             workspace_note_id=21,
@@ -277,14 +279,14 @@ def test_web_clipper_document_mapping_is_immutable_and_placement_resolves_note(d
             clip_type="article",
         )
 
-    placement = db.upsert_note_clipper_workspace_placement(
+    placement = db.workspace_store.upsert_note_clipper_workspace_placement(
         clip_id="clip-immutable",
         workspace_id="ws-1",
         workspace_note_id=17,
     )
     assert placement["source_note_id"] == note_id
     with pytest.raises(InputError, match="document note_id"):
-        db.upsert_note_clipper_workspace_placement(
+        db.workspace_store.upsert_note_clipper_workspace_placement(
             clip_id="clip-immutable",
             workspace_id="ws-1",
             workspace_note_id=17,

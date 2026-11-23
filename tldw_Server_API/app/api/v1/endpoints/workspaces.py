@@ -622,13 +622,13 @@ def _workspace_artifact_version_for_export(
     artifact_version_id: str | None,
 ) -> dict:
     """Fetch the current artifact or a version snapshot for export."""
-    artifact = db.get_workspace_artifact(workspace_id, artifact_id)
+    artifact = db.workspace_store.get_workspace_artifact(workspace_id, artifact_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail="Workspace artifact not found")
     if artifact_version_id is None:
         return artifact
 
-    version = db.get_workspace_artifact_version(workspace_id, artifact_id, artifact_version_id)
+    version = db.workspace_store.get_workspace_artifact_version(workspace_id, artifact_id, artifact_version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="Workspace artifact version not found")
     merged = {**artifact, **version}
@@ -662,7 +662,7 @@ def _note_to_response(note: dict) -> WorkspaceNoteResponse:
 
 def _require_workspace(db: CharactersRAGDB, workspace_id: str) -> dict:
     """Fetch a workspace or raise 404 if not found."""
-    ws = db.get_workspace(workspace_id)
+    ws = db.workspace_store.get_workspace(workspace_id)
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return ws
@@ -819,7 +819,7 @@ def _list_workspace_runtime_bindings_sync(
 ) -> list[dict[str, Any]]:
     """List runtime bindings with synchronous DB work isolated for threadpool use."""
     _require_workspace(db, workspace_id)
-    return db.list_workspace_runtime_bindings(
+    return db.workspace_store.list_workspace_runtime_bindings(
         workspace_id,
         binding_kind=binding_kind,
         owner_domain=owner_domain,
@@ -839,13 +839,13 @@ def _upsert_workspace_runtime_binding_sync(
     if bool(workspace.get("archived", False)):
         raise _workspace_runtime_binding_archived_conflict(workspace_id)
     payload = body.persistence_payload()
-    before = db.get_workspace_runtime_binding(
+    before = db.workspace_store.get_workspace_runtime_binding(
         workspace_id,
         str(payload.get("binding_id") or ""),
         include_deleted=True,
     )
     should_record_activity = runtime_binding_payload_changed(before, payload)
-    binding = db.upsert_workspace_runtime_binding(
+    binding = db.workspace_store.upsert_workspace_runtime_binding(
         workspace_id,
         payload,
         user_id=user_id,
@@ -868,7 +868,7 @@ def _get_workspace_runtime_binding_sync(
 ) -> dict[str, Any] | None:
     """Fetch one runtime binding using synchronous DB APIs."""
     _require_workspace(db, workspace_id)
-    return db.get_workspace_runtime_binding(workspace_id, binding_id)
+    return db.workspace_store.get_workspace_runtime_binding(workspace_id, binding_id)
 
 
 def _archive_workspace_runtime_binding_sync(
@@ -881,7 +881,7 @@ def _archive_workspace_runtime_binding_sync(
     workspace = _require_workspace(db, workspace_id)
     if bool(workspace.get("archived", False)):
         raise _workspace_runtime_binding_archived_conflict(workspace_id)
-    archived = db.archive_workspace_runtime_binding(
+    archived = db.workspace_store.archive_workspace_runtime_binding(
         workspace_id,
         binding_id,
         user_id=user_id,
@@ -895,7 +895,7 @@ def _archive_workspace_runtime_binding_sync(
             user_id=user_id,
         )
     if archived is None:
-        existing = db.get_workspace_runtime_binding(
+        existing = db.workspace_store.get_workspace_runtime_binding(
             workspace_id,
             binding_id,
             include_deleted=True,
@@ -910,7 +910,7 @@ def _workspace_with_primary_root(
     workspace: dict,
 ) -> dict:
     """Attach the primary project root to a workspace row for read-model projection."""
-    primary_root = db.get_workspace_primary_root(workspace_id)
+    primary_root = db.workspace_store.get_workspace_primary_root(workspace_id)
     if primary_root is None:
         return workspace
     enriched = dict(workspace)
@@ -928,7 +928,7 @@ def _workspace_primary_root_with_file_inventory_status(
     primary_root: dict[str, Any],
 ) -> dict[str, Any]:
     enriched_root = dict(primary_root)
-    status_payload = db.get_workspace_file_inventory_status(workspace_id)
+    status_payload = db.workspace_store.get_workspace_file_inventory_status(workspace_id)
     enriched_root["file_inventory"] = _workspace_file_inventory_summary(status_payload)
     enriched_root["file_inventory_state"] = status_payload.get("state") or primary_root.get("file_inventory_state")
     enriched_root["file_inventory"]["available"] = workspace_file_inventory_available(
@@ -1101,7 +1101,7 @@ async def list_workspaces(
 ):
     """List non-deleted workspaces for the current user."""
     try:
-        items = db.list_workspaces()
+        items = db.workspace_store.list_workspaces()
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspaces") from exc
     persona_profile_cache: WorkspacePersonaProfileCache = {}
@@ -1157,7 +1157,7 @@ async def upsert_workspace(
             if "workspace_profile" in body.model_fields_set
             else None
         )
-        ws = db.upsert_workspace(
+        ws = db.workspace_store.upsert_workspace(
             workspace_id,
             body.name,
             study_materials_policy=body.study_materials_policy,
@@ -1197,7 +1197,7 @@ async def patch_workspace(
             detail="No fields to update",
         )
     try:
-        ws = db.update_workspace(workspace_id, updates, body.version)
+        ws = db.workspace_store.update_workspace(workspace_id, updates, body.version)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update workspace") from exc
     return _ws_to_response(ws, db=db, current_user=current_user)
@@ -1220,7 +1220,7 @@ async def delete_workspace(
     if owner_user_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_user_id")
     try:
-        db.delete_workspace(workspace_id, ws["version"])
+        db.workspace_store.delete_workspace(workspace_id, ws["version"])
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace") from exc
     try:
@@ -1607,7 +1607,7 @@ def list_source_saved_views(
     """List the current user's source views for one active owned workspace."""
     owner_user_id = _request_user_id(current_user)
     try:
-        rows = db.list_workspace_source_saved_views(owner_user_id, workspace_id)
+        rows = db.workspace_store.list_workspace_source_saved_views(owner_user_id, workspace_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise _source_saved_view_error(
             exc, default_detail="Failed to fetch workspace source saved views"
@@ -1637,7 +1637,7 @@ def create_source_saved_view(
     """Create one canonical V1 source view."""
     owner_user_id = _request_user_id(current_user)
     try:
-        row = db.create_workspace_source_saved_view(
+        row = db.workspace_store.create_workspace_source_saved_view(
             owner_user_id,
             workspace_id,
             name=body.name,
@@ -1673,7 +1673,7 @@ def update_source_saved_view(
     patch = body.root
     state_model = getattr(patch, "state", None)
     try:
-        row = db.update_workspace_source_saved_view(
+        row = db.workspace_store.update_workspace_source_saved_view(
             owner_user_id,
             workspace_id,
             view_id,
@@ -1707,7 +1707,7 @@ def delete_source_saved_view(
     """Unconditionally delete one owned source view."""
     owner_user_id = _request_user_id(current_user)
     try:
-        db.delete_workspace_source_saved_view(owner_user_id, workspace_id, view_id)
+        db.workspace_store.delete_workspace_source_saved_view(owner_user_id, workspace_id, view_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise _source_saved_view_error(
             exc, default_detail="Failed to delete workspace source saved view"
@@ -1731,7 +1731,7 @@ async def list_sources(
     """List all sources belonging to a workspace."""
     _require_workspace(db, workspace_id)
     try:
-        sources = db.list_workspace_sources(workspace_id)
+        sources = db.workspace_store.list_workspace_sources(workspace_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace sources") from exc
     return [_src_to_response(s) for s in sources]
@@ -1753,7 +1753,7 @@ async def get_sources_status(
     """Return read-computed ingestion, extraction, chunking, and indexing status."""
     _require_workspace(db, workspace_id)
     try:
-        sources = db.list_workspace_sources(workspace_id)
+        sources = db.workspace_store.list_workspace_sources(workspace_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace source status") from exc
     jobs = list_recent_workspace_source_ingest_jobs(
@@ -1785,7 +1785,7 @@ async def get_workspace_capabilities(
     """Return conservative UI capability gates for the workspace model."""
     workspace = _require_workspace(db, workspace_id)
     try:
-        sources = db.list_workspace_sources(workspace_id)
+        sources = db.workspace_store.list_workspace_sources(workspace_id)
         workspace_projection = _workspace_with_primary_root(db, workspace_id, workspace)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace capabilities") from exc
@@ -1825,11 +1825,11 @@ async def get_workspace_context(
     """Return the canonical read model for the workspace page shell."""
     workspace = _require_workspace(db, workspace_id)
     try:
-        sources = db.list_workspace_sources(workspace_id)
+        sources = db.workspace_store.list_workspace_sources(workspace_id)
         workspace_projection = _workspace_with_primary_root(db, workspace_id, workspace)
         active_operations = [
             workspace_operation_response_payload(operation)
-            for operation in db.list_active_workspace_operations(workspace_id)
+            for operation in db.workspace_store.list_active_workspace_operations(workspace_id)
         ]
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace context") from exc
@@ -1950,7 +1950,7 @@ async def list_workspace_roots(
     _ = current_user
     try:
         workspace = _require_workspace(db, workspace_id)
-        roots = db.list_workspace_project_roots(workspace_id)
+        roots = db.workspace_store.list_workspace_project_roots(workspace_id)
     except HTTPException:
         raise
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
@@ -1981,7 +1981,7 @@ async def attach_workspace_primary_root(
             request=WorkspaceRootAttachRequest(**body.model_dump()),
         )
         workspace = _require_workspace(db, workspace_id)
-        roots = db.list_workspace_project_roots(workspace_id)
+        roots = db.workspace_store.list_workspace_project_roots(workspace_id)
     except WorkspaceRootServiceError as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -2073,7 +2073,7 @@ async def get_workspace_operation_status(
     _ = current_user
     try:
         _require_workspace(db, workspace_id)
-        operation = db.get_workspace_operation(workspace_id, operation_id)
+        operation = db.workspace_store.get_workspace_operation(workspace_id, operation_id)
     except HTTPException:
         raise
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
@@ -2102,7 +2102,7 @@ async def queue_workspace_file_inventory_scan(
 ) -> WorkspaceFileInventoryStatusResponse:
     """Queue a metadata-only inventory scan for the workspace primary root."""
     _require_workspace(db, workspace_id)
-    root = db.get_workspace_primary_root(workspace_id)
+    root = db.workspace_store.get_workspace_primary_root(workspace_id)
     if root is None:
         raise _workspace_file_inventory_no_root_conflict()
     if body.expected_root_version is not None and int(root.get("version") or 0) != body.expected_root_version:
@@ -2116,7 +2116,7 @@ async def queue_workspace_file_inventory_scan(
 
     policy = build_inventory_ignore_policy()
     try:
-        current_status = db.get_workspace_file_inventory_status(
+        current_status = db.workspace_store.get_workspace_file_inventory_status(
             workspace_id,
             policy_fingerprint=policy.fingerprint,
         )
@@ -2187,7 +2187,7 @@ async def get_workspace_file_inventory_status(
     _ = current_user
     _require_workspace(db, workspace_id)
     try:
-        status_payload = db.get_workspace_file_inventory_status(
+        status_payload = db.workspace_store.get_workspace_file_inventory_status(
             workspace_id,
             policy_fingerprint=build_inventory_ignore_policy().fingerprint,
         )
@@ -2219,11 +2219,11 @@ async def list_workspace_file_inventory_items(
     """Return redacted, project-root-relative inventory items."""
     _ = current_user
     _require_workspace(db, workspace_id)
-    root = db.get_workspace_primary_root(workspace_id)
+    root = db.workspace_store.get_workspace_primary_root(workspace_id)
     if root is None:
         raise _workspace_file_inventory_no_root_conflict()
     try:
-        page = db.list_workspace_file_inventory_items(
+        page = db.workspace_store.list_workspace_file_inventory_items(
             workspace_id,
             prefix=prefix,
             cursor=cursor,
@@ -2266,7 +2266,7 @@ async def get_source_preview(
     """Return bounded captured text and chunk evidence for one workspace source."""
     _require_workspace(db, workspace_id)
     try:
-        sources = db.list_workspace_sources(workspace_id)
+        sources = db.workspace_store.list_workspace_sources(workspace_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace source preview") from exc
     source = _find_source_in_workspace(sources, source_id)
@@ -2314,7 +2314,7 @@ async def add_source(
     """Add a media source to a workspace."""
     _require_workspace(db, workspace_id)
     try:
-        src = db.add_workspace_source(workspace_id, body.model_dump())
+        src = db.workspace_store.add_workspace_source(workspace_id, body.model_dump())
         _enqueue_workspace_source_ingest_job(
             jm=jm,
             current_user=current_user,
@@ -2341,7 +2341,7 @@ async def update_source_selection(
     """Set which sources are selected in a workspace (batch operation)."""
     _require_workspace(db, workspace_id)
     try:
-        db.update_workspace_source_selection(workspace_id, selected_ids=body.selected_ids)
+        db.workspace_store.update_workspace_source_selection(workspace_id, selected_ids=body.selected_ids)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(
             exc, default_detail="Failed to update workspace source selection"
@@ -2364,7 +2364,7 @@ async def reorder_sources(
     """Reorder workspace sources by providing an ordered list of IDs."""
     _require_workspace(db, workspace_id)
     try:
-        db.reorder_workspace_sources(workspace_id, body.ordered_ids)
+        db.workspace_store.reorder_workspace_sources(workspace_id, body.ordered_ids)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to reorder workspace sources") from exc
     return StatusResponse()
@@ -2385,7 +2385,7 @@ async def update_source_review_states(
     """Set the review state for selected workspace sources atomically."""
     _require_workspace(db, workspace_id)
     try:
-        sources = db.update_workspace_source_review_states(
+        sources = db.workspace_store.update_workspace_source_review_states(
             workspace_id,
             body.source_ids,
             body.review_state,
@@ -2423,7 +2423,7 @@ async def update_source(
         else {}
     )
     try:
-        src = db.update_workspace_source(
+        src = db.workspace_store.update_workspace_source(
             workspace_id,
             source_id,
             updates,
@@ -2450,7 +2450,7 @@ async def delete_source(
     """Remove a source from a workspace."""
     _require_workspace(db, workspace_id)
     try:
-        db.delete_workspace_source(workspace_id, source_id)
+        db.workspace_store.delete_workspace_source(workspace_id, source_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace source") from exc
 
@@ -2534,7 +2534,7 @@ async def list_artifacts(
     """List all artifacts belonging to a workspace."""
     _require_workspace(db, workspace_id)
     try:
-        artifacts = db.list_workspace_artifacts(workspace_id)
+        artifacts = db.workspace_store.list_workspace_artifacts(workspace_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace artifacts") from exc
     return [_art_to_response(a) for a in artifacts]
@@ -2556,7 +2556,7 @@ async def add_artifact(
     """Add an artifact to a workspace."""
     _require_workspace(db, workspace_id)
     try:
-        art = db.add_workspace_artifact(workspace_id, body.model_dump())
+        art = db.workspace_store.add_workspace_artifact(workspace_id, body.model_dump())
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to add workspace artifact") from exc
     return _art_to_response(art)
@@ -2579,7 +2579,7 @@ async def update_artifact(
     _require_workspace(db, workspace_id)
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
     try:
-        art = db.update_workspace_artifact(workspace_id, artifact_id, updates, expected_version=body.version)
+        art = db.workspace_store.update_workspace_artifact(workspace_id, artifact_id, updates, expected_version=body.version)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update workspace artifact") from exc
     return _art_to_response(art)
@@ -2608,7 +2608,7 @@ async def export_artifact(
             body.artifact_version_id,
         )
         payload = export_workspace_artifact_version(artifact, export_format=body.format)
-        db.append_workspace_artifact_export_ref(workspace_id, artifact_id, payload["export_ref"])
+        db.workspace_store.append_workspace_artifact_export_ref(workspace_id, artifact_id, payload["export_ref"])
     except WorkspaceArtifactExportStateError as exc:
         logger.warning(
             "Workspace artifact export rejected: workspace_id={} artifact_id={} artifact_version_id={} "
@@ -2651,7 +2651,7 @@ async def delete_artifact(
     """Remove an artifact from a workspace."""
     _require_workspace(db, workspace_id)
     try:
-        db.delete_workspace_artifact(workspace_id, artifact_id)
+        db.workspace_store.delete_workspace_artifact(workspace_id, artifact_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace artifact") from exc
 
@@ -2672,7 +2672,7 @@ async def list_notes(
     """List all notes belonging to a workspace."""
     _require_workspace(db, workspace_id)
     try:
-        notes = db.list_workspace_notes(workspace_id)
+        notes = db.workspace_store.list_workspace_notes(workspace_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace notes") from exc
     return [_note_to_response(n) for n in notes]
@@ -2694,7 +2694,7 @@ async def add_note(
     """Add a note to a workspace."""
     _require_workspace(db, workspace_id)
     try:
-        note = db.add_workspace_note(workspace_id, body.model_dump())
+        note = db.workspace_store.add_workspace_note(workspace_id, body.model_dump())
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to add workspace note") from exc
     return _note_to_response(note)
@@ -2717,7 +2717,7 @@ async def update_note(
     _require_workspace(db, workspace_id)
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
     try:
-        note = db.update_workspace_note(workspace_id, note_id, updates, expected_version=body.version)
+        note = db.workspace_store.update_workspace_note(workspace_id, note_id, updates, expected_version=body.version)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update workspace note") from exc
     return _note_to_response(note)
@@ -2738,6 +2738,6 @@ async def delete_note(
     """Remove a note from a workspace."""
     _require_workspace(db, workspace_id)
     try:
-        db.delete_workspace_note(workspace_id, note_id)
+        db.workspace_store.delete_workspace_note(workspace_id, note_id)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace note") from exc

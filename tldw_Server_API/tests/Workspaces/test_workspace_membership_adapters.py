@@ -357,6 +357,7 @@ def test_workspace_context_membership_summary_constructs_grouped_totals() -> Non
 
 
 class FakeChaChaDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self) -> None:
         self.workspaces = {
             "workspace-1": {"id": "workspace-1", "archived": False},

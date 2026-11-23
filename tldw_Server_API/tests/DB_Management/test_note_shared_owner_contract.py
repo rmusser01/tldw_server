@@ -489,14 +489,14 @@ def test_folder_paths_and_source_keys_preserve_other_owner(note_owners, operatio
             owner = conn.execute("SELECT client_id FROM note_folders WHERE id=?", (own["id"],)).fetchone()
         assert owner["client_id"] == "3"
     else:
-        f.alice.sync_note_source_folders(f.private, 1, ["Shared/Path"])
+        f.alice.workspace_store.sync_note_source_folders(f.private, 1, ["Shared/Path"])
         # Source IDs are globally assigned by ingestion. A conflicting foreign
         # provenance key may reject, but must never be reassigned to this owner.
         try:
-            f.bob.sync_note_source_folders(f.own, 1, ["Shared/Path"])
+            f.bob.workspace_store.sync_note_source_folders(f.own, 1, ["Shared/Path"])
         except CharactersRAGDBError:
             pass
-        f.bob.sync_note_source_folders(f.own, 2, ["Owned/Source"])
+        f.bob.workspace_store.sync_note_source_folders(f.own, 2, ["Owned/Source"])
         assert f.bob.get_note_folders_for_note(f.own)
         with f.alice.transaction() as conn:
             rows = conn.execute("SELECT folder_id FROM note_folder_source_keys WHERE source_id=1").fetchall()

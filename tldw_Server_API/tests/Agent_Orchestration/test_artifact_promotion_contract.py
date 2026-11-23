@@ -36,7 +36,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def note_db(tmp_path):
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+    db.workspace_store.upsert_workspace("workspace-alpha", "Alpha Workspace")
     try:
         yield db
     finally:
@@ -180,7 +180,7 @@ def test_accepted_acp_completion_promotes_exportable_traceable_artifact(
     assert result.skipped == []
     assert result.errors == []
 
-    artifact = note_db.get_workspace_artifact("workspace-alpha", "brief-1")
+    artifact = note_db.workspace_store.get_workspace_artifact("workspace-alpha", "brief-1")
     assert artifact is not None
     assert artifact["review_state"] == "accepted"
     assert artifact["owner_scope"] == "workspace"
@@ -265,7 +265,7 @@ def test_accepted_acp_completion_updates_existing_artifact_with_version_lineage(
     assert result.updated_artifact_ids == ["brief-1"]
     assert result.errors == []
 
-    artifact = note_db.get_workspace_artifact("workspace-alpha", "brief-1")
+    artifact = note_db.workspace_store.get_workspace_artifact("workspace-alpha", "brief-1")
     assert artifact is not None
     assert artifact["version"] == 2
     assert artifact["artifact_version_id"] == "brief-1:v2"
@@ -276,7 +276,7 @@ def test_accepted_acp_completion_updates_existing_artifact_with_version_lineage(
     assert artifact["version_metadata"]["revision_reason"] == "review follow-up incorporated"
     assert artifact["schema_version"] == 2
 
-    versions = note_db.list_workspace_artifact_versions("workspace-alpha", "brief-1")
+    versions = note_db.workspace_store.list_workspace_artifact_versions("workspace-alpha", "brief-1")
     assert [version["artifact_version_id"] for version in versions] == [
         "brief-1:v1",
         "brief-1:v2",
@@ -320,7 +320,7 @@ def test_non_accepted_acp_completion_does_not_promote_artifacts(
     assert result.updated_artifact_ids == []
     assert result.errors == []
     assert result.skipped == [{"artifact_id": "brief-1", "reason": expected_reason}]
-    assert note_db.list_workspace_artifacts("workspace-alpha") == []
+    assert note_db.workspace_store.list_workspace_artifacts("workspace-alpha") == []
 
 
 def test_malformed_and_non_promotable_acp_artifacts_are_reported_without_partial_create(
@@ -350,11 +350,11 @@ def test_malformed_and_non_promotable_acp_artifacts_are_reported_without_partial
         {"artifact_id": "missing-lineage", "reason": "missing_source_lineage"},
     ]
     assert result.skipped == [{"artifact_id": "session-log-1", "reason": "not_promotable"}]
-    assert note_db.list_workspace_artifacts("workspace-alpha") == []
+    assert note_db.workspace_store.list_workspace_artifacts("workspace-alpha") == []
 
 
 def test_unaccepted_traceable_artifact_snapshot_remains_non_exportable(note_db):
-    artifact = note_db.add_workspace_artifact(
+    artifact = note_db.workspace_store.add_workspace_artifact(
         "workspace-alpha",
         {
             "id": "brief-draft",

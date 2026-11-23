@@ -124,8 +124,8 @@ def test_add_deck_undelete_preserves_visibility_when_omitted():
 
 def test_shared_with_user_workspace_filter_can_include_general_scope():
     with _temporary_chacha_db() as db:
-        db.upsert_workspace("ws-1", "Workspace One")
-        db.upsert_workspace("ws-2", "Workspace Two")
+        db.workspace_store.upsert_workspace("ws-1", "Workspace One")
+        db.workspace_store.upsert_workspace("ws-2", "Workspace Two")
         general_deck = db.add_deck("General Shared Deck")
         workspace_deck = db.add_deck("Workspace Shared Deck", workspace_id="ws-1")
         other_workspace_deck = db.add_deck("Other Workspace Shared Deck", workspace_id="ws-2")

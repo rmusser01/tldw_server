@@ -527,7 +527,7 @@ def _sync_v2_parse_positive_int_env(name: str, value: str) -> int:
 def _workspace_access_checker(user_id: str, workspace_id: str, permission: str) -> bool:
     if permission != "sync":
         return False
-    return _chacha_notes_db_for_user(user_id).get_workspace(workspace_id) is not None
+    return _chacha_notes_db_for_user(user_id).workspace_store.get_workspace(workspace_id) is not None
 
 
 def _default_sync_v2_path_for_user(user_id: str) -> Path:

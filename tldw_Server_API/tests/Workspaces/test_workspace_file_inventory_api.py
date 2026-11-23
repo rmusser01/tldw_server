@@ -104,9 +104,9 @@ def _inventory_client(
 
 
 def _workspace_with_root(db: CharactersRAGDB, root_path: Path) -> dict[str, Any]:
-    db.upsert_workspace("ws-inventory", "Inventory Workspace", workspace_profile="project")
+    db.workspace_store.upsert_workspace("ws-inventory", "Inventory Workspace", workspace_profile="project")
     root_path.mkdir(parents=True, exist_ok=True)
-    return db.upsert_workspace_primary_root(
+    return db.workspace_store.upsert_workspace_primary_root(
         "ws-inventory",
         {
             "root_id": "root-1",
@@ -127,15 +127,15 @@ def _completed_scan(
     diagnostics: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     policy = build_inventory_ignore_policy()
-    scan = db.begin_workspace_file_inventory_scan(
+    scan = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-inventory",
         root["root_id"],
         int(root["version"]),
         policy_fingerprint or policy.fingerprint,
         requested_by="user-1",
     )
-    db.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 701, "uuid": "job-701"})
-    return db.complete_workspace_file_inventory_scan(
+    db.workspace_store.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 701, "uuid": "job-701"})
+    return db.workspace_store.complete_workspace_file_inventory_scan(
         scan["scan_id"],
         state,
         {"files": 2, "directories": 1, "ignored": 1, "diagnostics": len(diagnostics or [])},
@@ -177,7 +177,7 @@ def test_scan_endpoint_maps_no_root_version_conflict_and_jobs_unavailable(
     db: CharactersRAGDB,
     tmp_path: Path,
 ) -> None:
-    db.upsert_workspace("ws-inventory", "Inventory Workspace", workspace_profile="project")
+    db.workspace_store.upsert_workspace("ws-inventory", "Inventory Workspace", workspace_profile="project")
     with _inventory_client(workspace_app, db, jobs=_RecordingJobs()) as client:
         no_root = client.post("/api/v1/workspaces/ws-inventory/file-inventory/scan", json={})
     assert no_root.status_code == 409
@@ -236,7 +236,7 @@ def test_scan_reuses_active_scan_only_after_job_is_attached(
 ) -> None:
     root = _workspace_with_root(db, tmp_path / "project")
     policy = build_inventory_ignore_policy()
-    orphaned = db.begin_workspace_file_inventory_scan(
+    orphaned = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-inventory",
         root["root_id"],
         int(root["version"]),
@@ -306,7 +306,7 @@ def test_items_endpoint_paginates_filters_and_returns_relative_paths_only(
 ) -> None:
     root = _workspace_with_root(db, tmp_path / "project")
     completed = _completed_scan(db, root)
-    db.replace_workspace_file_inventory_items(
+    db.workspace_store.replace_workspace_file_inventory_items(
         "ws-inventory",
         root["root_id"],
         completed["scan_id"],

@@ -36,8 +36,8 @@ def test_workspace_context_source_items_include_review_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "context.db"), client_id="user-1")
-    db.upsert_workspace("ws-context", "Context Workspace")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace("ws-context", "Context Workspace")
+    db.workspace_store.add_workspace_source(
         "ws-context",
         {
             "id": "src-context",

@@ -14,7 +14,7 @@ def db(tmp_path):
 class TestConversationListScope:
     def test_list_defaults_to_global_scope(self, db):
         """Omitting scope returns only global conversations."""
-        db.upsert_workspace("ws-a", "Workspace A")
+        db.workspace_store.upsert_workspace("ws-a", "Workspace A")
         db.add_conversation({"title": "Global chat", "character_id": 1})
         db.add_conversation({
             "title": "Workspace chat", "character_id": 1,
@@ -27,8 +27,8 @@ class TestConversationListScope:
         assert "Workspace chat" not in titles
 
     def test_list_workspace_scope_returns_only_that_workspace(self, db):
-        db.upsert_workspace("ws-a", "A")
-        db.upsert_workspace("ws-b", "B")
+        db.workspace_store.upsert_workspace("ws-a", "A")
+        db.workspace_store.upsert_workspace("ws-b", "B")
         db.add_conversation({
             "title": "A chat", "character_id": 1,
             "scope_type": "workspace", "workspace_id": "ws-a",
@@ -47,7 +47,7 @@ class TestConversationListScope:
 class TestConversationDetail404OnScopeMismatch:
     def test_get_conversation_has_scope_fields(self, db):
         """Verify the raw data has scope set correctly."""
-        db.upsert_workspace("ws-a", "A")
+        db.workspace_store.upsert_workspace("ws-a", "A")
         conv_id = db.add_conversation({
             "title": "WS chat", "character_id": 1,
             "scope_type": "workspace", "workspace_id": "ws-a",

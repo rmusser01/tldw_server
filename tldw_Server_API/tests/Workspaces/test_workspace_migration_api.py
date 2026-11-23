@@ -281,9 +281,9 @@ def test_workspace_migration_delete_verification_reports_missing_chunks(workspac
     )
     assert accepted.status_code == 200, accepted.text
 
-    session = db.get_workspace_migration_session("mig-1")
+    session = db.workspace_store.get_workspace_migration_session("mig-1")
     assert session is not None
-    verification = db._verify_workspace_migration_delete_eligibility(session)
+    verification = db.workspace_store._verify_workspace_migration_delete_eligibility(session)
 
     assert verification["eligible"] is False
     assert verification["status"] == "missing_chunks"
@@ -430,15 +430,15 @@ def test_workspace_migration_rejects_oversized_chunk_receipt(workspace_client):
 @pytest.mark.integration
 def test_workspace_migration_missing_receipt_byte_count_precedes_session_lookup(db):
     with pytest.raises(InputError, match="byte_count must be an integer"):
-        db.add_workspace_migration_chunk("missing-migration", "chunk-1", {"sha256": _CHUNK_HASH, "byte_count": None})
+        db.workspace_store.add_workspace_migration_chunk("missing-migration", "chunk-1", {"sha256": _CHUNK_HASH, "byte_count": None})
 
 
 @pytest.mark.integration
 def test_workspace_migration_stored_missing_declared_byte_count_remains_ineligible(db):
     payload = _session_payload()
-    db.upsert_workspace_migration_session(payload)
+    db.workspace_store.upsert_workspace_migration_session(payload)
     receipt = {"sha256": _CHUNK_HASH, "byte_count": 64, "chunk_kind": "workspace_bundle"}
-    db.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
+    db.workspace_store.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
     payload["declared_chunks"][0]["byte_count"] = None
     with db.transaction() as conn:
         conn.execute(
@@ -447,24 +447,24 @@ def test_workspace_migration_stored_missing_declared_byte_count_remains_ineligib
         )
 
     with pytest.raises(ConflictError, match="invalid byte count") as exc_info:
-        db.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
+        db.workspace_store.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
     assert exc_info.value.entity == "workspace_migration_chunks"
     assert exc_info.value.entity_id == "chunk-1"
-    session = db.get_workspace_migration_session("mig-1")
+    session = db.workspace_store.get_workspace_migration_session("mig-1")
     assert session is not None
-    verification = db._verify_workspace_migration_delete_eligibility(session)
+    verification = db.workspace_store._verify_workspace_migration_delete_eligibility(session)
     assert verification["eligible"] is False
     assert verification["mismatch_chunk_ids"] == ["chunk-1"]
 
 
 @pytest.mark.integration
 def test_workspace_migration_missing_decoded_receipt_byte_count_remains_ineligible(db):
-    db.upsert_workspace_migration_session(_session_payload())
-    db.add_workspace_migration_chunk("mig-1", "chunk-1", {"sha256": _CHUNK_HASH, "byte_count": 64})
-    session = db.get_workspace_migration_session("mig-1")
+    db.workspace_store.upsert_workspace_migration_session(_session_payload())
+    db.workspace_store.add_workspace_migration_chunk("mig-1", "chunk-1", {"sha256": _CHUNK_HASH, "byte_count": 64})
+    session = db.workspace_store.get_workspace_migration_session("mig-1")
     assert session is not None
     session["_chunks"][0]["byte_count"] = None
-    verification = db._verify_workspace_migration_delete_eligibility(session)
+    verification = db.workspace_store._verify_workspace_migration_delete_eligibility(session)
     assert verification["eligible"] is False
     assert verification["mismatch_chunk_ids"] == ["chunk-1"]
 
@@ -472,8 +472,8 @@ def test_workspace_migration_missing_decoded_receipt_byte_count_remains_ineligib
 def test_old_finalized_hash_receipt_never_authorizes_content_deletion(workspace_client, db):
     _create_session(workspace_client)
     receipt = {"sha256": _CHUNK_HASH, "byte_count": 64, "chunk_kind": "workspace_bundle"}
-    db.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
-    db.finalize_workspace_migration("mig-1", {"manifest_hash": _MANIFEST_HASH})
+    db.workspace_store.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
+    db.workspace_store.finalize_workspace_migration("mig-1", {"manifest_hash": _MANIFEST_HASH})
     with db.transaction() as conn:
         conn.execute(
             "UPDATE workspace_migration_sessions SET client_delete_eligible = ?, recovery_manifest_json = ? WHERE id = ?",

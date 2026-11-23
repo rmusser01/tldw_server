@@ -209,8 +209,8 @@ def test_sync_scope_only_move_preserves_origin_but_rebinding_clears_it(
 ) -> None:
     """Whole-object Sync compares actual normalized binding, not revision or scope alone."""
     db = db_factory()
-    db.upsert_workspace("origin", "Origin")
-    db.upsert_workspace("destination", "Destination")
+    db.workspace_store.upsert_workspace("origin", "Origin")
+    db.workspace_store.upsert_workspace("destination", "Destination")
     cid = db.add_conversation(
         {
             "id": "synced",
@@ -383,7 +383,7 @@ def test_generated_lifecycle_never_restores_invalidated_origin(
                 db.restore_conversation(cid, row["version"])
         elif not row["deleted"]:
             if operation == "scope":
-                db.upsert_workspace("sequence-ws", "Sequence")
+                db.workspace_store.upsert_workspace("sequence-ws", "Sequence")
                 db.upsert_conversation_from_sync(
                     conversation_id=cid,
                     title="Moved",
@@ -420,13 +420,13 @@ def test_workspace_cascade_keeps_history_on_soft_delete_and_moved_rows(
 ) -> None:
     """Workspace deletion must not erase origin on a surviving historical conversation."""
     db = db_factory()
-    workspace = db.upsert_workspace("cascade", "Cascade")
+    workspace = db.workspace_store.upsert_workspace("cascade", "Cascade")
     origin = AssistantStartup(source="workspace_default", workspace_id="cascade", workspace_version=1)
     scoped = db.add_conversation({"scope_type": "workspace", "workspace_id": "cascade"}, assistant_startup=origin)
     moved = db.add_conversation({"title": "Already moved"}, assistant_startup=origin)
-    db.delete_workspace("cascade", workspace["version"])
+    db.workspace_store.delete_workspace("cascade", workspace["version"])
     assert decode_assistant_startup(db.get_conversation_by_id(scoped, include_deleted=True)[ORIGIN_COLUMN]) == origin
-    db.hard_delete_workspace("cascade")
+    db.workspace_store.hard_delete_workspace("cascade")
     assert db.get_conversation_by_id(scoped, include_deleted=True) is None
     assert decode_assistant_startup(db.get_conversation_by_id(moved)[ORIGIN_COLUMN]) == origin
 

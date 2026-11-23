@@ -270,44 +270,44 @@ def test_root_path_hint_redacts_relative_path_segments() -> None:
 
 class TestWorkspaceLifecycle:
     def test_upsert_then_get(self, db):
-        ws = db.upsert_workspace("ws-1", "My Workspace", study_materials_policy="workspace")
+        ws = db.workspace_store.upsert_workspace("ws-1", "My Workspace", study_materials_policy="workspace")
         assert ws["id"] == "ws-1"
         assert ws["study_materials_policy"] == "workspace"
-        fetched = db.get_workspace("ws-1")
+        fetched = db.workspace_store.get_workspace("ws-1")
         assert fetched["name"] == "My Workspace"
         assert fetched["study_materials_policy"] == "workspace"
 
     def test_upsert_workspace_updates_existing_policy(self, db):
-        original = db.upsert_workspace("ws-1", "Original Name", study_materials_policy="general")
-        updated = db.upsert_workspace("ws-1", "Renamed Workspace", study_materials_policy="workspace")
+        original = db.workspace_store.upsert_workspace("ws-1", "Original Name", study_materials_policy="general")
+        updated = db.workspace_store.upsert_workspace("ws-1", "Renamed Workspace", study_materials_policy="workspace")
         assert updated["id"] == original["id"]
         assert updated["name"] == "Renamed Workspace"
         assert updated["study_materials_policy"] == "workspace"
         assert updated["version"] == original["version"] + 1
 
     def test_patch_workspace_name(self, db):
-        db.upsert_workspace("ws-1", "Old")
-        ws = db.update_workspace("ws-1", {"name": "New"}, expected_version=1)
+        db.workspace_store.upsert_workspace("ws-1", "Old")
+        ws = db.workspace_store.update_workspace("ws-1", {"name": "New"}, expected_version=1)
         assert ws["name"] == "New"
         assert ws["version"] == 2
 
     def test_archive_workspace(self, db):
-        db.upsert_workspace("ws-1", "WS")
-        ws = db.update_workspace("ws-1", {"archived": True}, expected_version=1)
+        db.workspace_store.upsert_workspace("ws-1", "WS")
+        ws = db.workspace_store.update_workspace("ws-1", {"archived": True}, expected_version=1)
         assert ws["archived"] in (True, 1)
 
     def test_delete_workspace_cascade(self, db):
-        db.upsert_workspace("ws-1", "WS")
+        db.workspace_store.upsert_workspace("ws-1", "WS")
         conv_id = db.add_conversation({
             "title": "WS chat", "character_id": 1,
             "scope_type": "workspace", "workspace_id": "ws-1",
         })
         quiz_id = db.create_quiz(name="Workspace Quiz", workspace_id="ws-1")
         deck_id = db.add_deck("Workspace Deck", workspace_id="ws-1")
-        db.delete_workspace("ws-1", expected_version=1)
+        db.workspace_store.delete_workspace("ws-1", expected_version=1)
 
         # Workspace is soft-deleted
-        ws = db.get_workspace("ws-1")
+        ws = db.workspace_store.get_workspace("ws-1")
         assert ws is None  # get_workspace excludes deleted
 
         # Conversation is also soft-deleted
@@ -323,19 +323,19 @@ class TestWorkspaceLifecycle:
 
     def test_list_workspaces(self, db):
         for i in range(5):
-            db.upsert_workspace(f"ws-{i}", f"WS {i}")
-        result = db.list_workspaces()
+            db.workspace_store.upsert_workspace(f"ws-{i}", f"WS {i}")
+        result = db.workspace_store.list_workspaces()
         assert len(result) == 5
 
     def test_version_conflict_returns_error(self, db):
-        db.upsert_workspace("ws-1", "WS")
-        db.update_workspace("ws-1", {"name": "V2"}, expected_version=1)
+        db.workspace_store.upsert_workspace("ws-1", "WS")
+        db.workspace_store.update_workspace("ws-1", {"name": "V2"}, expected_version=1)
         with pytest.raises((ConflictError, Exception)):
-            db.update_workspace("ws-1", {"name": "V3"}, expected_version=1)
+            db.workspace_store.update_workspace("ws-1", {"name": "V3"}, expected_version=1)
 
     def test_workspace_policy_updates(self, db):
-        db.upsert_workspace("ws-1", "WS")
-        ws = db.update_workspace("ws-1", {"study_materials_policy": "workspace"}, expected_version=1)
+        db.workspace_store.upsert_workspace("ws-1", "WS")
+        ws = db.workspace_store.update_workspace("ws-1", {"study_materials_policy": "workspace"}, expected_version=1)
         assert ws["study_materials_policy"] == "workspace"
 
 
@@ -423,7 +423,7 @@ def test_delete_workspace_invokes_sharing_cleanup_hook(
     async def _record_cleanup(workspace_id: str, owner_user_id: int) -> None:
         cleanup_calls.append((workspace_id, owner_user_id))
 
-    db.upsert_workspace("ws-delete-hook", "Delete Hook")
+    db.workspace_store.upsert_workspace("ws-delete-hook", "Delete Hook")
     workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
@@ -457,7 +457,7 @@ def test_delete_workspace_cleanup_failure_log_includes_context(
         raise RuntimeError("cleanup backend unavailable")
 
     fake_logger = MagicMock()
-    db.upsert_workspace("ws-delete-log", "Delete Log")
+    db.workspace_store.upsert_workspace("ws-delete-log", "Delete Log")
     workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
@@ -498,7 +498,7 @@ def test_workspace_api_patches_assistant_defaults(workspace_fastapi_app, db):
             is_admin=True,
         )
 
-    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    workspace = db.workspace_store.upsert_workspace("ws-assistant", "Assistant Defaults")
     _create_workspace_test_persona(db)
     workspace_fastapi_app.dependency_overrides[get_request_user] = _user
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -524,7 +524,7 @@ def test_workspace_api_patches_assistant_defaults(workspace_fastapi_app, db):
         assert payload["assistant_defaults"]["voice"] is None
         assert payload["assistant_defaults"]["style"] is None
         assert payload["assistant_defaults"]["tool_policy_profile_id"] is None
-        persisted = db.get_workspace("ws-assistant")
+        persisted = db.workspace_store.get_workspace("ws-assistant")
         assert persisted is not None
         assert persisted["assistant_defaults_json"] == {
             "assistant_kind": "persona",
@@ -554,7 +554,7 @@ def test_workspace_api_requires_confirmation_for_read_write_assistant_default(wo
             is_admin=True,
         )
 
-    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    workspace = db.workspace_store.upsert_workspace("ws-assistant", "Assistant Defaults")
     _create_workspace_test_persona(db)
     workspace_fastapi_app.dependency_overrides[get_request_user] = _user
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -611,7 +611,7 @@ def test_workspace_api_rejects_confirmation_only_patch(workspace_fastapi_app, db
             is_admin=True,
         )
 
-    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    workspace = db.workspace_store.upsert_workspace("ws-assistant", "Assistant Defaults")
     workspace_fastapi_app.dependency_overrides[get_request_user] = _user
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
@@ -689,8 +689,8 @@ def test_workspace_roots_endpoint_returns_primary_root_contract(workspace_fastap
     async def _allow_rate_limit() -> None:
         return None
 
-    db.upsert_workspace("ws-root", "Rooted Workspace")
-    db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace_primary_root(
         "ws-root",
         {
             "root_id": "root-1",
@@ -728,6 +728,7 @@ def test_workspace_roots_endpoint_returns_primary_root_contract(workspace_fastap
 @pytest.mark.integration
 def test_list_workspace_roots_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "workspace_profile": "project"}
 
@@ -756,6 +757,7 @@ def test_list_workspace_roots_maps_database_error_to_contextual_500(workspace_fa
 @pytest.mark.integration
 def test_list_workspace_roots_maps_workspace_lookup_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             _ = workspace_id
             raise CharactersRAGDBError("sqlite backend unavailable")
@@ -773,6 +775,7 @@ def test_list_workspace_roots_maps_workspace_lookup_error_to_contextual_500(work
 @pytest.mark.integration
 def test_workspace_roots_endpoint_fails_closed_for_unknown_root_state_and_backend(workspace_fastapi_app):
     class _InvalidRootDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "workspace_profile": "project"}
 
@@ -818,6 +821,7 @@ def test_workspace_roots_endpoint_redacts_absolute_root_fallback(
     expected_hint,
 ):
     class _RootPathDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "workspace_profile": "project"}
 
@@ -852,7 +856,7 @@ def test_attach_workspace_primary_host_local_root_returns_redacted_roots_respons
     allowed = tmp_path / "allowed"
     project = allowed / "project"
     project.mkdir(parents=True)
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
     monkeypatch.setattr(
         root_binding_service.config,
         "get_workspace_project_root_allowed_roots",
@@ -887,7 +891,7 @@ def test_attach_workspace_primary_host_local_root_outside_allowed_returns_servic
     outside = tmp_path / "outside" / "project"
     allowed.mkdir()
     outside.mkdir(parents=True)
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
     monkeypatch.setattr(
         root_binding_service.config,
         "get_workspace_project_root_allowed_roots",
@@ -914,7 +918,7 @@ def test_attach_workspace_primary_host_local_root_without_configured_roots_retur
 ):
     project = tmp_path / "project"
     project.mkdir()
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
     monkeypatch.setattr(
         root_binding_service.config,
         "get_workspace_project_root_allowed_roots",
@@ -944,8 +948,8 @@ def test_attach_workspace_primary_different_root_without_replace_returns_409(
     replacement = allowed / "replacement"
     original.mkdir(parents=True)
     replacement.mkdir()
-    db.upsert_workspace("ws-root", "Rooted Workspace")
-    db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace_primary_root(
         "ws-root",
         {
             "root_id": "primary",
@@ -984,8 +988,8 @@ def test_attach_workspace_primary_replacement_with_replace_existing_returns_new_
     replacement = allowed / "replacement"
     original.mkdir(parents=True)
     replacement.mkdir()
-    db.upsert_workspace("ws-root", "Rooted Workspace")
-    db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace_primary_root(
         "ws-root",
         {
             "root_id": "primary",
@@ -1025,7 +1029,7 @@ def test_attach_workspace_primary_sandbox_volume_returns_not_configured_mount_st
     workspace_fastapi_app,
     db,
 ):
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
 
     response = _put_workspace_primary_root_response(
         workspace_fastapi_app,
@@ -1047,7 +1051,7 @@ def test_attach_workspace_primary_sandbox_volume_returns_not_configured_mount_st
 
 @pytest.mark.integration
 def test_provision_workspace_sandbox_root_requires_idempotency_key(workspace_fastapi_app, db):
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
 
     response = _post_workspace_sandbox_root_response(
         workspace_fastapi_app,
@@ -1065,7 +1069,7 @@ def test_provision_workspace_sandbox_root_returns_active_operation_and_pollable_
     workspace_fastapi_app,
     db,
 ):
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
     sandbox_service = SandboxWorkspaceVolumeService(store=InMemoryStore())
 
     response = _post_workspace_sandbox_root_response(
@@ -1115,7 +1119,7 @@ def test_provision_workspace_sandbox_root_conflicts_for_changed_idempotent_reque
     workspace_fastapi_app,
     db,
 ):
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
     sandbox_service = SandboxWorkspaceVolumeService(store=InMemoryStore())
     first = _post_workspace_sandbox_root_response(
         workspace_fastapi_app,
@@ -1142,7 +1146,7 @@ def test_provision_workspace_sandbox_root_maps_volume_idempotency_conflict_to_40
     workspace_fastapi_app: FastAPI,
     db: CharactersRAGDB,
 ) -> None:
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
 
     response = _post_workspace_sandbox_root_response(
         workspace_fastapi_app,
@@ -1153,7 +1157,7 @@ def test_provision_workspace_sandbox_root_maps_volume_idempotency_conflict_to_40
     )
 
     assert response.status_code == 409, response.text
-    operation = db.get_workspace_operation_by_idempotency(
+    operation = db.workspace_store.get_workspace_operation_by_idempotency(
         workspace_id="ws-root",
         user_id="1",
         command="provision_sandbox_root",
@@ -1175,7 +1179,7 @@ def test_attached_host_local_primary_root_is_redacted_across_read_contracts(
     allowed = secret_parent / "allowed-project-roots"
     project = allowed / "public-project"
     project.mkdir(parents=True)
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
     monkeypatch.setattr(
         root_binding_service.config,
         "get_workspace_project_root_allowed_roots",
@@ -1251,7 +1255,7 @@ def test_workspace_capabilities_and_context_include_file_inventory_summary(
     allowed = tmp_path / "allowed-project-roots"
     project = allowed / "public-project"
     project.mkdir(parents=True)
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
     monkeypatch.setattr(
         root_binding_service.config,
         "get_workspace_project_root_allowed_roots",
@@ -1265,16 +1269,16 @@ def test_workspace_capabilities_and_context_include_file_inventory_summary(
         {"backend": "host_local", "absolute_root": str(project)},
     )
     assert attach_response.status_code == 200, attach_response.text
-    root = db.get_workspace_primary_root("ws-root")
+    root = db.workspace_store.get_workspace_primary_root("ws-root")
     assert root is not None
-    scan = db.begin_workspace_file_inventory_scan(
+    scan = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-root",
         str(root["root_id"]),
         int(root["version"]),
         "policy-fingerprint",
         requested_by="test-user",
     )
-    db.complete_workspace_file_inventory_scan(
+    db.workspace_store.complete_workspace_file_inventory_scan(
         str(scan["scan_id"]),
         "current",
         {
@@ -1324,7 +1328,7 @@ def test_sandbox_volume_primary_root_fails_closed_across_read_contracts(
     db,
 ):
     volume_id = "volume-123"
-    db.upsert_workspace("ws-root", "Rooted Workspace")
+    db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
 
     attach_response = _put_workspace_primary_root_response(
         workspace_fastapi_app,
@@ -1377,7 +1381,7 @@ def test_workspace_context_manager_defaults_for_research_workspace(
     workspace_fastapi_app,
     db,
 ):
-    db.upsert_workspace("ws-root", "Research Workspace", workspace_profile="research")
+    db.workspace_store.upsert_workspace("ws-root", "Research Workspace", workspace_profile="research")
 
     context_response = _get_workspace_context_response(workspace_fastapi_app, db)
 
@@ -1395,7 +1399,7 @@ def test_workspace_context_project_shell_without_root_is_setup_pending(
     workspace_fastapi_app,
     db,
 ):
-    db.upsert_workspace("ws-root", "Project Workspace", workspace_profile="project")
+    db.workspace_store.upsert_workspace("ws-root", "Project Workspace", workspace_profile="project")
 
     context_response = _get_workspace_context_response(workspace_fastapi_app, db)
 
@@ -1418,7 +1422,7 @@ def test_workspace_context_project_inventory_scan_is_working(
     allowed = tmp_path / "allowed-project-roots"
     project = allowed / "active-inventory"
     project.mkdir(parents=True)
-    db.upsert_workspace("ws-root", "Project Workspace", workspace_profile="project")
+    db.workspace_store.upsert_workspace("ws-root", "Project Workspace", workspace_profile="project")
     monkeypatch.setattr(
         root_binding_service.config,
         "get_workspace_project_root_allowed_roots",
@@ -1431,9 +1435,9 @@ def test_workspace_context_project_inventory_scan_is_working(
         {"backend": "host_local", "absolute_root": str(project)},
     )
     assert attach_response.status_code == 200, attach_response.text
-    root = db.get_workspace_primary_root("ws-root")
+    root = db.workspace_store.get_workspace_primary_root("ws-root")
     assert root is not None
-    db.begin_workspace_file_inventory_scan(
+    db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-root",
         str(root["root_id"]),
         int(root["version"]),
@@ -1456,8 +1460,8 @@ def test_workspace_context_archived_workspace_attention_state(
     workspace_fastapi_app,
     db,
 ):
-    workspace = db.upsert_workspace("ws-root", "Archived Project", workspace_profile="project")
-    db.update_workspace("ws-root", {"archived": True}, expected_version=int(workspace["version"]))
+    workspace = db.workspace_store.upsert_workspace("ws-root", "Archived Project", workspace_profile="project")
+    db.workspace_store.update_workspace("ws-root", {"archived": True}, expected_version=int(workspace["version"]))
 
     context_response = _get_workspace_context_response(workspace_fastapi_app, db)
 
@@ -1478,7 +1482,7 @@ def test_attach_workspace_primary_stale_expected_workspace_version_returns_409(
     allowed = tmp_path / "allowed"
     project = allowed / "project"
     project.mkdir(parents=True)
-    workspace = db.upsert_workspace("ws-root", "Rooted Workspace")
+    workspace = db.workspace_store.upsert_workspace("ws-root", "Rooted Workspace")
     monkeypatch.setattr(
         root_binding_service.config,
         "get_workspace_project_root_allowed_roots",
@@ -1503,6 +1507,7 @@ def test_attach_workspace_primary_stale_expected_workspace_version_returns_409(
 @pytest.mark.integration
 def test_list_workspaces_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def list_workspaces(self):
             raise CharactersRAGDBError("sqlite backend unavailable")
 
@@ -1527,6 +1532,7 @@ def test_list_workspaces_maps_database_error_to_contextual_500(workspace_fastapi
 @pytest.mark.integration
 def test_get_workspace_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             _ = workspace_id
             raise CharactersRAGDBError("sqlite backend unavailable")
@@ -1552,6 +1558,7 @@ def test_get_workspace_maps_database_error_to_contextual_500(workspace_fastapi_a
 @pytest.mark.integration
 def test_upsert_workspace_maps_input_error_to_400(workspace_fastapi_app):
     class _InputErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def upsert_workspace(
             self,
             workspace_id: str,
@@ -1587,6 +1594,7 @@ def test_upsert_workspace_maps_input_error_to_400(workspace_fastapi_app):
 @pytest.mark.integration
 def test_upsert_workspace_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def upsert_workspace(
             self,
             workspace_id: str,
@@ -1621,7 +1629,7 @@ def test_upsert_workspace_maps_database_error_to_contextual_500(workspace_fastap
 
 class TestScopedChatSessions:
     def test_workspace_chat_not_visible_in_global_list(self, db):
-        db.upsert_workspace("ws-1", "WS")
+        db.workspace_store.upsert_workspace("ws-1", "WS")
         db.add_conversation({"title": "Global", "character_id": 1})
         db.add_conversation({
             "title": "WS Chat", "character_id": 1,
@@ -1631,7 +1639,7 @@ class TestScopedChatSessions:
         assert all(r["scope_type"] == "global" for r in global_results)
 
     def test_global_chat_not_visible_in_workspace_list(self, db):
-        db.upsert_workspace("ws-1", "WS")
+        db.workspace_store.upsert_workspace("ws-1", "WS")
         db.add_conversation({"title": "Global", "character_id": 1})
         ws_results = db.search_conversations(None, scope_type="workspace", workspace_id="ws-1")
         assert len(ws_results) == 0
@@ -1640,6 +1648,7 @@ class TestScopedChatSessions:
 @pytest.mark.integration
 def test_delete_workspace_maps_conflict_to_409(workspace_fastapi_app):
     class _ConflictDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -1667,6 +1676,7 @@ def test_delete_workspace_maps_conflict_to_409(workspace_fastapi_app):
 @pytest.mark.integration
 def test_patch_workspace_maps_input_error_to_400(workspace_fastapi_app):
     class _InputErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def update_workspace(self, workspace_id: str, updates: dict, expected_version: int):
             _ = (workspace_id, updates, expected_version)
             raise InputError("invalid workspace patch")
@@ -1695,6 +1705,7 @@ def test_patch_workspace_maps_input_error_to_400(workspace_fastapi_app):
 @pytest.mark.integration
 def test_delete_workspace_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -1723,6 +1734,7 @@ def test_delete_workspace_maps_database_error_to_contextual_500(workspace_fastap
 @pytest.mark.integration
 def test_update_workspace_source_maps_input_error_to_400(workspace_fastapi_app):
     class _InputErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -1784,7 +1796,7 @@ def test_workspace_artifact_endpoints_happy_path(workspace_fastapi_app, db: Char
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     try:
-        db.upsert_workspace("ws-art-api", "Workspace Artifacts")
+        db.workspace_store.upsert_workspace("ws-art-api", "Workspace Artifacts")
 
         with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
             add_response = client.post(
@@ -1907,8 +1919,8 @@ def test_workspace_artifact_export_accepted_version_preserves_identity_and_refs(
     workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
     try:
-        db.upsert_workspace("ws-export-api", "Workspace Exports")
-        db.add_workspace_artifact(
+        db.workspace_store.upsert_workspace("ws-export-api", "Workspace Exports")
+        db.workspace_store.add_workspace_artifact(
             "ws-export-api",
             {
                 "id": "brief-1",
@@ -2015,8 +2027,8 @@ def test_workspace_artifact_export_missing_version_snapshot_fails_loudly(workspa
     workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
     try:
-        db.upsert_workspace("ws-export-api", "Workspace Exports")
-        db.add_workspace_artifact(
+        db.workspace_store.upsert_workspace("ws-export-api", "Workspace Exports")
+        db.workspace_store.add_workspace_artifact(
             "ws-export-api",
             {
                 "id": "brief-1",
@@ -2077,8 +2089,8 @@ def test_workspace_artifact_export_rejects_non_accepted_state(workspace_fastapi_
     workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
     try:
-        db.upsert_workspace("ws-export-api", "Workspace Exports")
-        db.add_workspace_artifact(
+        db.workspace_store.upsert_workspace("ws-export-api", "Workspace Exports")
+        db.workspace_store.add_workspace_artifact(
             "ws-export-api",
             {
                 "id": "brief-1",
@@ -2133,8 +2145,8 @@ def test_workspace_artifact_export_rejects_placeholder_generated_artifact(worksp
     workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
     try:
-        db.upsert_workspace("ws-export-api", "Workspace Exports")
-        db.add_workspace_artifact(
+        db.workspace_store.upsert_workspace("ws-export-api", "Workspace Exports")
+        db.workspace_store.add_workspace_artifact(
             "ws-export-api",
             {
                 "id": "slides-1",
@@ -2190,7 +2202,7 @@ def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fast
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     try:
-        db.upsert_workspace("ws-art-api", "Workspace Artifacts")
+        db.workspace_store.upsert_workspace("ws-art-api", "Workspace Artifacts")
 
         with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
             add_response = client.post(
@@ -2254,6 +2266,7 @@ def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fast
 @pytest.mark.integration
 def test_list_workspace_artifacts_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2282,6 +2295,7 @@ def test_list_workspace_artifacts_maps_database_error_to_contextual_500(workspac
 @pytest.mark.integration
 def test_add_workspace_artifact_maps_input_error_to_400(workspace_fastapi_app):
     class _InputErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2317,6 +2331,7 @@ def test_add_workspace_artifact_maps_input_error_to_400(workspace_fastapi_app):
 @pytest.mark.integration
 def test_delete_workspace_artifact_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2345,6 +2360,7 @@ def test_delete_workspace_artifact_maps_database_error_to_contextual_500(workspa
 @pytest.mark.integration
 def test_update_workspace_artifact_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2383,6 +2399,7 @@ def test_update_workspace_artifact_maps_database_error_to_contextual_500(workspa
 @pytest.mark.integration
 def test_update_workspace_note_maps_input_error_to_400(workspace_fastapi_app):
     class _InputErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2444,7 +2461,7 @@ def test_workspace_note_endpoints_happy_path(workspace_fastapi_app, db: Characte
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     try:
-        db.upsert_workspace("ws-note-api", "Workspace Notes")
+        db.workspace_store.upsert_workspace("ws-note-api", "Workspace Notes")
 
         with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
             add_response = client.post(
@@ -2501,6 +2518,7 @@ def test_workspace_note_endpoints_happy_path(workspace_fastapi_app, db: Characte
 @pytest.mark.integration
 def test_list_workspace_notes_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2529,6 +2547,7 @@ def test_list_workspace_notes_maps_database_error_to_contextual_500(workspace_fa
 @pytest.mark.integration
 def test_add_workspace_note_maps_input_error_to_400(workspace_fastapi_app):
     class _InputErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2564,6 +2583,7 @@ def test_add_workspace_note_maps_input_error_to_400(workspace_fastapi_app):
 @pytest.mark.integration
 def test_delete_workspace_note_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2617,7 +2637,7 @@ def test_workspace_source_endpoints_happy_path(workspace_fastapi_app, db: Charac
     workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     try:
-        db.upsert_workspace("ws-src-api", "Workspace Sources")
+        db.workspace_store.upsert_workspace("ws-src-api", "Workspace Sources")
 
         with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
             add_response = client.post(
@@ -2715,7 +2735,7 @@ def test_add_workspace_source_enqueues_workspace_ingest_job(workspace_fastapi_ap
         )
 
     job_manager = _CapturingJobManager()
-    db.upsert_workspace("ws-job-api", "Workspace Source Jobs")
+    db.workspace_store.upsert_workspace("ws-job-api", "Workspace Source Jobs")
     workspace_fastapi_app.dependency_overrides[get_request_user] = _user
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[workspaces_endpoint.try_get_workspace_job_manager] = lambda: job_manager
@@ -2776,7 +2796,7 @@ def test_add_workspace_source_ignores_unused_job_manager_override(workspace_fast
     async def _allow_rate_limit() -> None:
         return None
 
-    db.upsert_workspace("ws-job-fail-api", "Workspace Source Job Failure")
+    db.workspace_store.upsert_workspace("ws-job-fail-api", "Workspace Source Job Failure")
     workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=8)
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[workspaces_endpoint.try_get_workspace_job_manager] = (
@@ -2803,7 +2823,7 @@ def test_add_workspace_source_ignores_unused_job_manager_override(workspace_fast
 
     assert response.status_code == 201, response.text
     assert response.json()["id"] == "src-job-fail"
-    assert [src["id"] for src in db.list_workspace_sources("ws-job-fail-api")] == ["src-job-fail"]
+    assert [src["id"] for src in db.workspace_store.list_workspace_sources("ws-job-fail-api")] == ["src-job-fail"]
 
 
 @pytest.mark.integration
@@ -2814,7 +2834,7 @@ def test_add_workspace_source_does_not_construct_job_manager(workspace_fastapi_a
     def _raise_job_manager() -> None:
         raise RuntimeError("jobs manager construction failed")
 
-    db.upsert_workspace("ws-job-dep-fail-api", "Workspace Source Job Dependency Failure")
+    db.workspace_store.upsert_workspace("ws-job-dep-fail-api", "Workspace Source Job Dependency Failure")
     workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=9)
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[get_job_manager] = _raise_job_manager
@@ -2838,12 +2858,13 @@ def test_add_workspace_source_does_not_construct_job_manager(workspace_fastapi_a
 
     assert response.status_code == 201, response.text
     assert response.json()["id"] == "src-job-dep-fail"
-    assert [src["id"] for src in db.list_workspace_sources("ws-job-dep-fail-api")] == ["src-job-dep-fail"]
+    assert [src["id"] for src in db.workspace_store.list_workspace_sources("ws-job-dep-fail-api")] == ["src-job-dep-fail"]
 
 
 @pytest.mark.integration
 def test_list_workspace_sources_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2872,6 +2893,7 @@ def test_list_workspace_sources_maps_database_error_to_contextual_500(workspace_
 @pytest.mark.integration
 def test_add_workspace_source_maps_input_error_to_400(workspace_fastapi_app):
     class _InputErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2903,6 +2925,7 @@ def test_add_workspace_source_maps_input_error_to_400(workspace_fastapi_app):
 @pytest.mark.integration
 def test_delete_workspace_source_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2931,6 +2954,7 @@ def test_delete_workspace_source_maps_database_error_to_contextual_500(workspace
 @pytest.mark.integration
 def test_update_workspace_source_selection_maps_input_error_to_400(workspace_fastapi_app):
     class _InputErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -2962,6 +2986,7 @@ def test_update_workspace_source_selection_maps_input_error_to_400(workspace_fas
 @pytest.mark.integration
 def test_reorder_workspace_sources_maps_database_error_to_contextual_500(workspace_fastapi_app):
     class _DatabaseErrorDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "version": 1}
 
@@ -3002,7 +3027,7 @@ def test_delete_workspace_validates_sharing_owner_before_mutation(workspace_fast
         cleanup_calls.append((workspace_id, owner_user_id))
 
     workspace_id = "ws-delete-owner-contract"
-    db.upsert_workspace(workspace_id, "Owner contract")
+    db.workspace_store.upsert_workspace(workspace_id, "Owner contract")
     workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=owner_id, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = allow_rate_limit
@@ -3018,9 +3043,9 @@ def test_delete_workspace_validates_sharing_owner_before_mutation(workspace_fast
     if owner_id == "tenant-private-id":
         assert response.status_code == 400, response.text
         assert response.json() == {"detail": "invalid_user_id"}
-        assert db.get_workspace(workspace_id) is not None
+        assert db.workspace_store.get_workspace(workspace_id) is not None
         assert cleanup_calls == []
     else:
         assert response.status_code == 204, response.text
         assert cleanup_calls == [(workspace_id, 1)]
-        assert db.get_workspace(workspace_id) is None
+        assert db.workspace_store.get_workspace(workspace_id) is None

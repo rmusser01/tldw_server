@@ -457,7 +457,7 @@ def test_share_link_create_requires_exact_scope_match(tmp_path):
     db_path = tmp_path / "chacha.db"
     db = CharactersRAGDB(db_path=str(db_path), client_id="1")
     client = _build_app(db, user_id=1)
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     char_id = db.add_character_card(
         {

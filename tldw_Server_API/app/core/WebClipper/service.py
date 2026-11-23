@@ -367,7 +367,7 @@ class WebClipperService:
         note_id = str(clip_document["note_id"])
         note = self._require_note(note_id)
         placements = [
-            self._placement_response_from_row(row) for row in self.db.list_note_clipper_workspace_placements(clip_id)
+            self._placement_response_from_row(row) for row in self.db.workspace_store.list_note_clipper_workspace_placements(clip_id)
         ]
         attachments = self._list_attachments(note_id=note_id)
         analysis = self._normalize_json_dict(clip_document.get("analysis_json"))
@@ -989,7 +989,7 @@ class WebClipperService:
     ) -> WebClipperWorkspacePlacement:
         if request.workspace is None:
             raise InputError("workspace payload is required for workspace saves.")  # noqa: TRY003
-        existing_rows = self.db.list_note_clipper_workspace_placements(request.clip_id)
+        existing_rows = self.db.workspace_store.list_note_clipper_workspace_placements(request.clip_id)
         for row in existing_rows:
             if str(row.get("workspace_id")) == request.workspace.workspace_id:
                 workspace_note_id = row.get("workspace_note_id")
@@ -1002,7 +1002,7 @@ class WebClipperService:
                     content=note_content,
                     keywords=request.note.keywords,
                 )
-                self.db.upsert_note_clipper_workspace_placement(
+                self.db.workspace_store.upsert_note_clipper_workspace_placement(
                     clip_id=request.clip_id,
                     workspace_id=request.workspace.workspace_id,
                     workspace_note_id=workspace_note_id,
@@ -1010,16 +1010,16 @@ class WebClipperService:
                     source_note_version=note_summary.version,
                 )
                 return self._placement_response_from_row(
-                    self.db.list_note_clipper_workspace_placements(request.clip_id)[0]
+                    self.db.workspace_store.list_note_clipper_workspace_placements(request.clip_id)[0]
                     if len(existing_rows) == 1
                     else next(
                         placement
-                        for placement in self.db.list_note_clipper_workspace_placements(request.clip_id)
+                        for placement in self.db.workspace_store.list_note_clipper_workspace_placements(request.clip_id)
                         if str(placement.get("workspace_id")) == request.workspace.workspace_id
                     )
                 )
 
-        workspace_note = self.db.add_workspace_note(
+        workspace_note = self.db.workspace_store.add_workspace_note(
             request.workspace.workspace_id,
             {
                 "title": note_summary.title,
@@ -1027,7 +1027,7 @@ class WebClipperService:
                 "keywords": request.note.keywords,
             },
         )
-        placement_row = self.db.upsert_note_clipper_workspace_placement(
+        placement_row = self.db.workspace_store.upsert_note_clipper_workspace_placement(
             clip_id=request.clip_id,
             workspace_id=request.workspace.workspace_id,
             workspace_note_id=int(workspace_note["id"]),
@@ -1059,7 +1059,7 @@ class WebClipperService:
             workspace_id=request.workspace.workspace_id,
         )
         source_id = self._workspace_source_id(request.clip_id)
-        existing_sources = self.db.list_workspace_sources(request.workspace.workspace_id)
+        existing_sources = self.db.workspace_store.list_workspace_sources(request.workspace.workspace_id)
         source_data = {
             "id": source_id,
             "media_id": media_id,
@@ -1071,7 +1071,7 @@ class WebClipperService:
         }
         if request.workspace.default_review_state == "needs_review":
             source_data["review_state"] = "needs_review"
-        return self.db.add_workspace_source(request.workspace.workspace_id, source_data)
+        return self.db.workspace_store.add_workspace_source(request.workspace.workspace_id, source_data)
 
     def _upsert_workspace_clip_media(
         self,
@@ -1175,7 +1175,7 @@ class WebClipperService:
         if not updates:
             return
 
-        self.db.update_workspace_note(
+        self.db.workspace_store.update_workspace_note(
             workspace_id,
             workspace_note_id,
             updates,

@@ -132,7 +132,7 @@ def _migration_to_response(row: dict[str, Any]) -> WorkspaceMigrationResponse:
 
 
 def _require_migration(db: CharactersRAGDB, migration_id: str) -> dict[str, Any]:
-    row = db.get_workspace_migration_session(migration_id)
+    row = db.workspace_store.get_workspace_migration_session(migration_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Workspace migration not found")
     return row
@@ -154,7 +154,7 @@ async def create_workspace_migration(
     """Create or idempotently return a Research Workspace migration session."""
     _ = current_user
     try:
-        row, created = db.upsert_workspace_migration_session(body.model_dump(mode="json"))
+        row, created = db.workspace_store.upsert_workspace_migration_session(body.model_dump(mode="json"))
     except (ConflictError, InputError, CharactersRAGDBError, NotFoundError) as exc:
         raise map_db_error_to_http(
             exc,
@@ -178,7 +178,7 @@ async def list_workspace_migrations(
     """List recent durable Research Workspace migration sessions."""
     _ = current_user
     try:
-        rows = db.list_workspace_migration_sessions(limit=100)
+        rows = db.workspace_store.list_workspace_migration_sessions(limit=100)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(
             exc,
@@ -228,7 +228,7 @@ async def put_workspace_migration_chunk(
     """Record an idempotent chunk receipt for a migration session."""
     _ = current_user
     try:
-        chunk = db.add_workspace_migration_chunk(
+        chunk = db.workspace_store.add_workspace_migration_chunk(
             migration_id,
             chunk_id,
             body.model_dump(mode="json"),
@@ -268,7 +268,7 @@ async def finalize_workspace_migration(
                     "missing_chunk_ids": missing,
                 },
             )
-        finalized = db.finalize_workspace_migration(
+        finalized = db.workspace_store.finalize_workspace_migration(
             migration_id,
             {"manifest_hash": body.manifest_hash},
         )
@@ -297,7 +297,7 @@ async def acknowledge_workspace_migration_client_delete(
     """Reject client deletion acknowledgement until deletion eligibility exists."""
     _ = current_user
     try:
-        db.record_workspace_migration_client_delete_ack(
+        db.workspace_store.record_workspace_migration_client_delete_ack(
             migration_id,
             {"acknowledged_manifest_hash": body.acknowledged_manifest_hash},
         )

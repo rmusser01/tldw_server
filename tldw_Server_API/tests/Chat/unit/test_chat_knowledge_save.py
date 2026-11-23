@@ -91,7 +91,7 @@ def test_knowledge_save_requires_exact_scope_match_for_workspace_conversations(t
     db = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
     app = _build_app(db)
 
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
     conv_id = db.add_conversation(
         {
             "id": "workspace-conv-1",
@@ -201,7 +201,7 @@ def test_legacy_knowledge_save_uses_owned_parent_question_and_public_excerpt(tmp
         app = _build_app(db)
         scope = {"scope_type": scope_type}
         if scope_type == "workspace":
-            db.upsert_workspace("garden", "Garden workspace")
+            db.workspace_store.upsert_workspace("garden", "Garden workspace")
             scope["workspace_id"] = "garden"
         conv_id = db.add_conversation({"character_id": 1, "title": "Garden", "client_id": "user-1", **scope})
         question_id = db.add_message({

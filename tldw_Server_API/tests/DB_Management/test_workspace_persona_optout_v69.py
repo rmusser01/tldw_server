@@ -44,37 +44,37 @@ def db_factory(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[Calla
 def test_choice_updates_are_atomic_and_survive_restart(db_factory: Callable[[], CharactersRAGDB]) -> None:
     """Clear/set/omit and stale updates preserve the paired flag and version contract."""
     db = db_factory()
-    fresh = db.upsert_workspace("ws-choice", "Choice")
+    fresh = db.workspace_store.upsert_workspace("ws-choice", "Choice")
     assert fresh[FLAG] is False
-    cleared = db.update_workspace(fresh["id"], {"assistant_defaults_json": None}, fresh["version"])
+    cleared = db.workspace_store.update_workspace(fresh["id"], {"assistant_defaults_json": None}, fresh["version"])
     assert cleared[FLAG] is True
     assert cleared["version"] == fresh["version"] + 1
-    again = db.update_workspace(fresh["id"], {"assistant_defaults_json": None}, cleared["version"])
+    again = db.workspace_store.update_workspace(fresh["id"], {"assistant_defaults_json": None}, cleared["version"])
     assert again[FLAG] is True
     assert again["version"] == cleared["version"] + 1
-    renamed = db.upsert_workspace(fresh["id"], "Renamed")
+    renamed = db.workspace_store.upsert_workspace(fresh["id"], "Renamed")
     assert renamed[FLAG] is True
-    archived = db.update_workspace(fresh["id"], {"archived": True, FLAG: False}, renamed["version"])
+    archived = db.workspace_store.update_workspace(fresh["id"], {"archived": True, FLAG: False}, renamed["version"])
     assert archived[FLAG] is True
     with pytest.raises(ConflictError):
-        db.update_workspace(fresh["id"], {"assistant_defaults_json": DEFAULT}, again["version"])
-    assert db.get_workspace(fresh["id"])[FLAG] is True
-    saved = db.update_workspace(fresh["id"], {"assistant_defaults_json": DEFAULT, FLAG: True}, archived["version"])
+        db.workspace_store.update_workspace(fresh["id"], {"assistant_defaults_json": DEFAULT}, again["version"])
+    assert db.workspace_store.get_workspace(fresh["id"])[FLAG] is True
+    saved = db.workspace_store.update_workspace(fresh["id"], {"assistant_defaults_json": DEFAULT, FLAG: True}, archived["version"])
     assert saved[FLAG] is False
     assert saved["assistant_defaults_json"] == DEFAULT
     with pytest.raises(ConflictError):
-        db.update_workspace(fresh["id"], {"assistant_defaults_json": None}, archived["version"])
-    assert db.get_workspace(fresh["id"])["assistant_defaults_json"] == DEFAULT
-    cleared = db.update_workspace(fresh["id"], {"assistant_defaults_json": None}, saved["version"])
+        db.workspace_store.update_workspace(fresh["id"], {"assistant_defaults_json": None}, archived["version"])
+    assert db.workspace_store.get_workspace(fresh["id"])["assistant_defaults_json"] == DEFAULT
+    cleared = db.workspace_store.update_workspace(fresh["id"], {"assistant_defaults_json": None}, saved["version"])
     db.close_all_connections()
     reopened = db_factory()
-    assert reopened.get_workspace(fresh["id"])[FLAG] is True
-    assert reopened.get_workspace(fresh["id"])["version"] == cleared["version"]
-    assert reopened.list_workspaces()[0][FLAG] is True
+    assert reopened.workspace_store.get_workspace(fresh["id"])[FLAG] is True
+    assert reopened.workspace_store.get_workspace(fresh["id"])["version"] == cleared["version"]
+    assert reopened.workspace_store.list_workspaces()[0][FLAG] is True
     if reopened.backend_type.value == "postgresql":
         assert reopened.get_connection()._connection.info.transaction_status.name == "IDLE"
-    reopened.delete_workspace(fresh["id"], expected_version=cleared["version"])
-    assert reopened.get_workspace(fresh["id"], include_deleted=True)[FLAG] is True
+    reopened.workspace_store.delete_workspace(fresh["id"], expected_version=cleared["version"])
+    assert reopened.workspace_store.get_workspace(fresh["id"], include_deleted=True)[FLAG] is True
 
 
 @pytest.mark.parametrize("rollback", [False, True])
@@ -83,16 +83,16 @@ def test_workspace_listing_preserves_managed_caller_transaction(
 ) -> None:
     """Listing cannot commit caller work or admit a nested staged deletion."""
     db = db_factory()
-    row = db.upsert_workspace("ws-caller", "Original")
+    row = db.workspace_store.upsert_workspace("ws-caller", "Original")
     completion = pytest.raises(RuntimeError, match="caller rollback") if rollback else nullcontext()
     with completion, db.transaction() as conn:
         conn.execute("UPDATE workspaces SET name = ? WHERE id = ?", ("Caller change", row["id"]))
-        assert db.list_workspaces()[0]["name"] == "Caller change"
+        assert db.workspace_store.list_workspaces()[0]["name"] == "Caller change"
         with pytest.raises(ConflictError, match="outermost"):
-            db.delete_workspace(row["id"], expected_version=row["version"])
+            db.workspace_store.delete_workspace(row["id"], expected_version=row["version"])
         if rollback:
             raise RuntimeError("caller rollback")
-    saved = db.get_workspace(row["id"])
+    saved = db.workspace_store.get_workspace(row["id"])
     assert saved["name"] == ("Original" if rollback else "Caller change")
     assert not saved["native_chat_admission_closed"]
 
@@ -103,22 +103,22 @@ def test_workspace_listing_preserves_driver_caller_transaction(
 ) -> None:
     """Driver-open work stays active until its caller chooses commit or rollback."""
     db = db_factory()
-    row = db.upsert_workspace("ws-caller", "Original")
+    row = db.workspace_store.upsert_workspace("ws-caller", "Original")
     conn = db.get_connection()
     if db.backend_type.value != "postgresql":
         conn.execute("BEGIN")
     try:
         conn.execute("UPDATE workspaces SET name = ? WHERE id = ?", ("Caller change", row["id"]))
-        assert db.list_workspaces()[0]["name"] == "Caller change"
+        assert db.workspace_store.list_workspaces()[0]["name"] == "Caller change"
         with pytest.raises(ConflictError, match="outermost"):
-            db.delete_workspace(row["id"], expected_version=row["version"])
+            db.workspace_store.delete_workspace(row["id"], expected_version=row["version"])
         if rollback:
             conn.rollback()
         else:
             conn.commit()
     finally:
         conn.rollback()
-    saved = db.get_workspace(row["id"])
+    saved = db.workspace_store.get_workspace(row["id"])
     assert saved["name"] == ("Original" if rollback else "Caller change")
     assert not saved["native_chat_admission_closed"]
 
@@ -143,30 +143,30 @@ def test_pre_optout_upgrade_preserves_storage_and_conservatively_opts_out(
     legacy.close_all_connections()
     upgraded = db_factory()
     for index, value in enumerate(values):
-        row = upgraded.get_workspace(f"legacy-{index}")
+        row = upgraded.workspace_store.get_workspace(f"legacy-{index}")
         stored = dict(upgraded.execute_query("SELECT * FROM workspaces WHERE id = ?", (row["id"],)).fetchone())
         assert stored["assistant_defaults_json"] == value
         assert row[FLAG] is (value is None)
         assert row["_assistant_defaults_invalid"] is (index >= 2)
         assert row["version"] == 1
-    assert upgraded.upsert_workspace("new-after-upgrade", "New")[FLAG] is False
-    opted_out = upgraded.get_workspace("legacy-0")
-    repaired = upgraded.update_workspace(opted_out["id"], {"assistant_defaults_json": DEFAULT}, opted_out["version"])
+    assert upgraded.workspace_store.upsert_workspace("new-after-upgrade", "New")[FLAG] is False
+    opted_out = upgraded.workspace_store.get_workspace("legacy-0")
+    repaired = upgraded.workspace_store.update_workspace(opted_out["id"], {"assistant_defaults_json": DEFAULT}, opted_out["version"])
     assert repaired[FLAG] is False
     upgraded.close_all_connections()
-    assert db_factory().get_workspace("legacy-0")[FLAG] is False
+    assert db_factory().workspace_store.get_workspace("legacy-0")[FLAG] is False
 
 
 def test_inconsistent_choice_is_invalid_until_owner_repair(db_factory: Callable[[], CharactersRAGDB]) -> None:
     """A saved default plus an opt-out bit cannot be resolved as an available default."""
     db = db_factory()
-    row = db.upsert_workspace("ws-inconsistent", "Inconsistent")
-    row = db.update_workspace(row["id"], {"assistant_defaults_json": DEFAULT}, row["version"])
+    row = db.workspace_store.upsert_workspace("ws-inconsistent", "Inconsistent")
+    row = db.workspace_store.update_workspace(row["id"], {"assistant_defaults_json": DEFAULT}, row["version"])
     with db.transaction() as conn:
         conn.execute("UPDATE workspaces SET assistant_defaults_explicit_none = ? WHERE id = ?", (True, row["id"]))
-    assert db.get_workspace(row["id"])["_assistant_defaults_invalid"] is True
+    assert db.workspace_store.get_workspace(row["id"])["_assistant_defaults_invalid"] is True
     for value in (DEFAULT, None):
-        row = db.update_workspace(row["id"], {"assistant_defaults_json": value}, row["version"])
+        row = db.workspace_store.update_workspace(row["id"], {"assistant_defaults_json": value}, row["version"])
         assert row["_assistant_defaults_invalid"] is False
         assert row[FLAG] is (value is None)
 
@@ -176,7 +176,7 @@ def test_clone_and_import_conservatively_opt_out_without_overwriting_existing_ch
 ) -> None:
     """Unrepresented source choices never turn into new provisioning consent."""
     db = db_factory()
-    clone = db.reserve_clone_target(
+    clone = db.workspace_store.reserve_clone_target(
         workspace_id="cloned",
         operation_id="clone-operation",
         request_fingerprint="clone-fingerprint",
@@ -186,11 +186,11 @@ def test_clone_and_import_conservatively_opt_out_without_overwriting_existing_ch
     )
     assert clone[FLAG] is True
     assert clone["assistant_defaults_json"] is None
-    db.publish_clone_target(workspace_id="cloned", operation_id="clone-operation")
-    db.confirm_clone_target_publication(workspace_id="cloned", operation_id="clone-operation")
-    assert db.get_workspace("cloned")[FLAG] is True
-    existing = db.upsert_workspace("existing", "Existing")
-    db.update_workspace(existing["id"], {"assistant_defaults_json": DEFAULT}, existing["version"])
+    db.workspace_store.publish_clone_target(workspace_id="cloned", operation_id="clone-operation")
+    db.workspace_store.confirm_clone_target_publication(workspace_id="cloned", operation_id="clone-operation")
+    assert db.workspace_store.get_workspace("cloned")[FLAG] is True
+    existing = db.workspace_store.upsert_workspace("existing", "Existing")
+    db.workspace_store.update_workspace(existing["id"], {"assistant_defaults_json": DEFAULT}, existing["version"])
     for target in ("imported", "existing"):
         data: dict[str, Any] = {
             "id": f"migration-{target}",
@@ -199,11 +199,11 @@ def test_clone_and_import_conservatively_opt_out_without_overwriting_existing_ch
             "target_workspace_name": "Imported",
             "manifest_hash": "a" * 64,
         }
-        db.upsert_workspace_migration_session(data)
-        db.upsert_workspace_migration_session(data)
-    assert db.get_workspace("imported")[FLAG] is True
-    assert db.get_workspace("existing")[FLAG] is False
-    assert db.get_workspace("existing")["assistant_defaults_json"] == DEFAULT
+        db.workspace_store.upsert_workspace_migration_session(data)
+        db.workspace_store.upsert_workspace_migration_session(data)
+    assert db.workspace_store.get_workspace("imported")[FLAG] is True
+    assert db.workspace_store.get_workspace("existing")[FLAG] is False
+    assert db.workspace_store.get_workspace("existing")["assistant_defaults_json"] == DEFAULT
 
 
 def test_cached_legacy_writer_is_not_fenced_by_the_upgrade(
@@ -221,13 +221,13 @@ def test_cached_legacy_writer_is_not_fenced_by_the_upgrade(
             ("legacy-writer", "Legacy", "user-1", '{"assistant_id":"persona-1"}'),
         )
     upgraded = db_factory()
-    assert upgraded.get_workspace("legacy-writer")[FLAG] is False
+    assert upgraded.workspace_store.get_workspace("legacy-writer")[FLAG] is False
     # An old cached writer's clear omits the new bit: SQL NULL alone is ambiguous.
     with cached_legacy.transaction() as conn:
         conn.execute("UPDATE workspaces SET assistant_defaults_json = NULL WHERE id = ?", ("legacy-writer",))
-    assert upgraded.get_workspace("legacy-writer")[FLAG] is False
-    row = upgraded.get_workspace("legacy-writer")
-    assert upgraded.update_workspace(row["id"], {"assistant_defaults_json": None}, row["version"])[FLAG] is True
+    assert upgraded.workspace_store.get_workspace("legacy-writer")[FLAG] is False
+    row = upgraded.workspace_store.get_workspace("legacy-writer")
+    assert upgraded.workspace_store.update_workspace(row["id"], {"assistant_defaults_json": None}, row["version"])[FLAG] is True
     cached_legacy.close_all_connections()
     upgraded.close_all_connections()
     with monkeypatch.context() as historical:
@@ -332,7 +332,7 @@ def test_sqlite_compatible_initializer_can_finish_during_version_probe(
             raced = True
             peer = CharactersRAGDB(path, client_id="user-1")
             try:
-                assert peer.upsert_workspace("fresh-after-upgrade", "Fresh")[FLAG] is False
+                assert peer.workspace_store.upsert_workspace("fresh-after-upgrade", "Fresh")[FLAG] is False
             finally:
                 peer.close_all_connections()
         initialize(ctx, target_version=target_version)
@@ -341,6 +341,6 @@ def test_sqlite_compatible_initializer_can_finish_during_version_probe(
     db = CharactersRAGDB(path, client_id="user-1")
     assert raced is True  # the patch was reached, so the competing upgrade really ran between the probe and the transaction
     try:
-        assert db.get_workspace("fresh-after-upgrade")[FLAG] is False
+        assert db.workspace_store.get_workspace("fresh-after-upgrade")[FLAG] is False
     finally:
         db.close_all_connections()

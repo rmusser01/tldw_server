@@ -80,7 +80,7 @@ def test_workspace_runtime_binding_api_upserts_lists_gets_and_archives(
     workspace_client: TestClient,
     db: CharactersRAGDB,
 ) -> None:
-    db.upsert_workspace("ws-runtime", "Runtime Workspace")
+    db.workspace_store.upsert_workspace("ws-runtime", "Runtime Workspace")
 
     response = workspace_client.post(
         "/api/v1/workspaces/ws-runtime/runtime-bindings",
@@ -97,7 +97,7 @@ def test_workspace_runtime_binding_api_upserts_lists_gets_and_archives(
         "path_hint",
     ]
     assert "absolute_root" not in created
-    assert [event["event_type"] for event in db.list_workspace_activity_events("ws-runtime", limit=5)] == [
+    assert [event["event_type"] for event in db.workspace_store.list_workspace_activity_events("ws-runtime", limit=5)] == [
         "runtime_binding.upserted"
     ]
     repeated = workspace_client.post(
@@ -105,7 +105,7 @@ def test_workspace_runtime_binding_api_upserts_lists_gets_and_archives(
         json=_descriptor_payload(),
     )
     assert repeated.status_code == 201
-    assert [event["event_type"] for event in db.list_workspace_activity_events("ws-runtime", limit=5)] == [
+    assert [event["event_type"] for event in db.workspace_store.list_workspace_activity_events("ws-runtime", limit=5)] == [
         "runtime_binding.upserted"
     ]
 
@@ -126,7 +126,7 @@ def test_workspace_runtime_binding_api_upserts_lists_gets_and_archives(
         "/api/v1/workspaces/ws-runtime/runtime-bindings/acp-session-1"
     )
     assert deleted.status_code == 204
-    events = db.list_workspace_activity_events("ws-runtime", limit=5)
+    events = db.workspace_store.list_workspace_activity_events("ws-runtime", limit=5)
     assert [event["event_type"] for event in events] == [
         "runtime_binding.archived",
         "runtime_binding.upserted",
@@ -150,7 +150,7 @@ def test_workspace_runtime_binding_api_rejects_unknown_binding_kind(
     workspace_client: TestClient,
     db: CharactersRAGDB,
 ) -> None:
-    db.upsert_workspace("ws-runtime", "Runtime Workspace")
+    db.workspace_store.upsert_workspace("ws-runtime", "Runtime Workspace")
 
     response = workspace_client.post(
         "/api/v1/workspaces/ws-runtime/runtime-bindings",
@@ -164,7 +164,7 @@ def test_workspace_runtime_binding_api_rejects_secret_metadata_key(
     workspace_client: TestClient,
     db: CharactersRAGDB,
 ) -> None:
-    db.upsert_workspace("ws-runtime", "Runtime Workspace")
+    db.workspace_store.upsert_workspace("ws-runtime", "Runtime Workspace")
 
     response = workspace_client.post(
         "/api/v1/workspaces/ws-runtime/runtime-bindings",
@@ -178,7 +178,7 @@ def test_workspace_runtime_binding_api_rejects_client_redaction_report(
     workspace_client: TestClient,
     db: CharactersRAGDB,
 ) -> None:
-    db.upsert_workspace("ws-runtime", "Runtime Workspace")
+    db.workspace_store.upsert_workspace("ws-runtime", "Runtime Workspace")
 
     response = workspace_client.post(
         "/api/v1/workspaces/ws-runtime/runtime-bindings",
@@ -194,7 +194,7 @@ def test_workspace_runtime_binding_api_rejects_archived_status_on_upsert(
     workspace_client: TestClient,
     db: CharactersRAGDB,
 ) -> None:
-    db.upsert_workspace("ws-runtime", "Runtime Workspace")
+    db.workspace_store.upsert_workspace("ws-runtime", "Runtime Workspace")
 
     response = workspace_client.post(
         "/api/v1/workspaces/ws-runtime/runtime-bindings",
@@ -219,8 +219,8 @@ def test_workspace_runtime_binding_api_rejects_writes_to_archived_workspace(
     workspace_client: TestClient,
     db: CharactersRAGDB,
 ) -> None:
-    workspace = db.upsert_workspace("ws-archived", "Archived Workspace")
-    db.update_workspace("ws-archived", {"archived": True}, expected_version=workspace["version"])
+    workspace = db.workspace_store.upsert_workspace("ws-archived", "Archived Workspace")
+    db.workspace_store.update_workspace("ws-archived", {"archived": True}, expected_version=workspace["version"])
 
     response = workspace_client.post(
         "/api/v1/workspaces/ws-archived/runtime-bindings",

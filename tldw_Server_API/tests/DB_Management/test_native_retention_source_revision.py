@@ -105,7 +105,7 @@ def test_nonordinary_or_wrong_owned_source_refuses_without_writes(native_fork_db
                     (cid, "a" * 64),
                 )
         if fault == "closed_workspace":
-            db.upsert_workspace("workspace", "Owned")
+            db.workspace_store.upsert_workspace("workspace", "Owned")
             authorized = AuthorizedNativeOwner(
                 "alice", owner().owner_key, NativeScopeV1(kind="workspace", workspace_id="workspace")
             )
@@ -119,7 +119,7 @@ def test_nonordinary_or_wrong_owned_source_refuses_without_writes(native_fork_db
 
             monkeypatch.setattr(db, "soft_delete_conversation", fail)
             with pytest.raises(Exception, match="workspace_delete_incomplete"):
-                db.delete_workspace("workspace", expected_version=1)
+                db.workspace_store.delete_workspace("workspace", expected_version=1)
     before = dict(db.execute_query("SELECT * FROM conversations WHERE id = ?", (cid,)).fetchone())
     with pytest.raises(ValueError):
         capture(db, cid, authorized=authorized)

@@ -110,7 +110,7 @@ def test_foreign_flashcard_write_routes_preserve_private_rows(owners, operation)
 
 def test_same_owner_reads_updates_and_workspace_filters_remain_available(owners):
     db = owners.bob
-    db.upsert_workspace("bob-workspace", "Bob Workspace")
+    db.workspace_store.upsert_workspace("bob-workspace", "Bob Workspace")
     workspace_deck = db.add_deck("Bob workspace deck", workspace_id="bob-workspace")
     workspace_card = db.add_flashcard({"deck_id": workspace_deck, "front": "Bob workspace", "back": "Owned"})
     with _client(db) as client:
@@ -127,7 +127,7 @@ def test_same_owner_reads_updates_and_workspace_filters_remain_available(owners)
 
 
 def test_foreign_workspace_id_alone_does_not_grant_private_deck_access(owners):
-    owners.alice.upsert_workspace("alice-workspace", "Alice Workspace")
+    owners.alice.workspace_store.upsert_workspace("alice-workspace", "Alice Workspace")
     deck = owners.alice.add_deck("Alice workspace deck", workspace_id="alice-workspace")
     owners.alice.add_flashcard({"deck_id": deck, "front": "Workspace private", "back": "Owner only"})
     with _client(owners.bob) as client:

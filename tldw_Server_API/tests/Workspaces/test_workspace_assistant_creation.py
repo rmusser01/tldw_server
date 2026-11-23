@@ -35,8 +35,8 @@ def db(tmp_path):
             "is_active": True,
         }
     )
-    workspace = database.upsert_workspace("ws", "Workspace")
-    database.update_workspace(
+    workspace = database.workspace_store.upsert_workspace("ws", "Workspace")
+    database.workspace_store.update_workspace(
         "ws",
         {
             "assistant_defaults_json": {
@@ -189,9 +189,9 @@ def test_startup_selection_uses_original_choice_not_identity_equality(db, payloa
 @pytest.mark.parametrize("cleared", [False, True])
 def test_unset_and_cleared_defaults_record_examined_workspace(db, cleared):
     """A stored opt-out is system fallback, not request-level explicit None."""
-    workspace = db.upsert_workspace("empty", "Empty")
+    workspace = db.workspace_store.upsert_workspace("empty", "Empty")
     if cleared:
-        workspace = db.update_workspace("empty", {"assistant_defaults_json": None}, workspace["version"])
+        workspace = db.workspace_store.update_workspace("empty", {"assistant_defaults_json": None}, workspace["version"])
     resolved = _resolve_startup(db, {"scope_type": "workspace", "workspace_id": "empty"})
     assert resolved.startup.model_dump() == {
         "schema_version": 1, "source": "system_fallback", "workspace_id": "empty",
@@ -202,9 +202,9 @@ def test_unset_and_cleared_defaults_record_examined_workspace(db, cleared):
 
 def test_inherited_read_write_is_saved_mode_and_does_not_mutate_request(db):
     """A confirmed saved mode is inherited while the original omission stays intact."""
-    workspace = db.get_workspace("ws")
+    workspace = db.workspace_store.get_workspace("ws")
     stored = dict(workspace["assistant_defaults_json"], persona_memory_mode="read_write")
-    db.update_workspace("ws", {"assistant_defaults_json": stored}, workspace["version"])
+    db.workspace_store.update_workspace("ws", {"assistant_defaults_json": stored}, workspace["version"])
     request = ChatSessionCreate(scope_type="workspace", workspace_id="ws")
     module = importlib.import_module("tldw_Server_API.app.core.Workspaces.assistant_defaults")
     result = module.resolve_workspace_assistant_startup(db, user_id="1", request=request)
@@ -219,7 +219,7 @@ def test_corrupt_normalized_defaults_fail_closed_without_private_logs(db, monkey
     messages = []
     sink = logger.add(messages.append, level="WARNING", format="{message}")
     try:
-        workspace = db._workspace_row_to_dict(dict(db.get_workspace("ws"), assistant_defaults_json=raw))
+        workspace = db.workspace_store._workspace_row_to_dict(dict(db.workspace_store.get_workspace("ws"), assistant_defaults_json=raw))
         monkeypatch.setattr(db, "get_workspace", lambda workspace_id: workspace)
         with pytest.raises(HTTPException) as error:
             _resolve(db, {"scope_type": "workspace", "workspace_id": "ws"})
@@ -232,7 +232,7 @@ def test_corrupt_normalized_defaults_fail_closed_without_private_logs(db, monkey
 
 def test_non_null_default_with_opt_out_fails_even_without_corruption_marker(db, monkeypatch):
     """The shared resolver checks inconsistent pairs instead of trusting a diagnostic bit."""
-    workspace = dict(db.get_workspace("ws"), assistant_defaults_explicit_none=True, _assistant_defaults_invalid=False)
+    workspace = dict(db.workspace_store.get_workspace("ws"), assistant_defaults_explicit_none=True, _assistant_defaults_invalid=False)
     monkeypatch.setattr(db, "get_workspace", lambda workspace_id: workspace)
     with pytest.raises(HTTPException) as error:
         _resolve(db, {"scope_type": "workspace", "workspace_id": "ws"})
@@ -256,8 +256,8 @@ def test_unavailable_default_has_bounded_startup_error(db, monkeypatch, state):
         profile = db.get_persona_profile("workspace-persona", user_id="1")
         db.soft_delete_persona_profile(persona_id="workspace-persona", user_id="1", expected_version=profile["version"])
     else:
-        workspace = db.get_workspace("ws")
-        db.update_workspace("ws", {"assistant_defaults_json": dict(
+        workspace = db.workspace_store.get_workspace("ws")
+        db.workspace_store.update_workspace("ws", {"assistant_defaults_json": dict(
             workspace["assistant_defaults_json"], assistant_id="PRIVATE-HIDDEN-PERSONA",
         )}, workspace["version"])
     with pytest.raises(HTTPException) as error:
@@ -321,7 +321,7 @@ def test_optional_connection_locks_workspace_then_selected_persona(db, monkeypat
 @pytest.mark.parametrize("workspace_id", ["PRIVATE-" + "x" * 1024, "PRIVATE-\ud800"])
 def test_unrepresentable_origin_raises_bounded_input_error(db, monkeypatch, workspace_id):
     """Legacy Workspace access stays intact but a new origin cannot be truncated."""
-    workspace = dict(db.get_workspace("ws"), id=workspace_id)
+    workspace = dict(db.workspace_store.get_workspace("ws"), id=workspace_id)
     monkeypatch.setattr(db, "get_workspace", lambda requested_id: workspace)
     with pytest.raises(InputError) as error:
         _resolve_startup(db, {"scope_type": "workspace", "workspace_id": workspace_id})
@@ -360,7 +360,7 @@ def test_explicit_persona_transaction_uses_selected_profile_and_request_memory(d
 def test_locked_effective_resolution_does_not_reuse_unlocked_profile_cache(db, monkeypatch):
     """An earlier active cached profile cannot authorize a later locked inactive read."""
     module = importlib.import_module("tldw_Server_API.app.core.Workspaces.assistant_defaults")
-    workspace = db.get_workspace("ws")
+    workspace = db.workspace_store.get_workspace("ws")
     cache = {}
     assert module.resolve_effective_workspace_assistant_default(
         db, workspace=workspace, user_id="1", persona_profile_cache=cache,
@@ -382,8 +382,8 @@ def test_locked_effective_resolution_does_not_reuse_unlocked_profile_cache(db, m
 
 def test_archived_workspace_preserves_legacy_inheritance(db):
     """Stage 1 does not import the deferred strict route's archived-Workspace rejection."""
-    workspace = db.get_workspace("ws")
-    db.update_workspace("ws", {"archived": True}, workspace["version"])
+    workspace = db.workspace_store.get_workspace("ws")
+    db.workspace_store.update_workspace("ws", {"archived": True}, workspace["version"])
     result = _resolve_startup(db, {"scope_type": "workspace", "workspace_id": "ws"})
     assert result.startup.source == "workspace_default"
     assert result.startup.workspace_version == 3
@@ -392,7 +392,7 @@ def test_archived_workspace_preserves_legacy_inheritance(db):
 @pytest.mark.parametrize("choice", [{}, {"assistant_kind": None}, {"character_id": 1}])
 def test_deleted_workspace_rejects_all_choices(db, monkeypatch, choice):
     """Explicit choices still require a visible Workspace before bypassing defaults."""
-    workspace = dict(db.get_workspace("ws"), deleted=True)
+    workspace = dict(db.workspace_store.get_workspace("ws"), deleted=True)
     monkeypatch.setattr(db, "get_workspace", lambda workspace_id: workspace)
     with pytest.raises(HTTPException) as error:
         _resolve_startup(db, {"scope_type": "workspace", "workspace_id": "ws", **choice})

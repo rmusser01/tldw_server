@@ -23,15 +23,15 @@ def db(tmp_path: Path) -> CharactersRAGDB:
         db_path=str(tmp_path / "workspace_eligibility.sqlite"),
         client_id="test-client",
     )
-    database.upsert_workspace("ws-active", "Active Workspace")
-    database.upsert_workspace("ws-other", "Other Workspace")
-    database.upsert_workspace("ws-archived", "Archived Workspace")
-    database.update_workspace("ws-archived", {"archived": True}, expected_version=1)
-    database.add_workspace_resource_membership(
+    database.workspace_store.upsert_workspace("ws-active", "Active Workspace")
+    database.workspace_store.upsert_workspace("ws-other", "Other Workspace")
+    database.workspace_store.upsert_workspace("ws-archived", "Archived Workspace")
+    database.workspace_store.update_workspace("ws-archived", {"archived": True}, expected_version=1)
+    database.workspace_store.add_workspace_resource_membership(
         "ws-active",
         {"resource_type": "chat", "resource_id": "chat-1", "role": "conversation"},
     )
-    database.add_workspace_resource_membership(
+    database.workspace_store.add_workspace_resource_membership(
         "ws-other",
         {"resource_type": "chat", "resource_id": "chat-other", "role": "conversation"},
     )

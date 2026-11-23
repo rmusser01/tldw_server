@@ -34,22 +34,22 @@ def db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[CharactersRAG
         client_id="alice",
         backend=backend,
     )
-    database.upsert_workspace("workspace-one", "Workspace One")
+    database.workspace_store.upsert_workspace("workspace-one", "Workspace One")
     yield database
     database.close_all_connections()
 
 
 def test_soft_final_transition_requires_version_and_rolls_back_caller_work(db: CharactersRAGDB) -> None:
-    db._begin_native_workspace_delete("workspace-one", expected_version=1, hard=False)
+    db.workspace_store._begin_native_workspace_delete("workspace-one", expected_version=1, hard=False)
 
     with pytest.raises(ConflictError, match="workspace_delete_incomplete") as exc_info:
         with db.transaction() as conn:
             conn.execute("UPDATE workspaces SET name = ? WHERE id = ?", ("Caller change", "workspace-one"))
-            db._finish_native_workspace_delete(conn, "workspace-one", expected_version=None, hard=False)
+            db.workspace_store._finish_native_workspace_delete(conn, "workspace-one", expected_version=None, hard=False)
 
     assert exc_info.value.entity == "workspaces"
     assert exc_info.value.entity_id == "workspace-one"
-    workspace = db.get_workspace("workspace-one", include_deleted=True)
+    workspace = db.workspace_store.get_workspace("workspace-one", include_deleted=True)
     assert workspace is not None
     assert workspace["name"] == "Workspace One"
     assert workspace["version"] == 1
@@ -68,14 +68,14 @@ def test_soft_delete_closure_survives_cascade_failure_and_retry(db: CharactersRA
 
     monkeypatch.setattr(db, "soft_delete_conversation", fail_once)
     with pytest.raises(ConflictError, match="workspace_delete_incomplete"):
-        db.delete_workspace("workspace-one", expected_version=1)
-    workspace = db.get_workspace("workspace-one")
+        db.workspace_store.delete_workspace("workspace-one", expected_version=1)
+    workspace = db.workspace_store.get_workspace("workspace-one")
     assert workspace is not None and bool(workspace["native_chat_admission_closed"])
     assert workspace["version"] == 1
-    updated = db.update_workspace("workspace-one", {"name": "Renamed before retry"}, expected_version=1)
+    updated = db.workspace_store.update_workspace("workspace-one", {"name": "Renamed before retry"}, expected_version=1)
     assert bool(updated["native_chat_admission_closed"])
-    assert db.delete_workspace("workspace-one", expected_version=updated["version"])
-    assert db.get_workspace("workspace-one") is None
+    assert db.workspace_store.delete_workspace("workspace-one", expected_version=updated["version"])
+    assert db.workspace_store.get_workspace("workspace-one") is None
     stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
     assert stored_conversation is not None
     assert stored_conversation["deleted"]
@@ -107,7 +107,7 @@ def test_soft_cascade_second_page_failure_preserves_progress_and_retries(
 
     monkeypatch.setattr(db, "get_messages_for_conversation", fail_second_page)
     with pytest.raises(ConflictError, match="workspace_delete_incomplete"):
-        db.delete_workspace("workspace-one", expected_version=1)
+        db.workspace_store.delete_workspace("workspace-one", expected_version=1)
     if db.backend_type == BackendType.POSTGRESQL:
         assert db.get_connection()._connection.info.transaction_status.name == "IDLE"
     else:
@@ -116,7 +116,7 @@ def test_soft_cascade_second_page_failure_preserves_progress_and_retries(
     assert all(message["images"][0]["image_data"] == b"saved-image" for page in pages for message in page)
     observer = CharactersRAGDB(db_path=db.db_path_str, client_id="alice", backend=db.backend)
     try:
-        workspace = observer.get_workspace("workspace-one")
+        workspace = observer.workspace_store.get_workspace("workspace-one")
         assert workspace is not None and not workspace["deleted"]
         assert bool(workspace["native_chat_admission_closed"]) and workspace["version"] == 1
         counts = observer.execute_query(
@@ -126,8 +126,8 @@ def test_soft_cascade_second_page_failure_preserves_progress_and_retries(
         assert {bool(row["deleted"]): row["total"] for row in counts} == {False: 1, True: 100}
     finally:
         observer.close_connection()
-    assert db.delete_workspace("workspace-one", expected_version=1)
-    assert db.get_workspace("workspace-one") is None
+    assert db.workspace_store.delete_workspace("workspace-one", expected_version=1)
+    assert db.workspace_store.get_workspace("workspace-one") is None
     stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
     assert stored_conversation is not None
     assert stored_conversation["deleted"]
@@ -159,9 +159,9 @@ def test_admission_closure_commits_before_conversation_enumeration(db: Character
     def delete() -> None:
         try:
             if hard:
-                db.hard_delete_workspace("workspace-one")
+                db.workspace_store.hard_delete_workspace("workspace-one")
             else:
-                results["deleted"] = db.delete_workspace("workspace-one", expected_version=1)
+                results["deleted"] = db.workspace_store.delete_workspace("workspace-one", expected_version=1)
             results["completed"] = True
         except Exception as exc:  # noqa: BLE001 - surfaced below
             results["error"] = exc
@@ -173,7 +173,7 @@ def test_admission_closure_commits_before_conversation_enumeration(db: Character
     observer = CharactersRAGDB(db_path=db.db_path_str, client_id="alice", backend=db.backend)
     try:
         assert enumerating.wait(timeout=10)
-        workspace = observer.get_workspace("workspace-one")
+        workspace = observer.workspace_store.get_workspace("workspace-one")
         assert workspace is not None and bool(workspace["native_chat_admission_closed"])
         assert workspace["version"] == 1
     finally:
@@ -183,7 +183,7 @@ def test_admission_closure_commits_before_conversation_enumeration(db: Character
     assert not thread.is_alive()
     assert "error" not in results
     assert results["completed"] is True
-    deleted_workspace = db.get_workspace("workspace-one", include_deleted=True)
+    deleted_workspace = db.workspace_store.get_workspace("workspace-one", include_deleted=True)
     if hard:
         assert deleted_workspace is None
     else:
@@ -199,11 +199,11 @@ def test_workspace_staged_delete_rejects_enclosing_transaction_without_committin
             conn.execute("UPDATE workspaces SET name = 'Caller change' WHERE id = 'workspace-one'")
             with pytest.raises(ConflictError, match="outermost"):
                 if hard:
-                    db.hard_delete_workspace("workspace-one")
+                    db.workspace_store.hard_delete_workspace("workspace-one")
                 else:
-                    db.delete_workspace("workspace-one", expected_version=1)
+                    db.workspace_store.delete_workspace("workspace-one", expected_version=1)
             raise RuntimeError("caller rollback")
-    workspace = db.get_workspace("workspace-one")
+    workspace = db.workspace_store.get_workspace("workspace-one")
     assert workspace is not None and workspace["name"] == "Workspace One"
     assert not bool(workspace["native_chat_admission_closed"])
 
@@ -218,11 +218,11 @@ def test_hard_delete_closure_survives_cascade_failure_and_retry(db: CharactersRA
 
     monkeypatch.setattr(db, "hard_delete_conversation", fail_once)
     with pytest.raises(ConflictError, match="workspace_delete_incomplete"):
-        db.hard_delete_workspace("workspace-one")
-    workspace = db.get_workspace("workspace-one")
+        db.workspace_store.hard_delete_workspace("workspace-one")
+    workspace = db.workspace_store.get_workspace("workspace-one")
     assert workspace is not None and bool(workspace["native_chat_admission_closed"])
-    db.hard_delete_workspace("workspace-one")
-    assert db.get_workspace("workspace-one", include_deleted=True) is None
+    db.workspace_store.hard_delete_workspace("workspace-one")
+    assert db.workspace_store.get_workspace("workspace-one", include_deleted=True) is None
 
 
 @pytest.mark.parametrize(("hard", "failure_at"), [(False, "messages"), (False, "conversation"), (True, "conversation")])
@@ -248,25 +248,25 @@ def test_failed_cascade_releases_owned_reads_before_immediate_retry(
     monkeypatch.setattr(db, method, fail_once)
     with pytest.raises(ConflictError, match="workspace_delete_incomplete"):
         if hard:
-            db.hard_delete_workspace("workspace-one")
+            db.workspace_store.hard_delete_workspace("workspace-one")
         else:
-            db.delete_workspace("workspace-one", expected_version=1)
+            db.workspace_store.delete_workspace("workspace-one", expected_version=1)
     if db.backend_type == BackendType.POSTGRESQL:
         assert db.get_connection()._connection.info.transaction_status.name == "IDLE"
     else:
         assert not db.get_connection().in_transaction
-    workspace = db.get_workspace("workspace-one")
+    workspace = db.workspace_store.get_workspace("workspace-one")
     assert workspace is not None and bool(workspace["native_chat_admission_closed"])
     assert workspace["version"] == 1
     if hard:
-        db.hard_delete_workspace("workspace-one")
+        db.workspace_store.hard_delete_workspace("workspace-one")
         assert db.get_conversation_by_id(child, include_deleted=True) is None
     else:
-        assert db.delete_workspace("workspace-one", expected_version=1)
+        assert db.workspace_store.delete_workspace("workspace-one", expected_version=1)
         stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
         assert stored_conversation is not None
         assert stored_conversation["deleted"]
-    assert db.get_workspace("workspace-one") is None
+    assert db.workspace_store.get_workspace("workspace-one") is None
 
 
 @pytest.mark.parametrize(("hard", "trashed"), [(False, False), (True, False), (True, True)])
@@ -288,10 +288,10 @@ def test_final_transition_preserves_workspace_when_protected_chat_was_missed(db:
     monkeypatch.setattr(db, "execute_query", miss_enumeration)
     with pytest.raises(ConflictError, match="workspace_delete_incomplete"):
         if hard:
-            db.hard_delete_workspace("workspace-one")
+            db.workspace_store.hard_delete_workspace("workspace-one")
         else:
-            db.delete_workspace("workspace-one", expected_version=1)
-    workspace = db.get_workspace("workspace-one", include_deleted=True)
+            db.workspace_store.delete_workspace("workspace-one", expected_version=1)
+    workspace = db.workspace_store.get_workspace("workspace-one", include_deleted=True)
     assert workspace is not None and bool(workspace["native_chat_admission_closed"])
     assert not workspace["deleted"]
     stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
@@ -301,8 +301,8 @@ def test_final_transition_preserves_workspace_when_protected_chat_was_missed(db:
 
 def test_stale_soft_delete_does_not_close_admission(db: CharactersRAGDB) -> None:
     with pytest.raises(ConflictError, match="version mismatch"):
-        db.delete_workspace("workspace-one", expected_version=0)
-    stored_workspace = db.get_workspace("workspace-one")
+        db.workspace_store.delete_workspace("workspace-one", expected_version=0)
+    stored_workspace = db.workspace_store.get_workspace("workspace-one")
     assert stored_workspace is not None
     assert not bool(stored_workspace["native_chat_admission_closed"])
 
@@ -311,18 +311,18 @@ def test_other_owner_cannot_close_or_delete_workspace(db: CharactersRAGDB) -> No
     other = CharactersRAGDB(db_path=db.db_path_str, client_id="bob", backend=db.backend)
     try:
         with pytest.raises(ConflictError, match="not found"):
-            other.delete_workspace("workspace-one", expected_version=1)
-        other.hard_delete_workspace("workspace-one")
-        workspace = db.get_workspace("workspace-one")
+            other.workspace_store.delete_workspace("workspace-one", expected_version=1)
+        other.workspace_store.hard_delete_workspace("workspace-one")
+        workspace = db.workspace_store.get_workspace("workspace-one")
         assert workspace is not None and not bool(workspace["native_chat_admission_closed"])
     finally:
         other.close_connection()
 
 
 def test_hard_delete_missing_workspace_remains_idempotent(db: CharactersRAGDB) -> None:
-    db.hard_delete_workspace("workspace-one")
-    db.hard_delete_workspace("workspace-one")
-    assert db.get_workspace("workspace-one", include_deleted=True) is None
+    db.workspace_store.hard_delete_workspace("workspace-one")
+    db.workspace_store.hard_delete_workspace("workspace-one")
+    assert db.workspace_store.get_workspace("workspace-one", include_deleted=True) is None
 
 
 @pytest.mark.parametrize("closed", [False, True])
@@ -374,7 +374,7 @@ def test_protected_restore_cannot_reopen_deleted_workspace(db: CharactersRAGDB) 
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
     db.soft_delete_conversation(child, expected_version=1)
-    assert db.delete_workspace("workspace-one", expected_version=1)
+    assert db.workspace_store.delete_workspace("workspace-one", expected_version=1)
     with pytest.raises(ConflictError, match="workspace_native_unavailable"):
         db.restore_conversation(child, expected_version=2)
     stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
@@ -417,11 +417,11 @@ def test_postgres_workspace_delete_rejects_caller_owned_driver_transaction(db: C
     try:
         with pytest.raises(ConflictError, match="outermost transaction"):
             if hard:
-                db.hard_delete_workspace("workspace-one")
+                db.workspace_store.hard_delete_workspace("workspace-one")
             else:
-                db.delete_workspace("workspace-one", expected_version=1)
+                db.workspace_store.delete_workspace("workspace-one", expected_version=1)
         assert raw.info.transaction_status.name == "INTRANS"
-        workspace = db.get_workspace("workspace-one")
+        workspace = db.workspace_store.get_workspace("workspace-one")
         assert workspace is not None
         assert workspace["name"] == "Uncommitted rename"
         assert not bool(workspace["native_chat_admission_closed"])
@@ -432,7 +432,7 @@ def test_postgres_workspace_delete_rejects_caller_owned_driver_transaction(db: C
     finally:
         raw.rollback()
     expected_name = "Uncommitted rename" if commit else "Workspace One"
-    stored_workspace = db.get_workspace("workspace-one")
+    stored_workspace = db.workspace_store.get_workspace("workspace-one")
     assert stored_workspace is not None
     assert stored_workspace["name"] == expected_name
 

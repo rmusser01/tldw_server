@@ -367,11 +367,11 @@ def _make_service(
     snapshot = snapshot or _workspace_snapshot()
     media_snapshots = media_snapshots or {}
 
-    source_chacha.read_workspace_clone_snapshot.return_value = snapshot
+    source_chacha.workspace_store.read_workspace_clone_snapshot.return_value = snapshot
     source_media.read_media_clone_snapshots.side_effect = lambda media_ids: {
         media_id: media_snapshots[media_id] for media_id in media_ids
     }
-    target_chacha.reserve_clone_target.return_value = _canonical_reservation_row(
+    target_chacha.workspace_store.reserve_clone_target.return_value = _canonical_reservation_row(
         description=snapshot.workspace.get("description"),
         workspace_profile=snapshot.workspace.get("workspace_profile") or "research",
     )
@@ -387,25 +387,25 @@ def _make_service(
         target_source_rows.append(row)
         return row
 
-    target_chacha.add_workspace_source.side_effect = add_source
-    target_chacha.get_workspace_source.return_value = None
-    target_chacha.list_workspace_sources.return_value = target_source_rows
+    target_chacha.workspace_store.add_workspace_source.side_effect = add_source
+    target_chacha.workspace_store.get_workspace_source.return_value = None
+    target_chacha.workspace_store.list_workspace_sources.return_value = target_source_rows
     next_note_id = iter(range(1001, 2000))
-    target_chacha.add_workspace_note.side_effect = lambda workspace_id, data: {
+    target_chacha.workspace_store.add_workspace_note.side_effect = lambda workspace_id, data: {
         **data,
         "workspace_id": workspace_id,
         "id": next(next_note_id),
     }
-    target_chacha.list_workspace_notes.return_value = []
-    target_chacha.add_workspace_artifact.side_effect = lambda workspace_id, data: {
+    target_chacha.workspace_store.list_workspace_notes.return_value = []
+    target_chacha.workspace_store.add_workspace_artifact.side_effect = lambda workspace_id, data: {
         **data,
         "workspace_id": workspace_id,
     }
-    target_chacha.get_workspace_artifact.return_value = None
-    target_chacha.add_workspace_resource_membership.side_effect = (
+    target_chacha.workspace_store.get_workspace_artifact.return_value = None
+    target_chacha.workspace_store.add_workspace_resource_membership.side_effect = (
         lambda workspace_id, data: {**data, "workspace_id": workspace_id}
     )
-    target_chacha.publish_clone_target.return_value = {
+    target_chacha.workspace_store.publish_clone_target.return_value = {
         "id": "target-ws",
         "system_operation_state": "publication_pending",
     }
@@ -436,7 +436,7 @@ def _make_service(
     ) -> dict[str, OperationOwnedMediaReadiness]:
         assert operation_id == "operation-1"
         source_rows = {str(source.get("id")): source for source in snapshot.sources}
-        target_rows = target_chacha.list_workspace_sources.return_value
+        target_rows = target_chacha.workspace_store.list_workspace_sources.return_value
         readiness: dict[str, OperationOwnedMediaReadiness] = {}
         for source_identity, _ in items:
             source_media_id = int(source_identity.removeprefix("media:"))
@@ -460,7 +460,7 @@ def _make_service(
     target_media.read_operation_owned_clone_media_readiness.side_effect = (
         read_target_readiness
     )
-    target_chacha.discard_clone_target.return_value = True
+    target_chacha.workspace_store.discard_clone_target.return_value = True
 
     service = CloneService(
         source_chacha_db=source_chacha,
@@ -494,7 +494,7 @@ def test_clone_rejects_media_above_publication_proof_limit_before_loading_media(
         )
 
     source_media.read_media_clone_snapshots.assert_not_called()
-    target_chacha.reserve_clone_target.assert_not_called()
+    target_chacha.workspace_store.reserve_clone_target.assert_not_called()
 
 
 def _warning_counts(result: WorkspaceCloneResult) -> dict[str, int]:
@@ -565,7 +565,7 @@ def test_clone_reads_stable_unique_snapshots_before_deterministic_reservation():
             11: _media_snapshot(11),
         },
     )
-    source_chacha.read_workspace_clone_snapshot.side_effect = lambda workspace_id: (
+    source_chacha.workspace_store.read_workspace_clone_snapshot.side_effect = lambda workspace_id: (
         events.append(("workspace_snapshot", workspace_id)) or snapshot
     )
 
@@ -587,7 +587,7 @@ def test_clone_reads_stable_unique_snapshots_before_deterministic_reservation():
             workspace_profile="analysis",
         )
 
-    target_chacha.reserve_clone_target.side_effect = reserve
+    target_chacha.workspace_store.reserve_clone_target.side_effect = reserve
 
     result = service.clone_workspace(_request(), should_cancel=lambda: False)
 
@@ -596,9 +596,9 @@ def test_clone_reads_stable_unique_snapshots_before_deterministic_reservation():
         ("media_snapshots", (7, 9, 11)),
         ("reserve", "target-ws"),
     ]
-    source_chacha.read_workspace_clone_snapshot.assert_called_once_with("source-ws")
+    source_chacha.workspace_store.read_workspace_clone_snapshot.assert_called_once_with("source-ws")
     source_media.read_media_clone_snapshots.assert_called_once_with((7, 9, 11))
-    target_chacha.reserve_clone_target.assert_called_once_with(
+    target_chacha.workspace_store.reserve_clone_target.assert_called_once_with(
         workspace_id="target-ws",
         operation_id="operation-1",
         request_fingerprint="fingerprint-1",
@@ -606,12 +606,12 @@ def test_clone_reads_stable_unique_snapshots_before_deterministic_reservation():
         description="Keep this description",
         workspace_profile="analysis",
     )
-    assert [call.args[1]["id"] for call in target_chacha.add_workspace_source.call_args_list] == [
+    assert [call.args[1]["id"] for call in target_chacha.workspace_store.add_workspace_source.call_args_list] == [
         "source-2",
         "source-1",
     ]
     assert [
-        call.args[1]["media_id"] for call in target_chacha.add_workspace_source.call_args_list
+        call.args[1]["media_id"] for call in target_chacha.workspace_store.add_workspace_source.call_args_list
     ] == [1007, 1009]
     assert [
         call.kwargs["source_identity"]
@@ -619,9 +619,9 @@ def test_clone_reads_stable_unique_snapshots_before_deterministic_reservation():
     ] == ["media:7", "media:9", "media:11"]
     target_chacha.create_workspace.assert_not_called()
     target_media.add_media_with_keywords.assert_not_called()
-    target_chacha.confirm_clone_target_publication.assert_not_called()
+    target_chacha.workspace_store.confirm_clone_target_publication.assert_not_called()
     target_media.confirm_operation_owned_clone_media.assert_not_called()
-    target_chacha.publish_clone_target.assert_called_once_with(
+    target_chacha.workspace_store.publish_clone_target.assert_called_once_with(
         workspace_id="target-ws",
         operation_id="operation-1",
     )
@@ -654,7 +654,7 @@ def test_clone_rejects_malformed_nonzero_media_references_before_writes(bad_refe
         cleanup_state="complete",
     )
     source_media.read_media_clone_snapshots.assert_not_called()
-    target_chacha.reserve_clone_target.assert_not_called()
+    target_chacha.workspace_store.reserve_clone_target.assert_not_called()
     target_media.insert_operation_owned_clone_media.assert_not_called()
 
 
@@ -684,14 +684,14 @@ def test_clone_rejects_nonpositive_active_media_memberships_before_writes(bad_re
         cleanup_state="complete",
     )
     source_media.read_media_clone_snapshots.assert_not_called()
-    target_chacha.reserve_clone_target.assert_not_called()
+    target_chacha.workspace_store.reserve_clone_target.assert_not_called()
     target_media.insert_operation_owned_clone_media.assert_not_called()
-    target_chacha.add_workspace_resource_membership.assert_not_called()
+    target_chacha.workspace_store.add_workspace_resource_membership.assert_not_called()
 
 
 def test_clone_snapshot_failure_is_controlled_and_precedes_reservation():
     service, source_chacha, source_media, target_chacha, _ = _make_service()
-    source_chacha.read_workspace_clone_snapshot.side_effect = CloneSnapshotUnavailable(
+    source_chacha.workspace_store.read_workspace_clone_snapshot.side_effect = CloneSnapshotUnavailable(
         cleanup_state="complete"
     )
 
@@ -700,7 +700,7 @@ def test_clone_snapshot_failure_is_controlled_and_precedes_reservation():
 
     assert exc_info.value.cleanup_state == "complete"
     source_media.read_media_clone_snapshots.assert_not_called()
-    target_chacha.reserve_clone_target.assert_not_called()
+    target_chacha.workspace_store.reserve_clone_target.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -757,13 +757,13 @@ def test_clone_cancels_at_every_required_boundary_with_exact_cleanup(
         for call in target_media.delete_operation_owned_clone_media.call_args_list
     ] == [f"media:{media_id}" for media_id in expected_cleanup_media]
     if reservation_expected:
-        target_chacha.discard_clone_target.assert_called_once_with(
+        target_chacha.workspace_store.discard_clone_target.assert_called_once_with(
             workspace_id="target-ws",
             operation_id="operation-1",
         )
     else:
-        target_chacha.discard_clone_target.assert_not_called()
-    target_chacha.publish_clone_target.assert_not_called()
+        target_chacha.workspace_store.discard_clone_target.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_duplicate_media_references_converge_to_one_target_media():
@@ -790,9 +790,9 @@ def test_duplicate_media_references_converge_to_one_target_media():
 
     target_media.insert_operation_owned_clone_media.assert_called_once()
     assert [
-        call.args[1]["media_id"] for call in target_chacha.add_workspace_source.call_args_list
+        call.args[1]["media_id"] for call in target_chacha.workspace_store.add_workspace_source.call_args_list
     ] == [1007, 1007]
-    membership = target_chacha.add_workspace_resource_membership.call_args.args[1]
+    membership = target_chacha.workspace_store.add_workspace_resource_membership.call_args.args[1]
     assert membership["resource_type"] == "media"
     assert membership["resource_id"] == "1007"
     assert result.counts.media_attempted == 1
@@ -828,11 +828,11 @@ def test_source_link_failure_deletes_unreferenced_media_and_later_source_recreat
             "reviewed_at": None,
             "reviewed_by_user_id": None,
         }
-        target_chacha.list_workspace_sources.return_value.append(row)
+        target_chacha.workspace_store.list_workspace_sources.return_value.append(row)
         return row
 
-    target_chacha.add_workspace_source.side_effect = add_source
-    target_chacha.get_workspace_source.return_value = None
+    target_chacha.workspace_store.add_workspace_source.side_effect = add_source
+    target_chacha.workspace_store.get_workspace_source.return_value = None
 
     result = service.clone_workspace(_request(), should_cancel=lambda: False)
 
@@ -844,7 +844,7 @@ def test_source_link_failure_deletes_unreferenced_media_and_later_source_recreat
             "expected_content_hash"
         ],
     )
-    assert target_chacha.add_workspace_source.call_args_list[1].args[1]["media_id"] == 202
+    assert target_chacha.workspace_store.add_workspace_source.call_args_list[1].args[1]["media_id"] == 202
     assert result.counts.sources_copied == 1
     assert result.counts.sources_failed == 1
     assert result.counts.media_copied == 1
@@ -861,8 +861,8 @@ def test_source_response_loss_accepts_exact_persisted_row_without_deleting_media
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.add_workspace_source.side_effect = RuntimeError("response lost")
-    target_chacha.get_workspace_source.return_value = {
+    target_chacha.workspace_store.add_workspace_source.side_effect = RuntimeError("response lost")
+    target_chacha.workspace_store.get_workspace_source.return_value = {
         "id": "source-1",
         "workspace_id": "target-ws",
         "media_id": 1007,
@@ -875,15 +875,15 @@ def test_source_response_loss_accepts_exact_persisted_row_without_deleting_media
         "reviewed_at": None,
         "reviewed_by_user_id": None,
     }
-    target_chacha.list_workspace_sources.return_value = [
-        target_chacha.get_workspace_source.return_value
+    target_chacha.workspace_store.list_workspace_sources.return_value = [
+        target_chacha.workspace_store.get_workspace_source.return_value
     ]
 
     result = service.clone_workspace(_request(), should_cancel=lambda: False)
 
-    target_chacha.get_workspace_source.assert_called_once_with("target-ws", "source-1")
+    target_chacha.workspace_store.get_workspace_source.assert_called_once_with("target-ws", "source-1")
     target_media.delete_operation_owned_clone_media.assert_not_called()
-    target_chacha.publish_clone_target.assert_called_once()
+    target_chacha.workspace_store.publish_clone_target.assert_called_once()
     assert result.outcome == "complete"
     assert result.counts.sources_copied == 1
     assert result.counts.sources_failed == 0
@@ -899,8 +899,8 @@ def test_source_response_loss_with_failed_lookup_fails_closed():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.add_workspace_source.side_effect = RuntimeError("response lost")
-    target_chacha.get_workspace_source.side_effect = RuntimeError("lookup failed")
+    target_chacha.workspace_store.add_workspace_source.side_effect = RuntimeError("response lost")
+    target_chacha.workspace_store.get_workspace_source.side_effect = RuntimeError("lookup failed")
 
     with pytest.raises(Exception) as exc_info:
         service.clone_workspace(_request(), should_cancel=lambda: False)
@@ -911,8 +911,8 @@ def test_source_response_loss_with_failed_lookup_fails_closed():
         cleanup_state="complete",
     )
     target_media.delete_operation_owned_clone_media.assert_called_once()
-    target_chacha.discard_clone_target.assert_called_once()
-    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_called_once()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_source_response_loss_with_mismatched_row_fails_closed():
@@ -923,8 +923,8 @@ def test_source_response_loss_with_mismatched_row_fails_closed():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.add_workspace_source.side_effect = RuntimeError("response lost")
-    target_chacha.get_workspace_source.return_value = {
+    target_chacha.workspace_store.add_workspace_source.side_effect = RuntimeError("response lost")
+    target_chacha.workspace_store.get_workspace_source.return_value = {
         "id": "source-1",
         "workspace_id": "target-ws",
         "media_id": 9999,
@@ -947,8 +947,8 @@ def test_source_response_loss_with_mismatched_row_fails_closed():
         cleanup_state="complete",
     )
     target_media.delete_operation_owned_clone_media.assert_called_once()
-    target_chacha.discard_clone_target.assert_called_once()
-    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_called_once()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_replayed_pending_media_counts_as_operation_owned():
@@ -1018,8 +1018,8 @@ def test_unresolved_media_write_exact_cleanup_becomes_partial(deleted):
 
     assert target_media.insert_operation_owned_clone_media.call_count == 2
     target_media.delete_operation_owned_clone_media.assert_called_once()
-    target_chacha.add_workspace_source.assert_not_called()
-    target_chacha.publish_clone_target.assert_called_once()
+    target_chacha.workspace_store.add_workspace_source.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_called_once()
     assert result.outcome == "partial"
     assert result.counts.media_attempted == 1
     assert result.counts.media_copied == 0
@@ -1056,8 +1056,8 @@ def test_unresolved_media_write_with_ambiguous_cleanup_fails_pending(cleanup_out
     )
     assert target_media.insert_operation_owned_clone_media.call_count == 2
     target_media.delete_operation_owned_clone_media.assert_called_once()
-    target_chacha.discard_clone_target.assert_called_once()
-    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_called_once()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_memberships_map_supported_resources_reset_review_and_aggregate_skips():
@@ -1127,7 +1127,7 @@ def test_memberships_map_supported_resources_reset_review_and_aggregate_skips():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.add_workspace_note.side_effect = lambda workspace_id, data: {
+    target_chacha.workspace_store.add_workspace_note.side_effect = lambda workspace_id, data: {
         **data,
         "workspace_id": workspace_id,
         "id": 105,
@@ -1135,7 +1135,7 @@ def test_memberships_map_supported_resources_reset_review_and_aggregate_skips():
 
     result = service.clone_workspace(_request(), should_cancel=lambda: False)
 
-    source_payload = target_chacha.add_workspace_source.call_args.args[1]
+    source_payload = target_chacha.workspace_store.add_workspace_source.call_args.args[1]
     assert source_payload == {
         "id": "source-1",
         "media_id": 1007,
@@ -1146,9 +1146,9 @@ def test_memberships_map_supported_resources_reset_review_and_aggregate_skips():
         "selected": False,
         "review_state": "unset",
     }
-    note_payload = target_chacha.add_workspace_note.call_args.args[1]
+    note_payload = target_chacha.workspace_store.add_workspace_note.call_args.args[1]
     assert note_payload == {"title": "Note", "content": "Body", "keywords": ["one", "two"]}
-    artifact_payload = target_chacha.add_workspace_artifact.call_args.args[1]
+    artifact_payload = target_chacha.workspace_store.add_workspace_artifact.call_args.args[1]
     assert artifact_payload == {
         "id": "artifact-1",
         "artifact_type": "report",
@@ -1167,7 +1167,7 @@ def test_memberships_map_supported_resources_reset_review_and_aggregate_skips():
         "schema_version": 2,
     }
     membership_payloads = [
-        call.args[1] for call in target_chacha.add_workspace_resource_membership.call_args_list
+        call.args[1] for call in target_chacha.workspace_store.add_workspace_resource_membership.call_args_list
     ]
     assert [(item["resource_type"], item["resource_id"]) for item in membership_payloads] == [
         ("media", "1007"),
@@ -1197,10 +1197,10 @@ def test_membership_write_response_loss_reconciles_exact_composite_row():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.add_workspace_resource_membership.side_effect = RuntimeError(
+    target_chacha.workspace_store.add_workspace_resource_membership.side_effect = RuntimeError(
         "response lost"
     )
-    target_chacha.get_workspace_resource_membership.return_value = {
+    target_chacha.workspace_store.get_workspace_resource_membership.return_value = {
         "workspace_id": "target-ws",
         "resource_type": "media",
         "resource_id": "1007",
@@ -1233,10 +1233,10 @@ def test_membership_write_response_loss_with_mismatch_fails_closed():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.add_workspace_resource_membership.side_effect = RuntimeError(
+    target_chacha.workspace_store.add_workspace_resource_membership.side_effect = RuntimeError(
         "response lost"
     )
-    target_chacha.get_workspace_resource_membership.return_value = {
+    target_chacha.workspace_store.get_workspace_resource_membership.return_value = {
         "workspace_id": "target-ws",
         "resource_type": "media",
         "resource_id": "1007",
@@ -1257,7 +1257,7 @@ def test_membership_write_response_loss_with_mismatch_fails_closed():
         cleanup_state="complete",
     )
     target_media.delete_operation_owned_clone_media.assert_called_once()
-    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_item_failures_aggregate_stable_warnings_and_truthful_final_counts():
@@ -1278,8 +1278,8 @@ def test_item_failures_aggregate_stable_warnings_and_truthful_final_counts():
         media_snapshots={7: _media_snapshot(7)},
     )
     target_media.insert_operation_owned_clone_media.side_effect = RuntimeError("media failed")
-    target_chacha.add_workspace_note.side_effect = RuntimeError("note failed")
-    target_chacha.add_workspace_artifact.side_effect = RuntimeError("artifact failed")
+    target_chacha.workspace_store.add_workspace_note.side_effect = RuntimeError("note failed")
+    target_chacha.workspace_store.add_workspace_artifact.side_effect = RuntimeError("artifact failed")
 
     result = service.clone_workspace(_request(), should_cancel=lambda: False)
 
@@ -1327,8 +1327,8 @@ def test_malformed_note_keywords_remain_a_partial_item_failure():
     assert result.counts.notes_copied == 0
     assert result.counts.notes_failed == 1
     assert _warning_counts(result) == {"note_copy_failed": 1}
-    target_chacha.add_workspace_note.assert_not_called()
-    target_chacha.publish_clone_target.assert_called_once()
+    target_chacha.workspace_store.add_workspace_note.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_called_once()
 
 
 def test_note_write_response_loss_reconciles_one_exact_unclaimed_row():
@@ -1350,8 +1350,8 @@ def test_note_write_response_loss_reconciles_one_exact_unclaimed_row():
         ],
     )
     service, _, _, target_chacha, _ = _make_service(snapshot)
-    target_chacha.add_workspace_note.side_effect = RuntimeError("response lost")
-    target_chacha.list_workspace_notes.return_value = [
+    target_chacha.workspace_store.add_workspace_note.side_effect = RuntimeError("response lost")
+    target_chacha.workspace_store.list_workspace_notes.return_value = [
         {
             "id": 904,
             "workspace_id": "target-ws",
@@ -1366,7 +1366,7 @@ def test_note_write_response_loss_reconciles_one_exact_unclaimed_row():
 
     assert result.counts.notes_copied == 1
     assert result.counts.notes_failed == 0
-    membership = target_chacha.add_workspace_resource_membership.call_args.args[1]
+    membership = target_chacha.workspace_store.add_workspace_resource_membership.call_args.args[1]
     assert membership["resource_type"] == "workspace_note"
     assert membership["resource_id"] == "904"
 
@@ -1376,8 +1376,8 @@ def test_note_write_response_loss_with_multiple_unclaimed_rows_fails_closed():
         notes=[{"id": 41, "title": "Same", "content": "Body", "keywords_json": "[]"}]
     )
     service, _, _, target_chacha, _ = _make_service(snapshot)
-    target_chacha.add_workspace_note.side_effect = RuntimeError("response lost")
-    target_chacha.list_workspace_notes.return_value = [
+    target_chacha.workspace_store.add_workspace_note.side_effect = RuntimeError("response lost")
+    target_chacha.workspace_store.list_workspace_notes.return_value = [
         {"id": 904, "title": "Same", "content": "Body", "keywords_json": "[]"},
         {"id": 905, "title": "Same", "content": "Body", "keywords_json": "[]"},
     ]
@@ -1390,8 +1390,8 @@ def test_note_write_response_loss_with_multiple_unclaimed_rows_fails_closed():
         code="clone_validation_failed",
         cleanup_state="complete",
     )
-    target_chacha.publish_clone_target.assert_not_called()
-    target_chacha.discard_clone_target.assert_called_once()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_called_once()
 
 
 def test_membership_write_response_loss_with_metadata_mismatch_fails_closed():
@@ -1404,10 +1404,10 @@ def test_membership_write_response_loss_with_metadata_mismatch_fails_closed():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.add_workspace_resource_membership.side_effect = RuntimeError(
+    target_chacha.workspace_store.add_workspace_resource_membership.side_effect = RuntimeError(
         "response lost"
     )
-    target_chacha.get_workspace_resource_membership.return_value = {
+    target_chacha.workspace_store.get_workspace_resource_membership.return_value = {
         "workspace_id": "target-ws",
         "resource_type": "media",
         "resource_id": "1007",
@@ -1431,7 +1431,7 @@ def test_membership_write_response_loss_with_metadata_mismatch_fails_closed():
         code="clone_validation_failed",
         cleanup_state="complete",
     )
-    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_artifact_write_response_loss_reconciles_exact_deterministic_row():
@@ -1446,8 +1446,8 @@ def test_artifact_write_response_loss_reconciles_exact_deterministic_row():
         ]
     )
     service, _, _, target_chacha, _ = _make_service(snapshot)
-    target_chacha.add_workspace_artifact.side_effect = RuntimeError("response lost")
-    target_chacha.get_workspace_artifact.return_value = {
+    target_chacha.workspace_store.add_workspace_artifact.side_effect = RuntimeError("response lost")
+    target_chacha.workspace_store.get_workspace_artifact.return_value = {
         "id": "artifact-1",
         "artifact_type": "report",
         "title": "Committed artifact",
@@ -1471,8 +1471,8 @@ def test_artifact_write_response_loss_with_mismatch_fails_closed():
         ]
     )
     service, _, _, target_chacha, _ = _make_service(snapshot)
-    target_chacha.add_workspace_artifact.side_effect = RuntimeError("response lost")
-    target_chacha.get_workspace_artifact.return_value = {
+    target_chacha.workspace_store.add_workspace_artifact.side_effect = RuntimeError("response lost")
+    target_chacha.workspace_store.get_workspace_artifact.return_value = {
         "id": "artifact-1",
         "artifact_type": "report",
         "title": "Different",
@@ -1486,8 +1486,8 @@ def test_artifact_write_response_loss_with_mismatch_fails_closed():
         code="clone_validation_failed",
         cleanup_state="complete",
     )
-    target_chacha.publish_clone_target.assert_not_called()
-    target_chacha.discard_clone_target.assert_called_once()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -1548,7 +1548,7 @@ def test_text_readiness_uses_canonical_target_chunks_after_copy():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.list_workspace_sources.return_value = [
+    target_chacha.workspace_store.list_workspace_sources.return_value = [
         {"id": "source-1", "workspace_id": "target-ws", "media_id": 1007}
     ]
     target_media.read_operation_owned_clone_media_readiness.return_value = {
@@ -1581,7 +1581,7 @@ def test_target_source_binding_swap_fails_before_publication():
         snapshot,
         media_snapshots={7: _media_snapshot(7), 9: _media_snapshot(9)},
     )
-    target_chacha.list_workspace_sources.return_value = [
+    target_chacha.workspace_store.list_workspace_sources.return_value = [
         {"id": "source-1", "workspace_id": "target-ws", "media_id": 1009},
         {"id": "source-2", "workspace_id": "target-ws", "media_id": 1007},
     ]
@@ -1599,7 +1599,7 @@ def test_target_source_binding_swap_fails_before_publication():
         code="clone_validation_failed",
         cleanup_state="complete",
     )
-    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_membership_only_media_chunks_do_not_make_source_retrieval_ready():
@@ -1635,7 +1635,7 @@ def test_missing_canonical_target_source_fails_before_publication():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.list_workspace_sources.return_value = []
+    target_chacha.workspace_store.list_workspace_sources.return_value = []
 
     with pytest.raises(Exception) as exc_info:
         service.clone_workspace(_request(), should_cancel=lambda: False)
@@ -1645,7 +1645,7 @@ def test_missing_canonical_target_source_fails_before_publication():
         code="clone_validation_failed",
         cleanup_state="complete",
     )
-    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_text_and_citations_require_a_copied_source_with_copied_chunks():
@@ -1667,7 +1667,7 @@ def test_text_and_citations_require_a_copied_source_with_copied_chunks():
 
 def test_same_operation_different_fingerprint_conflict_preserves_existing_target():
     service, _, _, target_chacha, target_media = _make_service()
-    target_chacha.reserve_clone_target.side_effect = RuntimeError(
+    target_chacha.workspace_store.reserve_clone_target.side_effect = RuntimeError(
         "same operation different fingerprint"
     )
 
@@ -1679,14 +1679,14 @@ def test_same_operation_different_fingerprint_conflict_preserves_existing_target
         code="clone_reservation_failed",
         cleanup_state="pending",
     )
-    target_chacha.discard_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_not_called()
     target_media.delete_operation_owned_clone_media.assert_not_called()
 
 
 def test_exact_publication_pending_reservation_exits_without_cleanup_or_copy():
     progress: list[tuple[str, float]] = []
     service, _, _, target_chacha, target_media = _make_service()
-    target_chacha.reserve_clone_target.return_value = _canonical_reservation_row(
+    target_chacha.workspace_store.reserve_clone_target.return_value = _canonical_reservation_row(
         state="publication_pending"
     )
 
@@ -1710,9 +1710,9 @@ def test_exact_publication_pending_reservation_exits_without_cleanup_or_copy():
     ]
     target_media.insert_operation_owned_clone_media.assert_not_called()
     target_media.delete_operation_owned_clone_media.assert_not_called()
-    target_chacha.add_workspace_source.assert_not_called()
-    target_chacha.publish_clone_target.assert_not_called()
-    target_chacha.discard_clone_target.assert_not_called()
+    target_chacha.workspace_store.add_workspace_source.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -1732,7 +1732,7 @@ def test_mismatched_returned_reservation_fields_preserve_ambiguous_target(
     service, _, _, target_chacha, target_media = _make_service()
     reservation = _canonical_reservation_row()
     reservation[field_name] = wrong_value
-    target_chacha.reserve_clone_target.return_value = reservation
+    target_chacha.workspace_store.reserve_clone_target.return_value = reservation
 
     with pytest.raises(Exception) as exc_info:
         service.clone_workspace(_request(), should_cancel=lambda: False)
@@ -1744,9 +1744,9 @@ def test_mismatched_returned_reservation_fields_preserve_ambiguous_target(
     )
     target_media.insert_operation_owned_clone_media.assert_not_called()
     target_media.delete_operation_owned_clone_media.assert_not_called()
-    target_chacha.add_workspace_source.assert_not_called()
-    target_chacha.publish_clone_target.assert_not_called()
-    target_chacha.discard_clone_target.assert_not_called()
+    target_chacha.workspace_store.add_workspace_source.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_not_called()
 
 
 @pytest.mark.parametrize("state", ("staged", "publication_pending"))
@@ -1770,7 +1770,7 @@ def test_reservation_requires_every_canonical_ownership_field(field_name, state)
     )
     reservation = _canonical_reservation_row(state=state)
     del reservation[field_name]
-    target_chacha.reserve_clone_target.return_value = reservation
+    target_chacha.workspace_store.reserve_clone_target.return_value = reservation
 
     with pytest.raises(Exception) as exc_info:
         service.clone_workspace(_request(), should_cancel=lambda: False)
@@ -1782,9 +1782,9 @@ def test_reservation_requires_every_canonical_ownership_field(field_name, state)
     )
     target_media.insert_operation_owned_clone_media.assert_not_called()
     target_media.delete_operation_owned_clone_media.assert_not_called()
-    target_chacha.add_workspace_source.assert_not_called()
-    target_chacha.publish_clone_target.assert_not_called()
-    target_chacha.discard_clone_target.assert_not_called()
+    target_chacha.workspace_store.add_workspace_source.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_not_called()
 
 
 @pytest.mark.parametrize("state", ("staged", "publication_pending"))
@@ -1804,7 +1804,7 @@ def test_reservation_requires_description_field_when_expected_value_is_none(stat
     )
     reservation = _canonical_reservation_row(state=state, description=None)
     del reservation["description"]
-    target_chacha.reserve_clone_target.return_value = reservation
+    target_chacha.workspace_store.reserve_clone_target.return_value = reservation
 
     with pytest.raises(Exception) as exc_info:
         service.clone_workspace(_request(), should_cancel=lambda: False)
@@ -1816,9 +1816,9 @@ def test_reservation_requires_description_field_when_expected_value_is_none(stat
     )
     target_media.insert_operation_owned_clone_media.assert_not_called()
     target_media.delete_operation_owned_clone_media.assert_not_called()
-    target_chacha.add_workspace_source.assert_not_called()
-    target_chacha.publish_clone_target.assert_not_called()
-    target_chacha.discard_clone_target.assert_not_called()
+    target_chacha.workspace_store.add_workspace_source.assert_not_called()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_not_called()
 
 
 def test_source_validation_failure_is_fatal_and_cleans_exact_media():
@@ -1829,7 +1829,7 @@ def test_source_validation_failure_is_fatal_and_cleans_exact_media():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.add_workspace_source.side_effect = lambda workspace_id, data: {
+    target_chacha.workspace_store.add_workspace_source.side_effect = lambda workspace_id, data: {
         **data,
         "workspace_id": workspace_id,
         "media_id": 999,
@@ -1845,8 +1845,8 @@ def test_source_validation_failure_is_fatal_and_cleans_exact_media():
         cleanup_state="complete",
     )
     target_media.delete_operation_owned_clone_media.assert_called_once()
-    target_chacha.discard_clone_target.assert_called_once()
-    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_called_once()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_invalid_media_persistence_result_is_exact_deleted_before_validation_failure():
@@ -1878,7 +1878,7 @@ def test_invalid_media_persistence_result_is_exact_deleted_before_validation_fai
             "expected_content_hash"
         ],
     )
-    target_chacha.discard_clone_target.assert_called_once()
+    target_chacha.workspace_store.discard_clone_target.assert_called_once()
 
 
 def test_publication_failure_cleans_all_exact_media_and_discards_target():
@@ -1889,7 +1889,7 @@ def test_publication_failure_cleans_all_exact_media_and_discards_target():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.publish_clone_target.side_effect = RuntimeError("publication failed")
+    target_chacha.workspace_store.publish_clone_target.side_effect = RuntimeError("publication failed")
 
     with pytest.raises(Exception) as exc_info:
         service.clone_workspace(_request(), should_cancel=lambda: False)
@@ -1906,11 +1906,11 @@ def test_publication_failure_cleans_all_exact_media_and_discards_target():
             "expected_content_hash"
         ],
     )
-    target_chacha.discard_clone_target.assert_called_once_with(
+    target_chacha.workspace_store.discard_clone_target.assert_called_once_with(
         workspace_id="target-ws",
         operation_id="operation-1",
     )
-    target_chacha.confirm_clone_target_publication.assert_not_called()
+    target_chacha.workspace_store.confirm_clone_target_publication.assert_not_called()
 
 
 def test_cleanup_failure_is_pending_and_every_tracked_identity_is_attempted():
@@ -1924,7 +1924,7 @@ def test_cleanup_failure_is_pending_and_every_tracked_identity_is_attempted():
         snapshot,
         media_snapshots={7: _media_snapshot(7), 8: _media_snapshot(8)},
     )
-    target_chacha.publish_clone_target.side_effect = RuntimeError("publication failed")
+    target_chacha.workspace_store.publish_clone_target.side_effect = RuntimeError("publication failed")
     target_media.delete_operation_owned_clone_media.side_effect = (
         RuntimeError("first cleanup failed"),
         1,
@@ -1942,7 +1942,7 @@ def test_cleanup_failure_is_pending_and_every_tracked_identity_is_attempted():
         call.kwargs["source_identity"]
         for call in target_media.delete_operation_owned_clone_media.call_args_list
     ] == ["media:7", "media:8"]
-    target_chacha.discard_clone_target.assert_called_once()
+    target_chacha.workspace_store.discard_clone_target.assert_called_once()
 
 
 def test_immediate_source_cleanup_failure_becomes_fatal_and_never_publishes():
@@ -1953,7 +1953,7 @@ def test_immediate_source_cleanup_failure_becomes_fatal_and_never_publishes():
         snapshot,
         media_snapshots={7: _media_snapshot(7)},
     )
-    target_chacha.add_workspace_source.side_effect = RuntimeError("source insert failed")
+    target_chacha.workspace_store.add_workspace_source.side_effect = RuntimeError("source insert failed")
     target_media.delete_operation_owned_clone_media.side_effect = RuntimeError("cleanup failed")
 
     with pytest.raises(Exception) as exc_info:
@@ -1965,8 +1965,8 @@ def test_immediate_source_cleanup_failure_becomes_fatal_and_never_publishes():
         cleanup_state="pending",
     )
     assert target_media.delete_operation_owned_clone_media.call_count == 2
-    target_chacha.discard_clone_target.assert_called_once()
-    target_chacha.publish_clone_target.assert_not_called()
+    target_chacha.workspace_store.discard_clone_target.assert_called_once()
+    target_chacha.workspace_store.publish_clone_target.assert_not_called()
 
 
 def test_progress_uses_only_stable_monotonic_content_free_phases():
@@ -2047,9 +2047,9 @@ def test_partial_failure_logs_use_only_bounded_ids_and_exception_classes():
     target_media.insert_operation_owned_clone_media.side_effect = RuntimeError(
         "SECRET_TOKEN sqlite:///tmp/private"
     )
-    target_chacha.add_workspace_source.side_effect = RuntimeError("password=bad")
-    target_chacha.add_workspace_note.side_effect = RuntimeError("token=abc123")
-    target_chacha.add_workspace_artifact.side_effect = RuntimeError("supersecret")
+    target_chacha.workspace_store.add_workspace_source.side_effect = RuntimeError("password=bad")
+    target_chacha.workspace_store.add_workspace_note.side_effect = RuntimeError("token=abc123")
+    target_chacha.workspace_store.add_workspace_artifact.side_effect = RuntimeError("supersecret")
 
     with patch("tldw_Server_API.app.core.Sharing.clone_service.logger") as fake_logger:
         result = service.clone_workspace(_request(), should_cancel=lambda: False)

@@ -200,7 +200,7 @@ def test_colliding_v68_lineages_upgrade_without_losing_history(
                 assert after == {**before, "history_admission_json": before.get("history_admission_json")}
                 assert db.execute_query("SELECT COUNT(*) AS n FROM conversation_history_projections").fetchone()["n"] == (1 if lineage.startswith("h1-") else 0)
                 assert db.get_conversation_by_id(cid)["assistant_startup_json"] is None
-                assert db.get_workspace("legacy-workspace")["assistant_defaults_explicit_none"] is True
+                assert db.workspace_store.get_workspace("legacy-workspace")["assistant_defaults_explicit_none"] is True
                 table = db._map_table_for_backend("keywords")
                 db.execute_query(f"SELECT merged_into_sync_id FROM {table}").fetchall()  # nosec B608 - backend table mapping
                 version = db.execute_query(

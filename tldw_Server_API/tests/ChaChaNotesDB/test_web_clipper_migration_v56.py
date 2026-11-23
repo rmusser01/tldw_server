@@ -133,7 +133,7 @@ def test_v55_to_v56_rekeys_only_non_uuid_note_and_preserves_public_mapping(tmp_p
             _assert_uuid4(str(legacy_document["note_id"]))
             assert canonical_document is not None
             assert canonical_document["note_id"] == canonical_id
-            placement = migrated.list_note_clipper_workspace_placements(legacy_clip_id)[0]
+            placement = migrated.workspace_store.list_note_clipper_workspace_placements(legacy_clip_id)[0]
             assert placement["source_note_id"] == legacy_document["note_id"]
             assert migrated.get_note_by_id(str(legacy_document["note_id"])) is not None
             assert migrated.get_note_by_id(legacy_clip_id) is None

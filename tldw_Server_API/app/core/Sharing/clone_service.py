@@ -216,7 +216,7 @@ class CloneService:
 
             description, workspace_profile = self._reservation_fields(prepared.workspace)
             try:
-                reservation = self._tgt_chacha.reserve_clone_target(
+                reservation = self._tgt_chacha.workspace_store.reserve_clone_target(
                     workspace_id=request.target_workspace_id,
                     operation_id=request.operation_id,
                     request_fingerprint=request.request_fingerprint,
@@ -279,7 +279,7 @@ class CloneService:
             reporter.emit("finalizing", 0.95)
             self._cancel_if_requested(should_cancel)
             try:
-                publication = self._tgt_chacha.publish_clone_target(
+                publication = self._tgt_chacha.workspace_store.publish_clone_target(
                     workspace_id=request.target_workspace_id,
                     operation_id=request.operation_id,
                 )
@@ -346,7 +346,7 @@ class CloneService:
 
     def _prepare_source_snapshot(self, request: WorkspaceCloneRequest) -> _PreparedSnapshot:
         try:
-            workspace = self._src_chacha.read_workspace_clone_snapshot(
+            workspace = self._src_chacha.workspace_store.read_workspace_clone_snapshot(
                 request.source_workspace_id
             )
             if not isinstance(workspace, WorkspaceCloneSnapshot):
@@ -532,7 +532,7 @@ class CloneService:
                 raise _FatalClone("clone_validation_failed")
             payload = self._source_payload(source, tracked)
             try:
-                copied = self._tgt_chacha.add_workspace_source(
+                copied = self._tgt_chacha.workspace_store.add_workspace_source(
                     request.target_workspace_id,
                     payload,
                 )
@@ -543,7 +543,7 @@ class CloneService:
                     exc,
                 )
                 try:
-                    copied = self._tgt_chacha.get_workspace_source(
+                    copied = self._tgt_chacha.workspace_store.get_workspace_source(
                         request.target_workspace_id,
                         source_key,
                     )
@@ -645,7 +645,7 @@ class CloneService:
                 reporter.emit("notes", 0.65 + 0.1 * ((index + 1) / len(notes)))
                 continue
             try:
-                copied = self._tgt_chacha.add_workspace_note(
+                copied = self._tgt_chacha.workspace_store.add_workspace_note(
                     request.target_workspace_id,
                     payload,
                 )
@@ -684,7 +684,7 @@ class CloneService:
         claimed_target_ids: set[str],
     ) -> Mapping[str, Any] | None:
         try:
-            rows = self._tgt_chacha.list_workspace_notes(request.target_workspace_id)
+            rows = self._tgt_chacha.workspace_store.list_workspace_notes(request.target_workspace_id)
         except Exception as exc:
             self._log_failure("Workspace clone note reconciliation failed", request, exc)
             raise _FatalClone("clone_validation_failed", exc) from None
@@ -755,7 +755,7 @@ class CloneService:
                 if field_name in artifact:
                     payload[field_name] = _thaw_json(artifact[field_name])
             try:
-                copied = self._tgt_chacha.add_workspace_artifact(
+                copied = self._tgt_chacha.workspace_store.add_workspace_artifact(
                     request.target_workspace_id,
                     payload,
                 )
@@ -766,7 +766,7 @@ class CloneService:
                     exc,
                 )
                 try:
-                    copied = self._tgt_chacha.get_workspace_artifact(
+                    copied = self._tgt_chacha.workspace_store.get_workspace_artifact(
                         request.target_workspace_id,
                         artifact_id,
                     )
@@ -867,7 +867,7 @@ class CloneService:
                 "metadata": {},
             }
             try:
-                copied = self._tgt_chacha.add_workspace_resource_membership(
+                copied = self._tgt_chacha.workspace_store.add_workspace_resource_membership(
                     request.target_workspace_id,
                     payload,
                 )
@@ -878,7 +878,7 @@ class CloneService:
                     exc,
                 )
                 try:
-                    copied = self._tgt_chacha.get_workspace_resource_membership(
+                    copied = self._tgt_chacha.workspace_store.get_workspace_resource_membership(
                         request.target_workspace_id,
                         resource_type,
                         mapped_resource_id,
@@ -1129,7 +1129,7 @@ class CloneService:
         state: _CopyState,
     ) -> bool:
         try:
-            rows = self._tgt_chacha.list_workspace_sources(request.target_workspace_id)
+            rows = self._tgt_chacha.workspace_store.list_workspace_sources(request.target_workspace_id)
         except Exception as exc:
             self._log_failure("Workspace clone target source validation failed", request, exc)
             raise _FatalClone("clone_validation_failed", exc) from None
@@ -1228,7 +1228,7 @@ class CloneService:
 
         if target_reserved:
             try:
-                discarded = self._tgt_chacha.discard_clone_target(
+                discarded = self._tgt_chacha.workspace_store.discard_clone_target(
                     workspace_id=request.target_workspace_id,
                     operation_id=request.operation_id,
                 )

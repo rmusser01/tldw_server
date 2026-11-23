@@ -464,7 +464,7 @@ def _serialize_clone_result(
             "clone_validation_failed",
             cleanup_state="unknown",
         )
-    rows = target_chacha.list_clone_targets_for_reconciliation(
+    rows = target_chacha.workspace_store.list_clone_targets_for_reconciliation(
         operation_ids=[identity.operation_id],
         limit=2,
     )
@@ -676,7 +676,7 @@ def _publish_clone_resources(
     target_media: Any,
     expected_media_count: int,
 ) -> bool:
-    pending = target_chacha.list_clone_targets_for_reconciliation(
+    pending = target_chacha.workspace_store.list_clone_targets_for_reconciliation(
         operation_ids=[identity.operation_id],
         limit=2,
     )
@@ -686,7 +686,7 @@ def _publish_clone_resources(
         if not _is_exact_pending_target(pending[0], identity):
             return False
     elif not _public_target_is_exact(
-        target_chacha.get_workspace(identity.target_workspace_id),
+        target_chacha.workspace_store.get_workspace(identity.target_workspace_id),
         identity,
     ):
         return False
@@ -716,7 +716,7 @@ def _publish_clone_resources(
         return False
 
     if pending:
-        published = target_chacha.confirm_clone_target_publication(
+        published = target_chacha.workspace_store.confirm_clone_target_publication(
             workspace_id=identity.target_workspace_id,
             operation_id=identity.operation_id,
         )
@@ -741,14 +741,14 @@ def _published_clone_resources_are_exact(
         or publication.pending_count != 0
     ):
         return False
-    pending = target_chacha.list_clone_targets_for_reconciliation(
+    pending = target_chacha.workspace_store.list_clone_targets_for_reconciliation(
         operation_ids=[identity.operation_id],
         limit=1,
     )
     if pending:
         return False
     return _public_target_is_exact(
-        target_chacha.get_workspace(identity.target_workspace_id),
+        target_chacha.workspace_store.get_workspace(identity.target_workspace_id),
         identity,
     )
 
@@ -1146,19 +1146,19 @@ def _cleanup_clone_resources(
         )
         if remaining:
             return False
-    discarded = target_chacha.discard_clone_target(
+    discarded = target_chacha.workspace_store.discard_clone_target(
         workspace_id=identity.target_workspace_id,
         operation_id=identity.operation_id,
     )
     if discarded:
-        return target_chacha.get_workspace(identity.target_workspace_id) is None
-    pending = target_chacha.list_clone_targets_for_reconciliation(
+        return target_chacha.workspace_store.get_workspace(identity.target_workspace_id) is None
+    pending = target_chacha.workspace_store.list_clone_targets_for_reconciliation(
         operation_ids=[identity.operation_id],
         limit=2,
     )
     if pending:
         return False
-    return target_chacha.get_workspace(identity.target_workspace_id) is None
+    return target_chacha.workspace_store.get_workspace(identity.target_workspace_id) is None
 
 
 async def cleanup_shared_workspace_clone(

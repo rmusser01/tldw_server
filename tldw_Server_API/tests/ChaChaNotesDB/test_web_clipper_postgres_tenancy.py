@@ -31,7 +31,7 @@ def _create_owner_clip(
     workspace_id: str,
 ) -> None:
     assert db.add_note(title=f"Clip for {db.client_id}", content="Body", note_id=note_id)
-    db.upsert_workspace(workspace_id, f"Workspace for {db.client_id}")
+    db.workspace_store.upsert_workspace(workspace_id, f"Workspace for {db.client_id}")
     db.upsert_note_clipper_document(
         clip_id=clip_id,
         note_id=note_id,
@@ -43,7 +43,7 @@ def _create_owner_clip(
         content_budget={},
         source_note_version=1,
     )
-    db.upsert_note_clipper_workspace_placement(
+    db.workspace_store.upsert_note_clipper_workspace_placement(
         clip_id=clip_id,
         workspace_id=workspace_id,
         source_note_id=note_id,
@@ -82,8 +82,8 @@ def test_postgres_web_clipper_same_clip_is_owner_isolated_by_rls(
         assert document_b is not None and document_b["note_id"] == note_b
         assert db_a.get_note_clipper_document_by_note_id(note_b) is None
         assert db_b.get_note_clipper_document_by_note_id(note_a) is None
-        assert [row["workspace_id"] for row in db_a.list_note_clipper_workspace_placements(clip_id)] == ["workspace-a"]
-        assert [row["workspace_id"] for row in db_b.list_note_clipper_workspace_placements(clip_id)] == ["workspace-b"]
+        assert [row["workspace_id"] for row in db_a.workspace_store.list_note_clipper_workspace_placements(clip_id)] == ["workspace-a"]
+        assert [row["workspace_id"] for row in db_b.workspace_store.list_note_clipper_workspace_placements(clip_id)] == ["workspace-b"]
 
         with db_a.transaction() as conn:
             policy_rows = conn.execute(
@@ -161,9 +161,9 @@ async def test_postgres_pinned_preview_foreign_workspace_denied_before_media_rea
     db_b = CharactersRAGDB(db_path=":memory:", client_id="910002", backend=pg_restricted_backend)
     workspace = f"foreign-{uuid4()}"
     try:
-        db_b.upsert_workspace(workspace, "Foreign workspace")
-        assert db_b.get_workspace(workspace) is not None
-        assert db_a.get_workspace(workspace) is None
+        db_b.workspace_store.upsert_workspace(workspace, "Foreign workspace")
+        assert db_b.workspace_store.get_workspace(workspace) is not None
+        assert db_a.workspace_store.get_workspace(workspace) is None
 
         class UnreadableMedia:
             def get_media_by_id(self, *_args, **_kwargs):
@@ -230,7 +230,7 @@ def test_postgres_capture_promotes_owned_source_and_retries(pg_restricted_backen
         },
     )
     try:
-        db.upsert_workspace(workspace, "Owned capture")
+        db.workspace_store.upsert_workspace(workspace, "Owned capture")
         service = WebClipperService(db=db, media_db=media, user_id=910001, promote_workspace_sources=True)
         try:
             first = service.save_clip(request)
@@ -239,7 +239,7 @@ def test_postgres_capture_promotes_owned_source_and_retries(pg_restricted_backen
             pytest.fail(f"PostgreSQL capture write failed: {diagnostics}")
         assert first.status == retry.status == "saved", (first.warnings, retry.warnings, diagnostics)
         assert first.note.id == retry.note.id
-        sources = db.list_workspace_sources(workspace)
+        sources = db.workspace_store.list_workspace_sources(workspace)
         assert len(sources) == 1
         assert sources[0]["id"] == f"web-clipper:{clip}"
         assert sources[0]["selected"] is True
@@ -262,7 +262,7 @@ def test_postgres_capture_promotes_owned_source_and_retries(pg_restricted_backen
             retried = service.save_clip(refreshed_request)
             assert refreshed.status == retried.status == "saved"
             assert refreshed.note.id == retried.note.id != first.note.id
-            sources = db.list_workspace_sources(workspace)
+            sources = db.workspace_store.list_workspace_sources(workspace)
             source = next(row for row in sources if row["id"] == f"web-clipper:{refreshed_request.clip_id}")
             media_id = int(source["media_id"])
             assert media_id not in media_ids
@@ -279,7 +279,7 @@ def test_postgres_capture_promotes_owned_source_and_retries(pg_restricted_backen
             media_ids.add(media_id)
             media_uuids.add(media_uuid)
             previous_clip = refreshed_request.clip_id
-        assert len(db.list_workspace_sources(workspace)) == 3
+        assert len(db.workspace_store.list_workspace_sources(workspace)) == 3
         assert service.save_clip(request).note.id == first.note.id
         retried_version = media_db_api.get_document_version(media, original_media_id, 1)
         assert (retried_version["uuid"], retried_version["content"], retried_version["safe_metadata"]) == (
@@ -287,7 +287,7 @@ def test_postgres_capture_promotes_owned_source_and_retries(pg_restricted_backen
             original_version["content"],
             original_version["safe_metadata"],
         )
-        assert len(db.list_workspace_sources(workspace)) == 3
+        assert len(db.workspace_store.list_workspace_sources(workspace)) == 3
     finally:
         logger.remove(sink)
         db.close_connection()
@@ -298,15 +298,15 @@ def test_postgres_source_duplicate_retains_first_snapshot(pg_restricted_backend)
     db = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=pg_restricted_backend)
     workspace = f"duplicate-{uuid4()}"
     try:
-        db.upsert_workspace(workspace, "Duplicate sources")
-        first = db.add_workspace_source(
+        db.workspace_store.upsert_workspace(workspace, "Duplicate sources")
+        first = db.workspace_store.add_workspace_source(
             workspace, {"id": "same", "media_id": 1, "title": "First", "source_type": "web", "selected": False}
         )
-        retry = db.add_workspace_source(
+        retry = db.workspace_store.add_workspace_source(
             workspace, {"id": "same", "media_id": 2, "title": "Replacement", "source_type": "pdf", "selected": True}
         )
         assert retry == first
-        assert len(db.list_workspace_sources(workspace)) == 1
+        assert len(db.workspace_store.list_workspace_sources(workspace)) == 1
     finally:
         db.close_connection()
 
@@ -315,21 +315,21 @@ def test_postgres_source_selection_uses_native_booleans_and_versions(pg_restrict
     db = CharactersRAGDB(db_path=":memory:", client_id="910001", backend=pg_restricted_backend)
     workspace = f"selection-{uuid4()}"
     try:
-        db.upsert_workspace(workspace, "Select sources")
-        first = db.add_workspace_source(workspace, {"id": "a", "media_id": 1, "title": "A", "source_type": "web"})
-        second = db.add_workspace_source(
+        db.workspace_store.upsert_workspace(workspace, "Select sources")
+        first = db.workspace_store.add_workspace_source(workspace, {"id": "a", "media_id": 1, "title": "A", "source_type": "web"})
+        second = db.workspace_store.add_workspace_source(
             workspace, {"id": "b", "media_id": 2, "title": "B", "source_type": "web", "selected": False}
         )
-        updated = db.update_workspace_source(workspace, "b", {"selected": True}, expected_version=second["version"])
+        updated = db.workspace_store.update_workspace_source(workspace, "b", {"selected": True}, expected_version=second["version"])
         assert updated["selected"] is True
-        db.update_workspace_source_selection(workspace, selected_ids=["a"])
-        rows = {row["id"]: row for row in db.list_workspace_sources(workspace)}
+        db.workspace_store.update_workspace_source_selection(workspace, selected_ids=["a"])
+        rows = {row["id"]: row for row in db.workspace_store.list_workspace_sources(workspace)}
         assert rows["a"]["selected"] is True
         assert rows["a"]["version"] == first["version"] + 2
         assert rows["b"]["selected"] is False
         assert rows["b"]["version"] == updated["version"] + 1
-        db.update_workspace_source_selection(workspace, selected_ids=[])
-        assert all(row["selected"] is False for row in db.list_workspace_sources(workspace))
+        db.workspace_store.update_workspace_source_selection(workspace, selected_ids=[])
+        assert all(row["selected"] is False for row in db.workspace_store.list_workspace_sources(workspace))
     finally:
         db.close_connection()
 
@@ -339,19 +339,19 @@ def test_postgres_source_constraints_and_foreign_selection_remain_enforced(pg_re
     db_b = CharactersRAGDB(db_path=":memory:", client_id="910002", backend=pg_restricted_backend)
     workspace = f"constraints-{uuid4()}"
     try:
-        db_a.upsert_workspace(workspace, "Owned source")
-        first = db_a.add_workspace_source(workspace, {"id": "a", "media_id": 1, "title": "A", "source_type": "web"})
+        db_a.workspace_store.upsert_workspace(workspace, "Owned source")
+        first = db_a.workspace_store.add_workspace_source(workspace, {"id": "a", "media_id": 1, "title": "A", "source_type": "web"})
         with pytest.raises(DatabaseError):
-            db_a.add_workspace_source(workspace, {"id": "invalid", "media_id": 2, "title": None, "source_type": "web"})
+            db_a.workspace_store.add_workspace_source(workspace, {"id": "invalid", "media_id": 2, "title": None, "source_type": "web"})
         with pytest.raises(DatabaseError):
-            db_a.add_workspace_source(
+            db_a.workspace_store.add_workspace_source(
                 "nonexistent-workspace", {"id": "missing", "media_id": 2, "title": "B", "source_type": "web"}
             )
         with pytest.raises(DatabaseError):
-            db_b.add_workspace_source(workspace, {"id": "foreign", "media_id": 2, "title": "B", "source_type": "web"})
-        db_b.update_workspace_source_selection(workspace, selected_ids=[])
-        assert db_a.list_workspace_sources(workspace) == [first]
-        assert db_b.list_workspace_sources(workspace) == []
+            db_b.workspace_store.add_workspace_source(workspace, {"id": "foreign", "media_id": 2, "title": "B", "source_type": "web"})
+        db_b.workspace_store.update_workspace_source_selection(workspace, selected_ids=[])
+        assert db_a.workspace_store.list_workspace_sources(workspace) == [first]
+        assert db_b.workspace_store.list_workspace_sources(workspace) == []
     finally:
         db_a.close_connection()
         db_b.close_connection()

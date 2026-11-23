@@ -228,7 +228,7 @@ def test_cookie_share_routes_retain_owner_and_scope_fences(chat_cookie_client, b
     elif boundary == "global-as-workspace":
         params = {"scope_type": "workspace", "workspace_id": "space-one"}
     else:
-        db.upsert_workspace("space-one", "Cookie workspace")
+        db.workspace_store.upsert_workspace("space-one", "Cookie workspace")
         conversation = db.add_conversation({"title": "Workspace", "client_id": owner,
                                             "scope_type": "workspace", "workspace_id": "space-one"})
         if boundary in {"wrong-workspace", "exact-workspace"}:
