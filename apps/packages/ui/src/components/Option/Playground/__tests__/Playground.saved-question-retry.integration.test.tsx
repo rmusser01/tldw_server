@@ -307,9 +307,8 @@ describe("Playground saved-question Retry in a plain server chat (8B)", { timeou
       await view.user.click(await screen.findByRole("button", { name: "Review saved question" }, HARNESS_WAIT))
       const review = await screen.findByRole("group", { name: "Saved question review" }, HARNESS_WAIT)
       expect(within(review).getByText("Answer like a pirate.")).toBeVisible()
-      expect(within(review).getByRole("alert")).toHaveTextContent(
-        "This server can't keep System/Prompt instructions on a retry"
-      )
+      expect(within(review).getByText(/This server can't keep System\/Prompt instructions on a retry/)).toBeVisible()
+      expect(within(review).queryByRole("alert")).toBeNull()
       expect(within(review).getByRole("button", { name: "Retry saved question" })).toBeDisabled()
       expect(server.completionRequests()).toHaveLength(1)
       const chatId = String(useStoreMessageOption.getState().serverChatId)

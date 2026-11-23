@@ -123,7 +123,7 @@ describe("send-time refusal copy (8B)", () => {
   it("uses plain-chat wording, not character wording, for a plain Retry's settings refusal", () => {
     const refused = new PlainSavedQuestionRefusal("native_history_setting_unsupported:topK")
     expect(nativeCharacterPreflightMessage(refused, t)).toBe(
-      "topK can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept."
+      "The topK setting can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept."
     )
     // A character chat's own refusal keeps its character wording.
     expect(nativeCharacterPreflightMessage(new Error("native_history_setting_unsupported:topK"), t)).toMatch(/saved character chat/)

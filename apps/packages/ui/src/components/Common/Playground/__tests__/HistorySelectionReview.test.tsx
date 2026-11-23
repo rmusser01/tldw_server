@@ -2330,9 +2330,10 @@ describe("plain-chat saved-question review (8B)", () => {
       review({instructions: ["Answer like a pirate."], instructionsSupported: false})} onRetrySavedQuestion={retry} />)
     fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
     const group = await screen.findByRole("group", {name: "Saved question review"})
-    const reason = within(group).getByRole("alert")
-    expect(reason).toHaveTextContent("This server can't keep System/Prompt instructions on a retry")
+    const reason = within(group).getByText(/This server can't keep System\/Prompt instructions on a retry/)
     expect(reason).toHaveTextContent("the default system prompt and output formatting guide in Settings")
+    // A standing reason, not an alert: the Retry error keeps the only alert.
+    expect(within(group).queryByRole("alert")).toBeNull()
     const button = within(group).getByRole("button", {name: "Retry saved question"})
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute("aria-describedby", reason.id)
@@ -2340,9 +2341,36 @@ describe("plain-chat saved-question review (8B)", () => {
     expect(retry).not.toHaveBeenCalled()
   })
 
+  it("tells the side panel to clear only the instructions it sends", async () => {
+    render(<HistorySelectionReview surface="sidepanel" selection={selected()} getSavedQuestionReview={async () =>
+      review({instructions: ["Answer like a pirate."], instructionsSupported: false})} onRetrySavedQuestion={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    const group = await screen.findByRole("group", {name: "Saved question review"})
+    const reason = within(group).getByText(/This server can't keep System\/Prompt instructions on a retry/)
+    expect(reason).toHaveTextContent("the default system prompt in Settings")
+    expect(reason).not.toHaveTextContent("output formatting guide")
+  })
+
+  it("keeps one alert when a refused review also reports an error", async () => {
+    const getReview = vi.fn()
+      .mockResolvedValueOnce(review({instructions: ["Answer like a pirate."], instructionsSupported: false}))
+      .mockRejectedValueOnce(new Error("retry_context_changed"))
+    render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={getReview} onRetrySavedQuestion={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    await screen.findByText(/This server can't keep System\/Prompt instructions on a retry/)
+    // Reviewing again fails; the refused review stays on screen beside the error.
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    await vi.waitFor(() => expect(getReview).toHaveBeenCalledTimes(2))
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("The System/Prompt instructions changed after your review")
+    expect(screen.getByText(/This server can't keep System\/Prompt instructions on a retry/)).toBeVisible()
+    expect(screen.getAllByRole("alert")).toHaveLength(1)
+  })
+
   it.each([
     ["retry_context_changed", "The System/Prompt instructions changed after your review"],
-    ["native_history_setting_unsupported:topK", "topK can't be used when retrying a saved question"],
+    ["native_history_setting_unsupported:topK", "The topK setting can't be used when retrying a saved question"],
+    ["unsupported_history_action_context", "This saved question can't be retried with the chat's current setup"],
     ["provider detail with dummy-private-marker", "Could not retry. Review the saved question again"]
   ])("explains a refused Retry (%s) in plain words", async (code, copy) => {
     render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={async () => review({instructions: []})}

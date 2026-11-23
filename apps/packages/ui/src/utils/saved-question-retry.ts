@@ -113,6 +113,9 @@ export class PlainSavedQuestionRefusal extends Error {
 
 type Translate = (key: string, fallback: string, options?: { setting: string }) => string
 
+/** Where the review is shown: the full page's instructions also carry the output formatting guide. */
+export type SavedQuestionSurface = "playground" | "sidepanel"
+
 const PLAIN_REFUSAL_COPY: Record<string, string> = {
   [INSTRUCTIONS_UNSUPPORTED]:
     "This server can't keep System/Prompt instructions on a retry. To retry here, clear this chat's System prompt and Prompt, and the default system prompt and output formatting guide in Settings, then review again. Or update the server. Your question is kept.",
@@ -144,21 +147,35 @@ const PLAIN_REFUSAL_COPY: Record<string, string> = {
   native_history_assets_unsupported:
     "A saved question with an image can't be retried this way. Your question is kept; use Retry on the stopped or failed reply instead.",
   temporary_history_unavailable:
-    "A temporary chat has no saved question to retry. Your question is kept."
+    "A temporary chat has no saved question to retry. Your question is kept.",
+  unsupported_history_action_context:
+    "This saved question can't be retried with the chat's current setup, such as a selected assistant or character, a reply target or added context. Clear them, then review it again; your question is kept."
 }
 
+/** The side panel sends no output formatting guide, so its copy doesn't mention one. */
+const SIDEPANEL_INSTRUCTIONS_UNSUPPORTED =
+  "This server can't keep System/Prompt instructions on a retry. To retry here, clear this chat's System prompt and Prompt, and the default system prompt in Settings, then review again. Or update the server. Your question is kept."
+
 /** Plain-chat copy for a refused saved-question Retry, or null for an unknown reason. */
-export const plainSavedQuestionRefusalMessage = (code: string, t: Translate): string | null => {
+export const plainSavedQuestionRefusalMessage = (
+  code: string,
+  t: Translate,
+  surface: SavedQuestionSurface = "playground"
+): string | null => {
   const prefix = "native_history_setting_unsupported:"
   if (code.startsWith(prefix)) {
-    const setting = code.slice(prefix.length)
+    const key = code.slice(prefix.length)
+    // The model settings' own label where it has one ("Top K"), else the key.
+    const setting = t(`common:modelSettings.form.${key}.label`, key)
     // Fill the placeholder here too, whatever the translator does with options.
     return t(
       "playground:historySelection.savedQuestionSettingUnsupported",
-      "{{setting}} can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept.",
+      "The {{setting}} setting can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept.",
       { setting }
     ).replaceAll("{{setting}}", setting)
   }
+  if (code === INSTRUCTIONS_UNSUPPORTED && surface === "sidepanel")
+    return t("playground:historySelection.savedQuestionInstructionsUnsupportedSidepanel", SIDEPANEL_INSTRUCTIONS_UNSUPPORTED)
   return PLAIN_REFUSAL_COPY[code]
     ? t(`playground:historySelection.savedQuestionRefusal.${code}`, PLAIN_REFUSAL_COPY[code])
     : null

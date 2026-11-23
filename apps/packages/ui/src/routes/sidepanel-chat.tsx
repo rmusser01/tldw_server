@@ -3228,7 +3228,7 @@ const SidepanelChatContent = ({
                 </div>
               ) : null}
               <div className={historySelection.status === "idle" || freshnessNotice ? undefined : "pt-12"}>
-                <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={getSavedQuestionReview} onRetrySavedQuestion={retrySavedQuestion} onExpand={openHydratedChatInWebUi} onBind={() => void historySelection.bindUnavailableConversation()} />
+                <HistorySelectionReview surface="sidepanel" selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={getSavedQuestionReview} onRetrySavedQuestion={retrySavedQuestion} onExpand={openHydratedChatInWebUi} onBind={() => void historySelection.bindUnavailableConversation()} />
               </div>
               <SidePanelBody
                 scrollParentRef={containerRef}

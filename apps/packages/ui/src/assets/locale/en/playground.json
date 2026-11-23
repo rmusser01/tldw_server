@@ -1449,7 +1449,8 @@
     "retryCurrentPrompt": "Current System/Prompt instructions",
     "retryNoPrompt": "No System/Prompt instruction is currently applied.",
     "nativeSavedQuestionRecoveryMessage": "Your question is saved, and no reply is shown for it. To answer it, choose Review saved question; your question is not saved again. Any text that arrived is kept here. Nothing is sent again automatically.",
-    "savedQuestionSettingUnsupported": "{{setting}} can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept.",
+    "savedQuestionSettingUnsupported": "The {{setting}} setting can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept.",
+    "savedQuestionInstructionsUnsupportedSidepanel": "This server can't keep System/Prompt instructions on a retry. To retry here, clear this chat's System prompt and Prompt, and the default system prompt in Settings, then review again. Or update the server. Your question is kept.",
     "savedQuestionRefusal": {
       "native_history_existing_input_instructions_unsupported": "This server can't keep System/Prompt instructions on a retry. To retry here, clear this chat's System prompt and Prompt, and the default system prompt and output formatting guide in Settings, then review again. Or update the server. Your question is kept.",
       "native_history_existing_input_client_managed": "This chat's history can't be answered by the server. Your question is kept; use Retry on the stopped or failed reply instead.",
@@ -1466,7 +1467,8 @@
       "native_history_explicit_model_provider_required": "Choose a specific model and provider (not Auto) to retry this saved question; your question is kept.",
       "native_history_explicit_context_unsupported": "A saved question can't be retried with web search, research, files or other added context. Turn them off and retry; your question is kept.",
       "native_history_assets_unsupported": "A saved question with an image can't be retried this way. Your question is kept; use Retry on the stopped or failed reply instead.",
-      "temporary_history_unavailable": "A temporary chat has no saved question to retry. Your question is kept."
+      "temporary_history_unavailable": "A temporary chat has no saved question to retry. Your question is kept.",
+      "unsupported_history_action_context": "This saved question can't be retried with the chat's current setup, such as a selected assistant or character, a reply target or added context. Clear them, then review it again; your question is kept."
     },
     "inspectRecovery": "Show what was sent and received",
     "copyRecovery": "Copy recovered text",

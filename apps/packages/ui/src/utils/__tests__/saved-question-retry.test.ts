@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import commonLocale from "@/assets/locale/en/common.json"
+import playgroundLocale from "@/assets/locale/en/playground.json"
 import type { HistorySelectionCaptureV1, NativeCompletionCapabilityV1 } from "@/types/history-selection"
 import { encodeChatErrorPayload } from "@/utils/chat-error-message"
 import {
@@ -109,9 +111,39 @@ describe("saved-question Retry rules (8B)", () => {
   })
 
   describe("plain-chat refusal copy", () => {
-    it("names the setting a plain Retry can't use, without character wording", () => {
-      const copy = plainSavedQuestionRefusalMessage("native_history_setting_unsupported:topK", t)
-      expect(copy).toBe("topK can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept.")
+    // Resolves keys from the English locales, like the app's translator.
+    const translate = (key: string, fallback: string, options?: Record<string, string>) => {
+      const [namespace, path] = key.includes(":") ? key.split(":") : ["playground", key]
+      const locale = namespace === "common" ? commonLocale : playgroundLocale
+      const found = path.split(".").reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], locale)
+      const text = typeof found === "string" ? found : fallback
+      return text.replace(/\{\{(\w+)\}\}/g, (match, name: string) => options?.[name] ?? match)
+    }
+
+    it("names the setting a plain Retry can't use by its settings label, without character wording", () => {
+      expect(plainSavedQuestionRefusalMessage("native_history_setting_unsupported:topK", translate)).toBe(
+        "The Top K setting can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept.")
+      expect(plainSavedQuestionRefusalMessage("native_history_setting_unsupported:numCtx", translate)).toMatch(
+        /^The Context Window Size \(num_ctx\) setting can't be used/)
+    })
+
+    it("phrases a setting without a label as a setting name", () => {
+      expect(plainSavedQuestionRefusalMessage("native_history_setting_unsupported:mirostat", translate)).toBe(
+        "The mirostat setting can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept.")
+      expect(plainSavedQuestionRefusalMessage("native_history_setting_unsupported:topK", t)).toMatch(/^The topK setting can't be used/)
+    })
+
+    it("tells the side panel only where its own instructions live", () => {
+      const sidepanel = plainSavedQuestionRefusalMessage(INSTRUCTIONS_UNSUPPORTED, translate, "sidepanel")
+      expect(sidepanel).toMatch(/This server can't keep System\/Prompt instructions on a retry/)
+      expect(sidepanel).toMatch(/default system prompt in Settings/)
+      expect(sidepanel).not.toMatch(/output formatting guide/)
+      expect(plainSavedQuestionRefusalMessage(INSTRUCTIONS_UNSUPPORTED, translate, "playground")).toMatch(/output formatting guide/)
+    })
+
+    it("explains a Retry refused by the chat's current setup", () => {
+      expect(plainSavedQuestionRefusalMessage("unsupported_history_action_context", translate)).toBe(
+        "This saved question can't be retried with the chat's current setup, such as a selected assistant or character, a reply target or added context. Clear them, then review it again; your question is kept.")
     })
 
     it.each([INSTRUCTIONS_UNSUPPORTED, SAVED_QUESTION_CLIENT_MANAGED, "retry_context_changed", "native_history_client_tools_unsupported",

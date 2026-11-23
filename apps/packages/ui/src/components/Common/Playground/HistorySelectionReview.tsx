@@ -17,7 +17,8 @@ import {
   INSTRUCTIONS_UNSUPPORTED,
   plainSavedQuestionRefusalMessage,
   savedQuestionChatKindOf,
-  savedQuestionReviewOffered
+  savedQuestionReviewOffered,
+  type SavedQuestionSurface
 } from "@/utils/saved-question-retry"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import type { HistoryCursorV1 } from "@/types/history-selection"
@@ -84,9 +85,12 @@ export function HistorySelectionReview({
   onRetryRecovery,
   getSavedQuestionReview,
   onRetrySavedQuestion,
-  onSwitchModel = () => openModelSelector()
+  onSwitchModel = () => openModelSelector(),
+  surface = "playground"
 }: {
   selection: HistorySelectionController
+  /** The page showing the review; refusal copy names only the settings that page uses. */
+  surface?: SavedQuestionSurface
   /**
    * Open the model picker, offered when a send failed because of its model
    * (CC-02). Defaults to the shared model-selector event, which the full page
@@ -443,7 +447,7 @@ export function HistorySelectionReview({
   const savedQuestionInstructionsRefused =
     Boolean(savedQuestionReview?.instructions?.length) && savedQuestionReview?.instructionsSupported !== true
   const savedQuestionFailure = (code: string) =>
-    (savedQuestionKind === "plain" ? plainSavedQuestionRefusalMessage(code, t) : null) ??
+    (savedQuestionKind === "plain" ? plainSavedQuestionRefusalMessage(code, t, surface) : null) ??
     text("savedQuestionRefused", "Could not retry. Review the saved question again after checking the model, connection and conversation.")
   const [expanded, setExpanded] = React.useState(false)
   const [included, setIncluded] = React.useState<string[]>([])
@@ -1059,7 +1063,8 @@ export function HistorySelectionReview({
                     <li key={index}><pre className="whitespace-pre-wrap break-words">{prompt}</pre></li>)}</ul>
                 : <p>{text("retryNoPrompt", "No System/Prompt instruction is currently applied.")}</p>}
             </>}
-            {savedQuestionInstructionsRefused && <p id={`${savedQuestionIds}-refused`} role="alert">{savedQuestionFailure(INSTRUCTIONS_UNSUPPORTED)}</p>}
+            {/* A standing reason (it describes the disabled Retry), so the error below keeps the only alert. */}
+            {savedQuestionInstructionsRefused && <p id={`${savedQuestionIds}-refused`}>{savedQuestionFailure(INSTRUCTIONS_UNSUPPORTED)}</p>}
             <Button disabled={savedQuestionBusy || savedQuestionInstructionsRefused}
               aria-describedby={savedQuestionInstructionsRefused ? `${savedQuestionIds}-refused` : undefined} onClick={async () => {
               if (!savedQuestionReview.isCurrent()) { setSavedQuestionError("history_selection_changed"); return }

@@ -3549,7 +3549,10 @@
     "message": "Your question is saved, and no reply is shown for it. To answer it, choose Review saved question; your question is not saved again. Any text that arrived is kept here. Nothing is sent again automatically."
   },
   "historySelection_savedQuestionSettingUnsupported": {
-    "message": "{{setting}} can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept."
+    "message": "The {{setting}} setting can't be used when retrying a saved question. Clear it in the model settings and retry; your question is kept."
+  },
+  "historySelection_savedQuestionInstructionsUnsupportedSidepanel": {
+    "message": "This server can't keep System/Prompt instructions on a retry. To retry here, clear this chat's System prompt and Prompt, and the default system prompt in Settings, then review again. Or update the server. Your question is kept."
   },
   "historySelection_savedQuestionRefusal_native_history_existing_input_instructions_unsupported": {
     "message": "This server can't keep System/Prompt instructions on a retry. To retry here, clear this chat's System prompt and Prompt, and the default system prompt and output formatting guide in Settings, then review again. Or update the server. Your question is kept."
@@ -3598,6 +3601,9 @@
   },
   "historySelection_savedQuestionRefusal_temporary_history_unavailable": {
     "message": "A temporary chat has no saved question to retry. Your question is kept."
+  },
+  "historySelection_savedQuestionRefusal_unsupported_history_action_context": {
+    "message": "This saved question can't be retried with the chat's current setup, such as a selected assistant or character, a reply target or added context. Clear them, then review it again; your question is kept."
   },
   "historySelection_inspectRecovery": {
     "message": "Show what was sent and received"
