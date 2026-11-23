@@ -29,7 +29,8 @@ type NotesGraphToolbarProps = {
   maxNodes: number
   maxNodeCap: number
   layout: NotesGraphLayout
-  scope: "focused" | "all"
+  /** "tag": a tag-filtered library graph, which is neither Focused nor All notes. */
+  scope: "focused" | "all" | "tag"
   allNotes: {
     activeNoteCount: number
     effectiveNoteCap: number
@@ -45,6 +46,8 @@ type NotesGraphToolbarProps = {
   semanticThreshold: number
   canExpand: boolean
   isRefreshing: boolean
+  /** Graph filters (NL-11), shown after the scope buttons. */
+  filterControls?: React.ReactNode
   onSearchChange: (value: string) => void
   onViewModeChange: (mode: "canvas" | "relationships") => void
   onSelectSearchResult: (nodeId: string) => void
@@ -124,6 +127,7 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
   semanticThreshold,
   canExpand,
   isRefreshing,
+  filterControls,
   onSearchChange,
   onViewModeChange,
   onSelectSearchResult,
@@ -219,6 +223,7 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
           maxNodes={maxNodes}
           maxNodeCap={maxNodeCap}
           layout={layout}
+          libraryScope={scope !== "focused"}
           onRadiusChange={onRadiusChange}
           onMaxNodesChange={onMaxNodesChange}
           onLayoutChange={onLayoutChange}
@@ -250,6 +255,8 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
             })}
           </button>
         </div>
+
+        {filterControls}
 
         {semanticAvailable || semanticEnabled ? (
           <fieldset className="flex min-h-11 min-w-0 flex-wrap items-end gap-2 border border-border bg-surface px-2 py-1">

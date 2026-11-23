@@ -168,6 +168,7 @@ describe("Notes Graph permission boundary", () => {
           "source_membership"
         ],
         null,
+        null,
         null
       ] as const
       await expect(

@@ -162,6 +162,7 @@ import {
   decodeSidepanelChatWebUiHandoff,
   SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM,
 } from "@/services/tldw/sidepanel-chat-webui-handoff";
+import { hasSidepanelChatHandoffInHref } from "@/services/sidepanel-chat-handoff";
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -190,6 +191,7 @@ import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedH
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
 import { isEditableTarget } from "@/utils/editable-target"
 import { useFocusReturn } from "./hooks/useFocusReturn";
+import { useKeepFocusedComposerControlInView } from "./composer-dock-scroll";
 
 const readSidepanelChatWebUiHandoffFromLocation = () => {
   if (typeof window === "undefined") return null;
@@ -411,6 +413,8 @@ const PlaygroundContent = () => {
   const threadSearchInputRef = React.useRef<HTMLInputElement>(null);
   const { ref: composerDockRef, height: composerDockHeight } =
     useComposerDockHeight()
+  const composerDockScrollRef = React.useRef<HTMLDivElement>(null);
+  useKeepFocusedComposerControlInView(composerDockScrollRef, composerDockHeight);
 
   const [droppedFiles, setDroppedFiles] = React.useState<File[]>([]);
   const researchAttachmentIntentRef = React.useRef(0);
@@ -789,7 +793,9 @@ const PlaygroundContent = () => {
       params.get(SETTINGS_SERVER_CHAT_ID_PARAM)?.trim() || null;
     const researchReturnRunId =
       params.get(RESEARCH_RETURN_RUN_ID_PARAM)?.trim() || null;
-    const sidepanelHandoff = readSidepanelChatWebUiHandoffFromLocation();
+    // An extension copy (`?handoff=<id>`) opens in a new chat, not the last session (XP-09).
+    const sidepanelHandoff = readSidepanelChatWebUiHandoffFromLocation() ??
+      (hasSidepanelChatHandoffInHref(window.location.href) ? "extension-copy" : null);
     return {
       historyId,
       serverChatId: returnServerChatId,
@@ -3234,7 +3240,7 @@ const PlaygroundContent = () => {
         kind: "media" as const,
         label: toText(t("playground:cockpit.media", "Media")),
         title: toText(
-          t("playground:cockpit.mediaScopeLabel", "Media scope {{id}}", {
+          t("playground:cockpit.mediaScopeLabel", "Media item {{id}}", {
             id: mediaId,
           }),
         ),
@@ -3248,10 +3254,10 @@ const PlaygroundContent = () => {
         onOpen: () => openSearchAndContext({ tab: "context" }),
         onRemove: () => removeRagMediaAt(index),
         openLabel: toText(
-          t("playground:cockpit.openMediaSource", "Open media scope"),
+          t("playground:cockpit.openMediaSource", "Open media item"),
         ),
         removeLabel: toText(
-          t("playground:cockpit.removeMediaSource", "Remove media scope"),
+          t("playground:cockpit.removeMediaSource", "Remove media item"),
         ),
       })),
     ] satisfies Array<PlaygroundContextSource | null>
@@ -3551,11 +3557,11 @@ const PlaygroundContent = () => {
       : null,
     ragMediaIdCount > 0
       ? ragMediaIdCount === 1
-        ? toText(t("playground:cockpit.contextMediaCountOne", "1 media scope"))
+        ? toText(t("playground:cockpit.contextMediaCountOne", "1 media item"))
         : toText(
             t(
               "playground:cockpit.contextMediaCountMany",
-              `${ragMediaIdCount} media scopes`,
+              `${ragMediaIdCount} media items`,
               { count: ragMediaIdCount },
             ),
           )
@@ -3581,8 +3587,6 @@ const PlaygroundContent = () => {
       sessionDetail={sessionSummary.detail}
       sessionError={sessionSummary.error}
       historyLinked={Boolean(historyId)}
-      webSearch={webSearch}
-      onToggleWebSearch={toggleWebSearchFromCockpit}
       temporaryChat={temporaryChat}
       onToggleTemporaryChat={setTemporaryChatFromCockpit}
       contextCounts={{
@@ -3775,6 +3779,7 @@ const PlaygroundContent = () => {
           onMobilePanelChange={setMobileCockpitPanel}
           leftRail={cockpitLeftRail}
           rightRail={cockpitRightRail}
+          overlayBottomInset={composerDockHeight}
         >
           <div
             data-testid="playground-chat-shell"
@@ -4110,7 +4115,7 @@ const PlaygroundContent = () => {
                 data-testid={
                   stickyChatInput ? "playground-chat-transcript" : undefined
                 }
-                className={`custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4 ${
+                className={`custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4 [@media(max-height:500px)]:min-h-[min(42dvh,45%)] ${
                   exitFocusPillVisible ? "pt-14 scroll-pt-14" : ""
                 }`}
               >
@@ -4149,7 +4154,7 @@ const PlaygroundContent = () => {
                   ? "playground-chat-composer-dock"
                   : "playground-chat-composer-region"
               }
-              className={`relative flex max-h-[60%] min-h-0 w-full shrink flex-col ${
+              className={`relative flex max-h-[60%] min-h-0 w-full shrink flex-col [@media(max-height:500px)]:min-h-[4.5rem] ${
                 stickyChatInput
                   ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
                   : ""
@@ -4163,7 +4168,10 @@ const PlaygroundContent = () => {
                   className="absolute -top-12 right-4"
                 />
               )}
-              <div className="min-h-0 overflow-y-auto overscroll-contain">
+              <div
+                ref={composerDockScrollRef}
+                className="min-h-0 overflow-y-auto overscroll-contain"
+              >
                 <PlaygroundForm
                   connectionSetupInTimeline={showStarterDeck && !characterWorkflowActive}
                   onCharacterRouteApplyReady={onCharacterRouteApplyReady}

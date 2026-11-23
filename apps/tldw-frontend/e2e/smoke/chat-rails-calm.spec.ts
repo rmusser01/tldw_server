@@ -147,6 +147,78 @@ for (const viewport of [
   }
 }
 
+// CO-04 (#3113): at 1024px both rails left the transcript a few hundred px.
+// Below the threshold one rail is open at a time; the other waits behind its
+// tab, and swapping does not change the saved preferences.
+test('opens one rail at a time at 1024px and keeps the transcript usable', async ({ page }) => {
+  await prepareOfflinePreview(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('playgroundChatContextRailVisible', 'true');
+    localStorage.setItem('playgroundChatRuntimeRailVisible', 'true');
+    localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+  });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 60_000 });
+  const exitFocus = page.getByRole('button', { name: 'Exit focus', exact: true });
+  if (await exitFocus.isVisible()) await exitFocus.click();
+  const left = page.getByTestId('playground-cockpit-left-rail');
+  const right = page.getByTestId('playground-cockpit-right-rail');
+  await expect(left.or(right)).toHaveCount(1);
+  const main = page.getByTestId('playground-cockpit-main');
+  const mainWidth = (await main.boundingBox())!.width;
+  expect(mainWidth, `transcript column ${mainWidth}px`).toBeGreaterThanOrEqual(480);
+  const restore = page.getByTestId('playground-cockpit-right-rail-restore');
+  if (await restore.isVisible()) {
+    await restore.click();
+    await expect(right).toBeVisible();
+    await expect(left).toHaveCount(0);
+  }
+  expect(
+    await page.evaluate(() => [
+      localStorage.getItem('playgroundChatContextRailVisible'),
+      localStorage.getItem('playgroundChatRuntimeRailVisible'),
+    ])
+  ).toEqual(['true', 'true']);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+  expect(overflow).toBe(false);
+});
+
+// AX-04 review: with the chat list open a 1024px window leaves room for no
+// inline rail, so a rail overlays the transcript: it stops above the
+// composer, Escape closes it back to its tab, and closing it doesn't open
+// the other rail in its place.
+test('overlays a rail above the composer and closes it with Escape', async ({ page }) => {
+  await prepareOfflinePreview(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('playgroundChatContextRailVisible', 'true');
+    localStorage.setItem('playgroundChatRuntimeRailVisible', 'true');
+    localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+  });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 60_000 });
+  const sidebarToggle = page.getByTestId('chat-sidebar-toggle');
+  if ((await sidebarToggle.getAttribute('aria-expanded')) === 'false') await sidebarToggle.click();
+  const overlay = page.locator('aside[data-placement="overlay"]');
+  await expect(overlay).toHaveCount(1);
+  await expect(overlay).toHaveAttribute('data-testid', 'playground-cockpit-left-rail');
+  const railBox = (await overlay.boundingBox())!;
+  const dockBox = (await page.getByTestId('playground-chat-composer-dock').boundingBox())!;
+  expect(railBox.y + railBox.height, 'the overlay stops above the composer').toBeLessThanOrEqual(dockBox.y + 1);
+  await expect(page.getByTestId('chat-input')).toBeInViewport();
+
+  await overlay.getByRole('button', { name: 'Hide context', exact: true }).focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('aside[data-testid^="playground-cockpit-"]')).toHaveCount(0);
+  await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeFocused();
+
+  await page.getByTestId('playground-cockpit-right-rail-restore').click();
+  const runtime = page.getByTestId('playground-cockpit-right-rail');
+  await expect(runtime).toHaveAttribute('data-placement', 'overlay');
+  expect(await runtime.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+});
+
 test('keeps independent rail visibility after reload', async ({ page }) => {
   await prepareOfflinePreview(page);
   await page.setViewportSize({ width: 1440, height: 1000 });

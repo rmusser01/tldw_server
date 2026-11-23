@@ -426,7 +426,7 @@ const getGenerationReadinessCopy = (
         }),
         message: t("sidepanel:personaGarden.visuals.generationWorkerUnavailableMessage", {
           defaultValue:
-            "Enable PERSONA_VISUAL_GENERATION_WORKER_ENABLED before queueing Persona Buddy visual generation jobs."
+            "Enable PERSONA_VISUAL_GENERATION_WORKER_ENABLED before queueing persona avatar visual generation jobs."
         }),
         toneClassName: "border-warning/40 bg-warning/10 text-warning"
       }
@@ -437,7 +437,7 @@ const getGenerationReadinessCopy = (
         }),
         message: t("sidepanel:personaGarden.visuals.generationProviderUnavailableMessage", {
           defaultValue:
-            "Enable an image backend before queueing a Persona Buddy visual generation job."
+            "Enable an image backend before queueing a persona avatar visual generation job."
         }),
         toneClassName: "border-warning/40 bg-warning/10 text-warning"
       }
@@ -448,7 +448,7 @@ const getGenerationReadinessCopy = (
         }),
         message: t("sidepanel:personaGarden.visuals.generationAdapterUnavailableMessage", {
           defaultValue:
-            "Check the selected image backend installation and credentials before queueing a Persona Buddy visual generation job."
+            "Check the selected image backend installation and credentials before queueing a persona avatar visual generation job."
         }),
         toneClassName: "border-warning/40 bg-warning/10 text-warning"
       }
@@ -459,7 +459,7 @@ const getGenerationReadinessCopy = (
         }),
         message: t("sidepanel:personaGarden.visuals.generationDependencyCheckFailedMessage", {
           defaultValue:
-            "Check the server logs and image generation configuration before queueing a Persona Buddy visual generation job."
+            "Check the server logs and image generation configuration before queueing a persona avatar visual generation job."
         }),
         toneClassName: "border-destructive/40 bg-destructive/10 text-destructive"
       }
@@ -506,7 +506,7 @@ const getGenerationReadinessCopy = (
         }),
         message: t("sidepanel:personaGarden.visuals.generationReadinessLoadingMessage", {
           defaultValue:
-            "Persona Buddy visual generation will be available after setup checks finish."
+            "Persona avatar visual generation will be available after setup checks finish."
         }),
         toneClassName: "border-border bg-bg text-text-muted"
       }
@@ -3257,7 +3257,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-text">
                   {t("sidepanel:personaGarden.visuals.buddyPipelinePacketTitle", {
-                    defaultValue: "Buddy pipeline packet"
+                    defaultValue: "Avatar pipeline packet"
                   })}
                 </span>
                 <Tag>
@@ -3869,10 +3869,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           >
             <div className="font-medium text-text">
               {selectedPersonaName || selectedPersonaId}
-              {"'s Persona Buddy does not have a visual pack yet."}
+              {"'s persona avatar does not have a visual pack yet."}
             </div>
             <div className="mt-1">
-              Choose a ready-made Buddy above, or create a custom draft here.
+              Choose a ready-made avatar above, or create a custom draft here.
             </div>
             <div className="mt-1">
               Custom drafts support uploaded artwork, state animations, and generation. Review and activate when ready.
@@ -3926,7 +3926,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             <div className="mt-1">
               {t("sidepanel:personaGarden.visuals.activePackDescription", {
                 defaultValue:
-                  "The active pack is the one Persona Buddy renders now; other packs stay available for editing or review."
+                  "The active pack is the one the persona avatar renders now; other packs stay available for editing or review."
               })}
             </div>
           </div>

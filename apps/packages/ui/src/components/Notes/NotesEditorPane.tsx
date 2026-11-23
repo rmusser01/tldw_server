@@ -115,6 +115,8 @@ export interface NoteRelationsShape {
 }
 
 export interface NotesEditorPaneProps {
+  /** The Move to Trash Undo offer, shown here while the notes list is hidden (XP-17). */
+  undoBanner?: React.ReactNode
   // Layout
   isMobileViewport: boolean
   setMobileSidebarOpen: (open: boolean) => void
@@ -348,6 +350,7 @@ export const NotesEditorEmptyState: React.FC<{
 }
 
 const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
+  undoBanner,
   isMobileViewport,
   setMobileSidebarOpen,
   mobileSidebarOpen = false,
@@ -683,6 +686,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
       }`}
       aria-disabled={editorDisabled}
     >
+      {undoBanner}
       {isMobileViewport && (
         <div className="border-b border-border px-4 py-2">
           <Button

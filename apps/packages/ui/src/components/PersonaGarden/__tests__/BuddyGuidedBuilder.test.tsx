@@ -97,10 +97,10 @@ describe("BuddyGuidedBuilder", () => {
     const gallery = screen.getByTestId("buddy-builder-starter-catalog")
     const sources = screen.getByTestId("buddy-builder-source-picker")
     expect(gallery.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByRole("heading", { name: "Choose a ready-made Buddy" })).toBeVisible()
+    expect(screen.getByRole("heading", { name: "Choose a ready-made avatar" })).toBeVisible()
     const disclosure = sources.closest("details")!
     expect(disclosure).not.toHaveAttribute("open")
-    fireEvent.click(screen.getByText("Import or customize a Buddy"))
+    fireEvent.click(screen.getByText("Import or customize an avatar"))
     expect(screen.getByRole("button", { name: "Import Codex/Petdex pet" })).toBeVisible()
   })
 
@@ -143,7 +143,7 @@ describe("BuddyGuidedBuilder", () => {
   it("separates Codex/Petdex and native Persona Visual import paths", () => {
     renderBuilder()
 
-    fireEvent.click(screen.getByText("Import or customize a Buddy"))
+    fireEvent.click(screen.getByText("Import or customize an avatar"))
     fireEvent.click(screen.getByRole("button", { name: "Import Codex/Petdex pet" }))
     expect(
       screen.getByRole("button", { name: "Import Codex/Petdex pet" })

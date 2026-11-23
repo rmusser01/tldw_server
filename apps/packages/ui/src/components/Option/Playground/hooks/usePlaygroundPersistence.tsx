@@ -168,7 +168,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         notificationApi.error({
           message: t(
             "common:privateModeSaveErrorTitle",
-            "tldw Assistant can't save data"
+            "tldw can't save data"
           ),
           description: t(
             "playground:errors.privateModeDescription",

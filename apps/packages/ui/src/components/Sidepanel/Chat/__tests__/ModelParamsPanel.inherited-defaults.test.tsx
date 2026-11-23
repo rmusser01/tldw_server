@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ModelParamsPanel } from "../ModelParamsPanel"
+import { MODEL_PARAMS_SECTIONS_STORAGE_KEY } from "../model-params-sections"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useUiModeStore } from "@/store/ui-mode"
 
@@ -55,6 +56,8 @@ const field = (panel: HTMLElement, label: string) =>
 
 describe("ModelParamsPanel inherited defaults (XS-16)", () => {
   beforeEach(() => {
+    // Sections are remembered (XS-15); each test starts with them closed.
+    localStorage.removeItem(MODEL_PARAMS_SECTIONS_STORAGE_KEY)
     modelDefaults.value = {}
     useStoreChatModelSettings.getState().reset()
     useUiModeStore.setState({ mode: "pro" })

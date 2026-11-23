@@ -28,7 +28,7 @@ patchStaticAntdNotificationCompat()
 
 export const SidepanelApp: React.FC = () => {
   const { direction, t } = useSidepanelInit({
-    titleDefaultValue: "tldw Assistant — Sidebar"
+    titleDefaultValue: "Sidebar | tldw"
   })
   const Router =
     platformConfig.routers.sidepanel === "hash"

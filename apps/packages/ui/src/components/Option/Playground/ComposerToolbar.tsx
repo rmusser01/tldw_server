@@ -2,6 +2,7 @@ import React from "react";
 import { Modal, Tooltip } from "antd";
 import {
   ChevronDown,
+  Ellipsis,
   FileText,
   Gauge,
   Globe,
@@ -21,6 +22,12 @@ import { AssistantSelect } from "@/components/Common/AssistantSelect";
 import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton";
 import { PromptSelect } from "@/components/Common/PromptSelect";
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide";
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens";
+import {
+  SHORT_VIEWPORT_COLLAPSE,
+  SHORT_VIEWPORT_INLINE,
+  SHORT_VIEWPORT_INLINE_GROUP,
+} from "./composer-short-viewport";
 import type { ComposerToolbarRolePlayActions } from "./ComposerToolbarOverflow";
 import { composerShortcutHint } from "./composer-shortcut-hint";
 import {
@@ -223,6 +230,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const [assistantPickerOpen, setAssistantPickerOpen] = React.useState(false);
   const [promptPickerOpen, setPromptPickerOpen] = React.useState(false);
   const pendingCustomizationRevealRef = React.useRef(false);
+  // AX-04, decision [14]: in short viewports (max-height 500px, e.g. 400%
+  // zoom) this row collapses first, behind one "Composer options" button;
+  // the input and Send stay. The textarea shares Send's row there
+  // (PlaygroundForm), so the transcript keeps a usable height. Anything that
+  // reveals Tools reveals the row too, so pickers never anchor to a hidden
+  // panel.
+  const [shortRowOpen, setShortRowOpen] = React.useState(false);
+  const shortHidden = shortRowOpen ? "" : SHORT_VIEWPORT_COLLAPSE;
   const handleAssistantPickerOpen = React.useCallback((open: boolean) => {
     setAssistantPickerOpen(open);
     if (open) pendingCustomizationRevealRef.current = true;
@@ -236,6 +251,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       pendingCustomizationRevealRef.current = false;
     if (!pendingCustomizationRevealRef.current || optionsLoading) return;
     pendingCustomizationRevealRef.current = false;
+    setShortRowOpen(true);
     if (!optionsExpanded) onToggleOptions();
   }, [
     assistantPickerOpen,
@@ -246,6 +262,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   ]);
   React.useEffect(() => {
     const revealTools = () => {
+      setShortRowOpen(true);
       if (optionsLoading) pendingCustomizationRevealRef.current = true;
       else if (!optionsExpanded) onToggleOptions();
     };
@@ -340,8 +357,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     t,
     temporaryChat,
   );
-  const controlClass =
-    "inline-flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+  // One size grammar for toolbar controls: 32px desktop, 44px touch ([3]).
+  const controlClass = `${COMPOSER_TOOLBAR_TOKENS.textControl} text-text-muted transition-colors hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`;
   const activeContextItems = contextItems.filter(
     (item) =>
       item.id !== "model" &&
@@ -355,6 +372,18 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           "rolePlayScene",
         ].includes(item.id)),
   );
+  // What "Composer options" hides in short viewports, so its button can say
+  // when that includes a warning or something in use (AX-04 review).
+  const hiddenAttention = contextItems.some((item) => item.tone === "warning")
+    ? "warning"
+    : activeContextItems.length > 0 ||
+        selectedDocumentsCount > 0 ||
+        uploadedFilesCount > 0 ||
+        toolChoice !== "none" ||
+        appendFormattingGuidePrompt ||
+        openUIRequestMode
+      ? "active"
+      : null;
   const neutralContextItems = contextItems.filter(
     (item) => item.tone === "neutral" && !activeContextItems.includes(item),
   );
@@ -454,6 +483,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   return (
     <div
       ref={toolbarRef}
+      id="composer-toolbar"
       data-testid="composer-toolbar"
       onFocusCapture={(event) => {
         lastFocusedControlRef.current = event.target as HTMLElement;
@@ -479,7 +509,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           toggleRef.current?.focus();
         }
       }}
-      className="w-full"
+      className={`w-full ${shortRowOpen ? "" : SHORT_VIEWPORT_INLINE}`}
     >
       <SystemPromptTemplatesModal
         open={systemPromptsOpen}
@@ -508,10 +538,11 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         uploadedFilesCount > 0) && (
         <div
           data-testid="composer-context-strip"
+          data-short-collapsed={shortRowOpen ? undefined : "true"}
           aria-label={
             t("playground:composer.activeContext", "Active context") as string
           }
-          className="flex flex-wrap items-center gap-2 px-2 pb-3"
+          className={`flex flex-wrap items-center gap-2 px-2 pb-3 ${shortHidden}`}
         >
           {activeContextItems.map((item) => {
             const className = `inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 py-1 text-xs ${item.tone === "warning" ? "bg-warn/10 text-text" : "bg-surface2 text-text"}`;
@@ -585,7 +616,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       )}
 
       {optionsUnavailable && (
-        <p role="status" className="px-2 text-xs text-text-muted">
+        <p role="status" className={`px-2 text-xs text-text-muted ${shortHidden}`}>
           {t(
             "playground:composer.toolsPreferenceUnavailable",
             "Display preference unavailable. Tools still work for this visit.",
@@ -595,7 +626,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       {(toolChoice !== "none" ||
         appendFormattingGuidePrompt ||
         openUIRequestMode) && (
-        <div className="flex flex-wrap gap-2 px-2 pb-2 text-xs text-text-muted">
+        <div className={`flex flex-wrap gap-2 px-2 pb-2 text-xs text-text-muted ${shortHidden}`}>
           {toolChoice !== "none" && (
             <span>
               {t("playground:composer.mcpSelectedSummary", {
@@ -633,7 +664,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           t("playground:composer.toolsPanel", "Composer tools") as string
         }
         hidden={!optionsExpanded}
-        className="mb-3 max-h-[35dvh] overflow-y-auto overscroll-contain border-y border-border py-4 [scrollbar-color:rgb(var(--color-border))_transparent]"
+        className={`mb-3 max-h-[35dvh] overflow-y-auto overscroll-contain border-y border-border py-4 [scrollbar-color:rgb(var(--color-border))_transparent] ${shortHidden}`}
       >
         <div className="grid gap-5 px-2 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border">
           <section
@@ -872,10 +903,13 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       </section>
 
       <div
+        id="composer-bottom-bar"
         data-testid="composer-bottom-bar"
         className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2 px-1"
       >
-        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1">
+        <div
+          className={`flex max-w-full shrink-0 flex-wrap items-center gap-1 ${shortHidden}`}
+        >
           {attachmentButton}
           <button
             ref={toggleRef}
@@ -903,10 +937,10 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           </span>
         </div>
         <div
-          className={`flex min-w-0 items-center gap-2 ${isMobile ? "w-full justify-between" : "flex-1 justify-end"}`}
+          className={`flex min-w-0 items-center gap-2 ${isMobile ? "w-full justify-between" : "flex-1 justify-end"} ${shortRowOpen ? "" : SHORT_VIEWPORT_INLINE_GROUP}`}
         >
           <Tooltip title={persistenceTooltip}>
-            <span className="text-xs">
+            <span className={`text-xs ${shortHidden}`}>
               <button
                 type="button"
                 onClick={() => onToggleTemporaryChat(!temporaryChat)}
@@ -914,7 +948,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
                 aria-pressed={!temporaryChat}
                 aria-label={persistenceControlLabel}
                 data-testid="composer-persistence"
-                className={`min-h-9 rounded-md px-2 transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed ${temporaryChat ? "bg-warn/10 text-text" : "text-text-muted"}`}
+                className={`${COMPOSER_TOOLBAR_TOKENS.textControl} transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed ${temporaryChat ? "bg-warn/10 text-text" : "text-text-muted"}`}
               >
                 {persistenceLabel}
               </button>
@@ -925,16 +959,55 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             onClickCapture={() => {
               if (!optionsExpanded) toggleRef.current?.focus();
             }}
-            className={`${optionsExpanded || dictationActive || voiceChatEnabled ? "flex" : ""} shrink-0 items-center gap-1`}
+            className={`${optionsExpanded || dictationActive || voiceChatEnabled ? "flex" : ""} shrink-0 items-center gap-1 ${shortHidden}`}
           >
             {dictationControl}
             {voiceChatButton}
           </div>
           <div
-            className={`min-w-0 ${isMobile ? "max-w-[10rem]" : "max-w-[18rem]"} [&>button]:max-w-full`}
+            className={`min-w-0 ${isMobile ? "max-w-[10rem]" : "max-w-[18rem]"} [&>button]:max-w-full ${shortHidden}`}
           >
             {modelSelectButton}
           </div>
+          <button
+            type="button"
+            onClick={() => setShortRowOpen((open) => !open)}
+            aria-expanded={shortRowOpen}
+            aria-controls="composer-toolbar"
+            aria-describedby={
+              hiddenAttention && !shortRowOpen
+                ? "composer-short-options-attention"
+                : undefined
+            }
+            data-attention={(!shortRowOpen && hiddenAttention) || undefined}
+            aria-label={
+              t("playground:composer.shortOptions", "Composer options") as string
+            }
+            title={t("playground:composer.shortOptions", "Composer options") as string}
+            data-testid="composer-short-options-toggle"
+            className={`relative hidden ${COMPOSER_TOOLBAR_TOKENS.iconButton} [@media(max-height:500px)]:inline-flex border border-border text-text-muted transition-colors hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${shortRowOpen ? "bg-surface2 text-text" : ""}`}
+          >
+            <Ellipsis className="h-4 w-4" aria-hidden="true" />
+            {hiddenAttention && !shortRowOpen && (
+              <span
+                aria-hidden="true"
+                className={`absolute right-1 top-1 h-2 w-2 rounded-full ${hiddenAttention === "warning" ? "bg-warn" : "bg-primary"}`}
+              />
+            )}
+          </button>
+          {hiddenAttention && !shortRowOpen && (
+            <span id="composer-short-options-attention" className="sr-only">
+              {hiddenAttention === "warning"
+                ? t(
+                    "playground:composer.shortOptionsWarning",
+                    "Some hidden options need attention.",
+                  )
+                : t(
+                    "playground:composer.shortOptionsActive",
+                    "Some hidden options are in use.",
+                  )}
+            </span>
+          )}
           <div
             data-testid="composer-inline-send-control"
             className="flex shrink-0 items-center gap-2"

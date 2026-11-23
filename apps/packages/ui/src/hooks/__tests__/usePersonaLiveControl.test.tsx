@@ -989,7 +989,7 @@ describe("usePersonaLiveControl", () => {
 })
 
 
-describe("Buddy incoming stream feedback", () => {
+describe("Avatar incoming stream feedback", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     MockWebSocket.instances = []

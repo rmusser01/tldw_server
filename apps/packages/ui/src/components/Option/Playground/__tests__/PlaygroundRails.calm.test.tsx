@@ -21,8 +21,6 @@ const contextProps: PlaygroundContextRailProps = {
   contextSummary: [],
   sessionLabel: "Local chat",
   historyLinked: false,
-  webSearch: false,
-  onToggleWebSearch: vi.fn(),
   temporaryChat: false,
   onToggleTemporaryChat: vi.fn(),
   contextCounts: { files: 0, knowledge: 0, media: 0, research: 0 },

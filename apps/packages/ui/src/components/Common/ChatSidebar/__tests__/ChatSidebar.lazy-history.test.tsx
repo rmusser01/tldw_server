@@ -150,7 +150,7 @@ describe("ChatSidebar lazy history loading", () => {
 
   it.each(["server", "folders"])("opens Folders with history collapsed from saved %s view", async (savedView) => {
     activeTab.value = savedView
-    render(<MemoryRouter><ChatSidebar collapsed={false} /></MemoryRouter>)
+    render(<MemoryRouter initialEntries={["/chat"]}><ChatSidebar collapsed={false} /></MemoryRouter>)
     const history = screen.getByRole("button", { name: /Recent conversations/i })
     expect(history).toHaveAttribute("aria-expanded", "false")
     const folders = screen.getByRole("radio", { name: "Folders", exact: true })
@@ -278,7 +278,7 @@ describe("ChatSidebar lazy history loading", () => {
 
   it("does not authorize server history from expansion before account verification", () => {
     verifiedOwner.verificationState = "pending"
-    render(<MemoryRouter><ChatSidebar collapsed={false} /></MemoryRouter>)
+    render(<MemoryRouter initialEntries={["/chat"]}><ChatSidebar collapsed={false} /></MemoryRouter>)
     fireEvent.click(screen.getByRole("button", {name: /Recent conversations/i}))
     expect(useServerChatHistoryMock).toHaveBeenLastCalledWith("", expect.objectContaining({enabled: false, owner: undefined}))
   })
@@ -307,14 +307,14 @@ describe("ChatSidebar lazy history loading", () => {
   })
 it("lazily mounts On this device while leaving the server coordinator disabled", async () => {
   activeTab.value = "local"
-  const view = render(<MemoryRouter><ChatSidebar collapsed={false} /></MemoryRouter>)
+  const view = render(<MemoryRouter initialEntries={["/chat"]}><ChatSidebar collapsed={false} /></MemoryRouter>)
   expect(screen.queryByTestId("local-chat-list")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
   expect(screen.getByTestId("local-chat-list")).toBeInTheDocument()
   expect(screen.getByText("On this device")).toBeInTheDocument()
   expect(useServerChatHistoryMock).toHaveBeenLastCalledWith("", expect.objectContaining({ enabled: false }))
   expect(useChatSurfaceCoordinatorStore.getState().visiblePanels["server-history"]).toBe(false)
-  view.rerender(<MemoryRouter><ChatSidebar collapsed /></MemoryRouter>)
+  view.rerender(<MemoryRouter initialEntries={["/chat"]}><ChatSidebar collapsed /></MemoryRouter>)
   expect(screen.queryByTestId("local-chat-list")).toBeNull()
 })
 

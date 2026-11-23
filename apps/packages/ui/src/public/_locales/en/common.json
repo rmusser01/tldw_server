@@ -1,12 +1,12 @@
 {
   "pageAssist": {
-    "message": "tldw Assistant"
+    "message": "tldw"
   },
   "titles_options": {
-    "message": "tldw Assistant"
+    "message": "tldw"
   },
   "titles_sidepanel": {
-    "message": "tldw Assistant"
+    "message": "tldw"
   },
   "dismiss": {
     "message": "Dismiss"
@@ -684,7 +684,7 @@
     "message": "Are you sure you want to cancel the download? This will stop the download process. If supported by the provider, you can resume later."
   },
   "privateModeSaveErrorTitle": {
-    "message": "tldw Assistant can't save data"
+    "message": "tldw can't save data"
   },
   "error_label": {
     "message": "Error"
@@ -927,7 +927,7 @@
     "message": "Search your knowledge base and context"
   },
   "commandPalette_toggleWebSearch": {
-    "message": "Toggle Web Search"
+    "message": "Toggle web search"
   },
   "commandPalette_toggleWebDesc": {
     "message": "Search the internet"
@@ -945,7 +945,7 @@
     "message": "Toggle Sidebar"
   },
   "commandPalette_toggleSidebarDesc": {
-    "message": "Show or hide the chat sidebar"
+    "message": "Show or hide the sidebar"
   },
   "commandPalette_placeholder": {
     "message": "Search commands, settings, and prompts…"
@@ -999,16 +999,16 @@
     "message": "Untitled note"
   },
   "featureHints_knowledge_title": {
-    "message": "Search your knowledge"
+    "message": "Search & Context"
   },
   "featureHints_knowledge_description": {
-    "message": "Open the knowledge search panel to find snippets and insert them into your chat."
+    "message": "Open Search & Context to find snippets and insert them into your chat."
   },
   "featureHints_moreTools_title": {
-    "message": "More tools available"
+    "message": "Tools"
   },
   "featureHints_moreTools_description": {
-    "message": "Access vision mode, image upload, quick ingest, and the full app."
+    "message": "Web search and MCP tools are under Tools; images, quick ingest and Open in full page are under More tools."
   },
   "featureHints_commandPalette_title": {
     "message": "Quick commands"
@@ -1025,8 +1025,23 @@
   "chatSidebar_title": {
     "message": "Chats"
   },
+  "undo_action": {
+    "message": "Undo"
+  },
+  "undo_dismiss": {
+    "message": "Dismiss"
+  },
+  "undo_failed": {
+    "message": "Couldn't restore. Try again."
+  },
+  "undo_restoredStatus": {
+    "message": "Restored."
+  },
   "chatSidebar_historyLandmark": {
     "message": "Chat history"
+  },
+  "chatSidebar_menuTitle": {
+    "message": "Menu"
   },
   "chatSidebar_newChat": {
     "message": "New Chat"
@@ -1158,7 +1173,7 @@
     "message": "Opening sidebar to save note..."
   },
   "contextSaveToNotesDeliveryFailed": {
-    "message": "Could not open the sidebar to save this note. Check that the tldw Assistant sidebar is allowed on this site and try again."
+    "message": "Could not open the sidebar to save this note. Check that the tldw sidebar is allowed on this site and try again."
   },
   "hfSendPageRejected": {
     "message": "[tldw] Page send request rejected by tldw_server"
@@ -1176,25 +1191,25 @@
     "message": "[tldw] Something went wrong while sending this page to tldw_server. Check that your tldw_server and the extension are running, then try again."
   },
   "hfPullInProgress": {
-    "message": "[tldw Assistant] A model pull request is already in progress. Please wait for it to finish before starting another one."
+    "message": "[tldw] A model pull request is already in progress. Please wait for it to finish before starting another one."
   },
   "hfPullConfirm": {
-    "message": "[tldw Assistant] Do you want to send a request to your tldw_server to pull the \"$1\" model? This is independent of the huggingface.co website. Your server will start pulling the model after you confirm."
+    "message": "[tldw] Do you want to send a request to your tldw_server to pull the \"$1\" model? This is independent of the huggingface.co website. Your server will start pulling the model after you confirm."
   },
   "hfPullSending": {
-    "message": "[tldw Assistant] Sending a request to your tldw_server to pull \"$1\". Check the extension icon or your tldw_server logs for progress."
+    "message": "[tldw] Sending a request to your tldw_server to pull \"$1\". Check the extension icon or your tldw_server logs for progress."
   },
   "hfPullErrorWithDetail": {
-    "message": "[tldw Assistant] Failed to send a pull request for \"$1\": $2. Check Settings → tldw server and try again."
+    "message": "[tldw] Failed to send a pull request for \"$1\": $2. Check Settings → tldw server and try again."
   },
   "hfPullError": {
-    "message": "[tldw Assistant] Failed to send a pull request for \"$1\". Check Settings → tldw server and try again."
+    "message": "[tldw] Failed to send a pull request for \"$1\". Check Settings → tldw server and try again."
   },
   "hfPullSuccess": {
-    "message": "[tldw Assistant] Request sent to your tldw_server to pull \"$1\". Monitor the extension icon or tldw_server logs for status."
+    "message": "[tldw] Request sent to your tldw_server to pull \"$1\". Monitor the extension icon or tldw_server logs for status."
   },
   "hfPullException": {
-    "message": "[tldw Assistant] Something went wrong while sending a pull request for \"$1\" to your tldw_server. Check that your tldw_server and the extension are running, then try again."
+    "message": "[tldw] Something went wrong while sending a pull request for \"$1\" to your tldw_server. Check that your tldw_server and the extension are running, then try again."
   },
   "stepLabel": {
     "message": "Welcome"
@@ -1344,7 +1359,7 @@
     "message": "No active tab found for contextual action."
   },
   "contextCopilotPopupDeliveryFailed": {
-    "message": "Could not open the contextual popup. Check that tldw Assistant is allowed on this site and try again."
+    "message": "Could not open the contextual popup. Check that tldw is allowed on this site and try again."
   },
   "popupStop": {
     "message": "Stop"
@@ -2153,11 +2168,26 @@
   "chatSidebar_groups_older": {
     "message": "Older"
   },
-  "chatSidebar_movedToTrash": {
-    "message": "Moved to Trash"
+  "chatSidebar_movedChatToTrash": {
+    "message": "Moved \"{{title}}\" to Trash."
   },
-  "chatSidebar_undoTrash": {
-    "message": "Undo"
+  "chatSidebar_movedChatsToTrash_one": {
+    "message": "Moved {{count}} chat to Trash."
+  },
+  "chatSidebar_movedChatsToTrash_other": {
+    "message": "Moved {{count}} chats to Trash."
+  },
+  "chatSidebar_undoPartialRestored": {
+    "message": "Restored {{restored}} of {{total}} chats."
+  },
+  "chatSidebar_stillInTrashNamed": {
+    "message": "\"{{title}}\" is still in Trash."
+  },
+  "chatSidebar_stillInTrash_one": {
+    "message": "{{count}} chat is still in Trash."
+  },
+  "chatSidebar_stillInTrash_other": {
+    "message": "{{count}} chats are still in Trash."
   },
   "chatSidebar_viewTrash": {
     "message": "View Trash"
@@ -2278,5 +2308,11 @@
   },
   "chatSidebar_exportTooLarge": {
     "message": "This chat is too large to export here. Use Chatbooks to export it."
+  },
+  "saveToNotesUnavailable": {
+    "message": "Notes isn't available on this server."
+  },
+  "openNote": {
+    "message": "Open note"
   }
 }

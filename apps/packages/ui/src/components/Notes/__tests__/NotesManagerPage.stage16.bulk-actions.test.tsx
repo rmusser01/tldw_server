@@ -310,9 +310,9 @@ describe("NotesManagerPage stage 16 bulk actions", () => {
       )
       expect(deleteCalls.length).toBe(2)
     })
-    expect(mockConfirmDanger).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Delete selected notes?" })
-    )
+    // XP-17 (decision 8): bulk Move to Trash happens at once and offers Undo.
+    expect(mockConfirmDanger).not.toHaveBeenCalled()
+    expect(await screen.findByTestId("notes-undo")).toHaveTextContent("Moved 2 notes to Trash.")
   })
 
   it("dispatches bulk add-tags patches and offers Undo instead of a danger confirm", async () => {

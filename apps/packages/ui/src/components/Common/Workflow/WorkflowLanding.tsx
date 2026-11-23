@@ -140,7 +140,7 @@ export const WorkflowLanding: React.FC<WorkflowLandingProps> = ({
             className="text-2xl font-semibold text-text inline-flex items-center justify-center gap-2"
           >
             <Sparkles className="h-6 w-6 text-primary" />
-            {t("workflows:landing.title", "Welcome to tldw Assistant")}
+            {t("workflows:landing.title", "Welcome to tldw")}
           </h1>
           <p className="text-base text-text-muted mt-2">
             {t("workflows:landing.subtitle", "What would you like to do?")}
@@ -227,7 +227,7 @@ export const WorkflowLanding: React.FC<WorkflowLandingProps> = ({
           className="text-2xl font-semibold text-text inline-flex items-center justify-center gap-2"
         >
           <Sparkles className="h-6 w-6 text-primary" />
-          {t("workflows:landing.title", "Welcome to tldw Assistant")}
+          {t("workflows:landing.title", "Welcome to tldw")}
         </h1>
         <p className="text-base text-text-muted mt-2">
           {t("workflows:landing.subtitle", "What would you like to do?")}
