@@ -9,6 +9,7 @@
  */
 import {
   createFakeTldwServer,
+  deferred,
   HARNESS_WAIT,
   renderPlayground,
   resetPlaygroundHarness,
@@ -262,5 +263,45 @@ describe("Playground first send in a new chat (CM-14)", { timeout: 60_000 }, () 
     expect(screen.queryByText(LOADING)).toBeNull()
     expect(server.completionRequests()).toHaveLength(0)
     expect(serverRows(server)).toEqual([[]])
+  })
+
+  // 8B x 8C: with server-settled turns, a Stop before the first token keeps the
+  // saved question for "Review saved question". The question shown on Enter
+  // must stay on screen through the Stop and the view's follow of the saved
+  // question, without a bubble -> empty -> question flash. (The follow moves
+  // the view before the pipeline's cleanup runs, so that cleanup can no
+  // longer remove the early row.)
+  it("keeps the early question through a server-settled Stop before the first token", async () => {
+    const server = createFakeTldwServer({ nativeCompletion: true })
+    const view = await renderPlayground({ server })
+    const held = deferred()
+    server.planCompletion({ chunks: ["never sent"], pauseAfterChunks: 0, resume: held.promise })
+    const shown = (messages: Array<{ isBot?: boolean; message?: string }>) =>
+      messages.some((row) => !row.isBot && row.message === "Stop before reply")
+    // Every published transcript, from Enter to the final state.
+    const timeline: boolean[] = []
+    const unsubscribe = useStoreMessageOption.subscribe((state, previous) => {
+      if (state.messages !== previous.messages) timeline.push(shown(state.messages))
+    })
+
+    try {
+      await pressEnterWith(view, "Stop before reply")
+      await waitFor(() => expect(server.completionRequests()).toHaveLength(1), HARNESS_WAIT)
+      await view.user.click(screen.getByRole("button", { name: "Stop Streaming" }))
+      await waitForChatIdle()
+      await waitFor(() => expect(transcript()).toEqual([{ role: "user", text: "Stop before reply" }]), HARNESS_WAIT)
+      expect(await screen.findByRole("button", { name: "Review saved question" }, HARNESS_WAIT)).toBeVisible()
+      await pause(100)
+    } finally {
+      unsubscribe()
+      held.resolve()
+    }
+
+    expectRendered(["Stop before reply"])
+    expect(serverRows(server)).toEqual([["user: Stop before reply"]])
+    // Once shown, the question is never missing from the transcript.
+    const first = timeline.indexOf(true)
+    expect(first).toBeGreaterThanOrEqual(0)
+    expect(timeline.slice(first)).not.toContain(false)
   })
 })
