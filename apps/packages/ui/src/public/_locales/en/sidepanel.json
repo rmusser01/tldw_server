@@ -68,6 +68,9 @@
   "header_openSettingsAria": {
     "message": "Open settings"
   },
+  "header_openFlashcards": {
+    "message": "Flashcards"
+  },
   "header_tempPill": {
     "message": "Temp"
   },
@@ -111,13 +114,13 @@
     "message": "Search & Vision"
   },
   "controlRow_webSearch": {
-    "message": "Web Search"
+    "message": "Web search"
   },
   "controlRow_vision": {
     "message": "Vision"
   },
   "controlRow_visionDisabledKnowledge": {
-    "message": "Disable Knowledge Search to use Vision"
+    "message": "Turn off Search & Context to use Vision"
   },
   "controlRow_visionTooltip": {
     "message": "Enable Vision to analyze images"
@@ -156,7 +159,7 @@
     "message": "More tools"
   },
   "toolbar_knowledgeSearch": {
-    "message": "Knowledge Search"
+    "message": "Search & Context"
   },
   "composer_connectHint": {
     "message": "Connect to your tldw server in Settings to send messages."
@@ -351,10 +354,10 @@
     "message": "Search"
   },
   "rag_show": {
-    "message": "Show Knowledge Search"
+    "message": "Show Search & Context"
   },
   "rag_hide": {
-    "message": "Hide Knowledge Search"
+    "message": "Hide Search & Context"
   },
   "rag_addTagPlaceholder": {
     "message": "Add tag (Enter)"
@@ -399,7 +402,7 @@
     "message": "Dismiss"
   },
   "errors_privateModeTitle": {
-    "message": "tldw Assistant can't save data"
+    "message": "tldw can't save data"
   },
   "errors_privateModeDescription": {
     "message": "Firefox Private Mode does not support saving chat history. Temporary chat is enabled by default. More fixes coming soon."
@@ -494,6 +497,12 @@
   "controlRow_mcpToolsEmpty": {
     "message": "No MCP tools available"
   },
+  "contextMenu_movedChatToTrash": {
+    "message": "Moved \"{{title}}\" to Trash."
+  },
+  "contextMenu_moveToTrash": {
+    "message": "Move to Trash"
+  },
   "contextMenu_status": {
     "message": "Status"
   },
@@ -587,6 +596,9 @@
   "multiSelect_deleteSuccess": {
     "message": "Chats moved to trash."
   },
+  "multiSelect_restoreSuccess": {
+    "message": "Chats restored."
+  },
   "multiSelect_localOnlyClosed": {
     "message": "{{count}} local chat(s) were closed."
   },
@@ -597,7 +609,7 @@
     "message": "Search all settings"
   },
   "knowledge_title": {
-    "message": "Knowledge Search"
+    "message": "Search & Context"
   },
   "knowledge_tabs_search": {
     "message": "Search"
@@ -756,7 +768,7 @@
     "message": "Enable generation"
   },
   "rag_enableGenerationHelper": {
-    "message": "Generate answers from retrieved context"
+    "message": "Chat answers from your sources. QA search writes one only when you click Generate answer."
   },
   "rag_strictExtractive": {
     "message": "Strict extractive"
@@ -1248,7 +1260,7 @@
     "message": "File Search"
   },
   "knowledge_tabs_label": {
-    "message": "Knowledge panel sections"
+    "message": "Search & Context sections"
   },
   "knowledge_tabs_contextBadge": {
     "message": "{{count}} items attached"
@@ -1273,6 +1285,21 @@
   },
   "qaSearch_insertAnswer": {
     "message": "Insert answer"
+  },
+  "qaSearch_generateAnswer": {
+    "message": "Generate answer"
+  },
+  "qaSearch_generatingAnswer": {
+    "message": "Generating answer…"
+  },
+  "qaSearch_noAnswerGenerated": {
+    "message": "No answer was generated from these sources."
+  },
+  "qaSearch_generateAnswerFailed": {
+    "message": "Couldn't generate an answer. Try again, or check the model in Settings."
+  },
+  "qaSearch_answerReady": {
+    "message": "Answer ready."
   },
   "qaSearch_copyChunk": {
     "message": "Copy chunk"
@@ -1383,7 +1410,7 @@
     "message": "Choose a Persona Visual or Codex/Petdex archive with a supported zip media type."
   },
   "personaGarden_visuals_builder_heading": {
-    "message": "Buddy builder"
+    "message": "Choose an avatar"
   },
   "personaGarden_visuals_builder_sourceStep": {
     "message": "Choose a source"
@@ -1401,7 +1428,7 @@
     "message": "Activate"
   },
   "personaGarden_visuals_builder_bundledSource": {
-    "message": "Bundled Buddy"
+    "message": "Browse ready-made avatars"
   },
   "personaGarden_visuals_builder_codexImportSource": {
     "message": "Import Codex/Petdex pet"
@@ -1554,10 +1581,10 @@
     "message": "Persona visuals"
   },
   "personaGarden_visuals_builder_description": {
-    "message": "Choose, import, review, configure, and activate a visual buddy for {{persona}}."
+    "message": "Choose artwork for {{persona}}. You can review each draft before activating it."
   },
   "personaGarden_visuals_builder_stepperAria": {
-    "message": "Buddy builder steps"
+    "message": "Avatar builder steps"
   },
   "personaGarden_visuals_builder_bundledSourceHelp": {
     "message": "Start from one of the reviewed Basic defaults."
@@ -1590,7 +1617,7 @@
     "message": "Start blank"
   },
   "personaGarden_visuals_builder_blankSourceHelp": {
-    "message": "Create a draft when the buddy needs custom states."
+    "message": "Create a draft when the avatar needs custom states."
   },
   "personaGarden_visuals_builder_blankHelp": {
     "message": "Blank drafts use the existing title and create-draft controls below."
@@ -1629,7 +1656,7 @@
     "message": "Copy production packet"
   },
   "personaGarden_visuals_builder_activePackFallback": {
-    "message": "Active visual buddy"
+    "message": "Active avatar"
   },
   "personaGarden_visuals_builder_packCount": {
     "message": "{{count}} packs"
@@ -1641,7 +1668,7 @@
     "message": "Draft preview"
   },
   "personaGarden_visuals_builder_review_previewFallback": {
-    "message": "Buddy preview"
+    "message": "Avatar preview"
   },
   "personaGarden_visuals_builder_review_atlasHeading": {
     "message": "Atlas metadata"
@@ -1728,7 +1755,7 @@
     "message": "bytes"
   },
   "personaGarden_visuals_setup_activeDescription": {
-    "message": "A visual buddy is active for this persona."
+    "message": "An avatar is active for this persona."
   },
   "personaGarden_visuals_setup_activeTag": {
     "message": "active"
@@ -1752,10 +1779,10 @@
     "message": "Choose another default"
   },
   "personaGarden_visuals_setup_compactEyebrow": {
-    "message": "Visual buddy"
+    "message": "Avatar"
   },
   "personaGarden_visuals_setup_compactHelp": {
-    "message": "Open the Buddy builder in Persona Garden to choose, import, review, and activate visuals."
+    "message": "Open the avatar builder in Persona Garden to choose, import, review, and activate visuals."
   },
   "personaGarden_visuals_setup_copyTag": {
     "message": "copy"
@@ -1779,7 +1806,7 @@
     "message": "Draft visual packs are ready to review. Activate one when it matches this persona."
   },
   "personaGarden_visuals_setup_emptyDescription": {
-    "message": "No visual buddy is active for this persona. Choose a starter path to create an inactive pack for review."
+    "message": "No avatar is active for this persona. Choose a starter path to create an inactive pack for review."
   },
   "personaGarden_visuals_setup_emptyPack": {
     "message": "Empty pack"
@@ -1788,7 +1815,7 @@
     "message": "first run"
   },
   "personaGarden_visuals_setup_heading": {
-    "message": "Visual buddy setup"
+    "message": "Avatar setup"
   },
   "personaGarden_visuals_setup_importDescription": {
     "message": "Import a visual pack through the existing preview flow, then review and enable it when ready."
@@ -1800,7 +1827,7 @@
     "message": "Loading bundled defaults."
   },
   "personaGarden_visuals_setup_openVisuals": {
-    "message": "Open Buddy builder"
+    "message": "Open avatar builder"
   },
   "personaGarden_visuals_setup_optionalTag": {
     "message": "optional"
@@ -1835,15 +1862,15 @@
   "personaGarden": {
     "visuals": {
       "builder": {
-        "heading": "Choose a Buddy",
+        "heading": "Choose an avatar",
         "description": "Choose artwork for {{persona}}. You can review each draft before activating it.",
-        "defaultCatalog": "Choose a ready-made Buddy",
-        "bundledSource": "Browse ready-made Buddies",
+        "defaultCatalog": "Choose a ready-made avatar",
+        "bundledSource": "Browse ready-made avatars",
         "bundledSourceHelp": "Return to the artwork gallery.",
-        "otherSources": "Import or customize a Buddy",
-        "galleryHelp": "Preview the artwork, then copy a Buddy to review and activate it.",
-        "loading": "Loading Buddies…",
-        "previewUnavailable": "Preview unavailable. Retry to view this Buddy.",
+        "otherSources": "Import or customize an avatar",
+        "galleryHelp": "Preview the artwork, then copy an avatar to review and activate it.",
+        "loading": "Loading avatars…",
+        "previewUnavailable": "Preview unavailable. Retry to view this avatar.",
         "retryPreview": "Retry preview",
         "loadingPreview": "Loading artwork…",
         "previewLabel": "preview",
@@ -1852,12 +1879,12 @@
         "template": "Custom template",
         "copyTemplate": "Copy template as draft",
         "customTemplates": "Custom artwork templates",
-        "catalogEmpty": "No ready-made Buddies are available on this server. Import a pack or create your own below.",
+        "catalogEmpty": "No ready-made avatars are available on this server. Import a pack or create your own below.",
         "active": "Active",
         "blankHelp": "Name your custom draft in the advanced creation section below.",
         "libraryHelp": "Choose a saved pack in the library section below.",
         "duplicateHelp": "Choose a persona and pack in the duplicate section below.",
-        "choicesFor": "Buddy choices for {{persona}}"
+        "choicesFor": "Avatar choices for {{persona}}"
       },
       "advancedCreation": "Manage packs and advanced creation",
       "identityArtwork": "Identity artwork"
@@ -1894,24 +1921,24 @@
     "currentConversation": "Current conversation"
   },
   "buddyManagement": {
-    "defaultSaved": "Workspace default saved. Buddy attachment was not confirmed: ",
+    "defaultSaved": "Workspace default saved. Avatar attachment was not confirmed: ",
     "saveFailed": "Could not apply. Your selection is retained; refresh and retry.",
-    "title": "Buddy & Persona Management",
+    "title": "Avatar settings",
     "cancel": "Cancel",
     "apply": "Apply",
-    "intro": "Choose a Buddy and where it belongs. Artwork is independent of the conversation’s Persona.",
+    "intro": "Choose an avatar and where it belongs. The avatar’s artwork doesn’t change the conversation’s Persona.",
     "currentPersona": "Conversation Persona",
     "personaUnavailable": "Persona unavailable",
     "none": "None",
-    "finishSelection": "Apply or cancel your Buddy changes before editing conversation settings.",
+    "finishSelection": "Apply or cancel your avatar changes before editing conversation settings.",
     "editConversation": "Edit conversation Persona & behavior",
     "retry": "Retry",
     "loading": "Loading available choices…",
-    "searchBuddies": "Find a Buddy",
-    "yourBuddies": "Your Buddies",
+    "searchBuddies": "Find an avatar",
+    "yourBuddies": "Your avatars",
     "use": "Use",
-    "loadMoreBuddies": "Load more Buddies",
-    "gallery": "Choose a ready-made Buddy",
+    "loadMoreBuddies": "Load more avatars",
+    "gallery": "Choose a ready-made avatar",
     "attachment": "Attach to",
     "scope": "Scope",
     "oneConversation": "One conversation",
@@ -1921,7 +1948,7 @@
     "conversation": "Conversation",
     "chooseConversation": "Choose a conversation",
     "moreConversations": "Load more conversations",
-    "noConversations": "Start a conversation in Console, then return here to attach your Buddy. Workspace attachments can be selected before conversations exist.",
+    "noConversations": "Start a conversation in Console, then return here to attach your avatar. Workspace attachments can be selected before conversations exist.",
     "conversationPersona": "The conversation keeps its current Persona. Use conversation settings to change its identity or behavior.",
     "chooseWorkspace": "Choose a workspace",
     "defaultPersona": "Default Persona for new conversations",
@@ -1929,13 +1956,13 @@
     "newOnly": "Applies to new conversations only. Existing conversations and explicit choices keep their identity. Changed defaults use read-only memory; advanced memory settings remain in workspace settings.",
     "workspaceVoice": "Workspace mode names each conversation and can read responses aloud. Microphone input is available only for a single conversation.",
     "selected": "Selected",
-    "useBuddy": "Use this Buddy",
+    "useBuddy": "Use this avatar",
     "licenceInfo": "Artwork licence",
-    "entry": "Buddy & Persona",
+    "entry": "Avatar",
     "dictationFailed": "Dictation unavailable. Check audio settings or type your reply.",
     "changedTarget": "Attachment changed. Refresh before replying.",
     "sendFailed": "Reply could not be confirmed. Your draft is retained. Retry uses the same request identity.",
-    "interaction": "Buddy conversation",
+    "interaction": "Avatar conversation",
     "queued": "Queued",
     "working": "Working",
     "stop": "Stop",
@@ -1966,20 +1993,20 @@
     "targetUnavailable": "Target unavailable",
     "open": "Open",
     "newResponses": "new responses",
-    "move": "Move Buddy with arrow keys",
+    "move": "Move avatar with arrow keys",
     "moveHint": "Drag to move, or focus and use arrow keys. Home resets position.",
-    "repair": "Buddy attachment needs attention",
+    "repair": "Avatar attachment needs attention",
     "workspaceScope": "Attached to workspace",
     "conversationScope": "Attached to conversation",
     "replyTarget": "Reply to conversation",
-    "options": "Buddy options",
+    "options": "Avatar options",
     "expressions": "Expressions",
     "dynamic": "Dynamic",
     "static": "Static",
     "reducedMotion": "Reduced motion is on; expressions remain static.",
     "resetPosition": "Reset position",
-    "manage": "Manage Buddy & Persona",
-    "detach": "Detach Buddy"
+    "manage": "Manage avatar",
+    "detach": "Detach avatar"
   },
   "multiSelect_organizationLoadError": {
     "message": "Unable to load folders and tags for this account."
@@ -2151,5 +2178,68 @@
   },
   "folderPicker_saveError": {
     "message": "Some folder changes couldn't be saved. Try again."
+  },
+  "qaSearch_relevance_best": {
+    "message": "Best match"
+  },
+  "qaSearch_relevance_good": {
+    "message": "Good match"
+  },
+  "qaSearch_relevance_weaker": {
+    "message": "Weaker match"
+  },
+  "qaSearch_relevance_tooltip": {
+    "message": "Compared with the other results. Score {{score}}"
+  },
+  "openFullPage_label": {
+    "message": "Open in full page"
+  },
+  "openFullPage_extensionDescription": {
+    "message": "Opens this chat in a new tab, with your draft and page references. Your draft also stays here."
+  },
+  "openFullPage_webuiDescription": {
+    "message": "Opens the WebUI with your draft. You can bring this chat's settings along there. This chat and its attachments stay here."
+  },
+  "openFullPage_failed": {
+    "message": "Could not open the full page. Your draft stays here."
+  },
+  "openFullPage_partial": {
+    "message": "Opened with a partial copy: some of the draft or page references were shortened or could not be read. Review it there. Your draft stays here."
+  },
+  "openFullPage_characterDraftStays": {
+    "message": "A new Character chat opens without your draft. It stays here."
+  },
+  "runtimeChip_defaults": {
+    "message": "Defaults"
+  },
+  "runtimeChip_title": {
+    "message": "Model parameters for this chat"
+  },
+  "openFullPage_routeOnlyDescription": {
+    "message": "Opens the chat page in a new tab. Drafts and page references stay here."
+  },
+  "openFullPage_webHostedDescription": {
+    "message": "Opens the full page with your draft. You can bring this chat's settings along there. This chat and its attachments stay here."
+  },
+  "openFullPage_newChatDescription": {
+    "message": "Opens the chat page in a new tab, with your draft and page references. Your draft also stays here."
+  },
+  "openFullPage_webuiLabel": {
+    "message": "Open in WebUI"
+  },
+  "openFullPage_personaDraftStays": {
+    "message": "A new Persona chat opens without your draft. It stays here."
+  },
+  "openFullPage_attachmentsStay": {
+    "message": "Attachments stay in the side panel. Add them again on the full page."
+  },
+  "openFullPage_checkingDraft": {
+    "message": "Checking which account this draft belongs to…"
+  },
+  "openFullPage_draftCheckFailed": {
+    "message": "This draft's account couldn't be checked. Retry from the draft notice."
+  },
+  "composer_imageProviderMissing": {
+    "message": "Name the image provider: /generate-image:<provider> <prompt>."
   }
 }

@@ -81,7 +81,7 @@ const MediaMultiInner = () => {
           })}
           description={t("review:mediaEmpty.demoDescription", {
             defaultValue:
-              "This demo shows how tldw Assistant can display and inspect processed media. Connect your own server later to browse your own recordings and documents."
+              "This demo shows how tldw can display and inspect processed media. Connect your own server later to browse your own recordings and documents."
           })}
           examples={[
             t("review:mediaEmpty.demoExample1", {

@@ -13,7 +13,7 @@ test.describe('Sidepanel first-run and connection panel', () => {
 
     // First-run: shared connection card visible in Sidepanel
     await expect(
-      page.getByText(/Connect tldw Assistant to your server/i)
+      page.getByText(/Connect tldw to your server/i)
     ).toBeVisible()
 
     // Helper microcopy should set expectations about where Settings opens.

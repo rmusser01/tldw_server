@@ -111,7 +111,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
   const displayActivePackTitle =
     activePackTitle ||
     t("sidepanel:personaGarden.visuals.builder.activePackFallback", {
-      defaultValue: "Active visual buddy"
+      defaultValue: "Active avatar"
     })
   const packCountText =
     packCount === 1
@@ -129,7 +129,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
     <section
       data-testid="buddy-guided-builder"
       data-persona-id={selectedPersonaId}
-      aria-label={t("sidepanel:personaGarden.visuals.builder.choicesFor", { defaultValue: "Buddy choices for {{persona}}", persona: selectedPersonaName })}
+      aria-label={t("sidepanel:personaGarden.visuals.builder.choicesFor", { defaultValue: "Avatar choices for {{persona}}", persona: selectedPersonaName })}
       className="space-y-3"
     >
         {hasActiveVisual ? (
@@ -163,7 +163,7 @@ export const BuddyGuidedBuilder: React.FC<BuddyGuidedBuilderProps> = ({
 
       <details open={selectedSource !== "bundled" || undefined} className="border-t border-border pt-3">
         <summary className="cursor-pointer rounded text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
-          {t("sidepanel:personaGarden.visuals.builder.otherSources", { defaultValue: "Import or customize a Buddy" })}
+          {t("sidepanel:personaGarden.visuals.builder.otherSources", { defaultValue: "Import or customize an avatar" })}
         </summary>
         <div className="mt-3 space-y-3">
           <BuddySourcePicker selectedSource={selectedSource} onSelectSource={selectSource} onStartBlank={onStartBlank} onOpenLibrary={onOpenLibrary} onOpenDuplicate={onOpenDuplicate} />

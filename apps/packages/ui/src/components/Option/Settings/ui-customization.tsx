@@ -373,13 +373,13 @@ export const UiCustomizationSettings = () => {
             <div className="space-y-1">
               <div className="text-sm font-semibold text-text">
                 {t("uiCustomization.personaBuddyShell.label", {
-                  defaultValue: "Enable persona buddy shell"
+                  defaultValue: "Enable persona avatar"
                 })}
               </div>
               <div className="text-xs text-text-muted">
                 {t("uiCustomization.personaBuddyShell.description", {
                   defaultValue:
-                    "Show the floating buddy shell on supported persona-aware surfaces."
+                    "Show the floating avatar on supported persona-aware surfaces."
                 })}
               </div>
             </div>

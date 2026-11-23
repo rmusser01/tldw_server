@@ -4,6 +4,7 @@ import { Check, Copy, Eye, Pin, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { QADocument } from "../hooks/useQASearch"
 import { highlightText } from "@/utils/text-highlight"
+import { chunkScore, relevanceLevel } from "./relevance-label"
 
 type SourceChunkItemProps = {
   document: QADocument
@@ -14,15 +15,13 @@ type SourceChunkItemProps = {
   onPin: (doc: QADocument) => void
   onPreview: (doc: QADocument) => void
   isPinned?: boolean
+  /** The strongest score in the same list; relevance is relative to it. */
+  topScore?: number | null
 }
 
-const formatScore = (score?: number) =>
-  typeof score === "number" && Number.isFinite(score)
-    ? score.toFixed(3)
-    : null
-
 /**
- * Individual source chunk card displaying retrieved text with relevance score.
+ * Individual source chunk card displaying retrieved text with a plain
+ * relevance label (CC-10); the raw score is in the label's tooltip.
  */
 export const SourceChunkItem: React.FC<SourceChunkItemProps> = React.memo(
   ({
@@ -33,7 +32,8 @@ export const SourceChunkItem: React.FC<SourceChunkItemProps> = React.memo(
     onInsert,
     onPin,
     onPreview,
-    isPinned = false
+    isPinned = false,
+    topScore = null
   }) => {
     const { t } = useTranslation(["sidepanel"])
     const [copied, setCopied] = React.useState(false)
@@ -50,7 +50,24 @@ export const SourceChunkItem: React.FC<SourceChunkItemProps> = React.memo(
     const type =
       (document.metadata as Record<string, unknown>)?.type as string ?? ""
 
-    const score = formatScore(document.score ?? document.relevance)
+    const score = chunkScore(document)
+    const level = relevanceLevel(score, topScore)
+    const relevanceText =
+      level === "best"
+        ? t("sidepanel:qaSearch.relevance.best", "Best match")
+        : level === "good"
+          ? t("sidepanel:qaSearch.relevance.good", "Good match")
+          : level === "weaker"
+            ? t("sidepanel:qaSearch.relevance.weaker", "Weaker match")
+            : null
+    const relevanceDetail =
+      score === null
+        ? ""
+        : (t(
+            "sidepanel:qaSearch.relevance.tooltip",
+            "Compared with the other results. Score {{score}}",
+            { score: score.toFixed(2) }
+          ) as string)
 
     const handleCopy = () => {
       onCopy(document)
@@ -77,9 +94,15 @@ export const SourceChunkItem: React.FC<SourceChunkItemProps> = React.memo(
               </span>
             )}
           </div>
-          {score && (
-            <span className="text-xs text-text-muted whitespace-nowrap font-mono">
-              {score}
+          {relevanceText && score !== null && (
+            // The comparison and score are text too, so screen readers get
+            // them; the hover title repeats them (CC-10 review).
+            <span
+              className="text-xs text-text-muted whitespace-nowrap"
+              title={relevanceDetail}
+            >
+              {relevanceText}
+              <span className="sr-only">{relevanceDetail}</span>
             </span>
           )}
         </div>

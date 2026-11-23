@@ -850,7 +850,7 @@ describe("Playground cockpit controls", () => {
       expect(
         within(contextRail).getByText("1 knowledge item"),
       ).toBeInTheDocument();
-      expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
+      expect(within(contextRail).getByText("2 media items")).toBeInTheDocument();
       expect(
         screen.queryByRole("status", { name: "Chat status" }),
       ).not.toBeInTheDocument();
@@ -887,7 +887,7 @@ describe("Playground cockpit controls", () => {
       );
       fireEvent.click(
         within(contextRail).getByRole("button", {
-          name: "Clear media scopes",
+          name: "Clear media items",
         }),
       );
       expect(messageOptionState.value.setContextFiles).toHaveBeenCalledWith([]);
@@ -895,16 +895,19 @@ describe("Playground cockpit controls", () => {
         null,
       );
       expect(messageOptionState.value.setRagMediaIds).toHaveBeenCalledWith(null);
-      const webSearchControl = within(contextRail).getByRole("button", {
-        name: "Web search",
-      });
-      expect(webSearchControl).toHaveAttribute("aria-pressed", "true");
-      fireEvent.click(webSearchControl);
+      // Web search is toggled in the Tools tray (CC-08); the rail lists it as
+      // a source while it is on, with a way to turn it off.
+      expect(
+        within(contextRail).queryByRole("button", { name: "Web search" }),
+      ).toBeNull();
+      fireEvent.click(
+        within(contextRail).getByRole("button", { name: "Disable web search" }),
+      );
       expect(toggleWebSearch).toHaveBeenCalledTimes(1);
 
       fireEvent.click(
         within(contextRail).getByRole("button", {
-          name: /open search & context/i,
+          name: "Add sources from Search & Context",
         }),
       );
       expect(openKnowledgePanel).toHaveBeenCalledTimes(1);
@@ -1049,7 +1052,10 @@ describe("Playground cockpit controls", () => {
     const contextRail = within(
       await screen.findByTestId("playground-cockpit-left-rail"),
     ).getByTestId("playground-context-rail");
-    expect(within(contextRail).getByText("Web search on")).toBeInTheDocument();
+    expect(within(contextRail).getByText("Web search")).toBeInTheDocument();
+    expect(
+      within(contextRail).getByRole("button", { name: "Disable web search" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("status", { name: "Chat status" }),
     ).not.toBeInTheDocument();

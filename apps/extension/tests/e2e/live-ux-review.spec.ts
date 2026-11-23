@@ -89,7 +89,7 @@ describeLive('Live server UX review (no mocks)', () => {
         .getByText(/Let’s get you connected|Let's get you connected/i)
         .or(
           page.getByRole('heading', {
-            name: /Welcome to tldw Assistant/i
+            name: /Welcome to tldw(?![\s_]*(browser|assistant))/i
           })
         )
         .first()

@@ -1,11 +1,13 @@
 import React from "react"
-import { Spin } from "antd"
+import { Button, Spin } from "antd"
+import { Sparkles } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { RagPinnedResult } from "@/utils/rag-format"
 import type { QASearchResponse, QADocument } from "../hooks/useQASearch"
 import { SearchEmptyState } from "../SearchTab/SearchEmptyState"
 import { GeneratedAnswerCard } from "./GeneratedAnswerCard"
 import { SourceChunksList } from "./SourceChunksList"
+import { scrollToTopWithin } from "./scroll-within"
 
 type QAResultsViewProps = {
   response: QASearchResponse | null
@@ -15,6 +17,15 @@ type QAResultsViewProps = {
   query?: string
   pinnedResults: RagPinnedResult[]
   onRetry?: () => void
+  /**
+   * Inside the composer's capped box: no nested list scroller, and a finished
+   * search scrolls its results to the top of the box (CC-10 review).
+   */
+  embedded?: boolean
+  /** Generate an answer from the shown sources; omit to hide the action. */
+  onGenerateAnswer?: () => void
+  answerLoading?: boolean
+  answerError?: string | null
   onCopyAnswer: () => void
   onInsertAnswer: () => void
   onCopyChunk: (doc: QADocument) => void
@@ -24,8 +35,8 @@ type QAResultsViewProps = {
 }
 
 /**
- * Orchestrates the QA Search results display:
- * generated answer card on top, source chunks below.
+ * Orchestrates the QA Search results display: source chunks first, then the
+ * generated answer, which the user asks for (CC-10, owner decision [2]).
  */
 export const QAResultsView: React.FC<QAResultsViewProps> = ({
   response,
@@ -35,6 +46,10 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
   query,
   pinnedResults,
   onRetry,
+  embedded = false,
+  onGenerateAnswer,
+  answerLoading = false,
+  answerError = null,
   onCopyAnswer,
   onInsertAnswer,
   onCopyChunk,
@@ -43,6 +58,39 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
   onPreviewChunk
 }) => {
   const { t } = useTranslation(["sidepanel"])
+  // Focus and announce an answer the user asked for (CC-10 review).
+  const answerHeadingRef = React.useRef<HTMLHeadingElement>(null)
+  const answerRequestedRef = React.useRef(false)
+  const [answerReady, setAnswerReady] = React.useState(false)
+  const hasGeneratedAnswer = Boolean(response?.generatedAnswer)
+  React.useEffect(() => {
+    if (!hasGeneratedAnswer) {
+      setAnswerReady(false)
+      return
+    }
+    if (!answerRequestedRef.current) return
+    answerRequestedRef.current = false
+    setAnswerReady(true)
+    answerHeadingRef.current?.focus()
+  }, [hasGeneratedAnswer])
+  const answerStatus =
+    answerError ||
+    (answerReady ? t("sidepanel:qaSearch.answerReady", "Answer ready.") : "")
+  const resultsRef = React.useRef<HTMLDivElement>(null)
+  const wasLoadingRef = React.useRef(loading)
+  React.useLayoutEffect(() => {
+    const searchFinished = wasLoadingRef.current && !loading
+    wasLoadingRef.current = loading
+    if (!embedded || !searchFinished || !resultsRef.current) return
+    // Align the results block, whose top is stable; its header starts it.
+    // (The header itself settles a few frames after the spinner is replaced.)
+    scrollToTopWithin(resultsRef.current)
+  }, [embedded, loading])
+  const requestAnswer = () => {
+    if (answerLoading || !onGenerateAnswer) return
+    answerRequestedRef.current = true
+    onGenerateAnswer()
+  }
 
   if (loading) {
     return (
@@ -75,7 +123,7 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={resultsRef} className="flex flex-col gap-4">
       {/* Errors */}
       {response.errors.length > 0 && (
         <div className="rounded-lg border border-warn/30 bg-warn/5 p-3">
@@ -85,18 +133,7 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
         </div>
       )}
 
-      {/* Generated Answer */}
-      {hasAnswer && (
-        <GeneratedAnswerCard
-          answer={response.generatedAnswer!}
-          totalTime={response.totalTime}
-          cacheHit={response.cacheHit}
-          onCopy={onCopyAnswer}
-          onInsert={onInsertAnswer}
-        />
-      )}
-
-      {/* Source Chunks */}
+      {/* Source Chunks, with Generate answer in their header */}
       {hasDocs && (
         <SourceChunksList
           documents={response.documents}
@@ -106,8 +143,51 @@ export const QAResultsView: React.FC<QAResultsViewProps> = ({
           onInsert={onInsertChunk}
           onPin={onPinChunk}
           onPreview={onPreviewChunk}
+          nestedScroll={!embedded}
+          headerAction={
+            !hasAnswer && onGenerateAnswer ? (
+              <>
+                {/* aria-disabled, not disabled, so focus stays here while it runs. */}
+                <Button
+                  size="small"
+                  onClick={requestAnswer}
+                  aria-disabled={answerLoading || undefined}
+                  aria-busy={answerLoading || undefined}
+                  className={answerLoading ? "cursor-wait opacity-70" : undefined}
+                  icon={<Sparkles className="h-3 w-3" aria-hidden="true" />}
+                >
+                  {answerLoading
+                    ? t("sidepanel:qaSearch.generatingAnswer", "Generating answer…")
+                    : t("sidepanel:qaSearch.generateAnswer", "Generate answer")}
+                </Button>
+                {answerError && (
+                  <p className="basis-full text-xs text-danger">{answerError}</p>
+                )}
+              </>
+            ) : null
+          }
         />
       )}
+
+      {/* Generated Answer, after the sources and only on request */}
+      {hasAnswer && (
+        <GeneratedAnswerCard
+          answer={response.generatedAnswer!}
+          totalTime={response.totalTime}
+          cacheHit={response.cacheHit}
+          onCopy={onCopyAnswer}
+          onInsert={onInsertAnswer}
+          headingRef={answerHeadingRef}
+        />
+      )}
+      <p
+        data-testid="qa-answer-status"
+        role="status"
+        aria-live="polite"
+        className="sr-only"
+      >
+        {answerStatus}
+      </p>
     </div>
   )
 }

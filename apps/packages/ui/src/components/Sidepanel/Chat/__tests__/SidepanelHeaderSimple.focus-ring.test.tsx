@@ -53,7 +53,7 @@ describe("SidepanelHeaderSimple focus indicators", () => {
     const controls = [
       screen.getByTestId("chat-open-tts-clips"),
       screen.getByTestId("chat-open-persona"),
-      screen.getByTestId("chat-open-dashboard"),
+      screen.getByTestId("chat-open-flashcards"),
       screen.getByTestId("chat-open-full-screen"),
       screen.getByRole("link", { name: "sidepanel:header.openSettingsAria" })
     ]

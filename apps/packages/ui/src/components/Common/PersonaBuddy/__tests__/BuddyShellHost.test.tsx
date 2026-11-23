@@ -187,7 +187,7 @@ const buildBuddySummary = (id: string, hasBuddy = true) => ({
 const buildVisualPack = (personaId = "persona-1") => ({
   id: "pack-1",
   persona_id: personaId,
-  title: "Animated buddy",
+  title: "Animated avatar",
   renderer_type: "sprite_frames" as const,
   status: "active" as const,
   manifest: {
@@ -330,7 +330,7 @@ const mockDockRect = () =>
   } as DOMRect)
 
 const dragBuddyBy = async (deltaX: number) => {
-  const buddy = await screen.findByRole("button", { name: /Buddy for/i })
+  const buddy = await screen.findByRole("button", { name: /Avatar for/i })
   fireEvent.pointerDown(buddy, {
     button: 0,
     pointerId: 1,
@@ -604,12 +604,12 @@ describe("BuddyShellHost", () => {
       left: "1104px", top: "609px"
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open avatar controls" }))
     expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
       left: "1044px", top: "17px"
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close avatar controls" }))
     view.unmount()
     renderHost({ context })
     expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
@@ -642,7 +642,7 @@ describe("BuddyShellHost", () => {
       persona_source: "route-local",
       buddy_summary: buildBuddySummary("persona-1")
     } })
-    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open avatar controls" }))
 
     height = 600
     act(() => { [...notifications].forEach((notify) => notify()) })
@@ -750,9 +750,9 @@ describe("BuddyShellHost", () => {
     const view = renderHost({ context })
     const frame = await screen.findByTestId("persona-visual-frame")
     const dock = screen.getByTestId("persona-buddy-dock")
-    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open avatar controls" }))
     fireEvent.change(
-      screen.getByRole("textbox", { name: "Message your Buddy" }),
+      screen.getByRole("textbox", { name: "Message your avatar" }),
       {
         target: { value: "Keep this draft through resizing" }
       }
@@ -772,7 +772,7 @@ describe("BuddyShellHost", () => {
       expect(screen.getByTestId("persona-buddy-dock")).toBe(dock)
       expect(screen.getByTestId("persona-visual-frame")).toBe(frame)
       expect(
-        screen.getByRole("textbox", { name: "Message your Buddy" })
+        screen.getByRole("textbox", { name: "Message your avatar" })
       ).toHaveValue("Keep this draft through resizing")
       expect(screen.getByTestId("persona-buddy-voice-link")).toHaveAttribute(
         "href",
@@ -880,7 +880,7 @@ describe("BuddyShellHost", () => {
     })
 
     expect(screen.getByRole("button", {
-      name: "Buddy for Persona persona-2"
+      name: "Avatar for Persona persona-2"
     })).toBeInTheDocument()
     expect(screen.getByTestId("persona-buddy-dock")).not.toHaveTextContent("owl")
   })
@@ -904,7 +904,7 @@ describe("BuddyShellHost", () => {
       "true"
     )
     expect(screen.getByRole("button", {
-      name: "Buddy for Persona Buddy"
+      name: "Avatar for Persona"
     })).toBeDisabled()
     expect(screen.getByTestId("persona-buddy-dock")).not.toHaveTextContent("owl")
   })
@@ -1134,11 +1134,11 @@ describe("BuddyShellHost", () => {
       )
     })
     expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
-      "The Buddy runtime cannot render live2d packs yet."
+      "The avatar runtime cannot render live2d packs yet."
     )
     expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
     expect(screen.getByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })).toBeInTheDocument()
   })
 
@@ -1184,7 +1184,7 @@ describe("BuddyShellHost", () => {
     )
     expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
     expect(screen.getByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })).toBeInTheDocument()
   })
 
@@ -1240,11 +1240,11 @@ describe("BuddyShellHost", () => {
     })
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Buddy controls" })
+      screen.getByRole("button", { name: "Open avatar controls" })
     )
 
     expect(
-      screen.getByRole("link", { name: "Choose/Change Buddy" })
+      screen.getByRole("link", { name: "Choose/Change avatar" })
     ).toHaveAttribute("href", "/persona?persona_id=persona-1&tab=visuals")
   })
 
@@ -1260,14 +1260,14 @@ describe("BuddyShellHost", () => {
       }
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
-    fireEvent.click(screen.getByRole("button", { name: "Close Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open avatar controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close avatar controls" }))
     expect(usePersonaBuddyShellStore.getState().isOpen).toBe(false)
     expect(companionMocks.calls.at(-1)).toEqual(
       expect.objectContaining({ controlsOpen: false })
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open avatar controls" }))
     fireEvent.keyDown(window, { key: "Escape" })
     expect(usePersonaBuddyShellStore.getState().isOpen).toBe(false)
   })
@@ -1326,7 +1326,7 @@ describe("BuddyShellHost", () => {
     })
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Buddy controls" })
+      screen.getByRole("button", { name: "Open avatar controls" })
     )
 
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument()
@@ -1374,7 +1374,7 @@ describe("BuddyShellHost", () => {
     })
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Buddy controls" })
+      screen.getByRole("button", { name: "Open avatar controls" })
     )
 
     expect(screen.getByRole("link", { name: "Stop listening" })).toHaveAttribute(
@@ -1444,11 +1444,11 @@ describe("BuddyShellHost", () => {
     })
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Open Buddy controls" })
+      screen.getByRole("button", { name: "Open avatar controls" })
     )
 
     expect(
-      screen.queryByRole("link", { name: "Choose/Change Buddy" })
+      screen.queryByRole("link", { name: "Choose/Change avatar" })
     ).not.toBeInTheDocument()
   })
 
@@ -1843,7 +1843,7 @@ describe("BuddyShellHost", () => {
       expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledWith("persona-1")
     })
     expect(screen.getByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })).toBeInTheDocument()
     expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
       "Visual pack did not load"
@@ -1885,7 +1885,7 @@ describe("BuddyShellHost", () => {
       )
     })
     expect(screen.getByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })).toBeInTheDocument()
     expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
       "tool-asset"
@@ -1926,7 +1926,7 @@ describe("BuddyShellHost", () => {
     expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledWith(
       "persona-1"
     )
-    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open avatar controls" }))
     expect(screen.getByTestId("persona-buddy-effective-mode")).toHaveTextContent(
       "Effective: Expressive · Roaming is limited to Expressive in the sidepanel."
     )
@@ -1961,7 +1961,7 @@ describe("BuddyShellHost", () => {
       }
     })
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Open avatar controls" }))
     const personaModes = screen.getByRole("group", { name: "For this Persona" })
     fireEvent.click(within(personaModes).getByRole("radio", { name: "Roaming" }))
 
@@ -1998,9 +1998,9 @@ describe("BuddyShellHost", () => {
     })
 
     renderSwitchableHost(personaContext("persona-1"), "web")
-    fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Open avatar controls" }))
     fireEvent.click(
-      within(screen.getByRole("group", { name: "Buddy behavior" }))
+      within(screen.getByRole("group", { name: "Avatar behavior" }))
         .getByRole("radio", { name: "Roaming" })
     )
     await waitFor(() => {
@@ -2052,7 +2052,7 @@ describe("BuddyShellHost", () => {
     preferenceMocks.updateBuddyPreferences.mockReturnValue(globalUpdate.promise)
 
     const view = renderSwitchableHost(personaContext("persona-1"), "web")
-    fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Open avatar controls" }))
     await waitFor(() => {
       expect(
         within(screen.getByRole("group", { name: "For this Persona" }))
@@ -2060,7 +2060,7 @@ describe("BuddyShellHost", () => {
       ).toBeChecked()
     })
     fireEvent.click(
-      within(screen.getByRole("group", { name: "Buddy behavior" }))
+      within(screen.getByRole("group", { name: "Avatar behavior" }))
         .getByRole("radio", { name: "Roaming" })
     )
     await waitFor(() => {
@@ -2136,7 +2136,7 @@ describe("BuddyShellHost", () => {
     expect(companionMocks.calls.at(-1)).toEqual(
       expect.objectContaining({ personaId: "persona-2", mode: "off" })
     )
-    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open avatar controls" }))
     expect(
       within(screen.getByRole("group", { name: "For this Persona" }))
         .getByRole("radio", { name: "Off" })
@@ -2158,7 +2158,7 @@ describe("BuddyShellHost", () => {
       }>()
       preferenceMocks.updatePersonaBuddyPreferences.mockReturnValue(update.promise)
       const view = renderSwitchableHost(personaContext("persona-1"))
-      fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Open avatar controls" }))
       await waitFor(() => {
         expect(
           within(screen.getByRole("group", { name: "For this Persona" }))
@@ -2209,7 +2209,7 @@ describe("BuddyShellHost", () => {
       expect(companionMocks.calls.at(-1)).toEqual(
         expect.objectContaining({ personaId: "persona-2", mode: "off" })
       )
-      expect(screen.queryByText("Buddy settings could not be saved.")).not.toBeInTheDocument()
+      expect(screen.queryByText("Avatar settings could not be saved.")).not.toBeInTheDocument()
       expect(
         screen.queryByText("Settings changed elsewhere. Latest values were loaded.")
       ).not.toBeInTheDocument()
@@ -2237,7 +2237,7 @@ describe("BuddyShellHost", () => {
         .mockResolvedValue({ ambient_mode: "expressive", version: 10, stored: true })
 
       const view = renderSwitchableHost(personaContext("persona-1"))
-      fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Open avatar controls" }))
       const personaModes = screen.getByRole("group", { name: "For this Persona" })
       await waitFor(() => {
         expect(
@@ -2296,7 +2296,7 @@ describe("BuddyShellHost", () => {
 
       const currentPersonaModes = screen.getByRole("group", { name: "For this Persona" })
       expect(within(currentPersonaModes).getByRole("radio", { name: "Off" })).toBeChecked()
-      expect(screen.queryByText("Buddy settings could not be saved.")).not.toBeInTheDocument()
+      expect(screen.queryByText("Avatar settings could not be saved.")).not.toBeInTheDocument()
       expect(
         screen.queryByText("Settings changed elsewhere. Latest values were loaded.")
       ).not.toBeInTheDocument()
@@ -2357,7 +2357,7 @@ describe("BuddyShellHost", () => {
       }
     })
 
-    const controls = await screen.findByRole("button", { name: "Open Buddy controls" })
+    const controls = await screen.findByRole("button", { name: "Open avatar controls" })
     controls.focus()
     expect(controls).toHaveFocus()
     fireEvent.click(controls)
@@ -2383,7 +2383,7 @@ describe("BuddyShellHost", () => {
       }
     })
     const buddy = await screen.findByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, {
@@ -2421,7 +2421,7 @@ describe("BuddyShellHost", () => {
       }
     })
     const buddy = await screen.findByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 1, clientX: 100, clientY: 100 })
@@ -2438,7 +2438,7 @@ describe("BuddyShellHost", () => {
   it("drops a deferred click when the focused Persona changes", async () => {
     const view = renderSwitchableHost(personaContext("persona-1"))
     const buddy = await screen.findByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 21, clientX: 100, clientY: 100 })
@@ -2461,7 +2461,7 @@ describe("BuddyShellHost", () => {
     const context = personaContext("persona-1")
     const view = renderSwitchableHost(context)
     const buddy = await screen.findByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 22, clientX: 100, clientY: 100 })
@@ -2488,7 +2488,7 @@ describe("BuddyShellHost", () => {
       .mockResolvedValue({ packs: [packB], active_pack: packB })
     renderSwitchableHost(personaContext("persona-1"))
     const buddy = await screen.findByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })
     await waitFor(() => {
       expect(companionMocks.calls.at(-1)).toEqual(
@@ -2527,7 +2527,7 @@ describe("BuddyShellHost", () => {
     const idleContext = personaContext("persona-1")
     const view = renderSwitchableHost(idleContext)
     const buddy = await screen.findByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })
     await screen.findByTestId("persona-buddy-visual-wrapper")
     vi.useFakeTimers()
@@ -2594,7 +2594,7 @@ describe("BuddyShellHost", () => {
       }
     })
     const buddy = await screen.findByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })
     const initial = usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 9, clientX: 140, clientY: 130 })
@@ -2611,7 +2611,7 @@ describe("BuddyShellHost", () => {
     const rectSpy = mockDockRect()
     renderHost({ root: "sidepanel", context: personaContext("persona-1") })
     const buddy = await screen.findByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })
     const initial = usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
     fireEvent.pointerDown(buddy, { button: 0, pointerId: 23, clientX: 140, clientY: 130 })
@@ -2647,7 +2647,7 @@ describe("BuddyShellHost", () => {
     })
     await act(async () => {})
     const buddy = screen.getByRole("button", {
-      name: "Buddy for Persona persona-1"
+      name: "Avatar for Persona persona-1"
     })
     fireEvent.keyDown(buddy, { key: "Enter" })
     expect(usePersonaBuddyShellStore.getState().isOpen).toBe(true)

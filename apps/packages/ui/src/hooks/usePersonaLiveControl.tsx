@@ -578,7 +578,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
           throw new Error("The focused session changed before the message could be sent")
         }
         updateFeedback({ sessionId: session.sessionId, personaId: session.personaId,
-          clientMessageId, status: "pending", text: "Waiting for your buddy…" })
+          clientMessageId, status: "pending", text: "Waiting for your avatar…" })
         ws.send(
           JSON.stringify({
             type: "user_message",

@@ -91,7 +91,7 @@ export function useSlashCommands({
         command: "web",
         label: t(
           "common:commandPalette.toggleWebSearch",
-          "Toggle Web Search"
+          "Toggle web search"
         ),
         description: t(
           "common:commandPalette.toggleWebDesc",
@@ -180,6 +180,19 @@ export function useSlashCommands({
             ...(search?.trim() ? { search: search.trim() } : {})
           })
         }
+      },
+      {
+        id: "slash-note",
+        command: "note",
+        label: t("playground:composer.slashNote", "Attach a note"),
+        description: t(
+          "playground:composer.slashNoteDesc",
+          "Search your notes and attach one to this message"
+        ),
+        keywords: ["notes", "attach", "context"],
+        // Leaves "/note " in the composer; the composer's note picker
+        // searches the text after it (decision [4], note-mentions.ts).
+        insertText: "/note "
       }
     ],
     [

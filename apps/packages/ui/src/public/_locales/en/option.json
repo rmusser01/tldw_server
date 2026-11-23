@@ -1325,6 +1325,12 @@
   "notesSearch_bulkRestoreSuccess_one": {
     "message": "Restored {{count}} note"
   },
+  "notesSearch_bulkDelete": {
+    "message": "Move selected to Trash"
+  },
+  "notesSearch_bulkRestorePartial": {
+    "message": "Restored {{restored}} of {{total}} notes."
+  },
   "notesSearch_bulkRestoreSuccess_other": {
     "message": "Restored {{count}} notes"
   },
@@ -6176,6 +6182,45 @@
   "notesSearch_graphScopeAll": {
     "message": "All notes"
   },
+  "notesSearch_graphPickOutsideView": {
+    "message": "The note you picked isn't in this view."
+  },
+  "notesSearch_graphPickShowIt": {
+    "message": "Show it in the graph"
+  },
+  "notesSearch_graphSettingsLibraryHint": {
+    "message": "All notes and tag filters show every matching note, so distance and item limit apply only to a focused graph."
+  },
+  "notesSearch_graphFilters": {
+    "message": "Graph filters"
+  },
+  "notesSearch_graphFilterTag": {
+    "message": "Tag"
+  },
+  "notesSearch_graphFilterAnyTag": {
+    "message": "All tags"
+  },
+  "notesSearch_graphFilterLinkedOnly": {
+    "message": "Linked notes only"
+  },
+  "notesSearch_graphAllNotesFilterHint": {
+    "message": "Pick a tag to see part of it."
+  },
+  "notesSearch_graphLayoutFallback": {
+    "message": "Tree is slow for a graph this large, so it uses the Rings layout. Tree works up to {{nodes}} items and {{links}} links."
+  },
+  "notesSearch_graphPreviewHeading": {
+    "message": "Note preview"
+  },
+  "notesSearch_graphPreviewUntitled": {
+    "message": "Untitled note"
+  },
+  "notesSearch_graphPreviewEmpty": {
+    "message": "This note has no text yet."
+  },
+  "notesSearch_graphOpenInEditor": {
+    "message": "Open in editor"
+  },
   "notesSearch_graphFocusCurrent": {
     "message": "Focus current note"
   },
@@ -6605,17 +6650,17 @@
   "notesSearch_serverUnavailableDescription": {
     "message": "You can keep writing. Your edits are kept on this device and saved when the server is back."
   },
-  "notesSearch_moveToTrashConfirmTitle": {
-    "message": "Move to Trash?"
+  "notesSearch_movedToTrashNamed": {
+    "message": "Moved \"{{title}}\" to Trash."
   },
-  "notesSearch_moveToTrashConfirmOk": {
-    "message": "Move to Trash"
+  "notesSearch_movedToTrashUnnamed": {
+    "message": "Moved this note to Trash."
   },
-  "notesSearch_moveToTrashConfirmNamed": {
-    "message": "Move \"{{title}}\" to Trash? You can restore it from Trash."
+  "notesSearch_bulkMovedToTrash_one": {
+    "message": "Moved {{count}} note to Trash."
   },
-  "notesSearch_moveToTrashConfirmUnnamed": {
-    "message": "Move this note to Trash? You can restore it from Trash."
+  "notesSearch_bulkMovedToTrash_other": {
+    "message": "Moved {{count}} notes to Trash."
   },
   "notesSearch_moveToTrashLinkedOne": {
     "message": "This note is linked from 1 other note. That link will not work while the note is in Trash."
@@ -7117,6 +7162,21 @@
   },
   "notesSearch_tagMatchAny": {
     "message": "Any of these tags"
+  },
+  "notesSearch_notebookHelperSelectedNoTags": {
+    "message": "This saved filter has no tags, so it does not narrow the list."
+  },
+  "notesSearch_notebookSaveAllTagsNotice": {
+    "message": "This filter will show notes that have all of these tags: {{tags}}."
+  },
+  "notesSearch_notebookHelperSelectedAllTags": {
+    "message": "Shows notes that have all of its tags: {{tags}}."
+  },
+  "notesSearch_notebookHelperDefaultAllTags": {
+    "message": "Save the picked tags as a saved filter. A saved filter shows notes that have all of its tags."
+  },
+  "notesSearch_viewModeInboxDescription": {
+    "message": "Notes saved from browser capture."
   },
   "notesSearch_sortRelevance": {
     "message": "Best match"

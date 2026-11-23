@@ -134,5 +134,12 @@ export const useNotesKeyboardNavigation = ({
     return () => window.removeEventListener('keydown', handler)
   }, [editorRegionId])
 
-  return { openNoteAndFocusEditor, focusEditorBody }
+  /** Focuses the editor once it has rendered, as Enter on a row does (AX-03, NL-11 review). */
+  const focusEditorSoon = React.useCallback(() => {
+    scheduleFrame(() => {
+      if (!focusEditorContent()) scheduleFrame(() => void focusEditorBody())
+    })
+  }, [focusEditorBody, focusEditorContent])
+
+  return { openNoteAndFocusEditor, focusEditorBody, focusEditorSoon }
 }

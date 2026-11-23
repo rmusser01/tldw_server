@@ -62,19 +62,19 @@ export const BuddyStarterCatalogPicker: React.FC<BuddyStarterCatalogPickerProps>
   return (
     <section data-testid="buddy-builder-starter-catalog" className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-text">{t("sidepanel:personaGarden.visuals.builder.defaultCatalog", { defaultValue: "Choose a ready-made Buddy" })}</h2>
+        <h2 className="text-base font-semibold text-text">{t("sidepanel:personaGarden.visuals.builder.defaultCatalog", { defaultValue: "Choose a ready-made avatar" })}</h2>
         {onRetry ? <Button size="small" disabled={loading} onClick={onRetry}>
           {t(error ? "sidepanel:personaGarden.visuals.builder.retryCatalog" : "sidepanel:personaGarden.visuals.builder.refreshCatalog", { defaultValue: error ? "Retry catalog" : "Refresh catalog" })}
         </Button> : null}
       </div>
-      <p className="text-sm text-text-muted">{t("sidepanel:personaGarden.visuals.builder.galleryHelp", { defaultValue: "Preview the artwork, then copy a Buddy to review and activate it." })}</p>
-      {loading ? <p role="status" className="text-sm text-text-muted">{t("sidepanel:personaGarden.visuals.builder.loading", { defaultValue: "Loading Buddies…" })}</p> : null}
+      <p className="text-sm text-text-muted">{t("sidepanel:personaGarden.visuals.builder.galleryHelp", { defaultValue: "Preview the artwork, then copy an avatar to review and activate it." })}</p>
+      {loading ? <p role="status" className="text-sm text-text-muted">{t("sidepanel:personaGarden.visuals.builder.loading", { defaultValue: "Loading avatars…" })}</p> : null}
       {error ? <p role="alert" className="text-sm text-text">{error}</p> : null}
       {(["basic", "intermediate", "intricate"] as const).map((tier) => {
         const ready = grouped[tier].filter((starter) => starter.production_status === "art_ready")
         return ready.length ? <div key={tier} data-testid={`buddy-builder-tier-${tier}`} className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{ready.map(choice)}</div> : null
       })}
-      {!loading && !error && !ordered.length ? <p className="text-sm text-text-muted">{t("sidepanel:personaGarden.visuals.builder.catalogEmpty", { defaultValue: "No ready-made Buddies are available on this server. Import a pack or create your own below." })}</p> : null}
+      {!loading && !error && !ordered.length ? <p className="text-sm text-text-muted">{t("sidepanel:personaGarden.visuals.builder.catalogEmpty", { defaultValue: "No ready-made avatars are available on this server. Import a pack or create your own below." })}</p> : null}
       {templates.length ? <details className="border-t border-border pt-3">
         <summary className="cursor-pointer rounded text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{t("sidepanel:personaGarden.visuals.builder.customTemplates", { defaultValue: "Custom artwork templates" })}</summary>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">{templates.map(choice)}</div>

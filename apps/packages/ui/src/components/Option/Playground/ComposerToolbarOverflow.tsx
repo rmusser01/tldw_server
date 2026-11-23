@@ -101,7 +101,7 @@ export const ComposerToolbarOverflow = React.memo(function ComposerToolbarOverfl
         key="buddy-persona"
         icon={<Users className="h-4 w-4" />}
         label={t("sidepanel:buddyManagement.entry", {
-          defaultValue: "Buddy & Persona"
+          defaultValue: "Avatar"
         })}
         onClick={() => {
           setOverflowOpen(false)

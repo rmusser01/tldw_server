@@ -25,7 +25,7 @@ async function readChatMode(page: import('@playwright/test').Page): Promise<stri
 }
 
 async function dismissWelcomeOverlay(page: import('@playwright/test').Page) {
-  const welcomeHeading = page.getByText(/Welcome to tldw Assistant/i).first()
+  const welcomeHeading = page.getByText(/Welcome to tldw(?![\s_]*(browser|assistant))/i).first()
   const isTimeoutError = (err: unknown): err is Error =>
     err instanceof Error && err.name === 'TimeoutError'
 
@@ -239,7 +239,7 @@ test.describe('Knowledge RAG workspace UX', () => {
       await expect(contextButton).toBeVisible({ timeout: 15_000 })
       await contextButton.click()
 
-      await expect(page.getByRole('heading', { name: /Knowledge Search/i })).toBeVisible()
+      await expect(page.getByRole('heading', { name: /Search & Context/i })).toBeVisible()
 
       const settingsTab = page.getByRole('tab', { name: /Settings/i }).first()
       await settingsTab.click()

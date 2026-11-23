@@ -96,7 +96,7 @@ export const BuddyDraftReviewPanel: React.FC<BuddyDraftReviewPanelProps> = ({
               reducedMotion={false}
               fallbackLabel={t(
                 "sidepanel:personaGarden.visuals.builder.review.previewFallback",
-                { defaultValue: "Buddy preview" }
+                { defaultValue: "Avatar preview" }
               )}
             />
           ) : (

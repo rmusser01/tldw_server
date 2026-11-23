@@ -105,7 +105,7 @@ export const KnowledgeTabs: React.FC<KnowledgeTabsProps> = ({
       role="tablist"
       aria-label={t(
         "sidepanel:knowledge.tabs.label",
-        "Knowledge panel sections"
+        "Search & Context sections"
       )}
       className={`flex border-b border-border ${className}`}
       onKeyDown={handleKeyDown}

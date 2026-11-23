@@ -274,9 +274,8 @@ describe("NotesManagerPage stage 46 list reliability", () => {
 
     fireEvent.click(screen.getByTestId("mock-delete-note"))
 
-    await waitFor(() => {
-      expect(mockMessageSuccess).toHaveBeenCalledWith("Note deleted")
-    })
+    // XP-17: the inline Undo offer reports the move to Trash.
+    expect(await screen.findByTestId("notes-undo")).toHaveTextContent(/to Trash\./)
 
     await waitFor(() => {
       expect(screen.queryByTestId("notes-recent-item-note-delete")).not.toBeInTheDocument()
@@ -372,7 +371,7 @@ describe("NotesManagerPage stage 46 list reliability", () => {
     fireEvent.click(screen.getByTestId("notes-bulk-delete"))
 
     await waitFor(() => {
-      expect(mockMessageSuccess).toHaveBeenCalledWith("Deleted 2 selected notes")
+      expect(screen.getByTestId("notes-undo")).toHaveTextContent("Moved 2 notes to Trash.")
     })
 
     await waitFor(() => {

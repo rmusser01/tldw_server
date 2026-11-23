@@ -14,6 +14,7 @@ import { useStoreChatModelSettings } from "@/store/model"
 import { useUiModeStore } from "@/store/ui-mode"
 import { LlamaCppAdvancedControls } from "@/components/Common/Settings/LlamaCppAdvancedControls"
 import { ModelParamSliderField } from "./ModelParamField"
+import { useModelParamsSections } from "./model-params-sections"
 import {
   useInheritedSamplingDefaults,
   useIsSamplingSetHere
@@ -54,9 +55,10 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
 }) => {
   const { t } = useTranslation(["sidepanel", "playground"])
   const mode = useUiModeStore((state) => state.mode)
-  const [paramsCollapsed, setParamsCollapsed] = React.useState(true)
-  const [providerCollapsed, setProviderCollapsed] = React.useState(true)
-  const [advancedCollapsed, setAdvancedCollapsed] = React.useState(true)
+  // XS-15: the open sections are remembered.
+  const [openSections, toggleSection] = useModelParamsSections()
+  const paramsCollapsed = !openSections.params
+  const providerCollapsed = !openSections.provider
   const [headersError, setHeadersError] = React.useState<string | null>(null)
   const [bodyError, setBodyError] = React.useState<string | null>(null)
 
@@ -132,7 +134,7 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
       {/* Provider & API Section */}
       <button
         type="button"
-        onClick={() => setProviderCollapsed(!providerCollapsed)}
+        onClick={() => toggleSection("provider")}
         className="w-full flex items-center justify-between px-3 py-2 text-sm text-text-muted hover:text-text hover:bg-surface2 transition-colors"
         aria-expanded={!providerCollapsed}
         aria-controls="provider-content"
@@ -262,7 +264,7 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
       {/* Model Parameters Section */}
       <button
         type="button"
-        onClick={() => setParamsCollapsed(!paramsCollapsed)}
+        onClick={() => toggleSection("params")}
         className="w-full flex items-center justify-between px-3 py-2 text-sm text-text-muted hover:text-text hover:bg-surface2 transition-colors border-t border-border"
         aria-expanded={!paramsCollapsed}
         aria-controls="model-params-content"

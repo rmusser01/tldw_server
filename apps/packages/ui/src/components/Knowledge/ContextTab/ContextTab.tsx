@@ -101,14 +101,14 @@ export const ContextTab: React.FC<ContextTabProps> = ({
                 aria-label={
                   t(
                     "playground:attachments.enableKnowledgeSearch",
-                    "Enable Knowledge Search"
+                    "Include in Search & Context"
                   ) as string
                 }
               />
               <span className="text-xs text-text-muted whitespace-nowrap">
                 {t(
                   "playground:attachments.enableKnowledgeSearch",
-                  "Enable Knowledge Search"
+                  "Include in Search & Context"
                 )}
               </span>
             </div>
