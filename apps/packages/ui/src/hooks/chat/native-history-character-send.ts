@@ -60,6 +60,7 @@ import { extractStreamTransportInterruption } from "@/utils/extract-token-from-c
 import { isSavedReplyActionRefusal, rememberSavedReplyRefusal } from "./saved-reply-actions"
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
 import { existingInputCurrentMessages, PlainSavedQuestionRefusal, type SavedQuestionInstructions } from "@/utils/saved-question-retry"
+import { systemPromptFormatter } from "@/utils/system-message"
 
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
 
@@ -634,7 +635,13 @@ export const sendNativeHistoryCharacter = async (
           capture.snapshot.nodes.some(node => node.role === "assistant" && node.parent_id === existing.id))
         throw new Error("native_history_existing_input_changed")
     }
-    const existingInputMessages = existing ? existingInputCurrentMessages(capture, existing) : []
+    // The review compares and shows the instructions as written; like an ordinary
+    // send, they go out with their placeholders ({model}, {current_year}, ...) filled.
+    const existingInputMessages = existing
+      ? await Promise.all(existingInputCurrentMessages(capture, existing).map(async ({ role, content }) =>
+          ({ role, content: String((await systemPromptFormatter({ content })).content) })))
+      : []
+    if (!preparingIsCurrent()) throw new Error("stale_selection")
     const request = prepareChatCompletionRequest(
       [
         ...(settings.systemPrompt?.trim()

@@ -245,6 +245,34 @@ describe("Playground saved-question Retry in a plain server chat (8B)", { timeou
     }
   })
 
+  it("fills the instruction's placeholders on the Retry exactly as the first send did", async () => {
+    const server = createFakeTldwServer({ nativeCompletion: true })
+    const view = await openChat(server, false)
+    await setSystemPromptForNonRagOption("Answer as {model} in {current_year}.")
+    const release = await stopBeforeFirstToken(view, "Which year is it?")
+    try {
+      const system = (index: number) =>
+        server.completionRequests()[index].body!.messages.filter((row: { role: string }) => row.role === "system")
+      const first = system(0)
+      expect(first).toHaveLength(1)
+      expect(first[0].content).toContain(String(new Date().getFullYear()))
+      expect(first[0].content).not.toMatch(/\{model\}|\{current_year\}/)
+
+      server.planCompletion({ reply: "This year." })
+      await view.user.click(await screen.findByRole("button", { name: "Review saved question" }, HARNESS_WAIT))
+      const review = await screen.findByRole("group", { name: "Saved question review" }, HARNESS_WAIT)
+      // The review shows (and compares) the instruction as written.
+      expect(within(review).getByRole("list", { name: "Current System/Prompt instructions" }))
+        .toHaveTextContent("Answer as {model} in {current_year}.")
+      await view.user.click(within(review).getByRole("button", { name: "Retry saved question" }))
+      await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+      await waitForChatIdle()
+      expect(server.completionRequests()[1].body!.messages).toEqual(first)
+    } finally {
+      release()
+    }
+  })
+
   it("carries a selected Prompt in place of the default instruction", async () => {
     const server = createFakeTldwServer({ nativeCompletion: true })
     const view = await openChat(server, false)
