@@ -717,6 +717,10 @@ review fixes went on the lanes. The lanes were merged into
 - **CM-04 (3):** sources at server settlement (size M, needs a design note).
 - **Saved system and error rows in the server's model context.**
 - **The test harness:** make `nativeCompletion: true` the default.
+- **Side panel, plain Retry refusals:** the side panel shows only the review's
+  inline alert, with no toast. Character Retry did the same before Wave 8.
+- **Side panel, switching tabs during a first send:** a tab snapshot might keep
+  the early question after it is withdrawn. Not verified.
 
 ## Status
 
