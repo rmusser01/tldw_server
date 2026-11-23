@@ -196,7 +196,7 @@ codegraph = [
   "tree-sitter-typescript>=0.23,<0.24",
   "tree-sitter-java>=0.23,<0.24",
   "tree-sitter-kotlin>=1.1,<1.2",
-  "tree-sitter-c-sharp>=0.23,<0.24",
+  "tree-sitter-c-sharp>=0.23,<0.25",
   "tree-sitter-c>=0.24,<0.25",
   "tree-sitter-cpp>=0.23,<0.24",
 ]
