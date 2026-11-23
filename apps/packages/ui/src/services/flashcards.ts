@@ -153,6 +153,7 @@ export type StudyPackSourceSelection = {
 export type StudyPackMediaSectionsResponse = {
   revision: string
   max_generation_passes?: number
+  pass_chars?: number
   sections: Array<{
     index: number
     title: string

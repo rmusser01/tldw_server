@@ -197,7 +197,8 @@ describe("StudyPackCreateDrawer", () => {
     )
 
     const create = screen.getByRole("button", { name: "Create study pack" })
-    expect(bgRequest).not.toHaveBeenCalled()
+    // The plan loads as soon as the source is chosen; expanding only shows it.
+    await waitFor(() => expect(bgRequest).toHaveBeenCalledTimes(1))
     await user.click(screen.getByRole("button", { name: "Review sections" }))
     const first = await screen.findByRole("checkbox", { name: "Chapter one" })
     const second = screen.getByRole("checkbox", { name: "Chapter two" })
@@ -385,6 +386,28 @@ describe("StudyPackCreateDrawer", () => {
       ],
       deck_mode: "new"
     })
+  })
+
+  it("warns about the pass budget before any source is expanded, from the section sizes", async () => {
+    vi.mocked(bgRequest).mockResolvedValue({
+      revision: "long-media",
+      max_generation_passes: 3,
+      pass_chars: 1000,
+      sections: [
+        { index: 0, title: "Chapter one", character_count: 1500, generation_passes: 2 },
+        { index: 1, title: "Chapter two", character_count: 2600, generation_passes: 3 }
+      ]
+    })
+    renderDrawer(
+      <StudyPackCreateDrawer
+        open
+        onClose={vi.fn()}
+        initialIntent={{ title: "Networks", sourceItems: [{ sourceType: "media", sourceId: "42" }] }}
+      />
+    )
+
+    expect(await screen.findByText(/needs 5 generation passes.*limit is 3/)).toBeVisible()
+    expect(screen.getByRole("button", { name: "Create study pack" })).toBeDisabled()
   })
 
   it("aborts a section preview when the authenticated account changes", async () => {

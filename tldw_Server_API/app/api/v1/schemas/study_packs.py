@@ -51,6 +51,7 @@ class StudyPackMediaSection(BaseModel):
 class StudyPackMediaSectionPreview(BaseModel):
     revision: str
     max_generation_passes: int
+    pass_chars: int
     sections: list[StudyPackMediaSection]
 
 

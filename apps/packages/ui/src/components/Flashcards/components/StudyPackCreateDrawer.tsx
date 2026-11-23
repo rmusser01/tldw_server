@@ -94,9 +94,9 @@ const StudyPackMediaSections = ({
   const { t } = useTranslation(["option", "common"])
   const disclosureId = React.useId()
   const [expanded, setExpanded] = React.useState(false)
+  const reviewedRef = React.useRef(false)
   const preview = useQuery({
     queryKey: ["flashcards:study-packs:media-sections", accountScope, item.source_id],
-    enabled: expanded,
     gcTime: 0,
     retry: false,
     queryFn: async ({ signal }) => {
@@ -111,8 +111,8 @@ const StudyPackMediaSections = ({
   const result = preview.isError ? undefined : sectionPreview
   const fetched = preview.isError ? undefined : preview.data
   React.useEffect(() => {
-    if (expanded && fetched) onPreview(rowId, fetched)
-  }, [expanded, fetched, onPreview, rowId])
+    if (fetched) onPreview(rowId, fetched)
+  }, [fetched, onPreview, rowId])
 
   const storedIndices = item.locator?.section_indices
   const storedSelection = Array.isArray(storedIndices) ? storedIndices : undefined
@@ -135,7 +135,12 @@ const StudyPackMediaSections = ({
         className="mt-1 inline-flex items-center gap-1 text-sm text-text-muted hover:text-text"
         aria-expanded={expanded}
         aria-controls={disclosureId}
-        onClick={() => setExpanded((current) => !current)}
+        onClick={() => {
+          // The first look uses the plan loaded when the source was added; reopening re-checks it.
+          if (!expanded && reviewedRef.current) void preview.refetch({ cancelRefetch: false })
+          reviewedRef.current = reviewedRef.current || !expanded
+          setExpanded((current) => !current)
+        }}
       >
         {expanded ? (
           <ChevronDown className="size-4" aria-hidden="true" />
@@ -444,9 +449,14 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     } else {
       const indices = item.locator?.section_indices
       if (!Array.isArray(indices)) continue
+      // The worker packs selected text into passes of pass_chars, so passes follow the text.
+      let chars = 0
       for (const section of sectionPreview.sections) {
-        if (indices.includes(section.index)) selectedPasses += section.generation_passes ?? 1
+        if (!indices.includes(section.index)) continue
+        chars += section.character_count
+        if (!sectionPreview.pass_chars) selectedPasses += section.generation_passes ?? 1
       }
+      if (sectionPreview.pass_chars) selectedPasses += Math.ceil(chars / sectionPreview.pass_chars)
     }
   }
   const exceedsPassBudget = selectedPasses > maxPasses

@@ -2331,6 +2331,7 @@ def preview_study_pack_media_sections(
     return StudyPackMediaSectionPreview(
         revision=revision,
         max_generation_passes=MAX_STUDY_PACK_PASSES,
+        pass_chars=limit,
         sections=[
             StudyPackMediaSection(
                 index=index,

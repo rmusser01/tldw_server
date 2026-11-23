@@ -486,6 +486,7 @@ def test_preview_saved_media_sections_returns_titles_without_book_text(client: T
     assert all(section["character_count"] > 0 for section in preview["sections"])  # nosec B101
     assert "Seeds germinate with water" not in response.text  # nosec B101
     assert len(preview["revision"]) == 64  # nosec B101
+    assert preview["pass_chars"] == 80  # nosec B101
 
 
 def test_preview_missing_media_sections_is_not_found(client: TestClient, tmp_path):
