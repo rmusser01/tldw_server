@@ -138,6 +138,7 @@ def test_context_module_privates_are_pinned() -> None:
         "tldw_Server_API.app.core.DB_Management.chacha.postgres_schema",
         "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap",
         "tldw_Server_API.app.core.DB_Management.chacha.workspace_store",
+        "tldw_Server_API.app.core.DB_Management.chacha.flashcard_store",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.sqlite_steps",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.postgres_steps",
     ],
@@ -466,3 +467,23 @@ def test_workspace_methods_live_on_the_store() -> None:
     assert [n for n in names if n in vars(CharactersRAGDB)] == []  # nosec B101
     assert [n for n in names if n not in vars(WorkspaceStore)] == []  # nosec B101
     assert not hasattr(WorkspaceStore, "__getattr__")  # nosec B101
+
+
+def test_flashcard_facade_forwards_moving_names_at_call_time() -> None:
+    """PR J1: ``db.flashcard_store.<m>`` reads ``db.<m>`` when called, so an instance patch of the DB stays live."""
+    from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
+
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db.flashcard_store = FlashcardStore(db.ctx)
+    patched = object()
+    db.get_deck = patched  # type: ignore[method-assign]
+    assert db.flashcard_store.get_deck is patched  # nosec B101
+
+
+def test_flashcard_facade_rejects_other_names() -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
+
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db.flashcard_store = FlashcardStore(db.ctx)
+    with pytest.raises(AttributeError):
+        db.flashcard_store.add_note  # noqa: B018
