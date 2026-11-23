@@ -33,14 +33,20 @@ Reference:
 - `apps/packages/ui/src/components/Flashcards/components/FlashcardEditDrawer.tsx`
 - `apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx`
 
+### Study Pack Chapter Sets
+
+The Study tab opens **Browse cards** for the selected deck. **All cards** includes every active card in the deck. The same drawer lists generated chapter sets and their current counts. Browsing leaves the review session and ratings intact.
+
+Each generated passage carries the media ID, section plan revision, and section index in its saved citation. Every pass of a chapter shares this identity. The picker uses the saved heading as the chapter label. Counts follow the cards when they move between decks.
+
 ### Guardrails
 
-- Tab naming and create-entry routing:  
-  `apps/packages/ui/src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx`
-- Shared drawer width token usage:  
-  `apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.cloze-help.test.tsx`  
-  `apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardEditDrawer.scheduling-metadata.test.tsx`  
-  `apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx`
+- Tab naming and create-entry routing:
+  - `apps/packages/ui/src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx`
+- Shared drawer width token usage:
+  - `apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.cloze-help.test.tsx`
+  - `apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardEditDrawer.scheduling-metadata.test.tsx`
+  - `apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx`
 
 ## H8 Layout Guardrails (Aesthetic + Minimalist)
 
