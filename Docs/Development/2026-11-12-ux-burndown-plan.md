@@ -208,6 +208,28 @@ are the decision numbers.
 - #3182: the Sync outbox (backend, L). The migration is approved [20]; it is
   sequenced after #3226.
 
+The scope, evidence and tests for the lanes below are in
+`2026-11-12-ux-burndown/wave8-p5-cm14-scope.md`. The lanes run in parallel;
+merge order is 8A, 8B, 8C.
+
+**Lane 8A — P5 Edit and send (S)**
+- Edit and send is settled on the server (`tldw_history_edit_v1` on
+  completions; the server already supports it).
+- A wrapped 409 edit or branch refusal is classified as refused.
+
+**Lane 8B — P5 saved-question Retry in plain chats (M) [22]**
+- A plain server chat can retry an unanswered saved question. Today only
+  character chats can.
+- The retry is server-settled, with the System and Prompt instructions.
+- Backend: existing-input requests accept system-only messages, behind a
+  capability sub-flag.
+- Docs: the turns that stay client-settled [23], and sync-v2 Q2.
+
+**Lane 8C — CM-14 first-send bubble (M)**
+- The user bubble shows on Enter.
+- A new chat's first load no longer flashes "Loading selected history";
+  other loads show it after 300 ms.
+
 ## Owner decisions
 
 **Answered 2026-11-19:** the owner accepted the recommended answer for every
@@ -251,6 +273,16 @@ question below ("go with your recommendations"):
     stayed open until 2026-11-23, when the owner parked both PRs. They stay
     open but no longer hold anything up, so finishing P5 and CM-14 goes ahead
     on dev. If they come back, they rebase onto that work.
+
+**Answered 2026-11-23** (Wave 8 scoping, both as recommended):
+
+22. Plain-chat saved-question Retry: the existing-input request may also carry
+    system-only messages. This amends B02's contract, so Retry keeps the
+    System and Prompt instructions. An older server refuses Retry while an
+    instruction is active.
+23. Replies that stay client-settled keep losing the output-limit marker and
+    model after a reload. This is accepted and documented; the client does not
+    write generation metadata (D7 §4.2(d)). Revisit with #3182.
 
 The original questions:
 
