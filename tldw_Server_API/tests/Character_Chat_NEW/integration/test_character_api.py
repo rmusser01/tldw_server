@@ -863,7 +863,7 @@ def test_chat_export_omits_private_local_startup(
 ) -> None:
     """Actual metadata-enabled exports omit stored origin in both supported formats."""
     db = character_db
-    db.upsert_workspace("http-export-private-origin", "Private origin")
+    db.workspace_store.upsert_workspace("http-export-private-origin", "Private origin")
     character_id = db.add_character_card({"name": "Export boundary", "system_prompt": "Help."})
     cid = db.add_conversation(
         {"title": "Export boundary", "character_id": character_id, "client_id": db.client_id},

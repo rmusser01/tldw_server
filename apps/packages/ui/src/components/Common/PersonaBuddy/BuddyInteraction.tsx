@@ -289,7 +289,7 @@ export const BuddyInteraction = ({
           seenResults.current = new Set([...seenResults.current].slice(-250))
       } catch (e) {
         const message =
-          e instanceof Error ? e.message : "Buddy interaction unavailable"
+          e instanceof Error ? e.message : "Avatar interaction unavailable"
         schedule?.settle(buddyFailureSignature(message))
         if (active) {
           setLoadError(message)
@@ -462,7 +462,7 @@ export const BuddyInteraction = ({
   return (
     <section
       className="space-y-3 text-sm text-text"
-      aria-label={label("interaction", "Buddy conversation")}
+      aria-label={label("interaction", "Avatar conversation")}
     >
       {error ? (
         <p role="alert" className="text-danger">

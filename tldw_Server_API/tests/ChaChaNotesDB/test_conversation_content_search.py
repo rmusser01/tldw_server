@@ -229,7 +229,7 @@ def test_paging_and_totals_stay_correct(db: CharactersRAGDB, order_by: str) -> N
 
 def test_conversation_filters_still_apply_to_content_matches(db: CharactersRAGDB) -> None:
     """A workspace chat that mentions the term stays out of the global list."""
-    db.upsert_workspace("ws-a", "A")
+    db.workspace_store.upsert_workspace("ws-a", "A")
     _add_chat(db, "global", "Weekly sync")
     _say(db, "global", "zebrafinch in the global chat")
     _add_chat(db, "scoped", "Weekly sync", workspace="ws-a")
@@ -380,6 +380,8 @@ def test_postgres_content_search_matches_messages_with_guards(pg_database_config
     """The PostgreSQL path finds chats by message text with the same owner, trash and delete guards."""
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     database = CharactersRAGDB(db_path=":memory:", client_id="alice", backend=backend)
+    # Another owner writes through their own instance: the message store locks chats to the instance owner.
+    bob = CharactersRAGDB(db_path=":memory:", client_id="bob", backend=backend)
     try:
         _add_chat(database, "title-old", "Zebrafinch migration notes")
         _say(database, "title-old", "Nothing relevant here.")
@@ -395,8 +397,8 @@ def test_postgres_content_search_matches_messages_with_guards(pg_database_config
         _say(database, "trashed", "zebrafinch in a trashed chat")
         trashed = database.get_conversation_by_id("trashed")
         database.soft_delete_conversation("trashed", expected_version=trashed["version"])
-        _add_chat(database, "bob-chat", "Weekly sync", owner="bob")
-        _say(database, "bob-chat", "Bob said zebrafinch.", owner="bob")
+        _add_chat(bob, "bob-chat", "Weekly sync", owner="bob")
+        _say(bob, "bob-chat", "Bob said zebrafinch.", owner="bob")
         _set_age(database, {"title-old": 72, "content-new": 1, "content-older": 24})
 
         for order_by in ("recency", "bm25", "hybrid", "topic"):

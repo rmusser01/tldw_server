@@ -251,7 +251,7 @@ def test_owned_pack_lifecycle_preserves_workspace_versions_and_empty_inputs(pack
     db, _jobs, client, _kind = pack_api
     ids = _seed(db)
     with chacha_operation(independent=True):
-        db.upsert_workspace("owned-workspace", "Owned workspace")
+        db.workspace_store.upsert_workspace("owned-workspace", "Owned workspace")
         deck = db.add_deck("Owned workspace destination", workspace_id="owned-workspace")
         replacement = db.create_study_pack(
             title="Owned successor",

@@ -74,6 +74,7 @@ async def test_raw_listing_query_keeps_default_rendering_pagination_and_access(l
     """Exercise actual query parsing, owner guard and database-backed responses."""
     db, chat_id, message_id, content = listing_state
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(character_messages.router, prefix="/api/v1")
     principal = SimpleNamespace(id=41)
     app.dependency_overrides[character_messages.get_request_user] = lambda: principal
@@ -102,6 +103,7 @@ async def test_raw_option_does_not_change_completion_format(listing_state):
     """Completion formatting continues to expand placeholders for inference."""
     db, chat_id, _, _ = listing_state
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(character_messages.router, prefix="/api/v1")
     app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
     app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
@@ -127,6 +129,7 @@ async def test_recovery_opt_in_returns_unverified_without_public_metadata_author
     db, chat_id, message_id, content = listing_state
     db.set_message_metadata_extra(message_id, {"history_result_v1": {"version": 1, "sources": []}})
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(character_messages.router, prefix="/api/v1")
     app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
     app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
@@ -182,6 +185,7 @@ async def test_recovery_api_get_and_list_use_normal_operation_checkout(listing_s
 async def test_recovery_listing_rejects_transformed_or_deleted_views(listing_state, incompatible):
     db, chat_id, _, _ = listing_state
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(character_messages.router, prefix="/api/v1")
     app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
     app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
@@ -206,38 +210,43 @@ async def test_image_listing_runs_off_event_loop_with_operation_context(
     import threading
 
     from tldw_Server_API.app.api.v1.utils import chat_message_images
-    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
-        chacha_operation,
-        current_connection_state,
-    )
+    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import current_connection_state
 
     db, chat_id, _, _ = listing_state
     helper_name = "expand_message_images" if recovery else "read_messages_with_images"
     helper_module = character_messages if recovery else chat_message_images
-    original = getattr(helper_module, helper_name)
     observed = []
+    expected_state = None
 
-    def read(*args: Any, **kwargs: Any) -> Any:
-        """Capture the execution owner while performing the real complete read."""
-        observed.append((threading.get_ident(), current_connection_state(db)))
-        return original(*args, **kwargs)
+    async def request_db():
+        nonlocal expected_state
+        expected_state = current_connection_state(db)
+        return db
 
-    monkeypatch.setattr(helper_module, helper_name, read)
+    def observe_read(original):
+        def read(*args: Any, **kwargs: Any) -> Any:
+            observed.append((threading.get_ident(), current_connection_state(db)))
+            return original(*args, **kwargs)
+
+        return read
+
+    monkeypatch.setattr(helper_module, helper_name, observe_read(getattr(helper_module, helper_name)))
+    if recovery:
+        monkeypatch.setattr(db, "read_history_recovery_messages", observe_read(db.read_history_recovery_messages))
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(character_messages.router, prefix="/api/v1")
     app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
-    app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
+    app.dependency_overrides[character_messages.get_chacha_db_for_user] = request_db
     loop_thread = threading.get_ident()
-    with chacha_operation() as operation:
-        expected_state = operation.state_for(db)
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get(f"/api/v1/chats/{chat_id}/messages", params={
-                "include_images": True, "include_history_recovery_v1": recovery,
-                "render_placeholders": not recovery, "scope_type": "global",
-            })
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/api/v1/chats/{chat_id}/messages", params={
+            "include_images": True, "include_history_recovery_v1": recovery,
+            "render_placeholders": not recovery, "scope_type": "global",
+        })
     assert response.status_code == 200
-    assert observed[0][0] != loop_thread
-    assert observed[0][1] is expected_state
+    assert len(observed) == (2 if recovery else 1)
+    assert all(thread != loop_thread and state is expected_state is not None for thread, state in observed)
     if recovery:
         assert response.json()["messages"][0]["tldw_history_recovery_v1"]["status"] == "unverified"
 
@@ -305,6 +314,7 @@ async def test_protected_image_read_failure_translation_is_scoped(
 
     monkeypatch.setattr(db, "read_history_recovery_messages", fail_read)
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(character_messages.router, prefix="/api/v1")
     principal = SimpleNamespace(id=41)
     app.dependency_overrides[character_messages.get_request_user] = lambda: principal

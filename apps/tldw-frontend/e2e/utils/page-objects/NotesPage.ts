@@ -338,12 +338,8 @@ export class NotesPage extends BasePage {
     await expect(deleteMenuItem).toBeVisible({ timeout: 5_000 })
     await deleteMenuItem.click()
 
-    // Handle the "Move to Trash?" confirm (confirmDanger with a "Move to Trash" button)
-    const confirmModal = this.page.locator('.ant-modal-confirm')
-    await confirmModal.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    const confirmDeleteBtn = confirmModal.getByRole("button", { name: /^(delete|move to trash)$/i })
-    if (await confirmDeleteBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await confirmDeleteBtn.click()
-    }
+    // Move to Trash happens at once and offers Undo inline (XP-17); there is
+    // no confirm dialog to accept.
+    await expect(this.page.getByTestId("notes-undo-undo")).toBeVisible({ timeout: 10_000 })
   }
 }

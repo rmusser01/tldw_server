@@ -20,6 +20,8 @@ import pytest
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, encode_assistant_startup
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.Persona.conversation_admission import PersonaAdmissionError, require_current_persona
 from tldw_Server_API.tests.DB_Management.test_conversation_assistant_startup import db_factory as db_factory
@@ -88,16 +90,12 @@ def _expected_version(db: CharactersRAGDB) -> int:
 
 
 def test_this_migration_is_the_version_after_the_create_fingerprint() -> None:
-    assert hasattr(CharactersRAGDB, "_migrate_from_v75_to_v76")
-    assert hasattr(CharactersRAGDB, "_migrate_from_v79_to_v80_postgres")
-    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 79
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 83
+    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == PREVIOUS_SQLITE_VERSION + 1
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == PREVIOUS_POSTGRES_VERSION + 1
     database = object.__new__(CharactersRAGDB)
     step = database._sqlite_linear_migration_steps()[PREVIOUS_SQLITE_VERSION]
-    assert step.__func__ is CharactersRAGDB._migrate_from_v75_to_v76
-    assert callable(CharactersRAGDB._migrate_from_v79_to_v80_postgres)
-    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= PREVIOUS_SQLITE_VERSION + 1
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= PREVIOUS_POSTGRES_VERSION + 1
+    assert step.__wrapped__ is sqlite_steps._migrate_from_v75_to_v76
+    assert callable(postgres_steps._migrate_from_v79_to_v80_postgres)
 
 
 def test_upgrade_clears_the_placeholder_and_leaves_every_other_chat_alone(
@@ -203,15 +201,16 @@ def test_interrupted_upgrade_rolls_back_the_repair_and_the_version(
     postgres = old.backend_type.value == "postgresql"
     old.close_all_connections()
     method = "_migrate_from_v79_to_v80_postgres" if postgres else "_migrate_from_v75_to_v76"
-    assert hasattr(CharactersRAGDB, method), "the placeholder repair must be a registered migration"
-    migrate = getattr(CharactersRAGDB, method)
+    steps_module = postgres_steps if postgres else sqlite_steps
+    assert hasattr(steps_module, method), "the placeholder repair must be a registered migration"
+    migrate = getattr(steps_module, method)
 
-    def fail_after_repair(self: CharactersRAGDB, conn: Any) -> None:
-        migrate(self, conn)
+    def fail_after_repair(ctx: ChaChaContext, conn: Any) -> None:
+        migrate(ctx, conn)
         raise CharactersRAGDBError("injected placeholder migration failure")
 
     with monkeypatch.context() as failing:
-        failing.setattr(CharactersRAGDB, method, fail_after_repair)
+        failing.setattr(steps_module, method, fail_after_repair)
         with pytest.raises(CharactersRAGDBError, match="injected placeholder migration failure"):
             db_factory()
 
@@ -229,8 +228,9 @@ def test_interrupted_upgrade_rolls_back_the_repair_and_the_version(
 def shared_postgres(request: pytest.FixtureRequest) -> Iterator[Callable[[str], CharactersRAGDB]]:
     """Open handles for different owners on one PostgreSQL database.
 
-    ``superuser`` is the documented deployment: the role bypasses row-level
-    security. ``restricted_owner`` owns the tables without bypassing it, so the
+    ``superuser`` is the test admin role, which bypasses row-level security: a
+    migration or test case, not a documented deployment (deployments run a
+    NOSUPERUSER NOBYPASSRLS role). ``restricted_owner`` owns the tables without bypassing it, so the
     forced policies hide every other owner's rows from an ordinary statement.
     """
     opened: list[CharactersRAGDB] = []

@@ -38,7 +38,7 @@ def _reserve(
     description: str | None = "Cloned workspace",
     workspace_profile: str = "research",
 ) -> dict[str, object]:
-    return db.reserve_clone_target(
+    return db.workspace_store.reserve_clone_target(
         workspace_id=workspace_id,
         operation_id=operation_id,
         request_fingerprint=request_fingerprint,
@@ -49,8 +49,8 @@ def _reserve(
 
 
 def _seed_workspace_snapshot(db: CharactersRAGDB, workspace_id: str = "workspace-source") -> None:
-    db.upsert_workspace(workspace_id, "Workspace v1", description="Description v1")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace(workspace_id, "Workspace v1", description="Description v1")
+    db.workspace_store.add_workspace_source(
         workspace_id,
         {
             "id": "source-1",
@@ -60,7 +60,7 @@ def _seed_workspace_snapshot(db: CharactersRAGDB, workspace_id: str = "workspace
             "position": 0,
         },
     )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         workspace_id,
         {
             "resource_type": "media",
@@ -71,11 +71,11 @@ def _seed_workspace_snapshot(db: CharactersRAGDB, workspace_id: str = "workspace
         },
         user_id="user-1",
     )
-    db.add_workspace_note(
+    db.workspace_store.add_workspace_note(
         workspace_id,
         {"title": "Note v1", "content": "Note content v1", "keywords": ["v1"]},
     )
-    db.add_workspace_artifact(
+    db.workspace_store.add_workspace_artifact(
         workspace_id,
         {
             "id": "artifact-1",
@@ -90,7 +90,7 @@ def test_workspace_clone_snapshot_materializes_all_active_collections(
     db: CharactersRAGDB,
 ) -> None:
     _seed_workspace_snapshot(db)
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "workspace-source",
         {
             "resource_type": "media",
@@ -98,21 +98,21 @@ def test_workspace_clone_snapshot_materializes_all_active_collections(
             "role": "source",
         },
     )
-    db.delete_workspace_resource_membership(
+    db.workspace_store.delete_workspace_resource_membership(
         "workspace-source",
         "media",
         "deleted-resource",
     )
-    deleted_note = db.add_workspace_note(
+    deleted_note = db.workspace_store.add_workspace_note(
         "workspace-source",
         {"title": "Deleted note", "content": "not cloned"},
     )
-    db.delete_workspace_note(
+    db.workspace_store.delete_workspace_note(
         "workspace-source",
         int(deleted_note["id"]),
     )
 
-    snapshot = db.read_workspace_clone_snapshot("workspace-source")
+    snapshot = db.workspace_store.read_workspace_clone_snapshot("workspace-source")
 
     assert snapshot.workspace["name"] == "Workspace v1"
     assert [row["title"] for row in snapshot.sources] == ["Source v1"]
@@ -161,7 +161,7 @@ def test_workspace_clone_snapshot_does_not_mix_concurrent_collection_versions(
 
     monkeypatch.setattr(db.backend, "execute", interleaved_execute)
     try:
-        snapshot = db.read_workspace_clone_snapshot("workspace-source")
+        snapshot = db.workspace_store.read_workspace_clone_snapshot("workspace-source")
     finally:
         writer.close_all_connections()
 
@@ -171,7 +171,7 @@ def test_workspace_clone_snapshot_does_not_mix_concurrent_collection_versions(
     assert snapshot.memberships[0]["label"] == "Membership v1"
     assert snapshot.notes[0]["title"] == "Note v1"
     assert snapshot.artifacts[0]["title"] == "Artifact v1"
-    assert db.get_workspace("workspace-source")["name"] == "Workspace v2"
+    assert db.workspace_store.get_workspace("workspace-source")["name"] == "Workspace v2"
 
 
 @pytest.mark.parametrize("workspace_id", ["missing-workspace", "hidden-workspace"])
@@ -183,7 +183,7 @@ def test_workspace_clone_snapshot_rejects_missing_or_hidden_sources(
         _reserve(db, workspace_id=workspace_id)
 
     with pytest.raises(CloneSnapshotUnavailable) as exc_info:
-        db.read_workspace_clone_snapshot(workspace_id)
+        db.workspace_store.read_workspace_clone_snapshot(workspace_id)
 
     assert str(exc_info.value) == "source_snapshot_unavailable"
     assert db.execute_query(
@@ -194,10 +194,10 @@ def test_workspace_clone_snapshot_rejects_missing_or_hidden_sources(
 
 def test_workspace_clone_snapshot_rejects_private_memory_database() -> None:
     memory_db = CharactersRAGDB(":memory:", client_id="memory-source")
-    memory_db.upsert_workspace("workspace-source", "Memory Workspace")
+    memory_db.workspace_store.upsert_workspace("workspace-source", "Memory Workspace")
     try:
         with pytest.raises(CloneSnapshotUnavailable):
-            memory_db.read_workspace_clone_snapshot("workspace-source")
+            memory_db.workspace_store.read_workspace_clone_snapshot("workspace-source")
     finally:
         memory_db.close_all_connections()
 
@@ -215,7 +215,7 @@ def test_workspace_clone_snapshot_reads_named_shared_cache_memory_database() -> 
     try:
         _seed_workspace_snapshot(memory_db)
 
-        snapshot = memory_db.read_workspace_clone_snapshot("workspace-source")
+        snapshot = memory_db.workspace_store.read_workspace_clone_snapshot("workspace-source")
 
         assert snapshot.workspace["name"] == "Workspace v1"
         assert snapshot.sources[0]["title"] == "Source v1"
@@ -239,7 +239,7 @@ def test_workspace_clone_snapshot_redacts_setup_failure(
 
     try:
         with pytest.raises(CloneSnapshotUnavailable) as exc_info:
-            db.read_workspace_clone_snapshot("workspace-source")
+            db.workspace_store.read_workspace_clone_snapshot("workspace-source")
     finally:
         logger.remove(sink_id)
 
@@ -276,10 +276,10 @@ def test_workspace_clone_snapshot_closes_dedicated_handle_on_every_path(
     monkeypatch.setattr(db.backend, "disconnect", tracked_disconnect)
 
     if workspace_id == "workspace-source":
-        db.read_workspace_clone_snapshot(workspace_id)
+        db.workspace_store.read_workspace_clone_snapshot(workspace_id)
     else:
         with pytest.raises(CloneSnapshotUnavailable):
-            db.read_workspace_clone_snapshot(workspace_id)
+            db.workspace_store.read_workspace_clone_snapshot(workspace_id)
 
     assert len(opened_connections) == 1
     assert opened_connections[0] is not caller_connection
@@ -298,9 +298,9 @@ def test_first_reservation_is_staged_archived_and_hidden(db: CharactersRAGDB) ->
     assert reserved["system_operation_kind"] == "shared_workspace_clone"
     assert reserved["system_operation_state"] == "staged"
     assert reserved["system_request_fingerprint"] == "fingerprint-1"
-    assert db.get_workspace("workspace-target") is None
-    assert db.get_workspace("workspace-target", include_deleted=True) is None
-    assert db.list_workspaces() == []
+    assert db.workspace_store.get_workspace("workspace-target") is None
+    assert db.workspace_store.get_workspace("workspace-target", include_deleted=True) is None
+    assert db.workspace_store.list_workspaces() == []
 
 
 def test_identical_reservation_is_idempotent(db: CharactersRAGDB) -> None:
@@ -332,7 +332,7 @@ def test_same_operation_reservation_requires_exact_request_match(
 
 
 def test_reservation_conflicts_with_ordinary_workspace(db: CharactersRAGDB) -> None:
-    db.upsert_workspace("workspace-target", "Ordinary Workspace")
+    db.workspace_store.upsert_workspace("workspace-target", "Ordinary Workspace")
 
     with pytest.raises(ConflictError):
         _reserve(db)
@@ -350,22 +350,22 @@ def test_publish_moves_owned_staged_target_to_hidden_publication_pending(
 ) -> None:
     _reserve(db)
 
-    published = db.publish_clone_target(
+    published = db.workspace_store.publish_clone_target(
         workspace_id="workspace-target",
         operation_id="operation-1",
     )
 
     assert bool(published["archived"]) is False
     assert published["system_operation_state"] == "publication_pending"
-    assert db.get_workspace("workspace-target") is None
-    assert db.list_workspaces() == []
+    assert db.workspace_store.get_workspace("workspace-target") is None
+    assert db.workspace_store.list_workspaces() == []
 
 
 def test_identical_reservation_replays_hidden_publication_pending_target(
     db: CharactersRAGDB,
 ) -> None:
     _reserve(db)
-    published = db.publish_clone_target(
+    published = db.workspace_store.publish_clone_target(
         workspace_id="workspace-target",
         operation_id="operation-1",
     )
@@ -375,16 +375,16 @@ def test_identical_reservation_replays_hidden_publication_pending_target(
     assert replayed == published
     assert bool(replayed["archived"]) is False
     assert replayed["system_operation_state"] == "publication_pending"
-    assert db.get_workspace("workspace-target") is None
-    assert db.get_workspace("workspace-target", include_deleted=True) is None
-    assert db.list_workspaces() == []
+    assert db.workspace_store.get_workspace("workspace-target") is None
+    assert db.workspace_store.get_workspace("workspace-target", include_deleted=True) is None
+    assert db.workspace_store.list_workspaces() == []
 
 
 def test_publish_rejects_wrong_operation(db: CharactersRAGDB) -> None:
     _reserve(db)
 
     with pytest.raises(ConflictError):
-        db.publish_clone_target(
+        db.workspace_store.publish_clone_target(
             workspace_id="workspace-target",
             operation_id="operation-2",
         )
@@ -392,9 +392,9 @@ def test_publish_rejects_wrong_operation(db: CharactersRAGDB) -> None:
 
 def test_confirmation_clears_all_markers_and_exposes_workspace(db: CharactersRAGDB) -> None:
     _reserve(db)
-    db.publish_clone_target(workspace_id="workspace-target", operation_id="operation-1")
+    db.workspace_store.publish_clone_target(workspace_id="workspace-target", operation_id="operation-1")
 
-    confirmed = db.confirm_clone_target_publication(
+    confirmed = db.workspace_store.confirm_clone_target_publication(
         workspace_id="workspace-target",
         operation_id="operation-1",
     )
@@ -404,8 +404,8 @@ def test_confirmation_clears_all_markers_and_exposes_workspace(db: CharactersRAG
     assert confirmed["system_operation_kind"] is None
     assert confirmed["system_operation_state"] is None
     assert confirmed["system_request_fingerprint"] is None
-    assert db.get_workspace("workspace-target") == confirmed
-    assert db.list_workspaces() == [confirmed]
+    assert db.workspace_store.get_workspace("workspace-target") == confirmed
+    assert db.workspace_store.list_workspaces() == [confirmed]
 
 
 def test_confirmation_requires_exact_owned_publication_pending_row(
@@ -414,7 +414,7 @@ def test_confirmation_requires_exact_owned_publication_pending_row(
     _reserve(db)
 
     with pytest.raises(ConflictError):
-        db.confirm_clone_target_publication(
+        db.workspace_store.confirm_clone_target_publication(
             workspace_id="workspace-target",
             operation_id="operation-1",
         )
@@ -427,9 +427,9 @@ def test_discard_soft_deletes_exact_owned_target(
 ) -> None:
     _reserve(db)
     if publish_first:
-        db.publish_clone_target(workspace_id="workspace-target", operation_id="operation-1")
+        db.workspace_store.publish_clone_target(workspace_id="workspace-target", operation_id="operation-1")
 
-    assert db.discard_clone_target(
+    assert db.workspace_store.discard_clone_target(
         workspace_id="workspace-target",
         operation_id="operation-1",
     ) is True
@@ -443,7 +443,7 @@ def test_discard_soft_deletes_exact_owned_target(
 def test_discard_is_operation_fenced(db: CharactersRAGDB) -> None:
     _reserve(db)
 
-    assert db.discard_clone_target(
+    assert db.workspace_store.discard_clone_target(
         workspace_id="workspace-target",
         operation_id="operation-2",
     ) is False
@@ -460,13 +460,13 @@ def test_reconciliation_lookup_is_caller_correlated_and_excludes_deleted_rows(
 ) -> None:
     _reserve(db, workspace_id="workspace-staged", operation_id="operation-staged")
     _reserve(db, workspace_id="workspace-pending", operation_id="operation-pending")
-    db.publish_clone_target(workspace_id="workspace-pending", operation_id="operation-pending")
+    db.workspace_store.publish_clone_target(workspace_id="workspace-pending", operation_id="operation-pending")
     _reserve(db, workspace_id="workspace-deleted", operation_id="operation-deleted")
-    db.discard_clone_target(workspace_id="workspace-deleted", operation_id="operation-deleted")
+    db.workspace_store.discard_clone_target(workspace_id="workspace-deleted", operation_id="operation-deleted")
     _reserve(db, workspace_id="workspace-unrequested", operation_id="operation-unrequested")
-    db.upsert_workspace("workspace-ordinary", "Ordinary")
+    db.workspace_store.upsert_workspace("workspace-ordinary", "Ordinary")
 
-    rows = db.list_clone_targets_for_reconciliation(
+    rows = db.workspace_store.list_clone_targets_for_reconciliation(
         operation_ids=["operation-pending", "operation-staged", "operation-deleted"],
         limit=2,
     )
@@ -482,7 +482,7 @@ def test_reconciliation_lookup_accepts_empty_operation_ids_without_scanning(
 ) -> None:
     _reserve(db)
 
-    assert db.list_clone_targets_for_reconciliation(operation_ids=[]) == []
+    assert db.workspace_store.list_clone_targets_for_reconciliation(operation_ids=[]) == []
 
 
 @pytest.mark.parametrize(
@@ -501,7 +501,7 @@ def test_reconciliation_lookup_rejects_unbounded_or_invalid_inputs(
     limit: int,
 ) -> None:
     with pytest.raises(InputError):
-        db.list_clone_targets_for_reconciliation(
+        db.workspace_store.list_clone_targets_for_reconciliation(
             operation_ids=operation_ids,  # type: ignore[arg-type]
             limit=limit,
         )

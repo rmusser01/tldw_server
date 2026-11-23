@@ -22,7 +22,7 @@ UNKNOWN = {"schema_version": 1, "source": "unknown", "workspace_id": None, "work
 def projection_db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
     """Keep Workspace authorization on the real per-user SQLite boundary."""
     db = CharactersRAGDB(tmp_path / "projection.db", client_id="owner")
-    db.upsert_workspace("private-origin", "Origin")
+    db.workspace_store.upsert_workspace("private-origin", "Origin")
     try:
         yield db
     finally:
@@ -40,9 +40,9 @@ def test_projection_checks_origin_visibility_without_rewriting_storage(
     cid = db.add_conversation({"id": "moved", "title": "Now global"}, assistant_startup=origin)
     raw = db.get_conversation_by_id(cid)["assistant_startup_json"]
     if visibility == "archived":
-        db.update_workspace("private-origin", {"archived": True}, 1)
+        db.workspace_store.update_workspace("private-origin", {"archived": True}, 1)
     elif visibility == "deleted":
-        db.delete_workspace("private-origin", expected_version=1)
+        db.workspace_store.delete_workspace("private-origin", expected_version=1)
     elif visibility == "staged":
         with db.transaction() as conn:
             conn.execute("UPDATE workspaces SET system_operation_state = 'staged' WHERE id = ?", ("private-origin",))
@@ -119,7 +119,7 @@ def test_projection_cache_is_explicitly_scoped_to_one_request(
         result = assistant_defaults.project_assistant_startup(db, raw=raw, user_id="owner", workspace_visibility_cache=first_request)
         assert result.source == "workspace_default"
     assert calls == ["private-origin"]
-    db.delete_workspace("private-origin", expected_version=1)
+    db.workspace_store.delete_workspace("private-origin", expected_version=1)
     calls.clear()
     assert assistant_defaults.project_assistant_startup(db, raw=raw, user_id="owner", workspace_visibility_cache={}).model_dump() == UNKNOWN
     assert calls == ["private-origin"]

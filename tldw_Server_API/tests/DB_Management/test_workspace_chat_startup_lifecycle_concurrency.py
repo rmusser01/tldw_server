@@ -42,7 +42,7 @@ def test_receipt_admission_committing_before_closure_is_cascaded(
     admitted, closing, release = Event(), Event(), Event()
     pids: list[int | None] = [None, None]
     recheck = creation_db.conversation_store._recheck_receipt_admission
-    lock_close = closer._lock_native_workspace_delete
+    lock_close = closer.workspace_store._lock_native_workspace_delete
 
     def pause_admitted(*args: Any, **kwargs: Any) -> None:
         """Keep actual Workspace/chat locks until the closure contender is observed."""
@@ -72,9 +72,9 @@ def test_receipt_admission_committing_before_closure_is_cascaded(
             if index == 0:
                 _resurrect(db, cid, writer, 2)
             elif hard:
-                db.hard_delete_workspace("ws")
+                db.workspace_store.hard_delete_workspace("ws")
             else:
-                assert db.delete_workspace("ws", expected_version=2)
+                assert db.workspace_store.delete_workspace("ws", expected_version=2)
         finally:
             if index == 1 and not postgres:
                 db.get_connection().set_trace_callback(None)
@@ -126,7 +126,7 @@ def test_committed_workspace_closure_blocks_receipt_resurrection_before_insert(
     first = _start(creation_db)
     cid = first.conversation["id"]
     creation_db.soft_delete_conversation(cid, 1)
-    assert creation_db._begin_native_workspace_delete("ws", expected_version=2, hard=False)
+    assert creation_db.workspace_store._begin_native_workspace_delete("ws", expected_version=2, hard=False)
     conn_type = type(creation_db.get_connection())
     inserted = False
     if creation_db.backend_type.value == "postgresql":
@@ -270,7 +270,7 @@ def test_postgres_receipt_appearing_after_sync_preflight_requires_fresh_admissio
             first = _start(creation_db)
             assert first.conversation["id"] == cid
             if closed:
-                assert creation_db._begin_native_workspace_delete("ws", expected_version=2, hard=False)
+                assert creation_db.workspace_store._begin_native_workspace_delete("ws", expected_version=2, hard=False)
         finally:
             release.set()
             start.set()

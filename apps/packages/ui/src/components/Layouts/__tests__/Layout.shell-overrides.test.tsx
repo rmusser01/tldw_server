@@ -1031,3 +1031,31 @@ it("shared shell demand-mounts its existing helper inside a cold real mobile Dra
     useQuickChatStore.getState().setIsOpen(false)
   }
 })
+
+// XP-11 (#3101): off /chat the mobile drawer holds the app menu, not the chat
+// list, so it is not announced as "Chats". antd names the dialog after its
+// title even though the header is hidden.
+it.each([
+  ["/chat", "Chats"],
+  ["/notes", "Menu"],
+  ["/knowledge", "Knowledge history"]
+])("names the mobile drawer after what it holds on %s", async (path, name) => {
+  capabilityProbe.actualDrawer = true
+  sidebarState.enabled = true
+  sidebarState.mobile = true
+  try {
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <OptionLayout>
+          <div>Page</div>
+        </OptionLayout>
+      </MemoryRouter>
+    )
+    act(() => window.dispatchEvent(new Event("tldw:open-chat-sidebar")))
+    expect(await screen.findByRole("dialog", { name })).toBeInTheDocument()
+  } finally {
+    capabilityProbe.actualDrawer = false
+    sidebarState.enabled = false
+    sidebarState.mobile = false
+  }
+})

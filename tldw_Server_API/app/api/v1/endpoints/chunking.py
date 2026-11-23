@@ -71,6 +71,7 @@ from tldw_Server_API.app.core.Chunking.strategies.rolling_summarize import (
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     record_byok_missing_credentials,
@@ -145,7 +146,7 @@ def _raise_sanitized_chunking_error(
 def _chunking_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
     """Map typed credential failures to bounded chunking responses."""
     code = getattr(exc, "policy_code", exc.code)
-    if code in {"provider_disabled", "model_not_allowed"}:
+    if code in ADMIN_POLICY_CODES:
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={

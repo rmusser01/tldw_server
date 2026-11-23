@@ -21,6 +21,7 @@ import {
   partialHistoryCoverage,
   plainHistoryPreview
 } from "./history-review-presentation"
+import { newestLeafPath } from "@/utils/newest-leaf-path"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -494,6 +495,13 @@ export function HistorySelectionReview({
     () => chronologicalHistoryNodes(sourceNodes || []),
     [sourceNodes]
   )
+  // CM-N2: a legacy chat's review starts from its newest path; alternatives stay listed.
+  const legacyPath = React.useMemo(
+    () => selection.status === "legacy_review_required"
+      ? newestLeafPath(nodes, (node) => ({ id: node.id, parentId: node.parent_id }))
+      : null,
+    [selection.status, nodes]
+  )
   const rowId = (id: string) => `${identity}-${encodeURIComponent(id)}`
   const virtualizer = useVirtualizer({
     count: nodes.length,
@@ -568,9 +576,9 @@ export function HistorySelectionReview({
     )
   }
   const beginReview = () => {
-    // Start from the complete owner manifest, including offscreen alternatives.
+    // Start from the newest path of a legacy chat, or the complete owner manifest.
     if (!expanded && included.length === 0) {
-      const ids = nodes.map((node) => node.id)
+      const ids = (legacyPath?.path ?? nodes).map((node) => node.id)
       setIncluded(ids)
       setCursor(
         ids.length
@@ -1335,6 +1343,14 @@ export function HistorySelectionReview({
             {text("refresh", "Refresh history")}
           </Button>
         )}
+        {reviewAvailable && legacyPath?.hasAlternatives && (
+          <p className="w-full text-xs text-text-muted">
+            {text(
+              "alternativeReplies",
+              "This chat has alternative replies. Only the newest is shown; review the history to choose which ones the AI sees."
+            )}
+          </p>
+        )}
         {reviewAvailable && (
           <Button
             ref={trigger}
@@ -1346,7 +1362,7 @@ export function HistorySelectionReview({
         )}
         {onExpand && (
           <Button variant="ghost" size="sm" onClick={onExpand}>
-            {text("expand", "Expand in full page")}
+            {text("expand", "Open in full page")}
           </Button>
         )}
       </div>

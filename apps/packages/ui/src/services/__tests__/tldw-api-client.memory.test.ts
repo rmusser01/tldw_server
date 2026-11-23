@@ -108,3 +108,14 @@ it('keeps shared in-flight deduplication and cached results', async () => {
   expect(await client.listChatMessages('same')).toBe(first)
   expect(request).toHaveBeenCalledOnce()
 })
+
+it('keeps the server saying a message has an image, so an export can say it left the image out', async () => {
+  request.mockResolvedValue([
+    { id: 'with-image', role: 'user', content: 'Look', has_image: true },
+    { id: 'text-only', role: 'user', content: 'Hi', has_image: false }
+  ])
+  const listed = await client.listChatMessages('images-chat', undefined, { fresh: true })
+  const [withImage, textOnly] = listed
+  expect(withImage.has_image).toBe(true)
+  expect(textOnly).not.toHaveProperty('has_image')
+})

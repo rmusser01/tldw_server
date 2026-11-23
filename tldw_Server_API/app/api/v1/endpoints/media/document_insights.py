@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_REFUSAL_STATUS, PROVIDER_STREAM_ERROR_MESSAGES
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
@@ -323,6 +324,13 @@ async def generate_document_insights(
             media_id,
         )
     except ChatConfigurationError as e:
+        code = getattr(e, "error_code", None)
+        if code in ADMIN_REFUSAL_STATUS:
+            # The provider base class refused an admin-disabled provider or model, or an unreadable store (TASK-15581).
+            raise HTTPException(
+                status_code=ADMIN_REFUSAL_STATUS[code],
+                detail={"error_code": code, "message": PROVIDER_STREAM_ERROR_MESSAGES[code]},
+            ) from e
         logger.error("LLM configuration error for insights")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

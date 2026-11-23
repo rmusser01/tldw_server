@@ -1247,6 +1247,102 @@
   "notesSearch_linkedChatUnresolved": {
     "message": "Linked chat"
   },
+  "notesSearch_fromChatLink": {
+    "message": "From chat"
+  },
+  "notesSearch_fromChatTooltip": {
+    "message": "Open the chat this note was saved from"
+  },
+  "notesSearch_bulkProgressDelete": {
+    "message": "Deleting {{done}}/{{total}}…"
+  },
+  "notesSearch_bulkProgressAddTags": {
+    "message": "Adding tags {{done}}/{{total}}…"
+  },
+  "notesSearch_bulkProgressRestore": {
+    "message": "Restoring {{done}}/{{total}}…"
+  },
+  "notesSearch_bulkFailedDelete": {
+    "message": "Delete failed for {{count}}:"
+  },
+  "notesSearch_bulkFailedAddTags": {
+    "message": "Adding tags failed for {{count}}:"
+  },
+  "notesSearch_bulkFailedRestore": {
+    "message": "Restore failed for {{count}}:"
+  },
+  "notesSearch_bulkFailedMore": {
+    "message": "+{{count}} more"
+  },
+  "notesSearch_bulkRetry": {
+    "message": "Retry"
+  },
+  "notesSearch_bulkDismissFailures": {
+    "message": "Dismiss"
+  },
+  "notesSearch_selectAllOnPageAria": {
+    "message": "Select all notes on this page"
+  },
+  "notesSearch_bulkSelectAllMatching": {
+    "message": "Select all {{count}} matching"
+  },
+  "notesSearch_bulkSelectFirstMatching": {
+    "message": "Select the first {{count}} matching"
+  },
+  "notesSearch_bulkAllMatchingSelected": {
+    "message": "All {{count}} matching notes are selected."
+  },
+  "notesSearch_bulkFirstMatchingSelected": {
+    "message": "The first {{count}} of {{total}} matching notes are selected."
+  },
+  "notesSearch_bulkSelectAllMatchingError": {
+    "message": "Could not select all matching notes. Try again."
+  },
+  "notesSearch_bulkRestore": {
+    "message": "Restore selected"
+  },
+  "notesSearch_bulkSelectTrashAria": {
+    "message": "Select note {{title}} to restore"
+  },
+  "notesSearch_noteRestored": {
+    "message": "Note restored"
+  },
+  "notesSearch_restoredOpenNote": {
+    "message": "Open note"
+  },
+  "notesSearch_trashSearchPlaceholder": {
+    "message": "Search Trash"
+  },
+  "notesSearch_trashSearchAria": {
+    "message": "Search Trash"
+  },
+  "notesSearch_bulkRunBusy": {
+    "message": "Wait for the bulk action to finish."
+  },
+  "notesSearch_fromChatTitleSeparator": {
+    "message": ": "
+  },
+  "notesSearch_bulkRestoreSuccess_one": {
+    "message": "Restored {{count}} note"
+  },
+  "notesSearch_bulkDelete": {
+    "message": "Move selected to Trash"
+  },
+  "notesSearch_bulkRestorePartial": {
+    "message": "Restored {{restored}} of {{total}} notes."
+  },
+  "notesSearch_bulkRestoreSuccess_other": {
+    "message": "Restored {{count}} notes"
+  },
+  "notesSearch_bulkRestoreFailed_one": {
+    "message": "{{count}} selected note could not be restored"
+  },
+  "notesSearch_bulkRestoreFailed_other": {
+    "message": "{{count}} selected notes could not be restored"
+  },
+  "notesSearch_shortcutListOpenChatDescription": {
+    "message": "Open the chat the focused note came from."
+  },
   "notesSearch_linkedConversationIdLabel": {
     "message": "Conversation ID"
   },
@@ -6045,16 +6141,25 @@
     "message": "Search loaded nodes"
   },
   "notesSearch_graphRadiusLabel": {
-    "message": "Radius"
+    "message": "Distance from focus"
   },
   "notesSearch_graphRadiusAria": {
-    "message": "Graph radius"
+    "message": "Distance from focus note"
+  },
+  "notesSearch_graphRadiusOption_one": {
+    "message": "1 link away"
+  },
+  "notesSearch_graphRadiusOption_two": {
+    "message": "2 links away"
+  },
+  "notesSearch_graphSettings": {
+    "message": "Graph settings"
   },
   "notesSearch_graphMaxNodesLabel": {
-    "message": "Max nodes"
+    "message": "Most items shown"
   },
   "notesSearch_graphMaxNodesAria": {
-    "message": "Maximum graph nodes"
+    "message": "Most items shown in the graph"
   },
   "notesSearch_graphLayoutLabel": {
     "message": "Layout"
@@ -6063,7 +6168,7 @@
     "message": "Graph layout"
   },
   "notesSearch_graphLayoutOption_dagre": {
-    "message": "Dagre"
+    "message": "Tree"
   },
   "notesSearch_graphLayoutOption_circle": {
     "message": "Circle"
@@ -6072,7 +6177,7 @@
     "message": "Grid"
   },
   "notesSearch_graphLayoutOption_concentric": {
-    "message": "Concentric"
+    "message": "Rings"
   },
   "notesSearch_graphScope": {
     "message": "Graph scope"
@@ -6082,6 +6187,45 @@
   },
   "notesSearch_graphScopeAll": {
     "message": "All notes"
+  },
+  "notesSearch_graphPickOutsideView": {
+    "message": "The note you picked isn't in this view."
+  },
+  "notesSearch_graphPickShowIt": {
+    "message": "Show it in the graph"
+  },
+  "notesSearch_graphSettingsLibraryHint": {
+    "message": "All notes and tag filters show every matching note, so distance and item limit apply only to a focused graph."
+  },
+  "notesSearch_graphFilters": {
+    "message": "Graph filters"
+  },
+  "notesSearch_graphFilterTag": {
+    "message": "Tag"
+  },
+  "notesSearch_graphFilterAnyTag": {
+    "message": "All tags"
+  },
+  "notesSearch_graphFilterLinkedOnly": {
+    "message": "Linked notes only"
+  },
+  "notesSearch_graphAllNotesFilterHint": {
+    "message": "Pick a tag to see part of it."
+  },
+  "notesSearch_graphLayoutFallback": {
+    "message": "Tree is slow for a graph this large, so it uses the Rings layout. Tree works up to {{nodes}} items and {{links}} links."
+  },
+  "notesSearch_graphPreviewHeading": {
+    "message": "Note preview"
+  },
+  "notesSearch_graphPreviewUntitled": {
+    "message": "Untitled note"
+  },
+  "notesSearch_graphPreviewEmpty": {
+    "message": "This note has no text yet."
+  },
+  "notesSearch_graphOpenInEditor": {
+    "message": "Open in editor"
   },
   "notesSearch_graphFocusCurrent": {
     "message": "Focus current note"
@@ -6489,7 +6633,7 @@
     "message": "Close notes list"
   },
   "notesSearch_listRowKeyboardHint": {
-    "message": "Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin."
+    "message": "Press Enter to open. Use the arrow keys to move between notes, X to select, P to pin, and C to open the chat a note came from."
   },
   "notesSearch_tagFilterNoMatch": {
     "message": "No tag named \"{{query}}\""
@@ -6512,17 +6656,17 @@
   "notesSearch_serverUnavailableDescription": {
     "message": "You can keep writing. Your edits are kept on this device and saved when the server is back."
   },
-  "notesSearch_moveToTrashConfirmTitle": {
-    "message": "Move to Trash?"
+  "notesSearch_movedToTrashNamed": {
+    "message": "Moved \"{{title}}\" to Trash."
   },
-  "notesSearch_moveToTrashConfirmOk": {
-    "message": "Move to Trash"
+  "notesSearch_movedToTrashUnnamed": {
+    "message": "Moved this note to Trash."
   },
-  "notesSearch_moveToTrashConfirmNamed": {
-    "message": "Move \"{{title}}\" to Trash? You can restore it from Trash."
+  "notesSearch_bulkMovedToTrash_one": {
+    "message": "Moved {{count}} note to Trash."
   },
-  "notesSearch_moveToTrashConfirmUnnamed": {
-    "message": "Move this note to Trash? You can restore it from Trash."
+  "notesSearch_bulkMovedToTrash_other": {
+    "message": "Moved {{count}} notes to Trash."
   },
   "notesSearch_moveToTrashLinkedOne": {
     "message": "This note is linked from 1 other note. That link will not work while the note is in Trash."
@@ -6927,7 +7071,13 @@
     "message": "Relationship line styles"
   },
   "notesSearch_graphLegendAuthoritative": {
-    "message": "Authoritative"
+    "message": "Saved links"
+  },
+  "notesSearch_graphNodeLegend": {
+    "message": "Node shapes"
+  },
+  "notesSearch_graphFocusFallbackHint": {
+    "message": "No note is open, so the graph is centered on “{{title}}”. Pick a note to focus the graph."
   },
   "notesSearch_graphPassageSimilarityShort": {
     "message": "passage similarity"
@@ -7019,6 +7169,24 @@
   "notesSearch_tagMatchAny": {
     "message": "Any of these tags"
   },
+  "notesSearch_notebookHelperSelectedNoTags": {
+    "message": "This saved filter has no tags, so it does not narrow the list."
+  },
+  "notesSearch_notebookSaveAllTagsNotice": {
+    "message": "This filter will show notes that have all of these tags: {{tags}}."
+  },
+  "notesSearch_notebookHelperSelectedAllTags": {
+    "message": "Shows notes that have all of its tags: {{tags}}."
+  },
+  "notesSearch_notebookHelperDefaultAllTags": {
+    "message": "Save the picked tags as a saved filter. A saved filter shows notes that have all of its tags."
+  },
+  "notesSearch_viewModeInboxDescription": {
+    "message": "Notes saved from browser capture."
+  },
+  "notesSearch_sortRelevance": {
+    "message": "Best match"
+  },
   "notesSearch_resultsRegionLabel": {
     "message": "Notes results"
   },
@@ -7042,6 +7210,15 @@
   },
   "notesSearch_shortcutListReturnDescription": {
     "message": "Return to the notes list."
+  },
+  "notesSearch_wikilinkSuggestionCount": {
+    "message": "{{count}} notes"
+  },
+  "notesSearch_wikilinkSuggestionCount_one": {
+    "message": "{{count}} note"
+  },
+  "notesSearch_wikilinkSuggestionCount_other": {
+    "message": "{{count}} notes"
   },
   "header_browsePages": {
     "message": "Browse pages"

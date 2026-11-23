@@ -242,8 +242,8 @@ def test_reveal_freezes_server_elapsed_time_once_and_retries_are_idempotent(
         ("2026-09-10T12:00:00.000Z", attempt["id"]),
     )
     monkeypatch.setattr(
-        db,
-        "_get_current_utc_timestamp_iso",
+        db.ctx,
+        "utc_now_iso",
         lambda: "2026-09-10T12:05:07.900Z",
     )
 

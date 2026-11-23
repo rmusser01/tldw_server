@@ -373,3 +373,21 @@ def test_duplicate_hard_fails_when_target_became_unusable(tmp_path, monkeypatch)
             payload=ScheduledTaskDuplicateRequest(),
         )
     assert excinfo.value.code == "execution_target_unusable"  # nosec B101
+
+
+def test_admin_denied_model_is_a_validation_error_on_the_model(tmp_path, monkeypatch):
+    """TASK-15582: a denied model is attributed to input.model, as a model off the allowlist is."""
+    _bound(monkeypatch, _LISTING)
+    monkeypatch.setattr(
+        service_module,
+        "validate_provider_override",
+        lambda p, m: {"error_code": "model_denied"} if (p == "openai" and m == "gpt-4o") else None,
+    )
+    service, _repo = _service(tmp_path)
+
+    preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_preview_payload("openai", "gpt-4o"))
+
+    assert (preview.status, [(e["field"], e["code"]) for e in preview.validation_errors]) == (
+        "invalid",
+        [("input.model", "model_denied")],
+    )  # nosec B101

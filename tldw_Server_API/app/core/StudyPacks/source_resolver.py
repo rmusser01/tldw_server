@@ -8,12 +8,12 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
     get_media_by_id,
     get_unvectorized_chunks_in_range,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 
 from .types import (
     StudySourceBundle,
@@ -256,6 +256,7 @@ class StudySourceResolver:
         label = selection.label or _clean_text(media.get("title")) or f"Media {media_id}"
         locator = dict(selection.locator)
         chunk_index = locator.get("chunk_index")
+        timestamp_value = locator.get("timestamp_seconds")
         if chunk_index is not None:
             chunk_index = _parse_non_negative_int(chunk_index, "chunk_index")
             try:
@@ -296,8 +297,9 @@ class StudySourceResolver:
                     evidence_text=evidence_text,
                     locator=normalized_locator,
                 )
+            if timestamp_value is None:
+                raise ValueError(f"Media {media_id} has no text evidence for chunk {chunk_index}")
 
-        timestamp_value = locator.get("timestamp_seconds")
         transcript = _clean_text(get_latest_transcription(self.media_db, media_id))
         normalized_locator: dict[str, Any] = {"media_id": media_id}
         if timestamp_value is not None:
@@ -305,9 +307,15 @@ class StudySourceResolver:
                 timestamp_value,
                 "timestamp_seconds",
             )
-        evidence_text, normalized_locator = _prepare_evidence(selection, normalized_locator, transcript)
+        evidence_text, normalized_locator = _prepare_evidence(
+            selection,
+            normalized_locator,
+            transcript,
+            media.get("content") if timestamp_value is None else None,
+        )
         if not evidence_text:
-            raise ValueError(f"Media {media_id} has no transcript evidence to resolve")
+            evidence_kind = "transcript" if timestamp_value is not None else "text"
+            raise ValueError(f"Media {media_id} has no {evidence_kind} evidence to resolve")
 
         return StudySourceBundleItem(
             source_type="media",

@@ -65,11 +65,23 @@ async def watchlist_run(payload: dict[str, Any]) -> dict[str, Any]:
     tenant_id = payload.get("tenant_id")
     if tenant_id is not None:
         tenant_id = str(tenant_id)
+    options: dict[str, Any] = {}
+    if any(key in payload for key in ("watchlist_schedule_id", "watchlist_schedule_cron", "watchlist_job_revision")):
+        schedule_id = payload.get("watchlist_schedule_id")
+        cron = payload.get("watchlist_schedule_cron")
+        if not isinstance(schedule_id, str) or not schedule_id or not isinstance(cron, str) or not cron.strip():
+            raise ValueError("watchlist_run: invalid recurring schedule reference")
+        options["expected_schedule"] = (schedule_id, cron)
+        if "watchlist_job_revision" in payload:
+            revision = payload["watchlist_job_revision"]
+            if not isinstance(revision, str) or not revision:
+                raise ValueError("watchlist_run: invalid recurring schedule revision")
+            options["expected_schedule_revision"] = revision
 
     # Execute the real pipeline (handles run row creation, stats, and job history). Its LLM
     # extraction calls run for this user, whatever request started the Scheduler (TASK-13864).
     with llm_call_root(uid_int):
-        result = await run_watchlist_job(uid_int, int(job_id), tenant_id=tenant_id)
+        result = await run_watchlist_job(uid_int, int(job_id), tenant_id=tenant_id, **options)
     status = str(result.get("status") or "succeeded")
     return {"run_id": result.get("run_id"), "status": status, "items_ingested": int(result.get("items_ingested", 0))}
 

@@ -27,7 +27,7 @@ def _load_generation_modules():
 @pytest.fixture
 def db(tmp_path):
     chacha = CharactersRAGDB(str(tmp_path / "study-pack-generation.db"), client_id="study-pack-generation-tests")
-    chacha.upsert_workspace("ws-1", "Workspace 1")
+    chacha.workspace_store.upsert_workspace("ws-1", "Workspace 1")
     try:
         yield chacha
     finally:

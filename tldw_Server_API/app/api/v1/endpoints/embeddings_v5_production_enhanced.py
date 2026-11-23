@@ -70,6 +70,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import EMBEDDINGS_ADMIN, SYSTEM
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
+from tldw_Server_API.app.core.config_sections.redis import redis_url_env
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
@@ -153,6 +154,7 @@ from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     encode_huggingface_model_path,
     encode_provider_model_path,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.LLM_Calls.providers.base import (
     EmbeddingsAdapterUnavailableError,
 )
@@ -566,7 +568,7 @@ def _is_embeddings_backpressure_redis_enabled() -> bool:
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         pass
 
-    return bool(os.getenv("EMBEDDINGS_REDIS_URL") or os.getenv("REDIS_URL"))
+    return bool(os.getenv("EMBEDDINGS_REDIS_URL") or redis_url_env())
 
 
 def _should_enforce_tenant_rps(request: Request) -> bool:
@@ -731,6 +733,7 @@ _EMBEDDINGS_CREDENTIAL_ERROR_MESSAGES = {
     "credential_scope_revoked": "The selected provider credential scope is no longer available.",
     "provider_disabled": "The selected provider is disabled by administrator policy.",
     "model_not_allowed": "The selected model is not allowed for this provider.",
+    "model_denied": "The selected model is disabled by administrator policy.",
 }
 _EMBEDDINGS_CREDENTIAL_ERROR_CODES = frozenset(
     {"missing_provider_credentials", *_EMBEDDINGS_CREDENTIAL_ERROR_MESSAGES}
@@ -794,7 +797,7 @@ def _embeddings_credential_http_exception(exc: ByokResolutionError) -> HTTPExcep
     return HTTPException(
         status_code=(
             status.HTTP_403_FORBIDDEN
-            if code in {"provider_disabled", "model_not_allowed"}
+            if code in ADMIN_POLICY_CODES
             else status.HTTP_503_SERVICE_UNAVAILABLE
         ),
         detail={"error_code": code, "message": message},

@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -94,7 +95,7 @@ def test_real_postgres_unique_failure_retains_only_a_safe_category(pg_database_c
         with pytest.raises(DatabaseError) as raised:
             backend.execute("INSERT INTO uat174_private_constraint(token) VALUES (%s)", (private_value,))
         error = raised.value
-        assert CharactersRAGDB._is_unique_violation(None, error)
+        assert ChaChaContext(None).is_unique_violation(error)
         assert str(error) == "PostgreSQL query execution failed"
         assert error.__cause__ is None
         assert error.__context__ is None
@@ -177,7 +178,7 @@ def test_redacted_category_does_not_keep_driver_or_rollback_payload(category, ro
     finally:
         logger.remove(sink)
     error = raised.value
-    assert CharactersRAGDB._is_unique_violation(None, error) is (
+    assert ChaChaContext(None).is_unique_violation(error) is (
         category in {"unique", "saved-view-name", "other-unique", "private-unique"}
     )
     assert CharactersRAGDB._is_workspace_source_saved_view_postgres_unique_error(error) is (
@@ -202,8 +203,8 @@ def test_redacted_category_does_not_keep_driver_or_rollback_payload(category, ro
 
 @pytest.mark.unit
 def test_unique_classifier_preserves_sqlite_and_generic_error_compatibility():
-    assert CharactersRAGDB._is_unique_violation(None, sqlite3.IntegrityError("UNIQUE constraint failed: decks.name"))
-    assert not CharactersRAGDB._is_unique_violation(None, DatabaseError("PostgreSQL query execution failed"))
+    assert ChaChaContext(None).is_unique_violation(sqlite3.IntegrityError("UNIQUE constraint failed: decks.name"))
+    assert not ChaChaContext(None).is_unique_violation(DatabaseError("PostgreSQL query execution failed"))
 
 
 @pytest.mark.unit

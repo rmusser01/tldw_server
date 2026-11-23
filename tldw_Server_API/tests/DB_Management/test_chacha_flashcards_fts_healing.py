@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 
 
 pytestmark = pytest.mark.unit
@@ -102,7 +103,7 @@ def test_flashcard_asset_schema_repairs_legacy_fts_before_scheduler_style_update
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
 
-        db._ensure_flashcard_asset_schema_sqlite(conn)
+        sqlite_schema._ensure_flashcard_asset_schema_sqlite(db.ctx, conn)
 
         flashcard_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info('flashcards')")

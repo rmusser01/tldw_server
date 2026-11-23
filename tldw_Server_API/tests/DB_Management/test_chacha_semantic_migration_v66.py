@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as chacha_db_module
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     SchemaError,
@@ -155,17 +155,17 @@ def test_sqlite_v83_migration_failure_rolls_back_table_and_version(
     db_path = tmp_path / "semantic-v83-rollback.sqlite"
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 82)
     db = CharactersRAGDB(str(db_path), client_id="owner-a")
-    original_split = chacha_db_module.split_sql_statements
+    original_split = sqlite_steps.split_sql_statements
 
     def broken_statements(script: str) -> list[str]:
         statements = original_split(script)
         return [statements[0], "INSERT INTO missing_v83_relation(value) VALUES (1)"]
 
-    monkeypatch.setattr(chacha_db_module, "split_sql_statements", broken_statements)
+    monkeypatch.setattr(sqlite_steps, "split_sql_statements", broken_statements)
     try:
         with db.transaction() as conn:
             with pytest.raises(SchemaError, match="Notes semantic v83 SQLite migration failed"):
-                db._migrate_from_v82_to_v83_sqlite(conn)
+                sqlite_steps._migrate_from_v82_to_v83_sqlite(db.ctx, conn)
             assert db._get_db_version(conn) == 82
             assert conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",

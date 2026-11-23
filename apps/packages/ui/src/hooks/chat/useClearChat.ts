@@ -17,6 +17,7 @@ import { updatePageTitle } from "@/utils/update-page-title"
 import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
 import { generateWorkspaceId, useWorkspaceStore } from "@/store/workspace"
 import { CHAT_WORKSPACE_PATH, RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
+import { withoutNotePins } from "@/utils/note-pins"
 import { planServerChatNavigation } from "@/hooks/chat/server-chat-route"
 
 type UseClearChatOptions = {
@@ -171,7 +172,9 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
       compareContinuationModeByCluster: {},
       compareSplitChats: {},
       compareActiveModelsByCluster: {},
-      compareParentByHistory: {}
+      compareParentByHistory: {},
+      // Attached notes belong to a message in the old chat (decision [4]).
+      ragPinnedResults: withoutNotePins(useStoreMessageOption.getState().ragPinnedResults)
     })
     clearReplyTarget()
     usePlaygroundSessionStore.getState().clearSession()

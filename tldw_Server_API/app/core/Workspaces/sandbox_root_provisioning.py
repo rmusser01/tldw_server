@@ -74,7 +74,7 @@ def provision_and_attach_sandbox_root(
             "expected_workspace_version": request_data.expected_workspace_version,
         }
     )
-    operation = db.create_workspace_operation(
+    operation = db.workspace_store.create_workspace_operation(
         workspace_id=workspace_key,
         user_id=user_key,
         command=WORKSPACE_SANDBOX_ROOT_COMMAND,
@@ -90,7 +90,7 @@ def provision_and_attach_sandbox_root(
             entity="workspace_operations",
             entity_id=str(operation.get("id") or ""),
         )
-    primary_root = db.get_workspace_primary_root(workspace_key)
+    primary_root = db.workspace_store.get_workspace_primary_root(workspace_key)
     if operation.get("status") == "succeeded":
         return _result(
             db=db,
@@ -142,7 +142,7 @@ def provision_and_attach_sandbox_root(
             workspace_key,
             exc,
         )
-        db.update_workspace_operation(
+        db.workspace_store.update_workspace_operation(
             workspace_key,
             str(operation["id"]),
             status="failed",
@@ -159,7 +159,7 @@ def provision_and_attach_sandbox_root(
             workspace_key,
             exc.key,
         )
-        db.update_workspace_operation(
+        db.workspace_store.update_workspace_operation(
             workspace_key,
             str(operation["id"]),
             status="conflicted",
@@ -178,7 +178,7 @@ def provision_and_attach_sandbox_root(
         raise
 
     if str(volume.state.value) == "ready":
-        operation = db.update_workspace_operation(
+        operation = db.workspace_store.update_workspace_operation(
             workspace_key,
             str(operation["id"]),
             status="succeeded",
@@ -193,7 +193,7 @@ def provision_and_attach_sandbox_root(
             http_status_code=200,
         )
 
-    operation = db.update_workspace_operation(
+    operation = db.workspace_store.update_workspace_operation(
         workspace_key,
         str(operation["id"]),
         status="running",
@@ -261,7 +261,7 @@ def _result(
     primary_root: dict[str, Any] | None,
     http_status_code: int,
 ) -> WorkspaceSandboxRootProvisionResult:
-    workspace = db.get_workspace(workspace_id) or {}
+    workspace = db.workspace_store.get_workspace(workspace_id) or {}
     return WorkspaceSandboxRootProvisionResult(
         workspace_id=workspace_id,
         workspace_profile=str(workspace.get("workspace_profile") or "research"),

@@ -126,6 +126,7 @@ def build_override_response(override: Any) -> LLMProviderOverrideResponse:
         provider=override.provider,
         is_enabled=override.is_enabled,
         allowed_models=override.allowed_models,
+        denied_models=override.denied_models,
         config=override.config or None,
         credential_fields=override.credential_fields or None,
         has_api_key=bool(override.api_key or override.api_key_hint),
@@ -209,6 +210,7 @@ async def upsert_override(
     if (
         payload.is_enabled is None
         and payload.allowed_models is None
+        and payload.denied_models is None
         and payload.config is None
         and payload.api_key is None
         and payload.credential_fields is None
@@ -268,6 +270,10 @@ async def upsert_override(
             patch_fields["allowed_models"] = (
                 json.dumps(normalized_models) if normalized_models else None
             )
+
+        if payload.denied_models is not None:
+            denied = normalize_allowed_models(payload.denied_models)
+            patch_fields["denied_models"] = json.dumps(denied) if denied else None
 
         if payload.config is not None:
             if not isinstance(payload.config, dict):

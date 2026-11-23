@@ -1285,6 +1285,28 @@ async def list_llamacpp_models_endpoint(llm_manager: LLMInferenceManager = Depen
 from tldw_Server_API.app.api.v1.schemas.llamacpp_schemas import LlamaCppInferenceRequest
 
 
+def _refuse_admin_disabled_llamacpp() -> None:
+    """Refuse inference when the admin provider override disables llama.cpp (TASK-15581).
+
+    This route posts to the managed server itself, not through an adapter, so the provider base class never sees it.
+    It names no model (it runs the loaded one), so only ``provider_disabled`` applies. 403, or 503 for a store that
+    cannot be read.
+    """
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+        ADMIN_REFUSAL_STATUS,
+        PROVIDER_STREAM_ERROR_MESSAGES,
+    )
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import enforce_provider_override
+
+    try:
+        enforce_provider_override("llama.cpp", None)  # every stored spelling folds to this canonical name
+    except ByokResolutionError as error:
+        code = getattr(error, "policy_code", None) or error.code
+        detail = {"error_code": code, "message": PROVIDER_STREAM_ERROR_MESSAGES[code]}
+        raise HTTPException(status_code=ADMIN_REFUSAL_STATUS[code], detail=detail) from None
+
+
 @router.post(
     "/llamacpp/inference",
     summary="Run inference with Llama.cpp",
@@ -1311,6 +1333,7 @@ async def run_llamacpp_inference_endpoint(
     Returns:
         The backend's completion payload, with ``model`` and ``backend`` filled in.
     """
+    _refuse_admin_disabled_llamacpp()
     try:
         supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
         if supervisor is not None:

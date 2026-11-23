@@ -5,7 +5,6 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import time
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.prototype_workspaces_repo import (
     PrototypeWorkspacesRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.config_sections.auth import jwt_secret_key_env, single_user_api_key_env
 
 PROTOTYPE_SHARED_ACTOR_COOKIE = "prototype_shared_actor"
 DEFAULT_EXTERNAL_RUNTIME_POLICY_PROFILE = "locked_collab"
@@ -46,8 +46,8 @@ def _resolve_stable_signing_secret(signing_secret: str | None) -> str:
         signing_secret,
         getattr(settings, "JWT_SECRET_KEY", None),
         getattr(settings, "SINGLE_USER_API_KEY", None),
-        os.getenv("JWT_SECRET_KEY"),
-        os.getenv("SINGLE_USER_API_KEY"),
+        jwt_secret_key_env(),
+        single_user_api_key_env(),
     )
     for candidate in candidates:
         value = str(candidate or "").strip()

@@ -44,7 +44,10 @@ PROVIDER_STREAM_ERROR_MESSAGES = {
     "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
     "credential_scope_revoked": "The selected provider credential scope is no longer available.",
     "provider_disabled": "The selected provider is disabled by administrator policy.",
-    "model_not_allowed": "The selected model is not allowed for this provider.",
+    "model_not_allowed": (
+        "The selected model is not offered on the server's key for this provider. Your own provider key may serve it."
+    ),
+    "model_denied": "The selected model is disabled by administrator policy.",
     "provider_configuration_invalid": "The selected provider configuration is invalid.",
     "model_not_available": "The selected model is not available for this provider.",
     "provider_model_inventory_unavailable": (
@@ -64,7 +67,12 @@ _PROVIDER_STREAM_ERROR_STATUS = {
     "provider_output_limit": 502,
     "provider_disabled": 403,
     "model_not_allowed": 403,
+    "model_denied": 403,
 }
+# The admin provider-override policy refusals (TASK-15581, TASK-15582): each a 403, on whichever key refuses it.
+ADMIN_POLICY_CODES = frozenset({"provider_disabled", "model_not_allowed", "model_denied"})
+# The admin refusals the provider base class raises, with their HTTP status (an unreadable store is a 503).
+ADMIN_REFUSAL_STATUS = {**dict.fromkeys(ADMIN_POLICY_CODES, 403), "credential_store_unavailable": 503}
 _PROVIDER_STREAM_ERROR_TYPE_CODES = {
     "chatauthenticationerror": "provider_authentication_failed",
     "chatconfigurationerror": "provider_configuration_invalid",

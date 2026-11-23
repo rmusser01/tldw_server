@@ -194,9 +194,9 @@ def test_runtime_binding_normalizer_rejects_archived_status_on_write() -> None:
 def test_workspace_runtime_binding_upsert_list_get_and_archive(tmp_path: Path) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     try:
-        db.upsert_workspace("ws-1", "Workspace")
+        db.workspace_store.upsert_workspace("ws-1", "Workspace")
 
-        created = db.upsert_workspace_runtime_binding(
+        created = db.workspace_store.upsert_workspace_runtime_binding(
             "ws-1",
             {
                 "binding_id": "repo-main",
@@ -214,12 +214,12 @@ def test_workspace_runtime_binding_upsert_list_get_and_archive(tmp_path: Path) -
 
         assert created["path_hint"] == "project"
         assert created["metadata"] == {"branch": "main"}
-        assert db.get_workspace_runtime_binding("ws-1", "repo-main")["binding_id"] == "repo-main"
-        assert [item["binding_id"] for item in db.list_workspace_runtime_bindings("ws-1")] == [
+        assert db.workspace_store.get_workspace_runtime_binding("ws-1", "repo-main")["binding_id"] == "repo-main"
+        assert [item["binding_id"] for item in db.workspace_store.list_workspace_runtime_bindings("ws-1")] == [
             "repo-main"
         ]
 
-        updated = db.upsert_workspace_runtime_binding(
+        updated = db.workspace_store.upsert_workspace_runtime_binding(
             "ws-1",
             {
                 "binding_id": "repo-main",
@@ -239,12 +239,12 @@ def test_workspace_runtime_binding_upsert_list_get_and_archive(tmp_path: Path) -
         assert updated["metadata"] == {"branch": "dev"}
         assert updated["version"] == created["version"] + 1
 
-        archived = db.archive_workspace_runtime_binding("ws-1", "repo-main", user_id="user-1")
+        archived = db.workspace_store.archive_workspace_runtime_binding("ws-1", "repo-main", user_id="user-1")
         assert archived["status"] == "archived"
         assert archived["deleted"] in (True, 1)
-        assert db.get_workspace_runtime_binding("ws-1", "repo-main") is None
+        assert db.workspace_store.get_workspace_runtime_binding("ws-1", "repo-main") is None
         assert (
-            db.get_workspace_runtime_binding("ws-1", "repo-main", include_deleted=True)["status"]
+            db.workspace_store.get_workspace_runtime_binding("ws-1", "repo-main", include_deleted=True)["status"]
             == "archived"
         )
     finally:
@@ -254,8 +254,8 @@ def test_workspace_runtime_binding_upsert_list_get_and_archive(tmp_path: Path) -
 def test_workspace_runtime_binding_filters_by_kind_and_owner(tmp_path: Path) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     try:
-        db.upsert_workspace("ws-1", "Workspace")
-        db.upsert_workspace_runtime_binding(
+        db.workspace_store.upsert_workspace("ws-1", "Workspace")
+        db.workspace_store.upsert_workspace_runtime_binding(
             "ws-1",
             {
                 "binding_id": "repo-main",
@@ -266,7 +266,7 @@ def test_workspace_runtime_binding_filters_by_kind_and_owner(tmp_path: Path) -> 
                 "portability": "reference",
             },
         )
-        db.upsert_workspace_runtime_binding(
+        db.workspace_store.upsert_workspace_runtime_binding(
             "ws-1",
             {
                 "binding_id": "acp-session",
@@ -280,11 +280,11 @@ def test_workspace_runtime_binding_filters_by_kind_and_owner(tmp_path: Path) -> 
 
         assert [
             item["binding_id"]
-            for item in db.list_workspace_runtime_bindings("ws-1", binding_kind="repo")
+            for item in db.workspace_store.list_workspace_runtime_bindings("ws-1", binding_kind="repo")
         ] == ["repo-main"]
         assert [
             item["binding_id"]
-            for item in db.list_workspace_runtime_bindings("ws-1", owner_domain="acp")
+            for item in db.workspace_store.list_workspace_runtime_bindings("ws-1", owner_domain="acp")
         ] == ["acp-session"]
     finally:
         db.close_connection()

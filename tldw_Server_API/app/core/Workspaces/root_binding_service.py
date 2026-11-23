@@ -212,7 +212,7 @@ def attach_primary_workspace_root(
         payload["sandbox_mount_state"] = normalized.sandbox_mount_state
 
     try:
-        return db.upsert_workspace_primary_root(workspace_id, payload)
+        return db.workspace_store.upsert_workspace_primary_root(workspace_id, payload)
     except ConflictError as exc:
         raise _wrap_db_conflict(exc) from exc
     except InputError as exc:
@@ -223,7 +223,7 @@ def attach_primary_workspace_root(
 
 def _load_workspace_version_for_attach(db: Any, workspace_id: str) -> int:
     try:
-        workspace = db.get_workspace(workspace_id)
+        workspace = db.workspace_store.get_workspace(workspace_id)
     except ConflictError as exc:
         raise _wrap_db_conflict(exc) from exc
     except InputError as exc:
@@ -247,7 +247,7 @@ def _load_workspace_version_for_attach(db: Any, workspace_id: str) -> int:
 
 def _load_current_primary_root(db: Any, workspace_id: str) -> dict[str, Any] | None:
     try:
-        return db.get_workspace_primary_root(workspace_id)
+        return db.workspace_store.get_workspace_primary_root(workspace_id)
     except ConflictError as exc:
         raise _wrap_db_conflict(exc) from exc
     except InputError as exc:

@@ -6,6 +6,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
@@ -18,7 +19,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
     db = CharactersRAGDB(db_path=":memory:", client_id="workspace-source-pg-test", backend=backend)
 
     try:
-        db.upsert_workspace("ws-pg", "Postgres Workspace")
+        db.workspace_store.upsert_workspace("ws-pg", "Postgres Workspace")
         db.close_connection()
         with backend.transaction() as conn:
             backend.execute("DROP TABLE workspace_sources", connection=conn)
@@ -53,7 +54,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
             )
 
         with db.transaction() as conn:
-            db._ensure_workspace_subresource_schema_postgres(conn)
+            postgres_schema._ensure_workspace_subresource_schema_postgres(db.ctx, conn)
 
         column_rows = list(
             backend.execute(
@@ -112,7 +113,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
             """
         )
         with db.transaction() as conn:
-            db._ensure_workspace_subresource_schema_postgres(conn)
+            postgres_schema._ensure_workspace_subresource_schema_postgres(db.ctx, conn)
 
         cleaned = list(
             backend.execute(
@@ -126,7 +127,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
         assert cleaned["reviewed_at"] is None
         assert cleaned["reviewed_by_user_id"] is None
 
-        updated = db.update_workspace_source_review_states(
+        updated = db.workspace_store.update_workspace_source_review_states(
             "ws-pg",
             ["src-a", "src-a", "src-b"],
             "reviewed",
@@ -137,7 +138,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
         assert all(row["review_state"] == "reviewed" for row in updated)
         assert all(row["reviewed_by_user_id"] == "reviewer-pg" for row in updated)
         assert all(row["version"] == 2 for row in updated)
-        unrelated = db.get_workspace_source("ws-pg", "src-c")
+        unrelated = db.workspace_store.get_workspace_source("ws-pg", "src-c")
         assert unrelated["review_state"] == "needs_review"
         assert unrelated["version"] == 1
     finally:

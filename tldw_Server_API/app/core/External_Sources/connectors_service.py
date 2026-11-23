@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.External_Sources.notion import NotionConnector
 from tldw_Server_API.app.core.External_Sources.onedrive import OneDriveConnector
 from tldw_Server_API.app.core.External_Sources.sync_adapter import FileSyncAdapter
 from tldw_Server_API.app.core.External_Sources.zotero import ZoteroConnector
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.core.exceptions import ConnectorServiceError
 from tldw_Server_API.app.core.testing import is_production_like_env
 
@@ -141,7 +142,7 @@ def _env_truthy(name: str) -> bool:
 
 def _connector_secret_encryption_required() -> bool:
     """Return whether connector secrets must be encrypted before persistence."""
-    auth_mode = str(os.getenv("AUTH_MODE", "")).strip().lower()
+    auth_mode = str(load_auth_config().mode).strip().lower()
     return (
         _env_truthy("CONNECTORS_REQUIRE_TOKEN_ENCRYPTION")
         or auth_mode == "multi_user"

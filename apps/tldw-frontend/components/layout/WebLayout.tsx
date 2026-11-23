@@ -33,6 +33,7 @@ import { BuddyShellHost, BuddyShellRenderContextProvider } from '@/components/Co
 import { CurrentChatModelSettings } from '@/components/Common/Settings/CurrentChatModelSettings';
 import { Sidebar } from '@/components/Option/Sidebar';
 import { Header } from '@/components/Layouts/Header';
+import { isMainChatRoute } from '@/components/Layouts/header-action-policy';
 import { QuickIngestModalHost } from '@/components/Layouts/QuickIngestButton';
 import { useMigration } from '@/hooks/useMigration';
 import { useStorageMigrations } from '@/hooks/useStorageMigrations';
@@ -64,6 +65,7 @@ import {
 } from '@web/components/notifications/NotificationLifecycleProvider';
 import { NotificationToastBridge } from '@web/components/notifications/NotificationToastBridge';
 import { CommandPaletteHost } from '@/components/Common/CommandPaletteHost';
+import { useCommandPaletteContentProviders } from '@/components/Common/command-palette-content-providers';
 import { openModelSelector } from '@/utils/model-selector-events';
 import {
   useConnectionActions,
@@ -419,7 +421,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     }
   };
 
+  // ⌘K finds saved chats and notes (XP-06).
+  const commandPaletteContentProviders = useCommandPaletteContentProviders();
   const commandPaletteProps = {
+    contentProviders: commandPaletteContentProviders,
     onNewChat: clearChat,
     onToggleRag: () => setChatMode(chatMode === 'rag' ? 'normal' : 'rag'),
     onToggleWebSearch: () => setWebSearch(!webSearch),
@@ -597,7 +602,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           {/* Mobile Drawer for ChatSidebar when the persistent sidebar is enabled */}
           {shellSidebarEnabled && showChatSidebar && isMobileViewport && (
             <Drawer
-              title={t('common:chatSidebar.title', 'Chats')}
+              title={
+                // Named after what ChatSidebar shows on this route (XP-11).
+                isMainChatRoute(location.pathname)
+                  ? t('common:chatSidebar.title', 'Chats')
+                  : t('common:chatSidebar.menuTitle', 'Menu')
+              }
               styles={{ header: { display: 'none' }, body: { padding: 0, overflow: 'hidden' } }}
               placement="left"
               closeIcon={null}

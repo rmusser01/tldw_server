@@ -11,6 +11,7 @@ export const HOSTED_VISIBLE_OPTION_PATHS_LIST = [
   "/media",
   "/knowledge",
   "/collections",
+  "/watchlists",
   RESEARCH_WORKSPACE_PATH,
   "/stt",
   "/tts"

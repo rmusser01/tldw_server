@@ -12,21 +12,21 @@ def db(tmp_path):
 
 class TestFullWorkspaceSync:
     def test_workspace_with_all_sub_resources(self, db):
-        db.upsert_workspace("ws-1", "Full WS")
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.upsert_workspace("ws-1", "Full WS")
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "Video",
             "source_type": "video",
         })
-        db.add_workspace_artifact("ws-1", {
+        db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "Summary",
         })
-        db.add_workspace_note("ws-1", {"title": "Note", "content": "body"})
+        db.workspace_store.add_workspace_note("ws-1", {"title": "Note", "content": "body"})
 
-        assert len(db.list_workspace_sources("ws-1")) == 1
-        assert len(db.list_workspace_artifacts("ws-1")) == 1
-        assert len(db.list_workspace_notes("ws-1")) == 1
+        assert len(db.workspace_store.list_workspace_sources("ws-1")) == 1
+        assert len(db.workspace_store.list_workspace_artifacts("ws-1")) == 1
+        assert len(db.workspace_store.list_workspace_notes("ws-1")) == 1
 
-        ws = db.update_workspace("ws-1", {
+        ws = db.workspace_store.update_workspace("ws-1", {
             "banner_title": "Project X",
             "audio_provider": "openai",
         }, expected_version=1)
@@ -34,29 +34,29 @@ class TestFullWorkspaceSync:
         assert ws["audio_provider"] == "openai"
 
     def test_hard_delete_cascades_sub_resources(self, db):
-        db.upsert_workspace("ws-1", "WS")
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.upsert_workspace("ws-1", "WS")
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "V",
             "source_type": "video",
         })
-        db.add_workspace_artifact("ws-1", {
+        db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "S",
         })
-        db.add_workspace_note("ws-1", {"title": "N", "content": ""})
+        db.workspace_store.add_workspace_note("ws-1", {"title": "N", "content": ""})
 
-        db.hard_delete_workspace("ws-1")
+        db.workspace_store.hard_delete_workspace("ws-1")
 
-        assert db.list_workspace_sources("ws-1") == []
-        assert db.list_workspace_artifacts("ws-1") == []
-        assert db.list_workspace_notes("ws-1") == []
+        assert db.workspace_store.list_workspace_sources("ws-1") == []
+        assert db.workspace_store.list_workspace_artifacts("ws-1") == []
+        assert db.workspace_store.list_workspace_notes("ws-1") == []
 
     def test_optimistic_locking_across_sub_resources(self, db):
-        db.upsert_workspace("ws-1", "WS")
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.upsert_workspace("ws-1", "WS")
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "V",
             "source_type": "video",
         })
 
-        db.update_workspace_source("ws-1", "src-1", {"title": "V2"}, expected_version=1)
+        db.workspace_store.update_workspace_source("ws-1", "src-1", {"title": "V2"}, expected_version=1)
         with pytest.raises(ConflictError):
-            db.update_workspace_source("ws-1", "src-1", {"title": "V3"}, expected_version=1)
+            db.workspace_store.update_workspace_source("ws-1", "src-1", {"title": "V3"}, expected_version=1)

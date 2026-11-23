@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import functools
 import hashlib
 import json
 import os
@@ -79,7 +81,7 @@ QUEUE_TICK_GATES = {
 DIRECT_TRIGGER_DIGESTS = {
     "actionlint.yml": "d31daa2c3e010b3a70dcbd640ef24f573bea18619228e7548c50992c54df0e99",
     "backend-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
-    "ci.yml": "a2ef246f468b2b946f6fa5f9805497d9c8a1c4ca7f3ef395172a290a17a3b3a6",
+    "ci.yml": "ea6e388f5851cd2dea4664a145425ec84107d8a9406f56ff5f01a51d4b5b3bec",
     "codeql.yml": "8592a8565d97d233d6b27fb13d9a563f673550f3d8220d0b262487346a70e25f",
     "container-build-check.yml": "4b65b09e5b40faee5abc68a5e88fd114d8fd4b5b0ae84eb977474336ffdd6653",
     "coverage-required.yml": "88237a699f2e036ba116cd127e6a560a98ee417ef637db0163e6f90475bb6feb",
@@ -93,7 +95,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "notes-remediation-targeted.yml": "090c7ff3c4b668cd6c76fc3b9fc9a1b3be128b21b3b2b236cdfe33dd6f5edb5a",
     "onboarding-docs-gate.yml": "38fc27642d68b7b198e20a9e910ddfa2e1f626b32be5911df63d64c89cb60afa",
     "pre-commit.yml": "d3d381eead20326078cb0268da7340f8217d95336af86c8d9701419c5e67d3be",
-    "pypi-package.yml": "1faf356cfe858d94100ea61d578f0b9d132c73533277c552fd03f1e3ac141823",
+    "pypi-package.yml": "e90b731a35e91072df7737c033cc81208b6dd491e91ef1497fb47ce2a183768a",
     "sbom.yml": "6ba4774ab2129a605bb160c5ee6f48ebc51544881592ad60ad5268b910fcfbde",
     "security-required.yml": "17a6ff1c75afa8c8826e8378c3f73c1099375730bdd06067a2921ecaf38f58ab",
     "ui-characters-harness-tests.yml": "8977899d9903b59c454c686e1fda272a7b919f63782d84ec8c24973449f2eee6",
@@ -108,7 +110,7 @@ DIRECT_TRIGGER_DIGESTS = {
 }
 ORIGINAL_JOB_NAMES = {
     "actionlint.yml": ("actionlint",),
-    "backend-required.yml": ("changes", "non-utc-tests", "backend-required", "queue-tick"),
+    "backend-required.yml": ("changes", "non-utc-tests", "chacha-owner-isolation", "backend-required", "queue-tick"),
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
@@ -165,7 +167,8 @@ ORIGINAL_JOB_NAMES = {
 }
 ORIGINAL_DEPENDENCIES = {
     ("backend-required.yml", "non-utc-tests"): ("changes",),
-    ("backend-required.yml", "backend-required"): ("changes", "non-utc-tests"),
+    ("backend-required.yml", "chacha-owner-isolation"): ("changes",),
+    ("backend-required.yml", "backend-required"): ("changes", "non-utc-tests", "chacha-owner-isolation"),
     ("backend-required.yml", "queue-tick"): ("backend-required",),
     ("ci.yml", "full-suite-linux-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-summary"): ("full-suite-linux-312-shards", "changes"),
@@ -175,8 +178,8 @@ ORIGINAL_DEPENDENCIES = {
     ("ci.yml", "full-suite-macos-312-summary"): ("full-suite-macos-312-shards", "changes"),
     ("ci.yml", "full-suite-windows-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-windows-312-summary"): ("full-suite-windows-312-shards", "changes"),
-    ("ci.yml", "full-suite-os-313-release-shards"): ("lint", "syntax-check"),
-    ("ci.yml", "full-suite-windows-313-release-shards"): ("lint", "syntax-check"),
+    ("ci.yml", "full-suite-os-313-release-shards"): ("lint", "syntax-check", "changes"),
+    ("ci.yml", "full-suite-windows-313-release-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "character-chat-rate-limits"): (
         "full-suite-linux-312-summary",
         "changes",
@@ -224,6 +227,7 @@ LICENSE_RED_GATES = {
 }
 DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | LICENSE_RED_GATES | {
     ("backend-required.yml", "non-utc-tests"),
+    ("backend-required.yml", "chacha-owner-isolation"),
     ("backend-required.yml", "backend-required"),
     ("frontend-e2e-tiers.yml", "critical"),
     ("frontend-e2e-tiers.yml", "features"),
@@ -257,6 +261,7 @@ NON_PR_FULL_SUITE_JOBS = {
 }
 FETCH_DEPTH_CHECKOUTS = {
     ("backend-required.yml", "non-utc-tests"),
+    ("backend-required.yml", "chacha-owner-isolation"),
     ("backend-required.yml", "changes"),
     ("backend-required.yml", "backend-required"),
     ("ci.yml", "changes"),
@@ -277,6 +282,7 @@ CHANGE_CLASSIFIER_OUTPUTS = {
         "e2e_changed",
         "security_relevant_changed",
         "coverage_required",
+        "chacha_owner_scope_changed",
     },
     "ci.yml": {"backend_changed"},
     "coverage-required.yml": {
@@ -635,11 +641,10 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
         "always() && !cancelled() && (github.event_name == 'workflow_dispatch' || "
         "(github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true'))"
     )
-    non_pr = "github.event_name != 'pull_request' && github.event_name != 'workflow_run'"
+    release = "needs.changes.outputs.tier == 'release'"
     backend_changed = (
-        "(github.event_name != 'pull_request' && "
-        "github.event_name != 'workflow_run') || "
-        "needs.changes.outputs.backend_changed == 'true'"
+        "needs.changes.outputs.tier == 'nightly' || "
+        "needs.changes.outputs.tier == 'release'"
     )
     frontend_conditions = {
         "critical": (
@@ -677,9 +682,12 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
     for name, (data, _) in _load_ordinary_workflows().items():
         jobs = data["jobs"]
         backend_direct = name == "backend-required.yml"
-        assert tuple(
-            job_name for job_name in jobs if job_name not in {"admission", "await_license"}
-        ) == ORIGINAL_JOB_NAMES[name]
+        additional = {
+            "light-backend", "server-ci-verdict", "release-package", "release-qualified",
+        } if name == "ci.yml" else set()
+        assert set(jobs) == set(ORIGINAL_JOB_NAMES[name]) | additional | (
+            {"await_license"} if backend_direct else {"admission", "await_license"}
+        ), name
         for job_name in ORIGINAL_JOB_NAMES[name]:
             job = jobs[job_name]
             needs = _needs(job)
@@ -718,13 +726,19 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 if name == "frontend-e2e-tiers.yml":
                     extra_condition = frontend_conditions[job_name]
                 elif name == "ci.yml" and job_name in NON_PR_FULL_SUITE_JOBS:
-                    extra_condition = non_pr
+                    extra_condition = release
                 elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     extra_condition = backend_changed
                 elif (name, job_name) == ("backend-required.yml", "non-utc-tests"):
                     extra_condition = (
                         "needs.changes.result == 'success' && "
                         "needs.changes.outputs.backend_changed == 'true'"
+                    )
+                elif (name, job_name) == ("backend-required.yml", "chacha-owner-isolation"):
+                    extra_condition = (
+                        "needs.changes.result == 'success' && "
+                        "needs.changes.outputs.backend_changed == 'true' && "
+                        "needs.changes.outputs.chacha_owner_scope_changed == 'true'"
                     )
                 elif (name, job_name) == ("frontend-required.yml", "frontend-unit-tests"):
                     extra_condition = (
@@ -805,7 +819,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 ):
                     assert _normalized(job.get("if")) == _normalized(
-                        f"{dependencies_succeeded} && {non_pr}"
+                        f"{dependencies_succeeded} && {release}"
                     ), (name, job_name)
                 elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     assert _normalized(job.get("if")) == _normalized(
@@ -844,6 +858,14 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     expected_ref = classifier_ref
                 else:
                     expected_ref = admission_ref if "admission" in needs else event_ref
+                if name == "ci.yml" and expected_ref != classifier_ref:
+                    expected_ref = expected_ref.replace(
+                        "github.event.pull_request.head.sha",
+                        "(github.event.pull_request.base.ref == 'main' && github.sha) || "
+                        "github.event.pull_request.head.sha",
+                    )
+                if name == "pypi-package.yml":
+                    expected_ref = expected_ref.replace("${{ ", "${{ (inputs.qualification && github.sha) || ")
                 assert checkout_inputs.get("ref") == expected_ref, (name, job_name)
                 other_inputs = {
                     key: value
@@ -863,7 +885,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 61
+    assert checkout_count == 62
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -885,7 +907,12 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             assert "concurrency" not in data
         else:
             prefix = "${{ github.workflow }}" if name == "jobs-suite.yml" else name.removesuffix(".yml")
-            assert data["concurrency"]["group"] == f"{prefix}-{concurrency_suffix}", name
+            expected_group = f"{prefix}-{concurrency_suffix}"
+            if name == "ci.yml":
+                expected_group += "${{ inputs.nightly && '-nightly' || '' }}-${{ github.workflow }}"
+            if name == "pypi-package.yml":
+                expected_group += "${{ inputs.qualification && format('-qualification-{0}', github.workflow) || '' }}"
+            assert data["concurrency"]["group"] == expected_group, name
             expected_cancel: object = True
             if name == "jobs-suite.yml":
                 expected_cancel = (
@@ -907,14 +934,17 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
     assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 57
-    assert combined_text.count("github.event.pull_request.head.sha") == 56
+    assert combined_text.count("github.event.pull_request.head.sha") == 57
     # The backlog task ratchet still gets the PR base (TASK-13440).
     assert combined_text.count("github.event.pull_request.base.sha") == 6
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
 
     for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():
         changes_job = workflows[name][0]["jobs"]["changes"]
-        assert set(changes_job["outputs"]) == output_names
+        outputs = dict(changes_job["outputs"])
+        if name == "ci.yml":
+            assert outputs.pop("tier") == "${{ steps.tier.outputs.tier }}"
+        assert set(outputs) == output_names
         direct_step = next(step for step in changes_job["steps"] if step.get("id") == "detect")
         assert direct_step["uses"] == "./.github/actions/detect-required-gate-changes"
         if name == "backend-required.yml":
@@ -1200,7 +1230,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 27
+    assert setup_helper_count == 29
     assert setup_python_cache_count == 1
     assert cache_save_count == 7
     assert cache_restore_count == 7
@@ -1479,6 +1509,7 @@ def test_backend_required_enforces_http_usage_guard() -> None:
     [
         "tldw_Server_API/tests/lint/test_function_size_ratchet.py",
         "tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py",
+        "tldw_Server_API/tests/lint/test_charactersragdb_delegated_callers_ratchet.py",
         "tldw_Server_API/tests/lint/test_service_singleton_ratchet.py",
         "tldw_Server_API/tests/lint/test_endpoint_monkeypatch_ratchet.py",
     ],
@@ -1580,6 +1611,32 @@ def test_backend_required_enforces_endpoint_scope_guards(guard: str) -> None:
     assert guard in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "ratchet",
+    [
+        "tldw_Server_API/tests/lint/test_env_read_ratchet.py",
+        "tldw_Server_API/tests/lint/test_owner_scope_ratchet.py",
+        "tldw_Server_API/tests/lint/test_env_vars_docs_ratchet.py",
+        "tldw_Server_API/tests/Config/test_config_precedence_contract.py",
+    ],
+)
+def test_backend_required_enforces_config_ratchets(ratchet: str) -> None:
+    """TASK-13950.21: the config ratchets run in a required step, with the PR base their reason check reads."""
+    import shlex
+
+    from tldw_Server_API.tests.lint._ceilings import BASE_ENV
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    # Shell words, as bash reads them: a commented-out path is not an argument.
+    assert ratchet in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
+    # A rename on either side would quietly drop the bump-with-reason check to its local fallback.
+    assert "base_sha" in str(gate.get("env", {}).get(BASE_ENV, ""))  # nosec B101 - regression assertion
+
+
 def test_backend_required_enforces_isolation_ratchets():
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
     steps = workflow["jobs"]["backend-required"]["steps"]
@@ -1588,9 +1645,24 @@ def test_backend_required_enforces_isolation_ratchets():
     for suite in (
         "tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py",
         "tldw_Server_API/tests/lint/test_route_auth_ratchet.py",
-        "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
     ):
         assert suite in gate["run"]  # nosec B101 - regression assertion
+
+
+@pytest.mark.unit
+def test_ratchet_step_has_no_comment_inside_a_continued_command() -> None:
+    """A `#` line right after a `\\` line ends the command in bash; every later path would run as its own command."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    problems = []
+    for job_name, job in workflow["jobs"].items():
+        for step in job.get("steps", []):
+            lines = str(step.get("run", "")).splitlines()
+            problems += [
+                f"{job_name} / {step.get('name')}: run line {n + 1}: {line.strip()}"
+                for n, line in enumerate(lines)
+                if n and line.lstrip().startswith("#") and lines[n - 1].rstrip().endswith("\\")
+            ]
+    assert problems == [], "\n".join(problems)  # nosec B101
 
 
 # TASK-13950.6 and .19: the production-detector, test-seam and test-mode branch ratchets and the startup-guard /
@@ -1603,6 +1675,14 @@ TEST_SEAM_GATE_SUITES = (
     "tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py",
     "tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py",
     "tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py",
+    "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
+    "tldw_Server_API/tests/lint/test_owner_scope_ratchet.py",
+    "tldw_Server_API/tests/lint/test_charactersragdb_delegated_callers_ratchet.py",
+    # The ChaCha split tool and structure pins (TASK-13950.22) guard each move PR.
+    "tldw_Server_API/tests/Helper_Scripts/test_chacha_split.py",
+    "tldw_Server_API/tests/DB_Management/test_chacha_structure_pins.py",
+    "tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py",
+    "tldw_Server_API/tests/CI/test_path_classifier.py",
 )
 
 
@@ -2051,3 +2131,237 @@ def test_frontend_critical_always_reports_so_it_can_be_a_required_check() -> Non
     condition = _normalized(critical["if"])
     assert "needs.changes.outputs.backend_changed=='true'" in condition
     assert "needs.changes.outputs.e2e_changed=='true'" in condition
+
+
+# TASK-13950.23: the ChaCha owner-isolation files run on PostgreSQL in a required, path-gated job.
+OWNER_ISOLATION_JOB = "chacha-owner-isolation"
+OWNER_ISOLATION_CHECK_STEP = "Require ChaCha owner isolation to have passed"
+_OWNER_ISOLATION_PATH_RE = re.compile(r"^tldw_Server_API/tests/\S+\.py$")
+
+
+def _mentions_owner_isolation_mark(node: ast.AST) -> bool:
+    return any(
+        isinstance(sub, ast.Attribute) and sub.attr == "owner_isolation" and isinstance(sub.value, ast.Attribute)
+        and sub.value.attr == "mark"
+        for sub in ast.walk(node)
+    )
+
+
+def _owner_isolation_marked_files() -> set[str]:
+    """Test files whose module-level ``pytestmark`` carries ``pytest.mark.owner_isolation`` (by AST)."""
+    return set(_scan_owner_isolation_marked_files())
+
+
+@functools.lru_cache(maxsize=1)
+def _scan_owner_isolation_marked_files() -> frozenset[str]:
+    marked: set[str] = set()
+    for path in (REPO_ROOT / "tldw_Server_API" / "tests").rglob("test_*.py"):
+        if "owner_isolation" not in path.read_text(encoding="utf-8", errors="ignore"):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in tree.body:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+            if (
+                any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets)
+                and node.value is not None
+                and _mentions_owner_isolation_mark(node.value)
+            ):
+                marked.add(path.relative_to(REPO_ROOT).as_posix())
+    return frozenset(marked)
+
+
+# backend_changed:chacha_owner_scope_changed:result -- the only outcomes the required check may accept
+# (owner decision 2026-11-21: the job runs only when ChaCha paths change).
+OWNER_ISOLATION_ACCEPTED = "true:true:success|true:false:skipped|false:*:skipped) ;;"
+
+
+def _owner_isolation_job_problems(workflow: dict[str, Any], marked_files: set[str]) -> list[str]:
+    jobs = workflow["jobs"]
+    if OWNER_ISOLATION_JOB not in jobs:
+        return [f"no {OWNER_ISOLATION_JOB} job"]
+    job = jobs[OWNER_ISOLATION_JOB]
+    problems = ["job is continue-on-error"] if job.get("continue-on-error", False) else []
+    steps = job.get("steps", [])
+    if not any(str(step.get("env", {}).get("TLDW_TEST_POSTGRES_REQUIRED")) == "1" for step in steps):
+        problems.append("job does not require PostgreSQL")
+    pytest_steps = [step for step in steps if "pytest" in step.get("run", "")]
+    listed: set[str] = set()
+    checked: set[str] = set()
+    has_check = False
+    for step in pytest_steps:
+        # The pytest command, then the junit check ("python - <report> <files> <<'PY'" and its body).
+        command, sep, check = step["run"].partition("python - ")
+        command_tokens = _step_run_tokens(command)
+        listed |= {t for t in command_tokens if _OWNER_ISOLATION_PATH_RE.match(t)}
+        for token in sorted(command_tokens):
+            if token in ("-m", "-k") or token.startswith(("-m=", "-k=", "--deselect", "--ignore")):
+                problems.append(f"pytest command selects a subset with {token}")
+        if sep:
+            has_check = True
+            lines = [line.strip() for line in check.splitlines()]
+            checked |= {t for t in _step_run_tokens(check.split("<<", 1)[0]) if _OWNER_ISOLATION_PATH_RE.match(t)}
+            if "if skipped or missing:" not in lines or "sys.exit(1)" not in lines:
+                problems.append("junit check does not exit non-zero on skipped or missing cases")
+    if not has_check:
+        problems.append("job has no junit skipped/missing check")
+    problems += [f"job does not run {path}" for path in sorted(marked_files - listed)]
+    if has_check:
+        problems += [f"junit check does not cover {path}" for path in sorted(marked_files - checked)]
+    problems += [f"job runs unmarked {path}" for path in sorted((listed | checked) - marked_files)]
+    gate = jobs["backend-required"]
+    if OWNER_ISOLATION_JOB not in gate.get("needs", []):
+        problems.append(f"backend-required does not wait for {OWNER_ISOLATION_JOB}")
+    checks = [s for s in gate["steps"] if s.get("name") == OWNER_ISOLATION_CHECK_STEP]
+    if len(checks) != 1 or f"needs.{OWNER_ISOLATION_JOB}.result" not in str(checks[0].get("env", {})):
+        problems.append(f"backend-required has no {OWNER_ISOLATION_CHECK_STEP!r} step reading the job result")
+    elif OWNER_ISOLATION_ACCEPTED not in [line.strip() for line in checks[0].get("run", "").splitlines()]:
+        problems.append("required check accepts outcomes other than the three approved ones")
+    return problems
+
+
+def _backend_required_workflow() -> dict[str, Any]:
+    return yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+
+
+@pytest.mark.unit
+def test_backend_required_runs_every_owner_isolation_file():
+    marked = _owner_isolation_marked_files()
+    assert len(marked) >= 8  # nosec B101 - the marker scan must find Task 3a's files
+    assert "tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py" not in marked  # nosec B101
+    assert _owner_isolation_job_problems(_backend_required_workflow(), marked) == []  # nosec B101
+
+
+def _owner_isolation_pytest_step(workflow: dict[str, Any]) -> dict[str, Any]:
+    return next(s for s in workflow["jobs"][OWNER_ISOLATION_JOB]["steps"] if "pytest" in s.get("run", ""))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mutation", ["dropped", "commented-out"])
+def test_owner_isolation_contract_fails_when_a_file_leaves_the_job(mutation: str):
+    workflow = _backend_required_workflow()
+    marked = _owner_isolation_marked_files()
+    path = sorted(marked)[0]
+    step = _owner_isolation_pytest_step(workflow)
+    # Only the pytest command: the junit check lists the files separately and is pinned on its own.
+    command, sep, check = step["run"].partition("python - ")
+    lines = command.splitlines()
+    if mutation == "dropped":
+        command = "\n".join(line for line in lines if path not in line)
+    else:
+        command = "\n".join(line.replace(path, f"# {path}") for line in lines)
+    step["run"] = command + "\n" + sep + check
+    assert _owner_isolation_job_problems(workflow, marked) == [f"job does not run {path}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_an_unmarked_file_is_listed():
+    workflow = _backend_required_workflow()
+    extra = "tldw_Server_API/tests/DB_Management/test_not_marked.py"
+    step = _owner_isolation_pytest_step(workflow)
+    step["run"] = step["run"].replace("pytest ", f"pytest {extra} ", 1)
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        f"job runs unmarked {extra}"
+    ]
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_the_job_is_continue_on_error():
+    workflow = _backend_required_workflow()
+    workflow["jobs"][OWNER_ISOLATION_JOB]["continue-on-error"] = True
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        "job is continue-on-error"
+    ]
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_postgres_is_not_required():
+    workflow = _backend_required_workflow()
+    for step in workflow["jobs"][OWNER_ISOLATION_JOB]["steps"]:
+        step.get("env", {}).pop("TLDW_TEST_POSTGRES_REQUIRED", None)
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        "job does not require PostgreSQL"
+    ]
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_the_gate_does_not_wait_for_the_job():
+    workflow = _backend_required_workflow()
+    workflow["jobs"]["backend-required"]["needs"].remove(OWNER_ISOLATION_JOB)
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        f"backend-required does not wait for {OWNER_ISOLATION_JOB}"
+    ]
+
+
+@pytest.mark.unit
+def test_chacha_owner_scope_flag_lists_every_marked_file():
+    from Helper_Scripts.ci.path_classifier import CHACHA_OWNER_SCOPE_GLOBS
+
+    listed = {g for g in CHACHA_OWNER_SCOPE_GLOBS if g.startswith("tldw_Server_API/tests/") and g.endswith(".py")}
+    listed.discard("tldw_Server_API/tests/_plugins/postgres.py")
+    listed.discard("tldw_Server_API/tests/ChaChaNotesDB/conftest.py")
+    assert listed == _owner_isolation_marked_files()  # nosec B101
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_the_required_check_accepts_more() -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    check = next(
+        s for s in workflow["jobs"]["backend-required"]["steps"] if s.get("name") == OWNER_ISOLATION_CHECK_STEP
+    )
+    check["run"] = check["run"].replace("true:true:success|", "true:true:success|true:true:failure|")
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        "required check accepts outcomes other than the three approved ones"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("flag", ["-m", "-k", "--deselect", "--ignore", "-m=", "--deselect="])
+def test_owner_isolation_contract_fails_when_pytest_selects_a_subset(flag: str) -> None:
+    workflow = _backend_required_workflow()
+    step = _owner_isolation_pytest_step(workflow)
+    step["run"] = step["run"].replace("--durations=15", f'--durations=15 {flag} "not postgres"', 1)
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        f"pytest command selects a subset with {flag}"
+    ]
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_the_junit_check_misses_a_file() -> None:
+    workflow = _backend_required_workflow()
+    marked = _owner_isolation_marked_files()
+    path = sorted(marked)[0]
+    step = _owner_isolation_pytest_step(workflow)
+    command, sep, check = step["run"].partition("python - ")
+    step["run"] = command + sep + "\n".join(line for line in check.splitlines() if path not in line)
+    assert _owner_isolation_job_problems(workflow, marked) == [f"junit check does not cover {path}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_owner_isolation_contract_fails_when_the_junit_check_is_deleted() -> None:
+    workflow = _backend_required_workflow()
+    step = _owner_isolation_pytest_step(workflow)
+    step["run"] = step["run"].partition("python - ")[0]
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        "job has no junit skipped/missing check"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("if skipped or missing:", "if skipped:"),
+        ("sys.exit(1)", "sys.exit(0)"),
+    ],
+)
+def test_owner_isolation_contract_fails_when_the_junit_check_stops_failing(old: str, new: str) -> None:
+    workflow = _backend_required_workflow()
+    step = _owner_isolation_pytest_step(workflow)
+    assert old in step["run"]  # nosec B101
+    step["run"] = step["run"].replace(old, new)
+    assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
+        "junit check does not exit non-zero on skipped or missing cases"
+    ]

@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBack
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.owner_isolation]
 
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
@@ -489,14 +489,14 @@ def test_folder_paths_and_source_keys_preserve_other_owner(note_owners, operatio
             owner = conn.execute("SELECT client_id FROM note_folders WHERE id=?", (own["id"],)).fetchone()
         assert owner["client_id"] == "3"
     else:
-        f.alice.sync_note_source_folders(f.private, 1, ["Shared/Path"])
+        f.alice.workspace_store.sync_note_source_folders(f.private, 1, ["Shared/Path"])
         # Source IDs are globally assigned by ingestion. A conflicting foreign
         # provenance key may reject, but must never be reassigned to this owner.
         try:
-            f.bob.sync_note_source_folders(f.own, 1, ["Shared/Path"])
+            f.bob.workspace_store.sync_note_source_folders(f.own, 1, ["Shared/Path"])
         except CharactersRAGDBError:
             pass
-        f.bob.sync_note_source_folders(f.own, 2, ["Owned/Source"])
+        f.bob.workspace_store.sync_note_source_folders(f.own, 2, ["Owned/Source"])
         assert f.bob.get_note_folders_for_note(f.own)
         with f.alice.transaction() as conn:
             rows = conn.execute("SELECT folder_id FROM note_folder_source_keys WHERE source_id=1").fetchall()
@@ -649,7 +649,7 @@ def test_note_and_organization_changes_preserve_caller_rollback(note_owners, mod
 def test_foreign_version_change_between_lookup_and_mutation_does_not_transfer_note(note_owners, monkeypatch):
     f = note_owners
     before = f.bob.get_note_by_id(f.own)
-    original = f.bob._get_current_db_version
+    original = f.bob.ctx.current_db_version
 
     def reassign(conn, table, column, item, **kwargs):
         version = original(conn, table, column, item, **kwargs)
@@ -657,7 +657,7 @@ def test_foreign_version_change_between_lookup_and_mutation_does_not_transfer_no
             conn.execute("UPDATE notes SET client_id=? WHERE id=?", ("2", f.own))
         return version
 
-    monkeypatch.setattr(f.bob, "_get_current_db_version", reassign)
+    monkeypatch.setattr(f.bob.ctx, "current_db_version", reassign)
     with pytest.raises(ConflictError):
         f.bob.update_note(f.own, {"content": "Must not transfer back"}, expected_version=1)
     assert f.bob.get_note_by_id(f.own) == before

@@ -250,6 +250,10 @@ describe("useNotesExport paging (NL-02)", () => {
     });
 
     expect(fetchFilteredNotesRaw).toHaveBeenCalledTimes(2);
+    // An export reads notes, not match excerpts.
+    for (const call of fetchFilteredNotesRaw.mock.calls) {
+      expect(call[5]).toEqual({ includeSnippets: false });
+    }
     const exported = await exportedJson();
     expect(exported).toHaveLength(200);
     expect(new Set(exported.map((note) => note.id)).size).toBe(200);

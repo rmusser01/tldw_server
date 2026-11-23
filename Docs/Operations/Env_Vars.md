@@ -102,6 +102,7 @@ Config file overrides (`Config_Files/config.txt`)
 - `TEST_MODE`: Enables test-friendly behaviors (`true|1|yes`). Used across modules to:
   - Relax or bypass certain rate limiter keys (e.g., client IP) to avoid false positives in tests.
   - Prefer offline/test-safe code paths (e.g., RAG/Chunking avoid network downloads; health endpoints may expose additional diagnostics in tests).
+- `ROUTES_STABLE_ONLY`, `ROUTES_DISABLE`, `ROUTES_ENABLE`, `ROUTES_EXPERIMENTAL`: route-toggle overrides, honoured only in a test runtime (pytest or `TEST_MODE`). In production, `[API-Routes]` in `config.txt` is authoritative.
 - `DISABLE_NLTK_DOWNLOADS`: Prevent NLTK dataset downloads (`1|true|yes`).
   - RAG query features and Chunking modules will not attempt to download `punkt`, `wordnet`, or `stopwords` when this is set; they degrade gracefully to local fallbacks.
 - `ALLOW_NLTK_DOWNLOADS`: Force-enable NLTK downloads even when running tests (`1|true|yes`).
@@ -127,6 +128,10 @@ Config file overrides (`Config_Files/config.txt`)
 - `RAG_PRECOMPUTED_SPANS_MAX_VECTORS_PER_CORPUS`: Cap on stored span vectors per corpus (default `200000`). Config key: `[RAG] precomputed_spans_max_vectors_per_corpus`.
 - `RAG_PRECOMPUTED_SPANS_MAX_MB_PER_CORPUS`: Cap on precomputed span storage per corpus in MB (default `512`). Config key: `[RAG] precomputed_spans_max_mb_per_corpus`.
 - `RAG_PRECOMPUTED_SPANS_RETENTION_DAYS`: Retention window for precomputed spans before GC (default `30`). Config key: `[RAG] precomputed_spans_retention_days`.
+- `RAG_INCLUDE_PARENT_DOCUMENT`: Default for `include_parent_document` when a RAG request leaves it unset (`true` enables; default `false`). Config key: `[RAG] include_parent_document`. An explicit request value or a `rag_profile` still wins.
+- `RAG_PARENT_MAX_TOKENS`: Default for `parent_max_tokens` when a RAG request leaves it unset (default `1200`). Config key: `[RAG] parent_max_tokens`.
+- `RAG_INCLUDE_SIBLING_CHUNKS`: Default for `include_sibling_chunks` on `/rag/search` requests that leave it unset (`true` enables; default `false`). Config key: `[RAG] include_sibling_chunks`.
+- `RAG_SIBLING_WINDOW`: Default for `sibling_window` when a RAG request leaves it unset (0-50; default `1`). Config key: `[RAG] sibling_window`.
 
 ### RAG Guardrails (Production Defaults)
 - `RAG_GUARDRAILS_STRICT`: When `true`, enable strict guardrails in the unified pipeline (enables numeric fidelity and hard citations by default). Useful for non-prod environments where you still want strict behavior.
@@ -656,7 +661,7 @@ Quick start (local dev):
 - `SCHEDULER_DATABASE_URL`: Database URL for the core task scheduler. Defaults to `sqlite:///PROJECT_ROOT/Databases/scheduler.db` (test mode uses a per-process temp file). Set this to place the scheduler DB alongside other DBs.
 - `SCHEDULER_BASE_PATH`: Base path for the scheduler’s payload storage. Defaults to `PROJECT_ROOT/Databases/scheduler`.
 - `WORKFLOWS_SCHEDULER_DATABASE_URL`: Optional override for the Workflows Scheduler (cron) persistence; if using SQLite and not set, it defaults to the per-user path under `USER_DB_BASE_DIR/<user_id>/workflows/workflows_scheduler.db`.
-- `WORKFLOWS_SCHEDULER_RESCAN_SEC`: Interval (seconds) for the Workflows Scheduler to rescan all users for new/removed schedules. Default: `600`.
+- `WORKFLOWS_SCHEDULER_RESCAN_SEC`: Seconds between recurring schedule reconciliations. Defaults to `30`.
 - `POINTS_MODEL_PATH`: HF model path when running locally (e.g., `tencent/POINTS-Reader`).
 - `POINTS_PROMPT`: Optional prompt override.
 

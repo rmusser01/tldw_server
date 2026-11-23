@@ -72,6 +72,7 @@ def clone_client(test_app, mock_repo, monkeypatch, tmp_path):
             return {"id": user_id, "username": "alice"}
 
     class _OwnerDb:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             return {"id": workspace_id, "name": workspace_id}
 
@@ -199,6 +200,7 @@ async def test_shared_with_me_uses_authoritative_active_share_listing(
             raise AssertionError("claim-loop discovery must not be used")
 
     class _OwnerDb:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             events.append(f"workspace:{workspace_id}")
             return {"name": "Authoritative workspace"}
@@ -305,6 +307,7 @@ async def test_shared_with_me_workspace_name_resolution_log_is_sanitized(
     from tldw_Server_API.app.api.v1.endpoints import sharing
 
     class _FailingWorkspaceDb:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace(self, workspace_id: str):
             assert workspace_id == "private-ws"
             raise RuntimeError("workspace lookup exploded at /private/owner-workspaces.db")

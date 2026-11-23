@@ -432,6 +432,7 @@ class _TestUser:
 
 
 class _CanonicalWorkspaceDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self, workspaces: dict[str, dict[str, Any]] | None = None) -> None:
         self.workspaces = dict(workspaces or {})
 
@@ -1549,7 +1550,7 @@ async def test_dispatch_run_promotes_completion_artifact_to_canonical_workspace(
 
     db = OrchestrationDB(user_id=1, db_dir=tmp_path)
     note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+    note_db.workspace_store.upsert_workspace("workspace-alpha", "Alpha Workspace")
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     workspace = db.create_workspace(
@@ -1597,7 +1598,7 @@ async def test_dispatch_run_promotes_completion_artifact_to_canonical_workspace(
             "skipped": [],
             "errors": [],
         }
-        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        [artifact] = note_db.workspace_store.list_workspace_artifacts("workspace-alpha")
         assert artifact["id"] == "brief-1"
         assert artifact["review_state"] == "accepted"
         assert artifact["producer_metadata"]["producer_type"] == "acp"
@@ -1618,7 +1619,7 @@ async def test_dispatch_run_reports_artifact_promotion_failure_without_rolling_b
 
     db = OrchestrationDB(user_id=1, db_dir=tmp_path)
     note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+    note_db.workspace_store.upsert_workspace("workspace-alpha", "Alpha Workspace")
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     workspace = db.create_workspace(
@@ -1672,7 +1673,7 @@ async def test_dispatch_run_reports_artifact_promotion_failure_without_rolling_b
         }
         updated_task = db.get_task(task.id)
         assert updated_task.status == TaskStatus.COMPLETE
-        assert note_db.list_workspace_artifacts("workspace-alpha") == []
+        assert note_db.workspace_store.list_workspace_artifacts("workspace-alpha") == []
     finally:
         note_db.close_all_connections()
         db.close()

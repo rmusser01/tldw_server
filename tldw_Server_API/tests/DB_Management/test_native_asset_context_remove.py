@@ -152,7 +152,7 @@ async def test_failed_mutation_tail_rolls_back_even_when_caller_catches_error(
         raise RuntimeError("history fence interrupted")
 
     if boundary == "reference":
-        monkeypatch.setattr(db, "_generate_uuid", fail)
+        monkeypatch.setattr(db.ctx, "new_uuid", fail)
     elif boundary == "bundle":
         monkeypatch.setattr(db.message_store, "_advance_history_version", fail)
     else:

@@ -4,6 +4,7 @@ import pytest
 
 
 class FakeNotesDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self) -> None:
         self.updated_calls: list[dict[str, object]] = []
         self.added_calls: list[dict[str, object]] = []

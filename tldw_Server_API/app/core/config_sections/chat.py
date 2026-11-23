@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import configparser
 import os
 from dataclasses import dataclass
 from typing import Mapping
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 _TRUE_VALUES = {"1", "true", "yes", "y", "on"}
@@ -38,23 +40,10 @@ def _get_raw(
     fallback_option: str | None = None,
     default: str,
 ) -> str:
-    for env_key in env_keys:
-        env_value = env_map.get(env_key)
-        if env_value is not None and str(env_value).strip() != "":
-            return str(env_value)
-
-    raw = config_parser.get("Chat-Module", option, fallback=None)
-    text = str(raw).strip() if raw is not None else ""
-    if text:
-        return text
-
-    if fallback_option is not None:
-        fallback_raw = config_parser.get("Chat-Module", fallback_option, fallback=None)
-        fallback_text = str(fallback_raw).strip() if fallback_raw is not None else ""
-        if fallback_text:
-            return fallback_text
-
-    return default
+    locations = [("Chat-Module", name) for name in (option, fallback_option) if name is not None]
+    resolved = resolve(env_keys, locations, config_parser=config_parser, env=env_map, default=default)
+    text = str(resolved.value)
+    return text.strip() if resolved.source == "config" else text
 
 
 def _parse_bool(raw: object, default: bool) -> bool:
@@ -261,3 +250,28 @@ def load_chat_config(
         run_first_provider_allowlist=run_first_provider_allowlist,
         run_first_presentation_variant=run_first_presentation_variant,
     )
+
+
+DEFAULT_MAX_REQUEST_SIZE_CHARS = 1_000_000
+
+
+def max_request_size_chars(
+    config_parser: ConfigParserLike | None,
+    env: Mapping[str, str] | None = None,
+) -> int:
+    """Chat request size limit in characters, read at call time.
+
+    ``CHAT_REQUEST_MAX_SIZE`` when set and an integer, else ``[Chat-Module] max_request_size_chars``
+    when an integer, else the default; each clamped to at least 1.
+    """
+    try:
+        return max(1, int(resolve(("CHAT_REQUEST_MAX_SIZE",), env=env, blank_env=True).value or ""))
+    except (TypeError, ValueError):
+        pass
+    try:
+        raw = resolve(
+            (), (("Chat-Module", "max_request_size_chars"),), config_parser=config_parser, blank_config=True
+        ).value
+        return max(1, int(raw or ""))
+    except (TypeError, ValueError, configparser.Error):
+        return DEFAULT_MAX_REQUEST_SIZE_CHARS

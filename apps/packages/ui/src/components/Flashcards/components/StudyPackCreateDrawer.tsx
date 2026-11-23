@@ -1,10 +1,19 @@
 import React from "react"
-import { Button, Drawer, Input, Select, Space, Typography } from "antd"
+import { Button, Drawer, Input, Pagination, Select, Space, Typography } from "antd"
+import type { RefSelectProps } from "antd"
+import { useQuery } from "@tanstack/react-query"
 import { ChevronDown, ChevronRight, FileText, Film, MessageSquare, Trash2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
+import {
+  getMediaLibraryItemKey,
+  normalizeMediaLibraryResponse
+} from "@/components/Option/ResearchWorkspace/SourcesPane/media-library-normalization"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
+import { useDebounce } from "@/hooks/useDebounce"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { tldwClient } from "@/services/tldw"
 import type {
   StudyPackSourceSelection,
   StudyPackSourceType,
@@ -23,6 +32,7 @@ type StudyPackCreateDrawerProps = {
 }
 
 const DEFAULT_SOURCE_TYPE: StudyPackSourceType = "media"
+const MEDIA_PAGE_SIZE = 50
 
 const SOURCE_TYPE_ICONS: Record<StudyPackSourceType, React.ComponentType<{ className?: string }>> = {
   media: Film,
@@ -42,6 +52,163 @@ const normalizeIntentSources = (
         locator: item.locator
       }))
     : []
+
+type MediaOption = { value: string; label: string; title?: string }
+
+const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => void }) => {
+  const { t } = useTranslation(["option", "common"])
+  const pickerId = React.useId()
+  const [opened, setOpened] = React.useState(false)
+  const selectRef = React.useRef<RefSelectProps>(null)
+  const pagerRef = React.useRef<HTMLDivElement>(null)
+  const [search, setSearch] = React.useState("")
+  const [page, setPage] = React.useState(1)
+  const term = useDebounce(search.trim(), 300)
+  const isDebouncing = search.trim() !== term
+  const media = useQuery<{ totalCount: number; options: MediaOption[] }>({
+    queryKey: ["study-pack-media", pickerId, term, page],
+    enabled: opened && !isDebouncing,
+    gcTime: 0,
+    placeholderData: (previous, query) => query?.queryKey[2] === term ? previous : undefined,
+    queryFn: async ({ signal }) => {
+      const pagination = { page, results_per_page: MEDIA_PAGE_SIZE }
+      const response = term
+        ? await tldwClient.searchMedia({ query: term }, pagination, { signal })
+        : await tldwClient.listMedia(pagination, { signal })
+      signal.throwIfAborted()
+      const { items, totalCount } = normalizeMediaLibraryResponse(response)
+      const options = items.flatMap((item): MediaOption[] => {
+        const id = getMediaLibraryItemKey(item)
+        if (!id) return []
+        const rawTitle = (item as { title?: unknown }).title
+        const title = typeof rawTitle === "string" ? rawTitle.trim() || undefined : undefined
+        return [{
+          value: id,
+          label: title ?? t("option:flashcards.studyPackUntitledMedia", {
+            defaultValue: "Media {{id}}",
+            id
+          }),
+          title
+        }]
+      })
+      return {
+        totalCount,
+        options: options.map((option) =>
+          options.some((other) => other.value !== option.value && other.label === option.label)
+            ? { ...option, label: t("option:flashcards.studyPackMediaTitleWithId", {
+                defaultValue: "{{title}} (ID {{id}})",
+                title: option.label,
+                id: option.value
+              }) }
+            : option
+        )
+      }
+    }
+  })
+
+  const lastPage = Math.max(1, Math.ceil((media.data?.totalCount ?? 0) / MEDIA_PAGE_SIZE))
+  const pageOutOfRange = !isDebouncing && media.isSuccess && !media.isPlaceholderData && page > lastPage
+  React.useEffect(() => {
+    if (pageOutOfRange) setPage(lastPage)
+  }, [pageOutOfRange, lastPage])
+
+  const loading = isDebouncing || pageOutOfRange || media.isPlaceholderData || (opened && media.isFetching && !media.data)
+  const result = loading || media.isError ? undefined : media.data
+  const searchLabel = t("option:flashcards.studyPackMediaSearch", {
+    defaultValue: "Search media library"
+  })
+  const emptyText = term
+    ? t("option:flashcards.studyPackNoMediaMatches", { defaultValue: "No matching media." })
+    : t("option:flashcards.studyPackMediaEmpty", { defaultValue: "Your media library is empty." })
+  const showPager = !isDebouncing && (page > 1 || (media.data?.totalCount ?? 0) > MEDIA_PAGE_SIZE)
+
+  return (
+    <div className="relative mb-3" onKeyDownCapture={(event) => {
+      if (event.key !== "Tab" || !(event.target instanceof HTMLInputElement)) return
+      // AntD treats Tab as selection. Let it leave the input without choosing an option.
+      event.stopPropagation()
+      if (event.shiftKey || event.target.getAttribute("aria-expanded") !== "true") return
+      const firstPageButton = pagerRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      if (firstPageButton) {
+        event.preventDefault()
+        firstPageButton.focus()
+      }
+    }}>
+      <Select<string[], MediaOption>
+        ref={selectRef}
+        getPopupContainer={(trigger) => trigger.parentElement ?? trigger}
+        aria-label={searchLabel}
+        placeholder={searchLabel}
+        className="w-full"
+        mode="multiple"
+        value={[]}
+        showSearch={{
+          searchValue: search,
+          onSearch: (value) => {
+            if (value.trim() !== search.trim()) setPage(1)
+            setSearch(value)
+          },
+          filterOption: false,
+          // Keep the failed term visible when Retry takes focus.
+          autoClearSearchValue: false
+        }}
+        onOpenChange={(isOpen) => { if (isOpen) setOpened(true) }}
+        onSelect={(_, option) => {
+          onSelect(option)
+          setSearch("")
+          setPage(1)
+        }}
+        loading={loading}
+        options={result?.options ?? []}
+        notFoundContent={loading
+          ? t("option:flashcards.studyPackMediaLoading", { defaultValue: "Loading media…" })
+          : media.isError ? null : emptyText}
+        popupRender={(options) => (
+          <>
+            {options}
+            {showPager ? (
+              <div ref={pagerRef} className="flex justify-end border-t border-border/60 p-1.5">
+                <Pagination
+                  aria-label={t("option:flashcards.studyPackMediaPages", { defaultValue: "Media result pages" })}
+                  current={page}
+                  pageSize={MEDIA_PAGE_SIZE}
+                  total={media.data?.totalCount ?? (page - 1) * MEDIA_PAGE_SIZE + 1}
+                  simple={{ readOnly: true }}
+                  size="small"
+                  onChange={(nextPage) => {
+                    setPage(nextPage)
+                    if (pagerRef.current?.contains(document.activeElement)) {
+                      selectRef.current?.focus()
+                    }
+                  }}
+                />
+              </div>
+            ) : null}
+          </>
+        )}
+      />
+      {result && result.options.length > 0 && result.options.length < result.totalCount ? (
+        <Text type="secondary" className="mt-1 block">
+          {t("option:flashcards.studyPackMediaResultLimit", {
+            defaultValue: "Showing {{shown}} of {{total}} media items. Try a more specific search.",
+            shown: result.options.length,
+            total: result.totalCount
+          })}
+        </Text>
+      ) : null}
+      {!isDebouncing && media.isError ? (
+        <Space className="mt-1">
+          <Text role="alert">
+            {t("option:flashcards.studyPackMediaError", { defaultValue: "Could not load media." })}
+          </Text>
+          <Button size="small" onClick={() => void media.refetch()} loading={media.isFetching}>
+            {t("common:retry", { defaultValue: "Retry" })}
+          </Button>
+        </Space>
+      ) : null}
+    </div>
+  )
+}
 
 export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
   open,
@@ -110,6 +277,13 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     setJobId(null)
     handledTerminalJobIdRef.current = null
   }, [initialIntent, open])
+
+  React.useEffect(() => {
+    if (!open) return
+    return watchChatAccountChanges((invalidated) => {
+      if (invalidated) onClose()
+    })
+  }, [open, onClose])
 
   React.useEffect(() => {
     const response = jobQuery.data
@@ -187,6 +361,14 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     setSourceId("")
     setSourceTitle("")
   }, [sourceType, trimmedSourceId, trimmedSourceTitle])
+
+  const handleSelectMedia = ({ value, title }: MediaOption) => {
+    setSourceItems((current) =>
+      current.some((source) => source.source_type === "media" && source.source_id === value)
+        ? current
+        : [...current, { source_type: "media", source_id: value, source_title: title }]
+    )
+  }
 
   const handleRemoveSource = React.useCallback((index: number) => {
     setSourceItems((current) => current.filter((_, currentIndex) => currentIndex !== index))
@@ -282,6 +464,8 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
               })}
             </Text>
           </div>
+
+          {open ? <StudyPackMediaPicker onSelect={handleSelectMedia} /> : null}
 
           <button
             type="button"

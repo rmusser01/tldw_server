@@ -452,6 +452,8 @@ def _maybe_promote_feed_schedule(
     job,
     job_output_prefs: dict[str, Any],
 ) -> None:
+    if not str(job.schedule_expr or "").strip():
+        return
     schedule_cfg = job_output_prefs.get("collections_schedule")
     if not isinstance(schedule_cfg, dict):
         return
@@ -481,33 +483,28 @@ def _maybe_promote_feed_schedule(
     if now_utc < created_dt + timedelta(hours=promote_after):
         return
 
-    schedule_cfg["promoted"] = True
-    schedule_cfg["promoted_at"] = _utcnow_iso()
-    job_output_prefs["collections_schedule"] = schedule_cfg
-    patch = {"output_prefs_json": json.dumps(job_output_prefs)}
+    promoted = {**schedule_cfg, "promoted": True, "promoted_at": _utcnow_iso()}
+    patch = {"output_prefs_json": json.dumps({**job_output_prefs, "collections_schedule": promoted})}
     if str(job.schedule_expr or "").strip() != daily_expr:
         patch["schedule_expr"] = daily_expr
     try:
-        updated = db.update_job(int(job.id), patch)
+        updated = db.update_job(int(job.id), patch, expected_job=job)
     except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug(f"collections schedule promote failed for job {getattr(job, 'id', '?')}: {exc}")
         return
+    job_output_prefs["collections_schedule"] = promoted
     try:
         next_run = _compute_next_run(updated.schedule_expr, updated.schedule_timezone)
-        db.set_job_history(job_id=int(updated.id), next_run_at=next_run)
+        db.set_job_history(job_id=int(updated.id), next_run_at=next_run, expected_job=updated)
     except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
         pass
     try:
         if updated.wf_schedule_id:
-            from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
-            svc = get_workflows_scheduler()
-            svc.update(
-                updated.wf_schedule_id,
-                {
-                    "cron": updated.schedule_expr or "* * * * *",
-                    "timezone": _normalize_tz(updated.schedule_timezone) or "UTC",
-                    "enabled": bool(updated.active),
-                },
+            from tldw_Server_API.app.services.workflows_scheduler import register_watchlist_schedule
+
+            register_watchlist_schedule(
+                db, updated, timezone=_normalize_tz(updated.schedule_timezone),
+                force="schedule_expr" in patch,
             )
     except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug(f"collections schedule promote sync failed for job {getattr(job, 'id', '?')}: {exc}")
@@ -605,16 +602,33 @@ async def run_watchlist_job(
     source_ids_override: list[int] | None = None,
     capture_companion_activity: bool = False,
     companion_route: str | None = None,
+    expected_schedule: tuple[str, str] | None = None,
+    expected_schedule_revision: str | None = None,
 ) -> dict[str, Any]:
     """Run the watchlist fetch→ingest pipeline for this user/job.
 
     Returns minimal stats: { run_id, items_found, items_ingested }.
     """
     db = WatchlistsDatabase.for_user(user_id)
+    try:
+        job = db.get_job(job_id)
+    except KeyError:
+        if expected_schedule is not None:
+            return {"run_id": None, "status": "skipped"}
+        raise
+    if expected_schedule is not None and (
+        not job.active or (job.wf_schedule_id, job.schedule_expr) != expected_schedule
+        or (expected_schedule_revision is not None and job.updated_at != expected_schedule_revision)
+    ):
+        return {"run_id": None, "status": "skipped"}
     collections_db = CollectionsDatabase.for_user(user_id)
-    job = db.get_job(job_id)
     is_first_run = bool(not getattr(job, "last_run_at", None))
-    run = db.create_run(job_id=job_id, status="running")
+    if expected_schedule is not None:
+        run = db.create_scheduled_run(job)
+        if run is None:
+            return {"run_id": None, "status": "skipped"}
+    else:
+        run = db.create_run(job_id=job_id, status="running")
     effective_tenant_id = _resolve_watchlist_tenant_id(tenant_id)
 
     job_output_prefs: dict[str, Any] = {}
@@ -1703,7 +1717,12 @@ async def run_watchlist_job(
                 stats_json=json.dumps(stats),
                 error_msg=cancelled_error,
             )
-            db.set_job_history(job_id=job_id, last_run_at=_utcnow_iso(), next_run_at=_compute_next_run(job.schedule_expr, job.schedule_timezone))
+            db.set_job_history(
+                job_id=job_id,
+                last_run_at=_utcnow_iso(),
+                next_run_at=_compute_next_run(job.schedule_expr, job.schedule_timezone),
+                expected_job=job,
+            )
             return {"run_id": run.id, "status": "cancelled", **stats}
 
         run_status = "failed" if source_errors else "succeeded"
@@ -1718,7 +1737,7 @@ async def run_watchlist_job(
 
         # Update job history
         next_run = _compute_next_run(job.schedule_expr, job.schedule_timezone)
-        db.set_job_history(job_id=job_id, last_run_at=_utcnow_iso(), next_run_at=next_run)
+        db.set_job_history(job_id=job_id, last_run_at=_utcnow_iso(), next_run_at=next_run, expected_job=job)
         if source_errors:
             return {"run_id": run.id, "status": "failed", **stats}
         try:

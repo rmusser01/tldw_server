@@ -527,3 +527,53 @@ async def test_admin_alias_put_is_visible_to_canonical_credential_runtime(
         assert credentials.api_key == "alias-admin-key"
     finally:
         await runtime.close()
+
+
+def test_migration_107_adds_denied_models_once(tmp_path) -> None:
+    """TASK-15582: an AuthNZ database from before the denylist gains the column, its rows keep their values, and a
+    second run changes nothing."""
+    import sqlite3
+
+    from tldw_Server_API.app.core.AuthNZ import migrations
+
+    with sqlite3.connect(tmp_path / "users.db") as conn:
+        migrations.migration_041_add_llm_provider_overrides(conn)
+        conn.execute("INSERT INTO llm_provider_overrides (provider, allowed_models) VALUES ('openai', '[\"gpt-4o\"]')")
+        migrations.migration_107_add_override_denied_models(conn)
+        migrations.migration_107_add_override_denied_models(conn)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(llm_provider_overrides)")]
+        row = conn.execute("SELECT allowed_models, denied_models FROM llm_provider_overrides").fetchone()
+    assert (columns.count("denied_models"), row) == (1, ('["gpt-4o"]', None))
+
+
+@pytest.mark.asyncio
+async def test_the_denylist_round_trips_through_the_repo_sqlite(tmp_path, monkeypatch) -> None:
+    repo = await _open_sqlite_override_repo(tmp_path, monkeypatch)
+
+    stored = await repo.patch_override(
+        provider="openai", fields={"denied_models": json.dumps(["gpt-4o"])}, updated_at=datetime.now(timezone.utc)
+    )
+    listed = await repo.list_overrides("openai")
+
+    assert (stored["denied_models"], listed[0]["denied_models"]) == ('["gpt-4o"]', '["gpt-4o"]')
+
+
+@pytest.mark.asyncio
+async def test_an_admin_sets_and_clears_denied_models_through_the_real_repo_sqlite(tmp_path, monkeypatch) -> None:
+    """TASK-15616 (#3544's final review, M3): the admin API's service writes denied_models to the real repo, and each
+    response, and a later read, comes back through the store's refresh and _parse_override_row, with nothing stubbed.
+    Padding and blanks are dropped; an empty list clears the column (Review Focus 5)."""
+    from tldw_Server_API.app.api.v1.schemas.admin_schemas import LLMProviderOverrideRequest
+    from tldw_Server_API.app.services import admin_llm_providers_service as service
+
+    await _open_sqlite_override_repo(tmp_path, monkeypatch)
+
+    written = await service.upsert_override("openai", LLMProviderOverrideRequest(denied_models=[" gpt-4o ", "", "o1"]))
+    read_back = await service.get_override("openai")
+    cleared = await service.upsert_override("openai", LLMProviderOverrideRequest(denied_models=[]))
+
+    assert (written.denied_models, read_back.denied_models, cleared.denied_models) == (
+        ["gpt-4o", "o1"],
+        ["gpt-4o", "o1"],
+        None,
+    )

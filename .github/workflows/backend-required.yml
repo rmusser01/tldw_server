@@ -46,6 +46,7 @@ jobs:
       e2e_changed: ${{ steps.detect.outputs.e2e_changed }}
       security_relevant_changed: ${{ steps.detect.outputs.security_relevant_changed }}
       coverage_required: ${{ steps.detect.outputs.coverage_required }}
+      chacha_owner_scope_changed: ${{ steps.detect.outputs.chacha_owner_scope_changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -199,10 +200,135 @@ jobs:
             tldw_Server_API/tests/Sharing/test_shared_workspace_clone_operations.py \
             tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_security_matrix.py
 
+  # The ChaCha owner-isolation files only mean something on PostgreSQL, where RLS and the
+  # owner predicates are real, and they take 7 to 27 minutes. So they run in their own
+  # job, only when a path that can change ChaCha owner scoping changed
+  # (chacha_owner_scope_changed), and backend-required rejects any other outcome
+  # (TASK-13950.23). Serial: -n 2 fails xdist collection on these files' parametrize ids.
+  chacha-owner-isolation:
+    name: ChaCha owner isolation (PostgreSQL)
+    runs-on: ubuntu-latest
+    needs: [changes, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
+      ) &&
+      (
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.backend_changed == 'true' &&
+        needs.changes.outputs.chacha_owner_scope_changed == 'true'
+      )
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: ${{ needs.changes.result == 'success' && needs.changes.outputs.backend_changed == 'true' && needs.changes.outputs.chacha_owner_scope_changed == 'true' && 'mirror.gcr.io/library/postgres:18-bookworm' || '' }}
+        env:
+          POSTGRES_USER: tldw_user
+          POSTGRES_PASSWORD: TestPassword123!
+          POSTGRES_DB: tldw_test
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U tldw_user -d tldw_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install FFmpeg and PortAudio (Linux)
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
+
+      - name: Setup Python and dependencies
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: "3.12"
+          use-uv: "true"
+          enable-pip-cache: "true"
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: ChaCha owner isolation on PostgreSQL
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          TEST_MODE: 'true'
+          DISABLE_HEAVY_STARTUP: '1'
+          MINIMAL_TEST_APP: '1'
+          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+          TLDW_TEST_POSTGRES_REQUIRED: '1'
+          TLDW_TEST_NO_DOCKER: '1'
+          POSTGRES_TEST_HOST: 127.0.0.1
+          POSTGRES_TEST_PORT: ${{ job.services.postgres.ports['5432'] }}
+          POSTGRES_TEST_USER: tldw_user
+          POSTGRES_TEST_PASSWORD: TestPassword123!
+          POSTGRES_TEST_DB: tldw_test
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/owner-isolation.xml"
+          pytest -q --disable-warnings -p pytest_asyncio.plugin -p pytest_timeout --timeout=180 \
+            --durations=15 \
+            --junitxml="$report" \
+            tldw_Server_API/tests/ChaChaNotesDB/test_chacha_message_store.py \
+            tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py \
+            tldw_Server_API/tests/DB_Management/test_chacha_owner_scope_required.py \
+            tldw_Server_API/tests/DB_Management/test_chacha_study_tables_rls.py \
+            tldw_Server_API/tests/DB_Management/test_core_chat_owner_isolation.py \
+            tldw_Server_API/tests/DB_Management/test_core_chat_rls_postgres.py \
+            tldw_Server_API/tests/DB_Management/test_local_keyword_merge_survivor.py \
+            tldw_Server_API/tests/DB_Management/test_note_shared_owner_contract.py \
+            tldw_Server_API/tests/DB_Management/test_study_suggestion_owner_scope.py
+          # The skip hook cannot see collection-time skips: fail unless every listed file
+          # contributed a passing case and nothing at all was skipped.
+          python - "$report" \
+            tldw_Server_API/tests/ChaChaNotesDB/test_chacha_message_store.py \
+            tldw_Server_API/tests/ChaChaNotesDB/test_web_clipper_postgres_tenancy.py \
+            tldw_Server_API/tests/DB_Management/test_chacha_owner_scope_required.py \
+            tldw_Server_API/tests/DB_Management/test_chacha_study_tables_rls.py \
+            tldw_Server_API/tests/DB_Management/test_core_chat_owner_isolation.py \
+            tldw_Server_API/tests/DB_Management/test_core_chat_rls_postgres.py \
+            tldw_Server_API/tests/DB_Management/test_local_keyword_merge_survivor.py \
+            tldw_Server_API/tests/DB_Management/test_note_shared_owner_contract.py \
+            tldw_Server_API/tests/DB_Management/test_study_suggestion_owner_scope.py <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report, files = sys.argv[1], sys.argv[2:]
+          passed = {f: 0 for f in files}
+          skipped = []
+          for case in ET.parse(report).getroot().iter("testcase"):
+              classname = case.get("classname", "")
+              bad = case.find("skipped") is not None
+              if bad:
+                  skipped.append(f"{classname}::{case.get('name')}")
+              ok = not bad and case.find("failure") is None and case.find("error") is None
+              for f in files:
+                  module = f[: -len(".py")].replace("/", ".")
+                  if ok and (classname == module or classname.startswith(module + ".")):
+                      passed[f] += 1
+          missing = [f for f, n in passed.items() if n == 0]
+          if skipped or missing:
+              print("::error::owner-isolation files with no passing case: " + ", ".join(missing))
+              print("::error::skipped cases: " + ", ".join(skipped[:20]))
+              sys.exit(1)
+          PY
+
   backend-required:
     name: backend-required
     runs-on: ubuntu-latest
-    needs: [changes, await_license, non-utc-tests]
+    needs: [changes, await_license, non-utc-tests, chacha-owner-isolation]
     # Report failures for licensing or change detection instead of skipping the required check.
     if: >-
       always() && !cancelled() &&
@@ -252,6 +378,23 @@ jobs:
             true:success|false:skipped) ;;
             *)
               echo "::error::Non-UTC timestamp tests ended as '$TIMEZONE_RESULT' for backend_changed='$BACKEND_CHANGED'."
+              exit 1
+              ;;
+          esac
+
+      # backend_changed:chacha_owner_scope_changed:result. A run is expected exactly when both
+      # flags are true; a skip is fine only when the job was not due.
+      - name: Require ChaCha owner isolation to have passed
+        env:
+          BACKEND_CHANGED: ${{ needs.changes.outputs.backend_changed }}
+          CHACHA_OWNER_SCOPE_CHANGED: ${{ needs.changes.outputs.chacha_owner_scope_changed }}
+          OWNER_ISOLATION_RESULT: ${{ needs.chacha-owner-isolation.result }}
+        shell: bash
+        run: |
+          case "$BACKEND_CHANGED:$CHACHA_OWNER_SCOPE_CHANGED:$OWNER_ISOLATION_RESULT" in
+            true:true:success|true:false:skipped|false:*:skipped) ;;
+            *)
+              echo "::error::ChaCha owner isolation ended as '$OWNER_ISOLATION_RESULT' for backend_changed='$BACKEND_CHANGED', chacha_owner_scope_changed='$CHACHA_OWNER_SCOPE_CHANGED'."
               exit 1
               ;;
           esac
@@ -384,8 +527,7 @@ jobs:
             tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py \
             tldw_Server_API/tests/CI/test_test_quality_ratchet.py \
             tldw_Server_API/tests/lint/test_route_auth_ratchet.py \
-            tldw_Server_API/tests/lint/test_rg_route_map_lint.py \
-            tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py
+            tldw_Server_API/tests/lint/test_rg_route_map_lint.py
 
       # Contracts and ratchets that used to run only in ci.yml's full-suite shards,
       # which are not required and are skipped on most PRs -- how #3013 merged with
@@ -402,6 +544,11 @@ jobs:
       # The layering contract (TASK-13950.9) does the same for a raised import count.
       # The DB_Management logic-import ratchet (TASK-13950.16) does the same for its import counts.
       # The test-mode branch ratchet (TASK-13950.19) does the same for its two ceilings.
+      # The env-read ratchet (TASK-13950.21) does the same for its two ceilings.
+      # The scope-predicate ratchet (TASK-13950.23) is keyed by qualified name.
+      # The ChaCha owner-scope ratchet (TASK-13950.23) does the same for its call and opt-out counts.
+      # The delegated-caller ratchet (TASK-13950.22) does the same for its per-file call counts.
+      # The ChaCha split tool and structure pins (TASK-13950.22) guard each move PR.
       # inputs.base_sha is set only on a dispatch (the merge queue passes dev's tip).
       - name: Enforce CI contracts and code ratchets
         if: needs.changes.outputs.backend_changed == 'true'
@@ -441,6 +588,16 @@ jobs:
             tldw_Server_API/tests/lint/test_production_detector_single_source.py \
             tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py \
             tldw_Server_API/tests/lint/test_test_mode_branch_ratchet.py \
+            tldw_Server_API/tests/lint/test_env_read_ratchet.py \
+            tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py \
+            tldw_Server_API/tests/lint/test_owner_scope_ratchet.py \
+            tldw_Server_API/tests/lint/test_charactersragdb_delegated_callers_ratchet.py \
+            tldw_Server_API/tests/Helper_Scripts/test_chacha_split.py \
+            tldw_Server_API/tests/DB_Management/test_chacha_structure_pins.py \
+            tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py \
+            tldw_Server_API/tests/CI/test_path_classifier.py \
+            tldw_Server_API/tests/lint/test_env_vars_docs_ratchet.py \
+            tldw_Server_API/tests/Config/test_config_precedence_contract.py \
             tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py \
             tldw_Server_API/tests/lint/test_endpoint_auth_deps_import_boundary.py \
             tldw_Server_API/tests/lint/test_no_raw_sql_in_endpoints.py \

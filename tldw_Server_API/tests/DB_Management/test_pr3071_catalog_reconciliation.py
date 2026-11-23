@@ -1,11 +1,13 @@
 """Reconcile the relevant released catalog shapes without reconstructing history."""
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.chacha import message_order_schema
+from tldw_Server_API.app.core.DB_Management.chacha import message_order_schema, postgres_schema, schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
 from tldw_Server_API.tests.DB_Management.test_conversation_assistant_startup import db_factory as db_factory
@@ -13,8 +15,9 @@ from tldw_Server_API.tests.DB_Management.test_conversation_assistant_startup imp
 pytestmark = pytest.mark.integration
 
 
-def _incoming_fingerprint_migration(db, connection):
+def _incoming_fingerprint_migration(ctx, connection):
     """Freeze the released incoming step; the union now owns a different catalog."""
+    db = ctx.db
     postgres = db.backend_type.value == "postgresql"
     sql = db._MIGRATION_SQL_V78_TO_V79_POSTGRES if postgres else db._MIGRATION_SQL_V74_TO_V75
     for statement in split_sql_statements(sql):
@@ -27,8 +30,9 @@ def _incoming_fingerprint_migration(db, connection):
         raise CharactersRAGDBError("Frozen incoming fingerprint migration failed version verification.")
 
 
-def _parent_order_migration(db, connection):
+def _parent_order_migration(ctx, connection):
     """Install the released parent catalog, not incoming provenance at 77/81."""
+    db = ctx.db
     postgres = db.backend_type.value == "postgresql"
     if postgres:
         version = db._get_schema_version_postgres(connection)
@@ -47,13 +51,13 @@ def _parent_order_migration(db, connection):
         )
 
 
-def _published_union_migration(db, connection):
+def _published_union_migration(ctx, connection):
     """Reproduce the published 79/83 catalog, which had no quota owner column."""
     from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_notes_provenance_rls_sql
     from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
 
-    postgres = db.backend_type.value == "postgresql"
-    _parent_order_migration(db, connection)
+    postgres = ctx.backend_type.value == "postgresql"
+    _parent_order_migration(ctx, connection)
     connection.execute(notes_provenance_schema_sql(postgres=postgres))
     if postgres:
         for statement in build_notes_provenance_rls_sql():
@@ -68,8 +72,8 @@ def test_published_catalog_shapes_reconcile_without_changing_existing_messages(d
         previous.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 75 if catalog == "pr3071" else 76)
         previous.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 79 if catalog == "pr3071" else 80)
         if catalog == "pr3071":
-            previous.setattr(CharactersRAGDB, "_migrate_from_v74_to_v75", _parent_order_migration)
-            previous.setattr(CharactersRAGDB, "_migrate_from_v78_to_v79_postgres", _parent_order_migration)
+            previous.setattr(sqlite_steps, "_migrate_from_v74_to_v75", _parent_order_migration)
+            previous.setattr(postgres_steps, "_migrate_from_v78_to_v79_postgres", _parent_order_migration)
         old = db_factory()
     postgres = old.backend_type.value == "postgresql"
     conversation = old.add_conversation({"title": "Preserved catalog"})
@@ -147,13 +151,14 @@ def released_catalog(db_factory, monkeypatch, request):
                 "_migrate_from_v78_to_v79_postgres",
                 "_migrate_from_v80_to_v81_postgres",
             ):
-                historical.setattr(CharactersRAGDB, method, _parent_order_migration)
+                steps = postgres_steps if method.endswith("_postgres") else sqlite_steps
+                historical.setattr(steps, method, _parent_order_migration)
         elif catalog in ("incoming", "dev"):
-            historical.setattr(CharactersRAGDB, "_migrate_from_v74_to_v75", _incoming_fingerprint_migration)
-            historical.setattr(CharactersRAGDB, "_migrate_from_v78_to_v79_postgres", _incoming_fingerprint_migration)
+            historical.setattr(sqlite_steps, "_migrate_from_v74_to_v75", _incoming_fingerprint_migration)
+            historical.setattr(postgres_steps, "_migrate_from_v78_to_v79_postgres", _incoming_fingerprint_migration)
         else:
-            historical.setattr(CharactersRAGDB, "_migrate_from_v78_to_v79", _published_union_migration)
-            historical.setattr(CharactersRAGDB, "_migrate_from_v82_to_v83_postgres", _published_union_migration)
+            historical.setattr(sqlite_steps, "_migrate_from_v78_to_v79", _published_union_migration)
+            historical.setattr(postgres_steps, "_migrate_from_v82_to_v83_postgres", _published_union_migration)
         database = db_factory()
     if catalog in ("incoming", "dev"):
         assert not database.backend.table_exists("message_insertion_order")
@@ -322,7 +327,7 @@ def test_sqlite_bootstrap_and_upgrade_dispatch_final_union(db_factory, monkeypat
     if initial_catalog == "incoming78":
         with monkeypatch.context() as incoming:
             incoming.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 78)
-            incoming.setattr(CharactersRAGDB, "_migrate_from_v74_to_v75", _incoming_fingerprint_migration)
+            incoming.setattr(sqlite_steps, "_migrate_from_v74_to_v75", _incoming_fingerprint_migration)
             old = db_factory()
         assert not old.backend.table_exists("message_insertion_order")
         old.close_all_connections()
@@ -343,16 +348,10 @@ def test_pg_forward_migration_installs_only_the_missing_authority(dev_catalog, m
     db._local = SimpleNamespace()
     db._backend = backend
     db._uses_shared_content_backend = False
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _: 92)
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _connection: 92)
     connection = object()
 
-    message_order_schema.migrate_postgres_chat_catalog(
-        connection,
-        backend=db.backend,
-        fingerprint_sql=db._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES,
-        schema_name=db._SCHEMA_NAME,
-        get_version=db._get_schema_version_postgres,
-    )
+    getattr(postgres_steps, postgres_steps.POSTGRES_STEPS[91])(db.ctx, connection)
 
     calls = backend.execute.call_args_list
     assert all(call.kwargs["connection"] is connection for call in calls)
@@ -392,3 +391,47 @@ def test_pg_runtime_requires_order_ledger_privileges(allowed):
     assert "has_column_privilege(current_user, 'message_insertion_order', 'message_id', 'INSERT')" in sql
     assert "pg_get_serial_sequence('message_insertion_order', 'sequence')" in sql
     assert backend.execute.call_args.kwargs["connection"] is connection
+
+
+def test_pg_bootstrap_advances_v91_in_place_and_rechecks_v92(monkeypatch):
+    """Exercise real dispatch while replacing PostgreSQL I/O with recording doubles."""
+    version = 91
+    checks = []
+    live_connection, migration_connection = object(), object()
+    backend = Mock()
+    backend.transaction.side_effect = lambda: nullcontext(live_connection)
+    backend.table_exists.return_value = True
+    db = SimpleNamespace(repair_conversation_assistant_identity=Mock())
+    ctx = SimpleNamespace(backend=backend, db=db, postgres_schema_version=92, schema_name="rag_char_chat_schema")
+
+    def status(_ctx, connection):
+        checks.append((connection, version))
+        return version == 92
+
+    def migrate(connection, *, backend, fingerprint_sql, schema_name, get_version):
+        nonlocal version
+        assert connection is migration_connection
+        assert backend is ctx.backend
+        assert fingerprint_sql == CharactersRAGDB._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES
+        assert schema_name == ctx.schema_name
+        assert get_version(connection) == 91
+        version = 92
+
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_: nullcontext(migration_connection))
+    monkeypatch.setattr(schema_bootstrap, "_postgres_schema_is_current", status)
+    monkeypatch.setattr(postgres_schema, "_configure_notes_moodboard_studio_v61_postgres_transaction", Mock())
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda *_args, **_kwargs: version)
+    unrelated_ddl = Mock(side_effect=AssertionError("Do not replay full bootstrap for v91"))
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", unrelated_ddl)
+    monkeypatch.setattr(message_order_schema, "migrate_postgres_chat_catalog", migrate)
+
+    schema_bootstrap._initialize_schema_postgres(ctx)
+    assert checks == [(live_connection, 91), (migration_connection, 91), (migration_connection, 92)]
+    assert db.repair_conversation_assistant_identity.call_count == 1
+    assert db.repair_conversation_assistant_identity.call_args.args[0]._connection is migration_connection
+    unrelated_ddl.assert_not_called()
+
+    schema_bootstrap._initialize_schema_postgres(ctx)
+    assert checks[-1] == (live_connection, 92)
+    assert db.repair_conversation_assistant_identity.call_count == 2
+    assert db.repair_conversation_assistant_identity.call_args.args[0]._connection is live_connection

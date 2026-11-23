@@ -66,21 +66,21 @@ describe("sidepanel chat narrow layout contract", () => {
 
   it("allows the sticky composer and control rows to wrap within a 390px sidepanel", () => {
     expect(sidepanelChatSource).toContain(
-      'className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"',
+      'className="absolute bottom-0 left-0 right-0 z-10 flex max-h-[max(40%,var(--sp-dock-fixed-h,0px))] min-h-0 w-full min-w-0 flex-col overflow-hidden"',
     )
     expect(sidepanelFormSource).toContain(
-      "flex w-full min-w-0 flex-col items-center",
+      "flex min-h-0 w-full min-w-0 flex-col items-center",
     )
     expect(sidepanelFormSource).toContain(
-      "relative z-10 flex w-full min-w-0 flex-col items-center justify-center",
+      "relative z-10 flex min-h-0 w-full min-w-0 flex-col items-center justify-center",
     )
     expect(sidepanelFormSource).toContain(
-      "relative w-full min-w-0 max-w-[64rem]",
+      "relative flex min-h-0 w-full min-w-0 max-w-[64rem] flex-col",
     )
     expect(sidepanelFormSource).toContain(
-      'className="min-w-0 flex-1 flex flex-col items-center"',
+      'className="min-h-0 min-w-0 flex-1 flex flex-col items-center"',
     )
-    expect(sidepanelFormSource).toContain("flex w-full min-w-0 flex-col px-1")
+    expect(sidepanelFormSource).toContain("flex min-h-0 w-full min-w-0 flex-col px-1")
     expect(sidepanelFormSource).toContain(
       'className="mt-2 flex min-w-0 flex-col gap-2"',
     )

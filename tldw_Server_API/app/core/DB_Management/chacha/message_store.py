@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     FTSQueryTranslator,
     InputError,
+    OwnerScope,
     logger,
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
@@ -49,7 +50,7 @@ from tldw_Server_API.app.core.Utils.generation_metadata import (
 )
 
 if TYPE_CHECKING:
-    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 
 
 MAX_CHAT_ATTACHMENT_READ_BYTES = 32 * 1024 * 1024
@@ -57,8 +58,8 @@ MAX_CHAT_ATTACHMENT_READ_BYTES = 32 * 1024 * 1024
 class MessageStore:
     """Focused persistence seam for message CRUD operations."""
 
-    def __init__(self, db: CharactersRAGDB) -> None:
-        self._db = db
+    def __init__(self, ctx: ChaChaContext) -> None:
+        self._ctx = ctx
         self._last_message_order_timestamp: str | None = None
         self._message_order_lock = threading.Lock()
 
@@ -83,6 +84,8 @@ class MessageStore:
         self, conn: Any, conversation_id: str, owner_client_id: str | None = None, *, include_deleted: bool = False
     ) -> None:
         """Serialize the conversation before locking message rows or metadata."""
+        if owner_client_id is None and self._ctx.backend_type == BackendType.POSTGRESQL:
+            owner_client_id = str(self._ctx.client_id)
         query = "SELECT id FROM conversations WHERE id = ?"
         if not include_deleted:
             query += " AND deleted = FALSE"
@@ -90,7 +93,7 @@ class MessageStore:
         if owner_client_id is not None:
             query += " AND client_id = ?"
             params += (owner_client_id,)
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             query += " FOR UPDATE"
         if conn.execute(query, params).fetchone() is None:
             raise NotFoundError("Conversation not found.")
@@ -135,7 +138,7 @@ class MessageStore:
         Window gating enforces a 32 MiB selected image budget before bytes cross the
         database boundary. No display loader, per-message query or row cap is used.
         """
-        postgres = self._db.backend_type == BackendType.POSTGRESQL
+        postgres = self._ctx.backend_type == BackendType.POSTGRESQL
         image_data_sql = "CASE WHEN mi.message_id IS NOT NULL THEN mi.image_data ELSE m.image_data END"
         if postgres:
             requested_sql = "SELECT jsonb_array_elements_text(CAST(? AS JSONB)) AS id"
@@ -432,7 +435,7 @@ class MessageStore:
         An explicit projection ID selects the view's immutable accepted legacy base.
         """
         namespace = self._history_owner_key(owner_client_id, owner_key)
-        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
         with transaction as active:
             if lock_for_update:
                 self._lock_history_owner(active, conversation_id, owner_client_id)
@@ -473,7 +476,7 @@ class MessageStore:
             raise HistorySelectionError("owner_conversation_mismatch")
         conversation_id = view["conversation_id"]
         projection_id = view["interpretation"].get("projection_id")
-        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
         with transaction as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             snapshot, _ = self._read_history_snapshot(
@@ -483,7 +486,7 @@ class MessageStore:
                 projection_id=projection_id,
                 conn=active,
             )
-            state = self._db.conversation_resume_store.get_roleplay_resume_state(
+            state = self._ctx.db.conversation_resume_store.get_roleplay_resume_state(
                 conversation_id,
                 conn=active,
                 owner_client_id=owner_client_id,
@@ -546,7 +549,7 @@ class MessageStore:
         ):
             raise HistorySelectionError("selected_content_mismatch")
         projection_id = snapshot.interpretation_status.get("projection_id")
-        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
         with transaction as active:
             fresh, content = self._read_history_snapshot(
                 conversation_id,
@@ -622,7 +625,7 @@ class MessageStore:
         ):
             raise HistorySelectionError("invalid_projection")
         cid = body["conversation_id"]
-        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
         with transaction as active:
             self._lock_history_owner(active, cid, owner_client_id)
             existing = active.execute(
@@ -655,7 +658,7 @@ class MessageStore:
             except (HistorySelectionError, KeyError, TypeError) as exc:
                 raise HistorySelectionError("invalid_projection") from exc
             digest = self._history_digest(body)
-            created_at = self._db._get_current_utc_timestamp_iso()
+            created_at = self._ctx.utc_now_iso()
             active.execute(
                 "INSERT INTO conversation_history_projections (projection_id, conversation_id, client_id, owner_key, "
                 "interpretation_version, source_digest, history_fence, source_members_json, ordered_path_ids_json, "
@@ -848,7 +851,7 @@ class MessageStore:
             raise HistorySelectionError("owner_conversation_mismatch")
         target = self._prepare_history_edit(body, [data], history_branch, history_edit)
         intent = self._history_intent_digest({"message": data, "history_edit": target} if target else data)
-        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+        with nullcontext(conn) if conn is not None else self._ctx.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             existing = active.execute("SELECT history_admission_json FROM messages WHERE id = ?", (data["id"],)).fetchone()
             if existing is not None:
@@ -943,7 +946,7 @@ class MessageStore:
         ):
             raise HistorySelectionError("owner_conversation_mismatch")
         target = self._prepare_history_edit(body, messages, history_branch, history_edit)
-        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+        with nullcontext(conn) if conn is not None else self._ctx.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             consumed = active.execute(
                 "SELECT history_admission_json FROM messages "
@@ -979,7 +982,7 @@ class MessageStore:
                 if "parent_message_id" in data and data["parent_message_id"] != parent:
                     raise HistorySelectionError("parent_mismatch")
                 data.update(
-                    id=self._db._generate_uuid(),
+                    id=self._ctx.new_uuid(),
                     conversation_id=conversation_id,
                     parent_message_id=parent,
                     client_id=owner_client_id,
@@ -1055,7 +1058,7 @@ class MessageStore:
             raise HistorySelectionError("owner_conversation_mismatch")
         if body.get("interpretation", {}).get("kind") != "parent_graph_v1":
             raise reply_action_refusal("unsupported_history_regeneration", REPLY_ACTION_REFUSED_QUESTION)
-        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+        with nullcontext(conn) if conn is not None else self._ctx.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             fresh, _ = self.validate_history_selection(
                 conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
@@ -1179,7 +1182,7 @@ class MessageStore:
         namespace = self._history_owner_key(owner_client_id, owner_key)
         if snapshot.owner_key != namespace or snapshot.conversation_id != conversation_id:
             raise HistorySelectionError("owner_conversation_mismatch")
-        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
         with transaction as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             self._validate_history_parent(
@@ -1222,7 +1225,7 @@ class MessageStore:
         if "parent_message_id" in data and data["parent_message_id"] != binding["input_message_id"]:
             raise HistorySelectionError("parent_mismatch")
         intent = self._history_intent_digest(data)
-        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+        with nullcontext(conn) if conn is not None else self._ctx.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             authority = self._validate_history_parent(
                 conversation_id, binding, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
@@ -1302,7 +1305,7 @@ class MessageStore:
         if "parent_message_id" in data and data["parent_message_id"] != question_id:
             raise HistorySelectionError("parent_mismatch")
         intent = self._history_intent_digest(data)
-        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+        with nullcontext(conn) if conn is not None else self._ctx.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             scope = dict(active.execute(
                 "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)
@@ -1365,7 +1368,7 @@ class MessageStore:
     def _next_message_order_timestamp(self) -> str:
         """Return a millisecond ISO timestamp that is monotonic for message inserts."""
         with self._message_order_lock:
-            now = self._db._get_current_utc_timestamp_iso()
+            now = self._ctx.utc_now_iso()
             last = self._last_message_order_timestamp
             if last is not None and now <= last:
                 try:
@@ -1496,8 +1499,8 @@ class MessageStore:
         """
         if not 1 <= limit <= 200 or offset < 0:
             raise InputError("Invalid history recovery pagination.")
-        with self._db.transaction() as conn:
-            if self._db.backend_type == BackendType.POSTGRESQL:
+        with self._ctx.transaction() as conn:
+            if self._ctx.backend_type == BackendType.POSTGRESQL:
                 conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             conversation = conn.execute(
                 "SELECT scope_type, workspace_id FROM conversations "
@@ -1506,7 +1509,7 @@ class MessageStore:
             if conversation is None or dict(conversation) != dict(scope):
                 raise NotFoundError("Conversation not found.")
             if conversation["scope_type"] == "workspace":
-                workspace = self._db.get_workspace(conversation["workspace_id"], conn=conn)
+                workspace = self._ctx.db.get_workspace(conversation["workspace_id"], conn=conn)
                 if not workspace or workspace.get("client_id") != owner_client_id:
                     raise NotFoundError("Conversation not found.")
             if message_id is not None:
@@ -1555,7 +1558,7 @@ class MessageStore:
             "UPDATE conversations "
             "SET history_version = history_version + 1, last_modified = ? "
             "WHERE id = ? AND deleted = FALSE",
-            (self._db._get_current_utc_timestamp_iso(), conversation_id),
+            (self._ctx.utc_now_iso(), conversation_id),
         )
         if cursor.rowcount != 1:
             raise InputError(  # noqa: TRY003
@@ -1564,7 +1567,7 @@ class MessageStore:
 
     def lock_message_for_edit(self, message_id: str, *, conn: Any) -> None:
         """Lock a live PostgreSQL message after its conversation fence."""
-        if self._db.backend_type != BackendType.POSTGRESQL:
+        if self._ctx.backend_type != BackendType.POSTGRESQL:
             return
         row = conn.execute(
             "SELECT id FROM messages "
@@ -1581,7 +1584,7 @@ class MessageStore:
 
     def lock_message_metadata_for_edit(self, message_id: str, *, conn: Any) -> None:
         """Ensure and lock metadata after its conversation and message."""
-        if self._db.backend_type != BackendType.POSTGRESQL:
+        if self._ctx.backend_type != BackendType.POSTGRESQL:
             return
         conn.execute(
             "INSERT INTO message_metadata(message_id, last_modified) "
@@ -1679,7 +1682,7 @@ class MessageStore:
                         f"Message image attachment exceeds maximum size of {_max_img_bytes} bytes"
                     )
 
-        msg_id = msg_data.get('id') or self._db._generate_uuid()
+        msg_id = msg_data.get('id') or self._ctx.new_uuid()
 
         required_fields = ['conversation_id', 'sender']
         for field in required_fields:
@@ -1695,7 +1698,7 @@ class MessageStore:
             msg_data['image_data'] = first_bytes
             msg_data['image_mime_type'] = first_mime
 
-        client_id = msg_data.get('client_id') or self._db.client_id
+        client_id = msg_data.get('client_id') or self._ctx.client_id
         if not client_id:
             raise InputError("Client ID is required for message.")  # noqa: TRY003
 
@@ -1708,7 +1711,7 @@ class MessageStore:
                                       timestamp, ranking, last_modified, client_id, version, deleted)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             # Backend errors are redacted; retain duplicate-ID conflicts via rowcount.
             query += " ON CONFLICT (id) DO NOTHING"
             params = (
@@ -1725,7 +1728,7 @@ class MessageStore:
                 timestamp, msg_data.get('ranking'), now, client_id, 1, 0
             )
         try:
-            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
             with transaction as transaction_conn:
                 try:
                     self._lock_history_owner(transaction_conn, msg_data["conversation_id"])
@@ -1799,7 +1802,7 @@ class MessageStore:
         """
         if not content or not owner_client_id or not user_message_id:
             raise InputError("A durable user turn requires an owner, ID, and text.")
-        with self._db.transaction() as conn:
+        with self._ctx.transaction() as conn:
 
             def is_user_message(message_id: str, sender: str) -> bool:
                 metadata = self.get_message_metadata(message_id, conn=conn) or {}
@@ -1809,7 +1812,7 @@ class MessageStore:
                     return (sender or "").strip().lower() in USER_SENDER_ALIASES
                 return role == "user"
 
-            state = self._db.get_roleplay_resume_state(
+            state = self._ctx.db.conversation_resume_store.get_roleplay_resume_state(
                 conversation_id,
                 conn=conn,
                 lock_for_update=True,
@@ -1822,7 +1825,7 @@ class MessageStore:
                         "Conversation scope changed.", entity="conversations", entity_id=conversation_id
                     )
             if conversation.get("scope_type") == "workspace":
-                workspace = self._db.get_workspace(conversation.get("workspace_id"), conn=conn)
+                workspace = self._ctx.db.get_workspace(conversation.get("workspace_id"), conn=conn)
                 if not workspace or str(workspace.get("client_id")) != str(owner_client_id):
                     raise NotFoundError("Conversation not found.")
 
@@ -1925,7 +1928,7 @@ class MessageStore:
         if conn is not None:
             conn.executemany(query, params)
         else:
-            self._db.execute_many(query, params, commit=False)
+            self._ctx.execute_many(query, params, commit=False)
 
     def append_message_image(
         self,
@@ -1958,7 +1961,7 @@ class MessageStore:
         def _append_once(transaction_conn: Any, *, use_db_executor: bool = False) -> int:
             def _execute(query: str, params: tuple[Any, ...]) -> Any:
                 if use_db_executor:
-                    return self._db.execute_query(query, params)
+                    return self._ctx.execute_query(query, params)
                 return transaction_conn.execute(query, params)
 
             self._lock_message_conversation(transaction_conn, message_id)
@@ -1996,7 +1999,7 @@ class MessageStore:
                 try:
                     if existing_conn is not None:
                         return _append_once(existing_conn, use_db_executor=True)
-                    with self._db.transaction() as owned_conn:
+                    with self._ctx.transaction() as owned_conn:
                         return _append_once(owned_conn, use_db_executor=True)
                 except sqlite3.IntegrityError as exc:
                     last_error = exc
@@ -2008,13 +2011,13 @@ class MessageStore:
         if conn is not None:
             return _append_once(conn)
         if not commit:
-            return _append_with_retries(self._db.get_connection())
+            return _append_with_retries(self._ctx.get_connection())
         return _append_with_retries()
 
     def get_message_images(self, message_id: str, *, strict: bool = False) -> list[dict[str, Any]]:
         """Fetch ordered images; strict reads propagate errors and reject gaps."""
         try:
-            cursor = self._db.execute_query(
+            cursor = self._ctx.execute_query(
                 "SELECT message_id, position, image_data, image_mime_type FROM message_images "
                 "WHERE message_id = ? ORDER BY position ASC",
                 (message_id,),
@@ -2057,7 +2060,7 @@ class MessageStore:
         if owner_user_id is not None and (not isinstance(owner_user_id, str) or not owner_user_id.strip()):
             raise InputError("owner_user_id must be a non-empty string.")  # noqa: TRY003
 
-        is_postgres = self._db.backend_type == BackendType.POSTGRESQL
+        is_postgres = self._ctx.backend_type == BackendType.POSTGRESQL
         if is_postgres and owner_user_id is None:
             raise InputError("owner_user_id is required for PostgreSQL source projections.")  # noqa: TRY003
         owner_clause = " AND c.client_id = ?" if is_postgres and owner_user_id else ""
@@ -2078,7 +2081,7 @@ class MessageStore:
         failure_type = "UnknownDatabaseError"
 
         try:
-            cursor = self._db.execute_query(
+            cursor = self._ctx.execute_query(
                 f"""
                     WITH settings AS (
                         SELECT CAST(? AS INTEGER) AS char_budget
@@ -2263,7 +2266,7 @@ class MessageStore:
         """Return the conversation_id for a message if it exists and is not deleted."""
         query = "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE"
         try:
-            cursor = self._db.execute_query(query, (message_id,))
+            cursor = self._ctx.execute_query(query, (message_id,))
             row = cursor.fetchone()
             if not row:
                 return None
@@ -2303,7 +2306,7 @@ class MessageStore:
             f"WHERE m.id = ? {deleted_clause}"  # nosec B608
         )
         try:
-            cursor = self._db.execute_query(query, (message_id,), read_only=True)
+            cursor = self._ctx.execute_query(query, (message_id,), read_only=True)
             row = cursor.fetchone()
             if not row:
                 return None
@@ -2406,7 +2409,7 @@ class MessageStore:
                 existing_versions,
             )
 
-        with self._db.transaction() as conn:
+        with self._ctx.transaction() as conn:
             message_id = self.add_message(
                 {
                     "id": projection_id,
@@ -2490,13 +2493,13 @@ class MessageStore:
             )
 
         matched_ids = {str(version["id"]) for version in matched_versions}
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._ctx.utc_now_iso()
         affected_conversation_ids = {
             str(version["conversation_id"])
             for version in existing_versions
             if not bool(version["deleted"])
         }
-        with self._db.transaction() as conn:
+        with self._ctx.transaction() as conn:
             for conversation_id in sorted({str(version["conversation_id"]) for version in existing_versions}):
                 self._lock_history_owner(conn, conversation_id, include_deleted=True)
             for version in existing_versions:
@@ -2640,11 +2643,13 @@ class MessageStore:
         """Fetch message projections associated with a Sync v2 stable message ID.
 
         With ``owner_client_id``, only messages in chats that owner holds are
-        returned. A caller that has no Sync state tying the id to an owner must
-        pass it: the match is by id, across every chat the connection can read.
+        returned. On PostgreSQL a None owner is the instance owner (``client_id``).
+        On SQLite a None owner matches by id across every chat the connection can read.
         """
 
-        self._db._ensure_message_metadata_table()
+        self._ctx.db.ensure_message_metadata_table()
+        if owner_client_id is None and self._ctx.backend_type == BackendType.POSTGRESQL:
+            owner_client_id = str(self._ctx.client_id)
         deleted_clause = "" if include_deleted else "AND m.deleted = FALSE AND c.deleted = FALSE"
         owner_clause = "" if owner_client_id is None else "AND c.client_id = ?"
         query = (
@@ -2658,9 +2663,9 @@ class MessageStore:
             "ORDER BY m.timestamp ASC, m.last_modified ASC, m.id ASC"
         )
         cursor = (
-            self._db.execute_query(query)
+            self._ctx.execute_query(query)
             if owner_client_id is None
-            else self._db.execute_query(query, (str(owner_client_id),))
+            else self._ctx.execute_query(query, (str(owner_client_id),))
         )
         rows = cursor.fetchall()
         columns = [col[0] for col in cursor.description] if cursor.description else []
@@ -2827,7 +2832,7 @@ class MessageStore:
                     ORDER BY page.timestamp {order_direction}, page.last_modified {order_direction},
                              page.id {order_direction}, mi.position ASC
                 """.format_map(locals())  # nosec B608
-                cursor = self._db.execute_query(strict_query, (conversation_id, limit, offset, image_byte_limit))
+                cursor = self._ctx.execute_query(strict_query, (conversation_id, limit, offset, image_byte_limit))
                 columns = [column[0] for column in cursor.description] if cursor.description else []
                 by_id: dict[str, dict[str, Any]] = {}
                 for row in cursor.fetchall():
@@ -2852,7 +2857,7 @@ class MessageStore:
                             message["image_data"] = image_data
                             message["image_mime_type"] = image_mime
                 return list(by_id.values())
-            cursor = self._db.execute_query(query, (conversation_id, limit, offset))
+            cursor = self._ctx.execute_query(query, (conversation_id, limit, offset))
             raw_rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description] if cursor.description else []
             results: list[dict[str, Any]] = []
@@ -2877,7 +2882,7 @@ class MessageStore:
             "AND m.deleted = FALSE AND c.deleted = FALSE"
         )
         try:
-            cursor = self._db.execute_query(query, (conversation_id,))
+            cursor = self._ctx.execute_query(query, (conversation_id,))
             row = cursor.fetchone()
             if row is None:
                 return 0
@@ -2913,7 +2918,7 @@ class MessageStore:
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
         try:
-            cursor = self._db.execute_query(query, (conversation_id, limit, offset))
+            cursor = self._ctx.execute_query(query, (conversation_id, limit, offset))
             rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description] if cursor.description else []
             results: list[dict[str, Any]] = []
@@ -2951,7 +2956,7 @@ class MessageStore:
         """.format_map(locals())  # nosec B608
         params = [conversation_id, *parent_ids]
         try:
-            cursor = self._db.execute_query(query, tuple(params))
+            cursor = self._ctx.execute_query(query, tuple(params))
             rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description] if cursor.description else []
             results: list[dict[str, Any]] = []
@@ -2993,12 +2998,12 @@ class MessageStore:
                 rolls back every member, preserving the previous instruction block.
         """
         try:
-            self._db._ensure_message_metadata_table()
+            self._ctx.db.ensure_message_metadata_table()
             message_ids: list[str] = []
-            with self._db.transaction() as conn:
+            with self._ctx.transaction() as conn:
                 owned = conn.execute(
                     "SELECT 1 FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE",
-                    (conversation_id, self._db.client_id),
+                    (conversation_id, self._ctx.client_id),
                 ).fetchone()
                 if not owned:
                     raise InputError("Retry conversation is unavailable.")  # noqa: TRY003
@@ -3007,18 +3012,18 @@ class MessageStore:
                         raise InputError("Retry instructions require system messages with text content.")  # noqa: TRY003
                     if not message["content"].strip():
                         continue
-                    message_id = self._db.add_message({
+                    message_id = self._ctx.db.add_message({
                         "conversation_id": conversation_id,
                         "sender": "system",
                         "content": message["content"],
-                        "client_id": self._db.client_id,
+                        "client_id": self._ctx.client_id,
                     }, conn=conn)
                     if not message_id:
                         raise CharactersRAGDBError("Failed to persist retry instruction.")  # noqa: TRY003
                     extra = {"sender_role": "system", "system_instruction_block_id": block_id}
                     if message.get("name"):
                         extra["sender_name"] = message["name"]
-                    if not self._db.add_message_metadata(message_id, extra=extra, conn=conn):
+                    if not self._ctx.db.add_message_metadata(message_id, extra=extra, conn=conn):
                         raise CharactersRAGDBError("Failed to persist retry instruction metadata.")  # noqa: TRY003
                     message_ids.append(message_id)
             return message_ids
@@ -3033,7 +3038,7 @@ class MessageStore:
         of the caller's LLM history limit. Block IDs separate consecutive updates;
         legacy unmarked rows retain their contiguous-block interpretation.
         """
-        cursor = self._db.execute_query(
+        cursor = self._ctx.execute_query(
             """
             WITH ordered AS (
                 SELECT m.id, m.sender, m.content, mm.extra_json,
@@ -3054,7 +3059,7 @@ class MessageStore:
                ))
             ORDER BY timestamp DESC, last_modified DESC, id DESC
             """,
-            (conversation_id, self._db.client_id),
+            (conversation_id, self._ctx.client_id),
         )
         tail_ids: list[str] = []
         system_messages: list[dict[str, Any]] = []
@@ -3106,7 +3111,7 @@ class MessageStore:
             """
             params = (conversation_id, False, False)
         try:
-            cursor = self._db.execute_query(query, params)
+            cursor = self._ctx.execute_query(query, params)
             return cursor.fetchone() is not None
         except CharactersRAGDBError as e:
             logger.error(
@@ -3162,7 +3167,7 @@ class MessageStore:
         if not update_data:
             raise InputError("No data provided for message update.")  # noqa: TRY003
 
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._ctx.utc_now_iso()
         fields_to_update_sql = []
         params_for_set_clause = []
 
@@ -3196,7 +3201,7 @@ class MessageStore:
         current_params_for_set_clause = list(params_for_set_clause)
 
         current_fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
-        current_params_for_set_clause.extend([now, next_version_val, self._db.client_id])
+        current_params_for_set_clause.extend([now, next_version_val, self._ctx.client_id])
 
         where_values = [message_id, expected_version]
         final_params_for_execute = tuple(current_params_for_set_clause + where_values)
@@ -3204,18 +3209,20 @@ class MessageStore:
         query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = FALSE"  # nosec B608
 
         try:
-            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
             with transaction as transaction_conn:
                 conversation_id = self._lock_message_conversation(transaction_conn, message_id)
                 if conversation_id is not None and "parent_message_id" in update_data:
                     self._validate_live_message_parent(
                         transaction_conn, conversation_id, update_data["parent_message_id"]
                     )
-                current_db_version = self._db._get_current_db_version(
+                # OwnerScope.NOT_APPLICABLE: _lock_message_conversation locked the conversation with the owner above
+                current_db_version = self._ctx.current_db_version(
                     transaction_conn,
                     "messages",
                     "id",
                     message_id,
+                    owner_client_id=OwnerScope.NOT_APPLICABLE,
                 )
 
                 if current_db_version != expected_version:
@@ -3296,22 +3303,24 @@ class MessageStore:
             ConflictError: If not found (and not already deleted), or if active with a version mismatch.
             CharactersRAGDBError: For other database errors.
         """
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._ctx.utc_now_iso()
         next_version_val = expected_version + 1
 
         query = "UPDATE messages SET deleted = TRUE, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = FALSE"
-        params = (now, next_version_val, self._db.client_id, message_id, expected_version)
+        params = (now, next_version_val, self._ctx.client_id, message_id, expected_version)
 
         try:
-            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
             with transaction as transaction_conn:
                 conversation_id = self._lock_message_conversation(transaction_conn, message_id)
                 try:
-                    current_db_version = self._db._get_current_db_version(
+                    # OwnerScope.NOT_APPLICABLE: _lock_message_conversation locked the conversation with the owner above
+                    current_db_version = self._ctx.current_db_version(
                         transaction_conn,
                         "messages",
                         "id",
                         message_id,
+                        owner_client_id=OwnerScope.NOT_APPLICABLE,
                     )
                 except ConflictError:
                     check_status_cursor = transaction_conn.execute(
@@ -3417,7 +3426,7 @@ class MessageStore:
         Raises:
             CharactersRAGDBError: For database search errors.
         """
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             tsquery = FTSQueryTranslator.normalize_query(content_query, 'postgresql')
             if not tsquery:
                 logger.debug("Message content query normalized to empty tsquery for input '{}'", content_query)
@@ -3431,7 +3440,7 @@ class MessageStore:
                 "AND c.deleted = FALSE AND c.client_id = ?",
                 "AND m.messages_fts_tsv @@ to_tsquery('english', ?)",
             ]
-            params_list: list[Any] = [tsquery, self._db.client_id, tsquery]
+            params_list: list[Any] = [tsquery, self._ctx.client_id, tsquery]
 
             if conversation_id:
                 base_query.append("AND m.conversation_id = ?")
@@ -3442,7 +3451,7 @@ class MessageStore:
             params_list.extend([limit, offset])
 
             try:
-                cursor = self._db.execute_query("\n".join(base_query), tuple(params_list))
+                cursor = self._ctx.execute_query("\n".join(base_query), tuple(params_list))
                 return [dict(row) for row in cursor.fetchall()]
             except CharactersRAGDBError as exc:
                 logger.error("PostgreSQL FTS search failed for messages term '{}': {}", content_query, exc)
@@ -3472,7 +3481,7 @@ class MessageStore:
         try:
             try:
                 # Retain valid FTS syntax; normalize only prose parse failures.
-                rows = self._db.get_connection().execute(base_query, tuple(params_list)).fetchall()
+                rows = self._ctx.get_connection().execute(base_query, tuple(params_list)).fetchall()
             except sqlite3.OperationalError as exc:
                 if not any(marker in str(exc).lower() for marker in ("fts5: syntax error", "no such column:")):
                     raise
@@ -3480,7 +3489,7 @@ class MessageStore:
                 if normalized == safe_search_term:
                     raise
                 params_list[0] = normalized
-                rows = self._db.get_connection().execute(base_query, tuple(params_list)).fetchall()
+                rows = self._ctx.get_connection().execute(base_query, tuple(params_list)).fetchall()
             return [dict(row) for row in rows]
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Message search failed: {exc}") from exc  # noqa: TRY003
@@ -3557,8 +3566,8 @@ class MessageStore:
         The table is created on-demand if missing.
         """
         try:
-            self._db._ensure_message_metadata_table()
-            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            self._ctx.db.ensure_message_metadata_table()
+            transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
             with transaction as transaction_conn:
                 if self._lock_message_conversation(transaction_conn, message_id) is None:
                     return False
@@ -3583,7 +3592,7 @@ class MessageStore:
     ) -> dict[str, Any] | None:
         """Fetch metadata; strict reads distinguish unavailable data from legacy rows."""
         try:
-            self._db._ensure_message_metadata_table()
+            self._ctx.db.ensure_message_metadata_table()
             if conn is not None:
                 cursor = conn.execute(
                     "SELECT tool_calls_json, extra_json, last_modified "
@@ -3591,7 +3600,7 @@ class MessageStore:
                     (message_id,),
                 )
             else:
-                cursor = self._db.execute_query(
+                cursor = self._ctx.execute_query(
                     "SELECT tool_calls_json, extra_json, last_modified "
                     "FROM message_metadata WHERE message_id = ?",
                     (message_id,),
@@ -3618,14 +3627,14 @@ class MessageStore:
             return {}
 
         try:
-            self._db._ensure_message_metadata_table()
-            if self._db.backend_type == BackendType.SQLITE:
+            self._ctx.db.ensure_message_metadata_table()
+            if self._ctx.backend_type == BackendType.SQLITE:
                 placeholders = ",".join(["?"] * len(message_ids))
                 query = (
                     "SELECT message_id, tool_calls_json, extra_json, last_modified "
                     f"FROM message_metadata WHERE message_id IN ({placeholders})"  # nosec B608
                 )
-                cursor = self._db.execute_query(query, tuple(message_ids))
+                cursor = self._ctx.execute_query(query, tuple(message_ids))
                 rows = cursor.fetchall()
             else:
                 placeholders = ",".join(["%s"] * len(message_ids))
@@ -3633,7 +3642,7 @@ class MessageStore:
                     "SELECT message_id, tool_calls_json, extra_json, last_modified "
                     f"FROM message_metadata WHERE message_id IN ({placeholders})"  # nosec B608
                 )
-                result = self._db.backend.execute(query, tuple(message_ids))
+                result = self._ctx.backend.execute(query, tuple(message_ids))
                 rows = result.fetchall()
 
             metadata_by_message_id: dict[str, dict[str, Any]] = {}
@@ -3663,7 +3672,7 @@ class MessageStore:
         conn: Any,
     ) -> dict[str, Any] | None:
         """Read metadata under the row lock used by PostgreSQL merge writers."""
-        if self._db.backend_type == BackendType.POSTGRESQL:
+        if self._ctx.backend_type == BackendType.POSTGRESQL:
             query = (
                 "SELECT tool_calls_json, extra_json, last_modified "
                 "FROM message_metadata WHERE message_id = ? FOR UPDATE"
@@ -3708,8 +3717,8 @@ class MessageStore:
         tool_results are merged key-wise.
         """
         try:
-            self._db._ensure_message_metadata_table()
-            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            self._ctx.db.ensure_message_metadata_table()
+            transaction = nullcontext(conn) if conn is not None else self._ctx.transaction()
             with transaction as transaction_conn:
                 if self._lock_message_conversation(transaction_conn, message_id) is None:
                     return False
@@ -3871,7 +3880,7 @@ class MessageStore:
         if not include_deleted:
             base_query += " AND m.deleted = FALSE"
         try:
-            cursor = self._db.execute_query(base_query, tuple(params))
+            cursor = self._ctx.execute_query(base_query, tuple(params))
             row = cursor.fetchone()
             # row may be tuple or dict depending on connection row factory
             if row is None:
@@ -3912,7 +3921,7 @@ class MessageStore:
             base_query += " AND m.deleted = FALSE"
         base_query += " GROUP BY m.conversation_id"
         try:
-            cursor = self._db.execute_query(base_query, tuple(conversation_ids))
+            cursor = self._ctx.execute_query(base_query, tuple(conversation_ids))
             rows = cursor.fetchall()
             result: dict[str, int] = dict.fromkeys(conversation_ids, 0)
             for row in rows:
@@ -3938,7 +3947,7 @@ class MessageStore:
             "ORDER BY m.timestamp DESC, m.last_modified DESC, m.id DESC LIMIT 1"
         )
         try:
-            cursor = self._db.execute_query(query, (conversation_id,))
+            cursor = self._ctx.execute_query(query, (conversation_id,))
             row = cursor.fetchone()
             if not row:
                 return None
@@ -3980,7 +3989,7 @@ class MessageStore:
             "AND m.timestamp > ?"
         )
         try:
-            cursor = self._db.execute_query(query, (conversation_id, since_timestamp))
+            cursor = self._ctx.execute_query(query, (conversation_id, since_timestamp))
             row = cursor.fetchone()
             if row is None:
                 return 0

@@ -68,6 +68,7 @@ from tldw_Server_API.app.core.Watchlists.briefing_delivery_state import (
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError as _DatabaseError, UniqueConstraintError
 from .backends.factory import DatabaseBackendFactory
 from .backends.query_utils import prepare_backend_statement
+from .backends.sqlite_backend import SQLiteBackend
 from .db_path_utils import DatabasePaths
 from .tag_identity import WATCHLIST_TAGS, ensure_tag_identity, match_tag_ids, tags_containing
 from .tag_identity import ensure_tag_ids as ensure_owner_tag_ids
@@ -135,6 +136,10 @@ def _utcnow_iso() -> str:
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
 
+class WatchlistJobChangedError(RuntimeError):
+    """The Watchlist job no longer matches the snapshot used to prepare a write."""
+
+
 def _escape_like_literal(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -183,6 +188,10 @@ class SourceRow:
     was_created: bool = False
 
 
+def _collections_feed_binding(source: SourceRow) -> str:
+    return json.dumps([source.id, source.created_at])
+
+
 @dataclass
 class GroupRow:
     id: int
@@ -220,6 +229,13 @@ class JobRow:
     next_run_at: str | None
     wf_schedule_id: str | None = None
     watchlist_id: int | None = None
+    collections_feed_binding_json: str | None = None
+
+    def belongs_to_collections_feed(self, source: SourceRow) -> bool:
+        return (
+            self.user_id == source.user_id
+            and self.collections_feed_binding_json == _collections_feed_binding(source)
+        )
 
 
 @dataclass
@@ -568,6 +584,10 @@ class WatchlistsDatabase:
                 probe.replace("{columns}", identifiers).replace("{table}", backend.escape_identifier(table))
             )
 
+        return cls._borrow_backend(user_id, backend)
+
+    @classmethod
+    def _borrow_backend(cls, user_id: str, backend: DatabaseBackend) -> WatchlistsDatabase:
         instance = cls.__new__(cls)
         instance.user_id = user_id
         instance._local = threading.local()
@@ -577,6 +597,39 @@ class WatchlistsDatabase:
         # _refresh_backend_if_needed returns _backend without resolving globals.
         instance._uses_shared_content_backend = False
         return instance
+
+    @staticmethod
+    def shared_retirement_backend() -> DatabaseBackend | None:
+        parser = load_comprehensive_config()
+        if load_content_db_settings(parser).backend_type != BackendType.POSTGRESQL:
+            return None
+        backend = get_content_backend(parser)
+        if backend is None or backend.backend_type != BackendType.POSTGRESQL:
+            raise _DatabaseError("Watchlists retirement content backend unavailable")
+        return backend
+
+    @staticmethod
+    def list_shared_retirement_owners(backend: DatabaseBackend) -> list[str]:
+        if not backend.table_exists("watchlist_schedule_retirements"):
+            return []
+        rows = backend.execute("SELECT DISTINCT user_id FROM watchlist_schedule_retirements ORDER BY user_id").rows
+        return [str(row["user_id"]) for row in rows]
+
+    @classmethod
+    @contextlib.contextmanager
+    def open_retirement_store(
+        cls, user_id: int, *, shared_backend: DatabaseBackend | None,
+    ) -> Generator[WatchlistsDatabase | None, None, None]:
+        if shared_backend is not None:
+            yield cls._borrow_backend(str(user_id), shared_backend)
+            return
+        path = DatabasePaths.resolve_user_base_directory(user_id) / DatabasePaths.MEDIA_DB_NAME
+        config = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(path))
+        with SQLiteBackend.open_existing(config) as backend:
+            if backend is None or not backend.table_exists("watchlist_schedule_retirements"):
+                yield None
+            else:
+                yield cls._borrow_backend(str(user_id), backend)
 
     @property
     def backend(self) -> DatabaseBackend:
@@ -878,9 +931,17 @@ class WatchlistsDatabase:
                 updated_at TEXT NOT NULL,
                 last_run_at TEXT,
                 next_run_at TEXT,
-                wf_schedule_id TEXT
+                wf_schedule_id TEXT,
+                collections_feed_binding_json TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_jobs_user ON scrape_jobs(user_id);
+
+            CREATE TABLE IF NOT EXISTS watchlist_schedule_retirements (
+                user_id TEXT NOT NULL,
+                job_id BIGINT NOT NULL,
+                schedule_id TEXT NOT NULL,
+                PRIMARY KEY (user_id, job_id, schedule_id)
+            );
 
             CREATE TABLE IF NOT EXISTS scrape_runs (
                 id BIGSERIAL PRIMARY KEY,
@@ -1240,9 +1301,17 @@ class WatchlistsDatabase:
                 updated_at TEXT NOT NULL,
                 last_run_at TEXT,
                 next_run_at TEXT,
-                wf_schedule_id TEXT
+                wf_schedule_id TEXT,
+                collections_feed_binding_json TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_jobs_user ON scrape_jobs(user_id);
+
+            CREATE TABLE IF NOT EXISTS watchlist_schedule_retirements (
+                user_id TEXT NOT NULL,
+                job_id INTEGER NOT NULL,
+                schedule_id TEXT NOT NULL,
+                PRIMARY KEY (user_id, job_id, schedule_id)
+            );
 
             CREATE TABLE IF NOT EXISTS scrape_runs (
                 id INTEGER PRIMARY KEY,
@@ -1519,6 +1588,16 @@ class WatchlistsDatabase:
         if not _col_exists("scrape_jobs", "wf_schedule_id"):
             with contextlib.suppress(_WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS):
                 self.backend.execute("ALTER TABLE scrape_jobs ADD COLUMN wf_schedule_id TEXT", ())
+        if not _col_exists("scrape_jobs", "collections_feed_binding_json"):
+            if self.backend.backend_type == BackendType.POSTGRESQL:
+                self.backend.execute("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS collections_feed_binding_json TEXT", ())
+            else:
+                with self.backend.transaction() as conn:
+                    columns = self.backend.get_table_info("scrape_jobs", connection=conn)
+                    if not any(column.get("name") == "collections_feed_binding_json" for column in columns):
+                        self.backend.execute(
+                            "ALTER TABLE scrape_jobs ADD COLUMN collections_feed_binding_json TEXT", (), connection=conn,
+                        )
         if not _col_exists("scrape_jobs", "job_filters_json"):
             with contextlib.suppress(_WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS):
                 self.backend.execute("ALTER TABLE scrape_jobs ADD COLUMN job_filters_json TEXT", ())
@@ -1650,7 +1729,9 @@ class WatchlistsDatabase:
             raise RuntimeError("failed_to_create_watchlist")
         return self.get_watchlist(new_id)
 
-    def get_watchlist(self, watchlist_id: int, include_deleted: bool = False) -> WatchlistRow:
+    def get_watchlist(
+        self, watchlist_id: int, include_deleted: bool = False, *, connection: Any | None = None,
+    ) -> WatchlistRow:
         where = "id = ? AND user_id = ?"
         params: list[Any] = [watchlist_id, self.user_id]
         if not include_deleted:
@@ -1663,6 +1744,7 @@ class WatchlistsDatabase:
             WHERE {where}
             """,  # nosec B608
             tuple(params),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("watchlist_not_found")
@@ -1957,9 +2039,9 @@ class WatchlistsDatabase:
     # ------------------------
     # Sources
     # ------------------------
-    def _ensure_source_owner(self, source_id: int) -> int:
+    def _ensure_source_owner(self, source_id: int, *, connection: Any | None = None) -> int:
         source_id = int(source_id)
-        self.get_source(source_id)
+        self.get_source(source_id, connection=connection)
         return source_id
 
     def _validate_group_ids_for_user(self, group_ids: Iterable[int] | None) -> list[int]:
@@ -2088,16 +2170,18 @@ class WatchlistsDatabase:
         tags = [r.get("name") for r in trows if r.get("name")]
         return SourceRow(tags=tags, **row)  # type: ignore[arg-type]
 
-    def get_source(self, source_id: int) -> SourceRow:
+    def get_source(self, source_id: int, *, connection: Any | None = None) -> SourceRow:
         row = self.backend.execute(
             "SELECT id, user_id, name, url, source_type, active, settings_json, last_scraped_at, etag, last_modified, defer_until, status, consec_not_modified, consec_errors, created_at, updated_at FROM sources WHERE id = ? AND user_id = ?",
             (source_id, self.user_id),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("source_not_found")
         tags_rows = self.backend.execute(
             "SELECT t.name FROM source_tags st JOIN tags t ON st.tag_id = t.id WHERE st.source_id = ?",
             (source_id,),
+            connection=connection,
         ).rows
         tags = [r.get("name") for r in tags_rows if r.get("name")]
         return SourceRow(tags=tags, **row)  # type: ignore[arg-type]
@@ -2156,9 +2240,9 @@ class WatchlistsDatabase:
             out.append(SourceRow(tags=tags, **r))  # type: ignore[arg-type]
         return out, total
 
-    def update_source(self, source_id: int, patch: dict[str, Any]) -> SourceRow:
+    def update_source(self, source_id: int, patch: dict[str, Any], *, connection: Any | None = None) -> SourceRow:
         if not patch:
-            return self.get_source(source_id)
+            return self.get_source(source_id, connection=connection)
         fields = []
         params: list[Any] = []
         for key in ("name", "url", "source_type", "active", "settings_json", "status"):
@@ -2175,9 +2259,29 @@ class WatchlistsDatabase:
             self.backend.execute(
                 f"UPDATE sources SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
                 tuple(params),
+                connection=connection,
             )
         # tags/group updates handled via separate helpers
-        return self.get_source(source_id)
+        return self.get_source(source_id, connection=connection)
+
+    def update_feed_and_job(
+        self,
+        source_id: int,
+        source_patch: dict[str, Any],
+        *,
+        tags: list[str] | None,
+        expected_job: JobRow,
+        job_patch: dict[str, Any],
+    ) -> tuple[SourceRow, JobRow]:
+        """Commit a feed's source, tags and version-checked job edit together."""
+        with self.transaction() as conn:
+            source = self.update_source(source_id, source_patch, connection=conn)
+            if not expected_job.belongs_to_collections_feed(source):
+                raise WatchlistJobChangedError("Collections feed job does not match the source")
+            job = self.update_job(expected_job.id, job_patch, expected_job=expected_job, connection=conn)
+            if tags is not None:
+                source.tags = self.set_source_tags(source_id, tags, connection=conn)
+            return source, job
 
     def update_source_scrape_meta(
         self,
@@ -2233,17 +2337,22 @@ class WatchlistsDatabase:
             (source_id, self.user_id),
         )
 
-    def set_source_tags(self, source_id: int, tag_names: list[str]) -> list[str]:
-        source_id = self._ensure_source_owner(source_id)
-        tag_ids = self.ensure_tag_ids(tag_names)
-        self.backend.execute("DELETE FROM source_tags WHERE source_id = ?", (source_id,))
+    def set_source_tags(
+        self, source_id: int, tag_names: list[str], *, connection: Any | None = None,
+    ) -> list[str]:
+        source_id = self._ensure_source_owner(source_id, connection=connection)
+        tag_ids = self._ensure_tag_ids_with_connection(tag_names, connection)
+        self.backend.execute("DELETE FROM source_tags WHERE source_id = ?", (source_id,), connection=connection)
         for tid in tag_ids:
             try:
                 self.backend.execute(
                     "INSERT INTO source_tags (source_id, tag_id) VALUES (?, ?) ON CONFLICT(source_id, tag_id) DO NOTHING",
                     (source_id, tid),
+                    connection=connection,
                 )
             except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
+                if connection is not None:
+                    raise
                 self.backend.execute(
                     "INSERT INTO source_tags (source_id, tag_id) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM source_tags WHERE source_id = ? AND tag_id = ?)",
                     (source_id, tid, source_id, tid),
@@ -2251,6 +2360,7 @@ class WatchlistsDatabase:
         rows = self.backend.execute(
             "SELECT t.name FROM source_tags st JOIN tags t ON st.tag_id = t.id WHERE st.source_id = ?",
             (source_id,),
+            connection=connection,
         ).rows
         return [r.get("name") for r in rows if r.get("name")]
 
@@ -2329,24 +2439,63 @@ class WatchlistsDatabase:
         return result
 
     def delete_source(self, source_id: int) -> bool:
-        try:
-            source_id = self._ensure_source_owner(source_id)
-        except KeyError:
-            return False
         with self.transaction() as conn:
-            self.backend.execute("DELETE FROM source_groups WHERE source_id = ?", (source_id,), connection=conn)
-            self.backend.execute("DELETE FROM source_tags WHERE source_id = ?", (source_id,), connection=conn)
-            self.backend.execute(
-                "DELETE FROM feed_websub_subscriptions WHERE source_id = ? AND user_id = ?",
-                (source_id, self.user_id),
-                connection=conn,
-            )
-            res = self.backend.execute(
-                "DELETE FROM sources WHERE id = ? AND user_id = ?",
-                (source_id, self.user_id),
-                connection=conn,
-            )
-        return bool(res.rowcount > 0)
+            try:
+                source = self.get_source(source_id, connection=conn)
+            except KeyError:
+                return False
+            return self._delete_observed_source(source, connection=conn)
+
+    def _delete_observed_source(self, source: SourceRow, *, connection: Any) -> bool:
+        deleted = self.backend.execute(
+            "DELETE FROM sources WHERE id = ? AND user_id = ? AND updated_at = ?",
+            (source.id, self.user_id, source.updated_at), connection=connection,
+        )
+        if not deleted.rowcount:
+            return False
+        self.backend.execute("DELETE FROM source_groups WHERE source_id = ?", (source.id,), connection=connection)
+        self.backend.execute("DELETE FROM source_tags WHERE source_id = ?", (source.id,), connection=connection)
+        self.backend.execute("DELETE FROM watchlist_sources WHERE source_id = ?", (source.id,), connection=connection)
+        self.backend.execute(
+            "DELETE FROM feed_websub_subscriptions WHERE source_id = ? AND user_id = ?",
+            (source.id, self.user_id), connection=connection,
+        )
+        return True
+
+    def delete_feed_and_job(
+        self, source: SourceRow, *, linked_job_id: int | None, expected_job: JobRow | None, retire_schedule: bool,
+    ) -> None:
+        """Commit the observed feed/job deletions and retirement intent together."""
+        with self.transaction() as conn:
+            if not self._delete_observed_source(source, connection=conn):
+                raise WatchlistJobChangedError("Collections feed changed")
+            if expected_job is not None:
+                if expected_job.id != linked_job_id or not expected_job.belongs_to_collections_feed(source):
+                    raise WatchlistJobChangedError("Collections feed job does not match the source")
+                self._delete_observed_job(expected_job, retire_schedule=retire_schedule, connection=conn)
+            elif linked_job_id is not None:
+                # Restore consumes this same record before inserting the live job.
+                undo = self.backend.execute(
+                    """DELETE FROM deleted_jobs WHERE user_id = ? AND job_id = ? RETURNING payload_json""",
+                    (self.user_id, linked_job_id), connection=conn,
+                ).first
+                if undo:
+                    try:
+                        payload = json.loads(undo["payload_json"])
+                    except (TypeError, ValueError):
+                        payload = None
+                    if (
+                        not isinstance(payload, dict)
+                        or payload.get("collections_feed_binding_json") != _collections_feed_binding(source)
+                    ):
+                        raise WatchlistJobChangedError("Collections feed job undo does not match the source")
+                # Restore and re-delete can move the record again; read both states in one snapshot.
+                if self.backend.execute(
+                    """SELECT id FROM scrape_jobs WHERE id = ? AND user_id = ?
+                       UNION ALL SELECT job_id FROM deleted_jobs WHERE job_id = ? AND user_id = ?""",
+                    (linked_job_id, self.user_id, linked_job_id, self.user_id), connection=conn,
+                ).first:
+                    raise WatchlistJobChangedError("Collections feed job reappeared")
 
     def delete_source_reversible(
         self,
@@ -2686,16 +2835,38 @@ class WatchlistsDatabase:
         output_prefs_json: str | None,
         job_filters_json: str | None = None,
         watchlist_id: int | None = None,
+        collections_feed: SourceRow | None = None,
     ) -> JobRow:
         now = _utcnow_iso()
+        binding = None
+        if collections_feed is not None:
+            owner_source = self.get_source(collections_feed.id)
+            if collections_feed.user_id != self.user_id or owner_source.created_at != collections_feed.created_at:
+                raise WatchlistJobChangedError("Collections feed source changed")
+            binding = _collections_feed_binding(owner_source)
         target_watchlist_id = int(watchlist_id) if watchlist_id is not None else int(self.ensure_default_watchlist().id)
         self.get_watchlist(target_watchlist_id)
-        res = self._execute_insert(
+        if self.backend.backend_type == BackendType.SQLITE:
+            insert_job = """
+            INSERT INTO scrape_jobs (id, user_id, name, description, scope_json, schedule_expr, active, max_concurrency,
+            per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json, schedule_timezone, watchlist_id,
+            created_at, updated_at, collections_feed_binding_json)
+            SELECT MAX(
+                COALESCE((SELECT MAX(id) FROM scrape_jobs), 0),
+                COALESCE((SELECT MAX(job_id) FROM deleted_jobs), 0),
+                COALESCE((SELECT MAX(job_id) FROM watchlist_schedule_retirements), 0),
+                COALESCE((SELECT MAX(job_id) FROM scrape_runs), 0)
+            ) + 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             """
+        else:
+            insert_job = """
             INSERT INTO scrape_jobs (user_id, name, description, scope_json, schedule_expr, active, max_concurrency,
-            per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json, schedule_timezone, watchlist_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+            per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json, schedule_timezone, watchlist_id,
+            created_at, updated_at, collections_feed_binding_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+        res = self._execute_insert(
+            insert_job,
             (
                 self.user_id,
                 name,
@@ -2712,6 +2883,7 @@ class WatchlistsDatabase:
                 target_watchlist_id,
                 now,
                 now,
+                binding,
             ),
         )
         new_id = self._extract_lastrowid(res)
@@ -2719,15 +2891,17 @@ class WatchlistsDatabase:
             raise RuntimeError("failed_to_create_job")
         return self.get_job(new_id)
 
-    def get_job(self, job_id: int) -> JobRow:
+    def get_job(self, job_id: int, *, connection: Any | None = None) -> JobRow:
         row = self.backend.execute(
             """
             SELECT id, user_id, name, description, scope_json, schedule_expr, schedule_timezone, active,
                    max_concurrency, per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json,
-                   created_at, updated_at, last_run_at, next_run_at, wf_schedule_id, watchlist_id
+                   created_at, updated_at, last_run_at, next_run_at, wf_schedule_id, watchlist_id,
+                   collections_feed_binding_json
             FROM scrape_jobs WHERE id = ? AND user_id = ?
             """,
             (job_id, self.user_id),
+            connection=connection,
         ).first
         if not row:
             raise KeyError("job_not_found")
@@ -2751,7 +2925,7 @@ class WatchlistsDatabase:
             params.append(int(watchlist_id))
         total = int(self.backend.execute(f"SELECT COUNT(*) AS cnt FROM scrape_jobs WHERE {' AND '.join(where)}", tuple(params)).scalar or 0)  # nosec B608
         rows = self.backend.execute(
-            f"SELECT id, user_id, name, description, scope_json, schedule_expr, schedule_timezone, active, max_concurrency, per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json, created_at, updated_at, last_run_at, next_run_at, wf_schedule_id, watchlist_id FROM scrape_jobs WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT ? OFFSET ?",  # nosec B608
+            f"SELECT id, user_id, name, description, scope_json, schedule_expr, schedule_timezone, active, max_concurrency, per_host_delay_ms, retry_policy_json, output_prefs_json, job_filters_json, created_at, updated_at, last_run_at, next_run_at, wf_schedule_id, watchlist_id, collections_feed_binding_json FROM scrape_jobs WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT ? OFFSET ?",  # nosec B608
             tuple(params + [limit, offset]),
         ).rows
         return [JobRow(**r) for r in rows], total
@@ -2800,9 +2974,12 @@ class WatchlistsDatabase:
             pass
         return {"filters": []}
 
-    def update_job(self, job_id: int, patch: dict[str, Any]) -> JobRow:
+    def update_job(
+        self, job_id: int, patch: dict[str, Any], *,
+        expected_job: JobRow | None = None, connection: Any | None = None,
+    ) -> JobRow:
         if not patch:
-            return self.get_job(job_id)
+            return self.get_job(job_id, connection=connection)
         fields = []
         params: list[Any] = []
         for key in (
@@ -2819,24 +2996,38 @@ class WatchlistsDatabase:
             "job_filters_json",
             "watchlist_id",
         ):
-            if key in patch and patch[key] is not None:
+            if key in patch and (patch[key] is not None or key == "schedule_expr"):
                 fields.append(f"{key} = ?")
                 val = patch[key]
+                if key == "schedule_expr" and val is None:
+                    fields.append("next_run_at = NULL")
+                elif key == "schedule_expr" and str(val).strip():
+                    fields.append(
+                        "wf_schedule_id = CASE WHEN NULLIF(TRIM(schedule_expr), '') IS NULL THEN NULL ELSE wf_schedule_id END"
+                    )
                 if key == "active":
                     val = 1 if bool(val) else 0
                 if key == "watchlist_id":
                     val = int(val)
-                    self.get_watchlist(val)
+                    self.get_watchlist(val, connection=connection)
                 params.append(val)
         if fields:
             fields.append("updated_at = ?")
             params.append(_utcnow_iso())
             params.extend([job_id, self.user_id])
-            self.backend.execute(
-                f"UPDATE scrape_jobs SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
+            where = "id = ? AND user_id = ?"
+            if expected_job is not None:
+                where += " AND updated_at = ? AND COALESCE(wf_schedule_id, '') = ?"
+                params.extend([expected_job.updated_at, expected_job.wf_schedule_id or ""])
+            result = self.backend.execute(
+                f"UPDATE scrape_jobs SET {', '.join(fields)} WHERE {where}",  # nosec B608
                 tuple(params),
+                connection=connection,
             )
-        return self.get_job(job_id)
+            if expected_job is not None and not result.rowcount:
+                self.get_job(job_id, connection=connection)  # Preserve the missing-job error.
+                raise WatchlistJobChangedError("Watchlist job changed")
+        return self.get_job(job_id, connection=connection)
 
     def delete_job(self, job_id: int) -> bool:
         res = self.backend.execute(
@@ -2845,17 +3036,35 @@ class WatchlistsDatabase:
         )
         return bool(res.rowcount > 0)
 
+    def _delete_observed_job(self, job: JobRow, *, retire_schedule: bool, connection: Any) -> None:
+        deleted = self.backend.execute(
+            """DELETE FROM scrape_jobs WHERE id = ? AND user_id = ? AND updated_at = ?
+               AND COALESCE(wf_schedule_id, '') = ?""",
+            (job.id, self.user_id, job.updated_at, job.wf_schedule_id or ""),
+            connection=connection,
+        )
+        if not deleted.rowcount:
+            raise WatchlistJobChangedError("Watchlist job changed")
+        if retire_schedule and job.wf_schedule_id:
+            self._record_job_schedule_retirement(job.id, job.wf_schedule_id, connection=connection)
+
     def delete_job_reversible(
         self,
         job_id: int,
         *,
         undo_window_seconds: int,
+        expected_job: JobRow | None = None,
+        retire_schedule: bool = False,
     ) -> tuple[bool, str | None]:
         self._purge_expired_deleted_records()
         try:
             job = self.get_job(job_id)
         except KeyError:
             return False, None
+        if expected_job is not None and (job.updated_at, job.wf_schedule_id) != (
+            expected_job.updated_at, expected_job.wf_schedule_id,
+        ):
+            raise WatchlistJobChangedError("Watchlist job changed")
 
         payload = {
             "id": int(job.id),
@@ -2876,19 +3085,17 @@ class WatchlistsDatabase:
             "next_run_at": job.next_run_at,
             "wf_schedule_id": job.wf_schedule_id,
             "watchlist_id": job.watchlist_id,
+            "collections_feed_binding_json": job.collections_feed_binding_json,
         }
         deleted_at = _utcnow_iso()
         expires_at = self._restore_expires_at(undo_window_seconds)
 
         with self.transaction() as conn:
-            self.backend.execute(
+            saved = self.backend.execute(
                 """
                 INSERT INTO deleted_jobs (user_id, job_id, payload_json, deleted_at, expires_at)
                 VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(user_id, job_id) DO UPDATE SET
-                    payload_json = excluded.payload_json,
-                    deleted_at = excluded.deleted_at,
-                    expires_at = excluded.expires_at
+                ON CONFLICT(user_id, job_id) DO NOTHING
                 """,
                 (
                     self.user_id,
@@ -2899,130 +3106,145 @@ class WatchlistsDatabase:
                 ),
                 connection=conn,
             )
-            deleted = self.backend.execute(
-                "DELETE FROM scrape_jobs WHERE id = ? AND user_id = ?",
-                (job_id, self.user_id),
-                connection=conn,
-            )
-            if deleted.rowcount <= 0:
-                raise KeyError("job_not_found")
+            if not saved.rowcount:
+                raise WatchlistJobChangedError("An undo record already exists for this job ID")
+            self._delete_observed_job(job, retire_schedule=retire_schedule, connection=conn)
         return True, expires_at
 
     def restore_job(self, job_id: int) -> JobRow:
-        row = self.backend.execute(
-            "SELECT payload_json, expires_at FROM deleted_jobs WHERE user_id = ? AND job_id = ?",
-            (self.user_id, job_id),
-        ).first
-        if not row:
-            raise KeyError("job_restore_not_found")
-
-        expires_at = row.get("expires_at")
-        if self._is_restore_expired(str(expires_at) if expires_at is not None else None):
-            self.backend.execute(
-                "DELETE FROM deleted_jobs WHERE user_id = ? AND job_id = ?",
-                (self.user_id, job_id),
-            )
-            raise KeyError("job_restore_expired")
-
-        try:
-            payload = json.loads(row.get("payload_json") or "{}")
-        except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
-            payload = None
-        if not isinstance(payload, dict):
-            self.backend.execute(
-                "DELETE FROM deleted_jobs WHERE user_id = ? AND job_id = ?",
-                (self.user_id, job_id),
-            )
-            raise KeyError("job_restore_invalid_payload")
-
-        name = str(payload.get("name") or "").strip()
-        if not name:
-            self.backend.execute(
-                "DELETE FROM deleted_jobs WHERE user_id = ? AND job_id = ?",
-                (self.user_id, job_id),
-            )
-            raise KeyError("job_restore_invalid_payload")
-
-        created_at = str(payload.get("created_at") or _utcnow_iso())
-        updated_at = str(payload.get("updated_at") or created_at)
-
         with self.transaction() as conn:
-            existing = self.backend.execute(
-                "SELECT id FROM scrape_jobs WHERE id = ? AND user_id = ?",
-                (job_id, self.user_id),
+            row = self.backend.execute(
+                """DELETE FROM deleted_jobs WHERE user_id = ? AND job_id = ?
+                   RETURNING payload_json, expires_at""",
+                (self.user_id, job_id),
                 connection=conn,
             ).first
-
-            values = (
-                name,
-                payload.get("description"),
-                payload.get("scope_json"),
-                payload.get("schedule_expr"),
-                payload.get("schedule_timezone"),
-                1 if bool(payload.get("active", True)) else 0,
-                payload.get("max_concurrency"),
-                payload.get("per_host_delay_ms"),
-                payload.get("retry_policy_json"),
-                payload.get("output_prefs_json"),
-                payload.get("job_filters_json"),
-                created_at,
-                updated_at,
-                payload.get("last_run_at"),
-                payload.get("next_run_at"),
-                payload.get("wf_schedule_id"),
-                payload.get("watchlist_id"),
-            )
-
-            if existing:
-                self.backend.execute(
-                    """
-                    UPDATE scrape_jobs
-                    SET name = ?, description = ?, scope_json = ?, schedule_expr = ?, schedule_timezone = ?,
-                        active = ?, max_concurrency = ?, per_host_delay_ms = ?, retry_policy_json = ?,
-                        output_prefs_json = ?, job_filters_json = ?, created_at = ?, updated_at = ?,
-                        last_run_at = ?, next_run_at = ?, wf_schedule_id = ?, watchlist_id = ?
-                    WHERE id = ? AND user_id = ?
-                    """,
-                    (*values, job_id, self.user_id),
-                    connection=conn,
-                )
+            if not row:
+                raise KeyError("job_restore_not_found")
+            expires_at = row.get("expires_at")
+            if self._is_restore_expired(str(expires_at) if expires_at is not None else None):
+                rejected = "job_restore_expired"
             else:
-                self.backend.execute(
-                    """
-                    INSERT INTO scrape_jobs (
-                        id, user_id, name, description, scope_json, schedule_expr, schedule_timezone,
-                        active, max_concurrency, per_host_delay_ms, retry_policy_json, output_prefs_json,
-                        job_filters_json, created_at, updated_at, last_run_at, next_run_at, wf_schedule_id,
-                        watchlist_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (job_id, self.user_id, *values),
-                    connection=conn,
-                )
-
-            self.backend.execute(
-                "DELETE FROM deleted_jobs WHERE user_id = ? AND job_id = ?",
-                (self.user_id, job_id),
-                connection=conn,
-            )
-
-        return self.get_job(job_id)
+                try:
+                    payload = json.loads(row.get("payload_json") or "{}")
+                except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
+                    payload = None
+                if isinstance(payload, dict) and (name := str(payload.get("name") or "").strip()):
+                    now = _utcnow_iso()
+                    inserted = self.backend.execute(
+                        """
+                        INSERT INTO scrape_jobs (
+                            id, user_id, name, description, scope_json, schedule_expr, schedule_timezone,
+                            active, max_concurrency, per_host_delay_ms, retry_policy_json, output_prefs_json,
+                            job_filters_json, created_at, updated_at, last_run_at, next_run_at, watchlist_id,
+                            collections_feed_binding_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (id) DO NOTHING
+                        """,
+                        (
+                            job_id, self.user_id, name, payload.get("description"),
+                            payload.get("scope_json"), payload.get("schedule_expr"), payload.get("schedule_timezone"),
+                            int(bool(payload.get("active", True))), payload.get("max_concurrency"),
+                            payload.get("per_host_delay_ms"), payload.get("retry_policy_json"),
+                            payload.get("output_prefs_json"), payload.get("job_filters_json"),
+                            str(payload.get("created_at") or now), now, payload.get("last_run_at"),
+                            payload.get("next_run_at"), payload.get("watchlist_id"),
+                            payload.get("collections_feed_binding_json"),
+                        ),
+                        connection=conn,
+                    )
+                    if not inserted.rowcount:
+                        raise WatchlistJobChangedError("Watchlist job ID is already in use")
+                    return self.get_job(job_id, connection=conn)
+                rejected = "job_restore_invalid_payload"
+        # An expired or invalid record is consumed, even though there is nothing to restore.
+        raise KeyError(rejected)
 
     # ---- Schedule/history helpers ----
-    def set_job_schedule_id(self, job_id: int, schedule_id: str | None) -> None:
+    def set_job_schedule_id(
+        self, job_id: int, schedule_id: str | None, *, expected_job: JobRow | None = None,
+        retire_previous: bool = False,
+    ) -> bool:
+        where = "id = ? AND user_id = ?"
+        params: list[Any] = [schedule_id, job_id, self.user_id]
+        if expected_job is not None:
+            where += " AND updated_at = ? AND COALESCE(wf_schedule_id, '') = ?"
+            params.extend([expected_job.updated_at, expected_job.wf_schedule_id or ""])
+        if schedule_id is not None:
+            where += " AND NULLIF(TRIM(schedule_expr), '') IS NOT NULL"
+        retired_id = (
+            expected_job.wf_schedule_id if retire_previous and expected_job and schedule_id else None
+        )
+        if retired_id == schedule_id:
+            retired_id = None
+        with (self.transaction() if retired_id else contextlib.nullcontext()) as conn:
+            result = self.backend.execute(
+                f"UPDATE scrape_jobs SET wf_schedule_id = ? WHERE {where}",  # nosec B608
+                tuple(params), connection=conn,
+            )
+            if result.rowcount and retired_id:
+                self._record_job_schedule_retirement(job_id, retired_id, connection=conn)
+            return bool(result.rowcount)
+
+    def _record_job_schedule_retirement(self, job_id: int, schedule_id: str, *, connection: Any) -> None:
         self.backend.execute(
-            "UPDATE scrape_jobs SET wf_schedule_id = ? WHERE id = ? AND user_id = ?",
-            (schedule_id, job_id, self.user_id),
+            """INSERT INTO watchlist_schedule_retirements (user_id, job_id, schedule_id)
+               VALUES (?, ?, ?) ON CONFLICT (user_id, job_id, schedule_id) DO NOTHING""",
+            (self.user_id, job_id, schedule_id), connection=connection,
         )
 
-    def set_job_history(self, job_id: int, *, last_run_at: str | None = None, next_run_at: str | None = None) -> None:
+    def list_retired_job_schedule_ids(self, job_id: int) -> list[str]:
+        rows = self.backend.execute(
+            """SELECT schedule_id FROM watchlist_schedule_retirements
+               WHERE user_id = ? AND job_id = ? ORDER BY schedule_id""",
+            (self.user_id, job_id),
+        ).rows
+        return [str(row["schedule_id"]) for row in rows]
+
+    def list_schedule_retirements(self) -> list[tuple[int, str]]:
+        rows = self.backend.execute(
+            """SELECT job_id, schedule_id FROM watchlist_schedule_retirements
+               WHERE user_id = ? ORDER BY job_id, schedule_id""",
+            (self.user_id,),
+        ).rows
+        return [(int(row["job_id"]), str(row["schedule_id"])) for row in rows]
+
+    def has_job_schedule(self, job_id: int, schedule_id: str) -> bool:
+        return self.backend.execute(
+            "SELECT 1 FROM scrape_jobs WHERE id = ? AND user_id = ? AND wf_schedule_id = ?",
+            (job_id, self.user_id, schedule_id),
+        ).first is not None
+
+    def acknowledge_job_schedule_retirement(self, job_id: int, schedule_id: str) -> None:
+        self.backend.execute(
+            """DELETE FROM watchlist_schedule_retirements
+               WHERE user_id = ? AND job_id = ? AND schedule_id = ?""",
+            (self.user_id, job_id, schedule_id),
+        )
+
+    def detach_cleared_job_schedule(self, job_id: int, schedule_id: str) -> None:
+        self.backend.execute(
+            """UPDATE scrape_jobs SET wf_schedule_id = NULL
+               WHERE id = ? AND user_id = ? AND wf_schedule_id = ?
+                 AND NULLIF(TRIM(schedule_expr), '') IS NULL""",
+            (job_id, self.user_id, schedule_id),
+        )
+
+    def set_job_history(
+        self, job_id: int, *, last_run_at: str | None = None, next_run_at: str | None = None,
+        expected_job: JobRow | None = None,
+    ) -> None:
         sets = []
         params: list[Any] = []
         if last_run_at is not None:
             sets.append("last_run_at = ?")
             params.append(last_run_at)
         if next_run_at is not None:
-            sets.append("next_run_at = ?")
+            condition = "NULLIF(TRIM(schedule_expr), '') IS NOT NULL"
+            if expected_job is not None:
+                condition += " AND updated_at = ? AND COALESCE(wf_schedule_id, '') = ?"
+                params.extend([expected_job.updated_at, expected_job.wf_schedule_id or ""])
+            sets.append(f"next_run_at = CASE WHEN {condition} THEN ? ELSE next_run_at END")
             params.append(next_run_at)
         if not sets:
             return
@@ -3042,6 +3264,45 @@ class WatchlistsDatabase:
         new_id = self._extract_lastrowid(res)
         if not new_id:
             raise RuntimeError("failed_to_create_run")
+        return self.get_run(new_id)
+
+    def create_scheduled_run(self, job: JobRow) -> RunRow | None:
+        """Admit a managed run only if the observed job is still scheduled."""
+        if not job.wf_schedule_id or not job.schedule_expr:
+            return None
+        predicate = (
+            "id = ? AND user_id = ? AND active = 1 AND wf_schedule_id = ? "
+            "AND schedule_expr = ? AND updated_at = ?"
+        )
+        expected = (job.id, self.user_id, job.wf_schedule_id, job.schedule_expr, job.updated_at)
+        now = _utcnow_iso()
+        with self.transaction() as conn:
+            if self.backend.backend_type == BackendType.POSTGRESQL:
+                # Serialize admission with updates to the owner job row.
+                owned = self.backend.execute(
+                    f"SELECT id FROM scrape_jobs WHERE {predicate} FOR UPDATE",  # nosec B608
+                    expected,
+                    connection=conn,
+                ).first
+                if not owned:
+                    return None
+                res = self._execute_insert(
+                    "INSERT INTO scrape_runs (job_id, status, started_at) VALUES (?, 'running', ?)",
+                    (job.id, now),
+                    connection=conn,
+                )
+            else:
+                res = self._execute_insert(
+                    f"""INSERT INTO scrape_runs (job_id, status, started_at)
+                        SELECT id, 'running', ? FROM scrape_jobs WHERE {predicate}""",  # nosec B608
+                    (now, *expected),
+                    connection=conn,
+                )
+                if res.rowcount == 0:
+                    return None
+            new_id = self._extract_lastrowid(res)
+            if not new_id:
+                raise RuntimeError("failed_to_create_run")
         return self.get_run(new_id)
 
     def get_run(self, run_id: int) -> RunRow:

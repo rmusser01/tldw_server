@@ -718,11 +718,9 @@ def test_owned_queue_estimates_exclude_persistence_only_sources(selected_api, ow
 
 @pytest.mark.parametrize("stream", [False, True])
 def test_full_persistence_envelope_still_obeys_request_size_limit(selected_api, monkeypatch, stream):
-    from tldw_Server_API.app.api.v1.schemas import chat_validators
-
     client, db, cid, headers = selected_api
     body = body_for(client, cid, headers, stream, receipt_sources(), max_tokens=32)
-    monkeypatch.setattr(chat_validators, "MAX_REQUEST_SIZE", 3000)
+    monkeypatch.setenv("CHAT_REQUEST_MAX_SIZE", "3000")
     calls = []
 
     def unexpected_provider(*args, **kwargs):

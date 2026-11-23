@@ -234,7 +234,7 @@ class BuddyService:
     def resolve_target(self, scope_type: str, scope_id: str) -> dict[str, Any]:
         """Resolve existing private targets; never open a shared owner's DB."""
         if scope_type == "workspace":
-            workspace = self.db.get_workspace(scope_id)
+            workspace = self.db.workspace_store.get_workspace(scope_id)
             if workspace is None or workspace.get("deleted") or str(workspace.get("client_id")) != self.user_id:
                 raise BuddyNotFoundError("Target unavailable")
             return {"title": workspace.get("name") or "Workspace", "workspace_id": scope_id}
@@ -289,7 +289,7 @@ class BuddyService:
             CharactersRAGDBError: If reading the conversation state fails.
         """
         try:
-            resume = self.db.get_roleplay_resume_state(conversation_id, owner_client_id=self.user_id)
+            resume = self.db.conversation_resume_store.get_roleplay_resume_state(conversation_id, owner_client_id=self.user_id)
         except NotFoundError as exc:
             raise BuddyNotFoundError("Target unavailable") from exc
         settings = resume.get("settings") or {}

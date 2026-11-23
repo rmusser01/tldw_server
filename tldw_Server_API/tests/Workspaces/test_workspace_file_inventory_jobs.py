@@ -62,9 +62,9 @@ def db(tmp_path: Path) -> CharactersRAGDB:
 
 
 def _workspace_with_root(db: CharactersRAGDB, root_path: Path) -> dict[str, Any]:
-    db.upsert_workspace("ws-1", "Workspace", workspace_profile="project")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace", workspace_profile="project")
     root_path.mkdir(parents=True, exist_ok=True)
-    return db.upsert_workspace_primary_root(
+    return db.workspace_store.upsert_workspace_primary_root(
         "ws-1",
         {
             "root_id": "root-1",
@@ -209,7 +209,7 @@ def test_enqueue_logs_reload_failure_without_hiding_created_job(
 def test_enqueue_reuses_active_scan_only_when_job_id_exists(db: CharactersRAGDB, tmp_path: Path) -> None:
     root = _workspace_with_root(db, tmp_path / "project")
     policy = build_inventory_ignore_policy()
-    stale_unattached = db.begin_workspace_file_inventory_scan(
+    stale_unattached = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-1",
         root["root_id"],
         int(root["version"]),

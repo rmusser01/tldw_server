@@ -3,6 +3,7 @@ import { formatToMessage } from "@/db/dexie/helpers";
 import { readWorkspaceServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
 import { canonicalHistoryJson } from "@/db/dexie/history-selection";
 import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
+import { serverChatActivePath } from "@/utils/newest-leaf-path";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import type { Message } from "@/store/option";
 import { rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
@@ -512,7 +513,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
     if (chatReference?.serverChatId && cachedChat?.serverChatId === chatReference.serverChatId &&
         cachedChat.messages.length) {
       const signal = AbortSignal.any([scope.scopeSignal, AbortSignal.timeout(15000)]);
-      const serverMessages = await fetchAllServerChatMessages(
+      const listedMessages = await fetchAllServerChatMessages(
         ({ limit, offset }) => tldwClient.listChatMessages(chatReference.serverChatId!, {
           limit, offset, include_metadata: "true", include_images: "true",
           include_deleted: "false", render_placeholders: "false",
@@ -521,6 +522,8 @@ export const restoreMigratedResearchWorkspace = async (options: {
         { signal },
       );
       assertCurrent();
+      // CM-N2: a branched chat shows its newest path, so that is what a cache can match.
+      const serverMessages = serverChatActivePath(listedMessages).messages;
       const canonical = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null });
       const mirrorMessages = mirror ? formatToMessage(mirror.rows) : undefined;
       // Older manual two-message saves omitted parents. Retain that exact local
@@ -528,12 +531,19 @@ export const restoreMigratedResearchWorkspace = async (options: {
       const retainLegacyLinearParent = !!mirror && serverMessages.length === 2 &&
         serverMessages[0].role === "user" && serverMessages[1].role === "assistant" &&
         serverMessages.every(row => row.parent_message_id === null && row.version === 1);
-      const matches = (legacy: boolean) => cachedMessagesMatchCanonical(cachedChat.messages, canonical, legacy) &&
+      const matchesView = (view: Message[], legacy = false) =>
+        cachedMessagesMatchCanonical(cachedChat.messages, view, legacy) &&
         (!mirrorMessages || (mirror!.rows.length === mirrorMessages.length &&
-          cachedMessagesMatchCanonical(mirrorMessages, canonical, legacy)));
-      if ((matches(false) || (retainLegacyLinearParent && matches(true))) &&
-          (cachedChat.history.length === 0 ||
-            canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(canonical))))
+          cachedMessagesMatchCanonical(mirrorMessages, view, legacy))) &&
+        (cachedChat.history.length === 0 ||
+          canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(view)));
+      // Transition: a cache written before CM-N2 holds every saved message of
+      // a branched chat, as the flat list showed it; it is still the user's own.
+      const flatCanonical = serverMessages.length !== listedMessages.length
+        ? mapServerChatMessagesToPlaygroundMessages({ serverMessages: listedMessages, assistantName: "AI", characterId: null })
+        : null;
+      if (matchesView(canonical) || (retainLegacyLinearParent && matchesView(canonical, true)) ||
+          (flatCanonical && matchesView(flatCanonical)))
         verifiedCachedChat = cachedSelection!;
     }
     if (provisional && verifiedCachedChat) {

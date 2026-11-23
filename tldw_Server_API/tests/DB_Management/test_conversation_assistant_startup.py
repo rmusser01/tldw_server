@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Chat.assistant_startup import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -123,16 +124,17 @@ def test_failed_provenance_migration_rolls_back_column_and_preserves_old_row(
     method = (
         "_migrate_from_v73_to_v74_postgres" if legacy.backend_type.value == "postgresql" else "_migrate_from_v69_to_v70"
     )
-    migrate = getattr(CharactersRAGDB, method)
+    steps_module = postgres_steps if method.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, method)
     legacy.close_all_connections()
 
-    def fail_after_ddl(self: CharactersRAGDB, conn: Any) -> None:
+    def fail_after_ddl(ctx, conn) -> None:
         """Fail only after the real registered migration has executed."""
-        migrate(self, conn)
+        migrate(ctx, conn)
         raise CharactersRAGDBError("injected startup migration failure")
 
     with monkeypatch.context() as failing:
-        failing.setattr(CharactersRAGDB, method, fail_after_ddl)
+        failing.setattr(steps_module, method, fail_after_ddl)
         with pytest.raises(CharactersRAGDBError, match="injected startup migration failure"):
             db_factory()
     with monkeypatch.context() as historical:
@@ -207,8 +209,8 @@ def test_sync_scope_only_move_preserves_origin_but_rebinding_clears_it(
 ) -> None:
     """Whole-object Sync compares actual normalized binding, not revision or scope alone."""
     db = db_factory()
-    db.upsert_workspace("origin", "Origin")
-    db.upsert_workspace("destination", "Destination")
+    db.workspace_store.upsert_workspace("origin", "Origin")
+    db.workspace_store.upsert_workspace("destination", "Destination")
     cid = db.add_conversation(
         {
             "id": "synced",
@@ -381,7 +383,7 @@ def test_generated_lifecycle_never_restores_invalidated_origin(
                 db.restore_conversation(cid, row["version"])
         elif not row["deleted"]:
             if operation == "scope":
-                db.upsert_workspace("sequence-ws", "Sequence")
+                db.workspace_store.upsert_workspace("sequence-ws", "Sequence")
                 db.upsert_conversation_from_sync(
                     conversation_id=cid,
                     title="Moved",
@@ -418,13 +420,13 @@ def test_workspace_cascade_keeps_history_on_soft_delete_and_moved_rows(
 ) -> None:
     """Workspace deletion must not erase origin on a surviving historical conversation."""
     db = db_factory()
-    workspace = db.upsert_workspace("cascade", "Cascade")
+    workspace = db.workspace_store.upsert_workspace("cascade", "Cascade")
     origin = AssistantStartup(source="workspace_default", workspace_id="cascade", workspace_version=1)
     scoped = db.add_conversation({"scope_type": "workspace", "workspace_id": "cascade"}, assistant_startup=origin)
     moved = db.add_conversation({"title": "Already moved"}, assistant_startup=origin)
-    db.delete_workspace("cascade", workspace["version"])
+    db.workspace_store.delete_workspace("cascade", workspace["version"])
     assert decode_assistant_startup(db.get_conversation_by_id(scoped, include_deleted=True)[ORIGIN_COLUMN]) == origin
-    db.hard_delete_workspace("cascade")
+    db.workspace_store.hard_delete_workspace("cascade")
     assert db.get_conversation_by_id(scoped, include_deleted=True) is None
     assert decode_assistant_startup(db.get_conversation_by_id(moved)[ORIGIN_COLUMN]) == origin
 

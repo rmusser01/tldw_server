@@ -2,8 +2,8 @@
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
 
 pytestmark = pytest.mark.unit
 
@@ -11,7 +11,7 @@ pytestmark = pytest.mark.unit
 def test_postgres_v51_migration_keeps_dollar_quoted_function_intact(tmp_path):
     db = CharactersRAGDB(db_path=str(tmp_path / "dummy.db"), client_id="test")
 
-    stmts = db._convert_sqlite_schema_to_postgres_statements(
+    stmts = postgres_schema._convert_sqlite_schema_to_postgres_statements(db.ctx,
         db._MIGRATION_SQL_V50_TO_V51_POSTGRES
     )
 

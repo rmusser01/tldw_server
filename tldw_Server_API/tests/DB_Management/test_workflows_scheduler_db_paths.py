@@ -1,6 +1,13 @@
+import sqlite3
+from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 
@@ -30,3 +37,97 @@ def test_scheduler_uses_dedicated_default_sqlite_path_when_global_database_url_i
     finally:
         _close_scheduler_backend(db)
 
+
+def test_scheduler_upgrade_preserves_legacy_rows_and_fences_managed_definitions(tmp_path) -> None:
+    path = tmp_path / "legacy-schedules.db"
+    config = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(path))
+    db = WorkflowsSchedulerDB(backend=SQLiteBackend(config))
+    try:
+        db.create_schedule(
+            id="legacy", tenant_id="tenant", user_id="42", workflow_id=None,
+            name="Legacy monitor", cron="15 9 * * *", timezone="UTC",
+            inputs={"watchlist_job_id": 9},
+        )
+        original = db.get_schedule("legacy")
+    finally:
+        _close_scheduler_backend(db)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("ALTER TABLE workflow_schedules DROP COLUMN managed_watchlist_job_id")
+        connection.commit()
+    finally:
+        connection.close()
+
+    db = WorkflowsSchedulerDB(backend=SQLiteBackend(config))
+    try:
+        assert original is not None
+        assert db.get_schedule("legacy") == original
+        assert not db.bind_managed_watchlist("legacy", user_id="41", job_id=9)
+        assert db.bind_managed_watchlist("legacy", user_id="42", job_id=9)
+        assert not db.bind_managed_watchlist("legacy", user_id="42", job_id=10)
+        assert not db.update_schedule("legacy", {"cron": "15 10 * * *"})
+        assert db.update_schedule("legacy", {"name": "Renamed monitor"})
+        row = db.get_schedule("legacy")
+        assert row and (row.cron, row.name, row.managed_watchlist_job_id) == (
+            original.cron, "Renamed monitor", 9,
+        )
+    finally:
+        _close_scheduler_backend(db)
+
+
+
+@pytest.mark.parametrize("backend_type", [BackendType.SQLITE, BackendType.POSTGRESQL])
+def test_scheduler_creates_and_updates_boolean_flags(
+    backend_type: BackendType,
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    if backend_type is BackendType.POSTGRESQL:
+        config = request.getfixturevalue("pg_database_config")
+    else:
+        config = DatabaseConfig(backend_type=backend_type, sqlite_path=str(tmp_path / "scheduler.db"))
+    db = WorkflowsSchedulerDB(backend=DatabaseBackendFactory.create_backend(config))
+    try:
+        db.create_schedule(
+            id="watchlist-monitor",
+            tenant_id="default",
+            user_id="1",
+            workflow_id=None,
+            name="Watchlist monitor",
+            cron="*/15 * * * *",
+            timezone="UTC",
+            inputs={"watchlist_job_id": 1},
+            enabled=True,
+            require_online=False,
+            coalesce=True,
+        )
+        created = db.get_schedule("watchlist-monitor")
+        assert created is not None
+        assert (created.enabled, created.require_online, created.coalesce) == (True, False, True)
+        assert db.update_schedule(
+            "watchlist-monitor", {"enabled": False, "require_online": True, "coalesce": False},
+        )
+        paused = db.get_schedule("watchlist-monitor")
+        assert paused is not None
+        assert (paused.enabled, paused.require_online, paused.coalesce) == (False, True, False)
+
+        from tldw_Server_API.app.api.v1.endpoints.acp_schedules import ACPScheduleResponse, _schedule_to_response
+
+        last_run = "2026-11-17T19:30:00+00:00"
+        next_run = "2026-11-17T19:45:00+00:00"
+        db.set_history("watchlist-monitor", last_run_at=last_run, next_run_at=next_run)
+        rows = (
+            db.get_schedule("watchlist-monitor"),
+            *db.list_schedules(tenant_id="default", user_id="1"),
+            *db.list_all_schedules(),
+        )
+        assert len(rows) == 3
+        for row in rows:
+            assert row is not None
+            response = ACPScheduleResponse.model_validate(_schedule_to_response(row))
+            assert datetime.fromisoformat(response.last_run_at) == datetime.fromisoformat(last_run)
+            assert datetime.fromisoformat(response.next_run_at) == datetime.fromisoformat(next_run)
+            assert isinstance(response.created_at, str)
+            assert isinstance(row.updated_at, str)
+    finally:
+        _close_scheduler_backend(db)

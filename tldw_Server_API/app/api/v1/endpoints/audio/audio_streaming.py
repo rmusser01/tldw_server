@@ -131,9 +131,6 @@ from tldw_Server_API.app.core.TTS.tts_request_resolution import (
     resolve_tts_request_defaults,
 )
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
-from tldw_Server_API.app.core.Usage.audio_quota import (
-    consume_daily_minutes_with_compat,
-)
 import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
 import tldw_Server_API.app.core.Audio.streaming_service as _streaming_service
 import tldw_Server_API.app.core.Chat.chat_helpers as _chat_helpers
@@ -824,11 +821,11 @@ def _persist_audio_chat_settings(
         )
         return bool(db.upsert_conversation_settings(conversation_id, final_settings))
 
-    if callable(getattr(db, "get_roleplay_resume_state", None)) and callable(
+    if callable(getattr(getattr(db, "conversation_resume_store", None), "get_roleplay_resume_state", None)) and callable(
         getattr(db, "transaction", None)
     ):
         with db.transaction() as conn:
-            resume_state = db.get_roleplay_resume_state(
+            resume_state = db.conversation_resume_store.get_roleplay_resume_state(
                 conversation_id,
                 conn=conn,
                 lock_for_update=True,
@@ -897,11 +894,7 @@ async def _consume_daily_minutes(
     *,
     operation_id: str | None = None,
 ) -> tuple[bool, float | None]:
-    return await consume_daily_minutes_with_compat(
-        user_id=user_id,
-        minutes=minutes,
-        operation_id=operation_id,
-    )
+    return await _audio_quota.consume_daily_minutes(user_id, minutes, operation_id=operation_id)
 
 
 def _bytes_to_seconds(size_bytes: int, sample_rate: int) -> float:

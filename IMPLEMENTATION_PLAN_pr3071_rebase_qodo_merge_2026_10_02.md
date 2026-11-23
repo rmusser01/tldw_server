@@ -4327,3 +4327,544 @@ chat, SQLite compatibility, canonical OpenAPI, and pre-commit.
 
 ADR assessment: no new durable rule; these are fixture corrections under
 the existing ADR-059 tracking and ADR-080 patch-target guidance.
+
+## Stage 57: Runtime Fixture and Incoming Schedule Review
+**Goal**: Resolve the reported Full Suite failures without changing either
+database upgrade path, and qualify the necessary integration with dev.
+**Success Criteria**: The four repaired fixtures keep the current and
+historical schema checks, request-owned database state, and rollback coverage.
+The Study Pack and Watchlist changes are verified with no open review findings
+before normal publication. Current hosted checks and applicable acceptance
+remain required for merge.
+**Tests**: Selected durable chat, SQLite compatibility and rollback, raw
+message API, Study Pack source and picker, Watchlist schedule removal and
+scheduler ownership.
+**Status**: In Progress
+
+- On the published 7af1ac8c, three Full Suite shards failed on four assertions:
+  two obsolete release markers, a pinned historical Sync marker, and missing
+  operation middleware in Character Chat test apps. Reproduced locally before
+  correcting the four fixtures. No migration implementation changed.
+- The private, history-preserving preview against 9c731710 has no textual
+  conflicts; its 26 incoming paths exactly match dev. A scoped chat and
+  migration run passed 182, with 10 PostgreSQL fixture skips and 24 deselected.
+  The corrected preview passed 94 focused SQLite, chat, scheduler and resolver
+  checks before the final Study Pack refinements. PostgreSQL and native
+  acceptance are not claimed.
+- Study Pack regressions passed after constraining evidence to the requested
+  locator and fixing pagination, page loss, and keyboard selection. The final
+  focused results were 21 resolver cases and 39 UI cases. The prior typecheck,
+  production build and unchanged budgets passed before those final refinements;
+  they are not final-candidate results.
+- The initial private Watchlist clear passed its finite store, manual-run and
+  UI checks, but review remains open: concurrent schedule edits, a failing
+  cross-store write, store/live removal order, and stale run history or feed
+  promotion can still invalidate a clear. Do not publish this candidate until
+  corrected and independently verified. No published ref, PR body, or GitHub
+  run was changed.
+
+ADR check: no new ADR for the fixture or Study Pack corrections. ADR-059
+governs task tracking; ADR-080 governs operation ownership. Reassess durable
+scheduler ownership and cross-store consistency before the reviewed Watchlist
+follow-up.
+
+## Stage 58: Watchlist Schedule Consistency
+**Goal**: Make schedule clear, replacement, recovery, and dispatch safe under
+concurrent edits and either store failing, without changing manual runs.
+**Success Criteria**: Ownership and revision checks cover every managed writer
+and admission path, and the pager remains reachable while results are open.
+Independent review and current-source verification must pass before publication.
+**Status**: In Progress
+
+- The private candidate commits a conditional job clear before scheduler
+  cleanup, retains the cleanup reference on scheduler errors, removes a live
+  trigger only after a durable delete, and preserves newer run history. Focused
+  real SQLite and mocked-dispatch tests cover conflict, write failure, retry,
+  re-enable, missing persisted schedule, and stale queued work. The broader
+  backend selection passed 106 before the last history refinement; the latest
+  scheduler-controls selection passed 13.
+- Review still blocks publication. A mutable schedule name cannot identify
+  managed work. The final design needs stable managed identity for existing
+  linked rows, dispatch and atomic running-row admission checks, consistent
+  conditional attachments and updates across Watchlists and Collections, and
+  recovery without discarding the old link. Explicit schedule edits must not
+  leave an old auto-promotion policy able to replace the new cron.
+- Review found the Study Pack pager hidden by open results. The adjacent
+  compact layout now has a keyboard focus regression, but the pointer test
+  still fails because the results close on a real click. Do not infer a pass
+  from synthetic click dispatch, or carry forward the earlier build as proof
+  of the modified frontend.
+
+ADR check: the local ordering and history corrections do not change durable
+storage rules. Reassess and document the managed identity and cross-store
+reconciliation design before changing the persisted contract.
+
+## Stage 59: Atomic Run Admission and Study Pack Pager
+**Goal**: Close the managed run insertion race and let pointer and keyboard
+users page the media library without dismissing its results or selecting a
+source accidentally.
+**Success Criteria**: A clear or pause/resume after the read leaves no run row;
+a current revision is admitted; manual runs retain their existing path.
+Pointer and keyboard page changes show the new results; keyboard activation
+returns to search. Do not publish while any managed scheduler finding is open.
+**Status**: In Progress
+
+- The managed run now inserts conditionally using the observed version and
+  link. SQLite uses one conditional insert; PostgreSQL locks the matching
+  owner row through insert. The isolated SQLite tests pass forced clear and
+  pause/resume races and positive admission. This does not validate the
+  PostgreSQL path, or reject an already superseded generation before the
+  worker's initial read where the payload lacks a complete revision.
+- The Study Pack pager is in the result popup footer. Pointer pagination
+  stays open, while Tab focuses the controls without adding an item and
+  Enter returns to search on the new page. All 40 focused UI tests passed,
+  using a measured jsdom anchor and disabled test-only motion for the
+  keyboard case. This is not native viewport or hit-testing evidence.
+- Explicit Watchlist cron changes, including clear and re-enable, set
+  Collections promotion to manual; the same cron leaves the existing mode.
+  Tests reproduce the previous override and exercise the production path.
+- Two retained RED regressions prove that a renamed managed cron omits the
+  guard reference when current and still queues when cleared. Stable
+  persisted ownership, legacy classification, dispatch checking, and
+  shared cross-store revisions remain open. Resolve these with the other
+  Stage 58 findings before publishing or moving the merge queue.
+- Observed dev c5eef63 ahead of the current 9c73171 preview by four commits
+  affecting ten Backlog files only. No new merge or publication.
+
+ADR check: conditional insertion and focus/promotion fixes use existing
+storage and UI contracts. Stable scheduler ownership and revision persistence
+remain a separate design assessment, not implemented here.
+
+## Stage 60: Recheck Migration and Queue Boundaries
+**Goal**: Verify both released migration paths and chat runtime on the private
+union, and reproduce stale scheduled occurrences before changing ownership.
+**Success Criteria**: Both catalog lineages preserve rows and reopen after
+rollback; the chat selection passes; pager focus remains inside the actual
+drawer with the shared popup provider; retired occurrences cannot start.
+**Status**: In Progress
+
+- The migration selection passed 26 cases: the released PR and dev catalog
+  shapes, compatibility fixtures, rollback/reopen, and four PostgreSQL
+  recording-double checks. No production migration SQL changed here; 20
+  live PostgreSQL cases were not selected. All 130 selected unit/integration
+  chat runtime cases passed with isolated storage and provider doubles.
+- The prior scoped review found that the shared WebUI portal mounted the
+  pager outside the dialog. A production-shaped ConfigProvider regression
+  failed on dialog containment, then passed with the Select mounted in its
+  local wrapper. All 40 owning Study Pack tests and frontend typecheck pass.
+  Pointer and keyboard paths remain covered in jsdom, not a real browser.
+- The predecessor isolated backend selection ended with 111 passes before
+  adding the new failing cases. The real recurring dispatcher now feeds
+  two deterministic RED tests: timezone-only edit and pause/resume after
+  enqueue but before the worker reads the job. Both still reach run creation
+  with the same ID and cron text. The two Stage 59 rename cases also remain
+  open. No worker/provider/content processing runs in those regressions.
+- Follow-up: classify managed schedules by server-owned persisted identity
+  and the owner-scoped Watchlist attachment, not their editable display
+  name. Carry a definition generation through enqueue and atomic admission.
+  Reconcile replacement and cleanup across both producers without treating
+  lookup failures as absence. Specify compatibility for already queued
+  untagged tasks before changing persisted ownership; do not guess at legacy
+  records, or change generic workflow schedules and explicit run-now.
+
+ADR check: no new durable rule in the local focus correction or tests (ADR-059
+tracking). Durable scheduler identity/revision and rollout need a separate
+ADR assessment before changing the storage contract. No publication or merge.
+
+## Stage 61: Fence Linked Schedules and Preserve Cleanup
+**Goal**: Protect a linked monitor even if its scheduler name is edited, and
+retain the retry reference when replacing a retired schedule.
+**Success Criteria**: Dispatch checks the owner link and current definition;
+new managed payloads reject stale job versions before run insertion; a
+Collections replacement cannot lose its old link on a failed cleanup;
+lookup failures do not trigger missing-link repair.
+**Status**: In Progress
+
+- The recurring dispatcher now verifies the owner-scoped Watchlist link and
+  current cron, timezone, and active state. Newly submitted linked jobs carry
+  the existing job timestamp, and the worker checks it before the conditional
+  insert. All four original rename, clear, timezone, and pause/resume
+  regressions pass. Explicit Run Now, generic scheduler routes, and the
+  historical tagged payloads retain their existing behavior.
+- Both edited endpoints use the same owner-scoped pre-replacement cleanup.
+  Collections returns 503 before changing the feed if old-cron deletion
+  fails, and uses a snapshot compare for its job update and projected
+  next-run time. The retry test proves deletion of the old row before the
+  new schedule becomes attached. Watchlist mirror updates now distinguish
+  owner-store errors from absence; the failure-and-retry test retains the
+  link and does not create a duplicate when the read fails.
+- Final local selection: 41 passed, one run-time environment skip for the
+  unavailable PostgreSQL boolean-flag case. Production Bandit on the five
+  touched files reported zero findings; no live PostgreSQL, native runtime,
+  or shared resources were exercised. The 26 migration and 130 chat checks
+  in Stage 60 predate this distinct scheduler change.
+- Remaining: server-owned provenance for already detached or newly created
+  managed schedules, rollout behavior for legacy untagged tasks, and
+  conditional cross-store writes for every registration/activation/promotion
+  path. The current job timestamp rejects an edit after dispatch, but is not
+  a persisted scheduler-generation marker for an occurrence admitted after
+  an out-of-order mirror write. Collections job CAS errors can also follow a
+  committed source update; reconcile those boundaries before publication.
+
+ADR check: no new persisted rule for this step; compare the existing job
+revision and reuse the existing owner-scoped delete/update pattern. ADR-003
+still governs scheduler ownership and ADR-059 task tracking. Reassess a
+durable scheduler-generation/provenance design independently.
+
+## Stage 62: Preserve the Winning Schedule Attachment
+**Goal**: Make every new managed attachment use the job version that requested
+it, and isolate the separate race in writes to an already attached schedule.
+**Success Criteria**: The winning link survives delayed create, restore, and
+Collections registration. Primary and fallback create at most one candidate,
+and cleanup deletes only owner-matched rows. An older definition cannot
+overwrite the scheduler's copy of a newer definition.
+**Status**: In Progress
+
+- Four real SQLite regressions failed before the fix: Watchlists create and
+  restore, Collections create and direct-store fallback all overwrote the
+  winning link. One shared registration path now uses the exact job
+  snapshot, cleans a losing candidate, and reuses a single chosen ID if
+  registering the live trigger fails after the row was persisted. Attach
+  and cleanup exceptions do not start a second creation attempt.
+- The direct fallback uses a parameterized owner predicate when deleting
+  a candidate or retired row. An isolated shared-store regression failed
+  before the owner check and now keeps the other owner's schedule intact.
+  A fixture-only update preserves the original sanitized error checks;
+  the first broader run remains failed. Final scoped run: 47 passed,
+  one unavailable PostgreSQL boolean-case skip, zero failures. Bandit
+  reported zero findings on the four Stage 62 production files.
+- A separate two-request regression pauses an older edit immediately before
+  writing to the scheduler and commits the newer edit first. The Watchlist
+  row retains the newer cron but the already-linked scheduler row receives
+  the obsolete cron. The new test is RED, not included in the prior success.
+  Next: replace mutable shared schedule definitions with owner-checked
+  generations so a late write can affect only its own candidate. Keep
+  manual/legacy behavior under an explicit rollout, recover cleanup safely,
+  and reconcile Collections source/job atomicity before publication.
+
+ADR check: current shared registration reuses owner-scoped job snapshots
+and the existing SQL schema. ADR-003 and ADR-059 still apply. A durable
+managed-generation discriminator and legacy rollout need separate
+assessment. No changes to published PR, repository settings, or live data.
+
+## Stage 63: Rotate Schedule Definitions by Job Revision
+**Goal**: Never write an older definition into the row attached by a newer
+edit, and keep detached managed work fenced after rename or failed cleanup.
+**Success Criteria**: The final queued definition matches the winning
+Watchlist job. Old generations cannot submit after detachment. Existing
+scheduler definitions reopen after a schema upgrade, independent schedules
+and explicit Run Now retain their behavior, and combined feed edits do not
+partially commit.
+**Status**: In Progress
+
+- Watchlist edits, Collections edits, and promotion now create a new
+  scheduler generation through the shared owner-checked attachment path.
+  The delayed older write cannot overwrite the newer cron. Persisted private
+  managed-job identity survives scheduler renames and detachment, and an
+  existing attached row is marked before rotating it. Managed cron,
+  timezone, enabled state, and inputs are not editable directly on the
+  scheduler row. Scheduling policy and naming settings carry forward.
+- Both targeted race regressions passed. A new SQLite upgrade test reopens
+  a prior-format table, compares retained rows, and verifies owner-bound
+  binding. The first attempt failed for a reused closed fixture pool;
+  a fresh backend fixes the fixture, not the production migration. The
+  final focused selection passed 51 cases with one unavailable PostgreSQL
+  skip. Six touched production files passed Bandit with zero findings.
+  There is no live PostgreSQL or fresh chat migration qualification here.
+- A new Collections conflict test separately fails: the endpoint returns
+  409 but the rejected feed name has already persisted. Next: put the feed
+  changes and job compare-and-set in the same content transaction using
+  one explicit backend connection. Leave external scheduler writes outside
+  that transaction.
+- Before publication: reconcile persisted candidates and retired rows
+  after interrupted cleanup, handle legacy queue payloads without guessing
+  provenance, independently review the durable change, and verify the
+  current qualified union and all applicable gates.
+
+ADR required: yes. [Proposed ADR-096](Docs/ADR/096-watchlist-schedule-generation-ownership.md)
+records the additive scheduler marker and authoritative attachment. ADR-003
+still governs the execution mechanism; ADR-059 governs task tracking. No
+shared data, published PR, merge queue settings, or native runtime changed.
+
+## Stage 64: Commit Combined Collections Edits Atomically
+**Goal**: A failed or conflicting job edit must leave the feed metadata and
+tags unchanged, with no scheduler write from the failed edit.
+**Success Criteria**: The feed source, tag links and job revision check use
+one content-store transaction; a failed write rolls back all three; a later
+successful retry commits and only then synchronizes the scheduler.
+**Status**: Complete for the local transaction repair only
+
+- The Collections endpoint now resolves the persisted linked job before
+  writing and refuses to continue on a missing or unavailable job lookup
+  during a schedule edit. The source, tags and job write share an explicit
+  backend connection. Existing owner filters and optimistic job revision
+  checks remain in force; independent source-only behavior is unchanged.
+- The original rejected-name case and the new fault after writing tags pass.
+  The latter verifies that no scheduler sync ran on failure and a subsequent
+  retry changed the source, tags and job together. The focused selection
+  passed 12 cases; broader owning selection passed 53, with one unavailable
+  PostgreSQL boolean-case skip. Scoped Bandit reported zero findings on both
+  changed production files. Live PostgreSQL and native UAT were not run.
+- A separate, later RED test confirms a failed retirement after attaching
+  a new schedule leaves the retired row behind on retry. The new link
+  remains correct. Do not infer recoverable cleanup from the 53 passes.
+  Next: persist exact owner-scoped retirement intent with the attachment
+  change; distinguish a proven retired ID from a candidate still attaching.
+  Continue the separately required legacy-payload and restart assessment.
+
+ADR assessment: this transaction uses existing content persistence and
+introduces no schema or ownership changes. Proposed ADR-096 continues to
+govern the separate scheduler lifecycle; ADR-059 governs tracking. No push,
+merge, shared data changes, or cleanup were performed.
+
+## Stage 65: Recover Proven Schedule Retirements
+**Goal**: Retry an interrupted delete or acknowledgement without replacing
+the winning schedule or guessing which pending candidate is safe to delete.
+**Success Criteria**: A winning attachment records its prior owned generation
+atomically. Retry uses that record after reopening the service. A record
+write failure rolls back the attachment.
+**Status**: In Progress
+
+- The content store now records exact owner/job/schedule retirement keys
+  in the same transaction as the attachment CAS. Retried schedule edits
+  recheck current attachment and the owned scheduler marker. Successful
+  deletion or confirmed absence clears the pending key.
+- Forced scheduler delete and acknowledgement failures recover with fresh
+  service and content-store handles. An unrelated unattached candidate is
+  preserved. A forced retirement-insert failure rolls back the link write.
+  The owning selection passed 56 cases with one unavailable PostgreSQL
+  skip; two-file production Bandit reported zero findings.
+- Separate restore regressions are RED: the deleted job snapshot restores
+  its previous scheduler ID and revision, and a reused SQLite job ID lets
+  restore overwrite the newer job. Fix delete/restore authority so
+  no previous occurrence can regain eligibility, including snapshots with
+  outdated or ambiguous scheduler linkage. Preserve confirmed retirement
+  evidence and restore the requested definition on a fresh generation.
+- Unfinished: pre-attach crash recovery, drain scheduling without a user
+  retry, legacy queued-payload treatment, isolated PostgreSQL validation,
+  independent review findings and whole-PR qualification. No mutation of
+  live resources or current GitHub state.
+- Independent review confirmed the restore race and found that a failed
+  retry scan could block a new registration. A separate regression
+  reproduced the scan failure; retry reads are now best effort, while
+  the attachment/retirement write remains atomic and mandatory. Review
+  also identified missing candidate cleanup after a known rollback,
+  retirement retry without the scheduler default store, and retry after
+  hard-deleting a feed. These remain open.
+
+ADR required: yes. Proposed ADR-096 now records durable retirement intent
+and exact acknowledgement, in addition to generation ownership.
+
+## Stage 66: Fence Reversible Job Deletion and Restore
+**Goal**: Consume each undo record once without reinstating stale scheduler
+authority or replacing another job that now occupies the saved ID.
+**Success Criteria**: Restore is insert-only under the same transaction that
+claims the undo record. It uses a fresh revision and no previous schedule ID.
+Delete checks the observed job revision and attachment before committing
+its undo and retirement records.
+**Status**: In Progress
+
+- Restore now claims the undo record atomically, inserts only into a free
+  ID, and preserves the undo record on conflict. A successful restore starts
+  a fresh job revision without the old link. Database and HTTP paths no
+  longer overwrite a newer job; the API reports conflict.
+- Reversible delete binds the prior owned scheduler row before detach and
+  records retirement with the guarded job delete. An attachment that won
+  before delete prevents the stale request from removing the job. Failed
+  cleanup leaves exact retry evidence; an old renamed schedule cannot submit
+  after its job is gone. Restarting an edit with the scheduler singleton
+  unavailable can retire an exact recorded row via the owner's store.
+- Four focused delete/restore cases passed. Broader owning selection passed
+  63 with one unavailable PostgreSQL skip, including the HTTP fidelity
+  test. Three touched production files passed Bandit with zero findings.
+- Separate Collections hard-delete RED: after an earlier rotation and two
+  cleanup failures, the source and job disappear and the final attached
+  scheduler generation is not journaled. Next: atomically preserve that
+  retirement key and provide recovery independent of the deleted feed.
+  Candidate reservation, known rollback cleanup, legacy queued tasks,
+  isolated PostgreSQL execution, hosted and native acceptance remain open.
+- Independent static review found that SQLite can reuse a deleted job ID
+  while its undo record is still valid. The replacement can then overwrite
+  that record on delete. A separate regression retains the original
+  two-delete case. Also reproduced: a history-store error after restore
+  commit skipped registration. History failure is now logged without
+  blocking registration. The stored undo record and active-row collision
+  remain distinct validation cases.
+
+ADR assessment: Proposed ADR-096 continues to govern immutable authority
+and recoverable retirement. Restore and reversible delete implement its
+existing invariant rather than changing schema. No live data, published
+branch, merge queue, or services changed.
+
+## Stage 67: Preserve Undo Identity and Hard-Delete Intent
+**Goal**: Prevent a new monitor from taking an ID that still has undo or
+retirement state. Preserve cleanup authority when a feed is removed.
+**Success Criteria**: Each existing Undo restores its own monitor, including
+after creating and deleting another monitor. Legacy occupied IDs and undo
+snapshots are not overwritten. The feed, job and verified retirement record
+commit together, and failures roll back the content changes.
+**Status**: In Progress
+
+- SQLite allocates a job ID above the live IDs, deleted-job IDs and pending
+  retirement IDs in one write. PostgreSQL retains its current sequence path.
+  Reversible deletion no longer overwrites a saved undo record. Tests cover
+  both normal allocation and a deliberately recreated historical collision.
+- Collections hard-delete now checks the observed feed and job, marks the
+  known scheduler row before detach, and commits the owner-scoped deletions
+  and retirement together. Failed job deletion leaves the feed and tags
+  unchanged and emits no activity. External scheduler removal starts only
+  after commit. Earlier pending retirements are retained.
+- Four focused cases and all 67 broader owning cases pass, with one
+  unavailable live PostgreSQL skip. Scoped Bandit found zero findings.
+  Independent static review is separate from runtime qualification.
+- New rescan RED: it can see a managed row left after feed deletion, but
+  does not yet retry that exact retirement. Implement recovery through the
+  lease-owning scheduler without sweeping unattached candidates or opening
+  new empty stores. Continue known rollback/crash, legacy queue and external
+  verification work. No publication, PR merge or live cleanup occurred.
+- Static review identified retained run history and source memberships
+  crossing a reused ID. Both failures were reproduced. Allocation also
+  reserves IDs still referenced by run history, and source hard-delete
+  removes existing watchlist memberships in the same transaction.
+- Review also identified two feed/job association bugs, with separate
+  regressions: deletion trusts a stale saved job ID instead of proving that
+  the job belongs to this feed, and it ignores a missing job that is restored
+  between lookup and deletion. Fix authority and the missing-row race
+  before publication. The legacy scheduler marker can also remain set after
+  a rejected content delete; reconcile its editability without weakening
+  the scheduler fence.
+
+ADR assessment: Proposed ADR-096 covers these durable ID and retirement
+rules. Existing schema and PostgreSQL job ID generation remain unchanged.
+
+## Stage 68: Verify Collections Feed and Job Ownership
+**Goal**: Ensure stale feed settings cannot edit or delete another job, and
+serialize removal of a feed with the associated job's Undo.
+**Success Criteria**: Verify new private links, preserve unverified legacy
+data, serialize SQLite additive upgrades, and refuse any live or restored
+job that appears during feed deletion.
+**Status**: In Progress
+
+- New Collections jobs persist their owning source ID and creation timestamp
+  on the server. The value survives Undo and is not derived from editable
+  settings, job scope, or output preferences. Legacy links are preserved but
+  cannot grant authority over a job. The source and job can be managed
+  independently through the existing Watchlists operations.
+- SQLite checks and adds the field under one write lock; PostgreSQL uses
+  additive `IF NOT EXISTS`. Hard-delete consumes only the matching Undo and
+  checks both live and undo state in one final snapshot. Existing job
+  allocation and chat migration SQL are unchanged by this stage.
+- Original five regressions failed, then independent review drove three
+  more REDs (mutable legacy impersonation, concurrent SQLite openers,
+  and a replacement undo visible in the final snapshot). Eight focused
+  cases now pass. Broader selection: 77 pass, two rescan cases fail, and
+  one live PostgreSQL fixture is unavailable. The interleaving is modeled
+  locally, not a PostgreSQL execution. Bandit: zero findings in both touched
+  production files. Earlier 130 selected chat runtime cases remain verified.
+- Both rescan failures are retained: a deleted feed's managed schedule is
+  still present, and a separately removed schedule's exact journal entry
+  is not acknowledged. Next, drain only verified retirement entries using
+  existing owner storage under the rescan lease, without creating empty
+  stores or inferring ownership from unattached scheduler rows.
+- Independent follow-up found no actionable P1/P2 in the three reviewed
+  corrections; it did not run tests or certify PostgreSQL. The published
+  Full Suite has three additional package-install failures before pytest
+  (vector-stores unit/API and paper-search), on top of the earlier three
+  test-shard failures. The parent run is still active; no retry was made.
+
+ADR assessment: Proposed ADR-096 documents the durable source binding and
+the policy for unverified legacy data. No protected stores, GitHub source,
+PR merge state, or native acceptance were changed.
+
+## Stage 69: Recover Recorded Schedule Retirements
+**Goal**: Drain a verified retirement even after the feed and job are gone.
+**Success Criteria**: The lease holder deletes only the recorded owner/job
+generation or acknowledges known absence. Existing databases are opened
+without schema repair or provisioning. Missing databases leave receipts
+pending. Legacy content schema does not require the new source-binding column.
+**Status**: Complete for the isolated, locally verified scope
+
+- Rescan checks its lease, then drains the exact owner journal before APS
+  reconciliation. The deletion predicate checks the managed marker and owner
+  in the scheduler store. The content check reads only the current job link.
+  Existing-only SQLite uses `mode=rw`; shared discovery is followed by scoped
+  owner operations. No unfenced candidate is discovered from scheduler rows.
+- Final run: 84 passes, one unavailable live PostgreSQL fixture skip, and no
+  failures. Mixed-store cases use doubles; both older-schema cases turned
+  green. Bandit on four production files found zero findings. Requested
+  independent review did not execute; parent review and local tests are not
+  independent or PostgreSQL qualification.
+- The published Full Suite finished with six previously inspected failures,
+  a new Watchlists import-guard failure and the dependent aggregate failure.
+  The guard reproduced locally and the exact current dev test blob passes
+  all 47 architecture tests without changing the endpoint or expected names.
+  No rerun or publication.
+
+ADR assessment: Existing proposed schedule-ownership ADR governs exact
+retirement; no new policy is needed for this retry. Incoming dev now owns
+number 096 for CI tiers; reserve a different number for our proposed ADR
+when integrating, without editing the incoming ADR.
+
+## Stage 70: Integrate the Current Dev Migration Extraction
+**Goal**: Preserve both chat catalog upgrade paths and dev's extracted
+ChaCha modules on a fully reviewed, current dev integration.
+**Success Criteria**: Preserve the extracted dispatcher and both historical
+catalog paths; register the PR's SQLite 85-to-86 and PostgreSQL 91-to-92
+steps in the new registries, check fresh/upgrade/reopen and runtime role
+verification, resolve the remaining conflicts, and rerun owning tests.
+**Status**: Complete for local integration and the selected tests
+
+- Read-only preview from published `7af1ac8c` to dev `2aa1f81c`: 1,105 files
+  since our private integration base and 11 conflicts. Actual conflict tree
+  `324b3eea013bd2fc4e01af4ec1634a03eabd6476` is not a usable integration.
+  The source lookup identified the dev SQLite and PostgreSQL migration
+  registries and the shared PostgreSQL bootstrap/current-schema verifier.
+  Preserve both PostgreSQL loops, version verification, and the role check
+  at 92; do not restore the old in-class schema bodies. Review the chat
+  message store, notes provenance, Clear Chat and docs conflicts separately.
+  Inspect the revised CI tier policy before qualification. Existing hosted
+  and native acceptance requirements are not waived by that policy change.
+- A fresh isolated integration keeps the published head as its first parent
+  and the verified current `dev` as its pending merge parent. It preserves
+  the previous private union; all eleven conflicts are resolved. The
+  version registries retain both older native startup/order repairs and the
+  final catalog reconciliations. Fresh and existing SQLite cases, version
+  transitions, rollback/reopen, rows without synthetic history, and finite
+  PostgreSQL dispatch/role checks pass. The four SQL strings are byte-identical
+  to the prior catalog DDL and dev's historical fixture SQL.
+- Notes search retains both account assertions and dev's snippet response
+  model; 31 Notes tests passed. Clear Chat retains both workspace checkpoint
+  rotation and note-pin cleanup, and the canonical/published docs retain both
+  Chat Workspace and Avatar Settings. The OpenAPI fingerprint and types were
+  regenerated and checked; the path union was byte-identical.
+- Final migration and structural selection: 71 passed. The first 130-case
+  runtime run failed twice because dev moved the request-size limit to a
+  call-time config reader. The same 413/no-provider/no-write assertions then
+  passed in the full 130-case rerun. After the final SQL refactor, nine
+  focused runtime cases and 33 raw-message/recovery cases passed. The
+  selected UI tests passed 172 cases; frontend typecheck passed. Scheduler
+  and architecture selection: 133 passed, one unavailable PostgreSQL skip.
+  Bandit: zero findings in the nine scoped production files.
+- The renumbered [proposed ADR-097](Docs/ADR/097-watchlist-schedule-generation-ownership.md)
+  leaves incoming ADR-096 unchanged. This migration port preserves existing
+  persistence behavior, so it does not require a new migration ADR.
+  Live PostgreSQL and broader hosted/native qualification remain outstanding.
+  No commit, push, queue change, PR merge, or cleanup.
+
+## Stage 71: Verify Both Upgrade Lineages on Isolated PostgreSQL
+**Goal**: Prove the reconciled registries against the official disposable
+PostgreSQL fixture before publishing the integration.
+**Success Criteria**: Real PostgreSQL passes both upgrade lineages, rollback
+and reopen, fresh bootstrap, and restricted-role verification; no shared
+database is contacted. Publish normally, then inspect the successor checks.
+**Status**: In Progress
+
+- PostgreSQL 18, official unmodified fixtures: 19 passed with no failures or
+  skips (eight catalog reconciliation, ten startup-order compatibility, one
+  Notes receipt upgrade and RLS). The assertions exercised 19 distinct
+  fixture databases. The wrapper verified ownership and removed only its
+  disposable container and volume. The initial credential-selection setup
+  error created no fixture databases; it is not part of the passing run.
+- The repository's shard coverage guard found no unassigned new tests.
+  Duplicate task IDs and the legacy-body and HTTP-client guards passed.
+  Hosted and native acceptance are not established by these local checks.

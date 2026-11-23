@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import runtime as runtime_module
+from tldw_Server_API.app.core.DB_Management.chacha import schema_sql
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
     ChaChaOperationMiddleware,
     current_connection_state,
@@ -46,7 +47,7 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
     import psycopg
     from psycopg.rows import dict_row
 
-    monkeypatch.setattr(CharactersRAGDB, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
+    monkeypatch.setattr(schema_sql, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     # A real cache rebuild must resolve the same official PostgreSQL database.
     from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as chacha_module
@@ -58,7 +59,7 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
     db.add_character_card({"name": deps.DEFAULT_CHARACTER_NAME, "description": "Existing fixture"})
     populated = getattr(request, "param", False)
     if populated:
-        db.create_source_review_plan(
+        db.workspace_store.create_source_review_plan(
             title="HTTP due plan",
             starts_on="2020-01-01",
             timezone_name="UTC",
@@ -419,7 +420,7 @@ def test_http_failure_handoff_and_child_work_release_their_owned_reads(pg_http, 
     @f.app.get("/probe/read")
     async def read(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
         def perform_read():
-            rows, total = db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
+            rows, total = db.workspace_store.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
             assert rows == [] and total == 0
 
         if mode == "sync-handoff":
@@ -677,13 +678,13 @@ def test_detached_task_must_not_reuse_finished_http_owner(pg_http, independent_c
 
     @f.app.get("/probe/detached")
     async def detach(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
-        db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
+        db.workspace_store.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
 
         async def child():
             await release.wait()
             if independent_child:
                 with chacha_operation(independent=True):
-                    db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
+                    db.workspace_store.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
             else:
                 with pytest.raises(ClosedChaChaOperationError):
                     db.get_note_by_id(f.note)
@@ -756,7 +757,7 @@ def test_http_owner_lives_through_stream_and_background_work(pg_http, failure):
         def read(phase):
             raw = db._get_thread_connection()
             raw_connections.append(raw)
-            db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
+            db.workspace_store.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
             assert raw.info.transaction_status.name == "INTRANS"
             phases.append(phase)
 
@@ -849,7 +850,7 @@ def test_request_can_finalize_repeatedly_without_reusing_closed_owner(pg_http):
     @f.app.get("/probe/finish")
     async def finish(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
         with chacha_operation() as owner:
-            db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
+            db.workspace_store.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
             owner.close()
             owner.close()
             _assert_finished(f, "/probe/finish")

@@ -220,7 +220,7 @@ def test_context_requires_actual_owned_transaction(native_fork_db):
 async def test_workspace_context_denies_after_actual_closure_without_mutation(native_fork_db, tmp_path, monkeypatch):
     db = native_fork_db
     _, cid, _, _ = await reference_case(db, tmp_path, monkeypatch)
-    db.upsert_workspace("workspace", "Owned workspace")
+    db.workspace_store.upsert_workspace("workspace", "Owned workspace")
     authorized = SimpleNamespace(
         client_id="1",
         owner_key=owner().owner_key,
@@ -236,8 +236,8 @@ async def test_workspace_context_denies_after_actual_closure_without_mutation(na
         db, "soft_delete_conversation", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("held cascade"))
     )
     with pytest.raises(Exception, match="workspace_delete_incomplete"):
-        db.delete_workspace("workspace", expected_version=1)
-    assert db.get_workspace("workspace")["native_chat_admission_closed"]
+        db.workspace_store.delete_workspace("workspace", expected_version=1)
+    assert db.workspace_store.get_workspace("workspace")["native_chat_admission_closed"]
     before = [dict(row) for row in db.execute_query("SELECT * FROM native_chat_asset_references").fetchall()]
     with pytest.raises(ValueError, match="workspace_native_unavailable"):
         read(db, cid, authorized=authorized)

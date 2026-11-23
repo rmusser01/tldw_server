@@ -1,0 +1,38 @@
+name: Wake merge queue after server CI
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  wake:
+    if: >-
+      (vars.MERGE_QUEUE == 'on' || vars.MERGE_QUEUE == 'dry') &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.conclusion == 'failure' ||
+       github.event.workflow_run.conclusion == 'cancelled' ||
+       github.event.workflow_run.conclusion == 'timed_out' ||
+       github.event.workflow_run.conclusion == 'startup_failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - name: Wake the queue when the verdict is required
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          bound=$(gh api --paginate "repos/$GH_REPO/rules/branches/dev?per_page=100" \
+            --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[] | select(.context == "Server CI verdict") | .context')
+          if [[ -n "$bound" ]]; then
+            gh api --method POST "repos/$GH_REPO/actions/workflows/security-required.yml/dispatches" \
+              --raw-field ref=dev --raw-field 'inputs[queue_kick]=true' --raw-field "inputs[wait_run]=$RUN_ID"
+          fi

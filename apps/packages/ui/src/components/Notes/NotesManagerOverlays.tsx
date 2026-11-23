@@ -636,6 +636,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
               <div><strong>Enter</strong>: {t("option:notesSearch.shortcutListOpenDescription", { defaultValue: "Open the focused note." })}</div>
               <div><strong>X or Space</strong>: {t("option:notesSearch.shortcutListSelectDescription", { defaultValue: "Select or clear the focused note." })}</div>
               <div><strong>P</strong>: {t("option:notesSearch.shortcutListPinDescription", { defaultValue: "Pin or unpin the focused note." })}</div>
+              <div><strong>C</strong>: {t("option:notesSearch.shortcutListOpenChatDescription", { defaultValue: "Open the chat the focused note came from." })}</div>
               <div><strong>Alt + ↑ / ↓</strong>: {t("option:notesSearch.shortcutListAdjacentDescription", { defaultValue: "Open the previous or next note." })}</div>
               <div><strong>Esc (in the editor)</strong>: {t("option:notesSearch.shortcutListReturnDescription", { defaultValue: "Return to the notes list." })}</div>
             </div>

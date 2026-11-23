@@ -172,7 +172,7 @@ def test_character_id_aliases_replay_as_the_same_request(client: TestClient, db:
 
 
 def test_workspace_chat_with_client_id_replays(client: TestClient, db: CharactersRAGDB) -> None:
-    db.upsert_workspace("ws", "Workspace")
+    db.workspace_store.upsert_workspace("ws", "Workspace")
     body = {"scope_type": "workspace", "workspace_id": "ws", "assistant_kind": None, "title": "Workspace chat"}
     first = _create(client, body)
     second = _create(client, body)

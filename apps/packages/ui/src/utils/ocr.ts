@@ -7,11 +7,11 @@ export async function processImageForOCR(imageData: string): Promise<string> {
     try {
         const enabled = await isOcrEnabled()
         if (!enabled) {
-            console.warn("[tldw Assistant] OCR assets are disabled. Enable OCR in Settings to use this feature.")
+            console.warn("[tldw] OCR assets are disabled. Enable OCR in Settings to use this feature.")
             return ""
         }
 
-        const lang = await getOCRLanguageToUse() 
+        const lang = await getOCRLanguageToUse()
         const isOCROffline = isOfflineOCR(lang)
 
         const workerPath = `${OCR_CDN_BASE}/worker.min.js`

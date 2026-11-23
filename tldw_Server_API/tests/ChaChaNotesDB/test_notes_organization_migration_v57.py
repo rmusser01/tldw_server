@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import re
 from pathlib import Path
 
@@ -12,10 +11,13 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     QueryResult,
 )
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     SchemaError,
 )
+from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
 
 _V57_LOCKED_TABLES = (
     "chacha_keywords",
@@ -131,7 +133,7 @@ def test_sqlite_v56_to_v57_is_a_non_destructive_version_step(
 
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             for prior in range(4, 56):
                 db._run_sqlite_linear_migration_step(conn, from_version=prior, target_version=56, initial_version=4)
             assert db._get_db_version(conn) == 56
@@ -155,7 +157,7 @@ def test_sqlite_v56_to_v57_is_a_non_destructive_version_step(
                 ("11111111-1111-4111-8111-111111111111",),
             ).fetchone()["id"]
             before = dict(conn.execute("SELECT * FROM keywords WHERE id = ?", (keyword_id,)).fetchone())
-            initial._migrate_from_v56_to_v57(conn)
+            sqlite_steps._migrate_from_v56_to_v57(initial.ctx, conn)
             assert initial._get_db_version(conn) == 57
             assert dict(conn.execute("SELECT * FROM keywords WHERE id = ?", (keyword_id,)).fetchone()) == before
     finally:
@@ -183,8 +185,8 @@ def test_postgres_v56_to_v57_relaxes_only_global_organization_uniqueness() -> No
     backend = _MigrationBackend()
     db = _postgres_db(backend)
 
-    assert hasattr(db, "_migrate_from_v56_to_v57_postgres")
-    db._migrate_from_v56_to_v57_postgres(object())
+    assert callable(postgres_steps._migrate_from_v56_to_v57_postgres)
+    postgres_steps._migrate_from_v56_to_v57_postgres(db.ctx, object())
 
     sql = "\n".join(statement for statement, _ in backend.calls)
     assert backend.calls[0][0].startswith("LOCK TABLE")
@@ -232,7 +234,7 @@ def test_postgres_v56_to_v57_temporarily_unforces_verified_rls_tables() -> None:
     backend = _MigrationBackend(forced_rls_tables=forced_tables)
     db = _postgres_db(backend)
 
-    db._migrate_from_v56_to_v57_postgres(object())
+    postgres_steps._migrate_from_v56_to_v57_postgres(db.ctx, object())
 
     statements = [statement for statement, _ in backend.calls]
     catalog_index = next(
@@ -279,7 +281,7 @@ def test_postgres_v56_to_v57_rejects_unverified_schema_owner_before_scans() -> N
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="schema-owner migration path"):
-        db._migrate_from_v56_to_v57_postgres(object())
+        postgres_steps._migrate_from_v56_to_v57_postgres(db.ctx, object())
 
     sql = "\n".join(statement for statement, _ in backend.calls)
     assert "NO FORCE ROW LEVEL SECURITY" not in sql
@@ -292,25 +294,19 @@ def test_postgres_v55_to_v57_installs_full_rls_after_both_migrations(
 ) -> None:
     backend = _MigrationBackend()
     db = _postgres_db(backend)
-    import tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB as chacha_module
 
     monkeypatch.setattr(
-        chacha_module,
+        postgres_schema,
         "build_chacha_rls_sql",
         lambda: ["SELECT 'full chacha rls policy set'"],
-        raising=False,
     )
 
-    db._ensure_chacha_rls_postgres(object())
+    postgres_schema._ensure_chacha_rls_postgres(db.ctx, object())
 
     assert backend.calls == [("SELECT 'full chacha rls policy set'", None)]
-    initializer_source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
-    assert initializer_source.index("self._migrate_from_v55_to_v56_postgres(conn)") < (
-        initializer_source.index("self._migrate_from_v56_to_v57_postgres(conn)")
-    )
-    assert initializer_source.index("self._migrate_from_v56_to_v57_postgres(conn)") < (
-        initializer_source.index("self._ensure_chacha_rls_postgres(conn)")
-    )
+    order = ladder.names(ladder.ladder_calls(ladder.postgres_init_function()))
+    assert order.index("_migrate_from_v55_to_v56_postgres") < order.index("_migrate_from_v56_to_v57_postgres")
+    assert order.index("_migrate_from_v56_to_v57_postgres") < order.index("_ensure_chacha_rls_postgres")
 
 
 @pytest.mark.parametrize(
@@ -331,9 +327,9 @@ def test_postgres_v56_to_v57_rejects_unattributable_owner_before_schema_changes(
     )
     db = _postgres_db(backend)
 
-    assert hasattr(db, "_migrate_from_v56_to_v57_postgres")
+    assert callable(postgres_steps._migrate_from_v56_to_v57_postgres)
     with pytest.raises(SchemaError, match="authenticated owner"):
-        db._migrate_from_v56_to_v57_postgres(object())
+        postgres_steps._migrate_from_v56_to_v57_postgres(db.ctx, object())
 
     sql = "\n".join(statement for statement, _ in backend.calls)
     assert "DROP CONSTRAINT" not in sql
@@ -358,9 +354,9 @@ def test_postgres_v56_to_v57_rejects_same_owner_collision_before_schema_changes(
     backend = _MigrationBackend(collision_marker=collision_marker)
     db = _postgres_db(backend)
 
-    assert hasattr(db, "_migrate_from_v56_to_v57_postgres")
+    assert callable(postgres_steps._migrate_from_v56_to_v57_postgres)
     with pytest.raises(SchemaError, match="owner-scoped uniqueness"):
-        db._migrate_from_v56_to_v57_postgres(object())
+        postgres_steps._migrate_from_v56_to_v57_postgres(db.ctx, object())
 
     sql = "\n".join(statement for statement, _ in backend.calls)
     assert "DROP CONSTRAINT" not in sql
@@ -388,7 +384,7 @@ def test_postgres_v56_to_v57_rejects_cross_owner_relations_before_schema_changes
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="cross-owner"):
-        db._migrate_from_v56_to_v57_postgres(object())
+        postgres_steps._migrate_from_v56_to_v57_postgres(db.ctx, object())
 
     sql = "\n".join(statement for statement, _ in backend.calls)
     assert backend.calls[0][0].startswith("LOCK TABLE")
@@ -402,7 +398,7 @@ def test_postgres_folder_startup_dedupe_and_index_are_owner_scoped() -> None:
     backend = _MigrationBackend()
     db = _postgres_db(backend)
 
-    db._ensure_note_folder_schema_postgres(object())
+    postgres_schema._ensure_note_folder_schema_postgres(db.ctx, object())
 
     sql = "\n".join(statement for statement, _ in backend.calls)
     assert "PARTITION BY client_id, LOWER(path)" in sql
@@ -416,9 +412,9 @@ def test_postgres_v57_migration_ddl_is_idempotent() -> None:
     backend = _MigrationBackend()
     db = _postgres_db(backend)
 
-    assert hasattr(db, "_migrate_from_v56_to_v57_postgres")
-    db._migrate_from_v56_to_v57_postgres(object())
-    db._migrate_from_v56_to_v57_postgres(object())
+    assert callable(postgres_steps._migrate_from_v56_to_v57_postgres)
+    postgres_steps._migrate_from_v56_to_v57_postgres(db.ctx, object())
+    postgres_steps._migrate_from_v56_to_v57_postgres(db.ctx, object())
 
     ddl = [statement for statement, _ in backend.calls if statement.startswith(("DROP INDEX", "CREATE UNIQUE INDEX"))]
     assert ddl

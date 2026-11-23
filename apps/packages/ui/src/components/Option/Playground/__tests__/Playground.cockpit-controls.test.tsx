@@ -517,9 +517,32 @@ vi.mock("@plasmohq/storage/hook", () => ({
   },
 }));
 
+const mediaState = vi.hoisted(() => ({ mobile: false }));
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => false,
-  useDesktop: () => true,
+  useMobile: () => mediaState.mobile,
+  useDesktop: () => !mediaState.mobile,
+}));
+
+// The phone focus bar's New chat and title read the app's shared chat state;
+// the bar's own wiring is what these tests check (CO-01).
+const focusBarState = vi.hoisted(() => ({
+  title: "",
+  startSavedChat: vi.fn(() => true),
+}));
+vi.mock("@/hooks/useActiveChatTitle", () => ({
+  useActiveChatTitle: () => ({ title: focusBarState.title }),
+}));
+vi.mock("@/hooks/chat/useStartSavedChat", () => ({
+  useStartSavedChat: () => focusBarState.startSavedChat,
+}));
+// The real chat list is the shell's; the focus bar only has to open it and
+// close it when a chat is picked.
+vi.mock("@/components/Common/ChatSidebar", () => ({
+  ChatSidebar: ({ onConversationSelected }: { onConversationSelected?: () => void }) => (
+    <div data-testid="focus-chat-list-stub">
+      <button type="button" onClick={() => onConversationSelected?.()}>Pick a chat</button>
+    </div>
+  ),
 }));
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
@@ -586,6 +609,9 @@ describe("Playground cockpit controls", () => {
     storageState.values.set("playgroundChatContextRailVisible", true);
     storageState.values.set("playgroundChatRuntimeRailVisible", true);
     layoutShellOverrideState.overrides = [];
+    mediaState.mobile = false;
+    focusBarState.title = "";
+    focusBarState.startSavedChat.mockClear();
     modelSettingsState.value.systemPrompt = "";
     modelSettingsState.value.setSystemPrompt = vi.fn();
     modelSettingsState.value.temperature = 0.7;
@@ -824,7 +850,7 @@ describe("Playground cockpit controls", () => {
       expect(
         within(contextRail).getByText("1 knowledge item"),
       ).toBeInTheDocument();
-      expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
+      expect(within(contextRail).getByText("2 media items")).toBeInTheDocument();
       expect(
         screen.queryByRole("status", { name: "Chat status" }),
       ).not.toBeInTheDocument();
@@ -861,7 +887,7 @@ describe("Playground cockpit controls", () => {
       );
       fireEvent.click(
         within(contextRail).getByRole("button", {
-          name: "Clear media scopes",
+          name: "Clear media items",
         }),
       );
       expect(messageOptionState.value.setContextFiles).toHaveBeenCalledWith([]);
@@ -869,16 +895,19 @@ describe("Playground cockpit controls", () => {
         null,
       );
       expect(messageOptionState.value.setRagMediaIds).toHaveBeenCalledWith(null);
-      const webSearchControl = within(contextRail).getByRole("button", {
-        name: "Web search",
-      });
-      expect(webSearchControl).toHaveAttribute("aria-pressed", "true");
-      fireEvent.click(webSearchControl);
+      // Web search is toggled in the Tools tray (CC-08); the rail lists it as
+      // a source while it is on, with a way to turn it off.
+      expect(
+        within(contextRail).queryByRole("button", { name: "Web search" }),
+      ).toBeNull();
+      fireEvent.click(
+        within(contextRail).getByRole("button", { name: "Disable web search" }),
+      );
       expect(toggleWebSearch).toHaveBeenCalledTimes(1);
 
       fireEvent.click(
         within(contextRail).getByRole("button", {
-          name: /open search & context/i,
+          name: "Add sources from Search & Context",
         }),
       );
       expect(openKnowledgePanel).toHaveBeenCalledTimes(1);
@@ -1023,7 +1052,10 @@ describe("Playground cockpit controls", () => {
     const contextRail = within(
       await screen.findByTestId("playground-cockpit-left-rail"),
     ).getByTestId("playground-context-rail");
-    expect(within(contextRail).getByText("Web search on")).toBeInTheDocument();
+    expect(within(contextRail).getByText("Web search")).toBeInTheDocument();
+    expect(
+      within(contextRail).getByRole("button", { name: "Disable web search" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("status", { name: "Chat status" }),
     ).not.toBeInTheDocument();
@@ -1550,6 +1582,92 @@ describe("Playground cockpit controls", () => {
     expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled()
     expect(messageOptionState.value.setHistoryId).not.toHaveBeenCalled()
   })
+
+  // CO-01: phones open /chat in Focus, which hides the header and sidebar.
+  // A slim bar keeps the chat list, the title, New chat and Exit focus.
+  it("gives phone Focus a top bar with the chat list, title, New chat and Exit focus (CO-01)", async () => {
+    mediaState.mobile = true;
+    messageOptionState.value.temporaryChat = false;
+    focusBarState.title = "Trip plans";
+    renderPlayground();
+    // Focus stays the phone default.
+    expect(await screen.findByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
+    const bar = screen.getByTestId("playground-focus-bar");
+    expect(within(bar).getByRole("heading", { name: "Trip plans" })).toBeInTheDocument();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "New saved chat" }));
+    expect(focusBarState.startSavedChat).toHaveBeenCalledTimes(1);
+
+    // CO-N1: Exit focus sits in the bar, not floating over the messages.
+    const exitFocus = within(bar).getByRole("button", { name: "Exit focus" });
+    expect(exitFocus).toHaveAttribute("data-testid", "playground-chat-layout-mode-trigger");
+    expect(screen.getAllByTestId("playground-chat-layout-mode-trigger")).toHaveLength(1);
+    expect(exitFocus.className).not.toMatch(/\bfixed\b/);
+    // Like the other layout triggers, it reports Focus as pressed; the
+    // character-chat journey reads aria-pressed to decide whether to exit.
+    expect(exitFocus).toHaveAttribute("aria-pressed", "true");
+  });
+
+  // CO-01 review: ☰ opens the chat list over Focus without leaving it, so
+  // picking a chat (or closing the list) keeps the phone in Focus.
+  it("opens the chat list from the phone Focus bar without leaving Focus (CO-01)", async () => {
+    mediaState.mobile = true;
+    messageOptionState.value.temporaryChat = false;
+    const shellOpen = vi.fn();
+    window.addEventListener("tldw:open-chat-sidebar", shellOpen);
+    try {
+      renderPlayground();
+      const bar = await screen.findByTestId("playground-focus-bar");
+      const menu = within(bar).getByRole("button", { name: "Open chat list" });
+      expect(menu).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(menu);
+
+      const list = await screen.findByTestId("focus-chat-list-stub");
+      expect(menu).toHaveAttribute("aria-expanded", "true");
+      expect(shellOpen).not.toHaveBeenCalled();
+      expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
+      expect(storageState.values.has("playgroundChatLayoutMode")).toBe(false);
+
+      fireEvent.click(within(list).getByRole("button", { name: "Pick a chat" }));
+      await waitFor(() => expect(menu).toHaveAttribute("aria-expanded", "false"));
+      expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
+      expect(storageState.values.has("playgroundChatLayoutMode")).toBe(false);
+      expect(layoutShellOverrideState.overrides.at(-1)).toEqual({ hideHeader: true, hideSidebar: true });
+    } finally {
+      window.removeEventListener("tldw:open-chat-sidebar", shellOpen);
+    }
+  });
+
+  it.each([
+    [false, "New Chat"],
+    [true, "Temporary chat (on this device)"],
+  ])("names an untitled chat in the phone Focus bar (temporary: %s) (CO-01)", async (temporary, name) => {
+    mediaState.mobile = true;
+    messageOptionState.value.temporaryChat = temporary;
+    renderPlayground();
+    const bar = await screen.findByTestId("playground-focus-bar");
+    expect(within(bar).getByRole("heading", { name })).toBeInTheDocument();
+  });
+
+  // CO-N1: where the floating pill stays (wider screens), the transcript
+  // starts below it instead of under it.
+  it("keeps the Exit focus pill on wide screens and pads the transcript below it (CO-N1)", async () => {
+    storageState.values.set("playgroundChatLayoutMode", "focus");
+    renderPlayground();
+    expect(await screen.findByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
+    expect(screen.queryByTestId("playground-focus-bar")).toBeNull();
+    expect(screen.getByTestId("playground-chat-layout-mode-trigger").className).toMatch(/\bfixed\b/);
+    const scroller = screen.getByTestId("playground-chat").closest(".overflow-y-auto") as HTMLElement;
+    expect(scroller.className).toMatch(/\bpt-14\b/);
+    expect(scroller.className).toMatch(/\bscroll-pt-14\b/);
+
+    fireEvent.click(screen.getByTestId("playground-chat-layout-mode-trigger"));
+    await waitFor(() =>
+      expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "cockpit")
+    );
+    const cockpitScroller = screen.getByTestId("playground-chat").closest(".overflow-y-auto") as HTMLElement;
+    expect(cockpitScroller.className).not.toMatch(/\bpt-14\b/);
+  });
 
   it("does not render cockpit control rails in focus mode", async () => {
     storageState.values.set("playgroundChatLayoutMode", "focus");

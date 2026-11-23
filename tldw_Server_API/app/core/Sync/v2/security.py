@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any
 
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
+
 from .models import SyncEnvelope, SyncKeyRecord
 
 _REDACTED = "<redacted>"
@@ -128,7 +130,7 @@ def server_trusted_encryption_status_from_env() -> SyncV2ServerTrustedEncryption
     return server_trusted_encryption_status_from_config(
         mode=os.getenv("SYNC_V2_AT_REST_ENCRYPTION_MODE"),
         server_trusted_enabled=os.getenv("SYNC_V2_SERVER_TRUSTED_ENABLED"),
-        auth_mode=os.getenv("AUTH_MODE"),
+        auth_mode=load_auth_config().mode,
     )
 
 

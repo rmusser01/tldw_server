@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.AuthNZ.sqlite_profile_version_schema import (
     rebuild_sqlite_users_with_profile_version,
     validate_sqlite_profile_version_readiness,
 )
+from tldw_Server_API.app.core.config_sections.redis import redis_url_env
 from tldw_Server_API.app.core.DB_Management.authnz_session_schema import (
     create_sqlite_sessions_table,
     ensure_sqlite_session_last_activity,
@@ -6580,7 +6581,19 @@ def get_authnz_migrations() -> list[Migration]:
             "Persist external MCP discovery outcomes",
             migration_106_add_mcp_external_discovery_state,
         ),
+        Migration(107, "Add llm_provider_overrides.denied_models", migration_107_add_override_denied_models),
     ]
+
+
+def migration_107_add_override_denied_models(conn: sqlite3.Connection) -> None:
+    """Add ``llm_provider_overrides.denied_models``: models the admin refuses on every key (TASK-15582)."""
+    if not _sqlite_table_exists(conn, "llm_provider_overrides"):
+        logger.info("Migration 107: llm_provider_overrides table not present; skipping")
+        return
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(llm_provider_overrides)").fetchall()}
+    if "denied_models" not in columns:
+        conn.execute("ALTER TABLE llm_provider_overrides ADD COLUMN denied_models TEXT")
+    logger.info("Migration 107: Added llm_provider_overrides.denied_models")
 
 
 def migration_106_add_mcp_external_discovery_state(conn: sqlite3.Connection) -> None:
@@ -6845,9 +6858,8 @@ def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:
         db_path: Path to the database file
         target_version: Target migration version (None = latest)
     """
-    import os as _os
 
-    redis_url = _os.getenv("REDIS_URL")
+    redis_url = redis_url_env()
     lock_dir = str(Path(db_path).parent) if db_path else None
 
     with acquire_migration_lock(

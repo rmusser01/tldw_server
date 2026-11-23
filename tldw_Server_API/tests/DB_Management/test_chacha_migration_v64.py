@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import schema_sql
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, SchemaError
 
 pytestmark = pytest.mark.unit
@@ -484,7 +485,7 @@ def test_sqlite_v64_failure_rolls_back_partial_ddl_and_preserves_v63(
 
     try:
         monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 64)
-        monkeypatch.setattr(CharactersRAGDB, "_MIGRATION_SQL_V63_TO_V64", injected_sql)
+        monkeypatch.setattr(schema_sql, "_MIGRATION_SQL_V63_TO_V64", injected_sql)
 
         with pytest.raises(SchemaError, match="Notes graph suggestion v64 SQLite migration failed"):
             db._initialize_schema_sqlite()

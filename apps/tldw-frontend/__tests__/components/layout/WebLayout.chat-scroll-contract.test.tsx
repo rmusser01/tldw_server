@@ -622,6 +622,19 @@ describe('WebLayout /chat scroll contract', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull());
   });
 
+  // XP-11 (#3101): off /chat the drawer holds the app menu, not the chat
+  // list, so it is not announced as "Chats".
+  it('names the mobile sidebar frame Menu off the chat route', async () => {
+    capabilityProbe.actualDrawer = true;
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = true;
+    routerState.location.pathname = '/notes';
+    render(<OptionLayout><div>Notes content</div></OptionLayout>);
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar')));
+    expect(await screen.findByRole('dialog', { name: 'Menu' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull();
+  });
+
   it('demand-mounts the helper in a cold real mobile Drawer without opening the sidebar', async () => {
     capabilityProbe.actualDrawer = true;
     featureFlagState.showChatSidebar = true;

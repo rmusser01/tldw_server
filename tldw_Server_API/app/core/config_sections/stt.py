@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from collections.abc import Mapping
 
+from .precedence import resolve
 from .types import ConfigParserLike
 
 _TRUE_VALUES = {"1", "true", "yes", "y", "on"}
@@ -31,18 +32,8 @@ def _get_raw(
     options: tuple[str, ...],
     default: str,
 ) -> str:
-    for env_key in env_keys:
-        env_value = env_map.get(env_key)
-        if env_value is not None and str(env_value).strip() != "":
-            return str(env_value)
-
-    if config_parser is not None:
-        for section in ("STT_Settings", "STT-Settings"):
-            for option in options:
-                raw = config_parser.get(section, option, fallback=None)
-                if raw is not None and str(raw).strip() != "":
-                    return str(raw)
-    return default
+    locations = [(section, option) for section in ("STT_Settings", "STT-Settings") for option in options]
+    return str(resolve(env_keys, locations, config_parser=config_parser, env=env_map, default=default).value)
 
 
 def _parse_bool(raw: object, default: bool) -> bool:

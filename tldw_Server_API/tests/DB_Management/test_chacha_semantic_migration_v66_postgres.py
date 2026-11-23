@@ -17,6 +17,8 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
@@ -60,8 +62,10 @@ def _fake_postgres_initializer(
     for name in vars(CharactersRAGDB):
         if name.startswith("_ensure_"):
             monkeypatch.setattr(db, name, lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: False)
-    monkeypatch.setattr(db, "_repair_conversation_assistant_identity", lambda _conn: None)
+    is_current_calls: list[object] = []
+    monkeypatch.setattr(schema_bootstrap, "_postgres_schema_is_current", lambda _ctx, conn: is_current_calls.append(conn) or False)
+    db.is_current_calls = is_current_calls  # a positive anchor: the patch was reached, so the stub is not inert
+    monkeypatch.setattr(db, "repair_conversation_assistant_identity", lambda _conn: None)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
         lambda backend, _timeout: backend.transaction(),
@@ -69,20 +73,20 @@ def _fake_postgres_initializer(
 
     monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", target_version)
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_get_schema_version_postgres",
-        lambda _conn, lock=False: current_version,
+        lambda _ctx, _conn, lock=False: current_version,
     )
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: True)
-    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
-    monkeypatch.setattr(db, "_ensure_note_graph_suggestion_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_ensure_note_semantic_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_notes_moodboard_studio_schema_postgres", lambda _ctx, _conn: True)
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_progress_row", lambda _ctx, _conn, _phase: {"status": "complete"})
+    monkeypatch.setattr(postgres_schema, "_ensure_note_graph_suggestion_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_ensure_note_semantic_schema_postgres", lambda _ctx, _conn: None)
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_configure_notes_moodboard_studio_v61_postgres_transaction",
-        lambda _conn: None,
+        lambda _ctx, _conn: None,
     )
     return db
 
@@ -161,13 +165,14 @@ def test_postgres_initializer_routes_schema_v86_through_v87(
         target_version=87,
     )
 
-    def _reached_v87(_conn: object) -> None:
+    def _reached_v87(_ctx: object, _conn: object) -> None:
         raise RuntimeError("reached-v87")
 
-    monkeypatch.setattr(db, "_migrate_from_v86_to_v87_postgres", _reached_v87)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v86_to_v87_postgres", _reached_v87)
 
     with pytest.raises(RuntimeError, match="^reached-v87$"):
         db._initialize_schema_postgres()
+    assert db.is_current_calls
 
 
 def test_postgres_initializer_honors_target_v86_without_dispatching_v87(
@@ -179,12 +184,13 @@ def test_postgres_initializer_honors_target_v86_without_dispatching_v87(
         target_version=86,
     )
 
-    def _unexpected_v87(_conn: object) -> None:
+    def _unexpected_v87(_ctx: object, _conn: object) -> None:
         pytest.fail("v87 migration dispatched for a v86 target")
 
-    monkeypatch.setattr(db, "_migrate_from_v86_to_v87_postgres", _unexpected_v87)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v86_to_v87_postgres", _unexpected_v87)
 
     db._initialize_schema_postgres()
+    assert db.is_current_calls
 
 
 def test_postgres_v87_live_schema_has_cleanup_constraints_indexes_and_forced_rls(
@@ -332,9 +338,9 @@ def test_postgres_v87_migration_failure_rolls_back_table_and_version(
                 connection=conn,
             )
         monkeypatch.setattr(
-            db,
+            postgres_schema,
             "_convert_sqlite_schema_to_postgres_statements",
-            lambda _script: [
+            lambda _ctx, _script: [
                 f"CREATE TABLE {_TABLE}(id TEXT PRIMARY KEY)",
                 "SELECT value FROM missing_v87_relation",
             ],
@@ -342,7 +348,7 @@ def test_postgres_v87_migration_failure_rolls_back_table_and_version(
 
         with pytest.raises(BackendDatabaseError):
             with backend.transaction() as conn:
-                db._migrate_from_v86_to_v87_postgres(conn)
+                postgres_steps._migrate_from_v86_to_v87_postgres(db.ctx, conn)
 
         assert int(
             backend.execute(

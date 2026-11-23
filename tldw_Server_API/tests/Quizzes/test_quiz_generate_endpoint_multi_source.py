@@ -197,7 +197,7 @@ async def test_generate_quiz_rejects_unknown_workspace_before_generation(monkeyp
     monkeypatch.setattr("tldw_Server_API.app.services.quiz_generator.generate_quiz_from_sources", fake_generate_quiz_from_sources)
 
     db = Mock()
-    db.get_workspace.return_value = None
+    db.workspace_store.get_workspace.return_value = None
     request = QuizGenerateRequest.model_validate(
         {
             "num_questions": 4,

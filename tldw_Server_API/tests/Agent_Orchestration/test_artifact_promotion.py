@@ -28,7 +28,7 @@ pytestmark = pytest.mark.unit
 def _build_context(tmp_path):
     orch_db = OrchestrationDB(user_id=1, db_dir=tmp_path)
     note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+    note_db.workspace_store.upsert_workspace("workspace-alpha", "Alpha Workspace")
     workspace = orch_db.create_workspace(
         name="ACP Linked Workspace",
         root_path=str(tmp_path / "workspace"),
@@ -68,7 +68,7 @@ def _brief_payload(**overrides):
 def test_validate_artifact_payload_rejects_non_mapping(tmp_path):
     """Malformed artifact objects should fail validation without attribute errors."""
     note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+    note_db.workspace_store.upsert_workspace("workspace-alpha", "Alpha Workspace")
 
     try:
         assert (
@@ -106,7 +106,7 @@ def test_promotes_accepted_acp_brief_with_traceable_metadata(tmp_path):
         assert result.skipped == []
         assert result.errors == []
 
-        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        [artifact] = note_db.workspace_store.list_workspace_artifacts("workspace-alpha")
         assert artifact["id"] == "brief-1"
         assert artifact["artifact_type"] == "workspace_brief"
         assert artifact["status"] == "completed"
@@ -173,10 +173,10 @@ def test_updates_existing_promoted_artifact_version(tmp_path):
 
         assert result.created_artifact_ids == []
         assert result.updated_artifact_ids == ["brief-1"]
-        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        [artifact] = note_db.workspace_store.list_workspace_artifacts("workspace-alpha")
         assert artifact["version"] == 2
         assert artifact["content"] == "# Brief\nUpdated."
-        versions = note_db.list_workspace_artifact_versions("workspace-alpha", "brief-1")
+        versions = note_db.workspace_store.list_workspace_artifact_versions("workspace-alpha", "brief-1")
         assert [version["artifact_version_id"] for version in versions] == [
             "brief-1:v1",
             "brief-1:v2",
@@ -216,7 +216,7 @@ def test_promote_as_is_used_as_persisted_artifact_type(tmp_path):
         )
 
         assert result.created_artifact_ids == ["brief-promote-as"]
-        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        [artifact] = note_db.workspace_store.list_workspace_artifacts("workspace-alpha")
         assert artifact["artifact_type"] == "workspace_spec"
     finally:
         note_db.close_all_connections()
@@ -255,7 +255,7 @@ def test_promote_flag_without_allowed_artifact_type_is_not_promoted(tmp_path):
         assert result.updated_artifact_ids == []
         assert result.skipped == []
         assert result.errors == [{"artifact_id": "brief-missing-type", "reason": "missing_artifact_type"}]
-        assert note_db.list_workspace_artifacts("workspace-alpha") == []
+        assert note_db.workspace_store.list_workspace_artifacts("workspace-alpha") == []
     finally:
         note_db.close_all_connections()
         orch_db.close()
@@ -299,7 +299,7 @@ def test_rejected_or_retry_outputs_do_not_create_accepted_artifacts(
         assert result.updated_artifact_ids == []
         assert result.errors == []
         assert result.skipped == [{"artifact_id": "brief-1", "reason": expected_reason}]
-        assert note_db.list_workspace_artifacts("workspace-alpha") == []
+        assert note_db.workspace_store.list_workspace_artifacts("workspace-alpha") == []
     finally:
         note_db.close_all_connections()
         orch_db.close()
@@ -336,7 +336,7 @@ def test_preserves_redaction_contract_for_promoted_artifact(tmp_path):
             review_run=review_run,
         )
 
-        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        [artifact] = note_db.workspace_store.list_workspace_artifacts("workspace-alpha")
         assert artifact["redaction"] == {
             "support_safe": False,
             "redacted": True,
@@ -374,7 +374,7 @@ def test_malformed_promotion_payload_is_not_promoted(tmp_path):
         assert result.updated_artifact_ids == []
         assert result.skipped == []
         assert result.errors == [{"artifact_id": "brief-1", "reason": "missing_source_lineage"}]
-        assert note_db.list_workspace_artifacts("workspace-alpha") == []
+        assert note_db.workspace_store.list_workspace_artifacts("workspace-alpha") == []
     finally:
         note_db.close_all_connections()
         orch_db.close()
@@ -411,7 +411,7 @@ def test_oversized_promoted_artifact_is_not_written(tmp_path):
         assert result.updated_artifact_ids == []
         assert result.skipped == []
         assert result.errors == [{"artifact_id": "brief-1", "reason": "content_too_large"}]
-        assert note_db.list_workspace_artifacts("workspace-alpha") == []
+        assert note_db.workspace_store.list_workspace_artifacts("workspace-alpha") == []
     finally:
         note_db.close_all_connections()
         orch_db.close()
@@ -461,7 +461,7 @@ def test_malformed_optional_metadata_isolated_to_artifact_error(
         assert result.updated_artifact_ids == []
         assert result.skipped == []
         assert result.errors == [{"artifact_id": "bad-brief", "reason": expected_reason}]
-        [artifact] = note_db.list_workspace_artifacts("workspace-alpha")
+        [artifact] = note_db.workspace_store.list_workspace_artifacts("workspace-alpha")
         assert artifact["id"] == "good-brief"
     finally:
         note_db.close_all_connections()

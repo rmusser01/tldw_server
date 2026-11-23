@@ -368,3 +368,20 @@ def test_study_version_conflict_still_stops_before_dispatch_or_new_messages(stud
     assert response.status_code == 409
     assert provider_boundary.calls == []
     assert [row["id"] for row in route.client.get(route.path).json()["messages"]] == [prior["id"]]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("stored", "expected"), [(True, (200, 1)), (False, (400, 0))], ids=["own-key", "server-key"])
+def test_a_model_off_the_allowlist_runs_only_on_the_users_own_key(
+    study_route, provider_boundary, monkeypatch, stored, expected
+):
+    """TASK-15582: the study assistants hold the server's key to allowed_models and let the user's own key run a
+    model off it."""
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    if stored:
+        users_own_key(monkeypatch, "openai")
+    provider_boundary.overrides["openai"] = overrides.LLMProviderOverride(provider="openai", allowed_models=["gpt-allowed"])
+    payload = {"action": "follow_up", "message": "Which day?", "provider": "openai", "model": "remote-explicit"}
+    response = study_route.client.post(study_route.path + "/respond", json=payload)
+    assert (response.status_code, len(provider_boundary.calls)) == expected

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+
 # subprocess only ever runs the `gh` CLI with a fixed argv list, never a shell.
 import subprocess  # nosec B404
 import time
@@ -126,6 +127,7 @@ ALL_CONTEXTS = tuple(c.name for c in CONTEXTS)
 BY_NAME = {c.name: c for c in CONTEXTS}
 GATE_WORKFLOWS = frozenset(c.workflow for c in CONTEXTS if c.kind == "check")
 LICENSE = next(c for c in CONTEXTS if c.kind == "status")
+SERVER_CI = Context("Server CI verdict", "ci.yml")
 
 
 @dataclass(frozen=True)
@@ -243,9 +245,10 @@ def context_state(runs: list[CheckRun], now: datetime) -> str:
     finished = _finished(runs, now)
     if not finished:
         return MISSING
-    if finished[-1].conclusion in PASSING:
+    passing = {"success"} if finished[-1].context == SERVER_CI.name else PASSING
+    if finished[-1].conclusion in passing:
         return PASSED
-    return FAILED_TWICE if sum(c.conclusion not in PASSING for c in finished) >= 2 else FAILED
+    return FAILED_TWICE if sum(c.conclusion not in passing for c in finished) >= 2 else FAILED
 
 
 def decide_front(pr: PrState, now: datetime) -> Action:
@@ -527,6 +530,26 @@ def _rest_pages(gh: GhApi, path: str, key: str | None = None) -> list[dict]:
         if len(batch) < PER_PAGE or (total is not None and len(items) >= total):
             return items
     raise GhError(f"more than {MAX_PAGES * PER_PAGE} items for {path}; refusing to decide on a partial view")
+
+
+def _configure_server_ci_gate(gh: GhApi) -> None:
+    """Use the same active dev rule for queue approval and branch protection."""
+    global CONTEXTS, ALL_CONTEXTS, BY_NAME, GATE_WORKFLOWS
+
+    rules = _rest_pages(gh, f"repos/{REPO}/rules/branches/{BASE}")
+    if not any(
+        check["context"] == SERVER_CI.name
+        for rule in rules
+        if rule["type"] == "required_status_checks"
+        for check in rule["parameters"]["required_status_checks"]
+    ):
+        return
+    if SERVER_CI.name in BY_NAME:
+        return
+    CONTEXTS += (SERVER_CI,)
+    ALL_CONTEXTS += (SERVER_CI.name,)
+    BY_NAME = {**BY_NAME, SERVER_CI.name: SERVER_CI}
+    GATE_WORKFLOWS |= {SERVER_CI.workflow}
 
 
 def read_checks(gh: GhApi, sha: str) -> tuple[CheckRun, ...]:
@@ -1787,7 +1810,11 @@ def main() -> int:
         The process exit code (0; a failed call raises instead).
     """
     wait = os.environ.get("WAIT_RUN", "").strip()
-    decisions = run(Gh(), os.environ.get("MERGE_QUEUE"), wait_run=int(wait) if wait.isascii() and wait.isdigit() else None)
+    mode = os.environ.get("MERGE_QUEUE", "").strip().lower()
+    gh = Gh()
+    if mode in ("on", "dry"):
+        _configure_server_ci_gate(gh)
+    decisions = run(gh, mode, wait_run=int(wait) if wait.isascii() and wait.isdigit() else None)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:

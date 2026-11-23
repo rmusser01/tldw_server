@@ -88,15 +88,21 @@ async def users_own_key_serves(user_id: Any, provider: str) -> bool:
         return False
 
 
-async def users_own_key_credentials(user_id: Any, provider: str | None, *, model: str | None = None) -> Any:
+async def users_own_key_credentials(
+    user_id: Any, provider: str | None, *, model: str | None = None, policy: bool = True
+) -> Any:
     """A runtime-issued credential handle for the user's own stored key for ``provider``, or None (TASK-15426).
 
     None unless ``users_own_key_serves`` holds, so a user without such a key keeps the server's key and
     the call path it had. So does a resolution that fails or no longer finds the key. The runtime is
     closed once the handle is issued: the handle keeps its key for the caller's calls.
+
+    ``policy=False`` is for the provider listing only (TASK-15583): it skips the admin override check, which the
+    listing applies itself to what it lists. Never pass it for a call.
     """
     if not provider or not await users_own_key_serves(user_id, provider):
         return None
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
     from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
         capture_provider_override_call_snapshot,
     )
@@ -110,14 +116,21 @@ async def users_own_key_credentials(user_id: Any, provider: str | None, *, model
             team_ids=None,
             org_ids=None,
             trusted_base_url_override=False,
-            override_snapshot_resolver=capture_provider_override_call_snapshot,
+            override_snapshot_resolver=capture_provider_override_call_snapshot if policy else None,
         )
         try:
             handle = await runtime.resolve(provider, model=model)
         finally:
             await runtime.close()
     except Exception as error:  # noqa: BLE001 - the server's key, as for a user without one
-        logger.bind(exception_type=type(error).__name__).warning("Own-key credential resolution failed")
+        # A bounded code, never the message: a policy denial's code (TASK-15571), a resolution code, or the type.
+        # The request keeps the server's key, where an admin-disabled provider or model is refused too (TASK-15581).
+        reason = getattr(error, "policy_code", None) or (
+            error.code if isinstance(error, ByokResolutionError) else type(error).__name__
+        )
+        logger.bind(exception_type=type(error).__name__).warning(
+            "Own-key credential resolution for {} failed: {}", provider, reason
+        )
         return None
     return handle if handle.credential_source == USER_KEY_SOURCE else None
 

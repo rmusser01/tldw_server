@@ -157,7 +157,7 @@ _FLASHCARDS_INT_PARSE_EXCEPTIONS: tuple[type[BaseException], ...] = (
 def _ensure_workspace_exists(db: CharactersRAGDB, workspace_id: Optional[str]) -> None:
     if workspace_id is None:
         return
-    if db.get_workspace(workspace_id) is None:
+    if db.workspace_store.get_workspace(workspace_id) is None:
         raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
 
 
@@ -2098,14 +2098,14 @@ def create_source_review_plan(
 ) -> SourceReviewPlanResponse:
     """Create a source-grounded review plan and its scheduled occurrences."""
     try:
-        plan_id = db.create_source_review_plan(
+        plan_id = db.workspace_store.create_source_review_plan(
             title=payload.title,
             starts_on=payload.starts_on.isoformat(),
             timezone_name=payload.timezone,
             source_bundle_json=normalize_source_review_bundle(payload.source_items),
             schedule=payload.computed_schedule(),
         )
-        plan = db.get_source_review_plan(plan_id)
+        plan = db.workspace_store.get_source_review_plan(plan_id)
         if plan is None:
             raise CharactersRAGDBError("Created source review plan could not be loaded")
         return _serialize_source_review_plan(plan)
@@ -2129,7 +2129,7 @@ def list_source_review_plans(
 ) -> SourceReviewPlanListResponse:
     """List active source-grounded review plans for the current user."""
     try:
-        plans, total = db.list_source_review_plans(limit=min(limit, 100), offset=offset)
+        plans, total = db.workspace_store.list_source_review_plans(limit=min(limit, 100), offset=offset)
         return SourceReviewPlanListResponse(
             items=[_serialize_source_review_plan(plan) for plan in plans],
             total=total,
@@ -2156,7 +2156,7 @@ def list_due_source_review_occurrences(
     now = _source_review_now_utc()
     now_iso = now.isoformat().replace("+00:00", "Z")
     try:
-        occurrences, total = db.list_due_source_review_occurrences(
+        occurrences, total = db.workspace_store.list_due_source_review_occurrences(
             now_utc=now_iso,
             limit=min(limit, 100),
             offset=offset,
@@ -2188,11 +2188,11 @@ def _source_review_occurrence_action(
     """Apply one occurrence lifecycle action and serialize its result."""
     try:
         if action == "start":
-            occurrence = db.start_source_review_occurrence(occurrence_id)
+            occurrence = db.workspace_store.start_source_review_occurrence(occurrence_id)
         elif action == "complete":
-            occurrence = db.complete_source_review_occurrence(occurrence_id)
+            occurrence = db.workspace_store.complete_source_review_occurrence(occurrence_id)
         else:
-            occurrence = db.skip_source_review_occurrence(occurrence_id)
+            occurrence = db.workspace_store.skip_source_review_occurrence(occurrence_id)
         return _serialize_source_review_occurrence(occurrence)
     except (CharactersRAGDBError, NotFoundError) as exc:
         raise _map_source_review_db_error(
@@ -2268,7 +2268,7 @@ def delete_source_review_plan(
     """Soft-delete a source-review plan and its active occurrences."""
     try:
         return SourceReviewPlanDeleteResponse(
-            deleted=db.soft_delete_source_review_plan(plan_id)
+            deleted=db.workspace_store.soft_delete_source_review_plan(plan_id)
         )
     except (CharactersRAGDBError, NotFoundError) as exc:
         raise _map_source_review_db_error(

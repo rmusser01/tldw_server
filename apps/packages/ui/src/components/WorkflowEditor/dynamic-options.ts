@@ -277,10 +277,15 @@ const cacheSet = (key: OptionSourceKey, options: Option[]) => {
   optionsCache.set(key, { options, ts: Date.now() })
 }
 
+// The model lists come from the user's own listing (TASK-15583), which TldwModels caches per credential and clears
+// on a key change; a module-level copy here would show one user's own-key models to the next.
+const PER_CREDENTIAL_KEYS: ReadonlySet<OptionSourceKey> = new Set(["chatModels", "embeddingModels", "imageModels"])
+
 const loadOptions = async (key: OptionSourceKey): Promise<Option[]> => {
-  const cached = cacheGet(key)
+  const shared = !PER_CREDENTIAL_KEYS.has(key)
+  const cached = shared ? cacheGet(key) : null
   if (cached) return cached
-  const inflight = inFlight.get(key)
+  const inflight = shared ? inFlight.get(key) : undefined
   if (inflight) return inflight
 
   const promise = (async () => {
@@ -493,17 +498,19 @@ const loadOptions = async (key: OptionSourceKey): Promise<Option[]> => {
         )
       }
 
-      cacheSet(key, options)
+      if (shared) cacheSet(key, options)
       return options
     } catch {
       return []
     }
   })()
 
-  inFlight.set(key, promise)
-  promise.finally(() => {
-    inFlight.delete(key)
-  })
+  if (shared) {
+    inFlight.set(key, promise)
+    promise.finally(() => {
+      inFlight.delete(key)
+    })
+  }
 
   return promise
 }

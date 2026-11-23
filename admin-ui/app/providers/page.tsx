@@ -39,12 +39,16 @@ interface ProviderConfig {
   [key: string]: unknown;
 }
 
+const parseModelList = (value: string): string[] =>
+  value.split(',').map((model) => model.trim()).filter(Boolean);
+
 interface OverrideDialogState {
   isOpen: boolean;
   provider: LLMProvider | null;
   override: LLMProviderOverride | null;
   enabled: boolean;
   allowedModels: string;
+  deniedModels: string;
   defaultModel: string;
   baseUrl: string;
   apiKey: string;
@@ -309,6 +313,7 @@ export default function ProvidersPage() {
     override: null,
     enabled: true,
     allowedModels: '',
+    deniedModels: '',
     defaultModel: '',
     baseUrl: '',
     apiKey: '',
@@ -661,6 +666,7 @@ export default function ProvidersPage() {
       override: override || null,
       enabled: override?.is_enabled ?? provider.enabled ?? true,
       allowedModels: override?.allowed_models?.join(', ') ?? '',
+      deniedModels: override?.denied_models?.join(', ') ?? '',
       defaultModel: getStringValue(override?.config?.default_model),
       baseUrl: getStringValue(override?.credential_fields?.base_url),
       apiKey: '',
@@ -674,10 +680,8 @@ export default function ProvidersPage() {
     if (!overrideDialog.provider) return;
     updateOverrideDialog({ isSaving: true });
 
-    const allowedModels = overrideDialog.allowedModels
-      .split(',')
-      .map((model) => model.trim())
-      .filter(Boolean);
+    const allowedModels = parseModelList(overrideDialog.allowedModels);
+    const deniedModels = parseModelList(overrideDialog.deniedModels);
     const defaultModelValue = overrideDialog.defaultModel.trim();
     const overrideConfig = overrideDialog.override?.config;
     const configSource = isRecord(overrideConfig) ? overrideConfig : {};
@@ -701,6 +705,7 @@ export default function ProvidersPage() {
     const payload: Record<string, unknown> = {
       is_enabled: overrideDialog.enabled,
       allowed_models: allowedModels,
+      denied_models: deniedModels,
     };
 
     if (defaultModelValue || 'default_model' in configSource) {
@@ -1211,6 +1216,11 @@ export default function ProvidersPage() {
                                             {override.allowed_models.length} models allowlisted
                                           </div>
                                         ) : null}
+                                        {override.denied_models?.length ? (
+                                          <div className="text-xs text-muted-foreground">
+                                            {override.denied_models.length} models denied
+                                          </div>
+                                        ) : null}
                                         {override.api_key_hint ? (
                                           <div className="text-xs text-muted-foreground">
                                             Key • ****{override.api_key_hint}
@@ -1666,13 +1676,25 @@ export default function ProvidersPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="overrideAllowedModels">Allowlisted models</Label>
+                <Label htmlFor="overrideAllowedModels">Allowlisted models (server key)</Label>
                 <Input
                   id="overrideAllowedModels"
-                  placeholder="Comma-separated list (leave empty for all)"
+                  placeholder="Comma-separated; leave empty for all. Users' own keys may run others."
                   value={overrideDialog.allowedModels}
                   onChange={(e) => updateOverrideDialog({ allowedModels: e.target.value })}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="overrideDeniedModels">Denied models</Label>
+                <Input
+                  id="overrideDeniedModels"
+                  placeholder="Comma-separated; refused on every key"
+                  value={overrideDialog.deniedModels}
+                  onChange={(e) => updateOverrideDialog({ deniedModels: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Refused on every key, users&apos; own keys included. A model on both lists is refused.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="overrideBaseUrl">Base URL</Label>

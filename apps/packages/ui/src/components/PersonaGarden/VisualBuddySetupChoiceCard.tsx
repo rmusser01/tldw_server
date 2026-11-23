@@ -189,7 +189,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
               {t("sidepanel:personaGarden.visuals.setup.compactEyebrow", {
-                defaultValue: "Visual buddy"
+                defaultValue: "Avatar"
               })}
             </div>
             <div className="mt-1 text-sm font-medium text-text">
@@ -198,7 +198,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
             <Text className="mt-1 block max-w-2xl text-xs leading-5 text-text-muted">
               {t("sidepanel:personaGarden.visuals.setup.compactHelp", {
                 defaultValue:
-                  "Open the Buddy builder in Persona Garden to choose, import, review, and activate visuals."
+                  "Open the avatar builder in Persona Garden to choose, import, review, and activate visuals."
               })}
             </Text>
           </div>
@@ -217,7 +217,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
           onClick={onOpenVisuals}
         >
           {t("sidepanel:personaGarden.visuals.setup.openVisuals", {
-            defaultValue: "Open Buddy builder"
+            defaultValue: "Open avatar builder"
           })}
         </Button>
       </div>
@@ -243,7 +243,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
             {t("sidepanel:personaGarden.visuals.setup.heading", {
-              defaultValue: "Visual buddy setup"
+              defaultValue: "Avatar setup"
             })}
           </div>
           <div className="mt-1 text-sm font-medium text-text">
@@ -252,7 +252,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
           <Text className="mt-1 block max-w-3xl text-xs leading-5 text-text-muted">
             {hasActiveVisual
               ? t("sidepanel:personaGarden.visuals.setup.activeDescription", {
-                  defaultValue: "A visual buddy is active for this persona."
+                  defaultValue: "An avatar is active for this persona."
                 })
               : hasDrafts
                 ? t("sidepanel:personaGarden.visuals.setup.draftsDescription", {
@@ -261,7 +261,7 @@ export const VisualBuddySetupChoiceCard: React.FC<
                   })
                 : t("sidepanel:personaGarden.visuals.setup.emptyDescription", {
                     defaultValue:
-                      "No visual buddy is active for this persona. Choose a starter path to create an inactive pack for review."
+                      "No avatar is active for this persona. Choose a starter path to create an inactive pack for review."
                   })}
           </Text>
         </div>

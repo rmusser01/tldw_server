@@ -1387,7 +1387,10 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       setSubmitting(true)
 
       if (isEditing && initialValues) {
-        await updateWatchlistJob(initialValues.id, jobData)
+        await updateWatchlistJob(initialValues.id, {
+          ...jobData,
+          schedule_expr: jobData.schedule_expr ?? (initialValues.schedule_expr ? null : undefined)
+        })
         message.success(t("watchlists:jobs.updated", "Monitor updated"))
       } else {
         await createWatchlistJob(jobData)

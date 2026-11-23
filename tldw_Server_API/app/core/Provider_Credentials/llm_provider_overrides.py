@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import os
 import threading
 import time
 import weakref
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -41,6 +42,7 @@ class LLMProviderOverride:
     provider: str
     is_enabled: bool | None = None
     allowed_models: list[str] | None = None
+    denied_models: list[str] | None = None
     config: dict[str, Any] = field(default_factory=dict)
     api_key: str | None = None
     credential_fields: dict[str, Any] = field(default_factory=dict)
@@ -68,7 +70,7 @@ class ProviderOverridePolicyError(ByokResolutionError):
     """Typed, sanitized provider-policy denial at the credential boundary."""
 
     def __init__(self, policy_code: str, provider: str) -> None:
-        if policy_code not in {"provider_disabled", "model_not_allowed"}:
+        if policy_code not in {"provider_disabled", "model_not_allowed", "model_denied"}:
             raise ValueError("Unsupported provider override policy error code")
         self.policy_code = policy_code
         super().__init__("invalid_provider_credentials", provider)
@@ -88,6 +90,14 @@ def _override_allows_model(provider: str, allowed_models: Any, model: Any) -> bo
     return model in allowed_models
 
 
+def _model_denied(provider: str, denied_models: list[str], model: object) -> bool:
+    """Whether ``model`` is on a denylist: case does not matter (a denial errs wide), and Anthropic's dotted and
+    dashed spellings of one ID count as one (TASK-15582). A model that is not a string is not denied."""
+    if not isinstance(model, str):
+        return False
+    return _override_allows_model(provider, [entry.casefold() for entry in denied_models], model.casefold())
+
+
 @dataclass(frozen=True, repr=False)
 class ProviderOverrideCallSnapshot:
     """One redacted provider override snapshot used for policy and fallback."""
@@ -102,8 +112,13 @@ class ProviderOverrideCallSnapshot:
             ")"
         )
 
-    def policy_error(self, model: str | None) -> dict[str, str] | None:
-        """Return the bounded policy decision from this captured snapshot."""
+    def policy_error(self, model: str | None, *, allowlist: bool = True) -> dict[str, str] | None:
+        """Return the bounded policy decision from this captured snapshot (TASK-15581, TASK-15582).
+
+        A disabled provider and a denied model are refused on every key. ``allowed_models`` is what the server's key
+        offers: ``allowlist=False`` skips it, for a call on the user's own key at its vendor (credential source
+        ``user``), or for a check made before the call's key is known when a later check sees the key.
+        """
         override = self._override
         if override is None:
             return None
@@ -112,20 +127,28 @@ class ProviderOverrideCallSnapshot:
                 "error_code": "provider_disabled",
                 "message": f"Provider '{self.provider}' is disabled by admin override.",
             }
+        if override.denied_models and _model_denied(self.provider, override.denied_models, model):
+            return {
+                "error_code": "model_denied",
+                "message": f"Model '{model}' is disabled for provider '{self.provider}' by admin override.",
+            }
         allowed_models = override.allowed_models
-        if allowed_models and model and not _override_allows_model(self.provider, allowed_models, model):
+        if allowlist and allowed_models and model and not _override_allows_model(self.provider, allowed_models, model):
             return {
                 "error_code": "model_not_allowed",
-                "message": f"Model '{model}' is not allowed for provider '{self.provider}'.",
+                "message": (
+                    f"Model '{model}' is not offered on the server's key for provider '{self.provider}'; "
+                    "your own provider key may serve it."
+                ),
             }
         return None
 
-    def enforce(self, model: str | None, *, require_model: bool = False) -> None:
-        """Fail closed; final dispatch can require a known model for an allowlist."""
-        error = self.policy_error(model)
+    def enforce(self, model: str | None, *, require_model: bool = False, allowlist: bool = True) -> None:
+        """Fail closed; final dispatch can require a known model where the allowlist applies."""
+        error = self.policy_error(model, allowlist=allowlist)
         if error is not None:
             raise ProviderOverridePolicyError(error["error_code"], self.provider)
-        if require_model and not model and self._override and self._override.allowed_models:
+        if require_model and allowlist and not model and self._override and self._override.allowed_models:
             raise ProviderOverridePolicyError("model_not_allowed", self.provider)
 
     def ensure_healthy(self) -> None:
@@ -383,6 +406,11 @@ def _schedule_override_recovery() -> None:
         return
 
     with _OVERRIDE_LOCK:
+        service = _OVERRIDE_REFRESH_SERVICE_TASK
+        if service is not None and not service.done() and service.get_loop() is not loop:
+            # The refresh service keeps the cache fresh from its own loop (a CLI's daemon loop, TASK-15581). A refresh
+            # on this loop could be cancelled when it closes, and would move the PostgreSQL AuthNZ pool between loops.
+            return
         if (
             _OVERRIDE_RECOVERY_IN_FLIGHT
             or time.monotonic() < _OVERRIDE_RECOVERY_NEXT_RETRY_AT
@@ -587,6 +615,57 @@ def start_llm_provider_override_refresh_service() -> None:
         _cancel_task_on_owning_loop(task)
 
 
+@contextlib.asynccontextmanager
+async def standalone_llm_provider_overrides() -> AsyncIterator[None]:
+    """Load the provider-override store and keep it fresh, in a process the app did not start (TASK-15581).
+
+    The app loads the store at startup. A standalone worker or CLI must do it itself: the admin-override check
+    refuses every LLM call while the store is unloaded. The Research worker's pattern: a forced refresh, the
+    refresh service, and the recovery tasks shut down on exit. A refresh that fails raises, so the process
+    does not start.
+    """
+    await refresh_llm_provider_overrides(force=True)
+    try:
+        start_llm_provider_override_refresh_service()
+        yield
+    finally:
+        await shutdown_llm_provider_override_recovery()
+
+
+@contextlib.contextmanager
+def standalone_llm_provider_overrides_sync() -> Iterator[None]:
+    """``standalone_llm_provider_overrides`` for a synchronous CLI: the store's loop runs on a daemon thread.
+
+    LLM usage accounting runs on that loop too, as it runs on the server's loop in the app: the AuthNZ pool is bound
+    to one loop, and on PostgreSQL a write from a command's own ``asyncio.run`` loop would recreate it under the
+    store's refresh.
+    """
+    from tldw_Server_API.app.core.Usage.llm_accounting import (
+        drain_accounting,
+        get_accounting_loop,
+        set_accounting_loop,
+    )
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, name="llm-provider-overrides", daemon=True)
+    thread.start()
+    store = standalone_llm_provider_overrides()
+    try:
+        asyncio.run_coroutine_threadsafe(store.__aenter__(), loop).result()
+        previous_accounting_loop = get_accounting_loop()
+        set_accounting_loop(loop)
+        try:
+            yield
+        finally:
+            set_accounting_loop(previous_accounting_loop)
+            asyncio.run_coroutine_threadsafe(drain_accounting(), loop).result()
+            asyncio.run_coroutine_threadsafe(store.__aexit__(None, None, None), loop).result()
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join()
+        loop.close()
+
+
 def _parse_json_value(raw: Any, *, field_name: str, expected_type: type) -> Any | None:
     """Parse a stored JSON field and reject corrupt or shape-invalid values."""
     if raw is None:
@@ -631,18 +710,18 @@ def _normalize_optional_bool(raw: Any) -> bool | None:
     raise ValueError("Invalid stored is_enabled value")
 
 
+def _parse_models_column(row: dict[str, Any], name: str) -> list[str] | None:
+    """Parse a stored JSON list of model IDs; a value that does not parse fails its row (the store fails closed)."""
+    raw = _parse_json_value(row.get(name), field_name=name, expected_type=list)
+    if raw is not None and any(not isinstance(value, (str, int, float)) for value in raw):
+        raise ValueError(f"Invalid stored {name} entry")
+    return _normalize_models(raw)
+
+
 def _parse_override_row(row: dict[str, Any]) -> LLMProviderOverride:
     provider = canonical_builtin_llm_provider_name(row.get("provider"))
-    allowed_models_raw = _parse_json_value(
-        row.get("allowed_models"),
-        field_name="allowed_models",
-        expected_type=list,
-    )
-    if allowed_models_raw is not None and any(
-        not isinstance(value, (str, int, float)) for value in allowed_models_raw
-    ):
-        raise ValueError("Invalid stored allowed_models entry")
-    allowed_models = _normalize_models(allowed_models_raw)
+    allowed_models = _parse_models_column(row, "allowed_models")
+    denied_models = _parse_models_column(row, "denied_models")
     config = _parse_json_value(
         row.get("config_json"),
         field_name="config_json",
@@ -678,6 +757,7 @@ def _parse_override_row(row: dict[str, Any]) -> LLMProviderOverride:
         provider=provider,
         is_enabled=_normalize_optional_bool(row.get("is_enabled")),
         allowed_models=allowed_models,
+        denied_models=denied_models,
         config=config,
         api_key=api_key,
         credential_fields=credential_fields,
@@ -738,11 +818,35 @@ def get_llm_provider_overrides_snapshot() -> dict[str, LLMProviderOverride]:
     return _get_healthy_override_snapshot()
 
 
+def llm_provider_overrides_status() -> str:
+    """Return ``"healthy"`` when an LLM call would find a usable override snapshot, else ``"unavailable"``.
+
+    For health reporting (TASK-15581): it never raises, so a health route that shows it cannot fail over it.
+    """
+    try:
+        get_llm_provider_overrides_snapshot()
+    except Exception:  # noqa: BLE001 - any failure to read the snapshot means calls are refused
+        return "unavailable"
+    return "healthy"
+
+
 def capture_provider_override_call_snapshot(provider: str) -> ProviderOverrideCallSnapshot:
     """Capture one provider override for policy and server credential fallback."""
     provider_norm = canonical_provider_name(provider)
     override = _get_healthy_override_snapshot(provider_norm).get(provider_norm)
     return ProviderOverrideCallSnapshot(provider=provider_norm, _override=override)
+
+
+def mark_llm_provider_overrides_stale() -> None:
+    """Make the next read reload the store, keeping its snapshot, TTL and refresh service (TASK-15581).
+
+    For an AuthNZ pool reset: the stored policy has not changed, so an admin disable keeps holding from the last
+    snapshot while the reload runs, and the refresh service keeps refreshing from the new pool.
+    """
+    global _OVERRIDE_CACHE_REFRESHED_AT
+    with _OVERRIDE_LOCK:
+        due = time.monotonic() - _OVERRIDE_REFRESH_INTERVAL_SECONDS
+        _OVERRIDE_CACHE_REFRESHED_AT = min(_OVERRIDE_CACHE_REFRESHED_AT, due)
 
 
 def set_llm_provider_overrides_cache_for_tests(
@@ -839,6 +943,9 @@ def apply_llm_provider_overrides_to_listing(
                 else list(override.allowed_models)
             )
 
+        if override.denied_models:
+            models = [m for m in models if not _model_denied(provider_name, override.denied_models, m)]
+
         preferred_order = _get_model_priority_from_override(override, "highest_quality")
         if preferred_order:
             order_index = {name: index for index, name in enumerate(preferred_order)}
@@ -849,7 +956,9 @@ def apply_llm_provider_overrides_to_listing(
         merged["models"] = models
 
         models_info = merged.get("models_info")
-        if isinstance(models_info, list) and (override.allowed_models or isinstance(config_models, list)):
+        if isinstance(models_info, list) and (
+            override.allowed_models or override.denied_models or isinstance(config_models, list)
+        ):
             filtered_info = []
             for mi in models_info:
                 if not isinstance(mi, dict):
@@ -877,6 +986,8 @@ def apply_llm_provider_overrides_to_listing(
                 merged["default_model"] = default_model.strip()
         if authoritative and merged.get("default_model") not in models:
             merged["default_model"] = models[0] if models else None
+        if override.denied_models and _model_denied(provider_name, override.denied_models, merged.get("default_model")):
+            merged["default_model"] = models[0] if models else None
 
         updated_providers.append(merged)
 
@@ -885,8 +996,25 @@ def apply_llm_provider_overrides_to_listing(
     return updated
 
 
-def validate_provider_override(provider: str, model: str | None) -> dict[str, str] | None:
-    return capture_provider_override_call_snapshot(provider).policy_error(model)
+def validate_provider_override(provider: str, model: str | None, *, allowlist: bool = True) -> dict[str, str] | None:
+    return capture_provider_override_call_snapshot(provider).policy_error(model, allowlist=allowlist)
+
+
+def enforce_provider_override(provider: str, model: str | None, *, allowlist: bool = True) -> None:
+    """Refuse a call the admin provider override disables (TASK-15581, TASK-15582).
+
+    A disabled provider and a denied model are refused on every key; a model off ``allowed_models`` only with
+    ``allowlist`` (TASK-15582). A provider the server merely has no key for is not refused. Raises
+    ``ProviderOverridePolicyError``, or ``ByokResolutionError("credential_store_unavailable")`` when the policy
+    cannot be read. Each refusal writes one warning naming the provider and the reason, never a key.
+    """
+    provider_norm = canonical_provider_name(provider)
+    try:
+        capture_provider_override_call_snapshot(provider_norm).enforce(model, allowlist=allowlist)
+    except ByokResolutionError as exc:
+        reason = getattr(exc, "policy_code", None) or exc.code
+        logger.warning("Provider override for {}: {}; the call is refused", provider_norm, reason)
+        raise
 
 
 def _get_model_priority_from_override(

@@ -14,7 +14,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.owner_isolation]
 
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
@@ -240,7 +240,7 @@ def test_opposite_merges_serialize_without_deadlock(keywords, monkeypatch):
     first_locked, second_started, second_locked, release_first = (Event() for _ in range(4))
     pids = {}
     seen = set()
-    original = db._require_selected_owner_row
+    original = db.ctx.require_owner_row
 
     def gated(conn, table, item_id, owner, **kwargs):
         thread = current_thread().name
@@ -267,7 +267,7 @@ def test_opposite_merges_serialize_without_deadlock(keywords, monkeypatch):
         finally:
             db.close_connection()
 
-    monkeypatch.setattr(db, "_require_selected_owner_row", gated)
+    monkeypatch.setattr(db.ctx, "require_owner_row", gated)
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="merge") as pool:
         first = pool.submit(run, a, b)
         assert first_locked.wait(5)

@@ -703,3 +703,15 @@ def test_summary_code_maps_to_its_evaluations_response(summary_code: str, expect
     )
 
     assert (response.status_code, response.detail["error_code"]) == expected
+
+
+def test_an_admin_override_refusal_keeps_its_code_and_status() -> None:
+    """TASK-15581: the provider base class's refusal of a disallowed model is a 403 with its own code, not a 503
+    'configuration invalid' that invites a retry."""
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+    response = eval_endpoint._eval_provider_http_exception(
+        ChatConfigurationError("refused", provider="openai", error_code="model_not_allowed")
+    )
+
+    assert (response.status_code, response.detail["error_code"]) == (403, "model_not_allowed")

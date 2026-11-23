@@ -15,7 +15,20 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  qualify:
+    name: Qualify the publication commit
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   push_to_registries:
+    needs: qualify
+    if: >-
+      always() && !cancelled() &&
+      needs.qualify.result == 'success' && needs.qualify.outputs.qualified == 'true'
     name: Push ${{ matrix.name }} image to GHCR
     runs-on: ubuntu-latest
     permissions:

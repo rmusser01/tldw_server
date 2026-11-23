@@ -4528,6 +4528,75 @@ it.each(["normal", "character"])("compact $mode native regeneration preserves li
   })
 
 
+describe("side-panel Continue (CM-03)", () => {
+  it("continues the last saved reply of a server chat through the server, as the full page does", async () => {
+    mocks.storeState.messages = [{ id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+      { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }]
+    const hook = renderHook(() => useMessage())
+    const origin = h1.controller.getCurrent().view
+    h1.read.mockResolvedValue({ id: "u-old", sender: "user", conversation_id: nativeChatId, parent_message_id: null,
+      content: "old question", has_image: false, version: 1 })
+    h1.wire.mockImplementation(async function* () {
+      yield { tldw_history_admission_v1: { version: 1, owner_key: origin.owner_key, conversation_id: nativeChatId,
+        input_message_id: "u-old", input_message_revision: "1", selection_digest: "original", originating_selection_revision: 0, messages: [] } }
+      yield { tldw_message_id: "continued-alternative", tldw_conversation_id: nativeChatId }
+    })
+    let result: unknown
+    await act(async () => { result = await hook.result.current.continueLastMessage() })
+    expect(result).toEqual({ status: "submitted" })
+    expect(h1.wire).toHaveBeenCalledOnce()
+    const request = h1.wire.mock.calls[0][0] as { metadata?: Record<string, unknown> }
+    expect(request.metadata).toEqual(expect.objectContaining({ tldw_continue_from_message_id: "a1" }))
+    expect(request.metadata).not.toHaveProperty("tldw_regenerate_from_message_id")
+    hook.unmount()
+  })
+
+  it("says Continue, not Regenerate, when the server refuses to continue a saved reply", async () => {
+    mocks.storeState.messages = [{ id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+      { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }]
+    const hook = renderHook(() => useMessage())
+    h1.read.mockResolvedValue({ id: "u-old", sender: "user", conversation_id: nativeChatId, parent_message_id: null,
+      content: "old question", has_image: false, version: 1 })
+    const refusal = Object.assign(new Error("unsupported_history_continuation"), {
+      status: 409,
+      details: { detail: { status: "unsupported_history_capability", code: "unsupported_history_continuation", reason: "reply" } }
+    })
+    h1.wire.mockImplementation(() => ({ [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(refusal) }) }))
+    await act(async () => { await hook.result.current.continueLastMessage() })
+    const described = mocks.notification.error.mock.calls.map(([call]) => String((call as { description?: unknown }).description))
+    expect(described.some(text => /continu/i.test(text))).toBe(true)
+    expect(described.some(text => /regenerat/i.test(text))).toBe(false)
+    hook.unmount()
+  })
+
+  it("extends the last reply of a temporary chat with the ordinary continue mode", async () => {
+    await startFixtureDraft(true)
+    const current = h1.controller.getCurrent()
+    current.status = "idle"
+    current.owner = null
+    current.view = null
+    mocks.chatBaseState.historyId = "temp"
+    mocks.storeState.serverChatId = null
+    mocks.storeState.messages = [{ id: "u-local", name: "You", isBot: false, message: "local question", sources: [] },
+      { id: "a-local", name: "Assistant", isBot: true, message: "cut off answer", sources: [] }]
+    mocks.chatBaseState.history = [{ role: "user", content: "local question" }, { role: "assistant", content: "cut off answer" }]
+    h1.wire.mockImplementation(async function* () {
+      yield { choices: [{ delta: { content: " and the rest" } }] }
+    })
+    const hook = renderHook(() => useMessage())
+    let result: unknown
+    await act(async () => { result = await hook.result.current.continueLastMessage() })
+    expect(result).toEqual({ status: "submitted" })
+    expect(h1.wire).toHaveBeenCalledOnce()
+    const request = h1.wire.mock.calls[0][0] as { messages: Array<{ role: string; content: unknown }> }
+    // Continue sends no new question: the conversation ends with the reply it extends.
+    expect(request.messages.at(-1)).toEqual(expect.objectContaining({ role: "assistant" }))
+    expect(JSON.stringify(request.messages)).not.toContain("tldw_continue_from_message_id")
+    hook.unmount()
+    mocks.storeState.temporaryChat = false
+  })
+})
+
 it("compact native regeneration cannot follow an unmounted source even when its outer H1 owner survives", async () => {
   mocks.storeState.messages = [{ id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
     { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }]

@@ -16,7 +16,8 @@ import {
 } from "@/hooks/chat/chat-action-utils";
 import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
-import { loadHistoryRecoveryRetryContext, retryHistoryTurnRecovery, type HistoryRecoveryRetryContext } from "@/services/history-turn-retry";
+import { useSidepanelReplyActions } from "./chat/sidepanel-reply-actions";
+import { continueChatMode } from "./chat-modes/continueChatMode";
 import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep";
 import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
@@ -2680,7 +2681,7 @@ export const useMessage = () => {
   const submitResponse = async ({
     message,
     image,
-    isRegenerate,
+    isRegenerate, isContinue,
     controller,
     memory,
     messages: chatHistory,
@@ -2710,7 +2711,7 @@ export const useMessage = () => {
   }: {
     message: string;
     image: string;
-    isRegenerate?: boolean;
+    isRegenerate?: boolean; isContinue?: boolean;
     messages?: Message[];
     memory?: ChatHistory;
     controller?: AbortController;
@@ -2997,7 +2998,7 @@ export const useMessage = () => {
         : null
     );
     if (historyRegenerate && (!isRegenerate || historyEditResend || !selectedHistoryTurn))
-      throw new Error("unsupported_history_regeneration");
+      throw new Error(historyRegenerate.action === "continue" ? "unsupported_history_continuation" : "unsupported_history_regeneration");
     if (historyServerExistingInput && (!historySelection || temporaryChat || resolvedChatMode !== "normal" ||
       image || uploadedFiles?.length || docs?.length || messageType || hasExplicitImageBackend ||
       imageBackendCandidates.length || isRegenerate)) return chatSubmitFailed("unsupported_history_action_context");
@@ -3008,7 +3009,7 @@ export const useMessage = () => {
       throw new Error("unsupported_history_action_context");
     if (
       selectedHistoryTurn &&
-      ((isRegenerate && !historyRegenerate) ||
+      ((isRegenerate && !historyRegenerate) || isContinue ||
         hasExplicitImageBackend ||
         imageBackendCandidates.length ||
         messageType ||
@@ -3290,13 +3291,17 @@ export const useMessage = () => {
           return chatSubmitSubmitted();
         } catch (error) {
           if (historyRegenerate.isOriginCurrent()) notification.error({ message: t("error"),
-            description: nativeRegenerationFeedback(error, t) });
+            description: nativeRegenerationFeedback(error, t, historyRegenerate.action === "continue" ? "continue" : "regenerate") });
           if (releaseNormalControllerIfOwned()) {
             setAbortController(null); setIsProcessing(false); setStreaming(false);
           }
           return chatSubmitFailed(error instanceof Error ? error.message : "Native history completion failed");
         }
       }
+      if (isContinue) return await continueChatMode(chatHistory || messages, memory || history, signal, { selectedModel: model,
+        useOCR: resolvedUseOCR, selectedSystemPrompt: resolvedSelectedSystemPrompt, currentChatModelSettings, toolChoice: resolvedToolChoice,
+        setMessages, saveMessageOnSuccess, saveMessageOnError, setHistory, setIsProcessing, setStreaming, setAbortController, historyId,
+        setHistoryId: setTurnHistoryId, ...turnSetters, actorSettings: actorSceneSend.scene.settings });
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
         return await normalChatMode(
           message,
@@ -4096,24 +4101,9 @@ export const useMessage = () => {
     onSubmit,
   });
 
-  const recoveryRetrySource = React.useRef({ model: "", selectedSystemPrompt, systemPrompt: currentChatModelSettings.systemPrompt });
-  recoveryRetrySource.current = { model: selectedModel || "", selectedSystemPrompt, systemPrompt: currentChatModelSettings.systemPrompt };
-  const getRecoveryRetryContext = () => {
-    const source = { ...recoveryRetrySource.current };
-    return loadHistoryRecoveryRetryContext(source, () => JSON.stringify(source) === JSON.stringify(recoveryRetrySource.current));
-  };
-  const retryRecoveredHistoryTurn = (entry: HistoryTurnRecoveryEntry, review: { contextReviewed: boolean; context: HistoryRecoveryRetryContext }) =>
-    retryHistoryTurnRecovery(historySelection, entry, review, onSubmit, getRecoveryRetryContext);
-
-  const getSavedQuestionReview = async () => {
-    const {reviewServerSavedQuestion} = await import("@/services/history-turn-retry");
-    return reviewServerSavedQuestion(historySelection, await getRecoveryRetryContext());
-  };
-  const retrySavedQuestion = async (review: import("@/services/history-turn-retry").SavedQuestionReview) => {
-    if (!review.isCurrent()) return chatSubmitFailed("history_selection_changed");
-    return (await onSubmit({message: review.text, image: "", historyServerExistingInput: review})) ??
-      chatSubmitFailed("native_history_existing_input_not_submitted");
-  };
+  const { continueLastMessage, getRecoveryRetryContext, retryRecoveredHistoryTurn, getSavedQuestionReview, retrySavedQuestion } =
+    useSidepanelReplyActions({ historySelection, onSubmit, actionsMountedRef, t, notification,
+      retrySource: { model: selectedModel || "", selectedSystemPrompt, systemPrompt: currentChatModelSettings.systemPrompt } });
 
   return {
     conversationMetadata,
@@ -4142,7 +4132,7 @@ export const useMessage = () => {
     setChatMode,
     isEmbedding,
     setIsEmbedding,
-    regenerateLastMessage,
+    regenerateLastMessage, continueLastMessage,
     getRecoveryRetryContext,
     retryRecoveredHistoryTurn,
     getSavedQuestionReview: serverChatCharacterId ? getSavedQuestionReview : undefined,

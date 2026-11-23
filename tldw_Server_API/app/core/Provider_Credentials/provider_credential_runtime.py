@@ -30,7 +30,7 @@ from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     resolve_static_server_fallback_from_snapshot,
 )
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
-from tldw_Server_API.app.core.Usage.llm_call_context import billed_credential_source
+from tldw_Server_API.app.core.Usage.llm_call_context import USER_KEY_SOURCE, billed_credential_source
 
 _Resolver = Callable[..., Awaitable[ResolvedByokCredentials]]
 _FallbackResolver = Callable[[str], str | ServerFallbackCredentials | None]
@@ -39,7 +39,7 @@ _FallbackResolver = Callable[[str], str | ServerFallbackCredentials | None]
 class _ProviderOverrideSnapshot(Protocol):
     """Policy and fallback operations captured from one override snapshot."""
 
-    def enforce(self, model: str | None) -> None: ...
+    def enforce(self, model: str | None, *, allowlist: bool = True) -> None: ...
 
     def ensure_healthy(self) -> None: ...
 
@@ -528,6 +528,7 @@ class ProviderCredentialRuntime:
                         generation=generation,
                         force_refresh=force_refresh,
                         override_snapshot=None,
+                        model=model,
                     )
                 )
             )
@@ -725,6 +726,7 @@ class ProviderCredentialRuntime:
         force_refresh: bool,
         override_snapshot: _ProviderOverrideSnapshot | None,
         rejected_credential_generation: str | None = None,
+        model: str | None = None,
     ) -> _ResolvedEntry:
         resolution_failure: ByokResolutionError | None = None
         unexpected_failure = False
@@ -802,6 +804,18 @@ class ProviderCredentialRuntime:
                 provider,
                 **resolver_kwargs,
             )
+            if self._authoritative_scope is not None:
+                # Imported here: the override module imports the adapter registry, which imports this module.
+                from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+                    enforce_provider_override,
+                )
+
+                # After the scope check, on whichever key it chose: a disabled provider or a denied model is refused
+                # (TASK-15581); a model off the allowlist unless the key is the user's own at its vendor (TASK-15582).
+                own_key = billed_credential_source(
+                    provider, getattr(resolution, "source", None), getattr(resolution, "app_config", None)
+                ) == USER_KEY_SOURCE
+                enforce_provider_override(provider, model, allowlist=not own_key)
         except asyncio.CancelledError:
             raise
         except ByokResolutionError as exc:
@@ -1053,7 +1067,9 @@ class ProviderCredentialRuntime:
             return None
         try:
             snapshot = resolver(provider)
-            snapshot.enforce(model)
+            # The key is not resolved yet: only what every key refuses. _enforce_call_policy checks the server-key
+            # allowlist once it is (TASK-15582).
+            snapshot.enforce(model, allowlist=False)
             return snapshot
         except ByokResolutionError:
             raise
@@ -1075,7 +1091,9 @@ class ProviderCredentialRuntime:
             resolution.app_config,
         )
         try:
-            snapshot.enforce(effective_model)
+            # allowed_models is what the server's key offers; the user's own key at its vendor is not held to it.
+            own_key = billed_credential_source(provider, resolution.source, resolution.app_config) == USER_KEY_SOURCE
+            snapshot.enforce(effective_model, allowlist=not own_key)
             snapshot.ensure_healthy()
         except ByokResolutionError:
             raise

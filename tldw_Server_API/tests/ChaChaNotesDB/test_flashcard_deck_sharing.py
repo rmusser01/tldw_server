@@ -51,7 +51,7 @@ def test_deck_share_upsert_normalizes_role_and_updates_existing_share():
     with _temporary_chacha_db() as db:
         deck_id = db.add_deck("Role Update Deck")
         timestamps = iter(("2026-04-30T12:00:00Z", "2026-04-30T12:00:01Z"))
-        db._get_current_utc_timestamp_iso = lambda: next(timestamps)
+        db.ctx.utc_now_iso = lambda: next(timestamps)
 
         first = db.upsert_deck_share(deck_id, user_id=22, role="viewer", shared_by=11)
         second = db.upsert_deck_share(deck_id, user_id=22, role="OWNER", shared_by=12)
@@ -124,8 +124,8 @@ def test_add_deck_undelete_preserves_visibility_when_omitted():
 
 def test_shared_with_user_workspace_filter_can_include_general_scope():
     with _temporary_chacha_db() as db:
-        db.upsert_workspace("ws-1", "Workspace One")
-        db.upsert_workspace("ws-2", "Workspace Two")
+        db.workspace_store.upsert_workspace("ws-1", "Workspace One")
+        db.workspace_store.upsert_workspace("ws-2", "Workspace Two")
         general_deck = db.add_deck("General Shared Deck")
         workspace_deck = db.add_deck("Workspace Shared Deck", workspace_id="ws-1")
         other_workspace_deck = db.add_deck("Other Workspace Shared Deck", workspace_id="ws-2")

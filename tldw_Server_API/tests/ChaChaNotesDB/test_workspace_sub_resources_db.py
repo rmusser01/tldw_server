@@ -4,13 +4,15 @@ from datetime import datetime
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 
 @pytest.fixture
 def db(tmp_path):
     d = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    d.upsert_workspace("ws-1", "Test WS")
+    d.workspace_store.upsert_workspace("ws-1", "Test WS")
     try:
         yield d
     finally:
@@ -19,7 +21,7 @@ def db(tmp_path):
 
 class TestWorkspaceSources:
     def test_add_source(self, db):
-        src = db.add_workspace_source("ws-1", {
+        src = db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 42, "title": "My Video",
             "source_type": "video",
         })
@@ -32,7 +34,7 @@ class TestWorkspaceSources:
         assert src["version"] == 1
 
     def test_add_source_with_needs_review_state(self, db):
-        src = db.add_workspace_source("ws-1", {
+        src = db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 42, "title": "My Video",
             "source_type": "video", "review_state": "needs_review",
         })
@@ -44,7 +46,7 @@ class TestWorkspaceSources:
 
     @pytest.mark.parametrize("review_state", [None, "", "  "])
     def test_add_source_normalizes_blank_review_state_to_unset(self, db, review_state):
-        src = db.add_workspace_source("ws-1", {
+        src = db.workspace_store.add_workspace_source("ws-1", {
             "id": f"src-{review_state!r}", "media_id": 42, "title": "My Video",
             "source_type": "video", "review_state": review_state,
         })
@@ -54,7 +56,7 @@ class TestWorkspaceSources:
     @pytest.mark.parametrize("review_state", ["reviewed", "invalid"])
     def test_add_source_rejects_reviewed_and_invalid_review_states(self, db, review_state):
         with pytest.raises(InputError):
-            db.add_workspace_source("ws-1", {
+            db.workspace_store.add_workspace_source("ws-1", {
                 "id": "src-1", "media_id": 42, "title": "My Video",
                 "source_type": "video", "review_state": review_state,
             })
@@ -70,41 +72,41 @@ class TestWorkspaceSources:
     )
     def test_add_source_rejects_falsey_non_string_review_states(self, db, review_state, source_id):
         with pytest.raises(InputError):
-            db.add_workspace_source("ws-1", {
+            db.workspace_store.add_workspace_source("ws-1", {
                 "id": source_id, "media_id": 42, "title": "My Video",
                 "source_type": "video", "review_state": review_state,
             })
 
     def test_list_sources_ordered_by_position(self, db):
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-a", "media_id": 1, "title": "A",
             "source_type": "video", "position": 2,
         })
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-b", "media_id": 2, "title": "B",
             "source_type": "pdf", "position": 1,
         })
-        sources = db.list_workspace_sources("ws-1")
+        sources = db.workspace_store.list_workspace_sources("ws-1")
         assert sources[0]["id"] == "src-b"
         assert sources[1]["id"] == "src-a"
 
     def test_update_source_with_version_check(self, db):
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "Old",
             "source_type": "video",
         })
-        updated = db.update_workspace_source("ws-1", "src-1", {"title": "New"}, expected_version=1)
+        updated = db.workspace_store.update_workspace_source("ws-1", "src-1", {"title": "New"}, expected_version=1)
         assert updated["title"] == "New"
         assert updated["version"] == 2
 
     def test_update_source_stale_version_raises(self, db):
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video",
         })
-        db.update_workspace_source("ws-1", "src-1", {"title": "Y"}, expected_version=1)
+        db.workspace_store.update_workspace_source("ws-1", "src-1", {"title": "Y"}, expected_version=1)
         with pytest.raises(ConflictError):
-            db.update_workspace_source("ws-1", "src-1", {"title": "Z"}, expected_version=1)
+            db.workspace_store.update_workspace_source("ws-1", "src-1", {"title": "Z"}, expected_version=1)
 
     def test_update_source_review_state_sets_and_clears_review_metadata(self, db, monkeypatch):
         timestamps = iter(
@@ -115,13 +117,13 @@ class TestWorkspaceSources:
                 "2026-07-18T18:18:10.003Z",
             ]
         )
-        monkeypatch.setattr(db, "_get_current_utc_timestamp_iso", lambda: next(timestamps))
-        created = db.add_workspace_source("ws-1", {
+        monkeypatch.setattr(db.ctx, "utc_now_iso", lambda: next(timestamps))
+        created = db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video", "review_state": "needs_review",
         })
 
-        reviewed = db.update_workspace_source(
+        reviewed = db.workspace_store.update_workspace_source(
             "ws-1",
             "src-1",
             {"review_state": "reviewed"},
@@ -135,7 +137,7 @@ class TestWorkspaceSources:
         assert reviewed["reviewed_by_user_id"] == "reviewer-1"
         assert reviewed["version"] == created["version"] + 1
 
-        needs_review = db.update_workspace_source(
+        needs_review = db.workspace_store.update_workspace_source(
             "ws-1",
             "src-1",
             {"review_state": "needs_review"},
@@ -154,13 +156,13 @@ class TestWorkspaceSources:
         ids=["none", "empty", "blank", "non-string"],
     )
     def test_update_source_reviewed_requires_non_empty_string_actor(self, db, actor_user_id):
-        created = db.add_workspace_source("ws-1", {
+        created = db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video", "review_state": "needs_review",
         })
 
         with pytest.raises(InputError):
-            db.update_workspace_source(
+            db.workspace_store.update_workspace_source(
                 "ws-1",
                 "src-1",
                 {"review_state": "reviewed"},
@@ -168,18 +170,18 @@ class TestWorkspaceSources:
                 actor_user_id=actor_user_id,
             )
 
-        unchanged = db.get_workspace_source("ws-1", "src-1")
+        unchanged = db.workspace_store.get_workspace_source("ws-1", "src-1")
         assert unchanged["review_state"] == "needs_review"
         assert unchanged["version"] == created["version"]
 
     def test_update_source_rejects_invalid_review_state(self, db):
-        created = db.add_workspace_source("ws-1", {
+        created = db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video",
         })
 
         with pytest.raises(InputError):
-            db.update_workspace_source(
+            db.workspace_store.update_workspace_source(
                 "ws-1",
                 "src-1",
                 {"review_state": "invalid"},
@@ -187,36 +189,36 @@ class TestWorkspaceSources:
             )
 
     def test_delete_source(self, db):
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video",
         })
-        db.delete_workspace_source("ws-1", "src-1")
-        assert db.list_workspace_sources("ws-1") == []
+        db.workspace_store.delete_workspace_source("ws-1", "src-1")
+        assert db.workspace_store.list_workspace_sources("ws-1") == []
 
     def test_batch_update_selection(self, db):
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-a", "media_id": 1, "title": "A",
             "source_type": "video",
         })
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-b", "media_id": 2, "title": "B",
             "source_type": "pdf",
         })
-        db.update_workspace_source_selection("ws-1", selected_ids=["src-a"])
-        sources = db.list_workspace_sources("ws-1")
+        db.workspace_store.update_workspace_source_selection("ws-1", selected_ids=["src-a"])
+        sources = db.workspace_store.list_workspace_sources("ws-1")
         sel = {s["id"]: s["selected"] for s in sources}
         assert sel["src-a"] in (True, 1)
         assert sel["src-b"] in (False, 0)
 
     def test_batch_update_review_state_deduplicates_ids_and_leaves_unrelated_rows_unchanged(self, db):
         for source_id in ("src-a", "src-b", "src-c"):
-            db.add_workspace_source("ws-1", {
+            db.workspace_store.add_workspace_source("ws-1", {
                 "id": source_id, "media_id": 1, "title": source_id,
                 "source_type": "video", "review_state": "needs_review",
             })
 
-        updated = db.update_workspace_source_review_states(
+        updated = db.workspace_store.update_workspace_source_review_states(
             "ws-1",
             ["src-a", "src-a", "src-b"],
             "reviewed",
@@ -228,18 +230,18 @@ class TestWorkspaceSources:
         assert all(source["reviewed_at"] == source["review_state_updated_at"] for source in updated)
         assert all(source["reviewed_by_user_id"] == "reviewer-1" for source in updated)
         assert all(source["version"] == 2 for source in updated)
-        unrelated = db.get_workspace_source("ws-1", "src-c")
+        unrelated = db.workspace_store.get_workspace_source("ws-1", "src-c")
         assert unrelated["review_state"] == "needs_review"
         assert unrelated["version"] == 1
 
     def test_batch_update_review_state_preserves_exact_source_ids(self, db):
         for source_id in ("src", " src "):
-            db.add_workspace_source("ws-1", {
+            db.workspace_store.add_workspace_source("ws-1", {
                 "id": source_id, "media_id": 1, "title": repr(source_id),
                 "source_type": "video",
             })
 
-        updated = db.update_workspace_source_review_states(
+        updated = db.workspace_store.update_workspace_source_review_states(
             "ws-1",
             [" src "],
             "needs_review",
@@ -247,8 +249,8 @@ class TestWorkspaceSources:
         )
 
         assert [source["id"] for source in updated] == [" src "]
-        assert db.get_workspace_source("ws-1", " src ")["review_state"] == "needs_review"
-        assert db.get_workspace_source("ws-1", "src")["review_state"] == "unset"
+        assert db.workspace_store.get_workspace_source("ws-1", " src ")["review_state"] == "needs_review"
+        assert db.workspace_store.get_workspace_source("ws-1", "src")["review_state"] == "unset"
 
     @pytest.mark.parametrize(
         "source_id",
@@ -257,7 +259,7 @@ class TestWorkspaceSources:
     )
     def test_batch_update_review_state_rejects_invalid_source_ids(self, db, source_id):
         with pytest.raises(InputError, match="source_ids"):
-            db.update_workspace_source_review_states(
+            db.workspace_store.update_workspace_source_review_states(
                 "ws-1",
                 [source_id],
                 "needs_review",
@@ -275,7 +277,7 @@ class TestWorkspaceSources:
         backend = RecordingBackend()
         db = type("RecordingDB", (), {"backend": backend})()
 
-        CharactersRAGDB._ensure_workspace_subresource_schema_postgres(db, object())
+        postgres_schema._ensure_workspace_subresource_schema_postgres(ChaChaContext(db), object())
 
         backfill = next(
             statement
@@ -286,20 +288,20 @@ class TestWorkspaceSources:
         assert 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"' in backfill
 
     def test_batch_update_review_state_fails_atomically_for_missing_source(self, db):
-        created = db.add_workspace_source("ws-1", {
+        created = db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-a", "media_id": 1, "title": "A",
             "source_type": "video", "review_state": "needs_review",
         })
 
         with pytest.raises(ConflictError):
-            db.update_workspace_source_review_states(
+            db.workspace_store.update_workspace_source_review_states(
                 "ws-1",
                 ["src-a", "missing"],
                 "reviewed",
                 "reviewer-1",
             )
 
-        unchanged = db.get_workspace_source("ws-1", "src-a")
+        unchanged = db.workspace_store.get_workspace_source("ws-1", "src-a")
         assert unchanged["review_state"] == "needs_review"
         assert unchanged["version"] == created["version"]
 
@@ -309,34 +311,34 @@ class TestWorkspaceSources:
         ids=["none", "empty", "blank", "non-string"],
     )
     def test_batch_update_reviewed_requires_non_empty_string_actor(self, db, actor_user_id):
-        created = db.add_workspace_source("ws-1", {
+        created = db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video", "review_state": "needs_review",
         })
 
         with pytest.raises(InputError):
-            db.update_workspace_source_review_states(
+            db.workspace_store.update_workspace_source_review_states(
                 "ws-1",
                 ["src-1"],
                 "reviewed",
                 actor_user_id,
             )
 
-        unchanged = db.get_workspace_source("ws-1", "src-1")
+        unchanged = db.workspace_store.get_workspace_source("ws-1", "src-1")
         assert unchanged["review_state"] == "needs_review"
         assert unchanged["version"] == created["version"]
 
     def test_batch_reorder(self, db):
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-a", "media_id": 1, "title": "A",
             "source_type": "video",
         })
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-b", "media_id": 2, "title": "B",
             "source_type": "pdf",
         })
-        db.reorder_workspace_sources("ws-1", ["src-b", "src-a"])
-        sources = db.list_workspace_sources("ws-1")
+        db.workspace_store.reorder_workspace_sources("ws-1", ["src-b", "src-a"])
+        sources = db.workspace_store.list_workspace_sources("ws-1")
         assert sources[0]["id"] == "src-b"
         assert sources[0]["position"] == 0
         assert sources[1]["id"] == "src-a"
@@ -345,7 +347,7 @@ class TestWorkspaceSources:
     def test_existing_workspace_source_schema_is_backfilled(self, tmp_path):
         db_path = tmp_path / "pre-review.db"
         seed = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
-        seed.upsert_workspace("ws-1", "Test WS")
+        seed.workspace_store.upsert_workspace("ws-1", "Test WS")
         seed.close_all_connections()
 
         with sqlite3.connect(str(db_path)) as conn:
@@ -377,13 +379,13 @@ class TestWorkspaceSources:
 
         migrated = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
         try:
-            source = migrated.get_workspace_source("ws-1", "src-1")
+            source = migrated.workspace_store.get_workspace_source("ws-1", "src-1")
             assert source["review_state"] == "unset"
             assert source["review_state_updated_at"] == source["added_at"]
             assert source["reviewed_at"] is None
             assert source["reviewed_by_user_id"] is None
 
-            malformed = migrated.get_workspace_source("ws-1", "src-blank-added-at")
+            malformed = migrated.workspace_store.get_workspace_source("ws-1", "src-blank-added-at")
             assert malformed["review_state_updated_at"].strip()
             assert malformed["review_state_updated_at"] != malformed["added_at"]
             assert datetime.fromisoformat(
@@ -393,27 +395,27 @@ class TestWorkspaceSources:
             migrated.close_all_connections()
 
     def test_workspace_source_schema_ensure_is_operationally_idempotent(self, db):
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video",
         })
 
         with db.transaction() as conn:
             changes_before = conn.total_changes
-            db._ensure_workspace_subresource_schema_sqlite(conn)
+            sqlite_schema._ensure_workspace_subresource_schema_sqlite(db.ctx, conn)
             assert conn.total_changes == changes_before
 
 
 class TestWorkspaceArtifacts:
     def test_add_artifact(self, db):
-        art = db.add_workspace_artifact("ws-1", {
+        art = db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "Summary",
         })
         assert art["id"] == "art-1"
         assert art["artifact_type"] == "summary"
 
     def test_add_traceable_artifact_contract_fields_and_initial_version(self, db):
-        art = db.add_workspace_artifact("ws-1", {
+        art = db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "brief-1",
             "artifact_type": "workspace_brief",
             "title": "ACP Research Brief",
@@ -464,7 +466,7 @@ class TestWorkspaceArtifacts:
         assert art["redaction"]["support_safe"] is True
         assert art["schema_version"] == 1
 
-        versions = db.list_workspace_artifact_versions("ws-1", "brief-1")
+        versions = db.workspace_store.list_workspace_artifact_versions("ws-1", "brief-1")
         assert len(versions) == 1
         assert versions[0]["artifact_version_id"] == "brief-1:v1"
         assert versions[0]["review_state"] == "accepted"
@@ -481,7 +483,7 @@ class TestWorkspaceArtifacts:
             lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("late reload")),
         )
 
-        artifact = db.add_workspace_artifact(
+        artifact = db.workspace_store.add_workspace_artifact(
             "ws-1",
             {"id": "art-inline", "artifact_type": "summary", "title": "Inline"},
         )
@@ -490,7 +492,7 @@ class TestWorkspaceArtifacts:
         assert artifact["artifact_version_id"] == "art-inline:v1"
 
     def test_artifact_version_ids_are_server_owned_on_create_and_update(self, db):
-        created = db.add_workspace_artifact("ws-1", {
+        created = db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "brief-1",
             "artifact_type": "workspace_brief",
             "title": "Draft Brief",
@@ -503,7 +505,7 @@ class TestWorkspaceArtifacts:
         assert created["artifact_version_id"] == "brief-1:v1"
         assert created["previous_version_id"] is None
 
-        updated = db.update_workspace_artifact(
+        updated = db.workspace_store.update_workspace_artifact(
             "ws-1",
             "brief-1",
             {
@@ -518,7 +520,7 @@ class TestWorkspaceArtifacts:
         assert updated["root_artifact_id"] == "brief-1"
         assert updated["artifact_version_id"] == "brief-1:v2"
         assert updated["previous_version_id"] == "brief-1:v1"
-        versions = db.list_workspace_artifact_versions("ws-1", "brief-1")
+        versions = db.workspace_store.list_workspace_artifact_versions("ws-1", "brief-1")
         assert [version["artifact_version_id"] for version in versions] == ["brief-1:v1", "brief-1:v2"]
 
     def test_workspace_artifact_json_decode_failure_is_logged(self, monkeypatch):
@@ -539,25 +541,25 @@ class TestWorkspaceArtifacts:
         assert warnings[0][0][1] == "source_lineage_json"
 
     def test_list_artifacts(self, db):
-        db.add_workspace_artifact("ws-1", {
+        db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "S1",
         })
-        db.add_workspace_artifact("ws-1", {
+        db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-2", "artifact_type": "podcast", "title": "P1",
         })
-        arts = db.list_workspace_artifacts("ws-1")
+        arts = db.workspace_store.list_workspace_artifacts("ws-1")
         assert len(arts) == 2
 
     def test_update_artifact_with_version_check(self, db):
-        db.add_workspace_artifact("ws-1", {
+        db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "Old",
         })
-        updated = db.update_workspace_artifact("ws-1", "art-1", {"title": "New"}, expected_version=1)
+        updated = db.workspace_store.update_workspace_artifact("ws-1", "art-1", {"title": "New"}, expected_version=1)
         assert updated["title"] == "New"
         assert updated["version"] == 2
 
     def test_update_artifact_creates_new_traceable_version_record(self, db):
-        created = db.add_workspace_artifact("ws-1", {
+        created = db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "brief-1",
             "artifact_type": "workspace_brief",
             "title": "Draft Brief",
@@ -567,7 +569,7 @@ class TestWorkspaceArtifacts:
             "source_lineage": {"sources": [{"source_id": "src-1", "label": "Transcript"}]},
         })
 
-        updated = db.update_workspace_artifact(
+        updated = db.workspace_store.update_workspace_artifact(
             "ws-1",
             "brief-1",
             {
@@ -587,43 +589,43 @@ class TestWorkspaceArtifacts:
         assert updated["review_metadata"]["reason_code"] == "missing_citation"
         assert updated["version_metadata"]["revision_reason"] == "reviewer_requested_changes"
 
-        versions = db.list_workspace_artifact_versions("ws-1", "brief-1")
+        versions = db.workspace_store.list_workspace_artifact_versions("ws-1", "brief-1")
         assert [version["artifact_version_id"] for version in versions] == ["brief-1:v1", "brief-1:v2"]
         assert versions[0]["review_state"] == "draft"
         assert versions[1]["review_state"] == "needs_revision"
 
     def test_update_artifact_stale_version_raises(self, db):
-        db.add_workspace_artifact("ws-1", {
+        db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "X",
         })
-        db.update_workspace_artifact("ws-1", "art-1", {"title": "Y"}, expected_version=1)
+        db.workspace_store.update_workspace_artifact("ws-1", "art-1", {"title": "Y"}, expected_version=1)
         with pytest.raises(ConflictError):
-            db.update_workspace_artifact("ws-1", "art-1", {"title": "Z"}, expected_version=1)
+            db.workspace_store.update_workspace_artifact("ws-1", "art-1", {"title": "Z"}, expected_version=1)
 
     def test_delete_artifact(self, db):
-        db.add_workspace_artifact("ws-1", {
+        db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "X",
         })
-        db.delete_workspace_artifact("ws-1", "art-1")
-        assert db.list_workspace_artifacts("ws-1") == []
+        db.workspace_store.delete_workspace_artifact("ws-1", "art-1")
+        assert db.workspace_store.list_workspace_artifacts("ws-1") == []
 
     def test_delete_artifact_removes_version_history_for_recreate(self, db):
-        db.add_workspace_artifact("ws-1", {
+        db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "X",
         })
 
-        db.delete_workspace_artifact("ws-1", "art-1")
-        recreated = db.add_workspace_artifact("ws-1", {
+        db.workspace_store.delete_workspace_artifact("ws-1", "art-1")
+        recreated = db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "Recreated",
         })
 
         assert recreated["artifact_version_id"] == "art-1:v1"
-        assert len(db.list_workspace_artifact_versions("ws-1", "art-1")) == 1
+        assert len(db.workspace_store.list_workspace_artifact_versions("ws-1", "art-1")) == 1
 
 
 class TestWorkspaceNotes:
     def test_add_note(self, db):
-        note = db.add_workspace_note("ws-1", {
+        note = db.workspace_store.add_workspace_note("ws-1", {
             "title": "My Note", "content": "Hello",
         })
         assert note["title"] == "My Note"
@@ -640,7 +642,7 @@ class TestWorkspaceNotes:
             lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("late reload")),
         )
 
-        note = db.add_workspace_note(
+        note = db.workspace_store.add_workspace_note(
             "ws-1",
             {"title": "Inline", "content": "Committed", "keywords": ["one"]},
         )
@@ -649,23 +651,23 @@ class TestWorkspaceNotes:
         assert note["keywords_json"] == '["one"]'
 
     def test_list_notes_excludes_deleted(self, db):
-        db.add_workspace_note("ws-1", {"title": "N1", "content": ""})
-        n2 = db.add_workspace_note("ws-1", {"title": "N2", "content": ""})
-        db.delete_workspace_note("ws-1", n2["id"])
-        notes = db.list_workspace_notes("ws-1")
+        db.workspace_store.add_workspace_note("ws-1", {"title": "N1", "content": ""})
+        n2 = db.workspace_store.add_workspace_note("ws-1", {"title": "N2", "content": ""})
+        db.workspace_store.delete_workspace_note("ws-1", n2["id"])
+        notes = db.workspace_store.list_workspace_notes("ws-1")
         assert len(notes) == 1
         assert notes[0]["title"] == "N1"
 
     def test_update_note_with_version_check(self, db):
-        note = db.add_workspace_note("ws-1", {"title": "Old", "content": ""})
-        updated = db.update_workspace_note("ws-1", note["id"], {"title": "New"}, expected_version=1)
+        note = db.workspace_store.add_workspace_note("ws-1", {"title": "Old", "content": ""})
+        updated = db.workspace_store.update_workspace_note("ws-1", note["id"], {"title": "New"}, expected_version=1)
         assert updated["title"] == "New"
         assert updated["version"] == 2
 
 
 class TestWorkspaceSettings:
     def test_update_workspace_banner_settings(self, db):
-        ws = db.update_workspace("ws-1", {
+        ws = db.workspace_store.update_workspace("ws-1", {
             "banner_title": "My Project",
             "banner_subtitle": "Research notes",
         }, expected_version=1)
@@ -673,7 +675,7 @@ class TestWorkspaceSettings:
         assert ws["banner_subtitle"] == "Research notes"
 
     def test_update_workspace_audio_settings(self, db):
-        ws = db.update_workspace("ws-1", {
+        ws = db.workspace_store.update_workspace("ws-1", {
             "audio_provider": "openai",
             "audio_model": "tts-1",
             "audio_voice": "alloy",
@@ -684,52 +686,52 @@ class TestWorkspaceSettings:
 
 class TestFKCascadeOnHardDelete:
     def test_hard_delete_workspace_cascades_to_sources(self, db):
-        db.add_workspace_source("ws-1", {
+        db.workspace_store.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video",
         })
-        db.hard_delete_workspace("ws-1")
-        assert db.list_workspace_sources("ws-1") == []
+        db.workspace_store.hard_delete_workspace("ws-1")
+        assert db.workspace_store.list_workspace_sources("ws-1") == []
 
     def test_hard_delete_workspace_cascades_to_artifacts(self, db):
-        db.add_workspace_artifact("ws-1", {
+        db.workspace_store.add_workspace_artifact("ws-1", {
             "id": "art-1", "artifact_type": "summary", "title": "X",
         })
-        db.hard_delete_workspace("ws-1")
-        assert db.list_workspace_artifacts("ws-1") == []
+        db.workspace_store.hard_delete_workspace("ws-1")
+        assert db.workspace_store.list_workspace_artifacts("ws-1") == []
 
     def test_hard_delete_workspace_cascades_to_notes(self, db):
-        db.add_workspace_note("ws-1", {"title": "N", "content": ""})
-        db.hard_delete_workspace("ws-1")
-        assert db.list_workspace_notes("ws-1") == []
+        db.workspace_store.add_workspace_note("ws-1", {"title": "N", "content": ""})
+        db.workspace_store.hard_delete_workspace("ws-1")
+        assert db.workspace_store.list_workspace_notes("ws-1") == []
 
 
 @pytest.mark.parametrize("selected", [True, False])
 def test_source_duplicate_preserves_first_contents_and_version(db, selected):
-    first = db.add_workspace_source(
+    first = db.workspace_store.add_workspace_source(
         "ws-1", {"id": "duplicate", "media_id": 1, "title": "First", "source_type": "web", "selected": selected}
     )
-    retry = db.add_workspace_source(
+    retry = db.workspace_store.add_workspace_source(
         "ws-1", {"id": "duplicate", "media_id": 2, "title": "Changed", "source_type": "pdf", "selected": not selected}
     )
     assert retry == first
-    assert len(db.list_workspace_sources("ws-1")) == 1
+    assert len(db.workspace_store.list_workspace_sources("ws-1")) == 1
 
 
 def test_source_non_duplicate_constraint_failure_remains_conflict(db):
     with pytest.raises(ConflictError):
-        db.add_workspace_source("ws-1", {"id": "invalid", "media_id": 1, "title": None, "source_type": "web"})
-    assert db.list_workspace_sources("ws-1") == []
+        db.workspace_store.add_workspace_source("ws-1", {"id": "invalid", "media_id": 1, "title": None, "source_type": "web"})
+    assert db.workspace_store.list_workspace_sources("ws-1") == []
 
 
 def test_source_batch_selection_clears_and_preserves_version_counts(db):
-    a = db.add_workspace_source("ws-1", {"id": "a", "media_id": 1, "title": "A", "source_type": "web"})
-    b = db.add_workspace_source(
+    a = db.workspace_store.add_workspace_source("ws-1", {"id": "a", "media_id": 1, "title": "A", "source_type": "web"})
+    b = db.workspace_store.add_workspace_source(
         "ws-1", {"id": "b", "media_id": 2, "title": "B", "source_type": "web", "selected": False}
     )
-    db.update_workspace_source_selection("ws-1", selected_ids=["a"])
-    rows = {row["id"]: row for row in db.list_workspace_sources("ws-1")}
+    db.workspace_store.update_workspace_source_selection("ws-1", selected_ids=["a"])
+    rows = {row["id"]: row for row in db.workspace_store.list_workspace_sources("ws-1")}
     assert rows["a"]["version"] == a["version"] + 2
     assert rows["b"]["version"] == b["version"] + 1
-    db.update_workspace_source_selection("ws-1", selected_ids=[])
-    assert all(not row["selected"] for row in db.list_workspace_sources("ws-1"))
+    db.workspace_store.update_workspace_source_selection("ws-1", selected_ids=[])
+    assert all(not row["selected"] for row in db.workspace_store.list_workspace_sources("ws-1"))

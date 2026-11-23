@@ -55,6 +55,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_cata
 from tldw_Server_API.app.core.LLM_Calls.provider_results import sanitized_provider_stream_exception
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import refuse_admin_disabled
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     call_credential_source,
@@ -1318,6 +1319,8 @@ def _call_adapter(
     admitted = llm_call_context(prechecked=True) if checked else contextlib.nullcontext()
     try:
         with provider_error_privacy_scope(privacy_safe_errors), admitted:
+            # The admin override first: a disabled provider gets no model-list request (TASK-15582).
+            refuse_admin_disabled(adapter, request)
             call_started = time.monotonic()
             _validate_audited_call_policy_transport(registry, provider, request)
             _validate_provider_model_selection(provider, request)
@@ -1368,6 +1371,8 @@ async def _call_adapter_async(
 
     try:
         with provider_error_privacy_scope(privacy_safe_errors), llm_call_context(prechecked=True):
+            # The admin override first: a disabled provider gets no model-list request (TASK-15582).
+            refuse_admin_disabled(adapter, request)
             call_started = time.monotonic()
             strict_policy = _validate_audited_call_policy_transport(
                 registry, provider, request

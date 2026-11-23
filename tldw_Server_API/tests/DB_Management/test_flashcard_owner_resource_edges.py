@@ -189,8 +189,8 @@ def test_restricted_role_actual_persistence_keeps_private_rows_owner_local(owner
 
 @pytest.mark.parametrize("operation", ["create", "move"])
 def test_deck_workspace_reference_requires_current_owner(owners, operation):
-    owners.alice.upsert_workspace("alice-private", "Alice private workspace")
-    owners.bob.upsert_workspace("bob-private", "Bob private workspace")
+    owners.alice.workspace_store.upsert_workspace("alice-private", "Alice private workspace")
+    owners.bob.workspace_store.upsert_workspace("bob-private", "Bob private workspace")
     owned = owners.bob.add_deck("Owned workspace reference", workspace_id="bob-private")
     assert owners.bob.get_deck(owned)["workspace_id"] == "bob-private"
     if not owners.postgres:
@@ -313,7 +313,7 @@ def test_valid_owned_ancestry_and_queue_priority_remain_available(owners):
 
 @pytest.mark.asyncio
 async def test_authorized_service_handoff_uses_real_owner_db_before_flashcard_reads(owners):
-    owners.alice.upsert_workspace("shared-owner-workspace", "Shared workspace")
+    owners.alice.workspace_store.upsert_workspace("shared-owner-workspace", "Shared workspace")
     deck = owners.alice.add_deck("Explicit owner share deck", workspace_id="shared-owner-workspace")
     card = owners.alice.add_flashcard({"deck_id": deck, "front": "Shared read", "back": "Authorized owner repository"})
     share = {"id": 42, "workspace_id": "shared-owner-workspace", "owner_user_id": 2, "share_scope_type": "team", "share_scope_id": 11, "access_level": "read", "allow_clone": False}

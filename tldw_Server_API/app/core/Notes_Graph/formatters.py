@@ -42,6 +42,8 @@ def to_cytoscape(graph: NoteGraphResponse) -> dict[str, Any]:
             data["tag_count"] = node.tag_count
         if node.primary_source_id is not None:
             data["primary_source_id"] = node.primary_source_id
+        if node.has_note_links is not None:
+            data["has_note_links"] = node.has_note_links
         cy_nodes.append({"data": data})
 
     cy_edges = []

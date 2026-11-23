@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_workspace_chat_startup_rls_sql
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
     workspace_chat_startup_schema_statements,
 )
@@ -248,16 +249,17 @@ def test_failed_compatibility_step_restores_exact_old_shape(
     old, _, before = _seed_shape(db_factory, monkeypatch, shape)
     pg = _postgres(old)
     name = "_migrate_from_v78_to_v79_postgres" if pg else "_migrate_from_v74_to_v75"
-    assert hasattr(CharactersRAGDB, name), "Owned ordering must have an independent 75/79 migration"
-    migrate = getattr(CharactersRAGDB, name)
+    steps = postgres_steps if pg else sqlite_steps
+    assert hasattr(steps, name), "Owned ordering must have an independent 75/79 migration"
+    migrate = getattr(steps, name)
     old.close_all_connections()
 
-    def fail_after_version_write(self: CharactersRAGDB, conn: Any) -> None:
-        migrate(self, conn)
+    def fail_after_version_write(ctx, conn: Any) -> None:
+        migrate(ctx, conn)
         raise CharactersRAGDBError("injected compatibility failure")
 
     with monkeypatch.context() as failing:
-        failing.setattr(CharactersRAGDB, name, fail_after_version_write)
+        failing.setattr(steps, name, fail_after_version_write)
         with pytest.raises(CharactersRAGDBError, match="injected compatibility failure"):
             db_factory()
     with monkeypatch.context() as old_code:
@@ -295,7 +297,7 @@ def test_existing_collision_schema_skips_unrelated_postgres_ddl_and_reopen_migra
     assert upgraded.backend.table_exists(ORDER)
     upgraded.close_all_connections()
 
-    def reject_migration_replay(self: CharactersRAGDB, conn: Any) -> None:
+    def reject_migration_replay(ctx, conn: Any) -> None:
         pytest.fail("Completed compatible schema must not replay startup/order migrations")
 
     with monkeypatch.context() as completed:
@@ -305,7 +307,8 @@ def test_existing_collision_schema_skips_unrelated_postgres_ddl_and_reopen_migra
             "_migrate_from_v77_to_v78_postgres",
             "_migrate_from_v78_to_v79_postgres",
         ):
-            completed.setattr(CharactersRAGDB, name, reject_migration_replay)
+            steps = postgres_steps if name.endswith("_postgres") else sqlite_steps
+            completed.setattr(steps, name, reject_migration_replay)
         reopened = db_factory()
     assert _version(reopened) == (79 if pg else 75)
 

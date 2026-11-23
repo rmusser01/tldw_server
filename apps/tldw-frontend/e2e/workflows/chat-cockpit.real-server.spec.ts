@@ -833,6 +833,21 @@ const ensureComposerOptionsVisible = async (page: Page) => {
   await expect(page.getByTestId('composer-options-panel')).toBeVisible();
 };
 
+// CC-08 (#3101): the Tools tray is web search's one on/off control; the
+// Context rail lists it as a source while it is on.
+const openTrayWebSearchToggle = async (page: Page) => {
+  const tools = page.getByTestId('composer-options-toggle');
+  if ((await tools.getAttribute('aria-expanded')) !== 'true') await tools.click();
+  const toggle = page.getByTestId('web-search-toggle');
+  await expect(toggle).toBeVisible();
+  return toggle;
+};
+
+const closeToolsTray = async (page: Page) => {
+  const tools = page.getByTestId('composer-options-toggle');
+  if ((await tools.getAttribute('aria-expanded')) === 'true') await tools.click();
+};
+
 const closeSearchContextIfOpen = async (page: Page) => {
   const closeSearch = page.getByRole('button', { name: 'Close Search & Context' });
   if (await closeSearch.isVisible().catch(() => false)) {
@@ -1848,7 +1863,11 @@ test.describe('/chat cockpit real-server parity', () => {
       timeout: 60_000,
     });
     await assertNoBlockingServerDialog(page);
-    await expect(page.getByRole('log', { name: /chat messages/i })).toBeVisible();
+    // The log is the message rows only (AX-11): on a fresh chat it is present
+    // but empty and has no height, so check it exists, and that the chat
+    // column around it shows.
+    await expect(page.getByRole('log', { name: /chat messages/i })).toBeAttached();
+    await expect(page.getByTestId('playground-chat-shell')).toBeVisible();
     await assertCoreComposerControls(page, { composerOnly: true });
     await assertNoHorizontalOverflow(page);
     await page.screenshot({
@@ -1930,7 +1949,7 @@ test.describe('/chat cockpit real-server parity', () => {
       contextRail.getByRole('button', { name: 'Select character or persona' })
     ).toBeVisible();
     await assertRuntimeMcpRailState(runtimeInspector);
-    const webSearchControl = contextRail.getByRole('button', { name: 'Web search', exact: true });
+    const webSearchControl = await openTrayWebSearchToggle(page);
     const initialWebSearchState = await webSearchControl.getAttribute('aria-pressed');
     expect(['true', 'false']).toContain(initialWebSearchState);
 
@@ -1941,6 +1960,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await webSearchControl.click();
       await expect(webSearchControl).toHaveAttribute('aria-pressed', 'true');
     }
+    await closeToolsTray(page);
     const sourceInventory = contextRail.getByRole('list', { name: 'Context sources' });
     await expect(sourceInventory).toBeVisible();
     await expect(
@@ -1948,9 +1968,11 @@ test.describe('/chat cockpit real-server parity', () => {
     ).toContainText('Selected for the next message.');
 
     await closeSearchContextIfOpen(page);
-    await contextRail.getByRole('button', { name: 'Open Search & Context' }).click();
-    await expect(page.getByRole('heading', { name: /Knowledge Search/i })).toBeVisible();
+    await contextRail.getByRole('button', { name: 'Add sources from Search & Context' }).click();
+    await expect(page.getByRole('heading', { name: 'Search & Context', exact: true })).toBeVisible();
 
+    // The MCP control lives in the Tools tray, which closeToolsTray shut above.
+    await ensureComposerOptionsVisible(page);
     const mcpToggle = page.getByTestId('mcp-tools-toggle');
     await expect(mcpToggle).toHaveAccessibleName(
       /MCP tools|MCP tools unavailable|MCP tools are offline|MCP tools: None|Not checked yet/i
@@ -2058,11 +2080,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await ensureDesktopCockpitRailsVisible(page);
     await assertNoHorizontalOverflow(page);
 
-    const sendContextRail = getDesktopContextRail(page);
-    const sendWebSearchControl = sendContextRail.getByRole('button', {
-      name: 'Web search',
-      exact: true,
-    });
+    const sendWebSearchControl = await openTrayWebSearchToggle(page);
     if ((await sendWebSearchControl.getAttribute('aria-pressed')) !== 'true') {
       await sendWebSearchControl.click();
     }
@@ -2071,6 +2089,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await sendWebSearchControl.click();
       await expect(sendWebSearchControl).toHaveAttribute('aria-pressed', 'false');
     }
+    await closeToolsTray(page);
 
     const smokePrompt = `cockpit smoke ${Date.now()}`;
     await page.getByTestId('chat-input').fill(smokePrompt);
@@ -2431,11 +2450,10 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(runtimePanelTarget).toBeHidden();
     await expectMobileDraftPreserved();
     const contextPanel = contextPanelTarget;
-    await expect(contextPanel.getByRole('button', { name: 'Open Search & Context' })).toBeVisible();
-    const mobileWebSearchControl = contextPanel.getByRole('button', {
-      name: 'Web search',
-      exact: true,
-    });
+    await expect(
+      contextPanel.getByRole('button', { name: 'Add sources from Search & Context' })
+    ).toBeVisible();
+    const mobileWebSearchControl = await openTrayWebSearchToggle(page);
     const initialMobileWebSearchState = await mobileWebSearchControl.getAttribute('aria-pressed');
     await mobileWebSearchControl.click();
     await expect(mobileWebSearchControl).toHaveAttribute(
@@ -2451,9 +2469,10 @@ test.describe('/chat cockpit real-server parity', () => {
       await mobileWebSearchControl.click();
       await expect(mobileWebSearchControl).toHaveAttribute('aria-pressed', 'false');
     }
+    await closeToolsTray(page);
     await expectMobileDraftPreserved();
-    await contextPanel.getByRole('button', { name: 'Open Search & Context' }).click();
-    await expect(page.getByRole('heading', { name: /Knowledge Search/i })).toBeVisible();
+    await contextPanel.getByRole('button', { name: 'Add sources from Search & Context' }).click();
+    await expect(page.getByRole('heading', { name: 'Search & Context', exact: true })).toBeVisible();
     await closeSearchContextIfOpen(page);
     await expectMobileDraftPreserved();
     await contextPanel.getByRole('button', { name: /Select prompt|Select a prompt/i }).click();
@@ -3268,15 +3287,12 @@ test.describe('/chat cockpit real-server parity', () => {
       normalizeConfiguredChatModelId(chatModelSelection.provider, entry.model || entry.model_id || entry.id || entry.name) === chatModelSelection.model)).toBe(true);
     await expect(page.getByTestId('model-selector-option')).toHaveCount(0);
 
-    const contextRail = getDesktopContextRail(page);
-    const webSearchControl = contextRail.getByRole('button', {
-      name: 'Web search',
-      exact: true,
-    });
+    const webSearchControl = await openTrayWebSearchToggle(page);
     if ((await webSearchControl.getAttribute('aria-pressed')) === 'true') {
       await webSearchControl.click();
       await expect(webSearchControl).toHaveAttribute('aria-pressed', 'false');
     }
+    await closeToolsTray(page);
 
     const runtimeInspector = getDesktopRuntimeInspector(page);
     const regenerateControl = runtimeInspector.getByRole('button', {

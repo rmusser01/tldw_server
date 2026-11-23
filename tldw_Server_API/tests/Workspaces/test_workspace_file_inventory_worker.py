@@ -28,9 +28,9 @@ def db(tmp_path: Path) -> CharactersRAGDB:
 
 
 def _workspace_with_host_root(db: CharactersRAGDB, root_path: Path) -> dict[str, Any]:
-    db.upsert_workspace("ws-1", "Workspace", workspace_profile="project")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace", workspace_profile="project")
     root_path.mkdir(parents=True, exist_ok=True)
-    return db.upsert_workspace_primary_root(
+    return db.workspace_store.upsert_workspace_primary_root(
         "ws-1",
         {
             "root_id": "root-1",
@@ -42,8 +42,8 @@ def _workspace_with_host_root(db: CharactersRAGDB, root_path: Path) -> dict[str,
 
 
 def _workspace_with_sandbox_root(db: CharactersRAGDB) -> dict[str, Any]:
-    db.upsert_workspace("ws-1", "Workspace", workspace_profile="project")
-    return db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace("ws-1", "Workspace", workspace_profile="project")
+    return db.workspace_store.upsert_workspace_primary_root(
         "ws-1",
         {
             "root_id": "root-1",
@@ -56,14 +56,14 @@ def _workspace_with_sandbox_root(db: CharactersRAGDB) -> dict[str, Any]:
 
 
 def _attached_scan(db: CharactersRAGDB, root: dict[str, Any], policy_fingerprint: str) -> dict[str, Any]:
-    scan = db.begin_workspace_file_inventory_scan(
+    scan = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-1",
         root["root_id"],
         int(root["version"]),
         policy_fingerprint,
         requested_by="user-1",
     )
-    return db.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 501, "uuid": "job-501"})
+    return db.workspace_store.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 501, "uuid": "job-501"})
 
 
 def _job(root: dict[str, Any], scan: dict[str, Any], policy_fingerprint: str) -> dict[str, Any]:
@@ -110,7 +110,7 @@ async def test_worker_root_version_mismatch_completes_scan_failed(
     root = _workspace_with_host_root(db, root_path)
     policy = build_inventory_ignore_policy()
     scan = _attached_scan(db, root, policy.fingerprint)
-    db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace_primary_root(
         "ws-1",
         {
             "root_id": root["root_id"],
@@ -154,8 +154,8 @@ async def test_worker_host_local_scan_completes_and_writes_items(
         allowed_roots=[tmp_path],
     )
 
-    status = db.get_workspace_file_inventory_status("ws-1", policy_fingerprint=policy.fingerprint)
-    page = db.list_workspace_file_inventory_items("ws-1", include_ignored=True, limit=20)
+    status = db.workspace_store.get_workspace_file_inventory_status("ws-1", policy_fingerprint=policy.fingerprint)
+    page = db.workspace_store.list_workspace_file_inventory_items("ws-1", include_ignored=True, limit=20)
 
     assert result["state"] == "current"
     assert result["counts"]["files"] == 1
@@ -185,7 +185,7 @@ async def test_worker_policy_fingerprint_mismatch_fails_scan_without_writing_ite
         "SELECT state, diagnostics_json FROM workspace_file_inventory_scans WHERE scan_id = ?",
         (scan["scan_id"],),
     ).fetchone()
-    page = db.list_workspace_file_inventory_items("ws-1", include_ignored=True, limit=20)
+    page = db.workspace_store.list_workspace_file_inventory_items("ws-1", include_ignored=True, limit=20)
 
     assert result["state"] == "failed"
     assert updated["state"] == "failed"
@@ -220,7 +220,7 @@ async def test_worker_unexpected_scan_error_finalizes_scan_failed(
         "SELECT state, diagnostics_json FROM workspace_file_inventory_scans WHERE scan_id = ?",
         (scan["scan_id"],),
     ).fetchone()
-    root_after = db.get_workspace_primary_root("ws-1")
+    root_after = db.workspace_store.get_workspace_primary_root("ws-1")
 
     assert result["state"] == "failed"
     assert updated["state"] == "failed"
@@ -252,8 +252,8 @@ def test_root_resolution_rejects_missing_and_symlink_roots_without_mutating_db(
     db: CharactersRAGDB,
     tmp_path: Path,
 ) -> None:
-    db.upsert_workspace("ws-1", "Workspace", workspace_profile="project")
-    missing_root = db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace("ws-1", "Workspace", workspace_profile="project")
+    missing_root = db.workspace_store.upsert_workspace_primary_root(
         "ws-1",
         {
             "root_id": "root-1",
@@ -275,7 +275,7 @@ def test_root_resolution_rejects_missing_and_symlink_roots_without_mutating_db(
         symlink_root_path.symlink_to(real_root, target_is_directory=True)
     except OSError as exc:
         pytest.skip(f"symlink creation unsupported: {exc}")
-    symlink_root = db.upsert_workspace_primary_root(
+    symlink_root = db.workspace_store.upsert_workspace_primary_root(
         "ws-1",
         {
             "root_id": "root-1",
@@ -288,7 +288,7 @@ def test_root_resolution_rejects_missing_and_symlink_roots_without_mutating_db(
         root=symlink_root,
         allowed_roots=[tmp_path],
     )
-    after_root = db.get_workspace_primary_root("ws-1")
+    after_root = db.workspace_store.get_workspace_primary_root("ws-1")
 
     assert missing_resolution.ok is False
     assert missing_resolution.failure_code == "workspace_project_root_missing"

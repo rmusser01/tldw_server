@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -33,7 +35,7 @@ def _create_character(db: CharactersRAGDB, name: str = "Exemplar Test Character"
 def test_migration_v21_to_v22_creates_exemplar_tables(db_path: Path, monkeypatch):
     def initialize_historical_v21(db):
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 21):
                 steps[version](conn)
@@ -55,7 +57,7 @@ def test_migration_v21_to_v22_creates_exemplar_tables(db_path: Path, monkeypatch
 
     # Verify the exact historical step before the ordinary initializer reaches head.
     with seeded.transaction() as conn:
-        seeded._migrate_from_v21_to_v22(conn)
+        sqlite_steps._migrate_from_v21_to_v22(seeded.ctx, conn)
         assert seeded._get_db_version(conn) == 22
         tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"character_exemplars", "character_exemplars_fts"}.issubset(tables)

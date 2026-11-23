@@ -548,7 +548,7 @@ async def test_concurrent_callers_share_one_resolution() -> None:
     ("configured_model", "expected_code"),
     [
         ("gpt-allowed", None),
-        ("gpt-blocked", "model_not_allowed"),
+        ("gpt-blocked", "model_denied"),
     ],
 )
 async def test_concurrent_implicit_configured_model_policy_is_enforced_once(
@@ -574,7 +574,7 @@ async def test_concurrent_implicit_configured_model_policy_is_enforced_once(
         {
             "openai": LLMProviderOverride(
                 provider="openai",
-                allowed_models=["gpt-allowed"],
+                denied_models=["gpt-blocked"],
             )
         }
     )
@@ -627,7 +627,7 @@ async def test_concurrent_explicit_and_implicit_models_enforce_per_caller_policy
         {
             "openai": LLMProviderOverride(
                 provider="openai",
-                allowed_models=["gpt-explicit-allowed"],
+                denied_models=["gpt-blocked-default"],
             )
         }
     )
@@ -650,7 +650,7 @@ async def test_concurrent_explicit_and_implicit_models_enforce_per_caller_policy
         assert len(implicit_result) == 1
         assert isinstance(implicit_result[0], ByokResolutionError)
         assert implicit_result[0].code == "invalid_provider_credentials"
-        assert getattr(implicit_result[0], "policy_code", None) == "model_not_allowed"
+        assert getattr(implicit_result[0], "policy_code", None) == "model_denied"
         assert calls == 1
     finally:
         release.set()
@@ -1891,6 +1891,45 @@ async def test_authoritative_runtime_revalidates_cached_credentials(monkeypatch)
         await runtime.close()
 
 
+@pytest.mark.asyncio
+async def test_authoritative_runtime_checks_the_scope_before_the_admin_override(monkeypatch):
+    """TASK-15571, TASK-15581: a revoked scope fails as before; the admin override is checked only after it."""
+    from tldw_Server_API.app.core.AuthNZ import byok_runtime
+    from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+        ProviderScopeResult,
+        ProviderScopeStatus,
+    )
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    class Repo:
+        async def resolve_authorized_secret(self, user_id, provider):
+            return ProviderScopeResult(ProviderScopeStatus.UNAUTHORIZED)
+
+    async def repo():
+        return Repo()
+
+    monkeypatch.setattr(byok_runtime, "_get_user_repo", repo)
+    monkeypatch.setattr(byok_runtime, "is_byok_enabled", lambda: True)
+    monkeypatch.setattr(byok_runtime, "is_provider_allowlisted", lambda _provider: True)
+    set_llm_provider_overrides_cache_for_tests({"openai": LLMProviderOverride(provider="openai", allowed_models=["x"])})
+    runtime = ProviderCredentialRuntime(
+        user_id=7,
+        team_ids=[],
+        org_ids=[],
+        trusted_base_url_override=False,
+        authoritative_scope=byok_runtime.AuthoritativeProviderScope(7),
+        server_config_snapshot={"openai_api": {"api_key": "server-key", "api_base_url": "https://fixed.example/v1"}},
+    )
+    try:
+        with pytest.raises(ByokResolutionError, match="credential_scope_revoked"):
+            await runtime.resolve("openai", model="denied-model")
+    finally:
+        await runtime.close()
+
+
 @pytest.mark.parametrize(
     "extra",
     [
@@ -2039,3 +2078,61 @@ async def test_authoritative_runtime_cannot_publish_after_waiter_cleanup_close(m
         release_cleanup.set()
         await runtime.close()
         await original_gather(caller, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "app_config", "expected"),
+    [
+        ("user", None, "user"),
+        ("user", {"openai_api": {"api_base_url": "https://models.operator.example/v1"}}, "model_not_allowed"),
+        ("team", None, "model_not_allowed"),
+        ("org", None, "model_not_allowed"),
+        ("server_default", None, "model_not_allowed"),
+    ],
+    ids=["user", "user-at-operator-host", "team", "org", "server"],
+)
+async def test_a_model_off_the_allowlist_resolves_only_on_the_users_own_key(source, app_config, expected) -> None:
+    """TASK-15582: the runtime checks the allowlist after resolution, against the source the handle will carry."""
+
+    async def resolver(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        return ResolvedByokCredentials(
+            provider=provider, api_key=SECRET, app_config=app_config, credential_fields={}, source=source,
+            allowlisted=True, status=ByokResolutionStatus.RESOLVED,
+        )
+
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", allowed_models=["gpt-allowed"])}
+    )
+    runtime = _runtime(resolver, override_snapshot_resolver=capture_provider_override_call_snapshot)
+    try:
+        outcome = (await runtime.resolve("openai", model="gpt-other")).credential_source
+    except ByokResolutionError as error:
+        outcome = getattr(error, "policy_code", error.code)
+    finally:
+        await runtime.close()
+        set_llm_provider_overrides_cache_for_tests({})
+    assert outcome == expected
+
+
+@pytest.mark.asyncio
+async def test_a_denied_model_is_refused_before_any_key_is_resolved() -> None:
+    """TASK-15582 (R12): what every key refuses is refused before a credential is read."""
+    calls = 0
+
+    async def resolver(provider: str, **_kwargs) -> ResolvedByokCredentials:
+        nonlocal calls
+        calls += 1
+        return _resolution(provider)
+
+    set_llm_provider_overrides_cache_for_tests(
+        {"openai": LLMProviderOverride(provider="openai", denied_models=["gpt-denied"])}
+    )
+    runtime = _runtime(resolver, override_snapshot_resolver=capture_provider_override_call_snapshot)
+    try:
+        with pytest.raises(ByokResolutionError) as refused:
+            await runtime.resolve("openai", model="gpt-denied")
+    finally:
+        await runtime.close()
+        set_llm_provider_overrides_cache_for_tests({})
+    assert (refused.value.policy_code, calls) == ("model_denied", 0)

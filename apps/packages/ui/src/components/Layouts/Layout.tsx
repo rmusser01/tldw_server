@@ -35,6 +35,7 @@ import { useLayoutEffectsOwner } from "@/hooks/useLayoutEffectsOwner"
 import { useChatSidebar } from "@/hooks/useFeatureFlags"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { ChatSidebar } from "@/components/Common/ChatSidebar"
+import { isMainChatRoute } from "./header-action-policy"
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { setSettingsReturnTo } from "@/utils/settings-return"
@@ -170,9 +171,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const isViewportConstrainedRoute = (
     VIEWPORT_CONSTRAINED_PATHS as readonly string[]
   ).includes(location.pathname)
+  // The drawer is named after what ChatSidebar shows on this route (XP-11).
   const mobileSidebarTitle = location.pathname.startsWith("/knowledge")
     ? t("common:knowledgeSidebar.title", "Knowledge history")
-    : t("common:chatSidebar.title", "Chats")
+    : isMainChatRoute(location.pathname)
+      ? t("common:chatSidebar.title", "Chats")
+      : t("common:chatSidebar.menuTitle", "Menu")
   const chatScreenBackgroundStyle =
     isChatScreen && chatBackgroundImage
       ? {

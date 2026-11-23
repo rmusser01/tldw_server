@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.Workspaces.root_binding_service import WorkspaceRo
 @pytest.fixture
 def db(tmp_path) -> CharactersRAGDB:
     database = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    database.upsert_workspace("ws-project", "Project Workspace")
+    database.workspace_store.upsert_workspace("ws-project", "Project Workspace")
     return database
 
 
@@ -50,8 +50,8 @@ def test_provision_and_attach_sandbox_root_creates_active_operation_and_project_
     assert result.primary_root is not None
     assert result.primary_root["backend"] == "sandbox_volume"
     assert result.primary_root["sandbox_mount_state"] == "not_configured"
-    assert db.get_workspace("ws-project")["workspace_profile"] == "project"
-    assert db.list_active_workspace_operations("ws-project")[0]["id"] == result.operation["operation_id"]
+    assert db.workspace_store.get_workspace("ws-project")["workspace_profile"] == "project"
+    assert db.workspace_store.list_active_workspace_operations("ws-project")[0]["id"] == result.operation["operation_id"]
 
 
 def test_provision_and_attach_sandbox_root_retries_return_same_operation(db, volume_service):
@@ -124,7 +124,7 @@ def test_provision_and_attach_sandbox_root_maps_sandbox_idempotency_conflict(db:
             idempotency_key="root-key",
         )
 
-    operation = db.get_workspace_operation_by_idempotency(
+    operation = db.workspace_store.get_workspace_operation_by_idempotency(
         workspace_id="ws-project",
         user_id="user-1",
         command=WORKSPACE_SANDBOX_ROOT_COMMAND,

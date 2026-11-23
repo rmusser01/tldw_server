@@ -10,29 +10,32 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import (
     NotesLink,
     NotesLinkStore,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_link import NotesLinkMaterializer
+from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
 
 _LIVE_POSTGRES_DSN = os.getenv("TEST_DATABASE_URL") or os.getenv("POSTGRES_TEST_DSN")
 
 
 def test_postgres_initializer_serializes_v58_before_policy_install() -> None:
-    source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
+    calls = ladder.ladder_calls(ladder.postgres_init_function())
+    order = ladder.names(calls)
 
-    assert "_get_schema_version_postgres(conn, lock=True)" in source
-    assert "_migrate_from_v57_to_v58_postgres(conn)" in source
-    assert "_ensure_chacha_rls_postgres(conn)" in source
-    migration = source.index("_migrate_from_v57_to_v58_postgres(conn)")
-    policy = source.index("_ensure_chacha_rls_postgres(conn)")
+    assert calls[order.index("_get_schema_version_postgres")].kwargs == {"lock": True}
+    assert "_migrate_from_v57_to_v58_postgres" in order
+    assert "_ensure_chacha_rls_postgres" in order
+    migration = order.index("_migrate_from_v57_to_v58_postgres")
+    policy = order.index("_ensure_chacha_rls_postgres")
     assert migration < policy
 
 
 def test_postgres_v58_schema_uses_owner_and_live_query_indexes() -> None:
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v57_to_v58_postgres)
+    source = inspect.getsource(postgres_steps._migrate_from_v57_to_v58_postgres)
 
     assert "idx_note_edges_owner_live" in source
     assert "user_id, deleted" in source

@@ -355,7 +355,7 @@ export const launchWebClipperFromContextMenu = async (
     notify(
       title,
       browser.i18n.getMessage("contextSaveToClipperDeliveryFailed") ||
-        "Could not open the sidebar to save this clip. Check that the tldw Assistant sidebar is allowed on this site and try again.",
+        "Could not open the sidebar to save this clip. Check that the tldw sidebar is allowed on this site and try again.",
     );
   }
 };
@@ -4838,7 +4838,7 @@ export default defineBackground({
             } catch (e: any) {
               const failureMessage =
                 browser.i18n.getMessage("contextSaveToNotesDeliveryFailed") ||
-                "Could not open the sidebar to save this note. Check that the tldw Assistant sidepanel is allowed on this site and try again.";
+                "Could not open the sidebar to save this note. Check that the tldw sidepanel is allowed on this site and try again.";
               notify(title, failureMessage);
             }
           },
@@ -4889,7 +4889,7 @@ export default defineBackground({
                 browser.i18n.getMessage(
                   "contextSaveToCompanionDeliveryFailed",
                 ) ||
-                "Could not open the sidebar to save this selection. Check that the tldw Assistant sidepanel is allowed on this site and try again.";
+                "Could not open the sidebar to save this selection. Check that the tldw sidepanel is allowed on this site and try again.";
               notify(title, failureMessage);
             }
           },

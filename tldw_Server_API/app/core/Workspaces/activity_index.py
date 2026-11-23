@@ -62,7 +62,7 @@ class WorkspaceActivityIndexService:
         activity_limit: int = 25,
     ) -> dict[str, Any]:
         """Return the Workspace index/activity contract for API responses."""
-        workspace = self.chacha_db.get_workspace(workspace_id, include_deleted=True)
+        workspace = self.chacha_db.workspace_store.get_workspace(workspace_id, include_deleted=True)
         if workspace is None:
             raise WorkspaceMembershipServiceError(
                 "workspace_not_found",
@@ -171,7 +171,7 @@ class WorkspaceActivityIndexService:
 
     def _runtime_summary(self, workspace_id: str) -> dict[str, Any]:
         try:
-            rows = self.chacha_db.list_workspace_runtime_bindings(workspace_id, limit=50)
+            rows = self.chacha_db.workspace_store.list_workspace_runtime_bindings(workspace_id, limit=50)
         except AttributeError:
             rows = []
         bindings = [runtime_binding_response_payload(row) for row in rows]
@@ -188,7 +188,7 @@ class WorkspaceActivityIndexService:
         workspace_id: str,
         bindings: list[Mapping[str, Any]],
     ) -> dict[str, Any]:
-        summary = getattr(self.chacha_db, "workspace_runtime_binding_summary", None)
+        summary = getattr(getattr(self.chacha_db, "workspace_store", None), "workspace_runtime_binding_summary", None)
         if callable(summary):
             return summary(workspace_id)
         by_kind = Counter(str(item.get("binding_kind") or "") for item in bindings)
@@ -203,7 +203,7 @@ class WorkspaceActivityIndexService:
 
     def _recent_activity(self, workspace_id: str, activity_limit: int) -> list[dict[str, Any]]:
         try:
-            return self.chacha_db.list_workspace_activity_events(workspace_id, limit=activity_limit)
+            return self.chacha_db.workspace_store.list_workspace_activity_events(workspace_id, limit=activity_limit)
         except AttributeError:
             return []
 

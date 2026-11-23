@@ -2,7 +2,6 @@
 # Description: Aggregate audio endpoints and WebSocket routes.
 import asyncio as asyncio
 import importlib
-import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -20,10 +19,10 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async as chat_api_call_async,
 )
 from tldw_Server_API.app.core.config_llm_providers import get_api_keys
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.Metrics.metrics_manager import (
     get_metrics_registry,
 )
-import tldw_Server_API.app.core.config as _config
 import tldw_Server_API.app.core.Provider_Credentials.byok_runtime as _byok_runtime
 
 from . import (
@@ -131,6 +130,7 @@ _TTS_CREDENTIAL_ERROR_MESSAGES = {
     "credential_scope_revoked": "The selected provider credential scope is no longer available.",
     "provider_disabled": "The selected provider is disabled by administrator policy.",
     "model_not_allowed": "The selected model is not allowed for this provider.",
+    "model_denied": "The selected model is disabled by administrator policy.",
 }
 
 
@@ -144,7 +144,7 @@ def _tts_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
     return TTSPublicHTTPException(
         status_code=(
             status.HTTP_403_FORBIDDEN
-            if code in {"provider_disabled", "model_not_allowed", "credential_scope_revoked"}
+            if code in ADMIN_POLICY_CODES | {"credential_scope_revoked"}
             else status.HTTP_503_SERVICE_UNAVAILABLE
         ),
         detail={"error_code": code, "message": message},
@@ -198,45 +198,6 @@ async def _resolve_tts_byok(
         return await core_tts_service._resolve_tts_byok(**kwargs)
     except ByokResolutionError as exc:
         raise _tts_credential_http_exception(exc) from None
-
-
-def _get_failopen_cap_minutes() -> float:
-    """Return per-connection fail-open cap in minutes for streaming quotas.
-
-    Resolution order:
-      1) Env var AUDIO_FAILOPEN_CAP_MINUTES (>0)
-      2) Config [Audio-Quota] failopen_cap_minutes (>0)
-      3) Config [Audio] failopen_cap_minutes (>0)
-      4) Default 5.0
-    """
-    v = os.getenv("AUDIO_FAILOPEN_CAP_MINUTES")
-    if v is not None:
-        try:
-            f = float(v)
-            if f > 0:
-                return f
-        except (ValueError, TypeError):
-            logger.debug("AUDIO_FAILOPEN_CAP_MINUTES parse failed")
-    try:
-        cfg = _config.load_comprehensive_config()
-        if cfg is not None:
-            if cfg.has_section("Audio-Quota"):
-                try:
-                    f = float(cfg.get("Audio-Quota", "failopen_cap_minutes", fallback=""))
-                    if f > 0:
-                        return f
-                except (ValueError, TypeError):
-                    logger.debug("[Audio-Quota].failopen_cap_minutes parse failed")
-            if cfg.has_section("Audio"):
-                try:
-                    f = float(cfg.get("Audio", "failopen_cap_minutes", fallback=""))
-                    if f > 0:
-                        return f
-                except (ValueError, TypeError):
-                    logger.debug("[Audio].failopen_cap_minutes parse failed")
-    except Exception:
-        logger.debug("Config read for failopen cap failed")
-    return 5.0
 
 
 async def audio_chat_turn(*args, **kwargs):

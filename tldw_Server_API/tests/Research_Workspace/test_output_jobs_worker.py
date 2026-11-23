@@ -30,6 +30,7 @@ def _output_jobs_module() -> Any:
 @pytest.fixture
 def fake_workspace_db() -> object:
     class _FakeWorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
             assert workspace_id == "ws-1"
             return [
@@ -82,6 +83,7 @@ def fake_collections_db() -> object:
 
 
 class _VideoWorkspaceDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self, *, fail_complete_update: bool = False) -> None:
         self.artifact = {"id": "video_overview-1", "version": 1, "export_refs": []}
         self.fail_complete_update = fail_complete_update
@@ -272,6 +274,7 @@ def test_build_source_context_caps_title_and_content_text() -> None:
     output_jobs = _output_jobs_module()
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
             assert workspace_id == "ws-1"
             return [
@@ -307,6 +310,7 @@ def test_build_source_context_treats_empty_media_content_as_unavailable() -> Non
     output_jobs = _output_jobs_module()
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def list_workspace_sources(self, workspace_id: str) -> list[dict[str, Any]]:
             assert workspace_id == "ws-1"
             return [
@@ -566,6 +570,7 @@ async def test_infographic_worker_generates_image_and_updates_workspace_artifact
     fake_image_bytes = b"\x89PNG\r\n\x1a\nfake-adapter-png"
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def __init__(self) -> None:
             self.artifact = {"id": "infographic-1", "version": 3, "export_refs": []}
             self.updates: list[dict[str, Any]] = []
@@ -693,6 +698,7 @@ async def test_infographic_worker_cleans_output_when_final_workspace_update_fail
     fake_image_bytes = b"\x89PNG\r\n\x1a\nfake-adapter-png"
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def __init__(self) -> None:
             self.artifact = {"id": "infographic-1", "version": 3, "export_refs": []}
             self.updates: list[dict[str, Any]] = []
@@ -817,6 +823,7 @@ async def test_video_overview_worker_generates_narrated_slideshow_mp4(
     output_jobs = _output_jobs_module()
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def __init__(self) -> None:
             self.artifact = {"id": "video_overview-1", "version": 4, "export_refs": []}
             self.updates: list[dict[str, Any]] = []
@@ -1243,6 +1250,7 @@ async def test_infographic_worker_marks_workspace_artifact_failed_on_generation_
     output_jobs = _output_jobs_module()
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def __init__(self) -> None:
             self.artifact = {"id": "infographic-1", "version": 3}
             self.updates: list[dict[str, Any]] = []
@@ -1334,6 +1342,7 @@ async def test_video_overview_worker_marks_workspace_artifact_failed_on_render_e
     output_jobs = _output_jobs_module()
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def __init__(self) -> None:
             self.artifact = {"id": "video_overview-1", "version": 1}
             self.updates: list[dict[str, Any]] = []
@@ -1453,6 +1462,7 @@ async def test_infographic_worker_preserves_original_error_when_failure_marker_f
     output_jobs = _output_jobs_module()
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, Any]:
             return {"id": artifact_id, "version": 1}
 
@@ -1498,6 +1508,7 @@ async def test_infographic_worker_preserves_image_adapter_error_code(
     output_jobs = _output_jobs_module()
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def __init__(self) -> None:
             self.artifact = {"id": "infographic-1", "version": 1}
             self.updates: list[dict[str, Any]] = []
@@ -1596,6 +1607,7 @@ async def test_infographic_worker_rejects_non_png_image_export(
     output_jobs = _output_jobs_module()
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def __init__(self) -> None:
             self.artifact = {"id": "infographic-1", "version": 1}
             self.updates: list[dict[str, Any]] = []
@@ -1667,6 +1679,7 @@ async def test_infographic_worker_rejects_non_png_bytes_when_image_export_omits_
     output_jobs = _output_jobs_module()
 
     class _WorkspaceDB:
+        workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
         def __init__(self) -> None:
             self.artifact = {"id": "infographic-1", "version": 1}
             self.updates: list[dict[str, Any]] = []

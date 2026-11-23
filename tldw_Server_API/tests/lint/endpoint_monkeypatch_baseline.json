@@ -25,7 +25,6 @@
   "api/v1/endpoints/admin/admin_webhooks.py": {"monkeypatch": 6, "other": 0, "reason": null},
   "api/v1/endpoints/agent_client_protocol.py": {"monkeypatch": 70, "other": 0, "reason": null},
   "api/v1/endpoints/agent_orchestration.py": {"monkeypatch": 13, "other": 0, "reason": null},
-  "api/v1/endpoints/audio/__init__.py": {"monkeypatch": 1, "other": 0, "reason": null},
   "api/v1/endpoints/audio/audio.py": {"monkeypatch": 2, "other": 0, "reason": null},
   "api/v1/endpoints/audio/audio_health.py": {"monkeypatch": 24, "other": 4, "reason": null},
   "api/v1/endpoints/audio/audio_history.py": {"monkeypatch": 3, "other": 0, "reason": null},

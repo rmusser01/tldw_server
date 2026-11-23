@@ -79,7 +79,8 @@ describe("sidepanel chat compact toolbar contract", () => {
 
   it("keeps pro composer image attachment visible and accessible", () => {
     expect(controlRowSource).toContain('data-testid="chat-attach-image"')
-    expect(controlRowSource).toContain('sidepanel:controlRow.attachImage", "Attach image"')
-    expect(controlRowSource).toContain("min-h-[44px]")
+    expect(controlRowSource).toContain('playground:actions.attachImage", "Attach image"')
+    // 44px on touch (coarse pointers); the narrow side panel isn't touch by width (XS-15).
+    expect(controlRowSource).toContain("[@media(pointer:coarse)]:min-h-11")
   })
 })

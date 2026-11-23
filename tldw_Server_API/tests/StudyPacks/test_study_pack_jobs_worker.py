@@ -33,7 +33,7 @@ def _load_modules():
 @pytest.fixture
 def db(tmp_path):
     chacha = CharactersRAGDB(str(tmp_path / "study-pack-worker.db"), client_id="study-pack-worker-tests")
-    chacha.upsert_workspace("ws-1", "Workspace 1")
+    chacha.workspace_store.upsert_workspace("ws-1", "Workspace 1")
     try:
         yield chacha
     finally:

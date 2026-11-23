@@ -87,7 +87,7 @@ def test_sqlite_offline_backup_restore_retains_private_receipts(
     db = CharactersRAGDB(database_path, client_id="user-1")
     payload = {"scope_type": "workspace", "workspace_id": "ws", "workspace_assistant_selection": "none"}
     try:
-        db.upsert_workspace("ws", "Workspace")
+        db.workspace_store.upsert_workspace("ws", "Workspace")
         live = _start(db, payload=payload, receipt_limit=2)
         deleted = _start(db, payload=payload, idempotency_key="deleted-key", receipt_limit=2)
         db.hard_delete_conversation(deleted.conversation["id"])

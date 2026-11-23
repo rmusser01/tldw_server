@@ -4,6 +4,7 @@ import type { RagPinnedResult } from "@/utils/rag-format"
 import type { QADocument } from "../hooks/useQASearch"
 import { SourceChunkItem } from "./SourceChunkItem"
 import { toPinnedResult } from "../hooks"
+import { topChunkScore } from "./relevance-label"
 
 type SourceChunksListProps = {
   documents: QADocument[]
@@ -13,6 +14,13 @@ type SourceChunksListProps = {
   onInsert: (doc: QADocument) => void
   onPin: (doc: QADocument) => void
   onPreview: (doc: QADocument) => void
+  /** Rendered beside the "Source Chunks (N)" heading, e.g. Generate answer. */
+  headerAction?: React.ReactNode
+  /**
+   * Cap the list and scroll it on its own. Off inside an already capped box
+   * (the composer's Search & Context), so it doesn't scroll inside a scroller.
+   */
+  nestedScroll?: boolean
 }
 
 type ChunkSortMode = "relevance" | "source"
@@ -30,7 +38,7 @@ const getChunkScore = (doc: QADocument): number => {
 }
 
 /**
- * Scrollable list of retrieved source chunks with relevance scores.
+ * Scrollable list of retrieved source chunks with plain relevance labels.
  */
 export const SourceChunksList: React.FC<SourceChunksListProps> = ({
   documents,
@@ -39,7 +47,9 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
   onCopy,
   onInsert,
   onPin,
-  onPreview
+  onPreview,
+  headerAction,
+  nestedScroll = true
 }) => {
   const { t } = useTranslation(["sidepanel"])
   const [sortMode, setSortMode] = React.useState<ChunkSortMode>("relevance")
@@ -74,6 +84,7 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
 
     return decorated.map((item) => item.doc)
   }, [documents, sortMode])
+  const topScore = topChunkScore(documents)
 
   const isPinned = (doc: QADocument): boolean => {
     const ragResult = {
@@ -92,12 +103,16 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
+      <div
+        data-testid="qa-results-header"
+        className="flex flex-wrap items-center justify-between gap-2"
+      >
         <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
           {t("sidepanel:qaSearch.sourceChunks", "Source Chunks ({{count}})", {
             count: documents.length
           })}
         </h4>
+        {headerAction}
         <div
           className="inline-flex items-center rounded-md border border-border bg-surface2 p-0.5"
           role="group"
@@ -130,7 +145,7 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
         </div>
       </div>
       <div
-        className="flex flex-col gap-2 max-h-[350px] overflow-y-auto"
+        className={`flex flex-col gap-2 ${nestedScroll ? "max-h-[350px] overflow-y-auto" : ""}`}
         role="list"
         aria-label={t(
           "sidepanel:qaSearch.sourceChunksList",
@@ -148,6 +163,7 @@ export const SourceChunksList: React.FC<SourceChunksListProps> = ({
               onPin={onPin}
               onPreview={onPreview}
               isPinned={isPinned(doc)}
+              topScore={topScore}
             />
           </div>
         ))}

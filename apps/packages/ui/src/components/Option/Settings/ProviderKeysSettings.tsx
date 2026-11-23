@@ -4,6 +4,7 @@ import { Button, Input, Modal, Select, Table, Tag, Tooltip, message } from "antd
 import { Key, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { Alert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { tldwModels } from "@/services/tldw/TldwModels"
 
 type ProviderKey = {
   provider: string
@@ -100,6 +101,8 @@ export const ProviderKeysSettings = () => {
     setSaving(true)
     try {
       await tldwClient.upsertUserProviderKey(addProvider, addApiKey)
+      // The model pickers list a provider the user's own key serves (TASK-15583): refetch them now.
+      void tldwModels.clearCache()
       message.success(t("settings:providerKeys.saveSuccess", { provider: addProvider, defaultValue: `${addProvider} key saved and validated` }))
       setShowAddForm(false)
       setAddProvider("")
@@ -123,6 +126,7 @@ export const ProviderKeysSettings = () => {
         onOk: async () => {
           try {
             await tldwClient.deleteUserProviderKey(provider)
+            void tldwModels.clearCache()
             message.success(t("settings:providerKeys.deleteSuccess", { provider, defaultValue: `${provider} key removed` }))
             void loadKeys()
           } catch {

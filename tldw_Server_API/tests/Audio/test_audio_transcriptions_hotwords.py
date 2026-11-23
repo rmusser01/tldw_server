@@ -152,6 +152,10 @@ def _setup_stubbed_audio_app(
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", TEST_API_KEY)
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    # require_token_scope accepts AuthNZ's resolved key only (D1(e)), so rebuild Settings from the env above.
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    reset_settings()
 
     from types import SimpleNamespace
 

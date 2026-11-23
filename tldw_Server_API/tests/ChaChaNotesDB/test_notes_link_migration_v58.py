@@ -13,6 +13,9 @@ from uuid import uuid4
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, QueryResult
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -23,7 +26,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_graph_update_triggers_name_only_graph_relevant_columns() -> None:
-    sqlite_source = " ".join(inspect.getsource(CharactersRAGDB._notes_graph_schema_sqlite).split())
+    sqlite_source = " ".join(inspect.getsource(sqlite_schema._notes_graph_schema_sqlite).split())
     postgres_statements: list[str] = []
 
     class _RecordingBackend:
@@ -35,8 +38,8 @@ def test_graph_update_triggers_name_only_graph_relevant_columns() -> None:
         backend = _RecordingBackend()
 
     postgres_connection = object()
-    CharactersRAGDB._notes_graph_schema_postgres(
-        _RecordingDatabase(),  # type: ignore[arg-type]
+    postgres_schema._notes_graph_schema_postgres(
+        ChaChaContext(_RecordingDatabase()),  # type: ignore[arg-type]
         postgres_connection,
     )
     postgres_sql = " ".join(" ".join(query.split()) for query in postgres_statements)
@@ -49,10 +52,11 @@ def test_graph_update_triggers_name_only_graph_relevant_columns() -> None:
 
 
 def test_postgres_v58_canonical_rows_are_updated_in_one_set_based_statement() -> None:
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v57_to_v58_postgres)
+    source = inspect.getsource(postgres_steps._migrate_from_v57_to_v58_postgres)
 
     assert "jsonb_to_recordset" in source
-    assert "for row in canonical_rows:\n            backend.execute" not in source
+    # The body is a module function now, one indent level shallower than the class method it was moved from.
+    assert "for row in canonical_rows:\n        backend.execute" not in source
 
 
 OWNER = "owner-notes-link"
@@ -402,8 +406,8 @@ def test_postgres_v57_to_v58_locks_and_restores_verified_notes_rls() -> None:
     backend = _PostgresMigrationBackend()
     db = _postgres_db(backend)
 
-    assert hasattr(db, "_migrate_from_v57_to_v58_postgres")
-    db._migrate_from_v57_to_v58_postgres(object())
+    assert callable(postgres_steps._migrate_from_v57_to_v58_postgres)
+    postgres_steps._migrate_from_v57_to_v58_postgres(db.ctx, object())
 
     statements = [statement for statement, _ in backend.calls]
     lock_index = next(index for index, statement in enumerate(statements) if statement.startswith("LOCK TABLE"))
@@ -439,7 +443,7 @@ def test_postgres_v57_to_v58_rejects_unverified_schema_owner_before_scans() -> N
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="schema-owner"):
-        db._migrate_from_v57_to_v58_postgres(object())
+        postgres_steps._migrate_from_v57_to_v58_postgres(db.ctx, object())
 
     statements = [statement for statement, _ in backend.calls]
     assert not any("FROM note_edges AS edge" in statement for statement in statements)
@@ -450,7 +454,7 @@ def test_postgres_v58_installs_durable_link_constraints() -> None:
     backend = _PostgresMigrationBackend()
     db = _postgres_db(backend)
 
-    db._migrate_from_v57_to_v58_postgres(object())
+    postgres_steps._migrate_from_v57_to_v58_postgres(db.ctx, object())
 
     sql = "\n".join(statement for statement, _ in backend.calls)
     for constraint in (
@@ -477,7 +481,7 @@ def test_postgres_graph_trigger_functions_use_one_valid_declare_block() -> None:
     backend = _PostgresMigrationBackend()
     db = _postgres_db(backend)
 
-    db._migrate_from_v57_to_v58_postgres(object())
+    postgres_steps._migrate_from_v57_to_v58_postgres(db.ctx, object())
 
     statements = [statement for statement, _ in backend.calls]
     notes_changed = next(statement for statement in statements if "FUNCTION notes_graph_notes_changed" in statement)

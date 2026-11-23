@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Workspaces.membership_service import (
 
 
 class BackfillFakeDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self) -> None:
         self.workspaces = {"workspace-1": _workspace_row("workspace-1")}
         self.sources = [
@@ -248,6 +249,7 @@ class BackfillFakeDB:
 
 
 class ContextFakeDB(BackfillFakeDB):
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self) -> None:
         super().__init__()
         self.sources = []

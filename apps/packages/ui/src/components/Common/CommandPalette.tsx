@@ -42,6 +42,7 @@ import {
 import { ADMIN_MODULES } from "@/components/Option/Admin/admin-modules"
 import { CLAIMS_REVIEW_PATH, RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
+import { NEW_NOTE_PATH, buildNewNotePath } from "@/routes/hooks/useNotesRouteAddress"
 import { cn } from "@/libs/utils"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import {
@@ -50,6 +51,12 @@ import {
 } from "./command-palette-focus"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { requestSettingsNavigation } from "@/utils/settings-return"
+import {
+  type CommandPaletteContentProvider,
+  useCommandPaletteContentResults
+} from "./command-palette-content"
+
+export type { CommandPaletteContentProvider } from "./command-palette-content"
 
 type CommandShortcut = { key: string; modifiers: ShortcutModifier[] }
 
@@ -86,9 +93,12 @@ export interface CommandItem {
   shortcut?: CommandShortcut
   action: () => void
   targetPath?: string
-  category: "navigation" | "action" | "setting" | "recent" | "prompt"
+  category: "navigation" | "action" | "setting" | "recent" | "prompt" | "chat" | "note"
   keywords?: string[]
 }
+
+/** The order groups appear in, which is also the order the arrow keys walk. */
+const CATEGORY_ORDER = ["recent", "action", "chat", "note", "prompt", "navigation", "setting"] as const
 
 export interface CommandPaletteProps {
   /** Custom commands to add to the palette */
@@ -109,6 +119,8 @@ export interface CommandPaletteProps {
   openRequest?: PaletteFocusRequest
   registerGlobalOpenShortcut?: boolean
   listenForOpenEvents?: boolean
+  /** Async result groups (saved chats, notes) searched as the user types (XP-06). */
+  contentProviders?: CommandPaletteContentProvider[]
 }
 
 export function CommandPalette({
@@ -128,6 +140,7 @@ export function CommandPalette({
   openRequest,
   registerGlobalOpenShortcut = true,
   listenForOpenEvents = true,
+  contentProviders,
 }: CommandPaletteProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -436,6 +449,21 @@ export function CommandPalette({
             }
           ] as CommandItem[])
         : []),
+      // Opens Notes on a new, empty note from anywhere (XP-06).
+      ...(!isSidepanel
+        ? ([
+            {
+              id: "action-new-note",
+              label: t("common:commandPalette.newNote", "New note"),
+              icon: <StickyNote className="size-4" />,
+              targetPath: NEW_NOTE_PATH,
+              // A fresh address per request: the web router keys locations by address.
+              action: () => navigate(buildNewNotePath()),
+              category: "action",
+              keywords: ["create", "write", "capture", "note"],
+            }
+          ] as CommandItem[])
+        : []),
       ...(onToggleRag
         ? ([
             {
@@ -483,7 +511,7 @@ export function CommandPalette({
               id: "action-toggle-web",
               label: t(
                 "common:commandPalette.toggleWebSearch",
-                "Toggle Web Search"
+                "Toggle web search"
               ),
               description: t(
                 "common:commandPalette.toggleWebDesc",
@@ -541,7 +569,7 @@ export function CommandPalette({
               label: t("common:commandPalette.toggleSidebar", "Toggle Sidebar"),
               description: t(
                 "common:commandPalette.toggleSidebarDesc",
-                "Show or hide the chat sidebar"
+                "Show or hide the sidebar"
               ),
               icon: <Eye className="size-4" />,
               shortcut: toCommandShortcut(configuredShortcuts.toggleSidebar),
@@ -634,7 +662,7 @@ export function CommandPalette({
   const allCommands = useMemo(() => {
     const buddyCommand: CommandItem = {
       id: "buddy-persona-management",
-      label: t("sidepanel:buddyManagement.title", "Buddy & Persona Management"),
+      label: t("sidepanel:buddyManagement.title", "Avatar settings"),
       icon: <MessageSquare size={18} />,
       category: "action",
       keywords: ["buddy", "persona", "companion", "workspace"],
@@ -688,6 +716,12 @@ export function CommandPalette({
     return dedupedCommands
   }, [getCanonicalCommandTargetPath])
 
+  const contentResults = useCommandPaletteContentResults(
+    query,
+    contentProviders,
+    open && !isSidepanel
+  )
+
   // Filter commands based on query
   const filteredCommands = useMemo(() => {
     let commands: CommandItem[]
@@ -705,36 +739,51 @@ export function CommandPalette({
       const keywordMatch = cmd.keywords?.some((kw) => kw.toLowerCase().includes(q))
       return labelMatch || descMatch || keywordMatch
     })
-    return dedupeByTargetPath(commands)
-  }, [allCommands, dedupeByTargetPath, query])
-
-  // Clamp selection when filtered commands change
-  useEffect(() => {
-    const clampedIndex =
-      filteredCommands.length === 0
-        ? 0
-        : Math.max(0, Math.min(selectedIndex, filteredCommands.length - 1))
-    if (clampedIndex !== selectedIndex) {
-      setSelectedIndex(clampedIndex)
-    }
-  }, [filteredCommands, selectedIndex])
+    // Chats and notes were matched by the server, often in their body text.
+    return [...dedupeByTargetPath(commands), ...contentResults.items]
+  }, [allCommands, contentResults.items, dedupeByTargetPath, query])
 
   // Group commands by category
   const groupedCommands = useMemo(() => {
     // "recent" is reserved for future MRU/history commands and may be populated
     // by additionalCommands when that feature is implemented.
-    const groups: Record<string, CommandItem[]> = {
-      action: [],
-      prompt: [],
-      navigation: [],
-      setting: [],
-      recent: [],
-    }
+    const groups: Record<string, CommandItem[]> = Object.fromEntries(
+      CATEGORY_ORDER.map((category) => [category, [] as CommandItem[]])
+    )
     for (const cmd of filteredCommands) {
       groups[cmd.category]?.push(cmd)
     }
     return groups
   }, [filteredCommands])
+
+  // Commands in the order shown, so the highlighted row is the one Enter runs.
+  const orderedCommands = useMemo(
+    () => CATEGORY_ORDER.flatMap((category) => groupedCommands[category] ?? []),
+    [groupedCommands]
+  )
+
+  // The highlight follows a command, not a row: when chats and notes arrive
+  // above it, the command the user saw highlighted is still the one Enter
+  // runs. If it is gone, the row index is clamped instead.
+  const highlightedIdRef = useRef<string | null>(null)
+  const shownIds = useMemo(() => orderedCommands.map((command) => command.id).join("\n"), [orderedCommands])
+  const shownIdsRef = useRef(shownIds)
+  useEffect(() => {
+    let nextIndex = selectedIndex
+    if (shownIdsRef.current !== shownIds && highlightedIdRef.current != null) {
+      const keptIndex = orderedCommands.findIndex((command) => command.id === highlightedIdRef.current)
+      if (keptIndex >= 0) nextIndex = keptIndex
+    }
+    shownIdsRef.current = shownIds
+    nextIndex =
+      orderedCommands.length === 0
+        ? 0
+        : Math.max(0, Math.min(nextIndex, orderedCommands.length - 1))
+    highlightedIdRef.current = orderedCommands[nextIndex]?.id ?? null
+    if (nextIndex !== selectedIndex) {
+      setSelectedIndex(nextIndex)
+    }
+  }, [orderedCommands, selectedIndex, shownIds])
 
   // Reset selection when filtered results change
   useEffect(() => {
@@ -820,31 +869,31 @@ export function CommandPalette({
       case "ArrowDown":
         e.preventDefault()
         setSelectedIndex((i) =>
-          filteredCommands.length === 0
+          orderedCommands.length === 0
             ? 0
-            : Math.min(i + 1, filteredCommands.length - 1)
+            : Math.min(i + 1, orderedCommands.length - 1)
         )
         break
       case "ArrowUp":
         e.preventDefault()
         setSelectedIndex((i) =>
-          filteredCommands.length === 0 ? 0 : Math.max(i - 1, 0)
+          orderedCommands.length === 0 ? 0 : Math.max(i - 1, 0)
         )
         break
       case "Enter":
         e.preventDefault()
-        if (filteredCommands[selectedIndex]) {
-          executeCommand(filteredCommands[selectedIndex])
+        if (orderedCommands[selectedIndex]) {
+          executeCommand(orderedCommands[selectedIndex])
         }
         break
       // Escape is handled by useShortcut hook to avoid duplicate handlers
     }
-  }, [executeCommand, filteredCommands, selectedIndex])
+  }, [executeCommand, orderedCommands, selectedIndex])
 
   if (!open) return null
   if (typeof document === "undefined") return null
 
-  const categories = ["recent", "action", "prompt", "navigation", "setting"] as const
+  const categories = CATEGORY_ORDER
   const focusRingClasses =
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
 
@@ -854,7 +903,16 @@ export function CommandPalette({
     prompt: t("common:commandPalette.categoryPrompts", "Prompts"),
     setting: t("common:commandPalette.categorySettings", "Settings"),
     recent: t("common:commandPalette.categoryRecent", "Recent"),
+    chat: t("common:commandPalette.categoryChats", "Chats"),
+    note: t("common:commandPalette.categoryNotes", "Notes"),
   }
+
+  // Chats and notes are still being searched, or could not be.
+  const contentStatus = contentResults.pending
+    ? t("common:commandPalette.searchingContent", "Searching chats and notes…")
+    : contentResults.failed
+      ? t("common:commandPalette.contentSearchFailed", "Chats and notes could not be searched.")
+      : null
 
   const modalContent = (
     <div ref={paletteRootRef}>
@@ -901,9 +959,9 @@ export function CommandPalette({
           className="max-h-[60vh] overflow-y-auto p-2"
           role="listbox"
         >
-          {filteredCommands.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-text-subtle">
-              {t("common:commandPalette.noResults", "No results found")}
+          {orderedCommands.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-text-subtle" role="status">
+              {contentStatus ?? t("common:commandPalette.noResults", "No results found")}
             </div>
           ) : (
             <>
@@ -917,7 +975,10 @@ export function CommandPalette({
 
                 return (
                   <div key={category} className="mb-2">
-                    <div className="px-2 py-1.5 text-xs font-medium text-text-subtle">
+                    <div
+                      className="px-2 py-1.5 text-xs font-medium text-text-subtle"
+                      data-command-group-label
+                    >
                       {categoryLabels[category]}
                     </div>
                     {items.map((cmd, idx) => {
@@ -970,6 +1031,15 @@ export function CommandPalette({
             </>
           )}
         </div>
+
+        {orderedCommands.length > 0 && contentStatus ? (
+          <div
+            className="border-t border-border px-4 py-1.5 text-xs text-text-subtle"
+            role="status"
+          >
+            {contentStatus}
+          </div>
+        ) : null}
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-border px-4 py-2 text-xs text-text-subtle">

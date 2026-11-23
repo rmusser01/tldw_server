@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -105,14 +106,15 @@ def test_migration_failure_rolls_back_schema_and_version(backend_name, request, 
         old = CharactersRAGDB(**kwargs)
         old.close_connection()
     method_name = "_migrate_from_v74_to_v75_postgres" if backend_name == "postgres" else "_migrate_from_v70_to_v71"
-    migrate = getattr(CharactersRAGDB, method_name)
+    steps_module = postgres_steps if method_name.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, method_name)
 
-    def failing_migration(self, conn):
-        migrate(self, conn)
+    def failing_migration(ctx, conn):
+        migrate(ctx, conn)
         raise RuntimeError("migration interrupted after DDL")
 
     with monkeypatch.context() as patch:
-        patch.setattr(CharactersRAGDB, method_name, failing_migration)
+        patch.setattr(steps_module, method_name, failing_migration)
         with pytest.raises((RuntimeError, CharactersRAGDBError)):
             CharactersRAGDB(**kwargs)
     assert (
@@ -198,7 +200,7 @@ def test_colliding_v68_lineages_upgrade_without_losing_history(
                 assert after == {**before, "history_admission_json": before.get("history_admission_json")}
                 assert db.execute_query("SELECT COUNT(*) AS n FROM conversation_history_projections").fetchone()["n"] == (1 if lineage.startswith("h1-") else 0)
                 assert db.get_conversation_by_id(cid)["assistant_startup_json"] is None
-                assert db.get_workspace("legacy-workspace")["assistant_defaults_explicit_none"] is True
+                assert db.workspace_store.get_workspace("legacy-workspace")["assistant_defaults_explicit_none"] is True
                 table = db._map_table_for_backend("keywords")
                 db.execute_query(f"SELECT merged_into_sync_id FROM {table}").fetchall()  # nosec B608 - backend table mapping
                 version = db.execute_query(
@@ -263,16 +265,17 @@ def test_failed_upgrade_restores_colliding_history_marker(
         )
     old.close_connection()
     method = "_migrate_from_v74_to_v75_postgres" if backend_name == "postgres" else "_migrate_from_v70_to_v71"
-    migrate = getattr(CharactersRAGDB, method)
+    steps_module = postgres_steps if method.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, method)
 
-    def fail_after_history(self: CharactersRAGDB, conn: Any) -> None:
+    def fail_after_history(ctx, conn) -> None:
         """Inject interruption after real Persona and history DDL has executed."""
-        migrate(self, conn)
+        migrate(ctx, conn)
         raise RuntimeError("history lineage migration interrupted")
 
     try:
         with monkeypatch.context() as failing:
-            failing.setattr(CharactersRAGDB, method, fail_after_history)
+            failing.setattr(steps_module, method, fail_after_history)
             with pytest.raises(Exception, match="history lineage migration interrupted"):
                 CharactersRAGDB(**kwargs)
         assert old.execute_query(

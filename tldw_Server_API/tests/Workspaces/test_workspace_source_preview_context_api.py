@@ -86,8 +86,8 @@ class _JobManagerDouble:
 @pytest.fixture
 def workspace_preview_db(tmp_path):
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    db.upsert_workspace("ws-preview", "Preview Workspace")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace("ws-preview", "Preview Workspace")
+    db.workspace_store.add_workspace_source(
         "ws-preview",
         {
             "id": "src-ready",
@@ -99,7 +99,7 @@ def workspace_preview_db(tmp_path):
             "selected": True,
         },
     )
-    db.add_workspace_source(
+    db.workspace_store.add_workspace_source(
         "ws-preview",
         {
             "id": "src-pending",
@@ -110,7 +110,7 @@ def workspace_preview_db(tmp_path):
             "selected": True,
         },
     )
-    db.add_workspace_source(
+    db.workspace_store.add_workspace_source(
         "ws-preview",
         {
             "id": "src-missing",
@@ -404,8 +404,8 @@ def test_workspace_context_includes_attached_primary_root(
     monkeypatch,
 ):
     db = CharactersRAGDB(db_path=str(tmp_path / "project-context-chacha.db"), client_id="user-1")
-    db.upsert_workspace("ws-project-context", "Project Workspace")
-    db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace("ws-project-context", "Project Workspace")
+    db.workspace_store.upsert_workspace_primary_root(
         "ws-project-context",
         {
             "root_id": "root-1",
@@ -675,7 +675,7 @@ def test_workspace_pinned_preview_checks_membership_before_version_read(
     expected,
 ):
     if workspace == "removed-workspace":
-        workspace_preview_db.delete_workspace("ws-preview", workspace_preview_db.get_workspace("ws-preview")["version"])
+        workspace_preview_db.workspace_store.delete_workspace("ws-preview", workspace_preview_db.workspace_store.get_workspace("ws-preview")["version"])
         workspace = "ws-preview"
     db = _media_db()
     calls = []
@@ -701,7 +701,7 @@ def test_workspace_pinned_preview_checks_membership_before_version_read(
         expected in {200, 404}
         and workspace == "ws-preview"
         and source == "src-ready"
-        and workspace_preview_db.get_workspace(workspace)
+        and workspace_preview_db.workspace_store.get_workspace(workspace)
     ):
         assert calls == [(1, version, True)]
     else:

@@ -17,8 +17,15 @@ class _FakeFeedDb:
     def __init__(self) -> None:
         self.schedule_ids: list[tuple[int, str]] = []
 
-    def set_job_schedule_id(self, job_id: int, schedule_id: str) -> None:
+    def list_retired_job_schedule_ids(self, job_id: int) -> list[str]:
+        assert job_id == 9
+        return []
+
+    def set_job_schedule_id(self, job_id: int, schedule_id: str, *, expected_job, retire_previous: bool) -> bool:
+        assert expected_job.id == job_id
+        assert not retire_previous
         self.schedule_ids.append((job_id, schedule_id))
+        return True
 
 
 class _FailingScheduler:
@@ -26,19 +33,16 @@ class _FailingScheduler:
         raise RuntimeError("scheduler backend exploded at /private/scheduler.db")
 
 
-class _FailingUpdateScheduler(_FailingScheduler):
-    def update(self, schedule_id: str, payload: dict):
-        assert schedule_id == "schedule-private"
-        raise RuntimeError("scheduler update exploded at /private/scheduler-update.db")
-
-
 def _job_row() -> SimpleNamespace:
     return SimpleNamespace(
         id=9,
+        user_id="42",
         name="Private Feed",
         schedule_expr="0 * * * *",
         schedule_timezone="UTC",
         active=True,
+        wf_schedule_id=None,
+        belongs_to_collections_feed=lambda source: source.id == 7,
     )
 
 
@@ -101,7 +105,6 @@ async def test_list_feed_subscriptions_includes_canonical_page_pagination() -> N
 
 
 def test_register_schedule_sanitizes_scheduler_failure_log(monkeypatch):
-    from tldw_Server_API.app.core.DB_Management import Workflows_Scheduler_DB as wfdb_module
     from tldw_Server_API.app.services import workflows_scheduler
 
     class _FallbackSchedulerDb:
@@ -111,11 +114,17 @@ def test_register_schedule_sanitizes_scheduler_failure_log(monkeypatch):
         def create_schedule(self, **kwargs) -> None:
             return None
 
+        def get_schedule(self, schedule_id: str):
+            return None
+
+        def delete_schedule(self, schedule_id: str, *, user_id: str):
+            pytest.fail("successful attachment must not delete its schedule")
+
     fake_db = _FakeFeedDb()
     fake_logger = MagicMock()
     monkeypatch.setattr(workflows_scheduler, "get_workflows_scheduler", lambda: _FailingScheduler())
-    monkeypatch.setattr(wfdb_module, "WorkflowsSchedulerDB", _FallbackSchedulerDb)
-    monkeypatch.setattr(collections_feeds, "logger", fake_logger)
+    monkeypatch.setattr(workflows_scheduler, "WorkflowsSchedulerDB", _FallbackSchedulerDb)
+    monkeypatch.setattr(workflows_scheduler, "logger", fake_logger)
 
     collections_feeds._register_schedule(
         fake_db,
@@ -123,12 +132,11 @@ def test_register_schedule_sanitizes_scheduler_failure_log(monkeypatch):
         current_user=SimpleNamespace(id=42),
     )
 
-    fake_logger.debug.assert_called_once_with("Collections feeds schedule registration failed")
+    fake_logger.debug.assert_called_once_with("Watchlist schedule registration failed")
     assert fake_db.schedule_ids
 
 
 def test_register_schedule_sanitizes_db_fallback_failure_log(monkeypatch):
-    from tldw_Server_API.app.core.DB_Management import Workflows_Scheduler_DB as wfdb_module
     from tldw_Server_API.app.services import workflows_scheduler
 
     class _FailingFallbackSchedulerDb:
@@ -138,10 +146,13 @@ def test_register_schedule_sanitizes_db_fallback_failure_log(monkeypatch):
         def create_schedule(self, **kwargs) -> None:
             raise RuntimeError("scheduler DB fallback exploded at /private/scheduler-fallback.db")
 
+        def get_schedule(self, schedule_id: str):
+            return None
+
     fake_logger = MagicMock()
     monkeypatch.setattr(workflows_scheduler, "get_workflows_scheduler", lambda: _FailingScheduler())
-    monkeypatch.setattr(wfdb_module, "WorkflowsSchedulerDB", _FailingFallbackSchedulerDb)
-    monkeypatch.setattr(collections_feeds, "logger", fake_logger)
+    monkeypatch.setattr(workflows_scheduler, "WorkflowsSchedulerDB", _FailingFallbackSchedulerDb)
+    monkeypatch.setattr(workflows_scheduler, "logger", fake_logger)
 
     collections_feeds._register_schedule(
         _FakeFeedDb(),
@@ -150,30 +161,35 @@ def test_register_schedule_sanitizes_db_fallback_failure_log(monkeypatch):
     )
 
     assert fake_logger.debug.call_args_list == [
-        call("Collections feeds schedule registration failed"),
-        call("Collections feeds schedule DB fallback failed"),
+        call("Watchlist schedule registration failed"),
+        call("Watchlist schedule DB fallback failed"),
     ]
 
 
 def test_sync_job_schedule_sanitizes_scheduler_update_failure_log(monkeypatch):
     from tldw_Server_API.app.services import workflows_scheduler
 
-    class _FakeFeedDbWithJob(_FakeFeedDb):
-        def get_job(self, job_id: int) -> SimpleNamespace:
-            assert job_id == 9
-            return SimpleNamespace(id=job_id)
+    class _UnavailableOwnerSchedulerDb:
+        def __init__(self, *, user_id: int):
+            assert user_id == 42
+
+        def get_schedule(self, schedule_id: str):
+            assert schedule_id == "schedule-private"
+            raise RuntimeError("scheduler update exploded at /private/scheduler-update.db")
 
     fake_logger = MagicMock()
-    monkeypatch.setattr(workflows_scheduler, "get_workflows_scheduler", lambda: _FailingUpdateScheduler())
+    monkeypatch.setattr(workflows_scheduler, "WorkflowsSchedulerDB", _UnavailableOwnerSchedulerDb)
     monkeypatch.setattr(collections_feeds, "logger", fake_logger)
 
-    result = collections_feeds._sync_job_schedule(
-        _FakeFeedDbWithJob(),
+    fake_db = _FakeFeedDb()
+    collections_feeds._sync_job_schedule(
+        fake_db,
         _scheduled_job_row(),
         current_user=SimpleNamespace(id=42),
+        force=True,
     )
 
-    assert result.id == 9
+    assert not fake_db.schedule_ids
     fake_logger.debug.assert_called_once_with("Collections feeds schedule update failed")
 
 
@@ -314,31 +330,31 @@ async def test_update_feed_subscription_job_failure_log_is_sanitized(monkeypatch
             assert feed_id == 7
             return _source_row(settings=settings)
 
-        def update_source(self, feed_id: int, _patch: dict):
-            assert feed_id == 7
-            return _source_row(settings=settings)
-
         def get_job(self, job_id: int):
             assert job_id == 9
             return _job_row()
 
-        def update_job(self, job_id: int, _patch: dict):
-            assert job_id == 9
+        def update_feed_and_job(self, source_id: int, _patch: dict, *, tags, expected_job, job_patch):
+            assert source_id == 7
+            assert tags is None
+            assert expected_job.id == 9
+            assert job_patch["schedule_expr"] == "*/15 * * * *"
             raise RuntimeError("collections job update backend exploded at /private/feeds-job-update.db")
 
     fake_logger = MagicMock()
     monkeypatch.setattr(collections_feeds, "logger", fake_logger)
     monkeypatch.setattr("tldw_Server_API.app.core.Personalization.record_watchlist_source_updated", lambda **_kwargs: None)
 
-    response = await collections_feeds.update_feed_subscription(
-        feed_id=7,
-        payload=CollectionsFeedUpdateRequest(schedule_expr="*/15 * * * *"),
-        current_user=SimpleNamespace(id=42),
-        db=_FailingJobDb(),
-    )
+    with pytest.raises(HTTPException) as exc:
+        await collections_feeds.update_feed_subscription(
+            feed_id=7,
+            payload=CollectionsFeedUpdateRequest(schedule_expr="*/15 * * * *"),
+            current_user=SimpleNamespace(id=42),
+            db=_FailingJobDb(),
+        )
 
-    assert response.id == 7
-    assert response.job_id == 9
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "feed_update_failed"
     fake_logger.error.assert_called_once_with("collections_feeds_update_job_failed")
     rendered = " ".join(str(part) for call_args in fake_logger.error.call_args_list for part in call_args.args)
     assert "/private/feeds-job-update.db" not in rendered

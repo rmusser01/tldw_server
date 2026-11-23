@@ -20,8 +20,9 @@ from tldw_Server_API.app.core.Chat.conversation_import import (
     DEFAULT_CONVERSATION_STATE,
     import_fingerprint_from_authority,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, UniqueConstraintError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import conversation_store as conversation_store_module
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -157,8 +158,8 @@ def test_imported_branches_read_as_a_parent_graph_not_as_legacy_history(db: Char
 
 def test_import_advances_the_history_version_once_per_message(db: CharactersRAGDB) -> None:
     _import(db)
-    assert db.get_roleplay_resume_state(CHAT_ID)["history_version"] == 5
-    assert db.get_roleplay_resume_state(CHAT_ID)["message_count"] == 4
+    assert db.conversation_resume_store.get_roleplay_resume_state(CHAT_ID)["history_version"] == 5
+    assert db.conversation_resume_store.get_roleplay_resume_state(CHAT_ID)["message_count"] == 4
 
 
 def test_imported_text_is_searchable(db: CharactersRAGDB) -> None:
@@ -276,7 +277,7 @@ def test_other_database_errors_are_not_reported_as_id_conflicts(
 
 def test_default_state_matches_the_store(db: CharactersRAGDB) -> None:
     """An omitted state is fingerprinted as the default, so the two must not drift apart."""
-    assert DEFAULT_CONVERSATION_STATE == db._DEFAULT_CONVERSATION_STATE
+    assert DEFAULT_CONVERSATION_STATE == conversation_store_module._DEFAULT_CONVERSATION_STATE
     _import(db, conversation=_conversation(state=None))
     assert db.get_conversation_by_id(CHAT_ID)["state"] == DEFAULT_CONVERSATION_STATE
 
@@ -332,11 +333,13 @@ def test_malformed_fingerprint_is_refused_before_any_write(db: CharactersRAGDB, 
 def test_owner_is_the_argument_never_a_field_of_the_payload(db: CharactersRAGDB) -> None:
     conversation = _conversation(client_id="999", scope_type="workspace", workspace_id="ws", deleted=1, version=7)
     messages = [_message("m1", None, client_id="999", deleted=1, version=9, conversation_id="someone-elses")]
-    _import(db, messages, conversation=conversation, owner_client_id="42")
+    # On PostgreSQL the message store locks chats to the instance owner, so the argument must be that owner.
+    owner = "42" if db.backend_type == BackendType.SQLITE else db.client_id
+    _import(db, messages, conversation=conversation, owner_client_id=owner)
     row = db.get_conversation_by_id(CHAT_ID)
-    assert (row["client_id"], row["scope_type"], row["workspace_id"], row["version"]) == ("42", "global", None, 1)
+    assert (row["client_id"], row["scope_type"], row["workspace_id"], row["version"]) == (owner, "global", None, 1)
     message = db.get_message_by_id("m1")
-    assert (message["client_id"], message["conversation_id"], message["version"]) == ("42", CHAT_ID, 1)
+    assert (message["client_id"], message["conversation_id"], message["version"]) == (owner, CHAT_ID, 1)
     assert not message["deleted"]
 
 

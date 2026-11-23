@@ -831,22 +831,28 @@ def _analyze_with_empty_moonshot_handle():
 
 
 @pytest.mark.unit
-def test_explicit_missing_summary_model_uses_default_model_environment_under_the_override_policy(monkeypatch):
-    # TASK-15496: aca6ed7b32 kept this fallback out because it was unchecked; it now meets the override policy.
+def test_explicit_missing_summary_model_uses_default_model_environment_and_a_denied_one_is_refused(monkeypatch):
+    # TASK-15496 gave a handle call the DEFAULT_MODEL_<PROVIDER> fallback. A fallback model the provider override
+    # denies is refused with 'configuration' (TASK-15581 restores TASK-15496's refusal).
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
     adapter = _Adapter(response={"choices": [{"message": {"content": "Cedar summary"}}]})
     monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "server-env-model")
     monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(adapter))
-    monkeypatch.setattr(sgl, "_model_allowed_by_override", lambda provider, model: model != "blocked-model")
+    set_llm_provider_overrides_cache_for_tests(
+        {"moonshot": LLMProviderOverride(provider="moonshot", denied_models=["blocked-model"])}
+    )
 
     assert _analyze_with_empty_moonshot_handle() == "Cedar summary"
-    assert adapter.requests[0][0]["model"] == "server-env-model"
-
     monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "blocked-model")
     with pytest.raises(sgl.SummaryProviderError) as exc_info:
         _analyze_with_empty_moonshot_handle()
 
     assert exc_info.value.code == "configuration"
-    assert len(adapter.requests) == 1
+    assert [request["model"] for request, _timeout in adapter.requests] == ["server-env-model"]
 
 
 @pytest.mark.unit

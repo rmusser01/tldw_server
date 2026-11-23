@@ -15,6 +15,7 @@ from typing import Callable, Optional, Union
 from loguru import logger
 
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.core.DB_Management.media_db.constants import (
     MEDIA_DB_FILENAME,
 )
@@ -59,16 +60,7 @@ def _normalize_user_id(user_id: UserId) -> str:
 
 
 def _get_auth_mode() -> str:
-    raw = os.getenv("AUTH_MODE")
-    if raw:
-        return raw.strip().lower()
-    try:
-        from_settings = settings.get("AUTH_MODE")
-    except Exception:
-        from_settings = None
-    if not from_settings:
-        return "single_user"
-    return str(from_settings).strip().lower() or "single_user"
+    return str(load_auth_config().mode).strip().lower() or "single_user"
 
 
 def _is_single_user_mode() -> bool:

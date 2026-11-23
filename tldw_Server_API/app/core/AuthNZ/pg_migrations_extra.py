@@ -1885,6 +1885,7 @@ _CREATE_LLM_PROVIDER_OVERRIDES = [
     ),
     ("ALTER TABLE llm_provider_overrides ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN", ()),
     ("ALTER TABLE llm_provider_overrides ADD COLUMN IF NOT EXISTS allowed_models TEXT", ()),
+    ("ALTER TABLE llm_provider_overrides ADD COLUMN IF NOT EXISTS denied_models TEXT", ()),
     ("ALTER TABLE llm_provider_overrides ADD COLUMN IF NOT EXISTS config_json TEXT", ()),
     ("ALTER TABLE llm_provider_overrides ADD COLUMN IF NOT EXISTS secret_blob TEXT", ()),
     ("ALTER TABLE llm_provider_overrides ADD COLUMN IF NOT EXISTS api_key_hint TEXT", ()),

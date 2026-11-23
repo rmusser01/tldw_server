@@ -1461,7 +1461,8 @@ TTS_VOICE_STRICT_DURATION = false
 # API Route Toggles (optional)
 # ---------------------------------------------
 # Control which API route groups are included at startup.
-# You can also override via env vars:
+# Env vars override these only in a test runtime (pytest or TEST_MODE); in production this
+# section is authoritative:
 #   ROUTES_STABLE_ONLY=true|false
 #   ROUTES_DISABLE="sandbox,connectors"
 #   ROUTES_ENABLE="workflows"

@@ -36,6 +36,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.staticfiles import StaticFiles
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+from tldw_Server_API.app.core.config_sections.auth import load_auth_config
 from tldw_Server_API.app.core.startup_logging import (
     normalize_startup_log_level as _normalize_startup_log_level,
     startup_api_key_log_value as _startup_api_key_log_value,
@@ -1998,11 +1999,12 @@ def _apply_runtime_cors_headers(request: Request, response: Any) -> Any:
 # "Exception in ASGI application" in the uvicorn log.
 # ---------------------------------------------------------------------------
 from tldw_Server_API.app.api.v1.utils.exception_handlers import (  # noqa: E402, I001
+    admin_refusal_exception_handler as _admin_refusal_handler,
     client_disconnect_handler as _client_disconnect_handler,
     global_unhandled_exception_handler as _global_handler,
     tts_public_http_exception_handler as _tts_public_http_handler,
 )
-from tldw_Server_API.app.core.exceptions import TTSPublicHTTPException  # noqa: E402
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError, TTSPublicHTTPException  # noqa: E402
 
 
 def _run_startup_config_validation() -> None:
@@ -2074,6 +2076,16 @@ async def _standalone_response_validation_exception_handler(
 @app.exception_handler(ClientDisconnect)
 async def _client_disconnect_exception_handler(request: Request, exc: ClientDisconnect):
     response = await _client_disconnect_handler(request, exc)
+    return _apply_runtime_cors_headers(request, response)
+
+
+@app.exception_handler(ChatConfigurationError)
+async def _admin_refusal_exception_handler(request: Request, exc: ChatConfigurationError):
+    # An admin provider-override refusal no endpoint mapped answers 403/503 (TASK-15581). A standalone Slides route
+    # and any other ChatConfigurationError go on to the catch-all handler, as before.
+    if is_standalone_sensitive_route(request.method, request.url.path):
+        raise exc
+    response = await _admin_refusal_handler(request, exc)
     return _apply_runtime_cors_headers(request, response)
 
 
@@ -2512,7 +2524,7 @@ else:
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings as _get_cors_settings
         _cors_auth_mode = _get_cors_settings().AUTH_MODE
     except Exception:
-        _cors_auth_mode = os.getenv("AUTH_MODE", "single_user")
+        _cors_auth_mode = load_auth_config().mode
 
     _SINGLE_USER_LOCALHOST_ORIGINS = [
         "http://localhost:8080",

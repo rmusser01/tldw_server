@@ -3199,7 +3199,7 @@ async def _prepare_versioned_history_context(
     ]:
         with chat_db.transaction() as conn:
             owner_client_id = history_runtime["history_owner_client_id"]
-            state = chat_db.get_roleplay_resume_state(
+            state = chat_db.conversation_resume_store.get_roleplay_resume_state(
                 final_conversation_id, conn=conn, lock_for_update=True, owner_client_id=owner_client_id,
             )
             if selected_durable:

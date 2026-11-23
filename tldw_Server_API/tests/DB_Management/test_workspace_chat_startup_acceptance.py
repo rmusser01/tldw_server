@@ -68,7 +68,7 @@ def test_replay_does_not_resolve_current_default(creation_db: CharactersRAGDB) -
     """An accepted key binds the original identity/version, not today's default."""
     first = _start(creation_db)
     with creation_db.transaction():
-        creation_db.update_workspace("ws", {"assistant_defaults_json": None}, 2)
+        creation_db.workspace_store.update_workspace("ws", {"assistant_defaults_json": None}, 2)
     replay = _start(creation_db)
     assert replay.conversation["assistant_id"] == "persona-a"
     assert decode_assistant_startup(replay.conversation["assistant_startup_json"]).workspace_version == 2
@@ -97,7 +97,7 @@ def test_key_request_conflict_does_not_create(creation_db: CharactersRAGDB, chan
     """Presence changes and cross-Workspace key reuse cannot create a second receipt."""
     _start(creation_db)
     with creation_db.transaction():
-        creation_db.upsert_workspace("other", "Other")
+        creation_db.workspace_store.upsert_workspace("other", "Other")
     with pytest.raises(WorkspaceStartupError) as caught:
         _start(
             creation_db,
@@ -171,7 +171,7 @@ def test_nested_startup_preserves_caller_work(
     except RuntimeError as error:
         assert rollback and str(error) == "caller rolls back"
     with observer.transaction():
-        row = observer.get_workspace("ws")
+        row = observer.workspace_store.get_workspace("ws")
         assert row["name"] == ("Workspace" if rollback else "Caller sentinel")
 
 
@@ -319,7 +319,7 @@ def test_replay_requires_original_current_persona(
 
     _start(creation_db)
     with creation_db.transaction() as conn:
-        creation_db.update_workspace("ws", {"assistant_defaults_json": None}, 2)
+        creation_db.workspace_store.update_workspace("ws", {"assistant_defaults_json": None}, 2)
         if gate == "inactive":
             conn.execute("UPDATE persona_profiles SET is_active = ? WHERE id = ?", (False, "persona-a"))
         elif gate == "deleted":
@@ -341,7 +341,7 @@ def test_replay_returns_current_metadata_and_allows_archive(creation_db: Charact
     first = _start(creation_db)
     with creation_db.transaction():
         creation_db.update_conversation(first.conversation["id"], {"title": "Edited"}, first.conversation["version"])
-        creation_db.update_workspace("ws", {"archived": True}, 2)
+        creation_db.workspace_store.update_workspace("ws", {"archived": True}, 2)
     replay = _start(creation_db)
     assert (replay.replayed, replay.conversation["id"], replay.conversation["title"]) == (
         True, first.conversation["id"], "Edited",
@@ -472,7 +472,7 @@ def test_typed_default_failure_has_exact_strict_mapping(
         elif reason == "persona_unavailable":
             conn.execute("UPDATE persona_profiles SET is_active = ? WHERE id = ?", (False, "persona-a"))
         elif reason in {"permission_denied", "invalid_default"}:
-            creation_db.update_workspace("ws", {"assistant_defaults_json": {
+            creation_db.workspace_store.update_workspace("ws", {"assistant_defaults_json": {
                 "assistant_kind": "persona", "assistant_id": "" if reason == "invalid_default" else "private-missing",
             }}, 2)
             version = 3

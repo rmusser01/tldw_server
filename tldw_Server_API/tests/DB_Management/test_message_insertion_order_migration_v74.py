@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError
 
 pytestmark = pytest.mark.integration
@@ -92,13 +93,16 @@ def test_v74_fresh_and_upgraded_schema_equivalence(legacy_v73, tmp_path):
 def test_v74_failed_migration_rolls_back_schema_version_and_data(legacy_v73, monkeypatch):
     path, _, ids, rows = legacy_v73
 
-    class FailedMigration(CharactersRAGDB):
-        def _migrate_from_v74_to_v75(self, conn):
-            super()._migrate_from_v74_to_v75(conn)
-            raise sqlite3.OperationalError("injected migration failure")
+    migrate = sqlite_steps._migrate_from_v74_to_v75
 
-    with pytest.raises(CharactersRAGDBError, match="injected migration failure"):
-        FailedMigration(path, client_id="order-owner")
+    def fail_after_migration(ctx, conn):
+        migrate(ctx, conn)
+        raise sqlite3.OperationalError("injected migration failure")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(sqlite_steps, "_migrate_from_v74_to_v75", fail_after_migration)
+        with pytest.raises(CharactersRAGDBError, match="injected migration failure"):
+            CharactersRAGDB(path, client_id="order-owner")
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT version FROM db_schema_version").fetchone()[0] == 73
         assert conn.execute("SELECT name FROM sqlite_master WHERE name LIKE '%insertion_order%'").fetchall() == []

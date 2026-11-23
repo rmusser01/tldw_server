@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.tests.DB_Management.test_conversation_assistant_startup import db_factory as db_factory
 
@@ -69,16 +70,17 @@ def test_interrupted_upgrade_rolls_back_table_and_version(
     method = (
         "_migrate_from_v77_to_v78_postgres" if old.backend_type.value == "postgresql" else "_migrate_from_v73_to_v74"
     )
-    assert hasattr(CharactersRAGDB, method), "Workspace startup migration must be registered"
-    migrate = getattr(CharactersRAGDB, method)
+    steps_module = postgres_steps if method.endswith("_postgres") else sqlite_steps
+    assert hasattr(steps_module, method), "Workspace startup migration must be registered"
+    migrate = getattr(steps_module, method)
 
-    def fail_after_ddl(self: CharactersRAGDB, conn: Any) -> None:
+    def fail_after_ddl(ctx, conn) -> None:
         """Interrupt after the real migration, including its version bump."""
-        migrate(self, conn)
+        migrate(ctx, conn)
         raise CharactersRAGDBError("injected receipt migration failure")
 
     with monkeypatch.context() as failing:
-        failing.setattr(CharactersRAGDB, method, fail_after_ddl)
+        failing.setattr(steps_module, method, fail_after_ddl)
         with pytest.raises(CharactersRAGDBError, match="injected receipt migration failure"):
             db_factory()
     with monkeypatch.context() as old_code:
@@ -153,7 +155,7 @@ def test_private_schema_and_delete_tombstones(db_factory: Callable[[], Character
         "created_at",
         "invalidated_at",
     }
-    db.upsert_workspace("ws", "Workspace")
+    db.workspace_store.upsert_workspace("ws", "Workspace")
     cid = db.add_conversation({"title": "Accepted", "scope_type": "workspace", "workspace_id": "ws"})
     with db.transaction() as conn:
         conn.execute(

@@ -40,7 +40,7 @@ def test_workspace_chat_selection_reaches_buddy_without_manual_override(
     monkeypatch.setenv("CHAT_FORCE_MOCK", "1")
     client, headers, provider = persona_chat_client
     db = persona_chat_db
-    db.upsert_workspace("handoff-workspace", "Research")
+    db.workspace_store.upsert_workspace("handoff-workspace", "Research")
     created = client.post(
         "/api/v1/chats/",
         headers=headers,
@@ -113,7 +113,7 @@ def test_workspace_chat_does_not_save_implicit_or_ephemeral_selection(
     monkeypatch.setattr(chat_endpoint, "_get_default_model_for_provider_name", lambda _provider: "gpt-4")
     client, headers, _ = persona_chat_client
     db = persona_chat_db
-    db.upsert_workspace("ephemeral-workspace", "Research")
+    db.workspace_store.upsert_workspace("ephemeral-workspace", "Research")
     conversation_id = db.add_conversation(
         {"title": "Ephemeral", "client_id": "1", "scope_type": "workspace", "workspace_id": "ephemeral-workspace"}
     )
@@ -154,7 +154,7 @@ def test_workspace_model_handoff_rejects_a_foreign_conversation(
     monkeypatch.setenv("CHAT_FORCE_MOCK", "1")
     client, headers, provider = persona_chat_client
     db = persona_chat_db
-    db.upsert_workspace("foreign-workspace", "Other research")
+    db.workspace_store.upsert_workspace("foreign-workspace", "Other research")
     conversation_id = db.add_conversation(
         {"title": "Foreign", "client_id": "2", "scope_type": "workspace", "workspace_id": "foreign-workspace"}
     )

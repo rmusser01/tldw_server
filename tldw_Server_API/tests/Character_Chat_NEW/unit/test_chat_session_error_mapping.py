@@ -33,9 +33,9 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatRateLimitError,
 )
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import PromptCostGuardrailConfig
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
 )
@@ -79,16 +79,13 @@ def test_complete_v2_request_accepts_inference_prefix_cache_intent() -> None:
 
 class _BrokenChatSessionDb:
     owner_user_id = "1"
-    _normalize_nullable_text = staticmethod(CharactersRAGDB._normalize_nullable_text)
-    _ALLOWED_CONVERSATION_ASSISTANT_KINDS = CharactersRAGDB._ALLOWED_CONVERSATION_ASSISTANT_KINDS
-    _ALLOWED_PERSONA_MEMORY_MODES = CharactersRAGDB._ALLOWED_PERSONA_MEMORY_MODES
 
     def __init__(self, exc: Exception, *, deleted: bool = False, raise_on_get: bool = False) -> None:
         """Keep real identity normalization while injecting the tested storage failure."""
         self.exc = exc
         self.deleted = deleted
         self.raise_on_get = raise_on_get
-        self.conversation_store = ConversationStore(self)
+        self.conversation_store = ConversationStore(ChaChaContext(self))
 
     def get_conversation_by_id(self, chat_id: str, include_deleted: bool = False) -> dict[str, Any]:
         if self.raise_on_get:
@@ -113,13 +110,10 @@ class _BrokenChatSessionDb:
 
 class _CompletionReadyChatSessionDb:
     owner_user_id = "1"
-    _normalize_nullable_text = staticmethod(CharactersRAGDB._normalize_nullable_text)
-    _ALLOWED_CONVERSATION_ASSISTANT_KINDS = CharactersRAGDB._ALLOWED_CONVERSATION_ASSISTANT_KINDS
-    _ALLOWED_PERSONA_MEMORY_MODES = CharactersRAGDB._ALLOWED_PERSONA_MEMORY_MODES
 
     def __init__(self) -> None:
         """Use the production binding grammar without opening a database."""
-        self.conversation_store = ConversationStore(self)
+        self.conversation_store = ConversationStore(ChaChaContext(self))
 
     def get_conversation_by_id(self, chat_id: str, include_deleted: bool = False) -> dict[str, Any]:
         return _conversation()
@@ -2394,6 +2388,7 @@ async def test_restore_chat_session_maps_conflict_error_to_409() -> None:
 @pytest.mark.asyncio
 async def test_already_active_restore_checks_protected_workspace_lifecycle() -> None:
     class ActiveRestoreDb(_BrokenChatSessionDb):
+        conversation_resume_store = property(lambda self: self)
         def restore_conversation(self, *args: Any, require_already_active: bool = False, **kwargs: Any) -> None:
             if require_already_active:
                 raise self.exc

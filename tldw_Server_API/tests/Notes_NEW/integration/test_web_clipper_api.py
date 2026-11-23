@@ -34,7 +34,7 @@ class _JobManagerDouble:
 def client_with_web_clipper_db(tmp_path):
     db_path = tmp_path / "web_clipper_integration.db"
     db = CharactersRAGDB(str(db_path), client_id="web_clipper_user")
-    db.upsert_workspace("ws-1", "Research Workspace")
+    db.workspace_store.upsert_workspace("ws-1", "Research Workspace")
     media_db = MediaDatabase(db_path=str(tmp_path / "web_clipper_media.db"), client_id="1")
     media_db.initialize_db()
     job_manager = _JobManagerDouble()
@@ -150,7 +150,7 @@ def test_web_clipper_workspace_save_creates_media_backed_workspace_source(client
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "saved"
 
-    sources = db.list_workspace_sources("ws-1")
+    sources = db.workspace_store.list_workspace_sources("ws-1")
     assert len(sources) == 1
     assert sources[0]["id"] == "web-clipper:clip-source-api"
     assert sources[0]["media_id"] > 0
@@ -174,7 +174,7 @@ def test_web_clipper_workspace_save_can_default_source_to_needs_review(
     )
 
     assert response.status_code == 200, response.text
-    sources = db.list_workspace_sources("ws-1")
+    sources = db.workspace_store.list_workspace_sources("ws-1")
     assert len(sources) == 1
     assert sources[0]["review_state"] == "needs_review"
 
@@ -190,7 +190,7 @@ def test_web_clipper_workspace_save_enqueues_workspace_source_ingest_job(client_
     )
 
     assert response.status_code == 200, response.text
-    sources = db.list_workspace_sources("ws-1")
+    sources = db.workspace_store.list_workspace_sources("ws-1")
     assert len(sources) == 1
     source = sources[0]
 
@@ -348,7 +348,7 @@ def test_web_clipper_save_expected_principal_boundary(
         assert response.headers["Cache-Control"] == "no-store"
         assert saved_payloads == []
         assert document is None
-        assert db.list_workspace_sources("ws-1") == []
+        assert db.workspace_store.list_workspace_sources("ws-1") == []
         assert client.app.state.web_clipper_job_manager.created_jobs == []
     else:
         assert len(saved_payloads) == 1
@@ -375,7 +375,7 @@ def test_web_capture_invalid_descriptor_or_digest_persists_nothing(client_with_w
     db = client.app.state.web_clipper_db
     assert db.get_note_clipper_document_by_clip_id("capture-invalid") is None
     assert db.get_note_by_id(stable_note_id("web-clipper", "1\0capture-invalid")) is None
-    assert db.list_workspace_sources("ws-1") == []
+    assert db.workspace_store.list_workspace_sources("ws-1") == []
 
 
 def test_web_capture_save_status_and_exact_retry(client_with_web_clipper_db):
@@ -397,4 +397,4 @@ def test_web_capture_save_status_and_exact_retry(client_with_web_clipper_db):
     status = client.get("/api/v1/web-clipper/capture-api")
     assert status.status_code == 200
     assert status.json()["note"]["id"] == first.json()["note"]["id"]
-    assert len(client.app.state.web_clipper_db.list_workspace_sources("ws-1")) == 1
+    assert len(client.app.state.web_clipper_db.workspace_store.list_workspace_sources("ws-1")) == 1

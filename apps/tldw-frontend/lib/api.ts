@@ -54,7 +54,9 @@ const PUBLIC_PROVIDER_ERROR_MESSAGES = {
   credential_scope_revoked:
     'The selected provider credential scope is no longer available.',
   provider_disabled: 'The selected provider is disabled by administrator policy.',
-  model_not_allowed: 'The selected model is not allowed for this provider.',
+  model_not_allowed:
+    "The selected model is not offered on the server's key for this provider. Your own provider key may serve it.",
+  model_denied: 'The selected model is disabled by administrator policy.',
   provider_configuration_invalid:
     'The selected provider configuration is invalid.',
   provider_unavailable: 'The selected provider is currently unavailable.',

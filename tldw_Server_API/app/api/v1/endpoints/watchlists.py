@@ -66,7 +66,7 @@ from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistJobChangedError, WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, TemplateValidationError
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     build_watchlist_source_bulk_import_activity,
@@ -3534,57 +3534,16 @@ async def create_job(
     # Register schedule with workflows scheduler for persistence/rehydration
     try:
         if row.schedule_expr:
-            from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+            from tldw_Server_API.app.services.workflows_scheduler import register_watchlist_schedule
 
-            svc = get_workflows_scheduler()
-            sid = svc.create(
+            register_watchlist_schedule(
+                db, row,
                 tenant_id=str(getattr(current_user, "tenant_id", "default")),
-                user_id=str(current_user.id),
-                workflow_id=None,
-                name=f"watchlist:{row.id}:{row.name}",
-                cron=row.schedule_expr,
                 timezone=_normalize_tz(row.schedule_timezone) or "UTC",
-                inputs={"watchlist_job_id": row.id},
-                run_mode="async",
-                validation_mode="block",
-                enabled=bool(row.active),
-                concurrency_mode="queue",
-                misfire_grace_sec=300,
-                coalesce=True,
             )
-            db.set_job_schedule_id(row.id, sid)
             row = db.get_job(row.id)
-    except Exception as e:
-        logger.debug(f"Watchlists: schedule registration via service failed, falling back: {e}")
-        # Fallback: create a persisted schedule row directly so admin can inspect linkage
-        try:
-            if row.schedule_expr:
-                from uuid import uuid4
-
-                sid = uuid4().hex
-                from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
-
-                wfdb = WorkflowsSchedulerDB(user_id=int(current_user.id))
-                wfdb.create_schedule(
-                    id=sid,
-                    tenant_id=str(getattr(current_user, "tenant_id", "default")),
-                    user_id=str(current_user.id),
-                    workflow_id=None,
-                    name=f"watchlist:{row.id}:{row.name}",
-                    cron=row.schedule_expr,
-                    timezone=_normalize_tz(row.schedule_timezone) or "UTC",
-                    inputs={"watchlist_job_id": row.id},
-                    run_mode="async",
-                    validation_mode="block",
-                    enabled=bool(row.active),
-                    concurrency_mode="queue",
-                    misfire_grace_sec=300,
-                    coalesce=True,
-                )
-                db.set_job_schedule_id(row.id, sid)
-                row = db.get_job(row.id)
-        except Exception as _e:
-            logger.debug(f"Watchlists: schedule DB fallback failed: {_e}")
+    except Exception:
+        logger.warning("Watchlists: could not attach schedule for job {}", row.id)
 
     output_prefs = _normalize_output_prefs(getattr(row, "output_prefs_json", None))
     ingest_prefs = output_prefs.get("ingest") if isinstance(output_prefs, dict) else None
@@ -3907,6 +3866,9 @@ async def update_job(
     db=Depends(get_watchlists_db_for_user),
 ):
     patch = payload.model_dump(exclude_unset=True)
+    clearing_schedule = "schedule_expr" in patch and not (patch["schedule_expr"] or "").strip()
+    if clearing_schedule:
+        patch["schedule_expr"] = None
     try:
         current = db.get_job(job_id)
     except KeyError:
@@ -3957,6 +3919,23 @@ async def update_job(
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
             effective_output_prefs = {}
 
+    previous_feed_schedule = current_output_prefs.get("collections_schedule")
+    if (
+        "schedule_expr" in patch
+        and effective_schedule_expr != current.schedule_expr
+        and isinstance(previous_feed_schedule, dict)
+    ):
+        edited_feed_schedule = effective_output_prefs.get("collections_schedule")
+        effective_output_prefs = {
+            **effective_output_prefs,
+            "collections_schedule": {
+                **previous_feed_schedule,
+                **(edited_feed_schedule if isinstance(edited_feed_schedule, dict) else {}),
+                "mode": "manual",
+            },
+        }
+        patch["output_prefs_json"] = json.dumps(effective_output_prefs)
+
     _validate_job_request(
         scope=effective_scope if "scope_json" in patch else None,
         schedule_expr=effective_schedule_expr,
@@ -3966,82 +3945,55 @@ async def update_job(
         enforce_schedule=("schedule_expr" in patch or "schedule_timezone" in patch),
         enforce_email_recipients="output_prefs_json" in patch,
     )
+    if patch.get("schedule_expr"):
+        from tldw_Server_API.app.services.workflows_scheduler import delete_retired_watchlist_schedule
+
+        try:
+            delete_retired_watchlist_schedule(current, patch["schedule_expr"])
+        except (_DatabaseError, *_WATCHLISTS_NONCRITICAL_EXCEPTIONS) as exc:
+            raise HTTPException(status_code=503, detail="job_schedule_cleanup_pending") from exc
+
+    schedule_edit = any(k in patch for k in ("schedule_expr", "schedule_timezone", "active"))
     try:
-        r = db.update_job(job_id, patch)
+        r = db.update_job(job_id, patch, expected_job=current if schedule_edit else None)
+    except WatchlistJobChangedError:
+        raise HTTPException(status_code=409, detail="job_schedule_changed") from None
     except KeyError:
         raise HTTPException(status_code=404, detail="job_not_found") from None
-    # Update next_run_at if schedule changed
-    try:
-        if any(k in patch for k in ("schedule_expr", "schedule_timezone")):
-            next_run = _compute_next_run(r.schedule_expr, r.schedule_timezone)
-            db.set_job_history(job_id, next_run_at=next_run)
-            r = db.get_job(job_id)
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-        pass
-    # Sync with workflows scheduler (create/update/enable/disable)
-    try:
+    except (_DatabaseError, OSError, sqlite3.Error) as exc:
+        if not clearing_schedule:
+            raise
+        raise HTTPException(status_code=503, detail="job_schedule_clear_failed") from exc
+
+    if clearing_schedule and current.wf_schedule_id:
         from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
 
-        svc = get_workflows_scheduler()
-        if r.wf_schedule_id:
-            upd: dict[str, Any] = {}
-            if "schedule_expr" in patch:
-                upd["cron"] = r.schedule_expr or "* * * * *"
-            if "schedule_timezone" in patch:
-                upd["timezone"] = _normalize_tz(r.schedule_timezone) or "UTC"
-            if "active" in patch:
-                upd["enabled"] = bool(r.active)
-            if upd:
-                svc.update(r.wf_schedule_id, upd)
-        else:
-            if r.schedule_expr:
-                try:
-                    sid = svc.create(
-                        tenant_id=str(getattr(current_user, "tenant_id", "default")),
-                        user_id=str(current_user.id),
-                        workflow_id=None,
-                        name=f"watchlist:{r.id}:{r.name}",
-                        cron=r.schedule_expr,
-                        timezone=_normalize_tz(r.schedule_timezone) or "UTC",
-                        inputs={"watchlist_job_id": r.id},
-                        run_mode="async",
-                        validation_mode="block",
-                        enabled=bool(r.active),
-                        concurrency_mode="queue",
-                        misfire_grace_sec=300,
-                        coalesce=True,
-                    )
-                    db.set_job_schedule_id(r.id, sid)
-                    r = db.get_job(r.id)
-                except Exception as _e:
-                    logger.debug(f"Watchlists: schedule create during update failed, fallback: {_e}")
-                    try:
-                        from uuid import uuid4
+        # The job row already fenced this cron. Keep its old link until cleanup succeeds.
+        try:
+            get_workflows_scheduler().delete(current.wf_schedule_id, user_id=int(current_user.id))
+            db.detach_cleared_job_schedule(job_id, current.wf_schedule_id)
+            r = db.get_job(job_id)
+        except (_DatabaseError, *_WATCHLISTS_NONCRITICAL_EXCEPTIONS) as exc:
+            logger.warning("Watchlists: could not remove retired recurring schedule for job {}", job_id)
+            raise HTTPException(status_code=503, detail="job_schedule_cleanup_pending") from exc
+    try:
+        if not clearing_schedule and any(k in patch for k in ("schedule_expr", "schedule_timezone")):
+            next_run = _compute_next_run(r.schedule_expr, r.schedule_timezone)
+            db.set_job_history(job_id, next_run_at=next_run, expected_job=r)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        pass
+    try:
+        if not clearing_schedule and r.schedule_expr and (schedule_edit or not r.wf_schedule_id):
+            from tldw_Server_API.app.services.workflows_scheduler import register_watchlist_schedule
 
-                        sid = uuid4().hex
-                        from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
-
-                        wfdb = WorkflowsSchedulerDB(user_id=int(current_user.id))
-                        wfdb.create_schedule(
-                            id=sid,
-                            tenant_id=str(getattr(current_user, "tenant_id", "default")),
-                            user_id=str(current_user.id),
-                            workflow_id=None,
-                            name=f"watchlist:{r.id}:{r.name}",
-                            cron=r.schedule_expr,
-                            timezone=_normalize_tz(r.schedule_timezone) or "UTC",
-                            inputs={"watchlist_job_id": r.id},
-                            run_mode="async",
-                            validation_mode="block",
-                            enabled=bool(r.active),
-                            concurrency_mode="queue",
-                            misfire_grace_sec=300,
-                            coalesce=True,
-                        )
-                        db.set_job_schedule_id(r.id, sid)
-                        r = db.get_job(r.id)
-                    except Exception as __e:
-                        logger.debug(f"Watchlists: schedule DB fallback during update failed: {__e}")
+            register_watchlist_schedule(
+                db, r,
+                tenant_id=str(getattr(current_user, "tenant_id", "default")),
+                timezone=_normalize_tz(r.schedule_timezone) or "UTC",
+                force=(current.schedule_expr, current.schedule_timezone, current.active)
+                != (r.schedule_expr, r.schedule_timezone, r.active),
+            )
+            r = db.get_job(r.id)
     except Exception as e:
         logger.debug(f"Watchlists: schedule sync skipped: {e}")
     output_prefs = _normalize_output_prefs(getattr(r, "output_prefs_json", None))
@@ -4124,23 +4076,31 @@ async def delete_job(
     current_user: User = Depends(get_request_user),
     db=Depends(get_watchlists_db_for_user),
 ):
-    # Try to delete linked schedule if present
+    from tldw_Server_API.app.services.workflows_scheduler import (
+        bind_linked_watchlist_schedule,
+        retry_watchlist_schedule_retirements,
+    )
+
     try:
         r = db.get_job(job_id)
-        if getattr(r, "wf_schedule_id", None):
-            from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
-
-            get_workflows_scheduler().delete(r.wf_schedule_id)  # type: ignore[arg-type]
-            with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                db.set_job_schedule_id(job_id, None)
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-        pass
-    ok, restore_expires_at = db.delete_job_reversible(
-        job_id,
-        undo_window_seconds=WATCHLISTS_DELETE_RESTORE_WINDOW_SECONDS,
-    )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job_not_found") from None
+    try:
+        retire_schedule = bind_linked_watchlist_schedule(r)
+    except (_DatabaseError, *_WATCHLISTS_NONCRITICAL_EXCEPTIONS) as exc:
+        raise HTTPException(status_code=503, detail="job_schedule_cleanup_pending") from exc
+    try:
+        ok, restore_expires_at = db.delete_job_reversible(
+            job_id,
+            undo_window_seconds=WATCHLISTS_DELETE_RESTORE_WINDOW_SECONDS,
+            expected_job=r,
+            retire_schedule=retire_schedule,
+        )
+    except WatchlistJobChangedError:
+        raise HTTPException(status_code=409, detail="job_schedule_changed") from None
     if not ok or not restore_expires_at:
         raise HTTPException(status_code=404, detail="job_not_found")
+    retry_watchlist_schedule_retirements(db, r)
     return JobDeleteResponse(
         success=True,
         job_id=int(job_id),
@@ -4157,6 +4117,8 @@ async def restore_job(
 ):
     try:
         row = db.restore_job(job_id)
+    except WatchlistJobChangedError:
+        raise HTTPException(status_code=409, detail="job_restore_conflict") from None
     except KeyError as exc:
         code = str(exc.args[0]) if exc.args else "job_restore_not_found"
         if code == "job_restore_expired":
@@ -4166,63 +4128,22 @@ async def restore_job(
     # Recompute next_run_at and re-register scheduler linkage for restored jobs.
     try:
         next_run = _compute_next_run(row.schedule_expr, row.schedule_timezone)
-        db.set_job_history(row.id, next_run_at=next_run)
-        row = db.get_job(row.id)
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-        pass
+        db.set_job_history(row.id, next_run_at=next_run, expected_job=row)
+    except (_DatabaseError, *_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+        logger.warning("Watchlists: could not update schedule history for restored job {}", row.id)
 
     try:
         if row.schedule_expr:
-            from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+            from tldw_Server_API.app.services.workflows_scheduler import register_watchlist_schedule
 
-            svc = get_workflows_scheduler()
-            sid = svc.create(
+            register_watchlist_schedule(
+                db, row,
                 tenant_id=str(getattr(current_user, "tenant_id", "default")),
-                user_id=str(current_user.id),
-                workflow_id=None,
-                name=f"watchlist:{row.id}:{row.name}",
-                cron=row.schedule_expr,
                 timezone=_normalize_tz(row.schedule_timezone) or "UTC",
-                inputs={"watchlist_job_id": row.id},
-                run_mode="async",
-                validation_mode="block",
-                enabled=bool(row.active),
-                concurrency_mode="queue",
-                misfire_grace_sec=300,
-                coalesce=True,
             )
-            db.set_job_schedule_id(row.id, sid)
             row = db.get_job(row.id)
-    except Exception as e:
-        logger.debug(f"Watchlists: schedule registration during restore failed, fallback: {e}")
-        try:
-            if row.schedule_expr:
-                from uuid import uuid4
-
-                from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
-
-                sid = uuid4().hex
-                wfdb = WorkflowsSchedulerDB(user_id=int(current_user.id))
-                wfdb.create_schedule(
-                    id=sid,
-                    tenant_id=str(getattr(current_user, "tenant_id", "default")),
-                    user_id=str(current_user.id),
-                    workflow_id=None,
-                    name=f"watchlist:{row.id}:{row.name}",
-                    cron=row.schedule_expr,
-                    timezone=_normalize_tz(row.schedule_timezone) or "UTC",
-                    inputs={"watchlist_job_id": row.id},
-                    run_mode="async",
-                    validation_mode="block",
-                    enabled=bool(row.active),
-                    concurrency_mode="queue",
-                    misfire_grace_sec=300,
-                    coalesce=True,
-                )
-                db.set_job_schedule_id(row.id, sid)
-                row = db.get_job(row.id)
-        except Exception as fallback_exc:
-            logger.debug(f"Watchlists: schedule DB fallback during restore failed: {fallback_exc}")
+    except Exception:
+        logger.warning("Watchlists: could not attach schedule for restored job {}", row.id)
 
     output_prefs = _normalize_output_prefs(getattr(row, "output_prefs_json", None))
     ingest_prefs = output_prefs.get("ingest") if isinstance(output_prefs, dict) else None

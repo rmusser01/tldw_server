@@ -86,6 +86,7 @@ def _media(
 
 
 class _OwnerChaCha:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self, sources: list[dict[str, Any]]) -> None:
         self.sources = sources
         self.calls: list[str] = []

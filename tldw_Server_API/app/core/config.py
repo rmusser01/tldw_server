@@ -10,8 +10,10 @@ import json
 import os
 import platform
 from collections.abc import Mapping, MutableMapping
+from dataclasses import asdict
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlparse
 
@@ -23,6 +25,21 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
+from tldw_Server_API.app.core.config_sections.auth import (
+    api_key_env,
+    load_auth_config,
+    resolve_jwt_secret_key,
+    resolve_single_user_api_key,
+    resolve_single_user_fixed_id,
+)
+from tldw_Server_API.app.core.config_sections.database import database_url_env
+from tldw_Server_API.app.core.config_sections.precedence import resolve
+from tldw_Server_API.app.core.config_sections.rag import (
+    contextual_defaults,
+    resolve_default_llm_model,
+    resolve_default_llm_provider,
+)
+from tldw_Server_API.app.core.config_sections.redis import resolve_redis_url
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_api_key_env_keys,
     custom_openai_config_option_names,
@@ -104,13 +121,9 @@ def _first_nonempty_env(
     *,
     environment: Mapping[str, str] | None = None,
 ) -> str | None:
-    """Return the first non-empty environment value from ordered candidates."""
-    env = os.environ if environment is None else environment
-    for env_key in env_keys:
-        value = env.get(env_key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    """Return the first non-empty environment value from ordered candidates, stripped."""
+    value = resolve(env_keys, env=environment).value
+    return None if value is None else value.strip()
 
 
 def _env_or_config_value(
@@ -122,11 +135,16 @@ def _env_or_config_value(
     fallback: Optional[str] = None,
     environment: Mapping[str, str] | None = None,
 ) -> Optional[str]:
-    """Resolve an env-first value with a single config option fallback."""
-    return _first_nonempty_env(
+    """Resolve an env-first value (stripped) with a single config option fallback, which wins even when blank."""
+    resolved = resolve(
         env_keys,
-        environment=environment,
-    ) or config_parser_object.get(section, key, fallback=fallback)
+        ((section, key),),
+        config_parser=config_parser_object,
+        env=environment,
+        default=fallback,
+        blank_config=True,
+    )
+    return str(resolved.value).strip() if resolved.source == "env" else resolved.value
 
 
 def _first_config_option_value(
@@ -137,15 +155,7 @@ def _first_config_option_value(
     fallback: Optional[str] = None,
 ) -> Optional[str]:
     """Return the first non-empty value from equivalent config option names."""
-    sentinel = object()
-    for key in keys:
-        value = config_parser_object.get(section, key, fallback=sentinel)
-        if value is sentinel or value is None:
-            continue
-        if isinstance(value, str) and not value.strip():
-            continue
-        return value
-    return fallback
+    return resolve((), [(section, key) for key in keys], config_parser=config_parser_object, default=fallback).value
 
 
 def _env_or_config_option_value(
@@ -157,16 +167,15 @@ def _env_or_config_option_value(
     fallback: Optional[str] = None,
     environment: Mapping[str, str] | None = None,
 ) -> Optional[str]:
-    """Resolve ordered env aliases before ordered config option aliases."""
-    return _first_nonempty_env(
+    """Resolve ordered env aliases (stripped) before ordered config option aliases."""
+    resolved = resolve(
         env_keys,
-        environment=environment,
-    ) or _first_config_option_value(
-        config_parser_object,
-        section,
-        keys,
-        fallback=fallback,
+        [(section, key) for key in keys],
+        config_parser=config_parser_object,
+        env=environment,
+        default=fallback,
     )
+    return str(resolved.value).strip() if resolved.source == "env" else resolved.value
 
 
 def _int_env_or_cfg(
@@ -482,7 +491,7 @@ def get_ingestion_source_allowed_roots(*, reload: bool = False) -> tuple[Path, .
     )
     raw_values: list[str] = _split_allowed_root_values(config_value)
     for env_name in _INGESTION_SOURCE_ALLOWED_ROOT_ENV_KEYS:
-        raw_values.extend(_split_allowed_root_values(os.getenv(env_name)))
+        raw_values.extend(_split_allowed_root_values(resolve((env_name,), blank_env=True).value))
 
     return _dedupe_normalized_allowed_roots(raw_values)
 
@@ -497,7 +506,7 @@ def get_workspace_project_root_allowed_roots(*, reload: bool = False) -> tuple[P
         )
     )
     for env_name in _WORKSPACE_PROJECT_ROOT_ALLOWED_ROOT_ENV_KEYS:
-        workspace_values.extend(_split_allowed_root_values(os.getenv(env_name)))
+        workspace_values.extend(_split_allowed_root_values(resolve((env_name,), blank_env=True).value))
 
     workspace_roots = _dedupe_normalized_allowed_roots(workspace_values)
     if workspace_roots:
@@ -512,7 +521,7 @@ def get_workspace_project_root_allowed_roots(*, reload: bool = False) -> tuple[P
         )
     )
     for env_name in _WORKSPACE_PROJECT_ROOT_ACP_FALLBACK_ENV_KEYS:
-        fallback_values.extend(_split_allowed_root_values(os.getenv(env_name)))
+        fallback_values.extend(_split_allowed_root_values(resolve((env_name,), blank_env=True).value))
 
     return _dedupe_normalized_allowed_roots(fallback_values)
 
@@ -924,6 +933,16 @@ openai_tts_mappings = {
 }
 
 
+class _RawConfigView:
+    """A parser whose ``get`` skips ``%`` interpolation, for ``resolve``."""
+
+    def __init__(self, parser: configparser.ConfigParser) -> None:
+        self._parser = parser
+
+    def get(self, section: str, option: str, *, fallback: Any = None) -> Any:
+        return self._parser.get(section, option, raw=True, fallback=fallback)
+
+
 # --- Helper Function (Optional but can keep dictionary creation clean) ---
 def _load_claims_review_metrics_settings(parser: configparser.ConfigParser | None) -> dict[str, Any]:
     """Load Claims production flags while leaving numeric bounds to consumers."""
@@ -946,10 +965,16 @@ def _load_claims_review_metrics_settings(parser: configparser.ConfigParser | Non
         "CLAIMS_CLUSTER_REBUILD_MAX_CLEANUP_REFERENCES": "50000",
     }
     resolved: dict[str, Any] = {}
+    raw_parser = _RawConfigView(parser) if parser else None  # numeric bounds may hold a literal "%"
     for key, default in defaults.items():
-        raw = os.getenv(key)
-        if raw is None:
-            raw = parser.get("ClaimsMonitoring", key, raw=True, fallback=default) if parser else default
+        raw = resolve(
+            (key,),
+            (("ClaimsMonitoring", key),),
+            config_parser=raw_parser,
+            default=default,
+            blank_env=True,
+            blank_config=True,
+        ).value
         resolved[key] = is_truthy(raw) if key.endswith("_ENABLED") else raw
     return resolved
 
@@ -973,21 +998,20 @@ def load_settings():
     _load_env_files_early()
 
     # --- Application Mode ---
-    single_user_mode_str = os.getenv("APP_MODE", "single").lower()
-    single_user_mode = single_user_mode_str != "multi"
+    single_user_mode = load_auth_config(load_comprehensive_config()).mode == "single_user"
+    single_user_mode_str = "single" if single_user_mode else "multi"
 
     # --- Single-User Settings ---
     # Use a fixed ID for the single user's database path and cache key
     # Default to 1 for single-user mode (0 is typically reserved for system/admin)
-    single_user_fixed_id = int(os.getenv("SINGLE_USER_FIXED_ID", "1")) # Default to user ID 1
+    single_user_fixed_id = int(str(resolve_single_user_fixed_id(load_comprehensive_config()).value)) # Default to user ID 1
     # API Key for accessing the single-user instance
     # Check both SINGLE_USER_API_KEY (AuthNZ standard) and API_KEY (legacy) environment variables
-    single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
+    single_user_api_key = resolve_single_user_api_key(load_comprehensive_config()).value or api_key_env()  # D1(d)
 
     # --- Multi-User Settings (JWT) ---
-    jwt_secret_key = os.getenv("JWT_SECRET_KEY", "a_very_insecure_default_secret_key_for_dev_only")
+    jwt_secret_key = resolve_jwt_secret_key(load_comprehensive_config(), default="a_very_insecure_default_secret_key_for_dev_only").value  # D1(f)
     jwt_algorithm = "HS256"
-    access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
     # --- Redis Configuration ---
     # Initialize comprehensive_config early to avoid UnboundLocalError
@@ -1074,13 +1098,12 @@ def load_settings():
     except _CONFIG_NONCRITICAL_EXCEPTIONS:
         cache_ttl = 300
 
-    config_redis_url = _redis_section_get('redis_url')
-    redis_url_env = os.getenv("REDIS_URL")
-
-    if redis_url_env:
-        redis_url = redis_url_env
-    elif config_redis_url:
-        redis_url = config_redis_url
+    # The resolver reads the same `comprehensive_config` snapshot as the host/port options above.
+    resolved_redis = resolve_redis_url(SimpleNamespace(get=lambda _s, option, *, fallback=None: _redis_section_get(option, fallback)))
+    if resolved_redis.source == "env":
+        redis_url = resolved_redis.value
+    elif resolved_redis.source == "config":
+        redis_url = resolved_redis.value
         try:
             parsed = urlparse(redis_url)
             if parsed.hostname and not os.getenv("REDIS_HOST"):
@@ -1129,7 +1152,7 @@ def load_settings():
     # Main/central SQLite database: ACTUAL_PROJECT_ROOT/Databases/user_databases/<SINGLE_USER_FIXED_ID>/tldw.db
     default_main_db_path = (ACTUAL_PROJECT_ROOT / "Databases" / "user_databases" / f"{single_user_fixed_id}" / "tldw.db").resolve()
     default_database_url = f"sqlite:///{default_main_db_path}"
-    database_url = os.getenv("DATABASE_URL", default_database_url)
+    database_url = default_database_url if (env_url := database_url_env()) is None else env_url
 
     users_db_configured = os.getenv("USERS_DB_ENABLED", "false").lower() == "true"
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -1212,11 +1235,6 @@ def load_settings():
     )
 
     # Load comprehensive configurations (API keys, embedding settings, etc.)
-    # If SINGLE_USER_API_KEY wasn't present before, try reading again now that configs/.env may be loaded
-    if not single_user_api_key:
-        with contextlib.suppress(_CONFIG_NONCRITICAL_EXCEPTIONS):
-            single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
-
 
     content_backend_mode = os.getenv("TLDW_CONTENT_DB_BACKEND", "sqlite").strip().lower()
 
@@ -1516,7 +1534,6 @@ def load_settings():
         # Multi User / Auth
         "JWT_SECRET_KEY": jwt_secret_key,
         "JWT_ALGORITHM": jwt_algorithm,
-        "ACCESS_TOKEN_EXPIRE_MINUTES": access_token_expire_minutes,
         "DATABASE_URL": database_url,
         "USER_DB_BASE_DIR": user_data_base_dir, # Renamed for clarity (was user_db_base_dir)
         "USERS_DB_CONFIGURED": users_db_configured,
@@ -1968,48 +1985,7 @@ def load_settings():
         ))(),
 
         # Contextual retrieval defaults (parent/siblings) - from env or config.txt [RAG] section
-        "RAG_CONTEXTUAL_DEFAULTS": (lambda: (
-            # Build contextual defaults from env first, then config.txt [RAG] section
-            (lambda _envs, _cfg: {
-                "include_parent_document": (
-                    (_envs.get("RAG_INCLUDE_PARENT_DOCUMENT").lower() == "true") if _envs.get("RAG_INCLUDE_PARENT_DOCUMENT") is not None else (
-                        str(_cfg.get('include_parent_document', 'false')).lower() == 'true'
-                    )
-                ),
-                "parent_max_tokens": (
-                    _int_env_or_cfg(
-                        _envs.get("RAG_PARENT_MAX_TOKENS"),
-                        _cfg.get("parent_max_tokens", "1200"),
-                        1200,
-                    )
-                ),
-                "include_sibling_chunks": (
-                    (_envs.get("RAG_INCLUDE_SIBLING_CHUNKS").lower() == "true") if _envs.get("RAG_INCLUDE_SIBLING_CHUNKS") is not None else (
-                        str(_cfg.get('include_sibling_chunks', 'false')).lower() == 'true'
-                    )
-                ),
-                "sibling_window": (
-                    _int_env_or_cfg(
-                        _envs.get("RAG_SIBLING_WINDOW"),
-                        _cfg.get("sibling_window", "1"),
-                        1,
-                    )
-                ),
-            })(
-                {
-                    "RAG_INCLUDE_PARENT_DOCUMENT": os.getenv("RAG_INCLUDE_PARENT_DOCUMENT"),
-                    "RAG_PARENT_MAX_TOKENS": os.getenv("RAG_PARENT_MAX_TOKENS"),
-                    "RAG_INCLUDE_SIBLING_CHUNKS": os.getenv("RAG_INCLUDE_SIBLING_CHUNKS"),
-                    "RAG_SIBLING_WINDOW": os.getenv("RAG_SIBLING_WINDOW"),
-                },
-                (lambda _cp: (
-                    (lambda d: d)(
-                        {k: (_cp.get('RAG', k, fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None)
-                         for k in ['include_parent_document', 'parent_max_tokens', 'include_sibling_chunks', 'sibling_window']}
-                    )
-                ))(load_comprehensive_config())
-            )
-        ))(),
+        "RAG_CONTEXTUAL_DEFAULTS": asdict(contextual_defaults(load_comprehensive_config())),
         "IMPLICIT_FEEDBACK_ENABLED": implicit_feedback_enabled(default=True),
 
         # RAG FlashRank reranker cache/model configuration
@@ -2113,16 +2089,8 @@ def load_settings():
         ))(os.getenv('RAG_HYDE_MODEL'), load_comprehensive_config()),
 
         # RAG default LLM (used for general lightweight tasks like query expansion/gap analysis)
-        "RAG_DEFAULT_LLM_PROVIDER": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'default_llm_provider', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
-            )
-        ))(os.getenv('RAG_DEFAULT_LLM_PROVIDER'), load_comprehensive_config()),
-        "RAG_DEFAULT_LLM_MODEL": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'default_llm_model', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
-            )
-        ))(os.getenv('RAG_DEFAULT_LLM_MODEL'), load_comprehensive_config()),
+        "RAG_DEFAULT_LLM_PROVIDER": resolve_default_llm_provider(load_comprehensive_config()).value,
+        "RAG_DEFAULT_LLM_MODEL": resolve_default_llm_model(load_comprehensive_config()).value,
 
         # RAG default FTS level ('media' or 'chunk')
         "RAG_DEFAULT_FTS_LEVEL": (lambda _env, _cp: (
@@ -2675,49 +2643,53 @@ def _as_bool(val: object, default: bool) -> bool:
     return default
 
 
+def _env_then_loaded_config(
+    env_key: str,
+    section: str,
+    option: str,
+    default: str,
+) -> str:
+    """Resolve one setting: a set env var (blank counts) wins, else config.txt (blank counts), else ``default``.
+
+    config.txt is loaded only when the environment does not decide, so a config that cannot be
+    loaded never hides a set env var. A config that cannot be loaded or read yields ``default``.
+    """
+    env = resolve((env_key,), blank_env=True)
+    if env.source == "env":
+        return str(env.value)
+    try:
+        cp = load_comprehensive_config()
+        return str(resolve((), ((section, option),), config_parser=cp, default=default, blank_config=True).value)
+    except _CONFIG_NONCRITICAL_EXCEPTIONS:
+        return default
+
+
 def rag_enable_structure_index(default: bool = True) -> bool:
-    v = os.getenv("RAG_ENABLE_STRUCTURE_INDEX")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("RAG", "enable_structure_index", fallback=str(default)) if cp else str(default)
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = str(default)
-    return _as_bool(v, default)
+    return _as_bool(_env_then_loaded_config("RAG_ENABLE_STRUCTURE_INDEX", "RAG", "enable_structure_index", str(default)), default)
 
 
 def rag_strict_extractive(default: bool = False) -> bool:
-    v = os.getenv("RAG_STRICT_EXTRACTIVE")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("RAG", "strict_extractive", fallback=str(default)) if cp else str(default)
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = str(default)
-    return _as_bool(v, default)
+    return _as_bool(_env_then_loaded_config("RAG_STRICT_EXTRACTIVE", "RAG", "strict_extractive", str(default)), default)
 
 
 def rag_require_hard_citations(default: bool = False) -> bool:
-    v = os.getenv("RAG_REQUIRE_HARD_CITATIONS")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("RAG", "require_hard_citations", fallback=str(default)) if cp else str(default)
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = str(default)
-    return _as_bool(v, default)
+    return _as_bool(_env_then_loaded_config("RAG_REQUIRE_HARD_CITATIONS", "RAG", "require_hard_citations", str(default)), default)
 
 
 def rag_low_confidence_behavior(default: str = "continue") -> str:
-    v = os.getenv("RAG_LOW_CONFIDENCE_BEHAVIOR")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("RAG", "low_confidence_behavior", fallback=default) if cp else default
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = default
+    v = _env_then_loaded_config("RAG_LOW_CONFIDENCE_BEHAVIOR", "RAG", "low_confidence_behavior", default)
     s = str(v).strip().lower()
     return s if s in ("continue", "ask", "decline") else default
+
+
+def _present_web_scraper_locations(cp: Any, option: str) -> list[tuple[str, str]]:
+    """``option`` under each web-scraper section name that exists in ``cp`` (all of them when it cannot say)."""
+    has_section = getattr(cp, "has_section", None)
+    return [
+        (section_name, option)
+        for section_name in ("Web-Scraper", "Web-Scraping")
+        if not callable(has_section) or has_section(section_name)
+    ]
 
 
 def web_outbound_policy_mode(
@@ -2731,25 +2703,17 @@ def web_outbound_policy_mode(
     ``default``; malformed values and configuration-load failures preserve an
     empty sentinel so browser admission can fail closed.
     """
-    env = os.environ if environment is None else environment
-    v = env.get("WEB_OUTBOUND_POLICY_MODE")
-    if v is None:
+    resolved = resolve(("WEB_OUTBOUND_POLICY_MODE",), env=environment, blank_env=True)
+    v = resolved.value
+    if resolved.source != "env":
         try:
             cp = load_comprehensive_config()
-            v = default
-            if cp:
-                has_section = getattr(cp, "has_section", None)
-                for section_name in ("Web-Scraper", "Web-Scraping"):
-                    if callable(has_section) and not has_section(section_name):
-                        continue
-                    candidate = cp.get(
-                        section_name,
-                        "web_outbound_policy_mode",
-                        fallback=None,
-                    )
-                    if candidate is not None and str(candidate).strip():
-                        v = candidate
-                        break
+            v = resolve(
+                (),
+                _present_web_scraper_locations(cp, "web_outbound_policy_mode"),
+                config_parser=cp,
+                default=default,
+            ).value
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
             return ""
     s = str(v).strip().lower()
@@ -2762,53 +2726,33 @@ def web_browser_transport_mode(
     environment: Mapping[str, str] | None = None,
 ) -> str:
     """Resolve a transport mode, returning an empty invalid sentinel if malformed."""
-    env = os.environ if environment is None else environment
-    value = env.get("WEB_BROWSER_TRANSPORT_MODE")
-    if value is None:
+    resolved = resolve(("WEB_BROWSER_TRANSPORT_MODE",), env=environment, blank_env=True)
+    value = resolved.value
+    if resolved.source != "env":
         try:
             config = load_comprehensive_config()
-            if config:
-                has_section = getattr(config, "has_section", None)
-                for section_name in ("Web-Scraper", "Web-Scraping"):
-                    if callable(has_section) and not has_section(section_name):
-                        continue
-                    candidate = config.get(
-                        section_name,
-                        "web_browser_transport_mode",
-                        fallback=None,
-                    )
-                    if candidate is not None:
-                        value = candidate
-                        break
+            value = resolve(
+                (),
+                _present_web_scraper_locations(config, "web_browser_transport_mode"),
+                config_parser=config,
+                default=default,
+                blank_config=True,
+            ).value
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
             return ""
-        if value is None:
-            value = default
     normalized = str(value).strip().lower()
     allowed = {"auto", "disabled", "url_guarded", "attested_proxy"}
     return normalized if normalized in allowed else ""
 
 
 def rag_agentic_cache_backend(default: str = "memory") -> str:
-    v = os.getenv("RAG_AGENTIC_CACHE_BACKEND")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("RAG", "agentic_cache_backend", fallback=default) if cp else default
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = default
+    v = _env_then_loaded_config("RAG_AGENTIC_CACHE_BACKEND", "RAG", "agentic_cache_backend", default)
     s = str(v).strip().lower()
     return s if s in ("memory", "sqlite") else default
 
 
 def rag_agentic_cache_ttl_sec(default: int = 600) -> int:
-    v = os.getenv("RAG_AGENTIC_CACHE_TTL_SEC")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("RAG", "agentic_cache_ttl_sec", fallback=str(default)) if cp else str(default)
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = str(default)
+    v = _env_then_loaded_config("RAG_AGENTIC_CACHE_TTL_SEC", "RAG", "agentic_cache_ttl_sec", str(default))
     try:
         return max(1, int(str(v)))
     except _CONFIG_NONCRITICAL_EXCEPTIONS:
@@ -2830,8 +2774,9 @@ def implicit_feedback_enabled(
     Returns:
         bool: True if implicit feedback should be collected
     """
-    v = os.getenv("IMPLICIT_FEEDBACK_ENABLED")
-    if v is None:
+    resolved = resolve(("IMPLICIT_FEEDBACK_ENABLED",), blank_env=True)
+    v = resolved.value
+    if resolved.source != "env":
         cp = config_parser
         if cp is None:
             try:
@@ -2843,7 +2788,13 @@ def implicit_feedback_enabled(
                 cp = None
         if cp is not None:
             try:
-                v = cp.get("RAG", "implicit_feedback_enabled", fallback=str(default))
+                v = resolve(
+                    (),
+                    (("RAG", "implicit_feedback_enabled"),),
+                    config_parser=cp,
+                    default=str(default),
+                    blank_config=True,
+                ).value
             except (configparser.Error, AttributeError, TypeError, ValueError) as exc:
                 _log_debug(
                     f"implicit_feedback_enabled: config read failed, falling back to default={default}: {exc}"
@@ -2873,8 +2824,9 @@ def rg_enabled(default: bool = True) -> bool:
       2) [ResourceGovernor] enabled in config.txt
       3) Provided default (True unless overridden by caller)
     """
-    v = os.getenv("RG_ENABLED")
-    if v is None:
+    resolved = resolve(("RG_ENABLED",), blank_env=True)
+    v = resolved.value
+    if resolved.source != "env":
         # In test environments, keep RG disabled unless explicitly enabled via
         # RG_ENABLED so unit/integration tests don't unexpectedly start
         # receiving 429s when importing the main app.
@@ -2894,7 +2846,9 @@ def rg_enabled(default: bool = True) -> bool:
             v = str(default)
         else:
             try:
-                v = cp.get("ResourceGovernor", "enabled", fallback=str(default)) if cp else str(default)
+                v = resolve(
+                    (), (("ResourceGovernor", "enabled"),), config_parser=cp, default=str(default), blank_config=True
+                ).value
             except (configparser.Error, KeyError, ValueError) as exc:
                 _log_debug(f"rg_enabled: config read failed, falling back to default={default}: {exc}")
                 v = str(default)
@@ -2915,18 +2869,17 @@ def usage_quotas_enabled() -> bool:
       4) False: quotas are off unless an operator turns them on
     """
     global _USAGE_QUOTAS_LEGACY_WARNED
-    v = os.getenv("USAGE_QUOTAS_ENABLED")
-    if v is None:
-        legacy = os.getenv("LIMIT_ENFORCEMENT_ENABLED")
-        if legacy is not None:
-            if not _USAGE_QUOTAS_LEGACY_WARNED:
-                _USAGE_QUOTAS_LEGACY_WARNED = True
-                logger.warning("LIMIT_ENFORCEMENT_ENABLED is deprecated; set USAGE_QUOTAS_ENABLED instead")
-            v = legacy
-    if v is None:
+    resolved = resolve(("USAGE_QUOTAS_ENABLED", "LIMIT_ENFORCEMENT_ENABLED"), blank_env=True)
+    v = resolved.value
+    if resolved.origin == "LIMIT_ENFORCEMENT_ENABLED" and not _USAGE_QUOTAS_LEGACY_WARNED:
+        _USAGE_QUOTAS_LEGACY_WARNED = True
+        logger.warning("LIMIT_ENFORCEMENT_ENABLED is deprecated; set USAGE_QUOTAS_ENABLED instead")
+    if resolved.source != "env":
         try:
             cp = load_comprehensive_config()
-            v = cp.get("Usage-Quotas", "enabled", fallback="false") if cp else "false"
+            v = resolve(
+                (), (("Usage-Quotas", "enabled"),), config_parser=cp, default="false", blank_config=True
+            ).value
         except (FileNotFoundError, configparser.Error, KeyError, ValueError) as exc:
             _log_debug(f"usage_quotas_enabled: config read failed, quotas stay off: {exc}")
             v = "false"
@@ -2959,18 +2912,19 @@ def get_llamacpp_handler_settings() -> dict[str, Any] | None:
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
         _log_warning(f"llama.cpp handler config unavailable (config load failed): {exc}")
         return None
-    section = cp["LlamaCpp"] if cp and cp.has_section("LlamaCpp") else None
+    section_parser = cp if cp and cp.has_section("LlamaCpp") else None
 
     def _get(opt: str, env_name: str):
-        v = os.getenv(env_name)
-        if v is not None:
-            return v
-        if section is not None:
-            try:
-                return section.get(opt, fallback=None)
-            except _CONFIG_NONCRITICAL_EXCEPTIONS:
-                return None
-        return None
+        try:
+            return resolve(
+                (env_name,),
+                (("LlamaCpp", opt),),
+                config_parser=section_parser,
+                blank_env=True,
+                blank_config=True,
+            ).value
+        except _CONFIG_NONCRITICAL_EXCEPTIONS:
+            return None
 
     enabled_raw = _get("enabled", "LLAMACPP_ENABLED")
     enabled = _as_bool(enabled_raw, False)
@@ -3063,7 +3017,7 @@ def _resolve_run_first_rollout_mode(
         candidate = str(raw_mode).strip().lower()
         return candidate if candidate in _RUN_FIRST_ROLLOUT_MODES else safe_default
 
-    env_mode = os.getenv(env_name)
+    env_mode = resolve((env_name,), blank_env=True).value
     if env_mode is not None:
         candidate = str(env_mode).strip().lower()
         return candidate if candidate in _RUN_FIRST_ROLLOUT_MODES else safe_default
@@ -3071,7 +3025,9 @@ def _resolve_run_first_rollout_mode(
     try:
         cp = load_comprehensive_config()
         if cp and cp.has_section(config_section):
-            candidate = cp.get(config_section, config_key, fallback="").strip().lower()
+            candidate = str(
+                resolve((), ((config_section, config_key),), config_parser=cp, default="", blank_config=True).value
+            ).strip().lower()
             if candidate in _RUN_FIRST_ROLLOUT_MODES:
                 return candidate
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:
@@ -3093,7 +3049,7 @@ def _resolve_run_first_provider_allowlist(
     if raw_allowlist is not None:
         return _split_run_first_provider_allowlist(raw_allowlist)
 
-    env_allowlist = os.getenv(env_name)
+    env_allowlist = resolve((env_name,), blank_env=True).value
     if env_allowlist is not None:
         return _split_run_first_provider_allowlist(env_allowlist)
 
@@ -3101,7 +3057,7 @@ def _resolve_run_first_provider_allowlist(
         cp = load_comprehensive_config()
         if cp and cp.has_section(config_section):
             return _split_run_first_provider_allowlist(
-                cp.get(config_section, config_key, fallback="")
+                resolve((), ((config_section, config_key),), config_parser=cp, default="", blank_config=True).value
             )
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:
         _log_warning(
@@ -3126,7 +3082,7 @@ def _resolve_run_first_presentation_variant(
         candidate = str(raw_variant).strip()
         return candidate or safe_default
 
-    env_variant = os.getenv(env_name)
+    env_variant = resolve((env_name,), blank_env=True).value
     if env_variant is not None:
         candidate = str(env_variant).strip()
         if candidate:
@@ -3135,7 +3091,9 @@ def _resolve_run_first_presentation_variant(
     try:
         cp = load_comprehensive_config()
         if cp and cp.has_section(config_section):
-            candidate = cp.get(config_section, config_key, fallback="").strip()
+            candidate = str(
+                resolve((), ((config_section, config_key),), config_parser=cp, default="", blank_config=True).value
+            ).strip()
             if candidate:
                 return candidate
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:
@@ -3301,7 +3259,7 @@ def resolve_governance_rollout_mode(
         candidate = str(raw_mode).strip().lower()
         return candidate if candidate in _GOVERNANCE_ROLLOUT_MODES else safe_default
 
-    env_mode = os.getenv("GOVERNANCE_ROLLOUT_MODE")
+    env_mode = resolve(("GOVERNANCE_ROLLOUT_MODE",), blank_env=True).value
     if env_mode is not None:
         candidate = str(env_mode).strip().lower()
         return candidate if candidate in _GOVERNANCE_ROLLOUT_MODES else safe_default
@@ -3309,7 +3267,9 @@ def resolve_governance_rollout_mode(
     try:
         cp = load_comprehensive_config()
         if cp and cp.has_section("Governance"):
-            candidate = cp.get("Governance", "rollout_mode", fallback="").strip().lower()
+            candidate = str(
+                resolve((), (("Governance", "rollout_mode"),), config_parser=cp, default="", blank_config=True).value
+            ).strip().lower()
             if candidate in _GOVERNANCE_ROLLOUT_MODES:
                 return candidate
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:
@@ -3322,59 +3282,31 @@ def resolve_governance_rollout_mode(
 
 
 def rg_policy_store(default: str = "file") -> str:
-    v = os.getenv("RG_POLICY_STORE")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("ResourceGovernor", "policy_store", fallback=default) if cp else default
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = default
+    v = _env_then_loaded_config("RG_POLICY_STORE", "ResourceGovernor", "policy_store", default)
     s = str(v).strip().lower()
     return s if s in ("file", "db") else default
 
 
 def rg_policy_reload_enabled(default: bool = True) -> bool:
-    v = os.getenv("RG_POLICY_RELOAD_ENABLED")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("ResourceGovernor", "policy_reload_enabled", fallback=str(default)) if cp else str(default)
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = str(default)
+    v = _env_then_loaded_config("RG_POLICY_RELOAD_ENABLED", "ResourceGovernor", "policy_reload_enabled", str(default))
     return _as_bool(v, default)
 
 
 def rg_policy_reload_interval_sec(default: int = 10) -> int:
-    v = os.getenv("RG_POLICY_RELOAD_INTERVAL_SEC")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("ResourceGovernor", "policy_reload_interval_sec", fallback=str(default)) if cp else str(default)
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = str(default)
+    v = _env_then_loaded_config(
+        "RG_POLICY_RELOAD_INTERVAL_SEC", "ResourceGovernor", "policy_reload_interval_sec", str(default)
+    )
     return max(1, _as_int(v, default))
 
 
 def rg_backend(default: str = "memory") -> str:
-    v = os.getenv("RG_BACKEND")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("ResourceGovernor", "backend", fallback=default) if cp else default
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = default
+    v = _env_then_loaded_config("RG_BACKEND", "ResourceGovernor", "backend", default)
     s = str(v).strip().lower()
     return s if s in ("memory", "redis") else default
 
 
 def rg_redis_fail_mode(default: str = "fallback_memory") -> str:
-    v = os.getenv("RG_REDIS_FAIL_MODE")
-    if v is None:
-        try:
-            cp = load_comprehensive_config()
-            v = cp.get("ResourceGovernor", "redis_fail_mode", fallback=default) if cp else default
-        except _CONFIG_NONCRITICAL_EXCEPTIONS:
-            v = default
+    v = _env_then_loaded_config("RG_REDIS_FAIL_MODE", "ResourceGovernor", "redis_fail_mode", default)
     s = str(v).strip().lower()
     return s if s in ("fail_closed", "fail_open", "fallback_memory") else default
 
@@ -3415,7 +3347,7 @@ def rg_policy_path_default() -> str:
 
 
 def rg_policy_path() -> str:
-    v = os.getenv("RG_POLICY_PATH")
+    v = resolve(("RG_POLICY_PATH",), blank_env=True).value
     if v:
         resolved = resolve_repo_relative_path(v)
         try:
@@ -3426,7 +3358,13 @@ def rg_policy_path() -> str:
         return resolved
     try:
         cp = load_comprehensive_config()
-        p = cp.get("ResourceGovernor", "policy_path", fallback=rg_policy_path_default()) if cp else rg_policy_path_default()
+        p = resolve(
+            (),
+            (("ResourceGovernor", "policy_path"),),
+            config_parser=cp,
+            default=rg_policy_path_default(),
+            blank_config=True,
+        ).value
         resolved = resolve_repo_relative_path(p)
         try:
             if not Path(resolved).exists():
@@ -3459,7 +3397,7 @@ def is_production_environment() -> bool:
 
 
 def _resolve_disable_cors_value_and_source() -> tuple[bool, str]:
-    env_value = os.getenv("DISABLE_CORS")
+    env_value = resolve(("DISABLE_CORS",), blank_env=True).value
     if env_value is not None:
         return env_value.strip().lower() in {"true", "1", "yes", "on"}, "env"
 
@@ -3476,7 +3414,7 @@ def _resolve_disable_cors_value_and_source() -> tuple[bool, str]:
 
 
 def _resolve_cors_allow_credentials_value_and_source() -> tuple[bool, str]:
-    env_value = os.getenv("CORS_ALLOW_CREDENTIALS")
+    env_value = resolve(("CORS_ALLOW_CREDENTIALS",), blank_env=True).value
     if env_value is not None:
         return is_truthy(env_value), "env"
 
@@ -3690,13 +3628,13 @@ def _route_toggle_policy() -> dict:
         allow_env_overrides = False
 
     if allow_env_overrides:
-        env_stable_only = os.getenv('ROUTES_STABLE_ONLY')
+        env_stable_only = resolve(("ROUTES_STABLE_ONLY",), blank_env=True).value
         if env_stable_only is not None:
             cfg_stable_only = is_truthy(env_stable_only)
 
-        cfg_disable |= _parse_list(os.getenv('ROUTES_DISABLE'))
-        cfg_enable |= _parse_list(os.getenv('ROUTES_ENABLE'))
-        default_experimental |= _parse_list(os.getenv('ROUTES_EXPERIMENTAL'))
+        cfg_disable |= _parse_list(resolve(("ROUTES_DISABLE",), blank_env=True).value)
+        cfg_enable |= _parse_list(resolve(("ROUTES_ENABLE",), blank_env=True).value)
+        default_experimental |= _parse_list(resolve(("ROUTES_EXPERIMENTAL",), blank_env=True).value)
     default_experimental |= cfg_experimental_extra
 
     return {
@@ -4380,14 +4318,13 @@ def load_and_log_configs(
             config_parser_object.get('RAG', 'default_llm_provider', fallback=None)
             if config_parser_object.has_section('RAG') else None
         )
-        rag_default_llm_provider = env.get("RAG_DEFAULT_LLM_PROVIDER") or configured_rag_provider
-        rag_default_llm_model = env.get("RAG_DEFAULT_LLM_MODEL") or (
-            config_parser_object.get('RAG', 'default_llm_model', fallback=None)
-            if config_parser_object.has_section('RAG') else None
-        )
+        resolved_rag_provider = resolve_default_llm_provider(config_parser_object, env=env)
+        rag_default_llm_provider = resolved_rag_provider.value
+        resolved_rag_model = resolve_default_llm_model(config_parser_object, env=env)
+        rag_default_llm_model = resolved_rag_model.value
         if (
-            env.get("RAG_DEFAULT_LLM_PROVIDER")
-            and not env.get("RAG_DEFAULT_LLM_MODEL")
+            resolved_rag_provider.source == "env"
+            and resolved_rag_model.source != "env"
             and canonical_provider_name(str(configured_rag_provider or "").strip() or default_api)
             != canonical_provider_name(rag_default_llm_provider)
         ):

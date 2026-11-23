@@ -46,7 +46,7 @@ def _build_app(db: CharactersRAGDB) -> TestClient:
 def startup_read_context(tmp_path: Path) -> Iterator[SimpleNamespace]:
     """Seed a global chat with historical origin in a distinct real Workspace."""
     db = CharactersRAGDB(tmp_path / "startup-read.db", client_id="user-1")
-    db.upsert_workspace("private-read-origin", "Origin")
+    db.workspace_store.upsert_workspace("private-read-origin", "Origin")
     cid = db.add_conversation(
         {"title": "Moved conversation", "client_id": "user-1"},
         assistant_startup=AssistantStartup(
@@ -69,9 +69,9 @@ def test_conversation_http_surfaces_project_stored_startup(
     ctx = startup_read_context
     db = ctx.db
     if origin_state == "archived":
-        db.update_workspace("private-read-origin", {"archived": True}, 1)
+        db.workspace_store.update_workspace("private-read-origin", {"archived": True}, 1)
     elif origin_state == "deleted":
-        db.delete_workspace("private-read-origin", expected_version=1)
+        db.workspace_store.delete_workspace("private-read-origin", expected_version=1)
     elif origin_state == "staged":
         with db.transaction() as conn:
             conn.execute("UPDATE workspaces SET system_operation_state = 'staged' WHERE id = ?", ("private-read-origin",))
@@ -131,7 +131,7 @@ def test_conversation_list_origin_cache_does_not_outlive_request(
     assert first.status_code == 200, first.text
     assert [item["assistant_startup"]["source"] for item in first.json()["items"]] == ["workspace_default", "workspace_default"]
     assert reads == ["private-read-origin"]
-    ctx.db.delete_workspace("private-read-origin", expected_version=1)
+    ctx.db.workspace_store.delete_workspace("private-read-origin", expected_version=1)
     reads.clear()
     second = ctx.client.get("/api/v1/chat/conversations")
     assert second.status_code == 200, second.text
@@ -467,7 +467,7 @@ def test_conversation_list_defaults_omitted_scope_to_global(tmp_path):
             "client_id": "user-1",
         }
     )
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
     db.add_conversation(
         {
             "id": "global-conv",
@@ -509,7 +509,7 @@ def test_conversation_tree_requires_exact_scope_match(tmp_path):
             "client_id": "user-1",
         }
     )
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
     conversation_id = db.add_conversation(
         {
             "id": "workspace-tree",

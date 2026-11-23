@@ -62,8 +62,8 @@ def _seed(db: CharactersRAGDB) -> int:
         "id": "persona", "name": "Researcher", "user_id": "42",
         "character_card_id": character_id, "mode": "session_scoped", "is_active": True,
     })
-    db.upsert_workspace("origin", "Origin")
-    db.update_workspace("origin", {"assistant_defaults_json": {
+    db.workspace_store.upsert_workspace("origin", "Origin")
+    db.workspace_store.update_workspace("origin", {"assistant_defaults_json": {
         "assistant_kind": "persona", "assistant_id": "persona", "persona_memory_mode": "read_only",
     }}, 1)
     return character_id
@@ -132,7 +132,7 @@ async def test_service_first_character_library_projects_and_redacts(
         return list_character_conversations(db, character_id, client_id="42")[0]
 
     assert read()["assistant_startup"]["workspace_id"] == "origin"
-    db.delete_workspace("origin", expected_version=2)
+    db.workspace_store.delete_workspace("origin", expected_version=2)
     result = read()
     assert result["assistant_startup"]["source"] == "unknown"
     assert "assistant_startup_json" not in result
@@ -171,7 +171,7 @@ async def test_service_callers_keep_distinct_owner_databases(alias_db: Character
     other = await deps.get_chacha_db_for_user_id(43, client_id="voice_assistant")
     assert other is not alias_db
     assert other.get_conversation_by_id(cid) is None
-    assert other.get_workspace("origin") is None
+    assert other.workspace_store.get_workspace("origin") is None
     assert (alias_db.owner_user_id, other.owner_user_id) == ("42", "43")
 
 

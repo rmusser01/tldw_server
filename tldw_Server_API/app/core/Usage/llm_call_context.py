@@ -55,6 +55,7 @@ class LLMCallContext:
     user_id: int | None = None
     operation: str = "llm_call"
     endpoint: str = "internal"
+    # Not accounted, and also skips the admin provider-override guard (TASK-15581): key tests and the setup check only.
     exempt: bool = False
     records_itself: bool = False
     prechecked: bool = False

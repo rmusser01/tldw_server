@@ -62,10 +62,17 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 NOTES_GRAPH_ENABLED = lambda: _env_bool("NOTES_GRAPH_ENABLED", True)  # noqa: E731
-MAX_NODES = lambda: _env_int("NOTES_GRAPH_MAX_NODES", 300)  # noqa: E731
-MAX_EDGES = lambda: _env_int("NOTES_GRAPH_MAX_EDGES", 1200)  # noqa: E731
+# An operator's own limits; 0 when unset, so a library graph can tell a lowered
+# limit from the default (NL-11 review).
+_CONFIGURED_MAX_NODES = lambda: max(0, _env_int("NOTES_GRAPH_MAX_NODES", 0))  # noqa: E731
+_CONFIGURED_MAX_EDGES = lambda: max(0, _env_int("NOTES_GRAPH_MAX_EDGES", 0))  # noqa: E731
+MAX_NODES = lambda: _CONFIGURED_MAX_NODES() or 300  # noqa: E731
+MAX_EDGES = lambda: _CONFIGURED_MAX_EDGES() or 1200  # noqa: E731
 MAX_DEGREE = lambda: _env_int("NOTES_GRAPH_MAX_DEGREE", 40)  # noqa: E731
-ALL_NOTES_NOTE_CAP = lambda: _env_int("NOTES_GRAPH_ALL_NOTES_NOTE_CAP", 100)  # noqa: E731
+# The largest library, in active notes, that the All-notes graph shows (NL-11).
+# It sets the All-notes eligibility, the guard on graphs with no focus note and
+# the node budget of those graphs; see _all_notes_note_cap.
+ALL_NOTES_NOTE_CAP = lambda: _env_int("NOTES_GRAPH_ALL_NOTES_NOTE_CAP", 500)  # noqa: E731
 POPULAR_TAG_CUTOFF = lambda: _env_float("NOTES_GRAPH_POPULAR_TAG_CUTOFF", 0.15)  # noqa: E731
 POPULAR_TAG_ABSOLUTE_MIN = lambda: _env_int("NOTES_GRAPH_POPULAR_TAG_ABSOLUTE_MIN", 25)  # noqa: E731
 
@@ -83,6 +90,27 @@ _CURSOR_MAX_ENCODED_BYTES = 8 * 1024
 _CURSOR_MAX_DECODED_BYTES = 4 * 1024
 _LINK_CURSOR_MAX_BYTES = 4 * 1024
 _SEMANTIC_ADMISSION_ALLOWANCE = DEFAULT_SEMANTIC_INDEX_SETTINGS.max_query_neighbors
+
+
+def _bounded_by_operator(budget: int, configured: int) -> int:
+    """An operator who set a lower limit keeps it; the default limit does not apply here."""
+    return min(budget, configured) if configured else budget
+
+
+def _all_notes_note_cap() -> int:
+    """The All-notes cap: room left for tag and source nodes, under a lowered NOTES_GRAPH_MAX_NODES."""
+    cap = min(max(1, ALL_NOTES_NOTE_CAP()), _PROJECTION_QUERY_MAX_NOTES - _TAG_CAP - _SOURCE_CAP)
+    return _bounded_by_operator(cap, _CONFIGURED_MAX_NODES())
+
+
+def _library_node_budget() -> int:
+    """Nodes a graph with no focus note may hold: every note under the cap, its tags and sources."""
+    return _bounded_by_operator(_all_notes_note_cap() + _TAG_CAP + _SOURCE_CAP, _CONFIGURED_MAX_NODES())
+
+
+def _library_edge_budget() -> int:
+    """Links a graph with no focus note may hold: four per node, as a focused graph asks for."""
+    return _bounded_by_operator(4 * _library_node_budget(), _CONFIGURED_MAX_EDGES())
 
 
 class GraphProjectionNotReadyError(InputError):
@@ -496,7 +524,7 @@ class NoteGraphService:
             else max_edges_override
         )
         active_note_count = self._db.count_user_notes(include_deleted=False)
-        all_notes_note_cap = min(max(1, ALL_NOTES_NOTE_CAP()), eff_max_nodes)
+        all_notes_note_cap = _all_notes_note_cap()
         ordinary_edge_types = [
             edge_type.value
             for edge_type in resolved_edge_types
@@ -515,6 +543,8 @@ class NoteGraphService:
             "max_degree": eff_max_degree,
             "allow_heavy": req.allow_heavy and self._allow_heavy_limits,
         }
+        if req.include_link_status:  # only when asked, so older request hashes and cursors hold
+            normalized_query["include_link_status"] = True
         dataset_hash = hashlib.sha256(self._dataset_id.encode()).hexdigest()
         request_hash = hashlib.sha256(
             json.dumps(normalized_query, sort_keys=True, separators=(",", ":")).encode()
@@ -549,7 +579,8 @@ class NoteGraphService:
         # 3. Determine seed set
         seed_ids = self._determine_seed_set(req, eff_max_nodes)
 
-        # 4. BFS expand — collects note IDs and manual edges
+        # 4. BFS expand — collects note IDs and manual edges. A tag or source
+        # filter with no focus note shows exactly its notes (NL-11 review).
         note_ids, manual_edges, truncated, truncated_by, cursor_info = self._bfs_expand(
             seed_ids,
             req.radius,
@@ -558,6 +589,7 @@ class NoteGraphService:
             req,
             wanted,
             cursor_binding,
+            admit=set(seed_ids) if req.center_note_id is None and (req.tag or req.source) else None,
         )
 
         # 5. Fetch note data
@@ -631,6 +663,9 @@ class NoteGraphService:
                 primary_source_id=None,
             )
 
+        if req.include_link_status:
+            self._mark_note_link_status(note_node_map)
+
         # 10. Compute degree & tag counts
         for edge in edges:
             if edge.source in note_node_map and note_node_map[edge.source].degree is not None:
@@ -667,7 +702,7 @@ class NoteGraphService:
         all_nodes: list[GraphNode] = list(note_node_map.values()) + list(tag_nodes.values()) + list(source_nodes.values())
         all_nodes, edges, truncated, truncated_by = self._apply_pruning(
             all_nodes, edges, eff_max_nodes, eff_max_edges, eff_max_degree,
-            truncated, truncated_by,
+            truncated, truncated_by, library_wide=req.center_note_id is None,
         )
 
         # 12. Build cursor
@@ -802,6 +837,15 @@ class NoteGraphService:
             )
         return notes, has_more, next_cursor
 
+    def _mark_note_link_status(self, note_node_map: dict[str, GraphNode]) -> None:
+        """Set ``has_note_links`` from the whole library, before degree pruning (NL-11 review)."""
+        projection_store = self._projection_store()
+        if projection_store is None or not note_node_map:
+            return
+        linked = projection_store.note_ids_with_note_links(list(note_node_map))
+        for note_id, node in note_node_map.items():
+            node.has_note_links = note_id in linked
+
     # ------------------------------------------------------------------
     # Limit resolution
     # ------------------------------------------------------------------
@@ -815,6 +859,10 @@ class NoteGraphService:
         heavy_allowed = bool(req.allow_heavy and self._allow_heavy_limits)
         hard_max_nodes = default_max_nodes * 2 if heavy_allowed else default_max_nodes
         hard_max_edges = default_max_edges * 2 if heavy_allowed else default_max_edges
+        if req.center_note_id is None:
+            # All notes, or a tag or source filter: room for every note under the cap (NL-11).
+            hard_max_nodes = max(hard_max_nodes, _library_node_budget())
+            hard_max_edges = max(hard_max_edges, _library_edge_budget())
         hard_max_degree = default_max_degree * 2 if heavy_allowed else default_max_degree
 
         requested_max_nodes = req.max_nodes if req.max_nodes is not None else default_max_nodes
@@ -866,14 +914,20 @@ class NoteGraphService:
         total = self._db.count_user_notes(include_deleted=False)
         if total == 0:
             return []
-        if total <= max_nodes:
+        cap = _all_notes_note_cap()
+        if total <= min(max_nodes, cap):
             return self._db.get_all_note_ids_for_graph(include_deleted=False, limit=max_nodes)
 
         if req.allow_heavy and self._allow_heavy_limits:
             return self._db.get_all_note_ids_for_graph(include_deleted=False, limit=max_nodes)
 
+        if total <= cap:
+            raise InputError(  # noqa: TRY003
+                f"max_nodes={max_nodes} is below this library's {total} notes. "
+                f"Ask for at least {total} nodes, or provide center_note_id, tag, or source filter."
+            )
         raise InputError(  # noqa: TRY003
-            f"Too many notes ({total}) for seedless graph. "
+            f"Too many notes ({total}) for a graph without a focus note: the All-notes cap of {cap} applies. "
             f"Provide center_note_id, tag, or source filter, or request allow_heavy with elevated graph permission."
         )
 
@@ -890,8 +944,14 @@ class NoteGraphService:
         req: NoteGraphRequest,
         wanted: set[EdgeType],
         cursor_binding: dict[str, object],
+        *,
+        admit: set[str] | None = None,
     ) -> tuple[list[str], list[dict], bool, list[str], dict | None]:
-        """Layer-by-layer BFS from seeds, collecting note IDs and manual edges."""
+        """Layer-by-layer BFS from seeds, collecting note IDs and manual edges.
+
+        With ``admit``, only those notes join the graph; edges to others are
+        still collected and dropped later with the notes they lead to.
+        """
         seen: set[str] = set()
         page_seen: set[str] = set()
         page_order: list[str] = []
@@ -999,7 +1059,7 @@ class NoteGraphService:
 
                 for neighbor_idx, nb in enumerate(neighbors):
                     replaying = neighbor_idx < replay_neighbor_count
-                    if nb in seen:
+                    if nb in seen or (admit is not None and nb not in admit):
                         continue
                     if not replaying and len(page_order) >= max_nodes:
                         truncated = True
@@ -1275,17 +1335,24 @@ class NoteGraphService:
         max_degree: int,
         truncated: bool,
         truncated_by: list[str],
+        *,
+        library_wide: bool = False,
     ) -> tuple[list[GraphNode], list[GraphEdge], bool, list[str]]:
-        """Apply per-type caps and global limits."""
+        """Apply per-type caps and global limits.
+
+        A graph with no focus note (``library_wide``) keeps every note under the
+        All-notes cap; a focused graph keeps at most ``_NOTE_CAP`` notes.
+        """
         truncated_by = list(truncated_by)  # copy
+        note_cap = max(_NOTE_CAP, _all_notes_note_cap()) if library_wide else _NOTE_CAP
 
         # Per-type node caps
         note_nodes = [n for n in nodes if n.type == "note"]
         tag_nodes = [n for n in nodes if n.type == "tag"]
         source_nodes = [n for n in nodes if n.type == "source"]
 
-        if len(note_nodes) > _NOTE_CAP:
-            note_nodes = note_nodes[:_NOTE_CAP]
+        if len(note_nodes) > note_cap:
+            note_nodes = note_nodes[:note_cap]
             truncated = True
             if "max_nodes" not in truncated_by:
                 truncated_by.append("max_nodes")

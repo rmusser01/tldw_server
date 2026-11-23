@@ -820,3 +820,23 @@ def test_stream_error_event_for_an_unlisted_model_keeps_the_nonstream_answer():
     assert provider_stream_error_payload(error)["error"] == {
         "code": "model_not_available", "type": "model_not_available", "message": expected,
     }
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("async_call", [False, True], ids=["sync", "async"])
+def test_a_disabled_provider_gets_no_model_list_request(boundary, async_call, stream):
+    """TASK-15582 (minor 2 of #3537's final review): the admin-override guard runs before model discovery, so a
+    disabled provider gets no model-list request, and the caller sees provider_disabled."""
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    set_llm_provider_overrides_cache_for_tests({"openai": LLMProviderOverride(provider="openai", is_enabled=False)})
+    fields = args(model="current-model", stream=stream)
+    with pytest.raises(ChatConfigurationError) as refused:
+        if async_call:
+            asyncio.run(chat_service.perform_chat_api_call_async(**fields))
+        else:
+            chat_service.perform_chat_api_call(**fields)
+    assert (refused.value.error_code, boundary.discovery, boundary.adapter.calls) == ("provider_disabled", [], [])

@@ -329,6 +329,7 @@ export interface LLMProviderOverride {
   provider: string;
   is_enabled?: boolean;
   allowed_models?: string[];
+  denied_models?: string[];
   config?: Record<string, unknown>;
   credential_fields?: Record<string, unknown>;
   has_api_key?: boolean;

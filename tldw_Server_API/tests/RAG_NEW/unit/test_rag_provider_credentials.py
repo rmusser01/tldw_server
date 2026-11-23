@@ -284,7 +284,7 @@ async def test_knowledge_qa_routes_isolate_configured_server_credentials_at_adap
     release_adapter_calls = asyncio.Event()
 
     class HealthyAbsentOverrideSnapshot:
-        def enforce(self, _model: str | None) -> None:
+        def enforce(self, _model: str | None, **_kwargs: object) -> None:
             return None
 
         def ensure_healthy(self) -> None:
@@ -868,6 +868,12 @@ def test_checkpoint_sanitizer_excludes_runtime() -> None:
             ),
             503,
             "missing_provider_credentials",
+        ),
+        (
+            # The provider base class's admin-override refusal keeps its code and 403 (TASK-15581).
+            ChatConfigurationError(_SENTINEL_SECRET, provider="openai", error_code="provider_disabled"),
+            403,
+            "provider_disabled",
         ),
         (
             ByokResolutionError("credential_store_unavailable", "openai"),

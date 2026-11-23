@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { buddyConversationLabels } from "../buddy-conversation-labels"
 
-describe("Buddy conversation labels", () => {
+describe("Avatar conversation labels", () => {
   it("treats nullable legacy timestamps as missing instead of January 1970", () => {
     const labels = buddyConversationLabels([
       { id: "one", title: "Legacy", created_at: null },

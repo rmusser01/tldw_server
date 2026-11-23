@@ -84,7 +84,7 @@ def _handle_workspace_file_inventory_job_sync(
     root_version = int(payload["root_version"])
     policy_fingerprint = str(payload["ignore_policy_fingerprint"])
 
-    root = db.get_workspace_primary_root(workspace_id)
+    root = db.workspace_store.get_workspace_primary_root(workspace_id)
     if root is None or str(root.get("root_id") or "") != root_id:
         return _complete_failed_scan(
             db,
@@ -113,7 +113,7 @@ def _handle_workspace_file_inventory_job_sync(
             message=resolution.message or "Workspace project root is unavailable.",
         )
 
-    db.mark_workspace_file_inventory_scanning(scan_id)
+    db.workspace_store.mark_workspace_file_inventory_scanning(scan_id)
     try:
         policy = build_inventory_ignore_policy()
         if policy.fingerprint != policy_fingerprint:
@@ -130,14 +130,14 @@ def _handle_workspace_file_inventory_job_sync(
             bounds=InventoryScanBounds(),
         )
         state = "current" if scan_result.coverage_complete else "partial"
-        items_written = db.replace_workspace_file_inventory_items(
+        items_written = db.workspace_store.replace_workspace_file_inventory_items(
             workspace_id,
             root_id,
             scan_id,
             list(scan_result.items),
             scan_coverage_complete=scan_result.coverage_complete,
         )
-        completed = db.complete_workspace_file_inventory_scan(
+        completed = db.workspace_store.complete_workspace_file_inventory_scan(
             scan_id,
             state,
             scan_result.counts,
@@ -213,7 +213,7 @@ def _coerce_payload(value: Any) -> dict[str, Any]:
 
 def _complete_failed_scan(db: Any, *, scan_id: str, code: str, message: str) -> dict[str, Any]:
     diagnostics = [{"code": code, "message": message}]
-    completed = db.complete_workspace_file_inventory_scan(
+    completed = db.workspace_store.complete_workspace_file_inventory_scan(
         scan_id,
         "failed",
         normalize_inventory_counts({}),

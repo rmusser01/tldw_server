@@ -35,15 +35,15 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     }
 
 
-def test_sqlite_v84_fresh_schema_has_model_revision_and_operation_receipts(
+def test_sqlite_fresh_schema_has_model_revision_and_operation_receipts(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "semantic-v84-fresh.sqlite"
+    path = tmp_path / "semantic-fresh.sqlite"
 
     _initialize(path)
 
     with sqlite3.connect(path) as conn:
-        assert _version(conn) == 85  # nosec B101 -- Current schema also retains Persona transcripts.
+        assert _version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION  # nosec B101
         assert "model_revision" in _columns(conn, "note_semantic_index_configs")
         assert "model_revision" in _columns(conn, "note_semantic_generations")
         assert {

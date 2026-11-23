@@ -45,6 +45,13 @@ from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
 from tldw_Server_API.app.core.config import get_tldw_env_file_path, is_tldw_env_file_exclusive
+from tldw_Server_API.app.core.config_sections.auth import (
+    api_key_env,
+    auth_mode_env,
+    jwt_secret_key_env,
+    single_user_api_key_env,
+)
+from tldw_Server_API.app.core.config_sections.database import database_url_env
 from tldw_Server_API.app.core.DB_Management.Users_DB import ensure_user_directories, get_users_db
 from tldw_Server_API.app.core.testing import is_test_mode
 
@@ -251,8 +258,8 @@ def _detect_env_issues(auth_mode: str, env_values: dict[str, str]) -> tuple[set[
 
     if mode == "single_user":
         single_key = (
-            _effective_env_value("SINGLE_USER_API_KEY", env_values)
-            or _effective_env_value("API_KEY", env_values)
+            _normalize_env_value(single_user_api_key_env() or env_values.get("SINGLE_USER_API_KEY"))
+            or _normalize_env_value(api_key_env() or env_values.get("API_KEY"))
         )
         if not single_key:
             missing_keys.add("SINGLE_USER_API_KEY")
@@ -265,7 +272,7 @@ def _detect_env_issues(auth_mode: str, env_values: dict[str, str]) -> tuple[set[
             issues.append("SINGLE_USER_API_KEY must be at least 16 characters")
 
     if mode == "multi_user":
-        jwt_key = _effective_env_value("JWT_SECRET_KEY", env_values)
+        jwt_key = _normalize_env_value(jwt_secret_key_env() or env_values.get("JWT_SECRET_KEY"))
         if not jwt_key:
             missing_keys.add("JWT_SECRET_KEY")
             issues.append("JWT_SECRET_KEY must be set for multi-user mode")
@@ -421,7 +428,7 @@ def check_environment():
         print(f"⚠️  Failed to load .env at {selected_env}: {e}")
 
     env_values = _read_env_values(selected_env)
-    auth_mode = _effective_env_value("AUTH_MODE", env_values) or "single_user"
+    auth_mode = _normalize_env_value(auth_mode_env() or env_values.get("AUTH_MODE")) or "single_user"
     missing_keys, issues = _detect_env_issues(auth_mode, env_values)
 
     if issues:
@@ -774,15 +781,15 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
     # In test suites we may switch DATABASE_URL or AUTH_MODE between runs (e.g., SQLite → Postgres).
     # Detect and realign settings/pools so the seed targets the active backend.
     try:
-        effective_db_url = os.getenv("DATABASE_URL")
+        effective_db_url = database_url_env()
     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS:
         effective_db_url = None
     try:
-        effective_auth_mode = os.getenv("AUTH_MODE")
+        effective_auth_mode = auth_mode_env()
     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS:
         effective_auth_mode = None
     try:
-        effective_single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
+        effective_single_user_api_key = single_user_api_key_env() or api_key_env()
     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS:
         effective_single_user_api_key = None
 

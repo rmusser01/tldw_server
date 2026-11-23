@@ -1,12 +1,14 @@
 import { stripKnowledgeNoteProvenance } from '@/utils/knowledge-note-provenance'
+import { toPlainPreview } from '@/utils/plain-text-preview'
+import { formatRelativeTime } from '@/utils/dateFormatters'
 import React from 'react'
 import { Button, Dropdown, Pagination, Spin, Tooltip } from 'antd'
-import { Clock3 as ClockIcon, Link2 as LinkIcon, Star as StarIcon, Tag as TagIcon } from 'lucide-react'
+import { Clock3 as ClockIcon, Link2 as LinkIcon, MessageSquare as ChatIcon, Star as StarIcon, Tag as TagIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NoteListItem } from '@/components/Notes/types'
 import { moveNotesListRowFocus } from './notes-list-keyboard'
-import { formatBacklinkIdsTooltip } from './notes-backlink-labels'
+import { NoteSearchSnippet } from './NoteSearchSnippet'
 
 const LazyNotesListPanelEmptyStates = React.lazy(() => import('./NotesListPanelEmptyStates'))
 
@@ -23,24 +25,18 @@ const truncateText = (value?: string | null, max?: number) => {
   return `${value.slice(0, max)}...`
 }
 
-const derivePreviewText = (content?: string | null, title?: string | null) => {
-  const source = stripKnowledgeNoteProvenance(String(content || ''))
-    .replace(/\r\n/g, '\n')
-    .trim()
-  if (!source) return ''
-  const normalizedTitle = String(title || '')
-    .trim()
-    .replace(/^#+\s*/, '')
-    .toLowerCase()
-  const lines = source
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-  const firstNonTitleLine = lines.find((line) => {
-    if (!normalizedTitle) return true
-    return line.replace(/^#+\s*/, '').toLowerCase() !== normalizedTitle
+/** The note's first line of plain text that is not its title (NL-04). */
+const derivePreviewText = (content?: string | null, title?: string | null) =>
+  toPlainPreview(stripKnowledgeNoteProvenance(String(content || '')), {
+    skipLine: title,
+    maxLength: MAX_PREVIEW_LENGTH
   })
-  return truncateText(firstNonTitleLine || lines[0] || source, MAX_PREVIEW_LENGTH)
+
+/** A row's date, or null when the server sent none or an unreadable one. */
+const parseRowDate = (value?: string | null): Date | null => {
+  if (!value) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
 const wasEditedRecently = (updatedAt?: string | null) => {
@@ -123,7 +119,11 @@ type NotesListPanelProps = {
   /** Enter on a row: open the note and move focus into the editor (AX-03). */
   onOpenNoteFromKeyboard?: (id: string | number) => void
   onToggleBulkSelection?: (id: string | number, checked: boolean, shiftKey: boolean) => void
+  /** The header checkbox: select or clear every row on this page (NL-05). */
+  onToggleSelectAllOnPage?: (checked: boolean) => void
   onTogglePinned?: (id: string | number) => void
+  /** A row's "From chat" link: opens the chat the note was saved from (NL-04). */
+  onOpenLinkedChat?: (conversationId: string) => void
   onChangePage: (page: number, pageSize: number) => void
   onCreateNote: () => void
   onResetEditor: () => void
@@ -132,6 +132,8 @@ type NotesListPanelProps = {
   onOpenSettings: () => void
   onOpenHealth: () => void
   onRestoreNote: (id: string | number, version?: number) => void
+  /** A bulk action is running: row Restore waits for it (NL-05). */
+  restoreDisabled?: boolean
   onExportAllMd: () => void
   onExportAllCsv: () => void
   onExportAllJson: () => void
@@ -174,7 +176,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onSelectNote,
   onOpenNoteFromKeyboard,
   onToggleBulkSelection,
+  onToggleSelectAllOnPage,
   onTogglePinned,
+  onOpenLinkedChat,
   onChangePage,
   onCreateNote,
   onResetEditor,
@@ -183,6 +187,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onOpenSettings,
   onOpenHealth,
   onRestoreNote,
+  restoreDisabled = false,
   onExportAllMd,
   onExportAllCsv,
   onExportAllJson,
@@ -193,7 +198,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   exportProgress = null,
   onCancelExport
 }) => {
-  const { t } = useTranslation(['option', 'settings'])
+  const { t, i18n } = useTranslation(['option', 'settings', 'common'])
+  // Dates read in the app's language, not the browser's (NL-04).
+  const appLanguage = i18n?.language
   const isTrashView = listMode === 'trash'
   const hasNotes = Array.isArray(notes) && notes.length > 0
   // A refresh of the same list keeps its rows on screen so the scroll position
@@ -212,6 +219,17 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
     [pinnedNoteIds]
   )
   const searchTerms = React.useMemo(() => extractSearchTerms(searchQuery), [searchQuery])
+  // Previews depend only on the rows, not on focus, selection or pins.
+  const previewTextById = React.useMemo(() => {
+    const previews = new Map<string, string>()
+    for (const note of notes ?? []) {
+      if (note.content) previews.set(String(note.id), derivePreviewText(note.content, note.title))
+    }
+    return previews
+  }, [notes])
+  const selectedOnPage = hasNotes ? notes.filter((note) => bulkSelectedIdSet.has(String(note.id))).length : 0
+  const allOnPageSelected = hasNotes && selectedOnPage === notes.length
+  const showSelectAllOnPage = Boolean(onToggleSelectAllOnPage) && hasNotes
   const listDomId = React.useId()
   const rowHintId = `${listDomId}-row-hint`
   // Roving tabindex (AX-03): the list is one Tab stop. It is the row the user
@@ -293,16 +311,48 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
     </React.Suspense>
   )
 
+  // NL-04: "3h ago" in the row, the full date in its tooltip.
+  const renderRowDate = (value: string, parsed: Date, testId: string, id?: string) => (
+    <Tooltip title={parsed.toLocaleString(appLanguage)}>
+      <time
+        id={id}
+        dateTime={value}
+        data-testid={testId}
+        className="shrink-0 whitespace-nowrap text-[11px] text-text-muted"
+      >
+        {formatRelativeTime(value, t, { compact: true, locale: appLanguage })}
+      </time>
+    </Tooltip>
+  )
+
   return (
     <div className="flex min-h-0 flex-col h-full">
       {/* Export header */}
       <div className="flex-shrink-0 px-4 py-2 border-b border-border bg-surface2">
         <div className="flex items-center justify-between">
-          <span className="text-xs uppercase tracking-[0.14em] text-text-muted">
-            {isTrashView
-              ? t('option:notesSearch.trashResultsLabel', { defaultValue: 'Trash' })
-              : t('option:notesSearch.resultsLabel', { defaultValue: 'Results' })}
-          </span>
+          <div className="flex items-center gap-2">
+            {showSelectAllOnPage && (
+              <label className={`${ROW_CONTROL_TARGET_CLASS} cursor-pointer`}>
+                <input
+                  type="checkbox"
+                  checked={allOnPageSelected}
+                  ref={(element) => {
+                    if (element) element.indeterminate = selectedOnPage > 0 && !allOnPageSelected
+                  }}
+                  aria-label={t('option:notesSearch.selectAllOnPageAria', {
+                    defaultValue: 'Select all notes on this page'
+                  })}
+                  data-testid="notes-select-all-page"
+                  onChange={(event) => onToggleSelectAllOnPage?.(event.target.checked)}
+                />
+              </label>
+            )}
+            <span className="text-xs uppercase tracking-[0.14em] text-text-muted">
+              {isTrashView
+                ? t('option:notesSearch.trashResultsLabel', { defaultValue: 'Trash' })
+                : t('option:notesSearch.resultsLabel', { defaultValue: 'Results' })}
+            </span>
+          </div>
           {/* Import, folder sync and export do not apply to Trash (NL-15). */}
           {!isTrashView && (
             <div className="flex items-center gap-1">
@@ -555,7 +605,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
             <p id={rowHintId} className="sr-only">
               {t('option:notesSearch.listRowKeyboardHint', {
                 defaultValue:
-                  'Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin.'
+                  'Press Enter to open. Use the arrow keys to move between notes, X to select, P to pin, and C to open the chat a note came from.'
               })}
             </p>
           )}
@@ -577,12 +627,19 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                   selectedId != null && String(selectedId) === itemIdText
                 const isPinned = pinnedNoteIdSet.has(itemIdText)
                 const rowDomId = `${listDomId}-row-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
-                const previewText = item.content ? derivePreviewText(item.content, item.title) : ''
+                const previewText = previewTextById.get(itemIdText) ?? ''
                 const hasRowKeywords = Array.isArray(item.keywords) && item.keywords.length > 0
+                const rowDate = parseRowDate(item.updated_at)
+                const rowDateTestId = `notes-row-date-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
+                const rowConversationId =
+                  onOpenLinkedChat && item.conversation_id != null && String(item.conversation_id) !== ''
+                    ? String(item.conversation_id)
+                    : null
                 const rowDescribedBy = [
-                  previewText ? `${rowDomId}-preview` : null,
+                  previewText || item.snippet ? `${rowDomId}-preview` : null,
                   hasRowKeywords ? `${rowDomId}-tags` : null,
-                  item.updated_at ? `${rowDomId}-date` : null,
+                  rowDate ? `${rowDomId}-date` : null,
+                  rowConversationId ? `${rowDomId}-chat` : null,
                   rowHintId
                 ]
                   .filter(Boolean)
@@ -590,9 +647,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                 return (
                   <div
                     key={itemIdText}
-                    className={`w-full py-3 text-left transition-colors ${
+                    className={`w-full py-2 text-left transition-colors ${
                       isTrashView
-                        ? 'px-4'
+                        ? isBulkSelected ? 'bg-surface2/70 px-4' : 'px-4'
                         : isSelectedNote
                           ? 'bg-surface2 border-l-4 border-l-primary px-3'
                           : isBulkSelected
@@ -648,6 +705,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         aria-hidden="true"
                       />
                     </button>
+                    <div className="min-w-0 flex-1">
                     <button
                       type="button"
                       aria-label={t('option:notesSearch.openNoteAria', {
@@ -683,6 +741,11 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         if ((e.key === 'p' || e.key === 'P') && onTogglePinned) {
                           e.preventDefault()
                           onTogglePinned(item.id)
+                          return
+                        }
+                        if ((e.key === 'c' || e.key === 'C') && rowConversationId && onOpenLinkedChat) {
+                          e.preventDefault()
+                          onOpenLinkedChat(rowConversationId)
                         }
                       }}
                       onKeyUp={(e) => {
@@ -703,13 +766,13 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                           const hasBacklink = Boolean(item.conversation_id)
                           const editedRecently = wasEditedRecently(item.updated_at)
                           return (
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="text-sm font-medium text-text truncate">
+                            <div className="flex items-center gap-2">
+                              <div className="min-w-0 flex-1 text-sm font-medium text-text truncate">
                                 {renderHighlightedText(titleText, searchTerms)}
                               </div>
                               {(isPinned || hasKeywords || hasBacklink || editedRecently) && (
                                 <div
-                                  className="mt-0.5 flex items-center gap-1 text-text-muted"
+                                  className="flex shrink-0 items-center gap-1 text-text-muted"
                                   data-testid={`notes-item-badges-${String(item.id)}`}
                                 >
                                   {isPinned && (
@@ -750,11 +813,16 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                                   )}
                                 </div>
                               )}
+                              {rowDate && item.updated_at
+                                ? renderRowDate(item.updated_at, rowDate, rowDateTestId, `${rowDomId}-date`)
+                                : null}
                             </div>
                           )
                         })()}
-                        {item.content && (
-                          <div id={`${rowDomId}-preview`} className="text-xs text-text-muted truncate mt-1">
+                        {item.snippet ? (
+                          <NoteSearchSnippet id={`${rowDomId}-preview`} segments={item.snippet} />
+                        ) : previewText && (
+                          <div id={`${rowDomId}-preview`} className="text-xs text-text-muted truncate mt-0.5">
                             {renderHighlightedText(
                               previewText,
                               searchTerms
@@ -762,11 +830,11 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                           </div>
                         )}
                         {Array.isArray(item.keywords) && item.keywords.length > 0 && (
-                          <div id={`${rowDomId}-tags`} className="mt-2 flex flex-wrap gap-1">
+                          <div id={`${rowDomId}-tags`} className="mt-1 flex flex-wrap gap-1">
                             {item.keywords.slice(0, 5).map((keyword, idx) => (
                               <span
                                 key={`${keyword}-${idx}`}
-                                className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-surface2 text-text"
+                                className="inline-flex items-center rounded bg-surface2 px-1.5 text-[11px] leading-5 text-text"
                               >
                                 {keyword}
                               </span>
@@ -778,77 +846,94 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                                   count: item.keywords.length - 5
                                 })}
                               >
-                                <span className="inline-flex items-center px-2 py-0.5 text-xs text-text-muted">
+                                <span className="inline-flex items-center px-1.5 text-[11px] leading-5 text-text-muted">
                                   +{item.keywords.length - 5}
                                 </span>
                               </Tooltip>
                             )}
                           </div>
                         )}
-                        {item.conversation_id &&
-                          (() => {
-                            const conversationId = String(item.conversation_id)
-                            const conversationLabel = conversationLabelById[conversationId]
-                            return (
-                              <div className="text-xs text-primary mt-1">
-                                {conversationLabel
-                                  ? `${t('option:notesSearch.linkedConversation', {
-                                      defaultValue: 'Linked to conversation'
-                                    })}: `
-                                  : null}
-                                <Tooltip
-                                  title={formatBacklinkIdsTooltip(t, conversationId, item.message_id ? String(item.message_id) : null)}
-                                >
-                                  <span className="font-medium">
-                                    {conversationLabel ||
-                                      t('option:notesSearch.linkedChatUnresolved', { defaultValue: 'Linked chat' })}
-                                  </span>
-                                </Tooltip>
-                              </div>
-                            )
-                          })()}
-                        <div id={`${rowDomId}-date`} className="text-xs text-text-muted mt-1">
-                          {item.updated_at
-                            ? (() => {
-                                const d = new Date(item.updated_at)
-                                return isNaN(d.getTime()) ? '' : d.toLocaleString()
-                              })()
-                            : ''}
-                        </div>
                       </div>
                     </button>
+                    {rowConversationId && (() => {
+                      // Outside the open-note button: a button may not hold another one.
+                      const conversationId = rowConversationId
+                      const conversationLabel = conversationLabelById[conversationId]
+                      return (
+                        <button
+                          type="button"
+                          id={`${rowDomId}-chat`}
+                          className={`${ROW_CONTROL_TARGET_CLASS} mt-0.5 max-w-full gap-1 text-left text-xs text-primary hover:underline`}
+                          title={t('option:notesSearch.fromChatTooltip', {
+                            defaultValue: 'Open the chat this note was saved from'
+                          })}
+                          tabIndex={-1}
+                          data-testid={`notes-from-chat-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onOpenLinkedChat?.(conversationId)
+                          }}
+                        >
+                          <ChatIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">
+                            {t('option:notesSearch.fromChatLink', { defaultValue: 'From chat' })}
+                            {conversationLabel ? (
+                              <>
+                                {t('option:notesSearch.fromChatTitleSeparator', { defaultValue: ': ' })}
+                                <span className="font-medium">{conversationLabel}</span>
+                              </>
+                            ) : null}
+                          </span>
+                        </button>
+                      )
+                    })()}
+                    </div>
                   </div>
                 )}
                 {isTrashView && (
-                  <div className="w-full">
+                  <div className="flex items-start gap-2">
+                  {/* Trash rows select for "Restore selected" (NL-05). */}
+                  <label className={`${ROW_CONTROL_TARGET_CLASS} cursor-pointer`}>
+                    <input
+                      type="checkbox"
+                      checked={isBulkSelected}
+                      aria-label={t('option:notesSearch.bulkSelectTrashAria', {
+                        defaultValue: 'Select note {{title}} to restore',
+                        title: noteTitle
+                      })}
+                      data-testid={`notes-select-checkbox-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
+                      onChange={() => {}}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onToggleBulkSelection?.(item.id, !isBulkSelected, event.shiftKey)
+                      }}
+                    />
+                  </label>
+                  <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-text truncate">
                       {truncateText(
                         item.title || `Note ${item.id}`,
                         MAX_TITLE_LENGTH
                       )}
                     </div>
-                    {item.content && (
-                      <div className="text-xs text-text-muted truncate mt-1">
-                        {derivePreviewText(item.content, item.title)}
+                    {previewText && (
+                      <div className="text-xs text-text-muted truncate mt-0.5">
+                        {previewText}
                       </div>
                     )}
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <div className="text-xs text-text-muted">
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1 text-xs text-text-muted">
                         {t('option:notesSearch.trashedAtLabel', {
                           defaultValue: 'Deleted'
                         })}
-                        {item.updated_at
-                          ? (() => {
-                              const d = new Date(item.updated_at)
-                              return isNaN(d.getTime())
-                                ? ''
-                                : ` · ${d.toLocaleString()}`
-                            })()
-                          : ''}
+                        {rowDate && item.updated_at
+                          ? renderRowDate(item.updated_at, rowDate, rowDateTestId)
+                          : null}
                       </div>
                       <Button
                         size="small"
                         type="primary"
+                        disabled={restoreDisabled}
                         onClick={() => onRestoreNote(item.id, item.version)}
                         data-testid={`notes-restore-${String(item.id)}`}
                       >
@@ -858,6 +943,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                       </Button>
                     </div>
                   </div>
+                  </div>
                 )}
                   </div>
                 )
@@ -865,7 +951,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
             ))}
           </div>
         </>
-      ) : hasActiveFilters && !isTrashView ? (
+      ) : hasActiveFilters ? (
         renderEmptyStateSurface('no-results')
       ) : (
         renderEmptyStateSurface('empty')

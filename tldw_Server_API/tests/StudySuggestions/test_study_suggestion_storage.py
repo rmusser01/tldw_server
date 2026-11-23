@@ -7,6 +7,7 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -674,7 +675,7 @@ def test_suggestion_generation_link_schema_dedupes_legacy_active_duplicates_befo
     )
 
     with db.transaction() as conn:
-        db._ensure_study_pack_schema_sqlite(conn)
+        sqlite_schema._ensure_study_pack_schema_sqlite(db.ctx, conn)
 
     rows = [
         dict(row)
@@ -702,7 +703,7 @@ def test_suggestion_generation_link_schema_dedupes_legacy_active_duplicates_befo
         )
 
 
-def test_study_pack_postgres_schema_dedupes_before_unique_index_recreation() -> None:
+def test_study_pack_postgres_schema_dedupes_before_unique_index_recreation(monkeypatch: pytest.MonkeyPatch) -> None:
     executed_statements: list[str] = []
 
     class RecordingBackend:
@@ -720,9 +721,13 @@ def test_study_pack_postgres_schema_dedupes_before_unique_index_recreation() -> 
     db._backend = RecordingBackend()
     db._local = threading.local()
     db._uses_shared_content_backend = False
-    db._dedupe_suggestion_generation_links_postgres = lambda conn: executed_statements.append("__DEDUPE__")  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        postgres_schema,
+        "_dedupe_suggestion_generation_links_postgres",
+        lambda _ctx, conn: executed_statements.append("__DEDUPE__"),
+    )
 
-    db._ensure_study_pack_schema_postgres(conn=object())
+    postgres_schema._ensure_study_pack_schema_postgres(db.ctx, conn=object())
 
     dedupe_index = executed_statements.index("__DEDUPE__")
     drop_index = next(

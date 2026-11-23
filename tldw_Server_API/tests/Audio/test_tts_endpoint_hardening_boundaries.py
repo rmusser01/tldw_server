@@ -947,7 +947,7 @@ async def test_public_tts_serializer_drops_byok_resolution_snapshot_frames(
     captured: dict[str, Any] = {}
 
     class _OverrideSnapshot:
-        def enforce(self, _model: str | None) -> None:
+        def enforce(self, _model: str | None, **_kwargs: object) -> None:
             return None
 
         def ensure_healthy(self) -> None:

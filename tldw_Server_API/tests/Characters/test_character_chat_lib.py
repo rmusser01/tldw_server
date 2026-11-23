@@ -183,7 +183,7 @@ def test_public_library_projects_local_startup_without_exposing_raw_column(
     """All public library reads redact inaccessible origin and retain ordinary metadata."""
     from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 
-    db.upsert_workspace("private-origin-marker", "Origin")
+    db.workspace_store.upsert_workspace("private-origin-marker", "Origin")
     char_id = db.add_character_card({"name": "Library Persona", "system_prompt": "Help."})
     cid = db.add_conversation(
         {"character_id": char_id, "title": "Provenance library fixture", "rating": 4, "client_id": db.client_id},
@@ -193,7 +193,7 @@ def test_public_library_projects_local_startup_without_exposing_raw_column(
     )
     stored = db.get_conversation_by_id(cid)
     if hidden:
-        db.delete_workspace("private-origin-marker", expected_version=1)
+        db.workspace_store.delete_workspace("private-origin-marker", expected_version=1)
     if surface == "metadata":
         result = get_conversation_metadata(db, cid)
     elif surface == "list":
@@ -274,7 +274,7 @@ def test_library_startup_cache_is_per_call_and_preserves_client_filter(
     """Repeated rows share visibility only for this call, with no caller-filter widening."""
     from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 
-    db.upsert_workspace("library-cache-origin", "Origin")
+    db.workspace_store.upsert_workspace("library-cache-origin", "Origin")
     char_id = db.add_character_card({"name": "Cache"})
     for title in ("Cache first", "Cache second"):
         db.add_conversation({"title": title, "character_id": char_id}, assistant_startup=AssistantStartup(
@@ -299,7 +299,7 @@ def test_library_startup_cache_is_per_call_and_preserves_client_filter(
     assert reads == []
     assert [row["assistant_startup"]["source"] for row in read(db.client_id)] == ["system_fallback"] * 2
     assert reads == ["library-cache-origin"]
-    db.delete_workspace("library-cache-origin", expected_version=1)
+    db.workspace_store.delete_workspace("library-cache-origin", expected_version=1)
     reads.clear()
     assert [row["assistant_startup"]["source"] for row in read(db.client_id)] == ["unknown"] * 2
     assert reads == ["library-cache-origin"]
@@ -311,7 +311,7 @@ def test_legacy_history_export_and_import_do_not_transport_local_startup(db: Cha
     from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
     from tldw_Server_API.app.core.Chat.chat_history import generate_chat_history_content
 
-    db.upsert_workspace("legacy-private-origin-marker", "Private")
+    db.workspace_store.upsert_workspace("legacy-private-origin-marker", "Private")
     char_id = db.add_character_card({"name": "Legacy transport", "system_prompt": "Help."})
     source_id = db.add_conversation(
         {"character_id": char_id, "title": "Legacy source"},
@@ -2032,7 +2032,7 @@ def test_start_new_chat_session_creates_atomic_resumable_snapshot(db, monkeypatc
     conv_id, _, _, _ = start_new_chat_session(db, char_id, "Alice")
 
     assert conv_id is not None
-    state = db.get_roleplay_resume_state(conv_id)
+    state = db.conversation_resume_store.get_roleplay_resume_state(conv_id)
     assert state["behavior_snapshot"]["status"] == "valid"
     assert state["resume_eligible"] is True
     assert state["settings_version"] == 1
