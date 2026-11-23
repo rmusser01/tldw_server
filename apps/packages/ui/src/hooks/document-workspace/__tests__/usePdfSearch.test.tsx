@@ -120,4 +120,85 @@ describe("usePdfSearch", () => {
     expect(document.querySelector('span')).toHaveClass('pdf-search-match')
     expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
   })
+
+  const tick = async (n = 30) => {
+    for (let i = 0; i < n; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0))
+      })
+    }
+  }
+  const setOpen = (open: boolean) =>
+    act(() => {
+      useDocumentWorkspaceStore.setState({ searchOpen: open })
+    })
+  const failingDoc = () => {
+    const getPage = vi.fn(async () => ({
+      getTextContent: vi.fn(async () => {
+        throw new Error("damaged page")
+      })
+    }))
+    return { numPages: 1, getPage } as unknown as MockPdfDocument
+  }
+
+  it("attempts a failing build once, and once more per reopen", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const doc = failingDoc()
+    const ref = { current: doc } as React.RefObject<PdfDocumentProxy | null>
+    renderHook(() => usePdfSearch(ref))
+    setOpen(true)
+    await tick()
+    expect(doc.getPage).toHaveBeenCalledTimes(1)
+    setOpen(false)
+    setOpen(true)
+    await tick()
+    expect(doc.getPage).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not read the document until search opens", async () => {
+    const doc = createPdfDocument([["Cat"]])
+    const ref = { current: doc } as React.RefObject<PdfDocumentProxy | null>
+    renderHook(() => usePdfSearch(ref))
+    await tick(5)
+    expect(doc.getPage).not.toHaveBeenCalled()
+    setOpen(true)
+    await tick(5)
+    expect(doc.getPage).toHaveBeenCalledTimes(1)
+  })
+
+  it("builds a query typed while indexing and drops stale indexes on document change", async () => {
+    const oldDoc = createPdfDocument([["alpha"]])
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const slowOld = {
+      numPages: 1,
+      getPage: vi.fn(async () => {
+        await gate
+        return { getTextContent: async () => ({ items: [{ str: "stale", transform: [] }] }) }
+      })
+    } as unknown as MockPdfDocument
+    const newDoc = createPdfDocument([["beta"]])
+    const ref = { current: oldDoc } as React.RefObject<PdfDocumentProxy | null>
+    const { result, rerender } = renderHook(() => usePdfSearch(ref))
+    setOpen(true)
+    act(() => result.current.setSearchQuery("alpha"))
+    await waitFor(() => expect(result.current.searchResults).toHaveLength(1))
+
+    // swap to a slow doc, then to the new doc before the slow one resolves
+    ref.current = slowOld
+    rerender()
+    await tick(3)
+    ref.current = newDoc
+    rerender()
+    act(() => result.current.setSearchQuery("beta"))
+    await waitFor(() => expect(result.current.searchResults).toHaveLength(1))
+    release()
+    await tick(5)
+    act(() => result.current.setSearchQuery("stale"))
+    await act(async () => { await new Promise((r) => setTimeout(r, 400)) })
+    expect(result.current.searchResults).toHaveLength(0)
+    act(() => result.current.setSearchQuery("alpha"))
+    await act(async () => { await new Promise((r) => setTimeout(r, 400)) })
+    expect(result.current.searchResults).toHaveLength(0)
+  })
 })

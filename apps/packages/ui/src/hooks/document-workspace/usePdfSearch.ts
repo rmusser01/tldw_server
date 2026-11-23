@@ -19,6 +19,14 @@ export type PdfDocumentProxy = Parameters<
   NonNullable<DocumentProps["onLoadSuccess"]>
 >[0]
 
+type PdfDoc = NonNullable<PdfDocumentProxy>
+
+interface IndexEntry {
+  doc: PdfDoc
+  status: "building" | "ready" | "failed"
+  index?: SearchIndex
+}
+
 interface SearchIndex {
   pageTexts: Map<number, string>
   pageItems: Map<number, TextItem[]>
@@ -81,8 +89,15 @@ function findMatches(
 export function usePdfSearch(
   pdfDocumentRef: React.RefObject<PdfDocumentProxy | null>
 ) {
-  const [searchIndex, setSearchIndex] = useState<SearchIndex | null>(null)
-  const [isIndexing, setIsIndexing] = useState(false)
+  // Index state is keyed to the document proxy it was built from, so a new
+  // document never sees (or is overwritten by) another document's index.
+  const [entry, setEntry] = useState<IndexEntry | null>(null)
+  const entryRef = useRef<IndexEntry | null>(null)
+  const pdfDocument = pdfDocumentRef.current
+  const current = entry && entry.doc === pdfDocument ? entry : null
+  const searchIndex = current?.index ?? null
+  const isIndexing = current?.status === "building"
+  const indexFailed = current?.status === "failed"
   const [debouncedQuery, setDebouncedQuery] = useState("")
   const highlightedElementsRef = useRef<HTMLElement[]>([])
   const pendingScrollPageRef = useRef<number | null>(null)
@@ -104,11 +119,16 @@ export function usePdfSearch(
    * Build search index from PDF document.
    * Extracts text content from all pages.
    */
-  const buildSearchIndex = useCallback(async () => {
-    const pdfDocument = pdfDocumentRef.current
-    if (!pdfDocument) return
-
-    setIsIndexing(true)
+  const buildSearchIndex = useCallback(async (pdfDocument: PdfDoc) => {
+    const publish = (next: IndexEntry) => {
+      // A build for a document that is no longer the one being indexed is dropped.
+      if (entryRef.current?.doc !== pdfDocument) return
+      entryRef.current = next
+      setEntry(next)
+    }
+    const building: IndexEntry = { doc: pdfDocument, status: "building" }
+    entryRef.current = building
+    setEntry(building)
 
     try {
       const pageTexts = new Map<number, string>()
@@ -136,13 +156,12 @@ export function usePdfSearch(
         pageTexts.set(pageNum, items.map((item) => item.str).join(" "))
       }
 
-      setSearchIndex({ pageTexts, pageItems })
+      publish({ doc: pdfDocument, status: "ready", index: { pageTexts, pageItems } })
     } catch (error) {
       console.error("Error building search index:", error)
-    } finally {
-      setIsIndexing(false)
+      publish({ doc: pdfDocument, status: "failed" })
     }
-  }, [pdfDocumentRef])
+  }, [])
 
   /**
    * Search for query across all pages.
@@ -301,11 +320,7 @@ export function usePdfSearch(
    */
   const openSearch = useCallback(() => {
     setSearchOpen(true)
-    // Build index if not already built
-    if (!searchIndex && !isIndexing) {
-      buildSearchIndex()
-    }
-  }, [setSearchOpen, searchIndex, isIndexing, buildSearchIndex])
+  }, [setSearchOpen])
 
   /**
    * Close search overlay and clear results.
@@ -316,12 +331,14 @@ export function usePdfSearch(
     clearHighlights()
   }, [setSearchOpen, clearSearch, clearHighlights])
 
-  // Build search index when PDF document changes
+  // Build lazily when search is open. Deps deliberately exclude build state: a
+  // failed build is retried only when search is reopened or the document changes.
   useEffect(() => {
-    if (pdfDocumentRef.current && !searchIndex && !isIndexing) {
-      buildSearchIndex()
-    }
-  }, [pdfDocumentRef.current, searchIndex, isIndexing, buildSearchIndex])
+    if (!searchOpen || !pdfDocument) return
+    const e = entryRef.current
+    if (e?.doc === pdfDocument && e.status !== "failed") return
+    void buildSearchIndex(pdfDocument)
+  }, [searchOpen, pdfDocument, buildSearchIndex])
 
   // Debounce search query to prevent jank on large PDFs
   useEffect(() => {
@@ -359,6 +376,7 @@ export function usePdfSearch(
     searchResults,
     activeSearchIndex,
     isIndexing,
+    indexFailed,
 
     // Actions
     setSearchQuery,
