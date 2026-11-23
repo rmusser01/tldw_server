@@ -889,6 +889,26 @@ describe("NotificationLifecycleProvider", () => {
     expect(view.latest().events.map(({ event }) => event.id)).toEqual([11])
   })
 
+  it("keeps a notification event whose payload carries a heartbeat key", async () => {
+    let streamOptions: Record<string, unknown> | undefined
+    mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
+      streamOptions = options
+      return vi.fn()
+    })
+    const view = renderProvider()
+    await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
+
+    act(() =>
+      (streamOptions?.onEvent as ((event: unknown) => void) | undefined)?.({
+        event: "notification",
+        id: 12,
+        payload: { notification_id: 12, heartbeat: true }
+      })
+    )
+
+    expect(view.latest().events.map(({ event }) => event.id)).toEqual([12])
+  })
+
   it("adds a validated coalesced count to the lifecycle unread total", async () => {
     let streamOptions: Record<string, unknown> | undefined
     mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {

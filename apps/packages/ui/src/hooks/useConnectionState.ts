@@ -7,6 +7,8 @@ import { deriveConnectionUxState, type ConnectionState } from "@/types/connectio
  * Whole connection state, or a shallow-compared selection of it. Every health
  * poll replaces the state object, so a caller that reads only a few fields
  * should pass a selector to re-render only when those fields change.
+ * Return a flat object of primitives: only its top level is compared, so a
+ * nested object or array built in the selector re-renders on every store update.
  */
 export function useConnectionState<T = ConnectionState>(
   selector?: (state: ConnectionState) => T

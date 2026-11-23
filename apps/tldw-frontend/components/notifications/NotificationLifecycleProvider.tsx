@@ -99,7 +99,8 @@ const unreadIncrementForEvent = (event: NotificationStreamEvent): number => {
 // the context value and re-render every consumer.
 const isHeartbeat = (event: NotificationStreamEvent): boolean =>
   event.event === "heartbeat" ||
-  (typeof event.payload === "object" && event.payload !== null &&
+  (event.event === "message" &&
+    typeof event.payload === "object" && event.payload !== null &&
     (event.payload as Record<string, unknown>).heartbeat === true)
 
 const readStoredOrgId = (): string | number | null => {

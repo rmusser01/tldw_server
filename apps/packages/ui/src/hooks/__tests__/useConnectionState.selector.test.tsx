@@ -13,6 +13,7 @@ import { useConnectionStore } from "@/store/connection"
 import { ConnectionPhase, type ConnectionState } from "@/types/connection"
 
 const initialState = useConnectionStore.getState().state
+const originalStore = useConnectionStore.getState()
 
 const patchState = (patch: Partial<ConnectionState>) =>
   act(() => {
@@ -50,7 +51,10 @@ describe("useConnectionState", () => {
 
   afterEach(() => {
     cleanup()
-    useConnectionStore.setState({ state: initialState })
+    useConnectionStore.setState({
+      state: initialState,
+      checkOnce: originalStore.checkOnce
+    })
   })
 
   it("returns the whole state without a selector", () => {
@@ -82,5 +86,33 @@ describe("useConnectionState", () => {
     expect(knowledge).toHaveLength(1)
     expect(actions).toHaveLength(1)
     expect(ux).toHaveLength(1)
+  })
+
+  it("re-renders each helper hook when a value it returns changes", () => {
+    const knowledge = countRenders(() => useKnowledgeStatus())
+    const actions = countRenders(() => useConnectionActions())
+    const ux = countRenders(() => useConnectionUxState())
+
+    patchState({ knowledgeError: "rag-timeout" })
+    expect(knowledge).toHaveLength(2)
+    expect(knowledge.at(-1)).toMatchObject({ knowledgeError: "rag-timeout" })
+    expect(ux).toHaveLength(1)
+
+    patchState({ errorKind: "partial" })
+    expect(ux).toHaveLength(2)
+    expect(ux.at(-1)).toMatchObject({
+      uxState: "connected_degraded",
+      errorKind: "partial"
+    })
+
+    const checkOnce = async () => {}
+    act(() => {
+      useConnectionStore.setState({ checkOnce })
+    })
+    expect(actions).toHaveLength(2)
+    expect(actions.at(-1)).toMatchObject({
+      checkOnce,
+      setServerUrl: originalStore.setServerUrl
+    })
   })
 })

@@ -1,7 +1,7 @@
 ---
 id: TASK-15621
 title: Stop health-poll and notification-heartbeat re-renders of the chat page
-status: In Progress
+status: Done
 labels:
 - webui
 - performance
@@ -30,20 +30,22 @@ Root cause verified: useConnectionState() selected s.state, which checkOnce repl
 Brief deviation: selections of derived values (Playground catalogConnectionReady, PlaygroundForm connectionUxState/connectionPending, PlaygroundEmpty connectionPending) are undefined under a mock that ignores the selector. Four test files broke that way (Playground.cockpit-shell, Playground.cockpit-controls, Playground.coordinator.integration, PlaygroundEmpty.disconnected); their mocks now apply the selector like the real hook. Raw-field consumers still work with selector-ignoring mocks.
 Verification: new tests red then green (useConnectionState.selector 2 failed -> 3 passed; provider heartbeat 2 failed -> 53 passed). Neighbouring tests: 34 shared-UI files 1285 passed; 7 web files 185 passed; 7 helper-hook consumer files 33 passed. eslint: no new warnings or errors on changed files.
 PR: https://github.com/rmusser01/tldw_server/pull/3575 (base dev).
+Review follow-ups (PR #3575): the seven remaining PlaygroundForm/PlaygroundEmpty test mocks now apply the selector, so their derived values equal base again (same functions on the same mock object); no test outcome changed. Five of those files mock deriveConnectionUxState to return an object, as on base; left unchanged. Added positive-update coverage for the helper hooks (fails with an always-equal comparator). Heartbeat data form now also requires event === "message"; a notification carrying payload.heartbeat is kept (red then green). JSDoc notes a selection must be flat; overloads not used because they trip no-redeclare.
+Verification round 2: 41 shared-UI files 1319 passed; 7 web files 186 passed; eslint no new warnings or errors. Docs: none needed (internal hook behaviour). Bandit: not applicable, TypeScript only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-useConnectionState takes an optional shallow-compared selector; the /chat-path consumers select only what they read (Playground, PlaygroundForm and PlaygroundEmpty select derived values); the object-returning helper hooks are shallow-compared; NotificationLifecycleProvider drops SSE heartbeat frames. A health poll or heartbeat no longer re-renders Playground or the notification consumers. Four Playground test mocks now apply the selector.
+useConnectionState takes an optional shallow-compared selector (flat selections); the /chat-path consumers select only what they read, with Playground, PlaygroundForm and PlaygroundEmpty selecting derived values; useConnectionActions, useKnowledgeStatus and useConnectionUxState are shallow-compared; NotificationLifecycleProvider drops SSE heartbeat frames (event heartbeat, or a message whose payload.heartbeat is true). A health poll or heartbeat no longer re-renders Playground or the notification consumers. Eleven test mocks now apply the selector like the real hook. PR #3575.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
