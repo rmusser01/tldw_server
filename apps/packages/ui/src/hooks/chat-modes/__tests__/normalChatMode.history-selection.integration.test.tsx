@@ -2748,6 +2748,45 @@ describe("early question (CM-14)", () => {
     hook.unmount()
   })
 
+  // The early question and the turn's create are one decision. A tools change
+  // after the question is shown can't send it down the local-create path (whose
+  // non-quiet first load replaces the transcript): the dispatch fence refuses
+  // the turn first, and the question is withdrawn.
+  it("refuses a send whose tools change after its early question, without creating or loading a chat", async () => {
+    const create = vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+      async (_id, request) => emptyServerCapture(request)
+    )
+    const hook = renderHook(() => useHistorySelection())
+    const load = vi.spyOn(hook.result.current, "loadConversation")
+    const histories = storage.tables.chatHistories.rows.size
+    const setMessages: SetRows = (next) => {
+      useStoreMessageOption.getState().setMessages(next)
+      // A tool becomes available just after the question is shown.
+      useMcpToolsStore.setState({ healthState: "healthy", chatTools: buildChatToolFilterState({ tools: [{
+        name: "lookup", canExecute: true, inputSchema: { type: "object", properties: {} }
+      }] }).chatTools })
+    }
+    const tools = useMcpToolsStore.getState().chatTools
+    try {
+      const attempt = startSend("First question", { ...firstSendParams(hook.result.current, setMessages), toolChoice: "auto" })
+      expect(useStoreMessageOption.getState().messages.map((row) => row.message)).toEqual(["First question"])
+      let outcome: unknown
+      await act(async () => {
+        outcome = await attempt.catch((error) => error)
+      })
+
+      expect(outcome).toEqual(new Error("stale_selection"))
+      expect(create).not.toHaveBeenCalled()
+      expect(storage.tables.chatHistories.rows.size).toBe(histories)
+      expect(load).not.toHaveBeenCalled()
+      expect(useStoreMessageOption.getState().messages).toEqual([])
+    } finally {
+      useMcpToolsStore.setState({ chatTools: tools })
+      hook.unmount()
+    }
+  })
+
   it("shows no early question when the turn first loads an existing chat", async () => {
     vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
       async (_id, request) => emptyServerCapture(request, "existing-server")

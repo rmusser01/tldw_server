@@ -835,7 +835,9 @@ const captureNormalHistoryTurn = async (
   acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null,
   sourceDraft: ChatDraftAddress | null,
   stopSignal: AbortSignal,
-  retainIdWatcher: (stop: () => void) => void
+  retainIdWatcher: (stop: () => void) => void,
+  /** The turn's one `createsServerChat` decision, taken before its early question. */
+  createServerChat: boolean
 ): Promise<HistorySendTurn> => {
   const { controller, originIsCurrent, temporary } = params.historySelection!
   const notifyServerMutation = () => {
@@ -876,7 +878,7 @@ const captureNormalHistoryTurn = async (
     let localId = params.historyId
     let serverId = params.serverChatId
     let createdNativeChat: Awaited<ReturnType<typeof tldwClient.createChat>> | undefined
-    if (createsServerChat(params, current)) {
+    if (createServerChat) {
       if (!sourceDraft || sourceDraft.kind !== "fresh" || !params.surface)
         throw new Error("chat_creation_source_invalid")
       creationHandle = { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
@@ -1628,7 +1630,8 @@ const showQuestionEarly = <TParams extends ChatModeParamsBase & HistoryChatModeP
   message: string,
   image: string,
   isRegenerate: boolean,
-  params: TParams
+  params: TParams,
+  createServerChat: boolean
 ) => {
   const selection = params.historySelection
   if (!selection || isRegenerate || selection.regenerate || selection.editResend ||
@@ -1639,7 +1642,7 @@ const showQuestionEarly = <TParams extends ChatModeParamsBase & HistoryChatModeP
   // the transcript until the turn draws; any other first load replaces it, and
   // the question would flicker.
   const current = selection.controller.getCurrent()
-  if (current.owner ? current.status !== "ready" : current.status !== "idle" || !createsServerChat(params, current))
+  if (current.owner ? current.status !== "ready" : current.status !== "idle" || !createServerChat)
     return undefined
   const question: Message = {
     isBot: false,
@@ -1697,7 +1700,10 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       if (params.uploadedFiles?.length && mode.id === "normal")
         throw new Error("unsupported_history_message_assets")
       if (!servicePromptSnapshot) throw new Error("history_scope_unavailable")
-      earlyQuestion = showQuestionEarly(mode, message, resolvedImage, isRegenerate, params)
+      // Decide once: the early question and the turn's create must agree, even if
+      // the tools stores change in between (CM-14).
+      const createServerChat = createsServerChat(params, params.historySelection.controller.getCurrent())
+      earlyQuestion = showQuestionEarly(mode, message, resolvedImage, isRegenerate, params, createServerChat)
       if (earlyQuestion) params = { ...params, userMessageId: earlyQuestion.id }
       const historyTurn = await captureNormalHistoryTurn(
         { ...params, historyPreparation: preparation },
@@ -1710,7 +1716,8 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
         preparation!.acceptDraftBind,
         preparation!.sourceDraft,
         signal,
-        stop => { stopWatchingPreparationIds = stop }
+        stop => { stopWatchingPreparationIds = stop },
+        createServerChat
       )
       createdTurn = historyTurn
       // Canonical roles/content come from the captured owner, not display normalization.
