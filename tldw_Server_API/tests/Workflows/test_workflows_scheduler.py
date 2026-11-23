@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import nullcontext
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from fastapi.testclient import TestClient
@@ -449,7 +450,7 @@ def test_list_registered_schedules_pages_until_short_page(monkeypatch):
                 return second_page
             return []
 
-    monkeypatch.setattr(svc, "_get_db", lambda uid: _PagedDB())
+    monkeypatch.setattr(svc, "_existing_schedule_store", lambda uid: nullcontext(_PagedDB()))
 
     schedules = svc._list_registered_schedules(1)
 
@@ -533,12 +534,8 @@ async def test_load_all_discovers_non_default_tenant_schedules(monkeypatch, tmp_
             return [schedule]
 
     (tmp_path / "1").mkdir()
-    monkeypatch.setattr(
-        workflows_scheduler_mod.DatabasePaths,
-        "get_user_db_base_dir",
-        lambda: tmp_path,
-    )
-    monkeypatch.setattr(svc, "_get_db", lambda uid: _StubDB())
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(svc, "_existing_schedule_store", lambda uid: nullcontext(_StubDB()))
     monkeypatch.setattr(svc, "_add_job", lambda schedule_obj, user_id=None: loaded.append((schedule_obj.id, user_id)))
 
     await svc._load_all()  # type: ignore[attr-defined]
@@ -581,16 +578,14 @@ async def test_load_all_uses_schedule_owner_when_shared_backend_returns_duplicat
 
     (tmp_path / "1").mkdir()
     (tmp_path / "77").mkdir()
-    monkeypatch.setattr(
-        workflows_scheduler_mod.DatabasePaths,
-        "get_user_db_base_dir",
-        lambda: tmp_path,
-    )
-    monkeypatch.setattr(svc, "_get_db", lambda uid: _SharedDB())
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    existing_store = Mock(side_effect=lambda _uid: nullcontext(_SharedDB()))
+    monkeypatch.setattr(svc, "_existing_schedule_store", existing_store)
     monkeypatch.setattr(svc, "_add_job", lambda schedule_obj, user_id=None: loaded.append((schedule_obj.id, user_id)))
 
     await svc._load_all()  # type: ignore[attr-defined]
 
+    assert existing_store.call_args_list == [call(1), call(77)]
     assert loaded == [("sched-shared", 77)]
 
 

@@ -397,12 +397,45 @@ def test_pg_bootstrap_advances_v91_in_place_and_rechecks_v92(monkeypatch):
     """Exercise real dispatch while replacing PostgreSQL I/O with recording doubles."""
     version = 91
     checks = []
+    repairs = []
     live_connection, migration_connection = object(), object()
-    backend = Mock()
-    backend.transaction.side_effect = lambda: nullcontext(live_connection)
-    backend.table_exists.return_value = True
-    db = SimpleNamespace(repair_conversation_assistant_identity=Mock())
-    ctx = SimpleNamespace(backend=backend, db=db, postgres_schema_version=92, schema_name="rag_char_chat_schema")
+    schema_name = "rag_char_chat_schema"
+
+    class _VersionBackend:
+        def transaction(self):
+            return nullcontext(live_connection)
+
+        def table_exists(self, table, *, connection):
+            if table != "db_schema_version" or connection is not migration_connection:
+                raise AssertionError(f"Unexpected catalog probe: {table}")
+            return True
+
+        def execute(self, query, params, *, connection):
+            if query in (
+                "SELECT set_config('lock_timeout',%s,true)",
+                "SELECT set_config('statement_timeout',%s,true)",
+            ):
+                return None
+            if (
+                connection is migration_connection
+                and params == (schema_name,)
+                and query in (
+                    "SELECT version FROM db_schema_version WHERE schema_name = %s LIMIT 1 FOR UPDATE",
+                    "SELECT version FROM db_schema_version WHERE schema_name = %s LIMIT 1",
+                )
+            ):
+                return SimpleNamespace(scalar=version)
+            raise AssertionError(f"Unexpected SQL on the forward-only upgrade: {query}")
+
+    def record_repair(connection):
+        repairs.append(connection._connection)
+
+    ctx = SimpleNamespace(
+        backend=_VersionBackend(),
+        db=SimpleNamespace(repair_conversation_assistant_identity=record_repair),
+        postgres_schema_version=92,
+        schema_name=schema_name,
+    )
 
     def status(_ctx, connection):
         checks.append((connection, version))
@@ -419,19 +452,14 @@ def test_pg_bootstrap_advances_v91_in_place_and_rechecks_v92(monkeypatch):
 
     monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_: nullcontext(migration_connection))
     monkeypatch.setattr(schema_bootstrap, "_postgres_schema_is_current", status)
-    monkeypatch.setattr(postgres_schema, "_configure_notes_moodboard_studio_v61_postgres_transaction", Mock())
-    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda *_args, **_kwargs: version)
-    unrelated_ddl = Mock(side_effect=AssertionError("Do not replay full bootstrap for v91"))
-    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", unrelated_ddl)
     monkeypatch.setattr(message_order_schema, "migrate_postgres_chat_catalog", migrate)
 
     schema_bootstrap._initialize_schema_postgres(ctx)
     assert checks == [(live_connection, 91), (migration_connection, 91), (migration_connection, 92)]
-    assert db.repair_conversation_assistant_identity.call_count == 1
-    assert db.repair_conversation_assistant_identity.call_args.args[0]._connection is migration_connection
-    unrelated_ddl.assert_not_called()
+    assert repairs == [migration_connection]
 
     schema_bootstrap._initialize_schema_postgres(ctx)
-    assert checks[-1] == (live_connection, 92)
-    assert db.repair_conversation_assistant_identity.call_count == 2
-    assert db.repair_conversation_assistant_identity.call_args.args[0]._connection is live_connection
+    assert checks == [
+        (live_connection, 91), (migration_connection, 91), (migration_connection, 92), (live_connection, 92),
+    ]
+    assert repairs == [migration_connection, live_connection]

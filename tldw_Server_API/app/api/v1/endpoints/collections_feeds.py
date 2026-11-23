@@ -403,7 +403,6 @@ async def create_feed_subscription(
                 await run_watchlist_job(
                     user_id,
                     job_id,
-                    capture_companion_activity=True,
                     companion_route="/api/v1/collections/feeds",
                 )
             except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:

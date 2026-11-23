@@ -2338,7 +2338,6 @@ async def check_sources_now(
                 manual_job_id,
                 tenant_id=_resolve_request_tenant_id(current_user),
                 source_ids_override=active_source_ids,
-                capture_companion_activity=True,
                 companion_route="/api/v1/watchlists/sources/check-now",
             )
             raw_run_id = run_result.get("run_id") if isinstance(run_result, dict) else None
@@ -4237,7 +4236,6 @@ async def trigger_run(
             int(current_user.id),
             job_id,
             tenant_id=_resolve_request_tenant_id(current_user),
-            capture_companion_activity=True,
             companion_route=f"/api/v1/watchlists/jobs/{job_id}/run",
         )
         run_id = int(result.get("run_id"))

@@ -3767,10 +3767,16 @@ async def _settle_selected_durable_result(
             "sender_role": "assistant", "history_result_v1": result_metadata},
         "parent_message_id": reference["input_message_id"]}
     try:
-        mid = await asyncio.to_thread(db.settle_history_admission, cid, reference, prepared,
-            owner_client_id=owner_client_id, owner_key=owner_key)
-        rows, _ = await asyncio.to_thread(db.read_history_recovery_messages, cid,
-            owner_client_id=owner_client_id, owner_key=owner_key, scope=scope, message_id=mid)
+        mid = await asyncio.to_thread(
+            lambda: db.message_store.settle_history_admission(
+                cid, reference, prepared, owner_client_id=owner_client_id, owner_key=owner_key,
+            ),
+        )
+        rows, _ = await asyncio.to_thread(
+            lambda: db.message_store.read_history_recovery_messages(
+                cid, owner_client_id=owner_client_id, owner_key=owner_key, scope=scope, message_id=mid,
+            ),
+        )
         proof = rows[0].get("tldw_history_recovery_v1") if len(rows) == 1 else None
         if not isinstance(proof, dict) or proof.get("status") != "result_verified" or proof.get("scope") != scope:
             raise HistorySelectionError("unverified_history_result")

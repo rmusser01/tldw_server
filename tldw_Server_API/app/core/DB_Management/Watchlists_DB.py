@@ -493,6 +493,21 @@ _WATCHLISTS_REQUIRED_TABLES = (
     "deleted_jobs",
 )
 
+_WATCHLIST_RETIREMENT_RLS_DDL = """
+    ALTER TABLE watchlist_schedule_retirements ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE watchlist_schedule_retirements FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS watchlist_retirements_owner ON watchlist_schedule_retirements;
+    CREATE POLICY watchlist_retirements_owner ON watchlist_schedule_retirements
+        USING (user_id = NULLIF(current_setting('app.current_user_id', true), ''))
+        WITH CHECK (user_id = NULLIF(current_setting('app.current_user_id', true), ''));
+    DROP POLICY IF EXISTS watchlist_retirements_discovery ON watchlist_schedule_retirements;
+    CREATE POLICY watchlist_retirements_discovery ON watchlist_schedule_retirements
+        FOR SELECT USING (
+            NULLIF(current_setting('app.current_user_id', true), '') IS NULL
+            AND current_setting('app.is_admin', true) = '1'
+        );
+"""
+
 # Complete read/write dependencies of published-cluster Watchlists evaluation,
 # including the notification insert's readback (not the generic startup sentinel).
 _CLUSTER_WATCHLIST_COLUMNS = {
@@ -609,8 +624,24 @@ class WatchlistsDatabase:
         return backend
 
     @staticmethod
+    def _prepare_shared_retirement_journal(backend: DatabaseBackend) -> bool:
+        state = backend.execute(
+            "SELECT c.relrowsecurity AND c.relforcerowsecurity AND "
+            "(SELECT count(*) FROM pg_catalog.pg_policy p WHERE p.polrelid = c.oid AND "
+            "((p.polname = 'watchlist_retirements_owner' AND p.polcmd = '*') OR "
+            "(p.polname = 'watchlist_retirements_discovery' AND p.polcmd = 'r'))) = 2 AS ready "
+            "FROM pg_catalog.pg_class c WHERE c.oid = to_regclass('watchlist_schedule_retirements')"
+        ).first
+        if state is None:
+            return False
+        # Recovery can encounter an existing journal before Watchlists schema setup.
+        if not state["ready"]:
+            backend.create_tables(_WATCHLIST_RETIREMENT_RLS_DDL)
+        return True
+
+    @staticmethod
     def list_shared_retirement_owners(backend: DatabaseBackend) -> list[str]:
-        if not backend.table_exists("watchlist_schedule_retirements"):
+        if not WatchlistsDatabase._prepare_shared_retirement_journal(backend):
             return []
         rows = backend.execute("SELECT DISTINCT user_id FROM watchlist_schedule_retirements ORDER BY user_id").rows
         return [str(row["user_id"]) for row in rows]
@@ -834,7 +865,9 @@ class WatchlistsDatabase:
         return None
 
     def ensure_schema(self) -> None:
-        if self.backend.backend_type == BackendType.POSTGRESQL:
+        backend = self.backend
+        postgres = backend.backend_type == BackendType.POSTGRESQL
+        if postgres:
             ddl = """
             CREATE TABLE IF NOT EXISTS sources (
                 id BIGSERIAL PRIMARY KEY,
@@ -1575,7 +1608,10 @@ class WatchlistsDatabase:
             );
             CREATE INDEX IF NOT EXISTS idx_deleted_jobs_expires ON deleted_jobs(expires_at);
             """
-        self.backend.create_tables(ddl)
+        backend.create_tables(ddl + _WATCHLIST_RETIREMENT_RLS_DDL if postgres else ddl)
+        self._ensure_legacy_columns()
+
+    def _ensure_legacy_columns(self) -> None:
         # Backfill columns in case tables existed (guarded to avoid noisy duplicate-column errors)
         def _col_exists(table: str, col: str) -> bool:
             try:

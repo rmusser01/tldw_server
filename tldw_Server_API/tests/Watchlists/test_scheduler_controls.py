@@ -12,6 +12,137 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.postgres
+@pytest.mark.parametrize("upgrade", [False, True], ids=["fresh", "upgrade"])
+def test_postgres_retirement_journal_enforces_owner_scope_and_preserves_discovery(
+    pg_restricted_backend, upgrade,
+):
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+    from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+
+    backend = pg_restricted_backend
+
+    def visible_owners():
+        return [
+            row["user_id"]
+            for row in backend.execute(
+                "SELECT DISTINCT user_id FROM watchlist_schedule_retirements ORDER BY user_id",
+            ).rows
+        ]
+
+    if upgrade:
+        backend.create_tables(
+            """
+            CREATE TABLE watchlist_schedule_retirements (
+                user_id TEXT NOT NULL,
+                job_id BIGINT NOT NULL,
+                schedule_id TEXT NOT NULL,
+                PRIMARY KEY (user_id, job_id, schedule_id)
+            );
+            """
+        )
+        backend.execute(
+            "INSERT INTO watchlist_schedule_retirements VALUES (?, ?, ?)",
+            ("9201", 7, "old-receipt"),
+        )
+        backend.execute(
+            "INSERT INTO watchlist_schedule_retirements VALUES (?, ?, ?)",
+            ("9203", 9, "other-legacy-receipt"),
+        )
+
+    with scoped_context(user_id=None, is_admin=True):
+        assert WatchlistsDatabase.list_shared_retirement_owners(backend) == (["9201", "9203"] if upgrade else [])
+    if not upgrade:
+        assert not backend.table_exists("watchlist_schedule_retirements")
+    else:
+        assert backend.execute(
+            "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class "
+            "WHERE oid = 'watchlist_schedule_retirements'::regclass"
+        ).scalar is True
+        with scoped_context(user_id=9201):
+            assert visible_owners() == ["9201"]
+        with scoped_context(user_id=None):
+            assert visible_owners() == []
+
+    first = WatchlistsDatabase(9201, backend=backend)
+    second = WatchlistsDatabase(9202, backend=backend)
+    flags = backend.execute(
+        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+        "WHERE oid = 'watchlist_schedule_retirements'::regclass"
+    ).first
+    assert flags == {"relrowsecurity": True, "relforcerowsecurity": True}
+    commands = backend.execute(
+        "SELECT cmd FROM pg_policies WHERE schemaname = 'public' "
+        "AND tablename = 'watchlist_schedule_retirements' ORDER BY cmd"
+    ).rows
+    assert commands == [{"cmd": "ALL"}, {"cmd": "SELECT"}]
+
+    with scoped_context(user_id=9201):
+        assert first.list_schedule_retirements() == ([(7, "old-receipt")] if upgrade else [])
+        with first.transaction() as conn:
+            first._record_job_schedule_retirement(8, "retire-first", connection=conn)
+    with scoped_context(user_id=9202):
+        with second.transaction() as conn:
+            second._record_job_schedule_retirement(8, "retire-second", connection=conn)
+        assert second.list_schedule_retirements() == [(8, "retire-second")]
+
+    with scoped_context(user_id=None, is_admin=True):
+        assert WatchlistsDatabase.list_shared_retirement_owners(backend) == (
+            ["9201", "9202", "9203"] if upgrade else ["9201", "9202"]
+        )
+    with scoped_context(user_id=9201):
+        assert visible_owners() == ["9201"]
+        assert first.list_retired_job_schedule_ids(8) == ["retire-first"]
+        first.acknowledge_job_schedule_retirement(8, "retire-first")
+        assert first.list_retired_job_schedule_ids(8) == []
+    with scoped_context(user_id=9202):
+        assert second.list_schedule_retirements() == [(8, "retire-second")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.postgres
+async def test_postgres_scheduled_promotion_retires_generation_under_task_owner(pg_restricted_backend, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
+    from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+    from tldw_Server_API.app.core.Scheduler.handlers import watchlists as handler
+    from tldw_Server_API.app.core.Watchlists.pipeline import _maybe_promote_feed_schedule
+    from tldw_Server_API.app.services import workflows_scheduler
+
+    db = WatchlistsDatabase(9201, backend=pg_restricted_backend)
+    job = db.create_job(
+        name="Feed", description=None, scope_json=None, schedule_expr="0 * * * *",
+        schedule_timezone="UTC", active=True, max_concurrency=None, per_host_delay_ms=None,
+        retry_policy_json=None, output_prefs_json=None,
+    )
+    db.set_job_schedule_id(job.id, "hourly")
+    observed = db.get_job(job.id)
+    prefs = {"collections_schedule": {
+        "mode": "hourly_then_daily", "created_at": "2000-01-01T00:00:00+00:00",
+    }}
+
+    def attach_replacement(db, updated, **_kwargs):
+        if not db.set_job_schedule_id(updated.id, "daily", expected_job=updated, retire_previous=True):
+            raise AssertionError("Promotion did not attach the replacement")
+
+    async def promote(*_args, **_kwargs):
+        _maybe_promote_feed_schedule(db=db, job=observed, job_output_prefs=prefs)
+        return {"run_id": 1}
+
+    monkeypatch.setattr(workflows_scheduler, "register_watchlist_schedule", attach_replacement)
+    monkeypatch.setattr(handler, "run_watchlist_job", promote)
+    with scoped_context(user_id=None):
+        await handler.watchlist_run({
+            "inputs": {"watchlist_job_id": job.id}, "user_id": "9201",
+            "watchlist_schedule_id": "hourly", "watchlist_schedule_cron": observed.schedule_expr,
+            "watchlist_job_revision": observed.updated_at,
+        })
+        assert get_scope().user_id is None
+
+    with scoped_context(user_id=9201):
+        assert db.get_job(job.id).wf_schedule_id == "daily"
+        assert db.list_retired_job_schedule_ids(job.id) == ["hourly"]
+
+
 @pytest.fixture()
 def client_user(monkeypatch):
     async def override_user():
@@ -1362,7 +1493,8 @@ async def test_scheduler_rescan_recovers_mixed_stores_with_owner_scope(
             scopes.append((scope.user_id, scope.is_admin))
             return db.backend.execute(query, *args, **kwargs)
 
-        shared_backend = SimpleNamespace(execute=execute, table_exists=db.backend.table_exists)
+        shared_backend = SimpleNamespace(execute=execute)
+        monkeypatch.setattr(type(db), "_prepare_shared_retirement_journal", staticmethod(lambda _backend: True))
     else:
         shared_backend = None
         monkeypatch.setattr(scheduler._db.backend.config, "backend_type", BackendType.POSTGRESQL)

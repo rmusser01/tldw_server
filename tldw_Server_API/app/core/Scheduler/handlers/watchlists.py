@@ -19,13 +19,15 @@ real scraping is implemented, this stub can be replaced with the actual pipeline
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
 from tldw_Server_API.app.core.Scheduler.base.registry import task
 from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 from tldw_Server_API.app.core.Watchlists import briefing_delivery, output_enrichment_handler
-from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
+from tldw_Server_API.app.core.Watchlists.pipeline import WatchlistScheduleGeneration, run_watchlist_job
 
 
 def _utcnow_iso() -> str:
@@ -71,16 +73,18 @@ async def watchlist_run(payload: dict[str, Any]) -> dict[str, Any]:
         cron = payload.get("watchlist_schedule_cron")
         if not isinstance(schedule_id, str) or not schedule_id or not isinstance(cron, str) or not cron.strip():
             raise ValueError("watchlist_run: invalid recurring schedule reference")
-        options["expected_schedule"] = (schedule_id, cron)
+        revision = None
         if "watchlist_job_revision" in payload:
             revision = payload["watchlist_job_revision"]
             if not isinstance(revision, str) or not revision:
                 raise ValueError("watchlist_run: invalid recurring schedule revision")
-            options["expected_schedule_revision"] = revision
+        options["expected_schedule"] = WatchlistScheduleGeneration(schedule_id, cron, revision)
 
     # Execute the real pipeline (handles run row creation, stats, and job history). Its LLM
     # extraction calls run for this user, whatever request started the Scheduler (TASK-13864).
-    with llm_call_root(uid_int):
+    scope = get_scope()
+    owner_scope = nullcontext() if scope is not None and scope.user_id == uid_int else scoped_context(user_id=uid_int)
+    with llm_call_root(uid_int), owner_scope:
         result = await run_watchlist_job(uid_int, int(job_id), tenant_id=tenant_id, **options)
     status = str(result.get("status") or "succeeded")
     return {"run_id": result.get("run_id"), "status": status, "items_ingested": int(result.get("items_ingested", 0))}

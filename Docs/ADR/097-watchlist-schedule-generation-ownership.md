@@ -47,7 +47,14 @@ This decision retains Scheduler as the execution mechanism under ADR-003.
   acknowledges successful deletion or confirmed absence. A failed cleanup
   leaves the record for retry; an unattached row alone is not proof of
   retirement. The scheduler lease holder retries recorded retirements using
-  existing owner storage.
+  existing owner storage. The shared PostgreSQL journal forces owner row
+  policies for reads and writes. The scheduler can discover pending owners
+  in its explicit, ownerless admin scope with a read-only policy; it returns
+  to the exact owner's scope before reading or acknowledging their receipts.
+  Existing journals gain these policies before discovery if caller
+  credentials can install them; recovery does not create missing journals.
+  Scheduled runs bind the stored task owner as content scope, including
+  when promotion attaches a replacement generation and records retirement.
 - A job ID remains reserved in SQLite while run history, an undo record, or
   a retirement record references it. A reversible delete cannot replace a still-present undo
   record. Collections hard-delete commits the feed, linked job, and any

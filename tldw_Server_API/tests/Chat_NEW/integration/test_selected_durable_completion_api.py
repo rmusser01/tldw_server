@@ -137,7 +137,7 @@ def selected_single_append_api(selected_api, monkeypatch):
     def forbidden(*_args, **_kwargs):
         pytest.fail("selected mode must not use legacy or plural admission")
 
-    monkeypatch.setattr(db, "insert_or_validate_user_turn", forbidden)
+    monkeypatch.setattr(db.message_store, "insert_or_validate_user_turn", forbidden)
     monkeypatch.setattr(db, "append_selected_history_inputs", forbidden)
     return selected_api
 
@@ -152,14 +152,14 @@ def selected_settlement_fault(selected_api, monkeypatch, fault):
 
         monkeypatch.setattr(db.message_store, "_add_message_metadata_with_conn", fail)
     elif fault == "unverified":
-        read = db.read_history_recovery_messages
+        read = db.message_store.read_history_recovery_messages
 
         def unverified(*args, **kwargs):
             rows, total = read(*args, **kwargs)
             rows[0]["tldw_history_recovery_v1"] = {"version": 1, "status": "unverified", "code": "live_state_mismatch"}
             return rows, total
 
-        monkeypatch.setattr(db, "read_history_recovery_messages", unverified)
+        monkeypatch.setattr(db.message_store, "read_history_recovery_messages", unverified)
 
 
 @pytest.fixture
@@ -335,7 +335,9 @@ async def test_selected_durable_generation_projection_preserves_protected_author
 
     runtime = {}
     call = endpoint._settle_selected_durable_result(
-        SimpleNamespace(settle_history_admission=settle, read_history_recovery_messages=read),
+        SimpleNamespace(message_store=SimpleNamespace(
+            settle_history_admission=settle, read_history_recovery_messages=read,
+        )),
         cid,
         payload,
         reference=reference,
@@ -958,7 +960,7 @@ def test_raw_string_result_returns_verified_receipt_without_resettling(
     expected_text = raw_text if redacted_text is None else redacted_text
     monkeypatch.setenv("CHAT_FORCE_NORMALIZE_STRING_RESPONSES", str(normalize).lower())
     monkeypatch.setattr(chat_service, "perform_chat_api_call", lambda *args, **kwargs: raw_text)
-    settle = db.settle_history_admission
+    settle = db.message_store.settle_history_admission
     settled_ids = []
 
     def record_settlement(
@@ -982,7 +984,7 @@ def test_raw_string_result_returns_verified_receipt_without_resettling(
         settled_ids.append(result_id)
         return result_id
 
-    monkeypatch.setattr(db, "settle_history_admission", record_settlement)
+    monkeypatch.setattr(db.message_store, "settle_history_admission", record_settlement)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert db.count_messages_for_conversation(cid) == 2
     assert len(settled_ids) == 1
@@ -1069,7 +1071,7 @@ def test_raw_digest_mismatch_rejects_before_any_write(selected_api, monkeypatch,
     def forbidden(*args, **kwargs):
         raise AssertionError("mismatched digest must not reach admission/provider")
 
-    monkeypatch.setattr(db, "append_selected_history_input", forbidden)
+    monkeypatch.setattr(db.message_store, "append_selected_history_input", forbidden)
     monkeypatch.setattr(chat_service, "perform_chat_api_call", forbidden)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 409, response.text
@@ -1092,7 +1094,7 @@ def test_resolved_inference_cannot_rewrite_finalized_wire(selected_api, monkeypa
     def forbidden(*args, **kwargs):
         raise AssertionError("rewritten inference must not reach admission/provider")
 
-    monkeypatch.setattr(db, "append_selected_history_input", forbidden)
+    monkeypatch.setattr(db.message_store, "append_selected_history_input", forbidden)
     monkeypatch.setattr(chat_service, "perform_chat_api_call", forbidden)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == 409, response.text
@@ -1136,7 +1138,7 @@ def test_unsupported_combinations_stay_closed_before_admission(selected_api, mon
     def forbidden(*args, **kwargs):
         raise AssertionError("unsupported combinations cannot dispatch or append")
 
-    monkeypatch.setattr(db, "append_selected_history_input", forbidden)
+    monkeypatch.setattr(db.message_store, "append_selected_history_input", forbidden)
     monkeypatch.setattr(chat_service, "perform_chat_api_call", forbidden)
     response = client.post("/api/v1/chat/completions", headers=headers, json=body)
     assert response.status_code == (409 if guard in {"skills", "sync"} else 422), response.text

@@ -242,7 +242,7 @@ def _append_server_origin_mutation(
         materializer = service.materializers.get(domain)
         if not isinstance(materializer, NotesMaterializer) or str(materializer.note_db.client_id) != user_id:
             raise SyncStoreError("Owner-bound Notes materializer is required for wikilink capture")
-        current = materializer.note_db.get_note_by_id(object_id)
+        current = materializer.note_db.note_store.get_note_by_id(object_id)
         if current is None or int(current["version"]) != expected_product_version:
             raise ConflictError("Note changed before wikilink capture", entity="notes", entity_id=object_id)
         # Keep product and Sync revisions monotonic after a local product edit.

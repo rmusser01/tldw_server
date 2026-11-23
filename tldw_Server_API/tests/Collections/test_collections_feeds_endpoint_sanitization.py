@@ -15,16 +15,15 @@ pytestmark = pytest.mark.unit
 
 class _FakeFeedDb:
     def __init__(self) -> None:
-        self.schedule_ids: list[tuple[int, str]] = []
+        self.retirement_lookups: list[int] = []
+        self.attachments: list[tuple[int, str, SimpleNamespace, bool]] = []
 
     def list_retired_job_schedule_ids(self, job_id: int) -> list[str]:
-        assert job_id == 9
+        self.retirement_lookups.append(job_id)
         return []
 
     def set_job_schedule_id(self, job_id: int, schedule_id: str, *, expected_job, retire_previous: bool) -> bool:
-        assert expected_job.id == job_id
-        assert not retire_previous
-        self.schedule_ids.append((job_id, schedule_id))
+        self.attachments.append((job_id, schedule_id, expected_job, retire_previous))
         return True
 
 
@@ -107,12 +106,14 @@ async def test_list_feed_subscriptions_includes_canonical_page_pagination() -> N
 def test_register_schedule_sanitizes_scheduler_failure_log(monkeypatch):
     from tldw_Server_API.app.services import workflows_scheduler
 
+    persisted_ids: list[str] = []
+
     class _FallbackSchedulerDb:
         def __init__(self, *, user_id: int) -> None:
             assert user_id == 42
 
-        def create_schedule(self, **kwargs) -> None:
-            return None
+        def create_schedule(self, *, id: str, **kwargs) -> None:
+            persisted_ids.append(id)
 
         def get_schedule(self, schedule_id: str):
             return None
@@ -126,14 +127,14 @@ def test_register_schedule_sanitizes_scheduler_failure_log(monkeypatch):
     monkeypatch.setattr(workflows_scheduler, "WorkflowsSchedulerDB", _FallbackSchedulerDb)
     monkeypatch.setattr(workflows_scheduler, "logger", fake_logger)
 
-    collections_feeds._register_schedule(
-        fake_db,
-        _job_row(),
-        current_user=SimpleNamespace(id=42),
-    )
+    job = _job_row()
+    collections_feeds._register_schedule(fake_db, job, current_user=SimpleNamespace(id=42))
 
     fake_logger.debug.assert_called_once_with("Watchlist schedule registration failed")
-    assert fake_db.schedule_ids
+    assert fake_db.retirement_lookups == [9]
+    assert len(persisted_ids) == 1
+    assert fake_db.attachments == [(9, persisted_ids[0], job, False)]
+    assert fake_db.attachments[0][2] is job
 
 
 def test_register_schedule_sanitizes_db_fallback_failure_log(monkeypatch):
@@ -154,8 +155,9 @@ def test_register_schedule_sanitizes_db_fallback_failure_log(monkeypatch):
     monkeypatch.setattr(workflows_scheduler, "WorkflowsSchedulerDB", _FailingFallbackSchedulerDb)
     monkeypatch.setattr(workflows_scheduler, "logger", fake_logger)
 
+    fake_db = _FakeFeedDb()
     collections_feeds._register_schedule(
-        _FakeFeedDb(),
+        fake_db,
         _job_row(),
         current_user=SimpleNamespace(id=42),
     )
@@ -164,6 +166,8 @@ def test_register_schedule_sanitizes_db_fallback_failure_log(monkeypatch):
         call("Watchlist schedule registration failed"),
         call("Watchlist schedule DB fallback failed"),
     ]
+    assert fake_db.retirement_lookups == [9]
+    assert fake_db.attachments == []
 
 
 def test_sync_job_schedule_sanitizes_scheduler_update_failure_log(monkeypatch):
@@ -189,7 +193,8 @@ def test_sync_job_schedule_sanitizes_scheduler_update_failure_log(monkeypatch):
         force=True,
     )
 
-    assert not fake_db.schedule_ids
+    assert fake_db.retirement_lookups == [9]
+    assert fake_db.attachments == []
     fake_logger.debug.assert_called_once_with("Collections feeds schedule update failed")
 
 

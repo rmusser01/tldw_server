@@ -4857,7 +4857,7 @@ PostgreSQL fixture before publishing the integration.
 **Success Criteria**: Real PostgreSQL passes both upgrade lineages, rollback
 and reopen, fresh bootstrap, and restricted-role verification; no shared
 database is contacted. Publish normally, then inspect the successor checks.
-**Status**: In Progress
+**Status**: Complete for the isolated verification and publication
 
 - PostgreSQL 18, official unmodified fixtures: 19 passed with no failures or
   skips (eight catalog reconciliation, ten startup-order compatibility, one
@@ -4867,4 +4867,51 @@ database is contacted. Publish normally, then inspect the successor checks.
   error created no fixture databases; it is not part of the passing run.
 - The repository's shard coverage guard found no unassigned new tests.
   Duplicate task IDs and the legacy-body and HTTP-client guards passed.
+  The PR was normally fast-forwarded to `0e95478a2`; the full configured
+  pre-commit selection passed on 1,526 changed files. The exact-head
+  GitHub workflows were queued without any reported failure at inspection.
   Hosted and native acceptance are not established by these local checks.
+
+## Stage 72: Repair Backend Required Ratchet Failures
+**Goal**: Correct four observed failures in the local selection from the
+backend-required workflow without loosening any check.
+**Success Criteria**: PostgreSQL enforces the journal owner's read/write
+boundary and preserves read-only internal discovery on fresh and upgraded
+schemas. Size and delegated-caller checks pass without raising ceilings.
+Test fixtures retain their production assertions and pass the quality check.
+Re-run the affected runtime tests and verify a normal successor push.
+**Status**: In Progress
+
+- On published `0e95478a2`, the local owning selection passed 119 and failed
+  four: journal RLS coverage, fixture quality, Chat/Sync delegated callers,
+  and the Watchlists schema/pipeline size ceilings. This is not a report
+  of four hosted failures.
+- ADR required: yes, existing proposed
+  [ADR-097](Docs/ADR/097-watchlist-schedule-generation-ownership.md).
+  Record the journal's PostgreSQL authorization rule there. Fixture repairs
+  and the use of existing storage contracts do not change durable rules.
+- Forced owner policies guard the shared retirement journal. Only the
+  ownerless internal discovery scope can read across owners; worker
+  promotion binds the stored task owner. An existing journal is upgraded
+  before discovery without creating a missing journal or scheduler store.
+  Scoped review found the original promotion and cold discovery gaps; both
+  reproduced on the official fixture and have regression coverage.
+- Live PostgreSQL: all 22 passed (both catalog lineages and three journal
+  cases), plus a focused three-case rerun with stronger row visibility
+  assertions. Those counts overlap. SQLite and finite checks: 57 passed,
+  18 PostgreSQL fixture skips. Scheduler selection: 107 passed and one
+  PostgreSQL fixture skip; the final touched fixture also passed separately.
+- Chat/Sync use the existing message, conversation and note stores while
+  retaining thread dispatch, owner validation and transaction boundaries.
+  Watchlists groups schedule authority and extracts source selection; the
+  size ceilings, delegation ceilings and fixture-quality baseline are
+  untouched. Bandit found no issues in the eight production files; Ruff
+  retained 39 identical diagnostics and added none.
+- The Chat and Notes runtime selection passed 230 cases with zero failures,
+  errors or skips. The earlier backend selection had 122 passes and the
+  new stale-fixture quality failure; the corrected fixture and its quality
+  rerun passed, and a direct final scan of 5,547 tests found no violations
+  beyond baseline. Prior failed runs are retained separately.
+- Local follow-up qualification is scoped to the affected code; the PR
+  still requires the actual successor's hosted checks and applicable
+  acceptance. No queue arm, PR merge or protected-resource cleanup.

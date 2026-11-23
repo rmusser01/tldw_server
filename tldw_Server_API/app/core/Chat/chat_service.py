@@ -3225,9 +3225,9 @@ async def _prepare_versioned_history_context(
                 current_user = next(message for message in request_data.messages if message.role == "user")
                 intent = {"id": str(turn_spec.user_message_id), "sender": "user", "content": current_user.content}
                 retained_selection = selection
+                store = chat_db.message_store
                 if durable_history.kind == "admission":
                     reference = durable_history.admission.model_dump(mode="json")
-                    store = chat_db.message_store
                     accepted = store._verified_history_input(final_conversation_id, intent["id"],
                         owner_client_id=owner_client_id, owner_key=owner, conn=conn)
                     authority = store._validate_history_parent(final_conversation_id, reference,
@@ -3235,7 +3235,7 @@ async def _prepare_versioned_history_context(
                     if authority["scope"] != scope or store._history_intent_digest(intent) != authority["intent_digest"]:
                         raise HistorySelectionError("message_id_conflict")
                     retained_selection = authority["selection"]
-                snap, content = chat_db.validate_history_selection(final_conversation_id, retained_selection,
+                snap, content = store.validate_history_selection(final_conversation_id, retained_selection,
                     owner_client_id=owner_client_id, owner_key=owner, conn=conn)
                 for item in content:
                     extra = item.get("extra_metadata") or {}
@@ -3246,7 +3246,7 @@ async def _prepare_versioned_history_context(
                                 for key in ("function_call", "tool_call_id", "content_placeholder_reason"))):
                         raise HistorySelectionError("unsupported_history_context_selected_assets_or_tools")
                 if durable_history.kind == "selection":
-                    accepted = chat_db.append_selected_history_input(final_conversation_id, selection, intent,
+                    accepted = store.append_selected_history_input(final_conversation_id, selection, intent,
                         owner_client_id=owner_client_id, owner_key=owner, conn=conn)
                 return snap, content, accepted, conversation, context
 
@@ -3399,7 +3399,7 @@ async def build_context_and_messages(
     authorized_conversation = None
     if turn_spec is not None:
         authorized_conversation = await loop.run_in_executor(
-            None, chat_db.get_conversation_by_id, final_conversation_id,
+            None, lambda: chat_db.conversation_store.get_conversation_by_id(final_conversation_id),
         )
         if (
             not authorized_conversation
@@ -3648,8 +3648,7 @@ async def build_context_and_messages(
             assistant_parent_message_id = str(turn_spec.user_message_id)
             current_user = next(message for message in request_data.messages if message.role == "user")
             try:
-                raw_hist = await loop.run_in_executor(None, partial(
-                    chat_db.insert_or_validate_user_turn,
+                raw_hist = await loop.run_in_executor(None, lambda: chat_db.message_store.insert_or_validate_user_turn(
                     conv_id, assistant_parent_message_id, current_user.content,
                     owner_client_id=str(chat_db.client_id),
                     conversation_context=authorized_conversation,

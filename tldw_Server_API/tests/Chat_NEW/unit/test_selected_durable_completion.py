@@ -113,7 +113,7 @@ async def test_single_input_admission_keeps_selected_sibling_and_literal_text(po
     def forbidden(*args, **kwargs):
         raise AssertionError("selected durable must not use legacy or plural admission")
 
-    monkeypatch.setattr(db, "insert_or_validate_user_turn", forbidden)
+    monkeypatch.setattr(db.message_store, "insert_or_validate_user_turn", forbidden)
     monkeypatch.setattr(db, "append_selected_history_inputs", forbidden)
     result, runtime = await build(db, request)
     assert result[4] == [
@@ -319,14 +319,14 @@ async def test_normalized_settlement_requires_committed_verified_result(populate
 
         monkeypatch.setattr(db.message_store, "_add_message_metadata_with_conn", fail)
     elif fault == "unverified":
-        original = db.read_history_recovery_messages
+        original = db.message_store.read_history_recovery_messages
 
         def unverified(*args, **kwargs):
             rows, total = original(*args, **kwargs)
             rows[0]["tldw_history_recovery_v1"] = {"version": 1, "status": "unverified", "code": "live_state_mismatch"}
             return rows, total
 
-        monkeypatch.setattr(db, "read_history_recovery_messages", unverified)
+        monkeypatch.setattr(db.message_store, "read_history_recovery_messages", unverified)
     call = settle(
         db,
         cid,
