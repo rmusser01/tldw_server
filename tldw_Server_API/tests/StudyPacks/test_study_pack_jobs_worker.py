@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import suppress
 from importlib import import_module
 from pathlib import Path
@@ -11,9 +12,9 @@ import pytest
 
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest, StudyPackSourceSelection
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
-
 
 pytestmark = pytest.mark.asyncio
 
@@ -117,7 +118,12 @@ async def test_handle_study_pack_job_rolls_back_late_persistence_failures(
         return db, SimpleNamespace()
 
     monkeypatch.setattr(worker_mod, "_get_databases_for_user", fake_get_databases_for_user)
-    monkeypatch.setattr(generation_mod.StudySourceResolver, "resolve", lambda self, selections: _bundle(types_mod))
+    def resolve_in_worker_thread(self, selections):
+        scope = get_scope()
+        assert scope is not None and scope.user_id == 1 and not scope.is_admin  # nosec B101
+        return _bundle(types_mod)
+
+    monkeypatch.setattr(generation_mod.StudySourceResolver, "resolve", resolve_in_worker_thread)
 
     async def fake_generate_validated_cards(self, resolved_bundle: Any, request: Any):
         return _generation_result(types_mod)
@@ -212,6 +218,66 @@ async def test_handle_study_pack_job_regeneration_supersedes_only_after_successf
     assert int(result["pack_id"]) > 0  # nosec B101
     assert original_row["status"] == "superseded"  # nosec B101
     assert int(original_row["superseded_by_pack_id"]) == int(result["pack_id"])  # nosec B101
+
+
+@pytest.mark.parametrize("repair_succeeds", [True, False])
+async def test_worker_finishes_only_after_citation_validation(
+    db: CharactersRAGDB,
+    jobs_db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repair_succeeds: bool,
+):
+    types_mod, generation_mod, worker_mod = _load_modules()
+    jm = JobManager(db_path=jobs_db_path, backend="sqlite")
+    job = jm.create_job(
+        domain="study_packs", queue="default", job_type="study_pack_generate",
+        payload=_request().model_dump(), owner_user_id="1", max_retries=2,
+    )
+    job_id = int(job["id"])
+    sdk = WorkerSDK(jm, WorkerConfig(domain="study_packs", queue="default", worker_id="citation-test"))
+    resolved = _bundle(types_mod)
+    calls = []
+
+    async def get_databases(_user_id):
+        return db, SimpleNamespace()
+
+    async def generate(**kwargs):
+        running = jm.get_job(job_id)
+        assert running is not None and not running.get("result")  # nosec B101
+        assert db.flashcard_store.get_study_pack(1) is None  # nosec B101
+        calls.append(kwargs)
+        if kwargs["system_message"].startswith("Verify each flashcard"):
+            return {"content": '{"supported":[true]}'}
+        quote = resolved.items[0].evidence_text if repair_succeeds and len(calls) == 2 else "Invented quote."
+        return {"content": json.dumps({"cards": [{
+            "front": "What is slow start?",
+            "back": "It doubles the congestion window each RTT.",
+            "citations": [{"source_type": "note", "source_id": "note-1", "citation_text": quote}],
+        }]})}
+
+    async def handler(job_row):
+        try:
+            return await worker_mod.handle_study_pack_job(job_row)
+        finally:
+            sdk.stop()
+
+    monkeypatch.setattr(worker_mod, "_get_databases_for_user", get_databases)
+    monkeypatch.setattr(generation_mod.StudySourceResolver, "resolve", lambda *_: resolved)
+    monkeypatch.setattr(generation_mod, "perform_chat_api_call_async", generate)
+    await asyncio.wait_for(sdk.run(handler=handler), timeout=10)
+
+    stored = jm.get_job(job_id)
+    assert stored is not None  # nosec B101
+    assert len(calls) == (3 if repair_succeeds else 2)  # nosec B101
+    if repair_succeeds:
+        assert stored["status"] == "completed"  # nosec B101
+        pack = db.flashcard_store.get_study_pack(stored["result"]["pack_id"])
+        assert pack is not None and pack["deck_id"] == stored["result"]["deck_id"]  # nosec B101
+    else:
+        assert stored["status"] == "failed"  # nosec B101
+        assert stored["error_code"] == "study_pack_invalid_citations"  # nosec B101
+        assert not stored.get("result")  # nosec B101
+        assert db.flashcard_store.get_study_pack(1) is None  # nosec B101
 
 
 async def test_worker_sdk_cancellation_marks_study_pack_job_cancelled_without_running_handler(
