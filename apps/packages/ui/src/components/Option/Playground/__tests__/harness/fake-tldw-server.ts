@@ -102,6 +102,16 @@ export type CompletionPlan = {
   finishReason?: string
 }
 
+/** A request the fake server holds until the test answers it (see `holdRequest`). */
+export type RequestHold = {
+  /** Settles when the held request reaches the server. */
+  arrived: Promise<void>
+  /** Let the held request through to its normal handler. */
+  release: () => void
+  /** Answer the held request with this error instead of handling it. */
+  fail: (status?: number, body?: unknown) => void
+}
+
 type Deferred = { promise: Promise<void>; resolve: () => void }
 export const deferred = (): Deferred => {
   let resolve!: () => void
@@ -233,6 +243,14 @@ export const createFakeTldwServer = ({
   const chats = new Map<string, FakeChat>()
   const inputAdmissions = new Map<string, HistoryAdmissionV1>()
   const completionPlans: CompletionPlan[] = []
+  const holds: Array<{
+    method: string
+    path: string | RegExp
+    skip: number
+    arrived: Deferred
+    answered: Deferred
+    failure?: Response
+  }> = []
   let defaultReply = "Harness reply"
   let chatSequence = 0
   let messageSequence = 0
@@ -587,6 +605,16 @@ export const createFakeTldwServer = ({
 
   const route = async (request: RecordedRequest, signal?: AbortSignal | null): Promise<Response> => {
     const { method, path, body } = request
+    const holdIndex = holds.findIndex(
+      (hold) => hold.method === method && (typeof hold.path === "string" ? hold.path === path : hold.path.test(path))
+    )
+    if (holdIndex >= 0 && holds[holdIndex].skip > 0) holds[holdIndex].skip -= 1
+    else if (holdIndex >= 0) {
+      const [hold] = holds.splice(holdIndex, 1)
+      hold.arrived.resolve()
+      await waitUnlessAborted(hold.answered.promise, signal)
+      if (hold.failure) return hold.failure
+    }
     if (OPTIONAL_UNSUPPORTED.has(path)) {
       return json({ detail: "Not supported by the harness server" }, 404)
     }
@@ -831,6 +859,23 @@ export const createFakeTldwServer = ({
     /** Queue the behaviour of the next chat completion. */
     planCompletion: (plan: CompletionPlan) => {
       completionPlans.push(plan)
+    },
+    /**
+     * Hold the next request matching a method and a path (string or pattern),
+     * after letting `skip` matching requests through, until the test releases
+     * or fails it. The client can still abort the held request.
+     */
+    holdRequest: (method: string, path: string | RegExp, { skip = 0 }: { skip?: number } = {}): RequestHold => {
+      const hold: (typeof holds)[number] = { method, path, skip, arrived: deferred(), answered: deferred() }
+      holds.push(hold)
+      return {
+        arrived: hold.arrived.promise,
+        release: () => hold.answered.resolve(),
+        fail: (status = 500, failureBody: unknown = { detail: "Harness: held request failed" }) => {
+          hold.failure = json(failureBody, status)
+          hold.answered.resolve()
+        }
+      }
     },
     /** Seed a saved server conversation (user/assistant turns in order). */
     seedChat: (seed: { id: string; title: string; turns: Array<{ role: "user" | "assistant"; content: string }> }) => {

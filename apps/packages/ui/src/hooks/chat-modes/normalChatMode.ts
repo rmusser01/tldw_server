@@ -919,6 +919,9 @@ const captureNormalHistoryTurn = async (
     let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
     const target = {
       historyId: localId, serverChatId: serverId, scope,
+      // This send created the chat: its empty first load stays quiet and leaves
+      // the question this turn renders alone (CM-14).
+      ...(!params.historyId && !params.serverChatId ? { quietLoad: true as const } : {}),
       // Accepted saved ownership is independent of the originating turn's Stop.
       isCurrent: () => acceptDraftBind?.isCurrent() !== false &&
         (loadPhase === "accepted" || (loadPhase === "preparing" && preparationIsCurrent()))

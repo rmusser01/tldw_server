@@ -723,8 +723,8 @@ describe("available history-path actions (TASK-13550)", () => {
     ).toBeNull()
   })
 
+  // A slow load still shows its panel, after a short delay (CM-14); see "loading panel" below.
   it.each([
-    { status: "loading", title: "Loading selected history" },
     { status: "stale_selection", title: "Conversation history changed" },
     {
       status: "unsupported_history_capability",
@@ -739,6 +739,64 @@ describe("available history-path actions (TASK-13550)", () => {
     } as unknown as HistorySelectionController
     render(<HistorySelectionReview selection={selection} />)
     expect(screen.getByText(title)).toBeInTheDocument()
+  })
+})
+
+// CM-14 (#3101): a fast load must not flash "Loading selected history", and a
+// new chat's first load (quiet) never shows it.
+describe("loading panel", () => {
+  const loading = (extra: Record<string, unknown> = {}) =>
+    ({
+      ...controller(),
+      status: "loading",
+      error: null,
+      capture: { snapshot: { nodes: [], source_digest: "empty" } },
+      ...extra
+    }) as unknown as HistorySelectionController
+  const panel = () => screen.queryByText("Loading selected history")
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("shows a load that is still running after 300 ms, and not before", () => {
+    render(<HistorySelectionReview selection={loading()} />)
+    expect(panel()).toBeNull()
+    act(() => { vi.advanceTimersByTime(299) })
+    expect(panel()).toBeNull()
+    act(() => { vi.advanceTimersByTime(1) })
+    expect(panel()).toBeInTheDocument()
+  })
+
+  it("never shows a quiet load", () => {
+    render(<HistorySelectionReview selection={loading({ quietLoad: true })} />)
+    act(() => { vi.advanceTimersByTime(1_000) })
+    expect(panel()).toBeNull()
+  })
+
+  it("starts the delay again for each load and cancels it when a load ends early", () => {
+    const view = render(<HistorySelectionReview selection={loading()} />)
+    act(() => { vi.advanceTimersByTime(200) })
+    view.rerender(<HistorySelectionReview selection={loading({ status: "ready" })} />)
+    act(() => { vi.advanceTimersByTime(200) })
+    expect(panel()).toBeNull()
+    view.rerender(<HistorySelectionReview selection={loading()} />)
+    act(() => { vi.advanceTimersByTime(299) })
+    expect(panel()).toBeNull()
+    act(() => { vi.advanceTimersByTime(1) })
+    expect(panel()).toBeInTheDocument()
+    view.rerender(<HistorySelectionReview selection={loading({ status: "ready" })} />)
+    expect(panel()).toBeNull()
+  })
+
+  it("leaves no timer behind when it unmounts during a load", () => {
+    const view = render(<HistorySelectionReview selection={loading()} />)
+    const before = vi.getTimerCount()
+    view.unmount()
+    expect(vi.getTimerCount()).toBeLessThan(before)
   })
 })
 
