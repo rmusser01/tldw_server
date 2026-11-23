@@ -698,8 +698,7 @@ export const VOICE_CHAT_ENABLED_SETTING = defineSetting(
   "voiceChatEnabled",
   false,
   (value) => coerceBoolean(value, false),
-  // Session area: a persisted "on" would reopen the mic + WebSocket on every page load.
-  { area: "session" }
+  { area: "local" }
 )
 
 export const VOICE_CHAT_MODEL_SETTING = defineSetting(
