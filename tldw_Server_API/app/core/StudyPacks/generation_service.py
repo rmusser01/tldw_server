@@ -140,6 +140,20 @@ def _citation_text_matches_evidence(citation_text: str, evidence_text: str) -> b
     return bool(normalized_citation and normalized_citation in normalized_evidence)
 
 
+def _locator_names_passage(raw_locator: Any, item: StudySourceBundleItem) -> bool:
+    """Whether a model-supplied locator points at this bundle item's passage or chapter."""
+
+    if not isinstance(raw_locator, Mapping):
+        return False
+    chapter = raw_locator.get(CHAPTER_LOCATOR_KEY)
+    wanted = chapter.get("section_index") if isinstance(chapter, Mapping) else None
+    have = item.locator.get(CHAPTER_LOCATOR_KEY, {}).get("section_index")
+    span = (raw_locator.get("start_char"), raw_locator.get("end_char"))
+    return (wanted is not None and wanted == have) or (
+        None not in span and span == (item.locator.get("start_char"), item.locator.get("end_char"))
+    )
+
+
 def _bundle_item_key(source_type: Any, source_id: Any) -> tuple[str, str]:
     return _clean_text(source_type).lower(), _clean_text(source_id)
 
@@ -787,12 +801,16 @@ class StudyPackGenerationService:
         if not isinstance(citation_text, str) or not citation_text.strip():
             raise StudyPackCitationError("Study-pack citations must include citation_text")
         # Packed passes hold several passages of one source; the quote picks its passage.
-        bundle_item = next(
-            (item for item in candidates if _citation_text_matches_evidence(citation_text, item.evidence_text)),
-            None,
-        )
-        if bundle_item is None:
+        matches = [item for item in candidates if _citation_text_matches_evidence(citation_text, item.evidence_text)]
+        if not matches:
             raise StudyPackCitationError("Study-pack citation_text must match source evidence")
+        if len({json.dumps(item.locator.get(CHAPTER_LOCATOR_KEY), sort_keys=True) for item in matches}) > 1:
+            # The same quote sits in passages of different chapters: only the model's own
+            # locator can settle which one, otherwise the card could get the wrong chapter.
+            matches = [item for item in matches if _locator_names_passage(raw_citation.get("locator"), item)]
+            if len(matches) != 1:
+                raise StudyPackCitationError("Study-pack citation_text is ambiguous between chapters")
+        bundle_item = matches[0]
 
         locator = self._merge_citation_locator(bundle_item, raw_citation.get("locator"))
         return {

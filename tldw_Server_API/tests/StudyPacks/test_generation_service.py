@@ -835,3 +835,59 @@ async def test_heading_dense_media_packs_sections_into_few_passes_and_keeps_chap
         assert cards_by_chapter == {f"Topic {n}": [f"Fact {n} is short."] for n in range(headings)}  # nosec B101
     else:  # too many headings to list: fixed windows, every card still lands in some window
         assert sum(chapter["card_count"] for chapter in page["chapters"]) == headings  # nosec B101
+
+
+def _two_chapter_pack(types_mod: Any):
+    def item(index: int, start: int):
+        return types_mod.StudySourceBundleItem(
+            source_type="media", source_id="7", label=f"Book · Chapter {index}",
+            evidence_text=f"Summary\nChapter {index} facts.",
+            locator={"media_id": 7, "start_char": start, "end_char": start + 30, "study_pack_chapter": {
+                "section_index": index, "section_revision": "a" * 64, "title": f"Chapter {index}", "source_title": "Book",
+            }},
+        )
+    return types_mod.StudySourceBundle(items=[item(0, 0), item(1, 100)])
+
+
+async def test_a_quote_in_two_chapters_of_a_packed_pass_is_ambiguous_without_a_locator(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+):
+    types_mod, service_mod = _load_generation_modules()
+    service, _ = _build_service(db, monkeypatch, [])
+    pack = _two_chapter_pack(types_mod)
+    lookup = {("media", "7"): pack.items}
+    citation = {"source_type": "media", "source_id": "7", "citation_text": "Summary"}
+
+    with pytest.raises(service_mod.StudyPackCitationError, match="ambiguous"):
+        service._validate_citation_payload(citation, bundle_lookup=lookup)
+
+    chosen = service._validate_citation_payload(
+        {**citation, "locator": {"start_char": 100, "end_char": 130}}, bundle_lookup=lookup
+    )
+    assert chosen["locator"]["study_pack_chapter"]["section_index"] == 1  # nosec B101
+    assert chosen["locator"]["start_char"] == 100  # nosec B101
+
+    same_chapter = types_mod.StudySourceBundle(items=[pack.items[0], pack.items[0]])
+    first = service._validate_citation_payload(citation, bundle_lookup={("media", "7"): same_chapter.items})
+    assert first["locator"]["study_pack_chapter"]["section_index"] == 0  # nosec B101
+
+
+async def test_an_ambiguous_quote_takes_the_repair_pass_and_the_repair_picks_the_chapter(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+):
+    types_mod, service_mod = _load_generation_modules()
+    card = '{{"cards":[{{"front":"Q","back":"A","citations":[{{"source_type":"media","source_id":"7",' \
+        '"citation_text":"Summary"{locator}}}]}}]}}'
+    service, calls = _build_service(
+        db, monkeypatch,
+        [card.format(locator=""), card.format(locator=',"locator":{"start_char":100,"end_char":130}'),
+         '{"supported":[true]}'],
+    )
+    request = StudyPackCreateJobRequest(
+        title="T", workspace_id="ws-1", source_items=[StudyPackSourceSelection(source_type="media", source_id="7")]
+    )
+    result = await service.generate_validated_cards(_two_chapter_pack(types_mod), request)
+
+    assert result.repair_attempted is True  # nosec B101
+    assert "ambiguous" in calls[1]["user_prompt"]  # nosec B101
+    assert result.cards[0].citations[0].locator["study_pack_chapter"]["section_index"] == 1  # nosec B101
