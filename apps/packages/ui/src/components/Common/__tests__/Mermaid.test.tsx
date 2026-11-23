@@ -53,7 +53,8 @@ describe("Mermaid", () => {
     expect(initializeMock).toHaveBeenCalledWith({
       startOnLoad: false,
       theme: "default",
-      securityLevel: "strict"
+      securityLevel: "strict",
+      suppressErrorRendering: true
     })
 
     await waitFor(() => {
