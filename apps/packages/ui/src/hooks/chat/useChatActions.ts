@@ -15,6 +15,7 @@ import {
 } from "@/hooks/chat/chat-action-utils"
 import { historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers"
 import { sendNativeHistoryCharacter } from "./native-history-character-send"
+import { isPlainSavedQuestion, submitSavedQuestionRetry } from "./saved-question-retry"
 import { useHistorySelectionContext, type HistoryLoadReceipt } from "./useHistorySelection"
 import { loadHistoryRecoveryRetryContext, retryHistoryTurnRecovery, type HistoryRecoveryRetryContext } from "@/services/history-turn-retry"
 import { resetStaleSelectionForFreshTurn } from "./fresh-chat-selection"
@@ -3953,7 +3954,7 @@ export const useChatActions = ({
       if (!actorSceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
       if (historyServerExistingInput && (
         !historyServerExistingInput.isCurrent() || !historySelection || temporaryChat || compareModeActive ||
-        turnResolvedSendMode !== "tracked_character" || isRegenerate || isContinue ||
+        turnResolvedSendMode !== (isPlainSavedQuestion(historyServerExistingInput) ? "plain" : "tracked_character") || isRegenerate || isContinue ||
         replyActive || turnUsesImageMode || turnContextFiles.length > 0 ||
         docs?.length || documentContext?.length || turnShouldUseRag ||
         turnWebSearchEnabled || turnUploadedFiles.length > 0 ||
@@ -4324,7 +4325,9 @@ export const useChatActions = ({
             }
           : enhancedChatModeParams
 
-        if (historyRegenerate) {
+        // A plain chat's saved-question Retry carries its reviewed instructions (8B).
+        const plainSavedQuestion = resolvedSendMode === "plain" && isPlainSavedQuestion(historyServerExistingInput)
+        if (historyRegenerate || plainSavedQuestion) {
           await sendNativeHistoryCharacter({
             surface: "playground", t, controller: selectedHistoryTurn!, originIsCurrent: historyOriginIsCurrent!,
             actorSceneSend,
@@ -4332,10 +4335,10 @@ export const useChatActions = ({
             signal, temporary: temporaryChat, historyId, serverChatId: serverChatIdOverride || serverChatId, scope,
             model: effectiveSelectedModel || "", currentModel: getEffectiveSelectedModel(),
             toolChoice: servicePromptChatModeParams.toolChoice, settings: servicePromptChatModeParams.currentChatModelSettings,
-            message, image, historyRegenerate, setServerChatId, setMessages,
-            unsupportedContext: Boolean(servicePromptChatModeParams.webSearch || servicePromptChatModeParams.selectedSystemPrompt ||
+            message, image, historyRegenerate, existingInput: historyServerExistingInput, setServerChatId, setMessages,
+            unsupportedContext: Boolean(servicePromptChatModeParams.webSearch || (!plainSavedQuestion && servicePromptChatModeParams.selectedSystemPrompt) ||
               uploadedFiles?.length || servicePromptChatModeParams.actorSettings?.isEnabled ||
-              servicePromptChatModeParams.systemPromptAppendix || shouldConsumeSteering || replyActive ||
+              (!plainSavedQuestion && servicePromptChatModeParams.systemPromptAppendix) || shouldConsumeSteering || replyActive ||
               servicePromptChatModeParams.researchContext || servicePromptChatModeParams.dynamicUIRequest ||
               requestOverrides?.historyForModel || requestOverrides?.messageForModel ||
               (resolvedSendMode === "overlay" && effectiveSelectedAssistant)),
@@ -5747,11 +5750,9 @@ export const useChatActions = ({
     const {reviewServerSavedQuestion} = await import("@/services/history-turn-retry")
     return reviewServerSavedQuestion(historySelection, await getRecoveryRetryContext())
   }
-  const retrySavedQuestion = async (review: import("@/services/history-turn-retry").SavedQuestionReview) => {
-    if (!review.isCurrent()) return chatSubmitFailed("history_selection_changed")
-    if (!validateBeforeSubmitFn()) return chatSubmitSkipped("Retry was not submitted")
-    return onSubmit({message: review.text, image: "", historyServerExistingInput: review})
-  }
+  const retrySavedQuestion = (review: import("@/services/history-turn-retry").SavedQuestionReview) =>
+    submitSavedQuestionRetry(review, getRecoveryRetryContext, async (submission) =>
+      validateBeforeSubmitFn() ? onSubmit(submission) : chatSubmitSkipped("Retry was not submitted"))
 
   const stopStreamingRequest = React.useCallback(
     (options?: unknown) => {

@@ -595,7 +595,7 @@ it.each([
       ...expectedScopeFields,
       abortSignal: signal,
       body: request,
-      path: "/api/v1/chat/conversations/chat%2Fone/history/selection?scope_type=workspace&workspace_id=7&include_native_completion=true&include_reasoning_history_support=true"
+      path: "/api/v1/chat/conversations/chat%2Fone/history/selection?scope_type=workspace&workspace_id=7&include_native_completion=true&include_reasoning_history_support=true&include_existing_input_system_messages_support=true"
     })
     await capture("chat/one", request, {
       requestScope

@@ -1489,10 +1489,13 @@ const captureNormalHistoryTurn = async (
         )
       )
       // Keep the admitted question selected so a deliberate no-output retry can reuse it.
-      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection) {
+      // A server-settled turn stopped before any text keeps its uncertain record, but
+      // its saved question is shown too, so it can be reviewed and retried (8B).
+      const stoppedServerTurn = turn.persistence === "server" && data.outcome === "stopped"
+      if (turn.admission && !data.content && (!data.outcome || stoppedServerTurn) && !turn.existingSelection) {
         const following = controller.followResult(view, turn.admission.input_message_id)
         // A Stop ends at once; following the question may wait on a slow read (CM-02).
-        if (data.stoppedBeforeReply)
+        if (data.stoppedBeforeReply || stoppedServerTurn)
           void Promise.resolve(following).catch(() =>
             console.warn("Could not follow a question stopped before its reply.")
           )

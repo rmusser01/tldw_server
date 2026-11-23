@@ -419,6 +419,9 @@ export function HistorySelectionReview({
   const [savedQuestionReview, setSavedQuestionReview] = React.useState<import("@/services/history-turn-retry").SavedQuestionReview | null>(null)
   const [savedQuestionBusy, setSavedQuestionBusy] = React.useState(false)
   const [savedQuestionError, setSavedQuestionError] = React.useState(false)
+  // An older server can't carry a plain Retry's instructions (decision 22): refuse before sending.
+  const savedQuestionInstructionsRefused =
+    Boolean(savedQuestionReview?.instructions?.length) && savedQuestionReview?.instructionsSupported !== true
   const [expanded, setExpanded] = React.useState(false)
   const [included, setIncluded] = React.useState<string[]>([])
   const [cursor, setCursor] = React.useState<HistoryCursorV1>({ kind: "empty" })
@@ -1010,10 +1013,20 @@ export function HistorySelectionReview({
             finally { setSavedQuestionBusy(false) }
           }}>{text("reviewSavedQuestion", "Review saved question")}</Button>
           {savedQuestionReview && <div role="group" aria-label={text("savedQuestionReview", "Saved question review")}>
-            <p>{text("savedQuestionExplanation", "Answer this saved question using the selected model and saved character context. This does not send another copy of your question. Earlier uncertain attempts remain available for inspection.")}</p>
+            <p>{savedQuestionReview.instructions
+              ? text("savedQuestionPlainExplanation", "Answer this saved question using the selected model and the System/Prompt instructions shown below. This does not send another copy of your question. Earlier uncertain attempts remain available for inspection.")
+              : text("savedQuestionExplanation", "Answer this saved question using the selected model and saved character context. This does not send another copy of your question. Earlier uncertain attempts remain available for inspection.")}</p>
             <pre className="whitespace-pre-wrap break-words">{savedQuestionReview.text}</pre>
             <p>{savedQuestionReview.model}</p>
-            <Button disabled={savedQuestionBusy} onClick={async () => {
+            {/* A plain chat's Retry carries its current instructions (decision 22). */}
+            {savedQuestionReview.instructions && <>
+              <p>{text("retryCurrentPrompt", "Current System/Prompt instructions")}</p>
+              {savedQuestionReview.instructions.length
+                ? savedQuestionReview.instructions.map((prompt, index) => <pre key={index} className="whitespace-pre-wrap break-words">{prompt}</pre>)
+                : <p>{text("retryNoPrompt", "No System/Prompt instruction is currently applied.")}</p>}
+            </>}
+            {savedQuestionInstructionsRefused && <p role="alert">{text("savedQuestionInstructionsUnsupported", "This server can't keep your System/Prompt instructions on a retry. Turn them off in the chat settings and review the saved question again, or update the server. Your question is kept.")}</p>}
+            <Button disabled={savedQuestionBusy || savedQuestionInstructionsRefused} onClick={async () => {
               if (!savedQuestionReview.isCurrent()) { setSavedQuestionError(true); return }
               setSavedQuestionBusy(true)
               setSavedQuestionError(false)

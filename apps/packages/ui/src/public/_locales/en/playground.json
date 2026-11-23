@@ -3536,6 +3536,18 @@
   "historySelection_nativeRecoveryMessage": {
     "message": "The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically."
   },
+  "historySelection_savedQuestionPlainExplanation": {
+    "message": "Answer this saved question using the selected model and the System/Prompt instructions shown below. This does not send another copy of your question. Earlier uncertain attempts remain available for inspection."
+  },
+  "historySelection_retryCurrentPrompt": {
+    "message": "Current System/Prompt instructions"
+  },
+  "historySelection_retryNoPrompt": {
+    "message": "No System/Prompt instruction is currently applied."
+  },
+  "historySelection_savedQuestionInstructionsUnsupported": {
+    "message": "This server can't keep your System/Prompt instructions on a retry. Turn them off in the chat settings and review the saved question again, or update the server. Your question is kept."
+  },
   "historySelection_inspectRecovery": {
     "message": "Show what was sent and received"
   },

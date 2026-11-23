@@ -59,10 +59,12 @@ import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryCon
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import { isSavedReplyActionRefusal, rememberSavedReplyRefusal } from "./saved-reply-actions"
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
+import { existingInputCurrentMessages, type SavedQuestionInstructions } from "./saved-question-retry"
 
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
 
-export type NativeHistoryExistingInput = { id: string; revision: string; isCurrent: () => boolean }
+/** A reviewed saved question; a plain chat's review also carries its instructions (8B). */
+export type NativeHistoryExistingInput = SavedQuestionInstructions & { id: string; revision: string; isCurrent: () => boolean }
 
 export type NativeHistoryCharacterSendParams = {
   existingInput?: NativeHistoryExistingInput
@@ -152,7 +154,9 @@ export const sendNativeHistoryCharacter = async (
 ): Promise<{ content: string; matchesPreview: boolean } | void> => {
   const { controller, signal } = params
   const existing = params.existingInput
-  if (existing && (params.temporary || params.image || params.unsupportedContext || params.historyEditResend || params.historyRegenerate || params.greetingSeed || params.privateDraft || !existing.isCurrent() || params.settings.systemPrompt?.trim()))
+  // A plain Retry carries its reviewed instructions; a character Retry has none and no character is plain.
+  if (existing && (params.temporary || params.image || params.unsupportedContext || params.historyEditResend || params.historyRegenerate || params.greetingSeed || params.privateDraft || !existing.isCurrent() ||
+      (existing.instructions ? params.characterId != null : params.settings.systemPrompt?.trim())))
     throw new Error("native_history_existing_input_review_changed")
   if (existing && !params.serverChatId && !params.historyId) throw new Error("native_history_existing_input_owner_required")
   const editResend = params.historyEditResend
@@ -627,6 +631,7 @@ export const sendNativeHistoryCharacter = async (
           capture.snapshot.nodes.some(node => node.role === "assistant" && node.parent_id === existing.id))
         throw new Error("native_history_existing_input_changed")
     }
+    const existingInputMessages = existing ? existingInputCurrentMessages(capture, existing) : []
     const request = prepareChatCompletionRequest(
       [
         ...(settings.systemPrompt?.trim()
@@ -660,7 +665,7 @@ export const sendNativeHistoryCharacter = async (
         slashCommandInjectionMode: settings.slashCommandInjectionMode
       }
     )
-    if (existing) request.messages = []
+    if (existing) request.messages = existingInputMessages
     const prepared = prepareHistoryContext(request, preparingIsCurrent)
     const selection = finalizeHistorySelection(
       owner,

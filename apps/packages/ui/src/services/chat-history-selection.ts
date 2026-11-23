@@ -171,6 +171,7 @@ const capturedSchema = z
         policy: z.literal("selected_history_v1"),
         supported: z.boolean(),
         reasoning_history_supported: z.literal(true).optional(),
+        existing_input_system_messages_supported: z.literal(true).optional(),
         storage_context_digest: str
       })
       .strict()

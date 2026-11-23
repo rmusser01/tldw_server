@@ -2204,6 +2204,48 @@ it.each([false, true])("B02 reviews a saved question before explicit retry (stal
   expect(retry).toHaveBeenCalledTimes(stale ? 0 : 1)
 })
 
+describe("plain-chat saved-question review (8B)", () => {
+  const selected = () => ({...controller(), status: "ready", owner: {kind: "native"}, settingsQualified: true,
+    capture: {status: "captured", rows: [{id: "saved-user", revision: "r1", role: "user"}], snapshot: {nodes: [{id: "saved-user", revision: "r1", role: "user"}]}},
+    view: {cursor: {kind: "after_message", message_id: "saved-user"}}} as unknown as HistorySelectionController)
+  const review = (overrides: Record<string, unknown>) => ({id: "saved-user", revision: "r1", text: "My unanswered question",
+    model: "llamacpp:qwen", isCurrent: () => true, instructionsSupported: true, ...overrides})
+
+  it("shows the System/Prompt instructions the Retry carries, not the character wording", async () => {
+    const retry = vi.fn(async () => ({status: "submitted" as const}))
+    const reviewed = review({instructions: ["Answer like a pirate."]})
+    render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={async () => reviewed} onRetrySavedQuestion={retry} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    const group = await screen.findByRole("group", {name: "Saved question review"})
+    expect(within(group).getByText(/the System\/Prompt instructions shown below/)).toBeVisible()
+    expect(within(group).queryByText(/saved character context/)).toBeNull()
+    expect(within(group).getByText("Current System/Prompt instructions")).toBeVisible()
+    expect(within(group).getByText("Answer like a pirate.")).toBeVisible()
+    fireEvent.click(within(group).getByRole("button", {name: "Retry saved question"}))
+    await vi.waitFor(() => expect(retry).toHaveBeenCalledWith(reviewed))
+  })
+
+  it("says when no instruction is applied", async () => {
+    render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={async () => review({instructions: []})}
+      onRetrySavedQuestion={vi.fn(async () => ({status: "submitted" as const}))} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    expect(await screen.findByText("No System/Prompt instruction is currently applied.")).toBeVisible()
+    expect(screen.getByRole("button", {name: "Retry saved question"})).toBeEnabled()
+  })
+
+  it("refuses before sending when the server can't keep an active instruction", async () => {
+    const retry = vi.fn()
+    render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={async () =>
+      review({instructions: ["Answer like a pirate."], instructionsSupported: false})} onRetrySavedQuestion={retry} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    const group = await screen.findByRole("group", {name: "Saved question review"})
+    expect(within(group).getByRole("alert")).toHaveTextContent("This server can't keep your System/Prompt instructions on a retry")
+    expect(within(group).getByRole("button", {name: "Retry saved question"})).toBeDisabled()
+    expect(within(group).getByText("My unanswered question")).toBeVisible()
+    expect(retry).not.toHaveBeenCalled()
+  })
+})
+
 describe("legacy chats with alternative replies (CM-N2)", () => {
   const legacyBranched = () => {
     const sourceNodes = [
