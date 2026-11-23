@@ -559,7 +559,7 @@ def test_workspace_soft_delete_then_saved_view_mutation_fails_after_serializatio
         delete_finished.set()
         assert allow_commit.wait(timeout=5)
 
-    monkeypatch.setattr(deletion_db, "_finish_native_workspace_delete", pause_after_final_transition)
+    monkeypatch.setattr(deletion_db.workspace_store, "_finish_native_workspace_delete", pause_after_final_transition)
 
     def soft_delete() -> None:
         try:

@@ -10,7 +10,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -549,7 +548,7 @@ def test_restore_deleted_membership_race_returns_already_restored_row(db, monkey
         return active_row if include_deleted else None
 
     monkeypatch.setattr(db, "transaction", lambda: _RowcountZeroTransaction(fake_conn))
-    monkeypatch.setattr(db, "_get_workspace_resource_membership_with_conn", fake_getter)
+    monkeypatch.setattr(db.workspace_store, "_get_workspace_resource_membership_with_conn", fake_getter)
 
     restored = db.workspace_store.add_workspace_resource_membership(
         "ws-1",
@@ -582,7 +581,7 @@ def test_delete_membership_race_returns_none_for_already_deleted_row(db, monkeyp
         return active_row if len(calls) == 1 else deleted_row
 
     monkeypatch.setattr(db, "transaction", lambda: _RowcountZeroTransaction(fake_conn))
-    monkeypatch.setattr(db, "_get_workspace_resource_membership_with_conn", fake_getter)
+    monkeypatch.setattr(db.workspace_store, "_get_workspace_resource_membership_with_conn", fake_getter)
 
     deleted = db.workspace_store.delete_workspace_resource_membership(
         "ws-1",
@@ -656,7 +655,7 @@ def test_get_conversation_for_workspace_membership_uses_backend_active_deleted_v
         captured.append((query, params))
         return _SingleRowCursor()
 
-    monkeypatch.setattr(db, "_workspace_active_deleted_value", lambda: "ACTIVE")
+    monkeypatch.setattr(db.workspace_store, "_workspace_active_deleted_value", lambda: "ACTIVE")
     monkeypatch.setattr(db, "execute_query", fake_execute)
 
     assert db.workspace_store.get_conversation_for_workspace_membership("chat-1") is None

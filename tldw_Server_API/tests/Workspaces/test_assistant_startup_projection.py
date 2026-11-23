@@ -65,7 +65,7 @@ def test_projection_decodes_legacy_or_corrupt_values_before_any_lookup(
         """Make an unnecessary authorization lookup observable."""
         pytest.fail("Invalid startup data must not trigger Workspace lookup")
 
-    monkeypatch.setattr(projection_db, "get_workspace", unexpected_lookup)
+    monkeypatch.setattr(projection_db.workspace_store, "get_workspace", unexpected_lookup)
     assert assistant_defaults.project_assistant_startup(projection_db, raw=raw, user_id="owner").model_dump() == UNKNOWN
 
 
@@ -79,7 +79,7 @@ def test_nonreference_sources_do_not_need_workspace_access(
         raise CharactersRAGDBError("Workspace storage unavailable")
 
     raw = encode_assistant_startup(AssistantStartup(source=source))
-    monkeypatch.setattr(projection_db, "get_workspace", unavailable_lookup)
+    monkeypatch.setattr(projection_db.workspace_store, "get_workspace", unavailable_lookup)
     assert assistant_defaults.project_assistant_startup(projection_db, raw=raw, user_id="owner").model_dump() == {
         "schema_version": 1, "source": source, "workspace_id": None, "workspace_version": None,
     }
@@ -94,7 +94,7 @@ def test_projection_does_not_mask_database_failures(
         raise CharactersRAGDBError("Workspace storage unavailable")
 
     raw = encode_assistant_startup(AssistantStartup(source="workspace_default", workspace_id="private-origin", workspace_version=1))
-    monkeypatch.setattr(projection_db, "get_workspace", unavailable_lookup)
+    monkeypatch.setattr(projection_db.workspace_store, "get_workspace", unavailable_lookup)
     with pytest.raises(CharactersRAGDBError):
         assistant_defaults.project_assistant_startup(projection_db, raw=raw, user_id="owner")
 
@@ -105,7 +105,7 @@ def test_projection_cache_is_explicitly_scoped_to_one_request(
     """Repeated origins are deduplicated while the next request observes access loss."""
     db = projection_db
     raw = encode_assistant_startup(AssistantStartup(source="workspace_default", workspace_id="private-origin", workspace_version=1))
-    real_lookup = db.get_workspace
+    real_lookup = db.workspace_store.get_workspace
     calls: list[str] = []
 
     def counted_lookup(workspace_id: str, **kwargs: Any) -> dict[str, Any] | None:
@@ -113,7 +113,7 @@ def test_projection_cache_is_explicitly_scoped_to_one_request(
         calls.append(workspace_id)
         return real_lookup(workspace_id, **kwargs)
 
-    monkeypatch.setattr(db, "get_workspace", counted_lookup)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", counted_lookup)
     first_request: dict[str, bool] = {}
     for _ in range(3):
         result = assistant_defaults.project_assistant_startup(db, raw=raw, user_id="owner", workspace_visibility_cache=first_request)

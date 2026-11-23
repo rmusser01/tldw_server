@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
 pytestmark = pytest.mark.integration
@@ -447,7 +448,7 @@ def test_workspace_delete_guard_reads_postgres_driver_transaction_status(monkeyp
     monkeypatch.setattr(fake_db, "get_connection", lambda: SimpleNamespace(_connection=raw, _backend=backend))
     monkeypatch.setattr(fake_db, "_connection_state", lambda: SimpleNamespace(tx_depth=0))
     with pytest.raises(ConflictError, match="outermost transaction"):
-        CharactersRAGDB._require_outermost_workspace_delete(fake_db, "workspace-one")
+        WorkspaceStore(fake_db.ctx)._require_outermost_workspace_delete("workspace-one")
 
 
 def test_active_only_restore_validation_never_reactivates_a_deleted_chat(db: CharactersRAGDB) -> None:

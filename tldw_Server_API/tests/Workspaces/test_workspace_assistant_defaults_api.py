@@ -268,8 +268,8 @@ def test_workspace_inconsistent_explicit_none_is_unavailable_on_reads(
         assistant_defaults_explicit_none=True,
         _assistant_defaults_invalid=diagnostic,
     )
-    monkeypatch.setattr(db, "get_workspace", Mock(return_value=workspace))
-    monkeypatch.setattr(db, "list_workspaces", Mock(return_value=[workspace]))
+    monkeypatch.setattr(db.workspace_store, "get_workspace", Mock(return_value=workspace))
+    monkeypatch.setattr(db.workspace_store, "list_workspaces", Mock(return_value=[workspace]))
     lookup = Mock(side_effect=AssertionError("inconsistent defaults must not resolve a Persona"))
     monkeypatch.setattr(db, "get_persona_profile", lookup)
     _install_workspace_overrides(workspace_app, db)

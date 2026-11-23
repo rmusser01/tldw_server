@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
 
 if TYPE_CHECKING:
@@ -158,7 +159,7 @@ class WorkspaceChatStartupStore:
         if self._db.backend_type == BackendType.POSTGRESQL:
             query += " FOR UPDATE" if for_create else " FOR NO KEY UPDATE"
         row = conn.execute(query, (workspace_id, self._db.owner_user_id)).fetchone()
-        return self._db.workspace_store._workspace_row_to_dict(row) if row else None
+        return WorkspaceStore._workspace_row_to_dict(row) if row else None
 
     def has_receipt(self, conversation_id: str, *, conn: Any) -> bool:
         """Keep association visible after invalidation without taking a receipt lock."""

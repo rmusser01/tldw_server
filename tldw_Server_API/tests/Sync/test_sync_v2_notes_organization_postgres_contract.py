@@ -303,8 +303,8 @@ class _PostgresSqlIntentDB:
     def _get_current_utc_timestamp_iso(self) -> str:
         return self.db._get_current_utc_timestamp_iso()
 
-    def _note_folder_path_key(self, path: str) -> str:
-        return self.db._note_folder_path_key(path)
+    def note_folder_path_key(self, path: str) -> str:
+        return self.db.note_folder_path_key(path)
 
 
 class _LifecycleSyncStore:
