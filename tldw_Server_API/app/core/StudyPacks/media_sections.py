@@ -62,7 +62,10 @@ def plan_media_sections(text: str, limit: int) -> tuple[str, list[MediaSection]]
         if has_body and heading.start() != starts[-1]:
             starts.append(heading.start())
             if len(starts) > _MAX_SECTIONS:
-                raise StudyPackSectionError("study_pack_sections_too_many")
+                # Too many headings to list: use fixed windows. Passages are packed
+                # into generation passes later, so heading density never adds cost.
+                starts, titles = [0], {}
+                break
         titles[starts[-1]] = heading.group().strip().lstrip("#").strip()
         previous_end = heading.end()
 

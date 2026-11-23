@@ -262,12 +262,22 @@ def _plan_generation_bundles(bundle: StudySourceBundle) -> tuple[StudySourceBund
             {**item.locator, "section_revision": revision, "section_indices": indices},
         )
         snapshots.append(replace(item, evidence_text=snapshot, locator=locator))
+        # Pack consecutive passages into passes of at most `limit` characters, so the pass
+        # count follows the selected text, not the heading count. Each packed passage is its
+        # own bundle item with its own chapter locator, and a citation is attributed to the
+        # item that contains its quote, so cards keep the right chapter.
+        pack: list[StudySourceBundleItem] = []
+        pack_chars = 0
         for index in indices:
             section = sections[index]
             for start, end, passage in section_passages(item.evidence_text, section, limit):
-                if len(batches) >= MAX_STUDY_PACK_PASSES:
-                    raise StudyPackSectionError("study_pack_section_budget")
-                batches.append(StudySourceBundle(items=[replace(
+                if pack and pack_chars + len(passage) > limit:
+                    batches.append(StudySourceBundle(items=pack))
+                    pack, pack_chars = [], 0
+                    if len(batches) > MAX_STUDY_PACK_PASSES:
+                        raise StudyPackSectionError("study_pack_section_budget")
+                pack_chars += len(passage)
+                pack.append(replace(
                     item, evidence_text=passage, label=f"{item.label} · {section.title}", locator={
                         "media_id": item.locator["media_id"],
                         "start_char": start, "end_char": end,
@@ -278,7 +288,9 @@ def _plan_generation_bundles(bundle: StudySourceBundle) -> tuple[StudySourceBund
                             "source_title": item.label,
                         },
                     },
-                )]))
+                ))
+        if pack:
+            batches.append(StudySourceBundle(items=pack))
 
     if len(batches) > MAX_STUDY_PACK_PASSES:
         raise StudyPackSectionError("study_pack_section_budget")
@@ -691,10 +703,9 @@ class StudyPackGenerationService:
         if not raw_cards:
             raise StudyPackNoCardsError("Study-pack generation returned no cards")
 
-        bundle_lookup = {
-            _bundle_item_key(item.source_type, item.source_id): item
-            for item in bundle.items
-        }
+        bundle_lookup: dict[tuple[str, str], list[StudySourceBundleItem]] = {}
+        for item in bundle.items:
+            bundle_lookup.setdefault(_bundle_item_key(item.source_type, item.source_id), []).append(item)
         validated_cards = [
             self._validate_card_payload(raw_card, bundle_lookup=bundle_lookup)
             for raw_card in raw_cards
@@ -707,7 +718,7 @@ class StudyPackGenerationService:
         self,
         raw_card: Any,
         *,
-        bundle_lookup: Mapping[tuple[str, str], StudySourceBundleItem],
+        bundle_lookup: Mapping[tuple[str, str], Sequence[StudySourceBundleItem]],
     ) -> StudyPackCardDraft:
         if not isinstance(raw_card, Mapping):
             raise StudyPackMalformedResponseError("Each study-pack card must be a JSON object")
@@ -759,7 +770,7 @@ class StudyPackGenerationService:
         self,
         raw_citation: Any,
         *,
-        bundle_lookup: Mapping[tuple[str, str], StudySourceBundleItem],
+        bundle_lookup: Mapping[tuple[str, str], Sequence[StudySourceBundleItem]],
     ) -> dict[str, Any]:
         if not isinstance(raw_citation, Mapping):
             raise StudyPackMalformedResponseError("Each study-pack citation must be a JSON object")
@@ -768,14 +779,19 @@ class StudyPackGenerationService:
             raw_citation.get("source_type"),
             raw_citation.get("source_id"),
         )
-        bundle_item = bundle_lookup.get(citation_key)
-        if bundle_item is None:
+        candidates = bundle_lookup.get(citation_key)
+        if not candidates:
             raise StudyPackCitationError("Study-pack citations must reference the allowed source bundle")
 
         citation_text = raw_citation.get("citation_text")
         if not isinstance(citation_text, str) or not citation_text.strip():
             raise StudyPackCitationError("Study-pack citations must include citation_text")
-        if not _citation_text_matches_evidence(citation_text, bundle_item.evidence_text):
+        # Packed passes hold several passages of one source; the quote picks its passage.
+        bundle_item = next(
+            (item for item in candidates if _citation_text_matches_evidence(citation_text, item.evidence_text)),
+            None,
+        )
+        if bundle_item is None:
             raise StudyPackCitationError("Study-pack citation_text must match source evidence")
 
         locator = self._merge_citation_locator(bundle_item, raw_citation.get("locator"))

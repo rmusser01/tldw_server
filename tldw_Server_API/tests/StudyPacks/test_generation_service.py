@@ -294,7 +294,7 @@ def test_validate_citation_payload_preserves_bundle_locator_over_conflicting_mod
             },
         },
         bundle_lookup={
-            ("media", "42"): bundle.items[1],
+            ("media", "42"): [bundle.items[1]],
         },
     )
 
@@ -319,7 +319,7 @@ def test_validate_citation_payload_requires_citation_text_to_match_bundle_eviden
                 "citation_text": "This unsupported citation is not in the note evidence.",
             },
             bundle_lookup={
-                ("note", "note-1"): bundle.items[0],
+                ("note", "note-1"): [bundle.items[0]],
             },
         )
 
@@ -651,33 +651,38 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
             return {"content": json.dumps({"supported": [True] * len(json.loads(user_prompt))})}
         is_repair = system_prompt.startswith("You repair")
         bundle_json = user_prompt.split("Allowed source bundle:\n", 1)[1].split("\n\n", 1)[0]
-        excerpt = json.loads(bundle_json)["items"][0]["evidence_text"]
-        is_capped = selection_mode.startswith("output_limit") and len(excerpt) > 6_100
+        excerpts = [item["evidence_text"] for item in json.loads(bundle_json)["items"]]
+        is_capped = selection_mode.startswith("output_limit") and sum(map(len, excerpts)) > 6_100
         if is_capped:
-            capped_passages.append(excerpt)
+            capped_passages.append("\n".join(excerpts))
         elif is_repair:
             repair_prompts.append((system_prompt, user_prompt))
         else:
-            passages.append(excerpt)
-        citation = excerpt.splitlines()[0][:96].strip()
-        citation_text = citation
-        if final_chapter in excerpt and (
-            selection_mode == "bad_citation" or (selection_mode == "citation_repair" and not is_repair)
-        ):
-            citation_text = first_chapter
-        content = json.dumps({"cards": [{
-            "front": f"What is the focus of section {len(passages)}?",
-            "back": citation,
-            "citations": [{
-                "source_type": "media",
-                "source_id": str(media_id),
-                "citation_text": citation_text,
-                "locator": {"chunk_index": 99, "timestamp_seconds": 120},
-            }],
-        }]})
-        if selection_mode == "bad_repair" and final_chapter in excerpt:
+            passages.extend(excerpts)
+        cards = []
+        for excerpt in excerpts:
+            if selection_mode == "nonstudy_section" and final_chapter not in excerpt:
+                continue
+            citation = excerpt.splitlines()[0][:96].strip()
+            citation_text = citation
+            if final_chapter in excerpt and (
+                selection_mode == "bad_citation" or (selection_mode == "citation_repair" and not is_repair)
+            ):
+                citation_text = first_chapter
+            cards.append({
+                "front": f"What is the focus of section {len(passages)}?",
+                "back": citation,
+                "citations": [{
+                    "source_type": "media",
+                    "source_id": str(media_id),
+                    "citation_text": citation_text,
+                    "locator": {"chunk_index": 99, "timestamp_seconds": 120},
+                }],
+            })
+        content = json.dumps({"cards": cards})
+        if selection_mode == "bad_repair" and any(final_chapter in excerpt for excerpt in excerpts):
             content = '{"cards":[]}' if is_repair else "malformed response"
-        if selection_mode == "nonstudy_section" and final_chapter not in excerpt:
+        if not cards:
             content = '{"cards":[]}'
         cap_reason = "MAX_TOKENS" if selection_mode == "output_limit_native" else "length"
         return {"choices": [{"finish_reason": cap_reason if is_capped else "stop", "message": {"content": content}}]}
@@ -686,7 +691,7 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
     if selection_mode == "budget":
         monkeypatch.setattr(service_mod, "MAX_STUDY_PACK_PASSES", 1)
     if selection_mode == "output_limit_budget":
-        monkeypatch.setattr(service_mod, "MAX_STUDY_PACK_PASSES", 3)
+        monkeypatch.setattr(service_mod, "MAX_STUDY_PACK_PASSES", 2)
     try:
         if selection_mode == "stale" or selection_mode.startswith("empty"):
             match = "Review its sections" if selection_mode == "stale" else "Select at least one"
@@ -773,3 +778,60 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
     assert "excerpt_text" not in selection  # nosec B101
     assert selection["locator"]["section_indices"] == indices  # nosec B101
     assert selection["locator"]["section_revision"] == revision  # nosec B101
+
+
+@pytest.mark.parametrize("headings", [300, 700])
+async def test_heading_dense_media_packs_sections_into_few_passes_and_keeps_chapters(
+    db: CharactersRAGDB,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    headings: int,
+):
+    _, service_mod = _load_generation_modules()
+    media = MediaDatabase(db_path=str(tmp_path / "dense.db"), client_id="study-pack-dense")
+    body = "\n".join(f"## Topic {number}\nFact {number} is short." for number in range(headings))
+    if headings == 300:
+        body += "\n" + "x" * (13_000 - len(body))  # just over the 12k limit, as in the review
+    media_id, _, _ = media.add_media_with_keywords(title="Dense", content=body, media_type="ebook", keywords=[])
+    service = service_mod.StudyPackGenerationService(note_db=db, media_db=media, provider="openai", model="test")
+    generation_calls = []
+
+    async def generate(**kwargs):
+        user_prompt = kwargs["messages"][0]["content"]
+        if kwargs["system_message"].startswith("Verify each flashcard"):
+            return {"content": json.dumps({"supported": [True] * len(json.loads(user_prompt))})}
+        generation_calls.append(user_prompt)
+        bundle_json = user_prompt.split("Allowed source bundle:\n", 1)[1].split("\n\n", 1)[0]
+        cards = [
+            {
+                "front": line, "back": "Yes",
+                "citations": [{"source_type": "media", "source_id": str(media_id), "citation_text": line}],
+            }
+            for item in json.loads(bundle_json)["items"]
+            for line in item["evidence_text"].splitlines()
+            if line.startswith("Fact ")
+        ]
+        return {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({"cards": cards})}}]}
+
+    monkeypatch.setattr(service_mod, "perform_chat_api_call_async", generate)
+    request = StudyPackCreateJobRequest(
+        title="Dense",
+        workspace_id="ws-1",
+        source_items=[StudyPackSourceSelection(source_type="media", source_id=str(media_id))],
+    )
+    try:
+        result = await service.create_from_request(request)
+    finally:
+        media.close_connection()
+
+    assert len(generation_calls) == -(-len(body) // 12_000)  # nosec B101
+    page = browse_deck_cards(db, result.deck_id, chapter_id=None, limit=100, offset=0)
+    assert page["all_cards_count"] == headings  # nosec B101
+    cards_by_chapter = {}
+    for chapter in page["chapters"]:
+        chapter_page = browse_deck_cards(db, result.deck_id, chapter_id=chapter["id"], limit=100, offset=0)
+        cards_by_chapter[chapter["title"]] = [card["front"] for card in chapter_page["items"]]
+    if headings == 300:
+        assert cards_by_chapter == {f"Topic {n}": [f"Fact {n} is short."] for n in range(headings)}  # nosec B101
+    else:  # too many headings to list: fixed windows, every card still lands in some window
+        assert sum(map(len, cards_by_chapter.values())) == headings  # nosec B101

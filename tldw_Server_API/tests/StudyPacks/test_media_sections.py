@@ -40,3 +40,12 @@ def test_chapter_plan_names_a_heading_only_title_chain_after_the_chapter():
     ]
     assert sections[0].start == 0  # nosec B101
     assert book[sections[1].start:].startswith("## Chapter 2:")  # nosec B101
+
+
+def test_more_headings_than_the_section_list_holds_falls_back_to_fixed_windows():
+    book = "\n".join(f"# H{number}\nBody {number}." for number in range(700))
+    _, sections = plan_media_sections(book, 4_000)
+
+    assert 1 < len(sections) <= 512  # nosec B101
+    assert all(section.title.startswith("Section ") for section in sections)  # nosec B101
+
