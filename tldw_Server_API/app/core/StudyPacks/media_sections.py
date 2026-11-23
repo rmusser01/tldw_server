@@ -48,8 +48,9 @@ def bounded_spans(text: str, start: int, end: int, limit: int) -> Iterator[tuple
 
 def plan_media_sections(text: str, limit: int) -> tuple[str, list[MediaSection]]:
     """Return the same chapter/section plan for preview and generation."""
-    digest = hashlib.sha256(f"{limit}\0".encode())
-    digest.update(text.encode("utf-8"))
+    # The revision covers only the source text and its section plan, so API and worker
+    # processes with different evidence limits still agree on an unchanged source.
+    digest = hashlib.sha256(text.encode("utf-8"))
     if len(text) <= limit:
         return digest.hexdigest(), []
 

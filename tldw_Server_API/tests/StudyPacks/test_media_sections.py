@@ -49,3 +49,12 @@ def test_more_headings_than_the_section_list_holds_falls_back_to_fixed_windows()
     assert 1 < len(sections) <= 512  # nosec B101
     assert all(section.title.startswith("Section ") for section in sections)  # nosec B101
 
+
+
+def test_revision_ignores_the_evidence_limit_when_the_section_plan_is_the_same():
+    book = "# One\n" + "First lesson. " * 20 + "\n# Two\n" + "Last lesson. " * 20
+    first, first_sections = plan_media_sections(book, 100)
+    second, second_sections = plan_media_sections(book, 200)
+
+    assert first_sections == second_sections  # nosec B101
+    assert first == second  # nosec B101
