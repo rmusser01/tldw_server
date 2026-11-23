@@ -14,14 +14,18 @@ Use these pages when you want to talk with models, run character or persona work
 | `/characters` | WebUI, extension options | Manage character cards, imports, generation helpers, tags, and roleplay setup. | Character roleplay, persona libraries, SillyTavern-compatible cards. |
 | `/agents`, `/agent-tasks` | Advanced self-hosted | Inspect agent registry and agent task status. | Agent orchestration experiments, task monitoring. |
 | `/chat-workflows` | Advanced self-hosted | Manage chat workflow entry points. | Guided conversations, repeatable assistant steps. |
-| `/chat-workspace` | Advanced self-hosted | Use workspace-focused chat with staged context, runtime state, approvals, and inspector rails. | Project chat, context staging, tool approval review. |
+| `/chat-workspace` | Advanced self-hosted; WebUI and extension options | Chat in the active workspace with explicit source staging and read-only runtime/inspector rails. | Project conversation, staged source retrieval, send-state inspection. |
 | `/dictionaries` | WebUI, extension options | Manage chat dictionary entries and replacement behavior. | Terminology expansion, roleplay context, acronym replacement. |
 | `/world-books` | WebUI, extension options | Manage lorebook/world-book context. | Roleplay settings, reusable background, character worlds. |
 | `/settings/chat`, `/settings/chat-dictionaries`, `/settings/characters`, `/settings/world-books` | Shared UI | Configure chat, dictionaries, character, and lore settings. | Defaults and behavior tuning. |
 
 ## Larger Systems
 
-The chat system is not one page. It spans the main chat workspace, sidepanel chat, character libraries, persona state, dictionaries, world books, workflow templates, model/provider settings, and optional tool or web-search controls. For ordinary conversation start with `/chat`; for persistent roleplay or assistant identity start with `/characters` or `/persona`; for structured project work start with `/chat-workspace`.
+The chat system is not one page. It spans Chat, sidepanel chat, character libraries, persona state, dictionaries, world books, workflow templates, model/provider settings, and optional tool or web-search controls. For ordinary conversation and model/assistant selection start with `/chat`; for persistent roleplay or assistant identity start with `/characters` or `/persona`.
+
+For focused conversation in an active workspace, use [Chat Workspace](Chat_Workspace.md). Select the workspace in Research Workspace first, and choose a model in Chat. Chat Workspace has no workspace/model picker or persona editor. Its inspector reports scope, staged sources, effective model/persona, and runtime state; it does not offer approval controls. Browsing a source does not stage or send it, and **Insert context summary** inserts only source-list text, not source content.
+
+For cited library questions use Knowledge QA (`/knowledge`); for source organization and Studio outputs use Research Workspace (`/research-workspace`); for document-centered reading and chat use Document Workspace (`/document-workspace`). The [Chat Workspace guide](Chat_Workspace.md) explains these boundaries, persona inheritance, context submission, and unsent-state lifetime.
 
 ## Extension Differences
 
@@ -29,6 +33,7 @@ The extension sidepanel chat is optimized for browser context. It can open from 
 
 ## Related Docs
 
+- [Chat Workspace](Chat_Workspace.md)
 - [Chat pages](../WebUI_Extension/Chat_Pages.md)
 - [Character roleplay quickstart](../WebUI_Extension/Character_Roleplay_Quickstart.md)
 - [Effective character roleplay](../WebUI_Extension/Effective_Character_Roleplay_and_You.md)

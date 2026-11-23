@@ -92,13 +92,19 @@ def test_sqlite_current_missing_transcript_table_is_not_silently_recreated(tmp_p
     path = tmp_path / "drift.db"
     db = CharactersRAGDB(path, client_id="1")
     with db.transaction() as conn:
+        version_before = conn.execute("SELECT version FROM db_schema_version").fetchone()[0]
         conn.execute("DROP TABLE persona_session_transcripts")
     db.close_all_connections()
     with pytest.raises(CharactersRAGDBError, match="missing or unsafe") as failed:
         CharactersRAGDB(path, client_id="1")
     assert isinstance(failed.value.__cause__, SchemaError)  # nosec B101 -- Preserve the exact migration/schema refusal.
     with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT version FROM db_schema_version").fetchone()[0] == 85  # nosec B101
+        version_after = conn.execute("SELECT version FROM db_schema_version").fetchone()[0]
+        transcript_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='persona_session_transcripts'"
+        ).fetchone()
+        current = CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        assert (version_before, version_after, transcript_table) == (current, current, None)  # nosec B101
 
 
 def test_postgres_rls_denies_forged_owner_even_with_real_parent(pg_restricted_backend, tmp_path):

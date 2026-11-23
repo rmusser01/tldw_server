@@ -17,6 +17,13 @@ def _load(path: str) -> dict:
     return data
 
 
+def test_linux312_postgres_defaults_to_official_registry_and_keeps_overrides() -> None:
+    job = _load(".github/workflows/ci.yml")["jobs"]["full-suite-linux-312-shards"]
+    assert job["services"]["postgres"]["image"] == (
+        "${{ matrix.shard.postgres_image || 'docker.io/library/postgres:18-bookworm' }}"
+    )
+
+
 def _get_step(steps: list[dict], name: str) -> dict:
     matching = [step for step in steps if step.get("name") == name]
     assert matching, f"{name} step missing"

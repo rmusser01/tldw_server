@@ -1,5 +1,6 @@
 import { captureChatDraftSource } from '@/hooks/chat/chat-draft-transition';
 import { HistorySelectionProvider, useHistorySelectionContext } from '@/hooks/chat/useHistorySelection';
+import { WorkspaceChatRouteSearchContext } from '@/hooks/chat/useWorkspaceChatCheckpoint';
 import { formatSelectedHistory } from '@/db/dexie/helpers';
 import React, { lazy, Suspense, useState, useContext, useCallback } from 'react';
 
@@ -22,6 +23,7 @@ import {
   useModeNavigationShortcuts,
 } from '@/hooks/keyboard/useKeyboardShortcuts';
 import { useQuickChatStore } from '@/store/quick-chat';
+import { useTutorialStore } from '@/store/tutorials';
 import { useStoreMessageOption } from '@/store/option';
 import { useLayoutUiStore } from '@/store/layout-ui';
 import { useRouteTransitionStore } from '@/store/route-transition';
@@ -119,6 +121,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   useStorageMigrations(isLayoutEffectsOwner);
   const shellSidebarEnabled = !hideHeader && !hideSidebar;
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const activeTutorialId = useTutorialStore((state) => state.activeTutorialId);
+  React.useEffect(() => {
+    if (activeTutorialId) setSidebarOpen(false);
+  }, [activeTutorialId]);
   const [chatSidebarOpenResetKey, setChatSidebarOpenResetKey] = useState(0);
   const signalChatSidebarOpen = useCallback(() => {
     setChatSidebarOpenResetKey((value) => value + 1);
@@ -191,7 +197,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     : !sidebarOpen;
   const stickyChatLayoutActive = isChatScreen && stickyChatInput;
   const useInlineBackendUnavailableAlert =
-    /^\/settings(\/|$)/.test(location.pathname);
+    /^\/(settings|chat-workspace)(\/|$)/.test(location.pathname);
   const isViewportConstrainedRoute =
     stickyChatLayoutActive ||
     (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname);
@@ -896,15 +902,20 @@ function RootLayoutShell({
       </NotificationRuntimeOwner>
     </DemoModeProvider>
   );
-  return ["/chat", "/model-playground"].includes(location.pathname) ? (
+  const isWorkspaceRoute = ['/chat-workspace', '/research-workspace'].includes(location.pathname);
+  const isPlaygroundRoute = ['/chat', '/model-playground'].includes(location.pathname);
+  return isWorkspaceRoute || isPlaygroundRoute ? (
     <HistorySelectionProvider
-      storageKey="tldw-h1-playground-reference"
+      key={isWorkspaceRoute ? location.pathname : 'chat'}
+      storageKey={isPlaygroundRoute ? 'tldw-h1-playground-reference' : undefined}
       onCapture={(capture) => {
         const display = formatSelectedHistory(capture);
         useStoreMessageOption.setState({ history: display.history, messages: display.messages });
       }}
     >
-      {content}
+      <WorkspaceChatRouteSearchContext.Provider value={location.search}>
+        {content}
+      </WorkspaceChatRouteSearchContext.Provider>
     </HistorySelectionProvider>
   ) : content;
 }

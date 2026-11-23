@@ -7158,6 +7158,10 @@ ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
 UPDATE db_schema_version SET version = 79 WHERE schema_name = 'rag_char_chat_schema' AND version = 78;
 """
 
+# Catalog reconciliation reuses the frozen DDL without the historical version write.
+_CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE = _MIGRATION_SQL_V74_TO_V75.partition("UPDATE db_schema_version ")[0]
+_CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES = _MIGRATION_SQL_V78_TO_V79_POSTGRES.partition("UPDATE db_schema_version ")[0]
+
 # #3182: until the Sync v2 conversation materializer stopped doing it, a chat whose
 # payload named no assistant was stored as persona 'sync-v2'. That persona never
 # existed, so persona admission answered 404 for the chat. The repair makes such a

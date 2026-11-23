@@ -357,6 +357,10 @@ async def update_schedule(
         update["coalesce"] = bool(body.coalesce)
     if body.require_online is not None:
         update["require_online"] = bool(body.require_online)
+    if s.managed_watchlist_job_id is not None and any(
+        key in update for key in ("cron", "timezone", "enabled", "inputs")
+    ):
+        raise HTTPException(status_code=409, detail="edit_managed_schedule_in_watchlists")
     ok = svc.update(schedule_id, update)
     return {"ok": bool(ok)}
 

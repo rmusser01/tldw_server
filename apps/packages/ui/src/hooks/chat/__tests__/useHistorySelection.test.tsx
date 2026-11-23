@@ -38,6 +38,8 @@ const mocks = vi.hoisted(() => ({
   bindLocal: vi.fn(),
   link: vi.fn(),
   recoveries: vi.fn<(...args: any[]) => Promise<any[]>>(async () => []),
+  inspectRecovery: vi.fn(),
+  saveRecovery: vi.fn(),
   dismissRecovery: vi.fn<(...args: any[]) => Promise<boolean>>(async () => true)
 }))
 vi.mock("@/components/Common/Button", async (original) => {
@@ -45,9 +47,10 @@ vi.mock("@/components/Common/Button", async (original) => {
     await original<typeof import("@/components/Common/Button")>()
   const React = await import("react")
   return {
-    Button: React.forwardRef<HTMLButtonElement, any>((props, ref) => {
-      if (props.children === "Open saved reply")
-        mocks.openButtons.push(props.onClick)
+    Button: React.forwardRef<HTMLButtonElement, import("react").ComponentPropsWithoutRef<typeof Button>>((props, ref) => {
+      // Replay the saved action itself; it does not consume the click event.
+      if (props.children === "Open saved reply" && props.onClick)
+        mocks.openButtons.push(props.onClick as () => void)
       return React.createElement(Button, { ...props, ref })
     })
   }
@@ -63,6 +66,7 @@ vi.mock("@/db/dexie/history-selection", async (original) => ({
   loadHistoryTurnRecoveries: (...args: any[]) => mocks.recoveries(...args),
   dismissHistoryTurnRecovery: (...args: any[]) =>
     mocks.dismissRecovery(...args),
+  saveHistoryTurnRecovery: (...args: any[]) => mocks.saveRecovery(...args),
   loadHistoryBookmark: async (scope: any, owner: any) =>
     mocks.bookmarks.get(
       JSON.stringify([
@@ -86,6 +90,9 @@ vi.mock("@/db/dexie/history-selection", async (original) => ({
   },
   getLocalHistoryOwner: (id: string) => mocks.localOwner(id),
   bindUnboundLocalHistory: (...args: any[]) => mocks.bindLocal(...args)
+}))
+vi.mock("@/services/history-durable-turn", () => ({
+  inspectHistoryDurableRecovery: (...args: any[]) => mocks.inspectRecovery(...args)
 }))
 vi.mock("@/services/chat-history-selection", async (original) => ({
   readNativeHistoryVersion: (...args: unknown[]) => mocks.historyVersion(...args),
@@ -193,6 +200,8 @@ beforeEach(() => {
   mocks.updateForkSettings.mockReset().mockResolvedValue(null)
   mocks.confirm.mockClear()
   mocks.recoveries.mockReset().mockResolvedValue([])
+  mocks.inspectRecovery.mockReset()
+  mocks.saveRecovery.mockReset().mockResolvedValue(undefined)
   mocks.dismissRecovery.mockReset().mockResolvedValue(true)
   mocks.configChanged = null
   controllers = {}
@@ -1378,6 +1387,85 @@ it("does not re-commit consumers when a load starts with nothing to clear", () =
   expect(commits).toBe(before)
 })
 
+const inspectionEntry = (view: HistoryViewSelectionV1, operation_id: string) => {
+  const request_context_digest = "a".repeat(64)
+  const resolved = resolveHistorySelection(snapshot, view, "send", request_context_digest)
+  if (resolved.status !== "ready") throw new Error(resolved.status)
+  return {
+    scope: { profile_id: "profile", client_session_id: "original" },
+    turn: {
+      operation_id, persistence: "server" as const, owner_key: view.owner_key,
+      conversation_id: view.conversation_id, logical_user_message_id: "12409645-7bce-4cba-b03b-bc4b0b27cc68",
+      origin_view: { ...view, view_session_id: "original-view" }, finalized_selection: resolved.selection,
+      input_text: "Question", input_images: [], result_text: "", state: "unknown" as const, created_at: 1,
+      selection_digest: resolved.selection.selection_digest, request_context_digest
+    }
+  }
+}
+
+it("inspection completes only its known committed operation and grants no cursor follow lease", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.loadConversation({ serverChatId: "chat" }) })
+  const originalOwner = hook.result.current.owner
+  if (originalOwner?.kind !== "native") throw new Error("fixture_native_owner_missing")
+  expect(originalOwner.owner_key).toBeUndefined()
+  const entry = inspectionEntry(hook.result.current.view!, "inspected")
+  mocks.inspectRecovery.mockResolvedValue({ ...entry.turn, observed_result: { result_message_id: "known" } })
+  const view = hook.result.current.view
+  await act(async () => { await hook.result.current.inspectRecovery(entry) })
+  expect(mocks.inspectRecovery).toHaveBeenCalledWith(
+    { ...originalOwner, owner_key: "owner" },
+    entry.turn,
+    expect.any(AbortSignal)
+  )
+  expect(mocks.saveRecovery).toHaveBeenCalledWith(entry.scope, entry.turn.origin_view, expect.objectContaining({ operation_id: "inspected" }))
+  expect(mocks.dismissRecovery).toHaveBeenCalledWith(entry.scope, entry.turn.origin_view, "inspected", "completed",
+    { signal: expect.any(AbortSignal), validate_lease: expect.any(Function) })
+  expect(hook.result.current.view).toBe(view)
+  expect(hook.result.current.owner).toBe(originalOwner)
+})
+
+it.each(["profile", "owner", "conversation", "origin owner", "origin conversation"])("inspection rejects a foreign %s without reading or saving", async field => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.loadConversation({ serverChatId: "chat" }) })
+  const entry = inspectionEntry(hook.result.current.view!, "foreign")
+  if (field === "profile") entry.scope.profile_id = "foreign"
+  if (field === "owner") entry.turn.owner_key = "foreign"
+  if (field === "conversation") entry.turn.conversation_id = "foreign"
+  if (field === "origin owner") entry.turn.origin_view = { ...entry.turn.origin_view, owner_key: "foreign" }
+  if (field === "origin conversation") entry.turn.origin_view = { ...entry.turn.origin_view, conversation_id: "foreign" }
+  await act(async () => { await hook.result.current.inspectRecovery(entry) })
+  expect(mocks.inspectRecovery).not.toHaveBeenCalled()
+  expect(mocks.saveRecovery).not.toHaveBeenCalled()
+})
+
+it("inspection resolving after account invalidation cannot write or complete recovery", async () => {
+  mocks.saveRecovery.mockClear()
+  mocks.dismissRecovery.mockClear()
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.loadConversation({ serverChatId: "chat" }) })
+  const entry = inspectionEntry(hook.result.current.view!, "old")
+  let resolve!: (value: any) => void
+  mocks.inspectRecovery.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  let reading!: Promise<void>
+  act(() => { reading = hook.result.current.inspectRecovery(entry) })
+  act(() => mocks.configChanged!())
+  await act(async () => { resolve({ ...entry.turn, observed_result: { result_message_id: "known" } }); await reading })
+  expect(mocks.saveRecovery).not.toHaveBeenCalled()
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+})
+
+it("inspection keeps the original cursor and surfaces an uncommitted completion", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.loadConversation({ serverChatId: "chat" }) })
+  const view = hook.result.current.view!
+  const entry = inspectionEntry(view, "uncommitted")
+  mocks.inspectRecovery.mockResolvedValue({ ...entry.turn, observed_result: { result_message_id: "known" } })
+  mocks.dismissRecovery.mockResolvedValueOnce(false)
+  await act(async () => { await hook.result.current.inspectRecovery(entry) })
+  expect(hook.result.current.recoveryError).toBe("recovery_dismissal_not_committed")
+  expect(hook.result.current.view).toBe(view)
+})
 
 it("following an edit result refuses a retired editor before capture", async () => {
   const { result } = renderHook(() => useHistorySelection())
@@ -1900,10 +1988,10 @@ describe("owned native stale-send choices", () => {
     owner_key: "owner",
     conversation_id: "chat",
     request_scope: {
+      userId: 1,
       config: {
         serverUrl: "https://chat.test",
-        authMode: "single-user" as const,
-        apiKey: "synthetic"
+        authMode: "single-user" as const
       }
     },
     validate_lease: () => true
@@ -2407,10 +2495,10 @@ it("an actual H1 branch survives a held compact focus capture and subsequent foc
     owner_key: "owner",
     conversation_id: "chat",
     request_scope: {
+      userId: 1,
       config: {
         serverUrl: "https://chat.test",
-        authMode: "single-user" as const,
-        apiKey: "synthetic"
+        authMode: "single-user" as const
       }
     },
     validate_lease: () => true
@@ -2475,10 +2563,10 @@ describe("shared proactive native freshness", () => {
     owner_key: "owner",
     conversation_id: "chat",
     request_scope: {
+      userId: 1,
       config: {
         serverUrl: "https://chat.test",
-        authMode: "single-user" as const,
-        apiKey: "synthetic"
+        authMode: "single-user" as const
       }
     },
     validate_lease: () => true
@@ -2944,6 +3032,7 @@ describe("acknowledged recovery controller", () => {
           conversation_id: "chat",
           origin_view: hook.result.current.view!,
           input_id: "input",
+          assistant_id: "assistant",
           created_at: 1,
           input_text: "  exact input\n  ",
           input_images: [],
@@ -3093,7 +3182,7 @@ it("explicitly refreshes empty native history after settlement without widening 
   settled = true
   await act(async () => { expect(await hook.result.current.refresh()).toBe(true) })
   expect(hook.result.current.capture?.snapshot.nodes).toHaveLength(snapshot.nodes.length)
-  expect(hook.result.current.capture?.rows).toEqual([])
+  expect(hook.result.current.capture).toMatchObject({ rows: [] })
   expect(hook.result.current.view).toEqual(originalView)
   expect(hook.result.current.view?.cursor).toEqual({ kind: "empty" })
   expect(hook.result.current.owner).toBe(native)
@@ -3125,14 +3214,14 @@ it.each(['settlement', 'capture failure', 'later focus', 'retired account'])("re
   const mounted = render(<RecoveryView />)
   try {
     await act(async () => { await controller.open(native) })
-    const refresh = await screen.findByRole('button', { name: 'Refresh history', exact: true })
+    const refresh = await screen.findByRole('button', { name: 'Refresh history' })
     refresh.focus()
     await userEvent.setup().keyboard('{Enter}')
     await waitFor(() => expect(reads).toBe(2))
     if (outcome === 'later focus' || outcome === 'retired account') screen.getByRole('button', { name: 'Other control' }).focus()
     if (outcome === 'retired account') leaseCurrent = false
     await act(async () => { release(); await held })
-    if (outcome === 'settlement') await waitFor(() => expect(screen.getByRole('button', { name: 'Review conversation history', exact: true })).toHaveFocus())
+    if (outcome === 'settlement') await waitFor(() => expect(screen.getByRole('button', { name: 'Review conversation history' })).toHaveFocus())
     else if (outcome === 'capture failure') await waitFor(() => expect(screen.getByRole('alert').closest('[tabindex="-1"]')).toHaveFocus())
     else expect(screen.getByRole('button', { name: 'Other control' })).toHaveFocus()
   } finally { release(); mounted.unmount() }

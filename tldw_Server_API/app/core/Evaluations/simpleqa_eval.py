@@ -67,6 +67,7 @@ class SimpleQAEvaluation(BaseEvaluation):
             "name": f"{self.name}_factuality",
             "description": f"{self.description} - {topic}",
             "evaluation_prompt": evaluation_prompt,
+            "require_grade": True,
             "input_data": {
                 "question": question,
                 "expected_answer": expected_answer,

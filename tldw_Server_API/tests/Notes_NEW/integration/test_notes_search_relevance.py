@@ -218,3 +218,15 @@ def test_openapi_documents_include_snippets(notes_client: TestClient) -> None:
     spec = notes_client.app.openapi()
     parameters = {param["name"]: param for param in spec["paths"]["/api/v1/notes/search/"]["get"]["parameters"]}
     assert parameters["include_snippets"]["schema"]["default"] is True
+
+
+@pytest.mark.parametrize("suffix", ["", "/"])
+def test_search_rejects_a_stale_expected_user(notes_client: TestClient, suffix: str) -> None:
+    response = notes_client.get(
+        f"/api/v1/notes/search{suffix}",
+        params={"query": "sourdough"},
+        headers={"X-TLDW-Expected-User-ID": "2"},
+    )
+    assert response.status_code == 412
+    assert response.json()["detail"]["code"] == "request_config_scope_changed"
+    assert response.headers["cache-control"] == "no-store"

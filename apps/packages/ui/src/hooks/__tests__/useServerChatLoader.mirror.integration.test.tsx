@@ -53,12 +53,90 @@ describe("real adapter → loader → mirror → formatter reload", () => {
     state.beforeMessagePut.mockReset().mockResolvedValue(undefined)
     state.profile.mockResolvedValue({ id: 4, name: "Cedar Guide" })
     state.request.mockImplementation(async ({ path }) => path.includes("/messages") ? { messages: remote } : { id: "cedar", title: "Cedar chat", character_id: 4, assistant_kind: "character", assistant_id: "4", source: "webui-character-chat", scope_type: "global" })
-    useStoreMessageOption.setState({ historyId: "legacy", serverChatId: "cedar", serverChatLoadState: "idle", messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantId: null, serverChatAssistantKind: null, streaming: false, isProcessing: false, temporaryChat: false })
+    useStoreMessageOption.setState({ historyId: "legacy", serverChatId: "cedar", serverChatLoadState: "idle", messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantId: null, serverChatAssistantKind: null, isLoading: false, streaming: false, isProcessing: false, temporaryChat: false })
     usePlaygroundSessionStore.getState().clearSession()
     usePlaygroundSessionStore.getState().saveSession({ historyId: "legacy", serverChatId: "cedar", scopeKey: "scope-A" })
     state.histories.set("legacy", { id: "legacy", title: "Cedar", server_chat_id: "cedar", is_rag: false, createdAt: 1 })
   })
   afterEach(() => vi.restoreAllMocks())
+  it.each([
+    ["isProcessing", "completed load", false],
+    ["streaming", "completed load", false],
+    ["isProcessing", "same-chat reopen", true],
+    ["isProcessing", "same-chat reopen with teardown before idle check", true],
+    ["isProcessing", "same-chat reopen with teardown after idle check", true],
+    ["isProcessing", "rejected chat", false],
+  ] as const)(
+    "settles overlapping %s after %s without clearing a replacement's loading",
+    async (activity, outcome, remainsLoading) => {
+      const reopen = outcome.startsWith("same-chat reopen")
+      let finishRead!: () => void
+      const pending = new Promise<void>(resolve => { finishRead = resolve })
+      const listMessages = tldwClient.listChatMessages.bind(tldwClient)
+      const read = vi.spyOn(tldwClient, "listChatMessages").mockImplementation(async (...args) => {
+        await pending
+        if (outcome === "rejected chat")
+          throw Object.assign(new Error("missing chat"), { status: 404 })
+        return listMessages(...args)
+      })
+      const view = mountLoader()
+      try {
+        await waitFor(() => expect(read).toHaveBeenCalled())
+        expect(useStoreMessageOption.getState().isLoading).toBe(true)
+        act(() => useStoreMessageOption.setState({ [activity]: true }))
+        await act(async () => { finishRead(); await pending })
+        await waitFor(() => {
+          const state = useStoreMessageOption.getState()
+          if (outcome === "rejected chat") expect(state.serverChatId).toBeNull()
+          else expect(state.serverChatLoadState).toBe("loaded")
+        })
+        expect(useStoreMessageOption.getState().isLoading).toBe(true)
+        await act(async () => {
+          if (reopen) useStoreMessageOption.getState().setIsLoading(true)
+          useStoreMessageOption.setState({ [activity]: false })
+          if (reopen) usePlaygroundSessionStore.getState().requestServerChatSelection("cedar")
+          if (outcome === "same-chat reopen with teardown before idle check") view.unmount()
+        })
+        if (outcome === "same-chat reopen with teardown after idle check") view.unmount()
+        expect(useStoreMessageOption.getState().isLoading).toBe(remainsLoading)
+      } finally {
+        view.unmount()
+        finishRead()
+        act(() => useStoreMessageOption.setState({ streaming: false, isProcessing: false, isLoading: false }))
+        usePlaygroundSessionStore.getState().clearSession()
+      }
+    },
+  )
+
+  it("does not clear a same-chat reopen when its previous read returns 404", async () => {
+    let failRead!: () => void
+    const pending = new Promise<void>(resolve => { failRead = resolve })
+    const read = vi.spyOn(tldwClient, "listChatMessages").mockImplementation(async () => {
+      await pending
+      throw Object.assign(new Error("missing chat"), { status: 404 })
+    })
+    const view = mountLoader()
+    try {
+      await waitFor(() => expect(read).toHaveBeenCalled())
+      const renderedSession = usePlaygroundSessionStore.getState()
+      // The old effect can observe the new synchronous store intent before a render.
+      const currentSession = vi.spyOn(usePlaygroundSessionStore, "getState").mockReturnValue({
+        ...renderedSession,
+        serverChatSelectionIntent: { chatId: "cedar" },
+      })
+      await act(async () => {
+        failRead()
+        await pending
+      })
+      expect(currentSession).toHaveBeenCalled()
+      expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "cedar", isLoading: true })
+    } finally {
+      view.unmount()
+      failRead()
+      usePlaygroundSessionStore.getState().clearSession()
+    }
+  })
+
   it.each(["selected_source_retrieval_failed", "selected_source_evidence_not_found"])("UAT103 restores local %s rows without promoting them into prompt history", async reason => {
     const generationInfo = { mode: "rag", grounded: false, reason }
     const local: Message[] = [

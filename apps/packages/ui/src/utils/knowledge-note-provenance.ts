@@ -363,6 +363,41 @@ export const stripKnowledgeNoteProvenance = (content: string): string => {
   return removed ? body.trimEnd() : content;
 };
 
+/** Rebase only unsaved capture additions; the fresh canonical head owns all older history. */
+export const reconcileCapturedNoteProvenance = (
+  local: KnowledgeNoteHead & {
+    pendingKnowledgeProvenance?: KnowledgeNoteProvenance;
+    content?: string;
+  },
+  remote: KnowledgeNoteHead,
+): KnowledgeNoteProvenance | undefined => {
+  if (
+    !local.pendingKnowledgeProvenance ||
+    remote.knowledge_provenance_state === "deleted" ||
+    remote.knowledge_provenance_state === "unsupported"
+  )
+    return undefined;
+  const pending = validateKnowledgeNoteProvenance(local.pendingKnowledgeProvenance);
+  if (!pending) throw new Error("Source history is invalid or too large to save");
+  const base = resolveKnowledgeNoteProvenance(local).provenance;
+  const latest = resolveKnowledgeNoteProvenance(remote).provenance;
+  if (knowledgeNoteProvenanceMatches(base, latest)) return pending;
+  const sources = [...(latest?.sources || [])];
+  for (const reference of pending.sources || []) {
+    if (
+      !(base?.sources || []).some((item) => knowledgeNoteProvenanceMatches(item, reference)) &&
+      !sources.some((item) => knowledgeNoteProvenanceMatches(item, reference))
+    )
+      sources.push(reference);
+  }
+  const result = validateKnowledgeNoteProvenance({
+    ...(latest || (base ? { origin: "reviewed_sources" } : pending)),
+    sources,
+  });
+  if (!result) throw new Error("Source history is invalid or too large to save");
+  return knowledgeNoteProvenanceMatches(result, latest) ? undefined : result;
+};
+
 /** Explicit cited-message capture merges evidence without changing the saved canonical head. */
 export const appendCapturedNoteProvenance = (
   head: KnowledgeNoteHead & {

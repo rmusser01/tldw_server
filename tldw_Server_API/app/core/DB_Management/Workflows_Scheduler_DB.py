@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, QueryResult
 from .backends.factory import DatabaseBackendFactory
+from .backends.sqlite_backend import SQLiteBackend
 
 
 def _utcnow_iso() -> str:
@@ -36,6 +39,7 @@ CREATE TABLE IF NOT EXISTS workflow_schedules (
     tenant_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     workflow_id INTEGER,
+    managed_watchlist_job_id BIGINT,
     name TEXT,
     cron TEXT NOT NULL,
     timezone TEXT,
@@ -69,6 +73,7 @@ CREATE TABLE IF NOT EXISTS workflow_schedules (
     tenant_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     workflow_id INTEGER,
+    managed_watchlist_job_id INTEGER,
     name TEXT,
     cron TEXT NOT NULL,
     timezone TEXT,
@@ -96,6 +101,8 @@ CREATE INDEX IF NOT EXISTS idx_wf_sched_tenant ON workflow_schedules(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_wf_sched_user ON workflow_schedules(user_id);
 """
 
+MANAGED_WATCHLIST_FIELDS = frozenset({"cron", "timezone", "enabled", "inputs", "inputs_json"})
+
 
 @dataclass
 class WorkflowSchedule:
@@ -121,93 +128,90 @@ class WorkflowSchedule:
     last_status: str | None
     created_at: str
     updated_at: str
+    managed_watchlist_job_id: int | None = None
 
 
 class WorkflowsSchedulerDB:
     def __init__(self, backend: DatabaseBackend | None = None, *, user_id: int | None = None) -> None:
-        if backend is not None:
-            self.backend = backend
-        else:
-            cfg = DatabaseConfig.from_env()
-            effective_user = user_id if user_id is not None else DatabasePaths.get_single_user_id()
-            default_path = DatabasePaths.get_workflows_scheduler_db_path(effective_user)
-
-            # Allow dedicated scheduler database URL override
-            custom_url = os.getenv("WORKFLOWS_SCHEDULER_DATABASE_URL")
-            if custom_url:
-                parsed = urlparse(custom_url)
-                scheme = (parsed.scheme or "").lower()
-                if scheme in {"sqlite", ""}:
-                    cfg.backend_type = BackendType.SQLITE
-                    raw_path = parsed.path or ""
-                    if raw_path.startswith("/./"):
-                        raw_path = raw_path[1:]
-                    if raw_path.startswith("/") and raw_path != "/:memory:":
-                        candidate = Path(raw_path)
-                    else:
-                        candidate = Path(raw_path or default_path.name)
-                        candidate = default_path.parent / candidate
-                    cfg.sqlite_path = str(candidate)
-                elif scheme in {"postgres", "postgresql"}:
-                    cfg = DatabaseConfig(
-                        backend_type=BackendType.POSTGRESQL,
-                        connection_string=custom_url,
-                    )
-                    cfg.pg_host = parsed.hostname or "localhost"
-                    try:
-                        cfg.pg_port = int(parsed.port or 5432)
-                    except Exception:
-                        cfg.pg_port = 5432
-                    cfg.pg_database = (parsed.path or "/").lstrip("/") or None
-                    cfg.pg_user = parsed.username or None
-                    cfg.pg_password = parsed.password or None
-                # Other schemes fall back to default cfg
-
-            # Allow explicit sqlite path override
-            custom_path = os.getenv("WORKFLOWS_SCHEDULER_SQLITE_PATH")
-            if custom_path:
-                cfg.backend_type = BackendType.SQLITE
-                cfg.sqlite_path = custom_path
-
-            # Do not inherit arbitrary global SQLite DB paths (e.g. DATABASE_URL
-            # for AuthNZ/content). When scheduler-specific overrides are absent,
-            # default scheduler storage should use the dedicated per-user path.
-            if (
-                not custom_url
-                and not custom_path
-                and cfg.backend_type == BackendType.SQLITE
-            ):
-                cfg.sqlite_path = str(default_path)
-
-            if cfg.backend_type == BackendType.SQLITE:
-                sqlite_path_str = (cfg.sqlite_path or "").strip()
-                default_candidates = {
-                    "",
-                    "./Databases/workflows_scheduler.db",
-                    "Databases/workflows_scheduler.db",
-                    "workflows_scheduler.db",
-                    "./Databases/workflows.db",
-                    "Databases/workflows.db",
-                    "workflows.db",
-                }
-                if sqlite_path_str in default_candidates:
-                    sqlite_path = default_path
-                else:
-                    sqlite_path = Path(sqlite_path_str)
-                    if not sqlite_path.is_absolute():
-                        sqlite_path = (default_path.parent / sqlite_path).resolve()
+        if backend is None:
+            cfg = self._database_config(user_id)
+            if cfg.backend_type == BackendType.SQLITE and cfg.sqlite_path:
+                parent = Path(cfg.sqlite_path).parent
                 try:
-                    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+                    parent.mkdir(parents=True, exist_ok=True)
                 except OSError as e:
-                    logger.error(f"WorkflowsSchedulerDB: failed to create directory {sqlite_path.parent}: {e}")
+                    logger.error(f"WorkflowsSchedulerDB: failed to create directory {parent}: {e}")
                     raise
-                cfg.sqlite_path = str(sqlite_path)
-
-            self.backend = DatabaseBackendFactory.create_backend(cfg)
+            backend = DatabaseBackendFactory.create_backend(cfg)
+        self.backend = backend
         self._ensure_schema()
         sqlite_target = self._sqlite_target_for_logging()
         if sqlite_target is not None:
             logger.info("WorkflowsSchedulerDB using SQLite path: {}", sqlite_target)
+
+    @staticmethod
+    def _database_config(user_id: int | None) -> DatabaseConfig:
+        cfg = DatabaseConfig.from_env()
+        effective_user = user_id if user_id is not None else DatabasePaths.get_single_user_id()
+        default_path = (
+            DatabasePaths.resolve_user_base_directory(effective_user)
+            / DatabasePaths.WORKFLOWS_SUBDIR / DatabasePaths.WORKFLOWS_SCHEDULER_DB_NAME
+        )
+        custom_url = os.getenv("WORKFLOWS_SCHEDULER_DATABASE_URL")
+        if custom_url:
+            parsed = urlparse(custom_url)
+            scheme = (parsed.scheme or "").lower()
+            if scheme in {"sqlite", ""}:
+                cfg.backend_type = BackendType.SQLITE
+                raw_path = parsed.path or ""
+                if raw_path.startswith("/./"):
+                    raw_path = raw_path[1:]
+                if raw_path.startswith("/") and raw_path != "/:memory:":
+                    candidate = Path(raw_path)
+                else:
+                    candidate = default_path.parent / Path(raw_path or default_path.name)
+                cfg.sqlite_path = str(candidate)
+            elif scheme in {"postgres", "postgresql"}:
+                cfg = DatabaseConfig(backend_type=BackendType.POSTGRESQL, connection_string=custom_url)
+                cfg.pg_host = parsed.hostname or "localhost"
+                try:
+                    cfg.pg_port = int(parsed.port or 5432)
+                except ValueError:
+                    cfg.pg_port = 5432
+                cfg.pg_database = (parsed.path or "/").lstrip("/") or None
+                cfg.pg_user = parsed.username or None
+                cfg.pg_password = parsed.password or None
+
+        custom_path = os.getenv("WORKFLOWS_SCHEDULER_SQLITE_PATH")
+        if custom_path:
+            cfg.backend_type = BackendType.SQLITE
+            cfg.sqlite_path = custom_path
+        if cfg.backend_type == BackendType.SQLITE:
+            defaults = {
+                "", "./Databases/workflows_scheduler.db", "Databases/workflows_scheduler.db",
+                "workflows_scheduler.db", "./Databases/workflows.db", "Databases/workflows.db", "workflows.db",
+            }
+            path = (cfg.sqlite_path or "").strip() if custom_url or custom_path else ""
+            sqlite_path = default_path if path in defaults else Path(path)
+            if not sqlite_path.is_absolute():
+                sqlite_path = (default_path.parent / sqlite_path).resolve()
+            cfg.sqlite_path = str(sqlite_path)
+        return cfg
+
+    @classmethod
+    @contextmanager
+    def open_existing_sqlite(cls, user_id: int) -> Iterator[WorkflowsSchedulerDB | None]:
+        cfg = cls._database_config(user_id)
+        if cfg.backend_type != BackendType.SQLITE:
+            yield None
+            return
+        with SQLiteBackend.open_existing(cfg) as backend:
+            if backend is None or not backend.table_exists("workflow_schedules"):
+                yield None
+                return
+            store = cls.__new__(cls)
+            store.backend = backend
+            yield store
 
     def _sqlite_target_for_logging(self) -> str | None:
         cfg = getattr(self.backend, "config", None)
@@ -240,6 +244,7 @@ class WorkflowsSchedulerDB:
                     "last_status": "ALTER TABLE workflow_schedules ADD COLUMN last_status TEXT",
                     "jitter_sec": "ALTER TABLE workflow_schedules ADD COLUMN jitter_sec INTEGER NOT NULL DEFAULT 0",
                     "acp_config_json": "ALTER TABLE workflow_schedules ADD COLUMN acp_config_json TEXT",
+                    "managed_watchlist_job_id": "ALTER TABLE workflow_schedules ADD COLUMN IF NOT EXISTS managed_watchlist_job_id BIGINT",
                 }
             else:
                 column_sql = {
@@ -252,6 +257,7 @@ class WorkflowsSchedulerDB:
                     "last_status": "ALTER TABLE workflow_schedules ADD COLUMN last_status TEXT",
                     "jitter_sec": "ALTER TABLE workflow_schedules ADD COLUMN jitter_sec INTEGER NOT NULL DEFAULT 0",
                     "acp_config_json": "ALTER TABLE workflow_schedules ADD COLUMN acp_config_json TEXT",
+                    "managed_watchlist_job_id": "ALTER TABLE workflow_schedules ADD COLUMN managed_watchlist_job_id INTEGER",
                 }
 
             for column, statement in column_sql.items():
@@ -302,6 +308,7 @@ class WorkflowsSchedulerDB:
         misfire_grace_sec: int = 300,
         coalesce: bool = True,
         acp_config_json: str | None = None,
+        managed_watchlist_job_id: int | None = None,
     ) -> None:
         now = _utcnow_iso()
         params = (
@@ -309,6 +316,7 @@ class WorkflowsSchedulerDB:
             tenant_id,
             user_id,
             workflow_id,
+            managed_watchlist_job_id,
             name,
             cron,
             timezone,
@@ -330,9 +338,9 @@ class WorkflowsSchedulerDB:
         )
         sql = (
             "INSERT INTO workflow_schedules("
-            "id,tenant_id,user_id,workflow_id,name,cron,timezone,inputs_json,run_mode,validation_mode,enabled,require_online,"
+            "id,tenant_id,user_id,workflow_id,managed_watchlist_job_id,name,cron,timezone,inputs_json,run_mode,validation_mode,enabled,require_online,"
             "concurrency_mode,misfire_grace_sec,coalesce,jitter_sec,acp_config_json,last_run_at,next_run_at,last_status,created_at,updated_at"
-            ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         )
         with self.backend.transaction() as conn:
             self.backend.execute(sql, params, connection=conn)
@@ -365,13 +373,41 @@ class WorkflowsSchedulerDB:
         set_clause = ", ".join(fields)
         update_schedule_sql_template = "UPDATE workflow_schedules SET {set_clause} WHERE id = ?"
         sql = update_schedule_sql_template.format_map(locals())  # nosec B608
+        if MANAGED_WATCHLIST_FIELDS.intersection(update):
+            sql += " AND managed_watchlist_job_id IS NULL"
         with self.backend.transaction() as conn:
             res = self.backend.execute(sql, tuple(params), connection=conn)
         return (getattr(res, "rowcount", 0) or 0) > 0
 
-    def delete_schedule(self, id: str) -> bool:
+    def bind_managed_watchlist(self, schedule_id: str, *, user_id: str, job_id: int) -> bool:
+        """Mark an existing owner-linked cron before detaching it."""
         with self.backend.transaction() as conn:
-            res = self.backend.execute("DELETE FROM workflow_schedules WHERE id = ?", (id,), connection=conn)
+            result = self.backend.execute(
+                """UPDATE workflow_schedules SET managed_watchlist_job_id = ?
+                   WHERE id = ? AND user_id = ? AND workflow_id IS NULL AND acp_config_json IS NULL
+                     AND (managed_watchlist_job_id IS NULL OR managed_watchlist_job_id = ?)""",
+                (job_id, schedule_id, user_id, job_id), connection=conn,
+            )
+        return bool(result.rowcount)
+
+    def delete_schedule(
+        self, id: str, *, user_id: str | None = None, managed_watchlist_job_id: int | None = None,
+    ) -> bool:
+        with self.backend.transaction() as conn:
+            if managed_watchlist_job_id is not None:
+                if user_id is None:
+                    raise ValueError("Managed schedule deletion requires an owner")
+                res = self.backend.execute(
+                    """DELETE FROM workflow_schedules WHERE id = ? AND user_id = ? AND managed_watchlist_job_id = ?
+                       AND workflow_id IS NULL AND acp_config_json IS NULL""",
+                    (id, user_id, managed_watchlist_job_id), connection=conn,
+                )
+            elif user_id is None:
+                res = self.backend.execute("DELETE FROM workflow_schedules WHERE id = ?", (id,), connection=conn)
+            else:
+                res = self.backend.execute(
+                    "DELETE FROM workflow_schedules WHERE id = ? AND user_id = ?", (id, user_id), connection=conn,
+                )
         return (getattr(res, "rowcount", 0) or 0) > 0
 
     def get_schedule(self, id: str) -> WorkflowSchedule | None:
@@ -390,7 +426,8 @@ class WorkflowsSchedulerDB:
             coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0),
             acp_config_json=r.get("acp_config_json"),
             last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
-            last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at")
+            last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at"),
+            managed_watchlist_job_id=r.get("managed_watchlist_job_id"),
         )
 
     def list_schedules(
@@ -422,7 +459,8 @@ class WorkflowsSchedulerDB:
                     coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0),
                     acp_config_json=r.get("acp_config_json"),
                     last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
-                    last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at")
+                    last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at"),
+                    managed_watchlist_job_id=r.get("managed_watchlist_job_id"),
                 )
             )
         return out
@@ -454,7 +492,8 @@ class WorkflowsSchedulerDB:
                     concurrency_mode=(r.get("concurrency_mode") or "skip"), misfire_grace_sec=int(r.get("misfire_grace_sec") or 300),
                     coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0), acp_config_json=r.get("acp_config_json"),
                     last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
-                    last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at")
+                    last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at"),
+                    managed_watchlist_job_id=r.get("managed_watchlist_job_id"),
                 )
             )
         return out

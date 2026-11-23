@@ -1,29 +1,80 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "@/services/resource-client"
-
-const KEYWORDS_CACHE_TTL_MS = 5 * 60 * 1000
-
-type KeywordCacheEntry = {
-  data: string[]
-  expiresAt: number
-}
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { resolveServicePromptScope } from "@/services/service-prompts"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
+import {
+  createServicePromptScopeChangedError,
+  servicePromptPrincipalMatches,
+  servicePromptSingleUserApiKeyScopeMatches,
+  servicePromptTargetsMatch
+} from "@/services/tldw/service-prompt-scope-error"
 
 export type NoteKeywordStat = {
   keyword: string
   noteCount: number
 }
 
-type KeywordStatsCacheEntry = {
-  data: NoteKeywordStat[]
-  expiresAt: number
-}
+type KeywordRequest = (path: string) => Promise<unknown>
+const keywordCredentialFields = ["accessToken", "refreshToken", "apiKey", "apiBearer"] as const
 
-const listCache = new Map<number, KeywordCacheEntry>()
-const listInFlight = new Map<number, Promise<string[]>>()
-const allCache = new Map<number, KeywordCacheEntry>()
-const allInFlight = new Map<number, Promise<string[]>>()
-const allStatsCache = new Map<number, KeywordStatsCacheEntry>()
-const allStatsInFlight = new Map<number, Promise<NoteKeywordStat[]>>()
+const withKeywordRead = async <T>(read: (request: KeywordRequest) => Promise<T>): Promise<T> => {
+  const controller = new AbortController()
+  let capturedConfig: Readonly<TldwConfig> | null = null
+  const stopWatching = watchChatAccountChanges((invalidated, currentConfig) => {
+    if (invalidated || (currentConfig !== undefined && (!currentConfig || !capturedConfig ||
+      keywordCredentialFields.some(key => currentConfig[key] !== capturedConfig?.[key])))) {
+      controller.abort()
+    }
+  })
+  // Config events omit credentials; a later reread cannot detect same-turn ABA.
+  const configUpdated = () => controller.abort()
+  if (typeof window !== "undefined") window.addEventListener("tldw:config-updated", configUpdated)
+  const assertActive = () => {
+    if (controller.signal.aborted) throw createServicePromptScopeChangedError()
+  }
+  try {
+    const scope = await resolveServicePromptScope({ signal: controller.signal })
+    assertActive()
+    const config = await tldwClient.ensureConfigForRequest(true)
+    assertActive()
+    if (!config || !servicePromptTargetsMatch(config, scope.config)) {
+      throw createServicePromptScopeChangedError()
+    }
+    const configSnapshot = Object.freeze({ ...config })
+    capturedConfig = configSnapshot
+    const assertCurrent = async () => {
+      assertActive()
+      const current = await tldwClient.ensureConfigForRequest(true)
+      assertActive()
+      if (!current || !servicePromptTargetsMatch(current, scope.config) ||
+        !servicePromptSingleUserApiKeyScopeMatches(current, scope.config.expectedSingleUserApiKeyScope) ||
+        (current.authSource !== "cookie-session" && !servicePromptPrincipalMatches(current, scope.userId)) ||
+        keywordCredentialFields.some(key =>
+          current[key] !== configSnapshot[key]
+        )) throw createServicePromptScopeChangedError()
+    }
+    const { headers } = requestScopeFields({ config: scope.config, userId: scope.userId })
+    const result = await read(async path => {
+      await assertCurrent()
+      assertActive()
+      // These paths use the captured-config transport, not the Service Prompt allowlist.
+      const response = await bgRequest({
+        path: path as any, method: "GET", configSnapshot, headers, abortSignal: controller.signal
+      })
+      await assertCurrent()
+      assertActive()
+      return response
+    })
+    await assertCurrent()
+    assertActive()
+    return result
+  } finally {
+    stopWatching()
+    if (typeof window !== "undefined") window.removeEventListener("tldw:config-updated", configUpdated)
+  }
+}
 
 export const normalizeNoteKeyword = (value: any): string | null => {
   const raw =
@@ -74,117 +125,53 @@ const dedupeKeywordStats = (items: NoteKeywordStat[]): NoteKeywordStat[] => {
   return Array.from(seen.values())
 }
 
-export const getNoteKeywords = async (limit = 200): Promise<string[]> => {
-  const now = Date.now()
-  const cached = listCache.get(limit)
-  if (cached && cached.expiresAt > now) return cached.data
-
-  const inFlight = listInFlight.get(limit)
-  if (inFlight) return inFlight
-
-  const request = (async () => {
-    const abs = await bgRequest<any>({
-      path: `/api/v1/notes/keywords/${buildQuery({ limit })}` as any,
-      method: "GET" as any
-    })
+export const getNoteKeywords = async (limit = 200): Promise<string[]> =>
+  withKeywordRead(async request => {
+    const abs = await request(`/api/v1/notes/keywords/${buildQuery({ limit })}`)
     const arr = Array.isArray(abs)
       ? abs
           .map((item: any) => normalizeNoteKeyword(item))
           .filter(Boolean) as string[]
       : []
-    const deduped = dedupeKeywords(arr)
-    listCache.set(limit, {
-      data: deduped,
-      expiresAt: Date.now() + KEYWORDS_CACHE_TTL_MS
-    })
-    return deduped
-  })()
+    return dedupeKeywords(arr)
+  })
 
-  listInFlight.set(limit, request)
-  try {
-    return await request
-  } finally {
-    listInFlight.delete(limit)
+export const getAllNoteKeywords = async (pageSize = 1000): Promise<string[]> =>
+  withKeywordRead(async request => {
+    const stats = await readAllNoteKeywordStats(request, pageSize)
+    return dedupeKeywords(stats.map((entry) => entry.keyword))
+  })
+
+const readAllNoteKeywordStats = async (request: KeywordRequest, pageSize: number): Promise<NoteKeywordStat[]> => {
+  const out: NoteKeywordStat[] = []
+  let offset = 0
+  const maxPages = 100
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const abs = await request(`/api/v1/notes/keywords/${buildQuery({ limit: pageSize, offset, include_note_counts: true })}`)
+    const arr = Array.isArray(abs)
+      ? abs
+          .map((item: any) => {
+            const keyword = normalizeNoteKeyword(item)
+            if (!keyword) return null
+            return {
+              keyword,
+              noteCount: normalizeNoteCount(item)
+            } as NoteKeywordStat
+          })
+          .filter(Boolean) as NoteKeywordStat[]
+      : []
+    if (!arr.length) break
+    out.push(...arr)
+    if (arr.length < pageSize) break
+    offset += pageSize
   }
+
+  return dedupeKeywordStats(out)
 }
 
-export const getAllNoteKeywords = async (pageSize = 1000): Promise<string[]> => {
-  const now = Date.now()
-  const cached = allCache.get(pageSize)
-  if (cached && cached.expiresAt > now) return cached.data
-
-  const inFlight = allInFlight.get(pageSize)
-  if (inFlight) return inFlight
-
-  const request = (async () => {
-    const stats = await getAllNoteKeywordStats(pageSize)
-    const deduped = dedupeKeywords(stats.map((entry) => entry.keyword))
-    allCache.set(pageSize, {
-      data: deduped,
-      expiresAt: Date.now() + KEYWORDS_CACHE_TTL_MS
-    })
-    return deduped
-  })()
-
-  allInFlight.set(pageSize, request)
-  try {
-    return await request
-  } finally {
-    allInFlight.delete(pageSize)
-  }
-}
-
-export const getAllNoteKeywordStats = async (pageSize = 1000): Promise<NoteKeywordStat[]> => {
-  const now = Date.now()
-  const cached = allStatsCache.get(pageSize)
-  if (cached && cached.expiresAt > now) return cached.data
-
-  const inFlight = allStatsInFlight.get(pageSize)
-  if (inFlight) return inFlight
-
-  const request = (async () => {
-    const out: NoteKeywordStat[] = []
-    let offset = 0
-    const maxPages = 100
-
-    for (let page = 0; page < maxPages; page += 1) {
-      const abs = await bgRequest<any>({
-        path: `/api/v1/notes/keywords/${buildQuery({ limit: pageSize, offset, include_note_counts: true })}` as any,
-        method: "GET" as any
-      })
-      const arr = Array.isArray(abs)
-        ? abs
-            .map((item: any) => {
-              const keyword = normalizeNoteKeyword(item)
-              if (!keyword) return null
-              return {
-                keyword,
-                noteCount: normalizeNoteCount(item)
-              } as NoteKeywordStat
-            })
-            .filter(Boolean) as NoteKeywordStat[]
-        : []
-      if (!arr.length) break
-      out.push(...arr)
-      if (arr.length < pageSize) break
-      offset += pageSize
-    }
-
-    const deduped = dedupeKeywordStats(out)
-    allStatsCache.set(pageSize, {
-      data: deduped,
-      expiresAt: Date.now() + KEYWORDS_CACHE_TTL_MS
-    })
-    return deduped
-  })()
-
-  allStatsInFlight.set(pageSize, request)
-  try {
-    return await request
-  } finally {
-    allStatsInFlight.delete(pageSize)
-  }
-}
+export const getAllNoteKeywordStats = async (pageSize = 1000): Promise<NoteKeywordStat[]> =>
+  withKeywordRead(request => readAllNoteKeywordStats(request, pageSize))
 
 export const searchNoteKeywords = async (
   query: string,
@@ -192,14 +179,13 @@ export const searchNoteKeywords = async (
 ): Promise<string[]> => {
   const q = String(query || "").trim()
   if (!q) return []
-  const abs = await bgRequest<any>({
-    path: `/api/v1/notes/keywords/search/${buildQuery({ query: q, limit })}` as any,
-    method: "GET" as any
+  return withKeywordRead(async request => {
+    const abs = await request(`/api/v1/notes/keywords/search/${buildQuery({ query: q, limit })}`)
+    const arr = Array.isArray(abs)
+      ? abs
+          .map((item: any) => normalizeNoteKeyword(item))
+          .filter(Boolean) as string[]
+      : []
+    return dedupeKeywords(arr)
   })
-  const arr = Array.isArray(abs)
-    ? abs
-        .map((item: any) => normalizeNoteKeyword(item))
-        .filter(Boolean) as string[]
-    : []
-  return dedupeKeywords(arr)
 }

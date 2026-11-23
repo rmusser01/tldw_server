@@ -1,4 +1,7 @@
 export const WORKSPACE_STORAGE_KEY = "tldw-workspace"
+export const WORKSPACE_STORAGE_SPLIT_KEY_PREFIX = `${WORKSPACE_STORAGE_KEY}:workspace:`
+const WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER =
+  "__tldwResearchWorkspaceFreshInitialization"
 export const WORKSPACE_STORAGE_QUOTA_EVENT =
   "tldw:workspace-storage-quota-error"
 export const WORKSPACE_STORAGE_RECOVERY_EVENT =
@@ -9,7 +12,53 @@ export const WORKSPACE_CONFLICT_NOTICE_THROTTLE_MS = 8000
 
 type WorkspaceWindow = Window & {
   __TLDW_ENABLE_WORKSPACE_BROADCAST_SYNC__?: boolean
+  [WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER]?: Set<string>
 }
+
+export const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
+  if (typeof window === "undefined") return []
+  const keys: string[] = []
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index)
+      if (!key) continue
+      if (
+        key === WORKSPACE_STORAGE_KEY ||
+        key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX) ||
+        key.startsWith("tldw:research-workspace:") ||
+        key.startsWith("tldw:workspace:playground:")
+      ) {
+        keys.push(key)
+      }
+    }
+  } catch {
+    return []
+  }
+  return keys.sort()
+}
+
+export const markFreshWorkspaceInitializationForRuntime = (
+  workspaceId: string
+): void => {
+  if (typeof window === "undefined" || !workspaceId) return
+  const runtimeWindow = window as WorkspaceWindow
+  const initializedWorkspaceIds =
+    runtimeWindow[WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER] ??
+    new Set<string>()
+  initializedWorkspaceIds.add(workspaceId)
+  runtimeWindow[WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER] =
+    initializedWorkspaceIds
+}
+
+export const wasWorkspaceFreshlyInitializedInRuntime = (
+  workspaceId: string
+): boolean =>
+  typeof window !== "undefined" &&
+  Boolean(
+    (window as WorkspaceWindow)[
+      WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER
+    ]?.has(workspaceId)
+  )
 
 export interface WorkspaceStorageQuotaEventDetail {
   key: string
@@ -52,9 +101,7 @@ export const isWorkspaceBroadcastSyncEnabled = (): boolean => {
   }
 
   try {
-    return (
-      window.localStorage.getItem(WORKSPACE_BROADCAST_SYNC_FLAG) === "1"
-    )
+    return window.localStorage.getItem(WORKSPACE_BROADCAST_SYNC_FLAG) === "1"
   } catch {
     return false
   }

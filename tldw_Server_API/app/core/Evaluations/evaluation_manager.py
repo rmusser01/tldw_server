@@ -554,6 +554,8 @@ class EvaluationManager:
         api_name: str = "openai",
         api_key: Optional[str] = None,
         provider_credentials: Any = None,
+        model_override: Optional[str] = None,
+        require_grade: bool = False,
     ) -> dict[str, Any]:
         """Evaluate using custom metric definition.
 
@@ -561,6 +563,7 @@ class EvaluationManager:
         run on the key of ``provider_credentials`` when it is given (the user's own key; TASK-15426), else on
         ``api_key`` or the server's. ``score`` is None when the item has no score (its model or judge call failed,
         or the reply held none): the callers count it unscored, in no average (TASK-15485).
+        SimpleQA declares require_grade to use categorical instead of numeric output.
         """
         runtime_input_data = dict(input_data)
         if self._contains_model_response_placeholder(runtime_input_data):
@@ -597,7 +600,9 @@ class EvaluationManager:
 
         # Add scoring criteria to prompt
         criteria_text = "\n".join([f"- {k}: {v}" for k, v in scoring_criteria.items()])
-        full_prompt = f"{formatted_prompt}\n\nScoring Criteria:\n{criteria_text}\n\nProvide a score from 1-10 and explanation."
+        full_prompt = f"{formatted_prompt}\n\nScoring Criteria:\n{criteria_text}"
+        if not require_grade:
+            full_prompt += "\n\nProvide a score from 1-10 and explanation."
 
         try:
             # Get evaluation from LLM
@@ -611,6 +616,7 @@ class EvaluationManager:
                 system_message="You are an expert evaluator. Provide scores and detailed explanations.",
                 input_is_literal_text=True,
                 provider_credentials=provider_credentials,
+                **({"model_override": model_override} if model_override else {}),
             )
 
             # A failed judge call (provider error, timeout, rate limit, truncated or empty reply)
@@ -631,7 +637,14 @@ class EvaluationManager:
                 parsed = json_module.loads(response)
             except (json_module.JSONDecodeError, ValueError):
                 parsed = None
-            if isinstance(parsed, dict):
+            if require_grade:
+                grade = re.search(
+                    r'\bGRADE[*_\t ]*:[*_\t \[]*(correct|incorrect|not[_ ]attempted)[\t *_\]]*(?=\r?$|EXPLANATION[ \t]*:)',
+                    response, re.MULTILINE | re.IGNORECASE
+                )
+                if grade:
+                    score = 1.0 if grade.group(1).lower() == "correct" else 0.0
+            elif isinstance(parsed, dict):
                 raw_score = parsed.get('score')
                 if isinstance(raw_score, str):  # {"score": "8"}: a numeric string is a score a human would read; "1_0" is not
                     raw_score = float(raw_score) if re.fullmatch(r'\d+(?:\.\d+)?', raw_score.strip()) else None
@@ -648,12 +661,14 @@ class EvaluationManager:
                 # form ("1e308", "15e3", "3.0e2") is not a 1-10 score, so no part of it is read as one: the
                 # digits are an atomic group, so the lookahead cannot be dodged by giving back a digit
                 number = r'((?>\d+(?:\.\d+)?))(?![eE][-+]?\d)'
+                score_end = r'[ \t*_]*(?=\r?$|EXPLANATION[ \t]*:)'
+                field_end = rf'(?:[ \t]*/[ \t]*10)?(?:[ \t]+points?)?{score_end}'
                 score_patterns = [
                     # the labelled "SCORE: 8" (also "**SCORE:** 8") wins over prose such as "Score 10 for a correct answer"
-                    rf'(?:score|rating)[*_\s]*:[*_\s]*{number}\s*(?:/\s*10)?',
+                    rf'\b(?:score|rating)[*_\t ]*:[*_\t ]*{number}{field_end}',
                     # a separator is required: a restated rubric ("Score 10 for a correct answer") is not the score
-                    rf'score\s*(?:=|is)\s*{number}\s*(?:/\s*10)?',
-                    rf'{number}\s*(?:/\s*10)\s+points?',  # 8/10 points
+                    rf'\bscore[ \t]*(?:=|is)[ \t]*{number}{field_end}',
+                    rf'^[ \t]*{number}[ \t]*/[ \t]*10[ \t]+points?{score_end}',
                     rf'^{number}\s*$'  # Just a number on its own line
                 ]
 
@@ -668,15 +683,6 @@ class EvaluationManager:
                                 break
                         except (ValueError, IndexError):
                             continue
-
-                # SimpleQA's grader answers with a grade (simpleqa_eval.parse_grading_response); it decides.
-                # Only a prompt that asks for a GRADE reads one ("Grade: ..." elsewhere is prose), and a restated
-                # format line "GRADE: [correct/incorrect/not_attempted]" is not a grade (no "/" may follow the word).
-                grade = re.search(
-                    r'GRADE[*_\s]*:[*_\s\[]*(correct|incorrect|not[_ ]attempted)\b(?!/)', response, re.IGNORECASE
-                )
-                if grade and "GRADE:" in evaluation_prompt:
-                    score = 1.0 if grade.group(1).lower() == "correct" else 0.0
 
                 # Extract explanation (everything after first score mention or first newline)
                 if '\n' in response:
@@ -723,10 +729,15 @@ class EvaluationManager:
         if question:
             choices = visible.get("choices")
             if choices:
+                instruction = (
+                    "Choose the answer letter and briefly explain your reasoning."
+                    if visible.get("require_reasoning") is True
+                    else "Answer the question directly."
+                )
                 return (
                     f"Question:\n{question}\n\n"
                     f"Choices:\n{choices}\n\n"
-                    "Answer the question directly."
+                    f"{instruction}"
                 )
             return str(question)
 

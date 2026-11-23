@@ -19,7 +19,9 @@ import json
 import os
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any
+from functools import partial
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers.base import STATE_PAUSED, STATE_RUNNING
@@ -29,6 +31,7 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.config import settings as core_settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     DatabaseError as BackendDatabaseError,
@@ -48,6 +51,9 @@ from tldw_Server_API.app.core.Scheduler.handlers import (
     workflows as _ensure_handlers,  # noqa: F401  # register workflow_run
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.DB_Management.Watchlists_DB import JobRow, WatchlistsDatabase
 
 _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
@@ -89,6 +95,11 @@ def build_schedule_payload(schedule: WorkflowSchedule) -> dict[str, Any]:
             exc,
         )
         inputs = {}
+    if schedule.managed_watchlist_job_id is not None:
+        inputs = {
+            **(inputs if isinstance(inputs, dict) else {}),
+            "watchlist_job_id": schedule.managed_watchlist_job_id,
+        }
     return {
         "workflow_id": schedule.workflow_id,
         "inputs": inputs,
@@ -260,12 +271,15 @@ class _WFRecurringScheduler:
             logger.info(f"Workflows scheduler: registered {loaded} schedule(s)")
 
     def _schedule_scan_user_ids(self) -> list[int]:
-        fallback_user_id = DatabasePaths.get_single_user_id()
         if self._db.backend.config.backend_type == BackendType.POSTGRESQL:
-            return [fallback_user_id]
-        user_ids = {fallback_user_id}
+            return [DatabasePaths.get_single_user_id()]
+        return self._local_schedule_user_ids()
+
+    @staticmethod
+    def _local_schedule_user_ids() -> list[int]:
+        user_ids = {DatabasePaths.get_single_user_id()}
         try:
-            base = DatabasePaths.get_user_db_base_dir()
+            base = DatabasePaths.resolve_user_db_base_dir()
             for p in base.iterdir():
                 if p.is_dir():
                     try:
@@ -284,6 +298,11 @@ class _WFRecurringScheduler:
             self._db_cache[user_id] = WorkflowsSchedulerDB(user_id=user_id)
         return self._db_cache[user_id]
 
+    def _existing_schedule_store(self, user_id: int) -> contextlib.AbstractContextManager[WorkflowsSchedulerDB | None]:
+        if self._db.backend.config.backend_type == BackendType.POSTGRESQL:
+            return contextlib.nullcontext(self._db)
+        return WorkflowsSchedulerDB.open_existing_sqlite(user_id)
+
     def _list_registered_schedules(self, user_id: int) -> list[WorkflowSchedule]:
         """Return every persisted schedule visible in a user's scheduler DB.
 
@@ -291,24 +310,18 @@ class _WFRecurringScheduler:
         single DB handle, so this intentionally uses ``user_id=None`` and pages
         until the DB returns a short page.
         """
-        db = self._get_db(user_id)
         page_size = 1000
         offset = 0
         schedules: list[WorkflowSchedule] = []
-        while True:
-            if hasattr(db, "list_all_schedules"):
-                page = db.list_all_schedules(user_id=None, limit=page_size, offset=offset)
-            else:
-                page = db.list_schedules(
-                    tenant_id="default",
-                    user_id=None,
-                    limit=page_size,
-                    offset=offset,
-                )
-            schedules.extend(page)
-            if len(page) < page_size:
+        with self._existing_schedule_store(user_id) as db:
+            if db is None:
                 return schedules
-            offset += len(page)
+            while True:
+                page = db.list_all_schedules(user_id=None, limit=page_size, offset=offset)
+                schedules.extend(page)
+                if len(page) < page_size:
+                    return schedules
+                offset += len(page)
 
     @staticmethod
     def _resolve_schedule_owner_id(schedule: WorkflowSchedule, *, fallback_user_id: int) -> int:
@@ -325,10 +338,13 @@ class _WFRecurringScheduler:
     async def _rescan_once(self) -> None:
         if not self._aps:
             return
+        schedule_owners = self._schedule_scan_user_ids()
+        if await self._may_submit_cron():
+            await self._recover_schedule_retirements(schedule_owners)
         # Collect desired enabled schedule IDs from all users
         desired: set[str] = set()
         seen_schedule_ids: set[str] = set()
-        for uid in self._schedule_scan_user_ids():
+        for uid in schedule_owners:
             try:
                 items = self._list_registered_schedules(uid)
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
@@ -355,6 +371,40 @@ class _WFRecurringScheduler:
                     logger.debug(f"Workflows scheduler: failed to remove job {jid}: {e}")
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Workflows scheduler: failed to reconcile jobs: {e}")
+
+    async def _recover_schedule_retirements(self, schedule_owners: list[int]) -> None:
+        from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+
+        shared_scheduler = self._db.backend.config.backend_type == BackendType.POSTGRESQL
+        try:
+            content = WatchlistsDatabase.shared_retirement_backend()
+            if content is not None:
+                with scoped_context(user_id=None, is_admin=True):
+                    known = WatchlistsDatabase.list_shared_retirement_owners(content)
+                owners = [int(owner) for owner in known if owner.isascii() and owner.isdecimal() and not owner.startswith("0")]
+            else:
+                owners = self._local_schedule_user_ids() if shared_scheduler else schedule_owners
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Watchlist schedule retirement discovery unavailable")
+            return
+
+        for owner in owners:
+            try:
+                with scoped_context(user_id=owner), WatchlistsDatabase.open_retirement_store(
+                    owner, shared_backend=content,
+                ) as db:
+                    if db is None or not (pending := db.list_schedule_retirements()):
+                        continue
+                    with self._existing_schedule_store(owner) as store:
+                        if store is None:
+                            continue
+                        delete = partial(store.delete_schedule, user_id=str(owner))
+                        for job_id, schedule_id in pending:
+                            if not await self._may_submit_cron():
+                                return
+                            _retire_watchlist_schedule(db, job_id, schedule_id, store, delete)
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+                logger.warning("Watchlist schedule retirement remains pending for owner {}", owner)
 
     def _add_job(self, schedule: WorkflowSchedule, user_id: int | None = None) -> None:
         """Register an APScheduler job for a recurring workflow schedule."""
@@ -648,6 +698,32 @@ class _WFRecurringScheduler:
                 logger.warning("Core Scheduler not initialized; skipping schedule run")
                 return
             handler_name, queue_name = resolve_schedule_submission_target(payload)
+            if handler_name == "watchlist_run" and expected_cron is not None and s.workflow_id is None:
+                target_id = payload["inputs"]["watchlist_job_id"]
+                from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+                from tldw_Server_API.app.core.Watchlists.pipeline import _normalize_tz
+
+                managed_name = (s.name or "").startswith(f"watchlist:{target_id}:")
+                try:
+                    job = WatchlistsDatabase.for_user(owner_user_id).get_job(int(target_id))
+                except KeyError:
+                    job = None
+                if s.managed_watchlist_job_id is not None or managed_name or (job is not None and job.wf_schedule_id == s.id):
+                    if (
+                        s.user_id != str(owner_user_id)
+                        or job is None or not job.active or job.wf_schedule_id != s.id
+                        or job.schedule_expr != s.cron
+                        or _normalize_tz(job.schedule_timezone) != (s.timezone or "UTC")
+                    ):
+                        return
+                    payload["watchlist_schedule_id"] = s.id
+                    payload["watchlist_schedule_cron"] = s.cron
+                    payload["watchlist_job_revision"] = job.updated_at
+                else:
+                    # Rotation can mark or delete a legacy row after the first read.
+                    latest = db.get_schedule(s.id)
+                    if latest is None or latest.managed_watchlist_job_id is not None:
+                        return
             await ensure_schedule_queue_worker(self._core_scheduler, queue_name)
             if expected_cron is not None and not await self._may_submit_cron():
                 return
@@ -670,8 +746,8 @@ class _WFRecurringScheduler:
                 logger.debug(f"Workflows scheduler: failed to set error status for {schedule_id}: {e}")
 
     # CRUD wrappers
-    def create(self, *, tenant_id: str, user_id: str, workflow_id: int | None, name: str | None, cron: str, timezone: str | None, inputs: dict[str, Any], run_mode: str, validation_mode: str, enabled: bool, concurrency_mode: str = "skip", misfire_grace_sec: int = 300, coalesce: bool = True, require_online: bool = False, acp_config_json: str | None = None) -> str:
-        sid = __import__("uuid").uuid4().hex
+    def create(self, *, tenant_id: str, user_id: str, workflow_id: int | None, name: str | None, cron: str, timezone: str | None, inputs: dict[str, Any], run_mode: str, validation_mode: str, enabled: bool, concurrency_mode: str = "skip", misfire_grace_sec: int = 300, coalesce: bool = True, require_online: bool = False, acp_config_json: str | None = None, schedule_id: str | None = None, managed_watchlist_job_id: int | None = None) -> str:
+        sid = schedule_id or uuid4().hex
         db = self._get_db(int(user_id))
         db.create_schedule(
             id=sid,
@@ -690,6 +766,7 @@ class _WFRecurringScheduler:
             misfire_grace_sec=int(misfire_grace_sec),
             coalesce=bool(coalesce),
             acp_config_json=acp_config_json,
+            managed_watchlist_job_id=managed_watchlist_job_id,
         )
         s = db.get_schedule(sid)
         if s and s.enabled:
@@ -699,12 +776,17 @@ class _WFRecurringScheduler:
                 self._add_job(s, int(user_id))
         return sid
 
-    def update(self, schedule_id: str, update: dict[str, Any]) -> bool:
-        # Resolve correct DB by locating the schedule first
-        s = self.get(schedule_id)
-        if not s:
-            return False
-        db = self._get_db(int(s.user_id))
+    def update(self, schedule_id: str, update: dict[str, Any], *, user_id: int | None = None) -> bool:
+        if user_id is None:
+            s = self.get(schedule_id)
+            if not s:
+                return False
+            db = self._get_db(int(s.user_id))
+        else:
+            db = self._get_db(user_id)
+            s = db.get_schedule(schedule_id)
+            if s is None or str(s.user_id) != str(user_id):
+                return False
         ok = db.update_schedule(schedule_id, update)
         s = db.get_schedule(schedule_id)
         if s:
@@ -721,17 +803,26 @@ class _WFRecurringScheduler:
                     logger.debug(f"Workflows scheduler: failed to remove job {schedule_id}: {e}")
         return ok
 
-    def delete(self, schedule_id: str) -> bool:
-        s = self.get(schedule_id)
-        if not s:
-            return False
+    def delete(
+        self, schedule_id: str, *, user_id: int | None = None, managed_watchlist_job_id: int | None = None,
+    ) -> bool:
+        if user_id is None:
+            s = self.get(schedule_id)
+            if not s:
+                return False
+            db = self._get_db(int(s.user_id))
+        else:
+            db = self._get_db(user_id)
+            s = db.get_schedule(schedule_id)
+            if s is None or str(s.user_id) != str(user_id):
+                return False
+        deleted = db.delete_schedule(schedule_id, user_id=str(s.user_id), managed_watchlist_job_id=managed_watchlist_job_id)
         try:
-            if self._aps:
+            if deleted and self._aps:
                 self._aps.remove_job(schedule_id)
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Workflows scheduler: failed to remove job {schedule_id}: {e}")
-        db = self._get_db(int(s.user_id))
-        return db.delete_schedule(schedule_id)
+        return deleted
 
     def get(self, schedule_id: str) -> WorkflowSchedule | None:
         # Check default DB first
@@ -787,6 +878,127 @@ def get_workflows_scheduler() -> _WFRecurringScheduler:
     if _INSTANCE is None:
         _INSTANCE = _WFRecurringScheduler()
     return _INSTANCE
+
+
+def delete_retired_watchlist_schedule(job: JobRow, replacement_cron: str | None) -> None:
+    """Remove a cleared job's old schedule before replacement drops its link."""
+    if replacement_cron and not (job.schedule_expr or "").strip() and job.wf_schedule_id:
+        get_workflows_scheduler().delete(job.wf_schedule_id, user_id=int(job.user_id))
+
+
+def bind_linked_watchlist_schedule(job: JobRow) -> bool:
+    """Record the owning job on an existing scheduler row before detaching it."""
+    if not job.wf_schedule_id:
+        return False
+    return WorkflowsSchedulerDB(user_id=int(job.user_id)).bind_managed_watchlist(
+        job.wf_schedule_id, user_id=str(job.user_id), job_id=job.id,
+    )
+
+
+def retry_watchlist_schedule_retirements(db: WatchlistsDatabase, job: JobRow) -> None:
+    try:
+        retired_ids = db.list_retired_job_schedule_ids(job.id)
+    except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Watchlist schedule retirement journal unavailable")
+        return
+    if not retired_ids:
+        return
+    owner = int(job.user_id)
+    try:
+        scheduler = get_workflows_scheduler()
+        store = scheduler._get_db(owner)
+    except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+        try:
+            store = WorkflowsSchedulerDB(user_id=owner)
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Watchlist schedule retirement store unavailable")
+            return
+        delete = partial(store.delete_schedule, user_id=str(owner))
+    else:
+        delete = partial(scheduler.delete, user_id=owner)
+    for schedule_id in retired_ids:
+        _retire_watchlist_schedule(db, job.id, schedule_id, store, delete)
+
+
+def _retire_watchlist_schedule(
+    db: WatchlistsDatabase, job_id: int, schedule_id: str, store: WorkflowsSchedulerDB, delete: Callable[..., bool],
+) -> None:
+    try:
+        if db.has_job_schedule(job_id, schedule_id):
+            return
+        row = store.get_schedule(schedule_id)
+        if row is None or (
+            row.user_id == db.user_id and row.managed_watchlist_job_id == job_id
+            and delete(schedule_id, managed_watchlist_job_id=job_id)
+        ):
+            db.acknowledge_job_schedule_retirement(job_id, schedule_id)
+    except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Watchlist schedule retirement remains pending for job {}", job_id)
+
+
+def register_watchlist_schedule(
+    db: WatchlistsDatabase, job: JobRow, *, timezone: str,
+    tenant_id: str | None = None, force: bool = True,
+) -> None:
+    """Attach an immutable schedule generation to the job snapshot that requested it."""
+    if not job.schedule_expr:
+        return
+    retry_watchlist_schedule_retirements(db, job)
+    owner = int(job.user_id)
+    previous = None
+    if job.wf_schedule_id:
+        store = WorkflowsSchedulerDB(user_id=owner)
+        old = store.get_schedule(job.wf_schedule_id)
+        if old is not None and old.user_id == str(owner):
+            if not store.bind_managed_watchlist(old.id, user_id=str(owner), job_id=job.id):
+                return
+            previous = old
+            if not force and (old.cron, old.timezone or "UTC", old.enabled) == (
+                job.schedule_expr, timezone, bool(job.active),
+            ):
+                return
+    sid = uuid4().hex
+    definition = dict(
+        tenant_id=previous.tenant_id if previous else tenant_id or "default",
+        user_id=str(owner), workflow_id=None, managed_watchlist_job_id=job.id,
+        name=previous.name if previous else f"watchlist:{job.id}:{job.name}",
+        cron=job.schedule_expr, timezone=timezone, inputs={"watchlist_job_id": job.id},
+        run_mode=previous.run_mode if previous else "async",
+        validation_mode=previous.validation_mode if previous else "block",
+        enabled=bool(job.active), concurrency_mode=previous.concurrency_mode if previous else "queue",
+        misfire_grace_sec=previous.misfire_grace_sec if previous else 300,
+        coalesce=previous.coalesce if previous else True,
+        require_online=previous.require_online if previous else False,
+    )
+    if previous:
+        inputs = build_schedule_payload(previous)["inputs"]
+        if isinstance(inputs, dict):
+            definition["inputs"] = {**inputs, "watchlist_job_id": job.id}
+    try:
+        scheduler = get_workflows_scheduler()
+        scheduler.create(schedule_id=sid, **definition)
+    except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Watchlist schedule registration failed")
+        try:
+            store = WorkflowsSchedulerDB(user_id=owner)
+            # The live registration can fail after persisting this exact ID.
+            persisted = store.get_schedule(sid)
+            if persisted is None:
+                store.create_schedule(id=sid, **definition)
+            elif persisted.user_id != str(owner) or persisted.managed_watchlist_job_id != job.id:
+                return
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Watchlist schedule DB fallback failed")
+            return
+        delete = partial(store.delete_schedule, user_id=str(owner))
+    else:
+        delete = partial(scheduler.delete, user_id=owner)
+
+    # Keep attach and cleanup errors out of the create fallback.
+    if not db.set_job_schedule_id(job.id, sid, expected_job=job, retire_previous=previous is not None):
+        delete(sid)
+    elif previous:
+        retry_watchlist_schedule_retirements(db, job)
 
 
 async def start_workflows_scheduler() -> asyncio.Task | None:

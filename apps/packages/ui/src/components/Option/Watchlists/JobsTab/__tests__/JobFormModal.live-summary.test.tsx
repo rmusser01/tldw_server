@@ -128,7 +128,7 @@ vi.mock("../ScopeSelector", () => ({
 }))
 
 vi.mock("../SchedulePicker", () => ({
-  SchedulePicker: ({ onChange }: { onChange: (value: string) => void }) => (
+  SchedulePicker: ({ onChange }: { onChange: (value: string | null) => void }) => (
     <div>
       <button
         type="button"
@@ -144,6 +144,7 @@ vi.mock("../SchedulePicker", () => ({
       >
         Set too-frequent schedule
       </button>
+      <button type="button" onClick={() => onChange(null)}>Clear schedule</button>
     </div>
   )
 }))
@@ -305,6 +306,37 @@ describe("JobFormModal live summary", () => {
       typeof buildBriefingPipelineContract
     >
   }
+
+  it("sends a null schedule when clearing an existing monitor", async () => {
+    servicesMock.updateWatchlistJob.mockResolvedValueOnce({ id: 91 })
+    render(
+      <JobFormModal
+        open
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        initialValues={{
+          id: 91,
+          name: "Feed monitor",
+          description: null,
+          scope: { sources: [1] },
+          schedule_expr: "0 9 * * *",
+          timezone: "UTC",
+          active: true,
+          created_at: "2026-01-15T00:00:00Z"
+        }}
+      />
+    )
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    fireEvent.click(screen.getByText("Schedule", { selector: ".ant-collapse-header span" }))
+    fireEvent.click(screen.getByRole("button", { name: "Clear schedule" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(servicesMock.updateWatchlistJob).toHaveBeenCalledWith(
+        91,
+        expect.objectContaining({ schedule_expr: null, active: true })
+      )
+    )
+  })
 
   it("uses full-width constrained modal chrome with visible create and cancel actions", async () => {
     setViewport(420)

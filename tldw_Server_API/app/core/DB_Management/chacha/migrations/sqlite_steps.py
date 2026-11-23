@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.chacha import persona_transcript_store, schema_sql, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha import message_order_schema, persona_transcript_store, schema_sql, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import _CHACHA_NONCRITICAL_EXCEPTIONS, SchemaError
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
@@ -2291,11 +2291,16 @@ def _migrate_from_v73_to_v74(ctx, conn: sqlite3.Connection) -> None:
 
 
 def _migrate_from_v74_to_v75(ctx, conn: sqlite3.Connection) -> None:
-    """Add client-id create fingerprints without inferring them for existing chats."""
-    for statement in split_sql_statements(schema_sql._MIGRATION_SQL_V74_TO_V75):
-        conn.execute(statement)
+    """Install ordering and fingerprints without inferring historical values."""
+    # The prior native V74 installed ordering instead of startup receipts.
+    if not ctx.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
+        _migrate_from_v73_to_v74(ctx, conn)
+    message_order_schema.ensure_message_order_sqlite(
+        ctx.backend, conn, schema_sql._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE,
+    )
+    conn.execute("UPDATE db_schema_version SET version = 75 WHERE schema_name = ? AND version = 74", (ctx.schema_name,))
     if sqlite_schema._get_db_version(ctx, conn) != 75:
-        raise SchemaError("Conversation create fingerprint migration V74->V75 failed version verification.")  # noqa: TRY003
+        raise SchemaError("Message insertion-order migration V74->V75 failed version verification.")  # noqa: TRY003
 
 
 def _migrate_from_v75_to_v76(ctx, conn: sqlite3.Connection) -> None:
@@ -2409,6 +2414,16 @@ def migrate_sqlite_transcripts(ctx, conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_from_v85_to_v86(ctx, conn: sqlite3.Connection) -> None:
+    message_order_schema.migrate_sqlite_chat_catalog(
+        conn,
+        backend=ctx.backend,
+        fingerprint_sql=schema_sql._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE,
+        schema_name=ctx.schema_name,
+        get_version=lambda connection: sqlite_schema._get_db_version(ctx, connection),
+    )
+
+
 # Source schema version -> step name, in upgrade order (R3, R12). Names are resolved on this module at call time, so one module
 # patch serves the class's step map and the legacy ladder's direct calls. Pinned by test_chacha_structure_pins.py (FROZEN_SQLITE).
 # To add a migration: write `_migrate_from_v<N>_to_v<N+1>(ctx, conn)` here, add its key below, raise `_CURRENT_SCHEMA_VERSION`
@@ -2495,4 +2510,5 @@ SQLITE_STEPS: dict[int, str] = {
     82: "_migrate_from_v82_to_v83_sqlite",
     83: "_migrate_from_v83_to_v84_sqlite",
     84: "migrate_sqlite_transcripts",
+    85: "_migrate_from_v85_to_v86",
 }

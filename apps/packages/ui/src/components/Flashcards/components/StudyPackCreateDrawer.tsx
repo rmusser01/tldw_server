@@ -1,5 +1,6 @@
 import React from "react"
-import { Button, Drawer, Input, Select, Space, Typography } from "antd"
+import { Button, Drawer, Input, Pagination, Select, Space, Typography } from "antd"
+import type { RefSelectProps } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronDown, ChevronRight, FileText, Film, MessageSquare, Trash2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
@@ -31,6 +32,7 @@ type StudyPackCreateDrawerProps = {
 }
 
 const DEFAULT_SOURCE_TYPE: StudyPackSourceType = "media"
+const MEDIA_PAGE_SIZE = 50
 
 const SOURCE_TYPE_ICONS: Record<StudyPackSourceType, React.ComponentType<{ className?: string }>> = {
   media: Film,
@@ -57,18 +59,22 @@ const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => 
   const { t } = useTranslation(["option", "common"])
   const pickerId = React.useId()
   const [opened, setOpened] = React.useState(false)
+  const selectRef = React.useRef<RefSelectProps>(null)
+  const pagerRef = React.useRef<HTMLDivElement>(null)
   const [search, setSearch] = React.useState("")
+  const [page, setPage] = React.useState(1)
   const term = useDebounce(search.trim(), 300)
   const isDebouncing = search.trim() !== term
-  const media = useQuery({
-    queryKey: ["study-pack-media", pickerId, term],
+  const media = useQuery<{ totalCount: number; options: MediaOption[] }>({
+    queryKey: ["study-pack-media", pickerId, term, page],
     enabled: opened && !isDebouncing,
     gcTime: 0,
+    placeholderData: (previous, query) => query?.queryKey[2] === term ? previous : undefined,
     queryFn: async ({ signal }) => {
-      const page = { page: 1, results_per_page: 50 }
+      const pagination = { page, results_per_page: MEDIA_PAGE_SIZE }
       const response = term
-        ? await tldwClient.searchMedia({ query: term }, page, { signal })
-        : await tldwClient.listMedia(page, { signal })
+        ? await tldwClient.searchMedia({ query: term }, pagination, { signal })
+        : await tldwClient.listMedia(pagination, { signal })
       signal.throwIfAborted()
       const { items, totalCount } = normalizeMediaLibraryResponse(response)
       const options = items.flatMap((item): MediaOption[] => {
@@ -100,7 +106,13 @@ const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => 
     }
   })
 
-  const loading = isDebouncing || (opened && media.isFetching && !media.data)
+  const lastPage = Math.max(1, Math.ceil((media.data?.totalCount ?? 0) / MEDIA_PAGE_SIZE))
+  const pageOutOfRange = !isDebouncing && media.isSuccess && !media.isPlaceholderData && page > lastPage
+  React.useEffect(() => {
+    if (pageOutOfRange) setPage(lastPage)
+  }, [pageOutOfRange, lastPage])
+
+  const loading = isDebouncing || pageOutOfRange || media.isPlaceholderData || (opened && media.isFetching && !media.data)
   const result = loading || media.isError ? undefined : media.data
   const searchLabel = t("option:flashcards.studyPackMediaSearch", {
     defaultValue: "Search media library"
@@ -108,10 +120,23 @@ const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => 
   const emptyText = term
     ? t("option:flashcards.studyPackNoMediaMatches", { defaultValue: "No matching media." })
     : t("option:flashcards.studyPackMediaEmpty", { defaultValue: "Your media library is empty." })
+  const showPager = !isDebouncing && (page > 1 || (media.data?.totalCount ?? 0) > MEDIA_PAGE_SIZE)
 
   return (
-    <div className="mb-3">
+    <div className="relative mb-3" onKeyDownCapture={(event) => {
+      if (event.key !== "Tab" || !(event.target instanceof HTMLInputElement)) return
+      // AntD treats Tab as selection. Let it leave the input without choosing an option.
+      event.stopPropagation()
+      if (event.shiftKey || event.target.getAttribute("aria-expanded") !== "true") return
+      const firstPageButton = pagerRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      if (firstPageButton) {
+        event.preventDefault()
+        firstPageButton.focus()
+      }
+    }}>
       <Select<string[], MediaOption>
+        ref={selectRef}
+        getPopupContainer={(trigger) => trigger.parentElement ?? trigger}
         aria-label={searchLabel}
         placeholder={searchLabel}
         className="w-full"
@@ -119,7 +144,10 @@ const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => 
         value={[]}
         showSearch={{
           searchValue: search,
-          onSearch: setSearch,
+          onSearch: (value) => {
+            if (value.trim() !== search.trim()) setPage(1)
+            setSearch(value)
+          },
           filterOption: false,
           // Keep the failed term visible when Retry takes focus.
           autoClearSearchValue: false
@@ -128,12 +156,36 @@ const StudyPackMediaPicker = ({ onSelect }: { onSelect: (media: MediaOption) => 
         onSelect={(_, option) => {
           onSelect(option)
           setSearch("")
+          setPage(1)
         }}
         loading={loading}
         options={result?.options ?? []}
         notFoundContent={loading
           ? t("option:flashcards.studyPackMediaLoading", { defaultValue: "Loading media…" })
           : media.isError ? null : emptyText}
+        popupRender={(options) => (
+          <>
+            {options}
+            {showPager ? (
+              <div ref={pagerRef} className="flex justify-end border-t border-border/60 p-1.5">
+                <Pagination
+                  aria-label={t("option:flashcards.studyPackMediaPages", { defaultValue: "Media result pages" })}
+                  current={page}
+                  pageSize={MEDIA_PAGE_SIZE}
+                  total={media.data?.totalCount ?? (page - 1) * MEDIA_PAGE_SIZE + 1}
+                  simple={{ readOnly: true }}
+                  size="small"
+                  onChange={(nextPage) => {
+                    setPage(nextPage)
+                    if (pagerRef.current?.contains(document.activeElement)) {
+                      selectRef.current?.focus()
+                    }
+                  }}
+                />
+              </div>
+            ) : null}
+          </>
+        )}
       />
       {result && result.options.length > 0 && result.options.length < result.totalCount ? (
         <Text type="secondary" className="mt-1 block">

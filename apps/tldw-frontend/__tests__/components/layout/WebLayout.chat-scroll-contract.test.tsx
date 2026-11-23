@@ -1,4 +1,5 @@
 import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
+import { WorkspaceChatRouteSearchContext } from "@/hooks/chat/useWorkspaceChatCheckpoint";
 // @vitest-environment jsdom
 import React from 'react';
 import { createPortal } from 'react-dom';
@@ -702,7 +703,11 @@ describe('WebLayout /chat scroll contract', () => {
     });
   });
 
-  it('shows diagnostics only after a fresh forced check confirms an outage and rechecks on Retry', async () => {
+  it.each([
+    ['/chat', 'modal'],
+    ['/chat-workspace', 'inline'],
+  ])('shows corroborated diagnostics and rechecks on Retry on %s', async (pathname, presentation) => {
+    routerState.location.pathname = pathname;
     const firstCheck = deferred();
     const retryCheck = deferred();
     connectionState.value.checkOnce = vi
@@ -739,7 +744,7 @@ describe('WebLayout /chat scroll contract', () => {
 
     expect(screen.getByTestId('backend-unavailable-modal')).toHaveAttribute(
       'data-presentation',
-      'modal'
+      presentation
     );
     expect(screen.getByTestId('backend-unavailable-detail')).toHaveTextContent(
       '"method":"GET"'
@@ -846,8 +851,14 @@ describe('WebLayout /chat scroll contract', () => {
     expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
   });
 
-  it('uses the non-blocking backend-unreachable presentation on settings routes', async () => {
-    routerState.location.pathname = '/settings/ui';
+  it.each([
+    '/settings',
+    '/settings/ui',
+    '/chat-workspace',
+    '/chat-workspace/',
+    '/chat-workspace/preview',
+  ])('uses the non-blocking backend-unreachable presentation on %s', async (pathname) => {
+    routerState.location.pathname = pathname;
     const check = deferred();
     connectionState.value.checkOnce = vi.fn(() => check.promise);
 
@@ -895,10 +906,20 @@ describe('WebLayout /chat scroll contract', () => {
     expect(latestGateProps).toEqual(
       expect.objectContaining({ presentation: 'inline' })
     );
+    act(() => (latestGateProps.onOpenHealth as () => void)());
+    expect(routerState.navigate).toHaveBeenCalledWith('/settings/health');
+    expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
   });
 
-  it('does not treat settings-prefixed non-settings routes as settings routes', async () => {
-    routerState.location.pathname = '/settings-wizard';
+  it.each([
+    '/settings-wizard',
+    '/chat-workspace-other',
+    '/chat-workspaces',
+    '/chat-workspaceother/preview',
+    '/workspace',
+    '/notes',
+  ])('keeps the blocking backend-unreachable presentation on %s', async (pathname) => {
+    routerState.location.pathname = pathname;
     const check = deferred();
     connectionState.value.checkOnce = vi.fn(() => check.promise);
 
@@ -1029,7 +1050,7 @@ describe('WebLayout /chat scroll contract', () => {
     layoutUiState.value.setChatSidebarCollapsed.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Select saved conversation' }));
     expect(screen.getByTestId('chat-sidebar')).toBeInTheDocument();
-    expect(layoutUiState.value.setChatSidebarCollapsed).not.toHaveBeenCalledWith(false);
+    expect(layoutUiState.value.setChatSidebarCollapsed).not.toHaveBeenCalled();
   });
 
   it('still closes an open mobile drawer on an ordinary route change', () => {
@@ -1423,6 +1444,53 @@ vi.mock('@/services/chat-history-selection', () => ({
   captureHistorySnapshot: vi.fn(),
   confirmLegacyHistoryProjection: vi.fn(),
 }));
+
+it.each(['/chat-workspace', '/research-workspace'])('shares one fresh H1 controller for %s', (path) => {
+  delete (globalThis as any).__tldwOptionShell;
+  routerState.location.pathname = path;
+  let controller: unknown;
+  function Probe() {
+    const current = useHistorySelectionContext()?.getReference ?? null;
+    React.useEffect(() => { controller = current; }, [current]);
+    return <output data-testid="workspace-controller">{current ? 'present' : 'absent'}</output>;
+  }
+  const view = render(<OptionLayout><Probe /></OptionLayout>);
+  expect(view.getByTestId('header')).toHaveAttribute('data-history-controller', 'present');
+  expect(view.getByTestId('workspace-controller')).toHaveTextContent('present');
+  const first = controller;
+  routerState.location.pathname = '/chat';
+  view.rerender(<OptionLayout><Probe /></OptionLayout>);
+  expect(controller).not.toBe(first);
+  const playground = controller;
+  routerState.location.pathname = path;
+  view.rerender(<OptionLayout><Probe /></OptionLayout>);
+  expect(controller).not.toBe(playground);
+  expect(view.getByTestId('workspace-controller')).toHaveTextContent('present');
+  cleanup();
+  delete (globalThis as any).__tldwOptionShell;
+});
+
+it.each(['/chat-workspace', '/research-workspace'])('publishes reactive workspace route search on %s without replacing H1', path => {
+  delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+  routerState.location.pathname = path;
+  routerState.location.search = '?chatId=chat-B';
+  const seen: unknown[] = [];
+  function Probe() {
+    const search = React.useContext(WorkspaceChatRouteSearchContext);
+    seen.push(useHistorySelectionContext()?.getReference);
+    return <output aria-label="Workspace route search">{search}</output>;
+  }
+  const view = render(<OptionLayout><Probe /></OptionLayout>);
+  expect(screen.getByLabelText('Workspace route search')).toHaveTextContent('?chatId=chat-B');
+  const first = seen.at(-1);
+  expect(first).toBeTypeOf('function');
+  routerState.location.search = '?chatId=chat-C';
+  view.rerender(<OptionLayout><Probe /></OptionLayout>);
+  expect(screen.getByLabelText('Workspace route search')).toHaveTextContent('?chatId=chat-C');
+  expect(seen.at(-1)).toBe(first);
+  view.unmount();
+  delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+});
 
 
 const capturePublication = vi.hoisted(() => ({

@@ -6,6 +6,8 @@ import { readWorkspaceArtifactClientPayload } from "./workspace-artifact-codec"
  */
 
 import type {
+  WorkspaceApiResponse,
+  WorkspaceNoteApiResponse,
   WorkspaceArtifactApiResponse,
   WorkspaceSourceApiResponse
 } from "../services/tldw/domains/workspace-api"
@@ -23,6 +25,7 @@ import type {
   TraceableArtifactReviewMetadata,
   TraceableArtifactVersionMetadata,
   WorkspaceSource,
+  WorkspaceNote,
   WorkspaceSourceReviewUpdate,
   WorkspaceSourceType
 } from "../types/workspace"
@@ -33,6 +36,7 @@ export interface ServerWorkspaceState {
   sources?: WorkspaceSourceApiResponse[]
   artifacts?: WorkspaceArtifactApiResponse[]
   notes?: any[]
+  metadata?: WorkspaceApiResponse
   version: number
   [key: string]: unknown
 }
@@ -44,8 +48,26 @@ export interface LocalWorkspaceState {
   selectedSourceIds: string[]
   artifacts: GeneratedArtifact[]
   notes: any[]
+  currentNote?: WorkspaceNote
+  metadata?: WorkspaceApiResponse
   version: number
 }
+
+// Canonical notes have their own table; their numeric IDs are not legacy /notes IDs.
+export interface ServerWorkspaceCache {
+  scopeKey: string
+  sourceSignature: string
+  selectedSourceSignature: string
+  metadata: Omit<WorkspaceApiResponse, "effectiveAssistantDefault" | "effective_assistant_default">
+  notes: WorkspaceNoteApiResponse[]
+}
+
+export const buildResearchWorkspaceServerSourceSignature = (
+  sources: WorkspaceSource[]
+): string => sources.map((source, index) => [
+  index, source.id, Number.isFinite(source.mediaId) ? source.mediaId : "invalid-media",
+  source.title, source.type, source.url || ""
+].join(":")).join("|")
 
 const workspaceSourceTypes = new Set<WorkspaceSourceType>([
   "pdf",
@@ -468,9 +490,22 @@ export const mapServerArtifactToLocal = (
  */
 export async function hydrateWorkspaceFromServer(
   workspaceId: string,
-  deps: { fetch: (id: string) => Promise<ServerWorkspaceState> }
+  deps: { fetch: (id: string) => Promise<ServerWorkspaceState>; requireComplete?: boolean }
 ): Promise<LocalWorkspaceState> {
   const server = await deps.fetch(workspaceId)
+  if (deps.requireComplete) {
+    if (!server.metadata || !Array.isArray(server.sources) ||
+        !Array.isArray(server.artifacts) || !Array.isArray(server.notes)) {
+      throw new Error("Incomplete workspace hydration")
+    }
+    if (server.id !== workspaceId || server.metadata.id !== workspaceId ||
+        server.metadata.deleted || server.metadata.workspace_profile !== "research" ||
+        !["general", "workspace"].includes(server.metadata.study_materials_policy) ||
+        [...server.sources, ...server.artifacts, ...server.notes].some(row =>
+          !row || row.workspace_id !== workspaceId)) {
+      throw new Error("Workspace hydration identity mismatch")
+    }
+  }
   const serverSources = server.sources ?? []
   return {
     id: server.id,
@@ -482,6 +517,7 @@ export async function hydrateWorkspaceFromServer(
     artifacts: (server.artifacts ?? []).map(mapServerArtifactToLocal)
       .filter(artifact => !(artifact.reviewStatus === "archived" && artifact.removedFromStudio)),
     notes: server.notes ?? [],
+    metadata: server.metadata,
     version: server.version,
   }
 }

@@ -16,7 +16,8 @@ def judge(monkeypatch, tmp_path):
     state = {"reply": "SCORE: 10\nA vivid story.", "calls": []}
 
     def _analyze(api_name, input_data, custom_prompt, api_key, **kwargs):
-        state["calls"].append({"api_name": api_name, "input_data": input_data, "prompt": custom_prompt})
+        state["calls"].append({"api_name": api_name, "input_data": input_data, "prompt": custom_prompt,
+                               "model": kwargs.get("model_override")})
         return state["reply"]
 
     monkeypatch.setattr(evaluation_manager, "analyze", _analyze)
@@ -60,6 +61,56 @@ def test_eval_custom_prints_a_failed_judge_as_unscored_not_zero_or_success(judge
 def test_eval_custom_has_no_save_option():
     """evaluate_custom_metric stores nothing, so the command does not offer to (TASK-15489)."""
     assert "--save" not in CliRunner().invoke(main, ["eval", "custom", "--help"]).output
+
+
+def test_custom_model_override_reaches_the_judge_in_single_and_batch_runs(judge):
+    result = CliRunner().invoke(main, ["eval", "custom", "clarity", "text", "--model", "judge-single"])
+    eval_commands._run_single_evaluation(
+        {"type": "custom", "metric_name": "clarity", "text": "text", "model": "judge-batch"},
+        "openai", None, None, {},
+    )
+    assert result.exit_code == 0, result.output
+    assert [call["model"] for call in judge["calls"]] == ["judge-single", "judge-batch"]
+
+
+@pytest.mark.parametrize("reply,status,code", [
+    ("SCORE: 10", "completed", 0), ("Error: provider unavailable", "unscored", 1),
+])
+def test_eval_custom_emits_one_json_document(judge, reply, status, code):
+    judge["reply"] = reply
+    result = CliRunner().invoke(main, ["eval", "custom", "clarity", "text", "--model", "judge-x", "--format", "json"])
+
+    assert result.exit_code == code, result.output
+    payload = json.loads(result.stdout)
+    assert (payload["status"], payload["model"]) == (status, "judge-x")
+
+
+def test_actual_batch_command_emits_one_json_document_and_uses_its_default_model(judge, tmp_path):
+    batch = tmp_path / "batch.json"
+    batch.write_text(json.dumps([{"type": "custom", "metric_name": "clarity", "text": "text"}]), encoding="utf-8")
+    result = CliRunner().invoke(main, ["--quiet", "eval", "batch", str(batch), "--model", "judge-default", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert judge["calls"][0]["model"] == "judge-default"
+    assert json.loads(result.stdout)[0]["model"] == "judge-default"
+
+
+@pytest.mark.parametrize("command", [
+    ["label-choice", "Question", "--labels", "A", "--labels", "B", "--expected", "A"],
+    ["nli-factcheck", "claim", "evidence", "--labels", "A", "--labels", "B", "--expected", "A"],
+])
+@pytest.mark.parametrize("content,expected", [
+    (None, None), ('{"metadata":"A"}', None), ('{"label":"A"}', "A"),
+])
+def test_classification_cli_uses_only_the_assistant_label(monkeypatch, command, content, expected):
+    response = {"choices": [{"message": {"role": "assistant", "content": content}}]}
+    monkeypatch.setattr(eval_commands, "chat_api_call", lambda **_kwargs: response)
+    rendered = []
+    monkeypatch.setattr(eval_commands, "print_json", lambda result, _title: rendered.append(result))
+
+    result = CliRunner().invoke(main, ["eval", *command, "--format", "json"])
+    assert result.exit_code == 0, result.output
+    assert rendered[0]["prediction"] == expected
 
 
 def test_a_batch_custom_spec_runs_and_an_unscored_one_is_counted_apart(judge, monkeypatch):

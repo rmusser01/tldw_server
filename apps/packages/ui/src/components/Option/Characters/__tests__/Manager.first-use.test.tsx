@@ -395,10 +395,12 @@ const findEditSubmitButton = async (timeout = 15000) =>
     return candidate as HTMLElement
   }, { timeout })
 
+const resetFixtureMocks = () => vi.resetAllMocks()
+
 describe("CharactersManager first-use onboarding", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    quickPopupFixture.retain.mockReset().mockResolvedValue(true)
+    resetFixtureMocks()
+    quickPopupFixture.retain.mockResolvedValue(true)
     quickPopupFixture.id = "quick-chat-session-default"
     quickPopupFixture.reply = "Quick chat response"
     quickPopupFixture.sessionId = null
@@ -437,6 +439,7 @@ describe("CharactersManager first-use onboarding", () => {
     useQueryClientMock.mockReturnValue({
       getQueryState: vi.fn(),
       invalidateQueries: vi.fn(),
+      getQueryCache: vi.fn(() => ({ findAll: vi.fn(() => []) })),
       setQueryData: vi.fn(),
       cancelQueries: vi.fn(async () => undefined)
     })
@@ -462,6 +465,22 @@ describe("CharactersManager first-use onboarding", () => {
         return makeUseQueryResult({ data: {} })
       }
       return makeUseQueryResult({})
+    })
+  })
+
+  it("discards an unused session response across fixture reset", async () => {
+    tldwClientMock.createChat.mockResolvedValueOnce({ id: "previous-fixture-session" })
+    resetFixtureMocks()
+    expect(await tldwClientMock.createChat()).toEqual({ id: "quick-chat-session-default" })
+  })
+
+  it("discards an unused reply response across fixture reset", async () => {
+    tldwClientMock.completeCharacterChatTurn.mockResolvedValueOnce({
+      assistant_content: "Previous fixture reply"
+    })
+    resetFixtureMocks()
+    expect(await tldwClientMock.completeCharacterChatTurn()).toEqual({
+      assistant_content: "Quick chat response"
     })
   })
 

@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_router
@@ -177,8 +178,8 @@ def _install_conversation_observability_spies(monkeypatch: pytest.MonkeyPatch):
             error_calls.append((args, kwargs))
 
     monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: registry, raising=False)
-    monkeypatch.setattr(chat_router.logger, "debug", capture_debug)
-    monkeypatch.setattr(chat_router.logger, "error", capture_error)
+    monkeypatch.setattr(logger, "debug", capture_debug)
+    monkeypatch.setattr(logger, "error", capture_error)
     return registry, debug_calls, error_calls
 
 

@@ -256,6 +256,7 @@ class StudySourceResolver:
         label = selection.label or _clean_text(media.get("title")) or f"Media {media_id}"
         locator = dict(selection.locator)
         chunk_index = locator.get("chunk_index")
+        timestamp_value = locator.get("timestamp_seconds")
         if chunk_index is not None:
             chunk_index = _parse_non_negative_int(chunk_index, "chunk_index")
             try:
@@ -296,8 +297,9 @@ class StudySourceResolver:
                     evidence_text=evidence_text,
                     locator=normalized_locator,
                 )
+            if timestamp_value is None:
+                raise ValueError(f"Media {media_id} has no text evidence for chunk {chunk_index}")
 
-        timestamp_value = locator.get("timestamp_seconds")
         transcript = _clean_text(get_latest_transcription(self.media_db, media_id))
         normalized_locator: dict[str, Any] = {"media_id": media_id}
         if timestamp_value is not None:

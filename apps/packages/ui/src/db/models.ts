@@ -31,304 +31,182 @@ export const generateID = () => {
 }
 
 /**
- * Model records live under a `model:` key prefix so reads can be scoped to
- * exactly the catalog instead of dumping ALL of chrome.storage.local. The
- * index key tracks the record ids; it is backfilled once from legacy
- * unprefixed records so existing persisted data keeps working.
+ * Prefixed records and legacy unprefixed records remain authoritative. The old
+ * shared index is only metadata: concurrent contexts can overwrite its ids.
  */
 const MODEL_KEY_PREFIX = "model:"
-const MODEL_INDEX_KEY = "__tldwModelDbIndexV1"
 
 const toStorageKey = (id: string) => `${MODEL_KEY_PREFIX}${id}`
+const storageAliases = (id: string) => [toStorageKey(id), id]
 
-const isLegacyModelRecord = (key: string, value: unknown): value is Model => {
+// Legacy reads expose recognizable rows even when provider metadata is missing.
+const isStoredModel = (id: string, value: unknown): value is Model => {
   if (!value || typeof value !== "object") return false
-  const record = value as Partial<Model> & { id?: unknown }
+  const record = value as Partial<Model>
   return (
-    record.id === key &&
+    record.id === id &&
     typeof record.model_id === "string" &&
-    typeof record.provider_id === "string"
+    (typeof record.provider_id === "string" || record.db_type === "openai_model")
   )
 }
 
-const readIndex = async (
-  db: chrome.storage.StorageArea
-): Promise<{ ids: string[]; migrated: boolean } | null> => {
-  return new Promise((resolve, reject) => {
-    db.get(MODEL_INDEX_KEY, (result) => {
-      if (chrome.runtime.lastError) {
-        reject(chrome.runtime.lastError)
-        return
-      }
-      const raw = (result as Record<string, unknown>)[MODEL_INDEX_KEY]
-      if (Array.isArray(raw)) {
-        resolve({
-          ids: raw.filter((id): id is string => typeof id === "string"),
-          migrated: true
-        })
-        return
-      }
-      resolve(null)
-    })
-  })
-}
-
-const writeIndex = async (
+const readStorage = (
   db: chrome.storage.StorageArea,
-  ids: string[]
-): Promise<void> => {
+  keys: string[] | null
+): Promise<Record<string, unknown>> => {
   return new Promise((resolve, reject) => {
-    db.set({ [MODEL_INDEX_KEY]: ids }, () => {
+    db.get(keys, (result) => {
       if (chrome.runtime.lastError) {
         reject(chrome.runtime.lastError)
       } else {
-        resolve()
+        resolve(result as Record<string, unknown>)
       }
     })
   })
-}
-
-const migrateLegacyRecords = async (
-  db: chrome.storage.StorageArea
-): Promise<string[]> => {
-  // One-time full read: move legacy unprefixed model records under the
-  // `model:` prefix and seed the index. Later reads never use get(null).
-  const everything = await new Promise<Record<string, unknown>>(
-    (resolve, reject) => {
-      db.get(null, (result) => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve(result as Record<string, unknown>)
-        }
-      })
-    }
-  )
-
-  const legacy: Model[] = []
-  for (const [key, value] of Object.entries(everything)) {
-    if (key.startsWith(MODEL_KEY_PREFIX) || key === MODEL_INDEX_KEY) continue
-    if (isLegacyModelRecord(key, value)) {
-      legacy.push(value)
-    }
-  }
-
-  const existing: Model[] = []
-  for (const [key, value] of Object.entries(everything)) {
-    if (!key.startsWith(MODEL_KEY_PREFIX)) continue
-    if (value && typeof value === "object" && typeof (value as Model).id === "string") {
-      existing.push(value as Model)
-    }
-  }
-
-  const byId = new Map<string, Model>()
-  for (const record of [...existing, ...legacy]) {
-    byId.set(record.id, record)
-  }
-  const ids = Array.from(byId.keys())
-
-  const writes: Record<string, unknown> = { [MODEL_INDEX_KEY]: ids }
-  const legacyKeys: string[] = []
-  for (const [id, record] of byId) {
-    writes[toStorageKey(id)] = record
-    if (!existing.some((candidate) => candidate.id === id)) {
-      legacyKeys.push(id)
-    }
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    db.set(writes, () => {
-      if (chrome.runtime.lastError) {
-        reject(chrome.runtime.lastError)
-      } else {
-        resolve()
-      }
-    })
-  })
-  if (legacyKeys.length > 0) {
-    await new Promise<void>((resolve, reject) => {
-      db.remove(legacyKeys, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
-  }
-  return ids
 }
 
 export class ModelDb {
   db: chrome.storage.StorageArea
-  private indexIds: string[] | null = null
 
   constructor() {
     this.db = chrome.storage.local
   }
 
-  private ensureIndex = async (): Promise<string[]> => {
-    if (this.indexIds) return this.indexIds
-    const stored = await readIndex(this.db).catch((error) => {
-      console.warn("[ModelDb] failed to read the model index", error)
-      return null
-    })
-    if (stored) {
-      this.indexIds = stored.ids
-      return this.indexIds
-    }
-    try {
-      this.indexIds = await migrateLegacyRecords(this.db)
-    } catch (error) {
-      // A failed migration must never be cached as an empty index: a later
-      // persistRecords would then write [] over the real index and orphan
-      // every migrated record. Propagate so the caller fails loudly and the
-      // next operation retries (PR #3210 review follow-up).
-      console.warn(
-        "[ModelDb] model index migration failed; refusing to cache an empty index",
-        error
-      )
-      throw error instanceof Error
-        ? error
-        : new Error(
-            (error as { message?: string } | null)?.message ?? String(error)
-          )
-    }
-    return this.indexIds
-  }
-
-  private persistRecords = async (
-    records: Model[],
-    options?: { removeIds?: string[]; nextIndexIds?: string[] }
-  ): Promise<void> => {
-    const current = await this.ensureIndex()
-    const indexSet = new Set(options?.nextIndexIds ?? current)
-    for (const record of records) {
-      indexSet.add(record.id)
-    }
-    for (const removedId of options?.removeIds ?? []) {
-      indexSet.delete(removedId)
-    }
-    const ids = Array.from(indexSet)
-    const writes: Record<string, unknown> = {
-      [MODEL_INDEX_KEY]: ids,
-      ...Object.fromEntries(records.map((record) => [toStorageKey(record.id), record]))
-    }
-    await new Promise<void>((resolve, reject) => {
-      this.db.set(writes, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
-    this.indexIds = ids
-  }
-
   getAll = async (): Promise<Model[]> => {
-    const ids = await this.ensureIndex()
-    if (ids.length === 0) return []
-    return new Promise((resolve, reject) => {
-      this.db.get(ids.map(toStorageKey), (result) => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          const items = result as Record<string, Model>
-          resolve(
-            ids
-              .map((id) => items[toStorageKey(id)])
-              .filter((item): item is Model => Boolean(item))
-          )
-        }
+    const getKeys = (this.db as chrome.storage.StorageArea & {
+      getKeys?: (callback: (keys: string[]) => void) => void
+    }).getKeys
+    let items: Record<string, unknown>
+    if (typeof getKeys === "function") {
+      const keys = await new Promise<string[]>((resolve, reject) => {
+        getKeys.call(this.db, (result) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError)
+          } else {
+            resolve(result)
+          }
+        })
       })
-    })
+      const currentKeys = keys.filter((key) => key.startsWith(MODEL_KEY_PREFIX))
+      // Legacy ids are unrestricted; inspect candidates without migrating them.
+      const legacyKeys = keys.filter(
+        (key) => !key.startsWith(MODEL_KEY_PREFIX)
+      )
+      items = {
+        ...(legacyKeys.length ? await readStorage(this.db, legacyKeys) : {}),
+        ...(currentKeys.length ? await readStorage(this.db, currentKeys) : {})
+      }
+    } else {
+      // Older browsers lack getKeys; retain the read-only full-read fallback.
+      items = await readStorage(this.db, null)
+    }
+
+    const byId = new Map<string, Model>()
+    for (const [key, value] of Object.entries(items)) {
+      if (isStoredModel(key, value)) byId.set(value.id, value)
+    }
+    // Current records win over legacy duplicates regardless of enumeration order.
+    for (const [key, value] of Object.entries(items)) {
+      if (key.startsWith(MODEL_KEY_PREFIX)) {
+        if (isStoredModel(key.slice(MODEL_KEY_PREFIX.length), value)) {
+          byId.set(value.id, value)
+        }
+      }
+    }
+    return Array.from(byId.values())
   }
 
   create = async (model: Model): Promise<void> => {
     await this.createMany([model])
   }
 
-  /** Batched write: all records plus the index update land in ONE set(). */
+  /** Batched write: all records land in one set(), without shared index RMW. */
   createMany = async (models: Model[]): Promise<void> => {
-    if (models.length === 0) return
-    await this.persistRecords(models)
+    await this.replaceAll(models)
   }
 
   getById = async (id: string): Promise<Model | undefined> => {
-    await this.ensureIndex()
-    return new Promise((resolve, reject) => {
-      this.db.get(toStorageKey(id), (result) => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve((result as Record<string, Model>)[toStorageKey(id)])
-        }
-      })
-    })
+    const items = await readStorage(this.db, storageAliases(id))
+    const current = items[toStorageKey(id)]
+    if (isStoredModel(id, current)) return current
+    const legacy = items[id]
+    return isStoredModel(id, legacy) ? legacy : undefined
   }
 
   update = async (model: Model): Promise<void> => {
-    await this.persistRecords([model])
+    await this.createMany([model])
   }
 
   delete = async (id: string): Promise<void> => {
     await this.deleteMany([id])
   }
 
-  /** Batched delete: one remove() for the records plus one index write. */
+  /** Batched delete: one remove() for current and legacy aliases. */
   deleteMany = async (ids: string[]): Promise<void> => {
-    if (ids.length === 0) return
-    const current = await this.ensureIndex()
-    const removed = new Set(ids)
-    await new Promise<void>((resolve, reject) => {
-      // Also drop legacy unprefixed keys if any somehow remain.
-      const keys = ids.flatMap((id) => [toStorageKey(id), id])
-      this.db.remove(keys, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
-    const nextIndexIds = current.filter((candidate) => !removed.has(candidate))
-    if (nextIndexIds.length !== current.length) {
-      await writeIndex(this.db, nextIndexIds).catch(() => undefined)
-    }
-    this.indexIds = nextIndexIds
+    await this.replaceAll([], ids)
   }
 
   /**
-   * Batched replace: supersede `removeIds` with `records` using ONE set()
-   * (new records + index without the removed ids) followed by ONE remove()
-   * of the superseded record keys. Write-before-remove keeps a crash between
-   * the two calls harmless: orphaned keys are ignored because reads go via
-   * the index. Ids being (re-)written are never removed, so replacing a
-   * record with the same id keeps it.
+   * Preflight reads before mutation, then write before removing.
+   * If removal fails, remaining old records stay visible.
    */
-  replaceAll = async (records: Model[], removeIds: string[] = []) => {
-    if (records.length === 0 && removeIds.length === 0) return
-    const writtenIds = new Set(records.map((record) => record.id))
-    const supersededIds = removeIds.filter((id) => !writtenIds.has(id))
-    await this.persistRecords(records, { removeIds: supersededIds })
-    if (supersededIds.length === 0) return
-    await new Promise<void>((resolve, reject) => {
-      // Also drop legacy unprefixed keys if any somehow remain.
-      const keys = supersededIds.flatMap((id) => [toStorageKey(id), id])
-      this.db.remove(keys, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
+  replaceAll = async (records: Model[], removeIds: string[] = []): Promise<void> => {
+    const writes = new Map<string, Model>()
+    for (const record of records) {
+      for (const field of ["id", "model_id", "provider_id"] as const) {
+        if (typeof record?.[field] !== "string") {
+          throw new Error(`Invalid model storage record: ${field} must be a string`)
         }
+      }
+      writes.set(toStorageKey(record.id), { ...record })
+    }
+
+    const retiringIds = removeIds.filter((id) => !writes.has(toStorageKey(id)))
+    const destinations = Array.from(writes.keys())
+    const keys = [...new Set([...destinations, ...retiringIds.flatMap(storageAliases)])]
+    if (keys.length === 0) return
+
+    let items = await readStorage(this.db, keys)
+    // Keyed web-shim reads use null for absence; distinguish stored null.
+    if (destinations.some((key) => items[key] === null)) {
+      items = await readStorage(this.db, null)
+    }
+
+    // A proposed retirement grants authority only over matching stored records.
+    const retiringKeys = new Set(retiringIds.flatMap((id) =>
+      storageAliases(id).filter((key) => isStoredModel(id, items[key]))
+    ))
+    for (const [key, record] of writes) {
+      if (
+        Object.prototype.hasOwnProperty.call(items, key) &&
+        !isStoredModel(record.id, items[key]) &&
+        !retiringKeys.has(key)
+      ) {
+        throw new Error(`Cannot overwrite occupied model storage key: ${key}`)
+      }
+    }
+
+    if (writes.size > 0) {
+      await new Promise<void>((resolve, reject) => {
+        this.db.set(Object.fromEntries(writes), () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError)
+          } else {
+            resolve()
+          }
+        })
       })
-    })
+    }
+    await this.removeKeys([...retiringKeys].filter((key) => !writes.has(key)))
   }
 
   deleteAll = async (): Promise<void> => {
-    const ids = await this.ensureIndex()
-    const keys = [...ids.map(toStorageKey), ...ids, MODEL_INDEX_KEY]
+    const ids = (await this.getAll()).map((model) => model.id)
+    await this.deleteMany(ids)
+  }
+
+  private removeKeys = async (keys: string[]): Promise<void> => {
+    if (keys.length === 0) return
     await new Promise<void>((resolve, reject) => {
       this.db.remove(keys, () => {
         if (chrome.runtime.lastError) {
@@ -338,7 +216,6 @@ export class ModelDb {
         }
       })
     })
-    this.indexIds = []
   }
 }
 
@@ -498,8 +375,6 @@ export const deleteAllModelsByProviderId = async (provider_id: string) => {
 
 export const bulkAddModelsFB = async (models: Model[]) => {
   const db = new ModelDb()
-  // Supersede the existing catalog in one batched set + one batched remove
-  // (was: a deleteMany per pass with its own index write, then a create set).
   const existing = await db.getAll()
   const modelsToDelete = existing.filter(
     (model) => model?.db_type === "openai_model"

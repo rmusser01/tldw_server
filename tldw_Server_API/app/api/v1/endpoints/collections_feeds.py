@@ -20,7 +20,8 @@ from tldw_Server_API.app.api.v1.schemas.collections_feeds_schemas import (
 from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import JobRow, SourceRow, WatchlistJobChangedError, WatchlistsDatabase
 from tldw_Server_API.app.core.Personalization import (
     record_watchlist_source_deleted,
 )
@@ -173,53 +174,15 @@ def _register_schedule(db: WatchlistsDatabase, job_row, *, current_user: User) -
     if not getattr(job_row, "schedule_expr", None):
         return
     try:
-        from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
-        svc = get_workflows_scheduler()
-        sid = svc.create(
-            tenant_id=str(getattr(current_user, "tenant_id", "default")),
-            user_id=str(current_user.id),
-            workflow_id=None,
-            name=f"watchlist:{job_row.id}:{job_row.name}",
-            cron=job_row.schedule_expr,
-            timezone=_normalize_tz(job_row.schedule_timezone) or "UTC",
-            inputs={"watchlist_job_id": job_row.id},
-            run_mode="async",
-            validation_mode="block",
-            enabled=bool(job_row.active),
-            concurrency_mode="queue",
-            misfire_grace_sec=300,
-            coalesce=True,
-        )
-        db.set_job_schedule_id(job_row.id, sid)
-        return
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Collections feeds schedule registration failed")
-    try:
-        if job_row.schedule_expr:
-            from uuid import uuid4
+        from tldw_Server_API.app.services.workflows_scheduler import register_watchlist_schedule
 
-            from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
-            sid = uuid4().hex
-            wfdb = WorkflowsSchedulerDB(user_id=int(current_user.id))
-            wfdb.create_schedule(
-                id=sid,
-                tenant_id=str(getattr(current_user, "tenant_id", "default")),
-                user_id=str(current_user.id),
-                workflow_id=None,
-                name=f"watchlist:{job_row.id}:{job_row.name}",
-                cron=job_row.schedule_expr,
-                timezone=_normalize_tz(job_row.schedule_timezone) or "UTC",
-                inputs={"watchlist_job_id": job_row.id},
-                run_mode="async",
-                validation_mode="block",
-                enabled=bool(job_row.active),
-                concurrency_mode="queue",
-                misfire_grace_sec=300,
-                coalesce=True,
-            )
-            db.set_job_schedule_id(job_row.id, sid)
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Collections feeds schedule DB fallback failed")
+        register_watchlist_schedule(
+            db, job_row,
+            tenant_id=str(getattr(current_user, "tenant_id", "default")),
+            timezone=_normalize_tz(job_row.schedule_timezone) or "UTC",
+        )
+    except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS):
+        logger.warning("Collections feeds could not attach schedule for job {}", job_row.id)
 
 
 def _derive_health_status(source_row) -> str:
@@ -251,7 +214,6 @@ def _extract_promoted_at(settings: dict[str, Any], job_row=None) -> str | None:
 
 def _to_feed_response(source_row, *, job_row=None, settings: dict[str, Any] | None = None) -> CollectionsFeed:
     settings = settings if settings is not None else _parse_settings(source_row.settings_json)
-    job_id = _extract_job_id(settings)
     return CollectionsFeed(
         id=int(source_row.id),
         name=source_row.name,
@@ -272,7 +234,7 @@ def _to_feed_response(source_row, *, job_row=None, settings: dict[str, Any] | No
         promoted_at=_extract_promoted_at(settings, job_row=job_row),
         created_at=source_row.created_at,
         updated_at=source_row.updated_at,
-        job_id=job_row.id if job_row is not None else job_id,
+        job_id=job_row.id if job_row is not None else None,
         schedule_expr=getattr(job_row, "schedule_expr", None),
         timezone=getattr(job_row, "schedule_timezone", None),
         job_active=getattr(job_row, "active", None),
@@ -281,12 +243,13 @@ def _to_feed_response(source_row, *, job_row=None, settings: dict[str, Any] | No
     )
 
 
-def _load_job(db: WatchlistsDatabase, settings: dict[str, Any]):
+def _load_job(db: WatchlistsDatabase, source: SourceRow, settings: dict[str, Any]) -> JobRow | None:
     job_id = _extract_job_id(settings)
     if not job_id:
         return None
     try:
-        return db.get_job(int(job_id))
+        job = db.get_job(job_id)
+        return job if job.belongs_to_collections_feed(source) else None
     except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
         return None
 
@@ -294,19 +257,15 @@ def _load_job(db: WatchlistsDatabase, settings: dict[str, Any]):
 def _merge_settings(existing: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
     merged = dict(existing)
     for key, value in (updates or {}).items():
-        merged[key] = value
+        if key not in _FEED_JOB_KEYS:
+            merged[key] = value
     merged["collections_origin"] = FEED_ORIGIN
-    for key in _FEED_JOB_KEYS:
-        if key in existing:
-            merged[key] = existing.get(key)
     existing_nested = existing.get("collections") if isinstance(existing.get("collections"), dict) else {}
     update_nested = merged.get("collections") if isinstance(merged.get("collections"), dict) else {}
     nested = dict(existing_nested)
-    nested.update(update_nested)
-    if nested:
+    nested.update((key, value) for key, value in update_nested.items() if key != "job_id")
+    if nested or isinstance(merged.get("collections"), dict):
         nested["origin"] = FEED_ORIGIN
-        if "job_id" in existing_nested:
-            nested["job_id"] = existing_nested.get("job_id")
         merged["collections"] = nested
     return merged
 
@@ -332,28 +291,18 @@ def _ensure_collections_schedule(
     return output_prefs
 
 
-def _sync_job_schedule(db: WatchlistsDatabase, job_row, *, current_user: User) -> None:
+def _sync_job_schedule(db: WatchlistsDatabase, job_row, *, current_user: User, force: bool) -> None:
     try:
-        if job_row.wf_schedule_id:
-            from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
-            svc = get_workflows_scheduler()
-            svc.update(
-                job_row.wf_schedule_id,
-                {
-                    "cron": job_row.schedule_expr or "* * * * *",
-                    "timezone": _normalize_tz(job_row.schedule_timezone) or "UTC",
-                    "enabled": bool(job_row.active),
-                },
-            )
-            return
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+        from tldw_Server_API.app.services.workflows_scheduler import register_watchlist_schedule
+
+        register_watchlist_schedule(
+            db, job_row,
+            tenant_id=str(getattr(current_user, "tenant_id", "default")),
+            timezone=_normalize_tz(job_row.schedule_timezone),
+            force=force,
+        )
+    except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS):
         logger.debug("Collections feeds schedule update failed")
-    if not job_row.wf_schedule_id and job_row.schedule_expr:
-        _register_schedule(db, job_row, current_user=current_user)
-    try:
-        return db.get_job(job_row.id)
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
-        return None
 
 
 def _collections_feed_event_timestamp() -> str:
@@ -377,9 +326,7 @@ async def create_feed_subscription(
     current_user: User = Depends(get_request_user),
     db: WatchlistsDatabase = Depends(get_watchlists_db_for_user),
 ) -> CollectionsFeed:
-    settings = payload.settings if isinstance(payload.settings, dict) else {}
-    settings = dict(settings)
-    settings["collections_origin"] = FEED_ORIGIN
+    settings = _merge_settings({}, payload.settings if isinstance(payload.settings, dict) else {})
     name = payload.name.strip() if isinstance(payload.name, str) and payload.name.strip() else _default_name(str(payload.url))
     tags = [t for t in (payload.tags or []) if t]
     schedule_expr = payload.schedule_expr or _DEFAULT_HOURLY_CRON
@@ -420,6 +367,7 @@ async def create_feed_subscription(
             retry_policy_json=json.dumps({}),
             output_prefs_json=json.dumps(output_prefs),
             job_filters_json=None,
+            collections_feed=source,
         )
     except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("collections_feeds_create_job_failed")
@@ -455,7 +403,6 @@ async def create_feed_subscription(
                 await run_watchlist_job(
                     user_id,
                     job_id,
-                    capture_companion_activity=True,
                     companion_route="/api/v1/collections/feeds",
                 )
             except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
@@ -496,7 +443,7 @@ async def list_feed_subscriptions(
     paged = collected[offset: offset + size]
     items: list[CollectionsFeed] = []
     for row, settings in paged:
-        job = _load_job(db, settings)
+        job = _load_job(db, row, settings)
         items.append(_to_feed_response(row, job_row=job, settings=settings))
     return CollectionsFeedsListResponse(
         items=items,
@@ -518,7 +465,7 @@ async def get_feed_subscription(
     settings = _parse_settings(source.settings_json)
     if not _is_feed_source(settings):
         raise HTTPException(status_code=404, detail="feed_not_found")
-    job = _load_job(db, settings)
+    job = _load_job(db, source, settings)
     return _to_feed_response(source, job_row=job, settings=settings)
 
 
@@ -537,6 +484,7 @@ async def update_feed_subscription(
     if not _is_feed_source(settings):
         raise HTTPException(status_code=404, detail="feed_not_found")
 
+    job_id = _extract_job_id(settings)
     if payload.settings is not None and isinstance(payload.settings, dict):
         settings = _merge_settings(settings, payload.settings)
     settings["collections_origin"] = FEED_ORIGIN
@@ -551,20 +499,28 @@ async def update_feed_subscription(
         patch["url"] = str(payload.url)
     if payload.active is not None:
         patch["active"] = payload.active
-    try:
-        source = db.update_source(feed_id, patch)
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("collections_feeds_update_source_failed")
-        raise HTTPException(status_code=400, detail="feed_update_failed") from exc
-    if payload.tags is not None:
+    schedule_edit = any(value is not None for value in (payload.schedule_expr, payload.timezone, payload.active))
+    if job_id is not None and schedule_edit:
         try:
-            db.set_source_tags(feed_id, [t for t in payload.tags if t])
-            source = db.get_source(feed_id)
-        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
-            logger.error("collections_feeds_update_tags_failed")
+            job = db.get_job(job_id)
+        except KeyError:
+            raise HTTPException(status_code=409, detail="job_schedule_changed") from None
+        except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS) as exc:
+            logger.error("collections_feeds_lookup_job_failed")
+            raise HTTPException(status_code=503, detail="job_schedule_lookup_failed") from exc
+        if not job.belongs_to_collections_feed(source):
+            raise HTTPException(status_code=409, detail="job_schedule_changed")
+    else:
+        job = _load_job(db, source, settings)
+    if job is not None and payload.schedule_expr:
+        from tldw_Server_API.app.services.workflows_scheduler import delete_retired_watchlist_schedule
 
-    job = _load_job(db, settings)
-    if job and any(value is not None for value in (payload.schedule_expr, payload.timezone, payload.active)):
+        try:
+            delete_retired_watchlist_schedule(job, payload.schedule_expr)
+        except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS) as exc:
+            raise HTTPException(status_code=503, detail="job_schedule_cleanup_pending") from exc
+    tags = [t for t in payload.tags if t] if payload.tags is not None else None
+    if job is not None and schedule_edit:
         job_patch: dict[str, Any] = {}
         if payload.schedule_expr is not None:
             job_patch["schedule_expr"] = payload.schedule_expr
@@ -586,15 +542,41 @@ async def update_feed_subscription(
             except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
                 pass
 
+        previous = job
         try:
-            job = db.update_job(int(job.id), job_patch)
+            source, job = db.update_feed_and_job(
+                feed_id, patch, tags=tags, expected_job=job, job_patch=job_patch,
+            )
+        except WatchlistJobChangedError:
+            raise HTTPException(status_code=409, detail="job_schedule_changed") from None
+        except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS) as exc:
+            logger.error("collections_feeds_update_job_failed")
+            raise HTTPException(status_code=400, detail="feed_update_failed") from exc
+
+        try:
             if any(k in job_patch for k in ("schedule_expr", "schedule_timezone")):
                 next_run = _compute_next_run(job.schedule_expr, job.schedule_timezone)
-                db.set_job_history(int(job.id), next_run_at=next_run)
-                job = db.get_job(int(job.id))
-            _sync_job_schedule(db, job, current_user=current_user)
-        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
-            logger.error("collections_feeds_update_job_failed")
+                db.set_job_history(int(job.id), next_run_at=next_run, expected_job=job)
+            _sync_job_schedule(
+                db, job, current_user=current_user,
+                force=(previous.schedule_expr, previous.schedule_timezone, previous.active)
+                != (job.schedule_expr, job.schedule_timezone, job.active),
+            )
+            job = db.get_job(int(job.id))
+        except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS):
+            logger.error("collections_feeds_schedule_sync_failed")
+    else:
+        try:
+            source = db.update_source(feed_id, patch)
+        except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS) as exc:
+            logger.error("collections_feeds_update_source_failed")
+            raise HTTPException(status_code=400, detail="feed_update_failed") from exc
+        if tags is not None:
+            try:
+                db.set_source_tags(feed_id, tags)
+                source = db.get_source(feed_id)
+            except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS):
+                logger.error("collections_feeds_update_tags_failed")
 
     response = _to_feed_response(source, job_row=job, settings=settings)
     if activity_patch:
@@ -623,21 +605,38 @@ async def delete_feed_subscription(
     if not _is_feed_source(settings):
         raise HTTPException(status_code=404, detail="feed_not_found")
     job_id = _extract_job_id(settings)
-    if job_id:
+    job = None
+    if job_id is not None:
         try:
             job = db.get_job(job_id)
-            if getattr(job, "wf_schedule_id", None):
-                from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
-                get_workflows_scheduler().delete(job.wf_schedule_id)  # type: ignore[arg-type]
-        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+        except KeyError:
             pass
-        with contextlib.suppress(_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS):
-            db.delete_job(job_id)
+        except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS) as exc:
+            raise HTTPException(status_code=503, detail="job_schedule_lookup_failed") from exc
+        if job is not None and not job.belongs_to_collections_feed(source):
+            raise HTTPException(status_code=409, detail="job_schedule_changed")
+
+    from tldw_Server_API.app.services.workflows_scheduler import (
+        bind_linked_watchlist_schedule,
+        retry_watchlist_schedule_retirements,
+    )
+
+    try:
+        retire_schedule = job is not None and bind_linked_watchlist_schedule(job)
+    except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS) as exc:
+        raise HTTPException(status_code=503, detail="job_schedule_cleanup_pending") from exc
+    try:
+        db.delete_feed_and_job(source, linked_job_id=job_id, expected_job=job, retire_schedule=retire_schedule)
+    except WatchlistJobChangedError:
+        raise HTTPException(status_code=409, detail="job_schedule_changed") from None
+    except (DatabaseError, *_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS) as exc:
+        logger.error("collections_feeds_delete_failed")
+        raise HTTPException(status_code=503, detail="feed_delete_failed") from exc
+
+    if job is not None:
+        retry_watchlist_schedule_retirements(db, job)
     source_response = _to_feed_response(source, settings=settings)
     event_timestamp = _collections_feed_event_timestamp()
-    deleted = db.delete_source(feed_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="feed_not_found")
     record_watchlist_source_deleted(
         user_id=current_user.id,
         source=source_response,

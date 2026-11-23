@@ -5,6 +5,7 @@ import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fi
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { TFunction } from "i18next"
 import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { createDefaultActorSettings } from "@/types/actor"
 import { saveActorSettingsForChat } from "@/services/actor-settings"
 import {
@@ -130,13 +131,15 @@ beforeEach(() => {
     }
   })
   useStoreMessageOption.getState().startNewChatDraft()
+  const session = usePlaygroundSessionStore.getState()
+  session.completeServerChatSelection(session.serverChatSelectionIntent)
   useStoreMessageOption.setState({ historyId: null, serverChatId: null })
   io.bareSettings.mockResolvedValue(createDefaultActorSettings())
   io.create.mockRejectedValue(new Error("fixture stops before creation"))
   io.snapshot.mockResolvedValue(snapshot())
 })
 
-it("retains the command's original scope before held native prompt preparation", async () => {
+it.each(["new draft", "server navigation"])("retires held native prompt preparation after %s", async (transition) => {
   const prepared = await prepare()
   let release!: (value: ServicePromptSnapshot) => void
   io.snapshot.mockReturnValueOnce(
@@ -146,7 +149,8 @@ it("retains the command's original scope before held native prompt preparation",
   )
   const result = dispatch(prepared).catch((error) => error)
   await vi.waitFor(() => expect(io.snapshot).toHaveBeenCalledOnce())
-  useStoreMessageOption.getState().startNewChatDraft()
+  if (transition === "new draft") useStoreMessageOption.getState().startNewChatDraft()
+  else usePlaygroundSessionStore.getState().requestServerChatSelection("different-chat")
   release(snapshot())
   await result
   expect(io.snapshot).toHaveBeenCalledWith(

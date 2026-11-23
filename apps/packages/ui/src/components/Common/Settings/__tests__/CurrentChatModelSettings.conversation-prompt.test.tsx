@@ -214,10 +214,14 @@ const settingsClients = new Set<QueryClient>()
 
 const instruction =
   "UAT363 RETRY ORBIT742. Describe visible image contents accurately in one short sentence."
+let fixtureSignal: AbortSignal
+
 const renderSettings = (
   settingsScope?: string,
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  signal = fixtureSignal,
 ) => {
+  signal.throwIfAborted()
   settingsClients.add(client)
   const close = vi.fn()
   const view = render(
@@ -235,11 +239,23 @@ const renderSettings = (
   return { ...view, close }
 }
 
-const mountSettings = async (settingsScope?: string, client?: QueryClient) => {
-  const view = renderSettings(settingsScope, client)
-  fireEvent.click(await waitFor(() => getSettingsTab("Conversation")))
-  const editor = await screen.findByPlaceholderText("Enter System Prompt")
-  return { ...view, editor }
+const mountSettings = async (
+  settingsScope?: string,
+  client?: QueryClient,
+  tab: "conversation" | "model" = "conversation",
+  signal = fixtureSignal,
+) => {
+  const view = renderSettings(settingsScope, client, signal)
+  if (tab === "conversation") {
+    const conversationTab = await waitFor(() => getSettingsTab("Conversation"))
+    signal.throwIfAborted()
+    fireEvent.click(conversationTab)
+  }
+  const editor = tab === "conversation"
+    ? await screen.findByPlaceholderText("Enter System Prompt")
+    : await screen.findByLabelText("modelSettings.form.temperature.label")
+  signal.throwIfAborted()
+  return { ...view, editor, signal }
 }
 
 describe("Conversation prompt editor through real model settings Save", () => {
@@ -249,7 +265,8 @@ describe("Conversation prompt editor through real model settings Save", () => {
     for (const client of settingsClients) client.clear()
     settingsClients.clear()
   })
-  beforeEach(() => {
+  beforeEach(({ signal }) => {
+    fixtureSignal = signal
     inputs.selectedSystemPrompt = null
     inputs.character = null
     inputs.provider = "llama.cpp"
@@ -304,6 +321,29 @@ describe("Conversation prompt editor through real model settings Save", () => {
     } finally { mounted.unmount(); client.clear() }
   })
 
+  it("does not render a settings fixture whose lifetime has expired", async () => {
+    const controller = new AbortController()
+    controller.abort(new Error("Expired settings fixture"))
+    await expect(
+      mountSettings(undefined, undefined, "conversation", controller.signal),
+    ).rejects.toThrow("Expired settings fixture")
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("does not click a tab after its settings fixture lifetime expires", async () => {
+    const controller = new AbortController()
+    const mounting = mountSettings(
+      undefined,
+      undefined,
+      "conversation",
+      controller.signal,
+    )
+    controller.abort(new Error("Expired settings fixture"))
+    await expect(mounting).rejects.toThrow("Expired settings fixture")
+    expect(screen.getByText("Conversation", { selector: '[role="tab"]' }))
+      .toHaveAttribute("aria-selected", "false")
+  })
+
   it.each(["inferred", "explicit"])(
     "keeps the entered prompt immediately after Save with %s model scope",
     async (mode) => {
@@ -313,6 +353,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
           : undefined
       const { editor, close } = await mountSettings(scope)
       fireEvent.change(editor, { target: { value: instruction } })
+      expect(editor).toHaveValue(instruction)
       expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
       fireEvent.click(getMainSaveButton())
       await waitFor(() => expect(close).toHaveBeenCalledWith(false))
@@ -688,8 +729,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
-    const first = await mountSettings(undefined, client)
-    fireEvent.click(getSettingsTab("Model"))
+    const first = await mountSettings(undefined, client, "model")
     fireEvent.change(screen.getByLabelText("modelSettings.form.numPredict.label"), {
       target: { value: "48" },
     })
@@ -698,11 +738,11 @@ describe("Conversation prompt editor through real model settings Save", () => {
     })
     fireEvent.click(getMainSaveButton())
     await waitFor(() => expect(first.close).toHaveBeenCalledWith(false))
+    first.signal.throwIfAborted()
     expect(useStoreChatModelSettings.getState().numPredict).toBe(48)
     first.unmount()
 
-    const reopened = await mountSettings(undefined, client)
-    fireEvent.click(getSettingsTab("Model"))
+    const reopened = await mountSettings(undefined, client, "model", first.signal)
     expect(screen.getByLabelText("modelSettings.form.numPredict.label")).toHaveValue("48")
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
     fireEvent.click(getMainSaveButton())
@@ -712,7 +752,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
       temperature: 0.25,
       apiProvider: "llama.cpp",
     })
-  }, 10000)
+  })
 
   it("does not revive a cached default after explicitly clearing a numeric setting", async () => {
     const client = new QueryClient({
@@ -723,8 +763,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
       queryFn: getAllModelSettings,
     })
     useStoreChatModelSettings.getState().setTemperature(0.25)
-    const clearing = await mountSettings(undefined, client)
-    fireEvent.click(getSettingsTab("Model"))
+    const clearing = await mountSettings(undefined, client, "model")
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
     fireEvent.change(screen.getByLabelText("modelSettings.form.temperature.label"), {
       target: { value: "" },
@@ -733,14 +772,14 @@ describe("Conversation prompt editor through real model settings Save", () => {
     await waitFor(() =>
       expect(useStoreChatModelSettings.getState().temperature).toBeUndefined(),
     )
+    clearing.signal.throwIfAborted()
     clearing.unmount()
-    const reopened = await mountSettings(undefined, client)
-    fireEvent.click(getSettingsTab("Model"))
+    const reopened = await mountSettings(undefined, client, "model", clearing.signal)
     expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("")
     fireEvent.click(getMainSaveButton())
     await waitFor(() => expect(reopened.close).toHaveBeenCalledWith(false))
     expect(useStoreChatModelSettings.getState().temperature).toBeUndefined()
-  }, 10000)
+  })
 
   it.each(["saved", "reset-default", "reset-template", "owner-changed"])(
     "shows the current prompt when the dialog remounts with the existing query cache (%s)",
@@ -753,6 +792,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
       fireEvent.change(first.editor, { target: { value: instruction } })
       fireEvent.click(getMainSaveButton())
       await waitFor(() => expect(first.close).toHaveBeenCalledWith(false))
+      first.signal.throwIfAborted()
       let expected = instruction
       if (state.startsWith("reset")) {
         const template = state === "reset-template"
@@ -761,6 +801,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
         )
         expected = template ? "Selected template instructions" : ""
         await waitFor(() => expect(first.editor).toHaveValue(expected))
+        first.signal.throwIfAborted()
         fireEvent.click(getMainSaveButton())
         await waitFor(() => expect(useStoreChatModelSettings.getState().systemPrompt).toBe(expected))
       } else if (state === "owner-changed") {
@@ -770,14 +811,16 @@ describe("Conversation prompt editor through real model settings Save", () => {
         expected = ""
         useStoreMessageOption.getState().startNewChatDraft(false)
       }
+      first.signal.throwIfAborted()
       first.unmount()
-      const reopened = await mountSettings(undefined, client)
+      const reopened = await mountSettings(
+        undefined, client, "conversation", first.signal,
+      )
       expect(reopened.editor).toHaveValue(expected)
       expect(useStoreChatModelSettings.getState().systemPrompt).toBe(
         state === "owner-changed" ? undefined : expected,
       )
     },
-    10_000,
   )
 
   it.each([

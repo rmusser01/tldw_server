@@ -19,62 +19,41 @@ def _install_request_user_override(app, *, permissions=None, roles=None, is_admi
     return get_request_user
 
 
-@pytest.mark.integration
-def test_chat_command_audit_logged_system_mode(monkeypatch, test_client, auth_headers):
-    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
-    monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+@pytest.fixture
+def command_audit_events(monkeypatch, credentialed_test_client):
+    from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 
-    # Capture audit events
-    captured_events = {"events": []}
+    events = []
 
     class DummyAudit:
-        async def log_event(self, *args, **kwargs):
-            captured_events["events"].append({"args": args, "kwargs": kwargs})
+        async def log_event(self, **kwargs):
+            events.append(kwargs)
 
     async def override_audit():
         return DummyAudit()
 
-    # Override dependencies
-    from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-    test_client.app.dependency_overrides[get_audit_service_for_user] = override_audit
-
-    # Avoid provider network calls
-    from tldw_Server_API.app.core.Chat import chat_service
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", lambda **kwargs: {"choices": [{"message": {"role": "assistant", "content": "ok"}}]})
-
-    payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
-    _ = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
-
-    found = False
-    for e in captured_events["events"]:
-        kw = e.get("kwargs", {})
-        if kw.get("action") == "chat.command.executed":
-            md = kw.get("metadata") or {}
-            if md.get("command") == "time":
-                found = True
-                assert md.get("mode") == "system"
-                break
-    assert found, f"Expected chat.command.executed audit event, got: {captured_events['events']}"
+    monkeypatch.setitem(credentialed_test_client.app.dependency_overrides, get_audit_service_for_user, override_audit)
+    return events
 
 
 @pytest.mark.integration
-def test_chat_command_audit_logged_preface_mode(monkeypatch, credentialed_test_client, auth_headers):
+def test_chat_command_audit_logged_system_mode(monkeypatch, credentialed_test_client, auth_headers, command_audit_events):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+    monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+    payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
+    response = credentialed_test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+    assert response.status_code == 200, response.text
+    assert [
+        (event["metadata"]["command"], event["metadata"]["mode"])
+        for event in command_audit_events if event["action"] == "chat.command.executed"
+    ] == [("time", "system")]
+
+
+@pytest.mark.integration
+def test_chat_command_audit_logged_preface_mode(monkeypatch, credentialed_test_client, auth_headers, command_audit_events):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "preface")
 
-    captured_events = {"events": []}
-
-    class DummyAudit:
-        async def log_event(self, *args, **kwargs):
-            captured_events["events"].append({"args": args, "kwargs": kwargs})
-
-    async def override_audit():
-        return DummyAudit()
-
-    from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-    credentialed_test_client.app.dependency_overrides[get_audit_service_for_user] = override_audit
-
-    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
     captured_msg = {"messages": None}
     def fake_call(**kwargs):
         captured_msg["messages"] = kwargs.get("messages_payload")
@@ -85,16 +64,10 @@ def test_chat_command_audit_logged_preface_mode(monkeypatch, credentialed_test_c
     response = credentialed_test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
     assert response.status_code == 200, response.text
 
-    found = False
-    for e in captured_events["events"]:
-        kw = e.get("kwargs", {})
-        if kw.get("action") == "chat.command.executed":
-            md = kw.get("metadata") or {}
-            if md.get("command") == "time":
-                found = True
-                assert md.get("mode") == "preface"
-                break
-    assert found
+    assert [
+        (event["metadata"]["command"], event["metadata"]["mode"])
+        for event in command_audit_events if event["action"] == "chat.command.executed"
+    ] == [("time", "preface")]
 
     # Additional assertion: user message is prefixed in messages payload
     msgs = captured_msg["messages"] or []
@@ -110,7 +83,8 @@ def test_chat_command_audit_logged_preface_mode(monkeypatch, credentialed_test_c
         text_part = next((p for p in parts if p.get("type") == "text"), None)
         assert text_part is not None
         assert text_part.get("text", "").startswith("[/time]")
-    elif isinstance(parts, str):
+    else:
+        assert isinstance(parts, str)
         assert parts.startswith("[/time]")
 
 
@@ -134,7 +108,7 @@ def test_chat_command_rbac_enforcement(monkeypatch, test_client, auth_headers):
     async def override_audit():
         return DummyAudit()
     from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-    test_client.app.dependency_overrides[get_audit_service_for_user] = override_audit
+    monkeypatch.setitem(test_client.app.dependency_overrides, get_audit_service_for_user, override_audit)
 
     from tldw_Server_API.app.core.Chat import chat_service
     monkeypatch.setattr(chat_service, "perform_chat_api_call", lambda **kwargs: {"choices": [{"message": {"role": "assistant", "content": "ok"}}]})
@@ -199,7 +173,7 @@ def test_chat_command_weather_default_location_system_mode(monkeypatch, credenti
     async def override_audit():
         return DummyAudit()
     from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-    credentialed_test_client.app.dependency_overrides[get_audit_service_for_user] = override_audit
+    monkeypatch.setitem(credentialed_test_client.app.dependency_overrides, get_audit_service_for_user, override_audit)
 
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/weather"}], "stream": False}
     response = credentialed_test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)

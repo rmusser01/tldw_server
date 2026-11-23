@@ -481,10 +481,9 @@ class HttpxProbeTransport:
 
     async def send(self, request: ProbeHttpRequest) -> Any:
         proxies = _mutable_proxies(request.proxies)
-        client = (
-            http_client.create_async_client(proxies=proxies, trust_env=False)
-            if public_url_policy_active()
-            else http_client.create_async_client(proxies=proxies)
+        public_capture = public_url_policy_active()
+        client = http_client.create_async_client(
+            proxies=proxies, **({"trust_env": False} if public_capture else {})
         )
         try:
             response = await http_client.afetch(
@@ -498,7 +497,7 @@ class HttpxProbeTransport:
                 proxies=proxies,
                 retry=http_client.RetryPolicy(attempts=1),
                 sensitive_observability=True,
-                **({"max_response_bytes": _public_response_limit()} if public_url_policy_active() else {}),
+                **({"max_response_bytes": _public_response_limit()} if public_capture else {}),
             )
         except asyncio.CancelledError:
             await _close_resource(client, label="client")

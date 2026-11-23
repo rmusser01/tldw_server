@@ -2,6 +2,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { ConfigProvider } from "antd"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { StudyPackCreateDrawer } from "../StudyPackCreateDrawer"
@@ -183,6 +184,130 @@ describe("StudyPackCreateDrawer", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
     if (picker.getAttribute("aria-expanded") === "false") fireEvent.mouseDown(picker)
     expect(await screen.findByText("Your media library is empty.")).toBeInTheDocument()
+  })
+
+  it("selects a search result from page two and resets to page one for a new search", async () => {
+    vi.spyOn(tldwClient, "listMedia").mockResolvedValue({ items: [] })
+    const searchMedia = vi.spyOn(tldwClient, "searchMedia").mockImplementation(async ({ query }, params) => {
+      if (query !== "Lecture") return { results: [] }
+      return {
+        results: params?.page === 2
+          ? [{ id: 51, title: "Second lecture" }]
+          : [{ id: 5, title: "First lecture" }],
+        total_count: 51
+      }
+    })
+
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+    const picker = screen.getByRole("combobox", { name: "Search media library" })
+    fireEvent.mouseDown(picker)
+    fireEvent.change(picker, { target: { value: "Lecture" } })
+    expect(await screen.findByText("First lecture")).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByTitle("Next Page"))
+    await waitFor(() => expect(searchMedia).toHaveBeenLastCalledWith(
+      { query: "Lecture" },
+      { page: 2, results_per_page: 50 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    ))
+    if (picker.getAttribute("aria-expanded") === "false") fireEvent.mouseDown(picker)
+    expect(await screen.findByText("Second lecture")).toBeInTheDocument()
+    fireEvent.change(picker, { target: { value: "Other" } })
+    await waitFor(() => expect(searchMedia).toHaveBeenLastCalledWith(
+      { query: "Other" },
+      { page: 1, results_per_page: 50 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    ))
+    fireEvent.change(picker, { target: { value: "Lecture" } })
+    expect(await screen.findByText("First lecture")).toBeInTheDocument()
+    fireEvent.click(await screen.findByTitle("Next Page"))
+    if (picker.getAttribute("aria-expanded") === "false") fireEvent.mouseDown(picker)
+    fireEvent.click(await screen.findByText("Second lecture"))
+    expect(screen.getByTestId("study-pack-source-0")).toHaveTextContent("Second lecture")
+  })
+
+  it("can tab to the media pager without selecting a source", async () => {
+    vi.spyOn(tldwClient, "listMedia").mockResolvedValueOnce({
+      items: [{ id: 1, title: "Recent lecture" }],
+      total_count: 51
+    }).mockResolvedValue({ items: [{ id: 51, title: "Older lecture" }], total_count: 51 })
+    const user = userEvent.setup()
+    const popupRoot = React.createRef<HTMLDivElement>()
+    renderDrawer(
+      <ConfigProvider
+        getPopupContainer={() => popupRoot.current ?? document.body}
+        theme={{ token: { motion: false } }}>
+        <div ref={popupRoot} />
+        <StudyPackCreateDrawer open onClose={vi.fn()} />
+      </ConfigProvider>
+    )
+    const picker = screen.getByRole("combobox", { name: "Search media library" })
+    const anchor = picker.closest<HTMLElement>(".ant-select")!
+    // jsdom has no layout. AntD needs measurable anchor and popup rectangles to align its portal.
+    const nativeRect = Element.prototype.getBoundingClientRect
+    const measurePicker = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      if (this === anchor) return new DOMRect(20, 40, 320, 32)
+      if (this.classList.contains("ant-select-dropdown")) return new DOMRect(20, 72, 320, 200)
+      return nativeRect.call(this)
+    })
+    try {
+      await user.click(picker)
+      expect(await screen.findByText("Recent lecture")).toBeInTheDocument()
+      await waitFor(() => expect(screen.getByTitle("Next Page")).toBeVisible())
+      const pager = screen.getByRole("list", { name: "Media result pages" })
+      expect(screen.getByRole("dialog")).toContainElement(pager)
+
+      fireEvent.keyDown(picker, { key: "Tab", keyCode: 9, which: 9 })
+
+      expect(screen.queryByTestId("study-pack-source-0")).not.toBeInTheDocument()
+      expect(pager).toContainElement(document.activeElement as HTMLElement)
+      expect(picker).toHaveAttribute("aria-expanded", "true")
+      expect(screen.getByTitle("Next Page")).toBeVisible()
+      await user.keyboard("{Enter}")
+      expect(await screen.findByText("Older lecture")).toBeVisible()
+      expect(picker).toHaveFocus()
+    } finally {
+      measurePicker.mockRestore()
+    }
+  })
+
+  it("keeps the media list open when paging with the pointer", async () => {
+    const listMedia = vi.spyOn(tldwClient, "listMedia").mockResolvedValueOnce({
+      items: [{ id: 1, title: "Recent lecture" }], total_count: 51
+    }).mockResolvedValue({ items: [{ id: 51, title: "Older lecture" }], total_count: 51 })
+    const user = userEvent.setup()
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+    const picker = screen.getByRole("combobox", { name: "Search media library" })
+    await user.click(picker)
+    expect(await screen.findByText("Recent lecture")).toBeInTheDocument()
+    await user.click(screen.getByTitle("Next Page"))
+    await waitFor(() => expect(listMedia).toHaveBeenLastCalledWith(
+      { page: 2, results_per_page: 50 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    ))
+    expect(await screen.findByText("Older lecture")).toBeInTheDocument()
+    expect(picker).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("reloads the last valid media page when the total shrinks", async () => {
+    const listMedia = vi.spyOn(tldwClient, "listMedia").mockResolvedValueOnce({
+      items: [{ id: 1, title: "First page" }],
+      total_count: 51
+    }).mockResolvedValueOnce({ items: [], total_count: 50 })
+      .mockResolvedValue({ items: [{ id: 2, title: "Last valid page" }], total_count: 50 })
+
+    renderDrawer(<StudyPackCreateDrawer open onClose={vi.fn()} />)
+    const picker = screen.getByRole("combobox", { name: "Search media library" })
+    fireEvent.mouseDown(picker)
+    expect(await screen.findByText("First page")).toBeInTheDocument()
+    fireEvent.click(await screen.findByTitle("Next Page"))
+    await waitFor(() => expect(listMedia).toHaveBeenCalledTimes(3))
+    expect(listMedia).toHaveBeenLastCalledWith(
+      { page: 1, results_per_page: 50 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    if (picker.getAttribute("aria-expanded") === "false") fireEvent.mouseDown(picker)
+    expect(await screen.findByText("Last valid page")).toBeInTheDocument()
   })
 
   it("keeps the search term after a failed search and retries the same request", async () => {

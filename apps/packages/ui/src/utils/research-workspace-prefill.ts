@@ -1,5 +1,6 @@
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import type { KnowledgeNoteSource } from "./knowledge-note-provenance"
+import { getOriginalResultIndex } from "./knowledge-qa-result-index"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
@@ -162,10 +163,11 @@ export const toPrefillSource = (
   const sourceType = normalizeString(metadata.source_type)
   let url = normalizeString(metadata.url)
   const pageNumber = parseNumber(metadata.page_number)
+  const originalIndex = getOriginalResultIndex(result, index)
   const fallbackTitle =
-    normalizeString(metadata.source) || `Source ${index + 1}`
+    normalizeString(metadata.source) || `Source ${originalIndex + 1}`
   const title = normalizeString(metadata.title) || fallbackTitle
-  const citationIndex = citedIndices.has(index + 1) ? index + 1 : undefined
+  const citationIndex = citedIndices.has(originalIndex + 1) ? originalIndex + 1 : undefined
 
   const originalReference =
     metadata.note_id ??
@@ -313,6 +315,7 @@ export const consumeResearchWorkspacePrefill = async (
 
 export const saveResearchWorkspacePrefill = async (
   payload: ResearchWorkspacePrefill,
+  fields: "all" | "selection" = "all",
 ): Promise<void> => {
   assertPersistentStorage()
   if (!payload.ownerScope) throw new Error("Missing import owner")
@@ -324,7 +327,12 @@ export const saveResearchWorkspacePrefill = async (
     )
     if (current && current.id !== checkpoint.id)
       throw new Error("A newer Knowledge handoff is waiting.")
-    await storage.set(prefillKey(owner), checkpoint)
+    if (fields === "selection" && (!current || current.ownerScope !== owner))
+      throw new Error("Import selection owner changed")
+    // Selection changes cannot retire an independently checkpointed retry receipt.
+    await storage.set(prefillKey(owner), fields === "selection"
+      ? { ...current, selectionIntent: checkpoint.selectionIntent }
+      : checkpoint)
   })
 }
 
@@ -382,28 +390,40 @@ export const saveResearchWebCapture = async (
     record.body.workspace?.workspace_id !== record.workspaceId
   )
     throw new Error("Missing capture owner or destination")
+  if (typeof navigator === "undefined" || !navigator.locks?.request)
+    throw new Error("Capture checkpoints require Web Locks support. Use a supported browser and retry.")
   const checkpoint = structuredClone(record)
-  await persistPrefill(async () => {
-    const key = `${prefillKey(checkpoint.ownerScope)}:web-captures`
+  const key = `${prefillKey(checkpoint.ownerScope)}:web-captures`
+  const recordKey = `${key}:${checkpoint.body.clip_id}`
+  // Tabs share each capture's read-modify-write; unrelated clips don't share a record.
+  await persistPrefill(async () => navigator.locks.request(`tldw:${recordKey}`, async () => {
     const records =
       (await storage.get<Record<string, ResearchWebCapture>>(key)) || {}
-    const recordKey = `${key}:${checkpoint.body.clip_id}`;
     const previous =
       (await storage.get<ResearchWebCapture>(recordKey)) ||
       records[checkpoint.body.clip_id];
     if (
       previous &&
-      (previous.workspaceId !== checkpoint.workspaceId ||
-        JSON.stringify(previous.body) !== JSON.stringify(checkpoint.body))
+      (previous.ownerScope !== checkpoint.ownerScope ||
+        previous.workspaceId !== checkpoint.workspaceId ||
+        previous.sourceId !== checkpoint.sourceId ||
+        JSON.stringify(previous.body) !== JSON.stringify(checkpoint.body) ||
+        (previous.pin && checkpoint.pin &&
+          JSON.stringify(previous.pin) !== JSON.stringify(checkpoint.pin)))
     )
       throw new Error("Accepted capture cannot change; retry the original body")
-    await storage.set(recordKey, checkpoint);
+    const next = {
+      ...checkpoint,
+      ...(previous?.pin ? { pin: previous.pin } : {}),
+      ...(previous?.attached ? { attached: true } : {})
+    }
+    await storage.set(recordKey, next);
     const saved = await createSafeStorage({ area: "local" }).get(recordKey);
-    if (JSON.stringify(saved) !== JSON.stringify(checkpoint))
+    if (JSON.stringify(saved) !== JSON.stringify(next))
       throw new Error(
         "Could not retain capture checkpoint. Enable browser storage and retry.",
       );
-  })
+  }))
 }
 
 /** Only decorate authoritative owned membership; a checkpoint never restores a removed source. */

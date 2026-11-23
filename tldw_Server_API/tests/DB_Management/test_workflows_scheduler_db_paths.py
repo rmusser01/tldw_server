@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -6,6 +7,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import WorkflowsSchedulerDB
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 
@@ -32,6 +34,43 @@ def test_scheduler_uses_dedicated_default_sqlite_path_when_global_database_url_i
         actual = Path(db.backend.config.sqlite_path).resolve()  # type: ignore[arg-type]
         expected = DatabasePaths.get_workflows_scheduler_db_path(1).resolve()
         assert actual == expected
+    finally:
+        _close_scheduler_backend(db)
+
+
+def test_scheduler_upgrade_preserves_legacy_rows_and_fences_managed_definitions(tmp_path) -> None:
+    path = tmp_path / "legacy-schedules.db"
+    config = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(path))
+    db = WorkflowsSchedulerDB(backend=SQLiteBackend(config))
+    try:
+        db.create_schedule(
+            id="legacy", tenant_id="tenant", user_id="42", workflow_id=None,
+            name="Legacy monitor", cron="15 9 * * *", timezone="UTC",
+            inputs={"watchlist_job_id": 9},
+        )
+        original = db.get_schedule("legacy")
+    finally:
+        _close_scheduler_backend(db)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("ALTER TABLE workflow_schedules DROP COLUMN managed_watchlist_job_id")
+        connection.commit()
+    finally:
+        connection.close()
+
+    db = WorkflowsSchedulerDB(backend=SQLiteBackend(config))
+    try:
+        assert original is not None
+        assert db.get_schedule("legacy") == original
+        assert not db.bind_managed_watchlist("legacy", user_id="41", job_id=9)
+        assert db.bind_managed_watchlist("legacy", user_id="42", job_id=9)
+        assert not db.bind_managed_watchlist("legacy", user_id="42", job_id=10)
+        assert not db.update_schedule("legacy", {"cron": "15 10 * * *"})
+        assert db.update_schedule("legacy", {"name": "Renamed monitor"})
+        row = db.get_schedule("legacy")
+        assert row and (row.cron, row.name, row.managed_watchlist_job_id) == (
+            original.cron, "Renamed monitor", 9,
+        )
     finally:
         _close_scheduler_backend(db)
 

@@ -368,7 +368,7 @@ export const ROUTE_METADATA = [
     availability: webAndExtension,
     nav: "secondary",
     requiresBackend: true,
-    rationale: "Workspace-focused chat route with runtime and approvals."
+    rationale: "Workspace-focused chat with staged sources and runtime status."
   }),
   defineRoute({
     path: "/knowledge",

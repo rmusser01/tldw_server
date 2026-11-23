@@ -8,6 +8,7 @@ import {
   nativeHistoryMessagePayload,
   parseNativeHistoryAdmission
 } from "@/services/chat-history-selection"
+import { prepareHistoryDurableTurn, parseHistoryDurableResult } from "@/services/history-durable-turn"
 import { canonicalHistoryJson } from "@/db/dexie/history-selection"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
 import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser, isLocalRagDiagnosticInfo } from "@/utils/local-rag-diagnostic"
@@ -76,6 +77,8 @@ import type { HistoryTurnOutcome } from "@/db/dexie/types"
 import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import type { MessageMetadataExtra } from "@/store/option"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import type { ChatModelSettings } from "@/store/model"
+import type { ChatTurnIdentity } from "@/services/tldw/TldwApiClient"
 import type { KnownServicePromptId } from "@/services/tldw/domains/service-prompts"
 import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
@@ -109,6 +112,8 @@ export type ChatModeParamsBase = {
   useOCR: boolean
   toolChoice?: ToolChoice
   conversationId?: string
+  currentChatModelSettings?: ChatModelSettings | null
+  tldwTurn?: ChatTurnIdentity
   setMessages: (messages: Message[] | ((prev: Message[]) => Message[])) => void
   saveMessageOnSuccess: (data: SaveMessageData) => Promise<string | null>
   saveMessageOnError: (data: SaveMessageErrorData) => Promise<string | null>
@@ -289,7 +294,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()
   const resolvedUserMessageId =
     !isRegenerate
-      ? userMessageId ?? generateID()
+      ? params.tldwTurn?.user_message_id ?? userMessageId ?? generateID()
       : retryFailedTurn
         ? userMessageId ?? diagnosticUser?.id ?? regenerateFromMessage?.parentMessageId ?? getLastUserMessageId(messages) ?? undefined
         : undefined
@@ -347,6 +352,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
   const context: ChatModeContext<TParams> = {
     ...params,
+    ...(selectedModelSelection.provider ? {
+      currentChatModelSettings: {
+        ...params.currentChatModelSettings,
+        apiProvider: selectedModelSelection.provider
+      }
+    } : {}),
     selectedModel: rawSelectedModel,
     modelIdOverride,
     message,
@@ -373,6 +384,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
   let modelClient: Awaited<ReturnType<typeof pageAssistModel>> | undefined
   let fullText = ""
+  let generationInfo: unknown = undefined
   let contentToSave = ""
   let timetaken = 0
   let promptContent: string | undefined = undefined
@@ -385,6 +397,19 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   let lastStreamingUpdateAt = 0
   let pendingStreamingText = ""
   let pendingReasoningTime = 0
+  const captureServerHistoryObservations = () => {
+    if (!historyTurn?.serverOwned || !modelClient) return false
+    let changed = false
+    if (modelClient.historyAdmission && !historyTurn.admission) {
+      historyTurn.admission = modelClient.historyAdmission
+      changed = true
+    }
+    if (modelClient.historyResult && !historyTurn.observedResult) {
+      historyTurn.observedResult = modelClient.historyResult
+      changed = true
+    }
+    return changed
+  }
   const setMessagesWithTransition = (
     messagesOrUpdater: Message[] | ((prev: Message[]) => Message[])
   ) => {
@@ -626,7 +651,11 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     }
   }
 
-  const admitHistoryInput = async (wire: unknown, diagnosticInfo?: unknown): Promise<ChatCompletionRequest | undefined> => {
+  const admitHistoryInput = async (
+    wire: unknown,
+    diagnosticInfo?: unknown,
+    durableMode: "plain" | "rag" = "plain"
+  ): Promise<ChatCompletionRequest | undefined> => {
     if (!historyTurn) return undefined
       if ((isRegenerate && !historyTurn.existingSelection) || mode.isContinue)
         throw new Error("unsupported_history_action")
@@ -644,18 +673,31 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         ...(documents?.length ? { documents } : {}),
         ...(diagnosticInfo !== undefined ? { generationInfo: diagnosticInfo } : {})
       }
-      if (historyTurn.owner.kind === "native") {
+      if (historyTurn.owner.kind === "native" && !historyTurn.serverOwned) {
         nativeHistoryMessagePayload(input)
         if ((wire as ChatCompletionRequest).tools?.length)
           throw new Error("unsupported_history_native_tool_result")
         if (params.dynamicUIRequest)
           throw new Error("unsupported_history_native_result_metadata")
       }
-      const prepared = prepareHistoryContext(wire, () =>
-        historyTurn.validateLease()
-      )
       const view = historyTurn.currentView()
       if (!view) throw new Error("stale_selection")
+      const owner = historyTurn.owner
+      if (historyTurn.serverOwned && owner.kind !== "native")
+        throw new Error("unsupported_history_durable_turn")
+      const durable = historyTurn.serverOwned && owner.kind === "native"
+        ? prepareHistoryDurableTurn(wire, {
+            owner,
+            mode: durableMode,
+            validate_lease: () => historyTurn.validateLease(),
+            history: historyTurn.retryAdmission
+              ? { kind: "admission", admission: historyTurn.retryAdmission }
+              : { kind: "selection", capture: historyTurn.capture, current_view: view }
+          })
+        : undefined
+      const prepared = durable?.prepared ?? prepareHistoryContext(wire, () =>
+        historyTurn.validateLease()
+      )
       const selection = finalizeHistorySelection(
         historyTurn.owner,
         historyTurn.capture,
@@ -664,7 +706,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       )
       if (!historyTurn.validateLease() || signal.aborted)
         throw new Error("request_config_scope_changed")
-      historyTurn.selection = selection
+      if (!durable || !historyTurn.retryAdmission) historyTurn.selection = selection
+      if (durable) historyTurn.requestContextDigest = prepared.request_context_digest
       historyTurn.input = input
       historyTurn.replyModel = {
         name: selectedModel,
@@ -675,13 +718,17 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       context.assertPreparationCurrent?.()
       if (!historyTurn.validateLease() || signal.aborted)
         throw new Error("request_config_scope_changed")
+      if (durable && !historyTurn.canUpdateView()) throw new Error("stale_selection")
       // Revalidate the view after the durable pending-intent write, immediately before dispatch.
+      const currentView = historyTurn.currentView()
+      if (!currentView) throw new Error("stale_selection")
       finalizeHistorySelection(
         historyTurn.owner,
         historyTurn.capture,
         prepared,
-        historyTurn.currentView()!
+        currentView
       )
+      if (durable) return durable.body as ChatCompletionRequest
       if (historyTurn.persistence === "server") {
         const payload = prepared.payload as ChatCompletionRequest
         const retainReasoning = historyTurn.capture.status === "captured" &&
@@ -727,6 +774,11 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   }
 
   try {
+    if (historyTurn && params.tldwTurn && !historyTurn.serverOwned) {
+      throw new Error("unsupported_history_durable_turn")
+    }
+    if (historyTurn?.serverOwned && (!params.tldwTurn || historyTurn.owner.kind !== "native"))
+      throw new Error("unsupported_history_durable_turn")
     // The pipeline owns response preparation as well as token delivery. Compact
     // ordinary sends do not acquire streaming in their native-only caller.
     if (
@@ -740,6 +792,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     const preflight = mode.preflight ? await mode.preflight(context) : null
     // Image preflight has dispatched its provider request; retrieval-only diagnostics have not.
     if (!isImageGenerationTurn && !preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
+    if (historyTurn?.serverOwned && preflight?.handled)
+      throw new Error(preflight.fullText)
     if (preflight?.handled) {
       dispatched = isImageGenerationTurn
       fullText = preflight.fullText
@@ -895,18 +949,34 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       ? [...promptData.chatHistory, humanMessage]
       : [...promptData.chatHistory]
 
-    const nativeCompletion = Boolean(historyTurn?.owner.kind === "native" &&
+    const requestProvider =
+      selectedModelSelection.provider ?? context.currentChatModelSettings?.apiProvider
+    const nativeCompletion = Boolean(!historyTurn?.serverOwned && historyTurn?.owner.kind === "native" &&
       historyTurn.capture.status === "captured" && historyTurn.capture.native_completion_v1?.supported === true &&
       !historyTurn.retryAdmission && !historyTurn.existingSelection && !historyTurn.historyEdit && promptData.nativeCurrentInput !== undefined && humanMessage && mode.id === "normal")
-    if (nativeCompletion) historyTurn!.persistence = "server"
+    if (nativeCompletion || historyTurn?.serverOwned) historyTurn!.persistence = "server"
     modelClient = await pageAssistModel({
       model: rawSelectedModel,
+      signal,
+      ...(params.tldwTurn ? {
+        tldwTurn: params.tldwTurn,
+        originalUserMessage: message,
+        generationSettings: context.currentChatModelSettings ?? undefined,
+        saveToDb: true
+      } : {}),
+      ...(requestProvider ? { apiProvider: requestProvider } : {}),
       toolChoice,
       conversationId,
       ...(params.saveToDb !== undefined ? { saveToDb: params.saveToDb } : {}),
-      ...(historyTurn ? nativeCompletion && historyTurn.owner.kind === "native"
-        ? { saveToDb: true, conversationId: historyTurn.owner.conversation_id, scope: historyTurn.owner.scope ? structuredClone(historyTurn.owner.scope) : undefined }
-        : { clientManagedHistory: true, saveToDb: false } : {}),
+      ...(historyTurn
+        ? historyTurn.persistence === "server" && historyTurn.owner.kind === "native"
+          ? {
+              saveToDb: true,
+              conversationId: historyTurn.owner.conversation_id,
+              scope: historyTurn.owner.scope ? structuredClone(historyTurn.owner.scope) : undefined
+            }
+          : { clientManagedHistory: true, saveToDb: false }
+        : {}),
       researchContext: context.researchContext,
       clientMessageId: resolvedUserMessageId,
       retryFailedTurn: serverRetryRequired,
@@ -934,11 +1004,17 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       : [...promptData.chatHistory]
     let preparedRequest: ChatCompletionRequest | undefined
     if (historyTurn) {
-      if (historyTurn.owner.kind === "native" && sources.length)
+      if (historyTurn.owner.kind === "native" && !historyTurn.serverOwned && sources.length)
         throw new Error("unsupported_history_native_result_metadata")
-      preparedRequest = await admitHistoryInput(nativeCompletion
-        ? modelClient.prepareNativeHistoryRequest([...promptData.nativeCurrentInput!, humanMessage] as BaseMessage[])
-        : modelClient.prepareClientManagedRequest(finalMessages as BaseMessage[]))
+      const wire = historyTurn.serverOwned
+        ? modelClient.prepareSelectedDurableRequest(
+            finalMessages as BaseMessage[],
+            sources.length ? parseHistoryDurableResult({ version: 1, sources }, "rag").sources : []
+          )
+        : nativeCompletion
+          ? modelClient.prepareNativeHistoryRequest([...promptData.nativeCurrentInput!, humanMessage] as BaseMessage[])
+          : modelClient.prepareClientManagedRequest(finalMessages as BaseMessage[])
+      preparedRequest = await admitHistoryInput(wire, undefined, sources.length ? "rag" : "plain")
     }
 
     let nativeReplyInterrupted = false
@@ -982,14 +1058,18 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         throw error
       }
     }
-    let generationInfo: unknown = undefined
     context.assertPreparationCurrent?.()
-    dispatched = !nativeCompletion
+    dispatched = !nativeCompletion && !historyTurn?.serverOwned
     const chunks = await modelClient.stream(finalMessages as BaseMessage[], {
       signal,
       onDispatch: () => {
         context.assertPreparationCurrent?.()
-        if (nativeCompletion) { historyTurn!.dispatched = true; dispatched = true }
+        if (historyTurn && (nativeCompletion || historyTurn.serverOwned)) {
+          if (!historyTurn.canUpdateView() || !historyTurn.validateLease())
+            throw new Error("stale_selection")
+          historyTurn.dispatched = true
+          dispatched = true
+        }
         params.onResponseDispatch?.()
       },
       ...(nativeCompletion ? { onChunk: observeNativeReceipt } : {}),
@@ -1013,6 +1093,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     let streamTransportInterruptionReason: string | null = null
 
     for await (const chunk of chunks) {
+      if (captureServerHistoryObservations())
+        await historyTurn?.afterAdmission?.()
       if (signal.aborted) break
 
       const interruptionEvent =
@@ -1068,6 +1150,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       historyTurn?.checkpoint?.(fullText)
       count++
     }
+
+    if (captureServerHistoryObservations())
+      await historyTurn?.afterAdmission?.()
 
     // User abort: never fall through to the success path (which would save the
     // partial as a complete answer). Route through the interrupted path, or
@@ -1222,6 +1307,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         "Stream transport interrupted; partial response saved."
       await saveMessageOnError({
         e: new Error(interruptionReason),
+        generationInfo: finalGenerationInfo as Record<string, unknown>,
         botMessage: fullText,
         history,
         historyId,
@@ -1263,6 +1349,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       return chatSubmitSkipped(interruptionReason)
     }
 
+    if (historyTurn?.serverOwned && (!historyTurn.admission || !historyTurn.observedResult))
+      throw new Error("history_result_unverified")
+
     setHistorySafely(
       mode.updateHistory
         ? mode.updateHistory(context, fullText)
@@ -1297,11 +1386,15 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
       documents,
       isContinue: mode.isContinue,
-      generationInfo: savedGenerationInfo as any,
+      generationInfo: savedGenerationInfo as SaveMessageData["generationInfo"],
       prompt_content: promptContent,
       prompt_id: promptId,
       reasoning_time_taken: timetaken,
       saveToDb: Boolean(modelClient.saveToDb),
+      serverOwnsUserMessage: Boolean(params.tldwTurn),
+      serverMessagesAlreadyPersisted:
+        Boolean(modelClient.serverMessagesAlreadyPersisted &&
+          (params.tldwTurn || modelClient.userServerMessageId?.trim())),
       conversationId: modelClient.conversationId,
       assistantServerMessageId: modelClient.serverMessageId,
       imageEventSyncPolicy,
@@ -1312,6 +1405,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined,
       assistantMetadataExtra
     })
+    if (historyTurn?.serverOwned) {
+      historyTurn.resultId = historyTurn.observedResult!.result_message_id
+      await historyTurn.complete?.()
+    }
     if (
       params.servicePromptSnapshot &&
       params.servicePromptSnapshot.scopeInvalidatedSignal.aborted
@@ -1324,38 +1421,43 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   } catch (caught) {
     const e = params.servicePromptSnapshot?.scopeInvalidatedSignal.aborted
       ? createServicePromptScopeChangedError("The server or authenticated account changed.") : caught
+    const scopeInvalidated = isRequestConfigScopeChangedError(e)
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
+    const isAbort = !scopeInvalidated && (signal.aborted || isAbortLikeError(e))
     if (!dispatched && !historyTurn?.dispatched && !preparationIsCurrent()) {
       await historyTurn?.cancelPreparation?.()
       return chatSubmitSkipped("Conversation changed")
     }
     if (historyTurn) {
+      // A receipt is proof of dispatch even if the iterator fails before yielding it.
+      if (captureServerHistoryObservations()) historyTurn.dispatched = true
       if (historyTurn.dispatched || e instanceof NativeHistoryBranchChoice) {
         // The question is already saved with its owner. A reply that ended
         // early, or finished after its view went away, stays in the
         // transcript (CS-04, #3104). Failures with nothing to show, and turns
         // whose account or server changed, stay in review.
-        const scopeInvalidated = Boolean(
-          params.servicePromptSnapshot?.scopeInvalidatedSignal?.aborted
-        )
         // A Stop before any text keeps the question for dev's saved-question
         // retry, instead of a kept turn with no reply to show (CM-02).
         const stoppedBeforeReply =
-          historyTurn.persistence !== "server" && Boolean(historyTurn.admission) &&
+          !scopeInvalidated && historyTurn.persistence !== "server" && Boolean(historyTurn.admission) &&
           !replyCompleted && !fullText.trim() && signal.aborted &&
           params.wasStoppedByUser?.() === true
         const outcome: HistoryTurnOutcome | undefined =
-          historyTurn.persistence === "server" && historyTurn.resultId ? historyTurn.outcome ?? "interrupted" :
-          (!historyTurn.admission && !historyTurn.existingSelection) || scopeInvalidated || stoppedBeforeReply
+          historyTurn.serverOwned || scopeInvalidated
             ? undefined
-            : replyCompleted
-              ? historyTurn.resultId ? "complete" : undefined
-              : signal.aborted && params.wasStoppedByUser?.() === true
-                ? "stopped"
-                : signal.aborted || fullText.trim().length > 0
-                  ? "interrupted"
-                  : undefined
+            : historyTurn.persistence === "server"
+              ? historyTurn.resultId ? historyTurn.outcome ?? "interrupted" : undefined
+              : (!historyTurn.admission && !historyTurn.existingSelection) || stoppedBeforeReply
+                ? undefined
+                : replyCompleted
+                  // A definitive stale-parent refusal retains the finished text; a lost save receipt proves neither write.
+                  ? historyTurn.resultId || (e instanceof Error && e.message === "stale_parent") ? "complete" : undefined
+                  : signal.aborted && params.wasStoppedByUser?.() === true
+                    ? "stopped"
+                    : signal.aborted || fullText.trim().length > 0
+                      ? "interrupted"
+                      : undefined
         const keptReason =
           outcome === "stopped"
             ? STOPPED_INTERRUPTION_REASON
@@ -1393,7 +1495,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         }
 
         if (historyTurn.persistence === "server" && !historyTurn.resultId) {
-          setMessagesWithTransition(prev => prev.filter(row => row.id !== resolvedAssistantMessageId && row.id !== resolvedUserMessageId))
+          setMessagesWithTransition(prev => prev.filter(row =>
+            row.id !== resolvedAssistantMessageId &&
+            (historyTurn.existingSelection || historyTurn.retryAdmission || row.id !== resolvedUserMessageId)))
+          if (isAbort) return chatSubmitSkipped("Request cancelled")
           return {
             ...chatSubmitFailed(e instanceof Error ? e.message : "Server response outcome unknown"),
             ...(!historyTurn.admission && !historyTurn.existingSelection && !historyTurn.retryAdmission &&
@@ -1425,11 +1530,15 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 )
               : prev.filter((row) => row.id !== resolvedAssistantMessageId)
           )
-          return outcome === "complete" || (historyTurn.persistence === "server" && historyTurn.resultId)
+          return (outcome === "complete" || historyTurn.persistence === "server") && historyTurn.resultId
             ? chatSubmitSubmitted()
             : outcome === "stopped"
               ? chatSubmitSkipped("Request cancelled")
-              : chatSubmitFailed(keptReason ?? DEFAULT_INTERRUPTION_REASON)
+              : chatSubmitFailed(
+                  outcome === "complete" && e instanceof Error
+                    ? e.message
+                    : keptReason ?? DEFAULT_INTERRUPTION_REASON
+                )
         }
         // Pending/unknown responses are inspected in scoped recovery, never ordinary retry controls.
         setMessagesWithTransition((prev) =>
@@ -1446,16 +1555,17 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         await historyTurn.cancelPreparation?.()
         setMessagesWithTransition(messages)
       }
+      if (historyTurn.dispatched && isAbort)
+        return chatSubmitSkipped("Request cancelled")
       return chatSubmitFailed(
         e instanceof Error ? e.message : "History send failed"
       )
     }
-    if (isRequestConfigScopeChangedError(e)) {
+    if (scopeInvalidated) {
       setMessages(messages)
       setHistorySafely(history)
       return chatSubmitSkipped("Request scope changed")
     }
-    const isAbort = signal.aborted || isAbortLikeError(e)
     if (isAbort && params.discardCurrentTurnOnAbort?.() === true) {
       setMessages(messages)
       setHistorySafely(history)
@@ -1496,6 +1606,15 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         ? e.message
         : "Something went wrong."
     const stoppedByUser = isAbort && params.wasStoppedByUser?.() === true
+    const errorGenerationInfo = {
+      ...(generationInfo && typeof generationInfo === "object" && !Array.isArray(generationInfo)
+        ? generationInfo as Record<string, unknown>
+        : {}),
+      interrupted: true,
+      ...(stoppedByUser ? { stopped: true } : {}),
+      interruptionReason,
+      interruptedAt: Date.now()
+    }
     setMessagesWithTransition((prev) =>
       prev.map((msg) =>
         msg.id === generateMessageId
@@ -1505,10 +1624,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 ...(modelClient?.serverMessageId ? { serverMessageId: modelClient.serverMessageId } : {}),
                 generationInfo: {
                   ...(msg.generationInfo || {}),
-                  interrupted: true,
-                  ...(stoppedByUser ? { stopped: true } : {}),
-                  interruptionReason,
-                  interruptedAt: Date.now()
+                  ...errorGenerationInfo
                 }
               })
             )
@@ -1522,6 +1638,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     try {
       errorSave = await saveMessageOnError({
         e,
+        generationInfo: errorGenerationInfo,
         botMessage: assistantContent,
         history,
         historyId,

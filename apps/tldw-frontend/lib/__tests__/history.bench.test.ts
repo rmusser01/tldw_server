@@ -22,7 +22,7 @@
 // Method:
 //   - 50 `addRequestHistory` calls, each carrying a 102,400-char responseBody
 //     (all entries byte-length identical for deterministic totals).
-//   - Passthrough spy on `Storage.prototype.setItem` (jsdom's Storage is a
+//   - Passthrough spy on the active storage prototype (jsdom's Storage is a
 //     WebIDL proxy; spying the `localStorage` instance stores the spy as a
 //     named data entry instead of intercepting — see the sibling workspace
 //     bench for the same finding).
@@ -98,7 +98,7 @@ type RunMetrics = {
 
 describe("request history bench (addRequestHistory 50x with 100 KiB bodies)", () => {
   it("records total setItem bytes written for 50 recorded requests", async () => {
-    const setItemSpy = vi.spyOn(Storage.prototype, "setItem")
+    const setItemSpy = vi.spyOn(Object.getPrototypeOf(localStorage), "setItem")
 
     try {
       const runs: RunMetrics[] = []

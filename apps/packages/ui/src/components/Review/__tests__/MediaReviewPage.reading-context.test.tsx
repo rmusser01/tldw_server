@@ -873,14 +873,19 @@ describe('MediaReviewPage active reading context', () => {
     expect(screen.getByText('Item 4 of 40')).toBeInTheDocument()
   })
 
-  it("keeps the footer aligned with preview, selected reading, the next window and restored preview", async () => {
+  it.each(["button", "shortcut"])("keeps the footer aligned through selected reading and restored preview (%s)", async (selection) => {
     render(<MediaReviewPage />)
     fireEvent.click(getResultRowByTitle("Item 3"))
     await screen.findByText("Content 3")
     const footer = screen.getByTestId("media-review-status-bar")
     expect(footer).toHaveTextContent("Previewing 3 of 40")
-    fireEvent.keyDown(document.body, { key: 'a', ctrlKey: true })
-    fireEvent.click(within(screen.getByTestId("media-review-selection-count").parentElement!).getByRole("button", { name: "Review selected (40)" }))
+    if (selection === "button") {
+      fireEvent.click(screen.getByRole("button", { name: "Add visible to selection (40)" }))
+    } else {
+      fireEvent.keyDown(document.body, { key: "a", ctrlKey: true })
+    }
+    fireEvent.click(within(screen.getByTestId("media-review-selection-count").parentElement!)
+      .getByRole("button", { name: "Review selected (40)" }))
     await waitFor(() =>
       expect(
         screen.getByTestId("media-review-reading-context")
@@ -890,10 +895,9 @@ describe('MediaReviewPage active reading context', () => {
     expect(footer).not.toHaveTextContent("Previewing")
     fireEvent.click(
       within(screen.getByTestId("media-review-reading-window")).getByRole(
-        "button",
-        { name: "Next reading window" },
-      ),
-    );
+        "button", { name: "Next reading window" }
+      )
+    )
     await waitFor(() =>
       expect(
         screen.getByTestId("media-review-reading-context")
@@ -903,10 +907,9 @@ describe('MediaReviewPage active reading context', () => {
     expect(footer).toHaveTextContent("Reading item 31 of 40")
     fireEvent.click(
       within(screen.getByTestId("media-review-reading-context")).getByRole(
-        "button",
-        { name: "Return to preview" },
-      ),
-    );
+        "button", { name: "Return to preview" }
+      )
+    )
     expect(screen.getByTestId("media-review-reading-context")).toHaveTextContent(
       "Result preview: Item 3"
     )

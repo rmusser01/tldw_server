@@ -1,5 +1,5 @@
 import React from "react"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const connectionStoreMock = vi.hoisted(() => ({
@@ -184,6 +184,97 @@ describe("ServerReadinessGate non-blocking sessions (W1)", () => {
       await screen.findByTestId("server-readiness-degraded-shell")
     ).toBeInTheDocument()
     expect(screen.queryByTestId("server-reconnect-banner")).toBeNull()
+  })
+
+  it.each(["unavailable", "degraded"] as const)(
+    "retains the checking draft and mounted instance when health becomes %s",
+    async (status) => {
+      vi.useFakeTimers()
+      let resolveHealth!: (response: Response) => void
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        () => new Promise<Response>((resolve) => { resolveHealth = resolve })
+      )
+      const { ServerReadinessGate } = await import("../ServerReadinessGate")
+      let mounts = 0
+      let unmounts = 0
+      const Draft = () => {
+        const [draft, setDraft] = React.useState("")
+        React.useEffect(() => {
+          mounts += 1
+          return () => { unmounts += 1 }
+        }, [])
+        return <input aria-label="Draft" value={draft} onChange={event => setDraft(event.target.value)} />
+      }
+      const { unmount } = render(<ServerReadinessGate nonBlocking><Draft /></ServerReadinessGate>)
+      const input = screen.getByRole("textbox", { name: "Draft" })
+      fireEvent.change(input, { target: { value: "Unsaved research question" } })
+
+      await act(async () => {
+        resolveHealth({ status: status === "degraded" ? 200 : 503,
+          json: async () => ({ status }) } as Response)
+        await vi.advanceTimersByTimeAsync(0)
+      })
+
+      expect(screen.getByRole("textbox", { name: "Draft" })).toHaveValue("Unsaved research question")
+      expect(screen.getByRole("textbox", { name: "Draft" })).toBe(input)
+      expect({ mounts, unmounts }).toEqual({ mounts: 1, unmounts: 0 })
+      unmount()
+      expect({ mounts, unmounts }).toEqual({ mounts: 1, unmounts: 1 })
+    }
+  )
+
+  it("retains a local draft across timeout, manual retry, degradation, recovery and bypass", async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(unavailableHealth())
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+    let mounts = 0
+    const Draft = () => {
+      const [draft, setDraft] = React.useState("")
+      React.useEffect(() => { mounts += 1 }, [])
+      return <input aria-label="Draft" value={draft} onChange={event => setDraft(event.target.value)} />
+    }
+    const tree = (bypass = false, configuredServerUrl = "http://first.test") => (
+      <ServerReadinessGate nonBlocking bypass={bypass} configuredServerUrl={configuredServerUrl}>
+        <Draft />
+      </ServerReadinessGate>
+    )
+    const { rerender } = render(tree())
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const input = screen.getByRole("textbox", { name: "Draft" })
+    fireEvent.change(input, { target: { value: "Keep this draft" } })
+    const expectDraft = () => {
+      expect(screen.getByRole("textbox", { name: "Draft" })).toBe(input)
+      expect(input).toHaveValue("Keep this draft")
+      expect(mounts).toBe(1)
+    }
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
+    expect(screen.getByTestId("server-reconnect-banner")).toHaveTextContent(/could not reach/i)
+    expectDraft()
+
+    let resolveRetry!: (response: Response) => void
+    fetchMock.mockImplementationOnce(() => new Promise<Response>(resolve => { resolveRetry = resolve }))
+    fireEvent.click(screen.getByRole("button", { name: /retry connection/i }))
+    expect(screen.queryByTestId("server-reconnect-banner")).toBeNull()
+    expectDraft()
+    await act(async () => {
+      resolveRetry({ status: 200, json: async () => ({ status: "degraded", checks: { mcp: { status: "degraded" } } }) } as Response)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(screen.getByTestId("server-readiness-degraded-shell")).toBeInTheDocument()
+    expectDraft()
+
+    rerender(tree(true))
+    expect(screen.queryByTestId("server-readiness-degraded-shell")).toBeNull()
+    expectDraft()
+    fetchMock.mockResolvedValue(okHealth())
+    rerender(tree(false, "http://recovered.test"))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.queryByTestId("server-reconnect-banner")).toBeNull()
+    expect(screen.queryByTestId("server-readiness-degraded-shell")).toBeNull()
+    expectDraft()
+    rerender(tree(true, "http://recovered.test"))
+    expectDraft()
   })
 })
 

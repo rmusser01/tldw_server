@@ -14,12 +14,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
 from .errors import SyncMaterializationContractError, SyncStoreError
 from .materializers.base import MaterializationResult
 from .materializers.guarded_product_mutation import GuardedProductMutation
-from .materializers.notes import NotesMaterializer
+from .materializers.notes import (
+    NOTES_EXPECTED_PRODUCT_VERSION_KEY,
+    NOTES_WIKILINK_REWRITE_SOURCE,
+    NotesMaterializer,
+    _conflict_result,
+)
 from .models import (
     SyncDataset,
     SyncDomain,
@@ -200,7 +205,28 @@ def project_notes_provenance(
                         conn=conn,
                         restore=member.routing_metadata.get("restore_intent") is True,
                     )
-    except Exception:  # noqa: BLE001 - product rollback is replayable, never expose source bytes.
+    except Exception as exc:  # noqa: BLE001 - product rollback is replayable, never expose source bytes.
+        if (
+            isinstance(exc, ConflictError)
+            and member.domain == "notes.note"
+            and member.device_id == "server-origin"
+            and member.routing_metadata.get("source") == NOTES_WIKILINK_REWRITE_SOURCE
+        ):
+            conflict = _conflict_result(
+                reason="product_version_changed", envelope=member,
+                current_state=store.get_object_state(member.dataset_id, member.domain, member.object_id),
+            )
+            conflict.metadata["expected_product_version"] = member.routing_metadata.get(
+                NOTES_EXPECTED_PRODUCT_VERSION_KEY
+            )
+            for _, failed_state in pending:
+                store.mark_envelope_apply_status(
+                    failed_state.latest_server_cursor,
+                    apply_status="conflict",
+                    apply_error_code="whole_object_conflict",
+                    apply_error_message=conflict.message,
+                )
+            return conflict
         for _, projected_state in pending:
             store.mark_envelope_apply_status(
                 projected_state.latest_server_cursor,

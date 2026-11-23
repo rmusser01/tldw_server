@@ -5,7 +5,6 @@ import {
   workspacePersistWriterInternals,
 } from "../workspace";
 import {
-  deleteResearchWorkspaceMigrationLocalValue,
   runResearchWorkspaceMigration,
   type ResearchWorkspaceMigrationApi,
 } from "../workspace-migration";
@@ -31,7 +30,6 @@ it("retains a real status update and all local payloads across receipt retries",
     status: "processing",
   });
   await flushWorkspacePersistence();
-  const captured = new Map<string, string | null>();
   const values = () =>
     Array.from(
       { length: localStorage.length },
@@ -65,42 +63,31 @@ it("retains a real status update and all local payloads across receipt retries",
           tool_accessible: true,
         });
       await flushWorkspacePersistence();
-      return { id, status: "finalized", client_delete_eligible: true };
+      return { id, status: "finalized", client_delete_eligible: false };
     }),
     getWorkspaceMigration: vi.fn(async (id: string) => ({
       id,
       status: "finalized",
-      client_delete_eligible: true,
+      client_delete_eligible: false,
     })),
     ackWorkspaceMigrationClientDelete: vi.fn(async () => ({})),
   } satisfies ResearchWorkspaceMigrationApi;
-  const remove = vi.fn((key: string) =>
-    deleteResearchWorkspaceMigrationLocalValue(
-      key,
-      captured.get(key),
-      () => true,
-    ),
-  );
+  const remove = vi.fn();
+  const write = vi.fn();
   const run = () =>
     runResearchWorkspaceMigration({
       targetWorkspaceId: workspace,
       targetWorkspaceName: "Live migration",
       discoveredLocalStorageKeys: values(),
-      readLocalStorageValue: async (key) => {
-        const raw = localStorage.getItem(key);
-        captured.set(key, raw);
-        return raw;
-      },
-      writeLocalStorageValue: (key, raw) => {
-        localStorage.setItem(key, raw);
-        captured.set(key, raw);
-      },
+      readLocalStorageValue: async (key) => localStorage.getItem(key),
+      writeLocalStorageValue: write,
       deleteLocalStorageValue: remove,
       api,
     });
   const first = await run();
   expect(first.status).toBe("finalized_not_delete_eligible");
   expect(remove).not.toHaveBeenCalled();
+  expect(write).not.toHaveBeenCalled();
   expect(api.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
   expect(
     values().some((key) => localStorage.getItem(key) !== original.get(key)),
@@ -115,10 +102,12 @@ it("retains a real status update and all local payloads across receipt retries",
   api.finalizeWorkspaceMigration.mockImplementation(async (id: string) => ({
     id,
     status: "finalized",
-    client_delete_eligible: true,
+    client_delete_eligible: false,
   }));
   const second = await run();
   expect(second.status).toBe("finalized_not_delete_eligible");
+  expect(remove).not.toHaveBeenCalled();
+  expect(write).not.toHaveBeenCalled();
   expect(api.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
   expect(changed.size).toBeGreaterThan(0);
   expect(

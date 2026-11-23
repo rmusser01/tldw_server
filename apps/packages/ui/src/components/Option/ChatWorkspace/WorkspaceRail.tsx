@@ -19,7 +19,7 @@ export type WorkspaceRailProps = {
 const panelClass = "rounded-md border border-border bg-surface px-3 py-2"
 const headingClass = "text-[11px] font-semibold text-text-muted"
 const buttonClass =
-  "inline-flex min-h-[28px] min-w-0 items-center justify-center break-words rounded-md border border-border px-2.5 py-1 text-xs font-medium text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+  "inline-flex min-h-11 min-w-11 items-center justify-center break-words rounded-md border border-border px-2.5 py-1 text-xs font-medium !text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50 xl:min-h-8"
 
 const DEFAULT_ADD_SOURCE_HREF = "/research-workspace?tab=sources"
 const DEFAULT_OPEN_LIBRARY_HREF = "/media"
@@ -128,6 +128,11 @@ export const WorkspaceRail = ({
 
       <section className={panelClass}>
         <h3 className={headingClass}>Sources</h3>
+        {sourcesError && sources.length > 0 ? (
+          <p className="mt-2 text-xs text-text" role="alert">
+            {sourcesError}
+          </p>
+        ) : null}
         {sourcesLoading && sources.length > 0 ? (
           <p className="mt-2 text-xs text-text-muted" role="status">
             Refreshing workspace sources
@@ -178,7 +183,7 @@ export const WorkspaceRail = ({
                         aria-label={`Browse ${source.title}${actionNameSuffix}`}
                         onClick={() => onBrowseSource(source.id)}
                       >
-                        Browse {source.title}
+                        Browse
                       </button>
                       {isStaged ? (
                         <button
@@ -187,7 +192,7 @@ export const WorkspaceRail = ({
                           aria-label={`Unstage ${source.title}${actionNameSuffix} from chat`}
                           onClick={() => onUnstageSource?.(source.id)}
                         >
-                          Unstage {source.title} from chat
+                          Unstage
                         </button>
                       ) : (
                         <button
@@ -201,7 +206,7 @@ export const WorkspaceRail = ({
                             }
                           }}
                         >
-                          Stage {source.title} for chat
+                          Stage
                         </button>
                       )}
                     </div>
@@ -211,7 +216,10 @@ export const WorkspaceRail = ({
             })}
           </ul>
         ) : (
-          <p className="mt-2 rounded-md border border-dashed border-border bg-surface2/40 px-2 py-1.5 text-xs text-text-muted">
+          <p
+            role={sourcesError ? "alert" : "status"}
+            className="mt-2 rounded-md border border-dashed border-border bg-surface2/40 px-2 py-1.5 text-xs text-text-muted"
+          >
             {sourcesError
               ? sourcesError
               : sourcesLoading

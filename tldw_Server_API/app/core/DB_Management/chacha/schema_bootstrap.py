@@ -11,7 +11,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseBackend
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
-from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_sql, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha import message_order_schema, postgres_schema, schema_sql, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.chacha.postgres_note_schema_contracts import (
     POSTGRES_CORE_INDEX_STATEMENTS,
@@ -1010,6 +1010,8 @@ def _postgres_schema_is_current(ctx, conn: Any) -> bool:
         verify_postgres_skill_registry(
             ctx.backend, getattr(conn, "_connection", conn), ctx.normalize_postgres_catalog_expression
         )
+    if current_version >= 92:
+        message_order_schema.verify_postgres_message_order_privileges(ctx.backend, conn)
     for fts_table, source_table, _ in schema_sql._FTS_CONFIG:
         # Required PostgreSQL capability stays lazy and bound before mapping each source.
         register_fts_table: Callable[[str, str], None] = getattr(ctx.backend, "register_fts_table")  # noqa: B009
@@ -1086,7 +1088,7 @@ def _initialize_schema_postgres(ctx):
             postgres_schema._set_schema_version_postgres(ctx, conn, 72)
             current_version = 72
 
-        if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90) and target_version >= 72:
+        if 71 <= current_version < target_version and target_version >= 72:
             # Completed dev schemas need only the new migrations, avoiding
             # replay of the earlier schema reconciliation and its DDL.
             if current_version == 71:

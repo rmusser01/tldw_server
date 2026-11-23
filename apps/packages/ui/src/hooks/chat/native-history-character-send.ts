@@ -151,6 +151,10 @@ export const sendNativeHistoryCharacter = async (
   params: NativeHistoryCharacterSendParams
 ): Promise<{ content: string; matchesPreview: boolean } | void> => {
   const { controller, signal } = params
+  const navigation = usePlaygroundSessionStore.getState()
+  const navigationIsCurrent = () =>
+    usePlaygroundSessionStore.getState().restoreRevision === navigation.restoreRevision &&
+    usePlaygroundSessionStore.getState().serverChatSelectionIntent === navigation.serverChatSelectionIntent
   const existing = params.existingInput
   if (existing && (params.temporary || params.image || params.unsupportedContext || params.historyEditResend || params.historyRegenerate || params.greetingSeed || params.privateDraft || !existing.isCurrent() || params.settings.systemPrompt?.trim()))
     throw new Error("native_history_existing_input_review_changed")
@@ -173,13 +177,13 @@ export const sendNativeHistoryCharacter = async (
     throw new Error("chat_creation_source_invalid")
   const acceptDraftBind = !privateHandle && !params.historyId && !params.serverChatId && sourceDraft?.kind === "fresh" ? captureChatDraftLoad("bind") : null
   const capturedDraftIsCurrent = privateHandle ? privateCurrent : acceptDraftBind?.isCurrent ?? captureChatDraftSource().isCurrent
-  const draftIsCurrent = () => params.sourceIsCurrent?.() !== false && capturedDraftIsCurrent()
+  const draftIsCurrent = () => navigationIsCurrent() && params.sourceIsCurrent?.() !== false && capturedDraftIsCurrent()
   if (!greetingSeed && !regenerate && !params.message.trim()) throw new Error("native_history_input_required")
   if (greetingSeed && (params.message || !greetingSeed.rawText?.trim() ||
       params.historyId || params.serverChatId || sourceDraft?.kind !== "fresh" ||
       controller.getCurrent().status !== "idle" || controller.getCurrent().owner))
     throw new Error("native_history_greeting_requires_fresh")
-  if (!params.originIsCurrent()) throw new Error("stale_selection")
+  if (!params.originIsCurrent() || !draftIsCurrent()) throw new Error("stale_selection")
   const greetingCurrent = () => !greetingSeed || params.greetingIsCurrent?.() !== false
   if (!greetingCurrent()) throw new Error("stale_selection")
   const resumeOrigin = controller.getCurrent()
@@ -190,7 +194,7 @@ export const sendNativeHistoryCharacter = async (
     (isSavedRoleplayConversation(controller) || params.privateDraft)
   ) {
     const owner = resumeOrigin.owner, view = resumeOrigin.view
-    const originalPreparationIsCurrent = () => params.originIsCurrent() && owner.validate_lease() &&
+    const originalPreparationIsCurrent = () => params.originIsCurrent() && draftIsCurrent() && owner.validate_lease() &&
       controller.getCurrent().owner === owner && controller.getCurrent().view === view
     try {
       const { sendSavedRoleplay } = await import("./roleplay-resume-send")
@@ -367,7 +371,7 @@ export const sendNativeHistoryCharacter = async (
       let receipt: HistoryLoadReceipt | undefined
       let adoptionIsCurrent: (() => boolean) | undefined
       let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
-      const loaded = await controller.loadConversation(
+      const loading = controller.loadConversation(
         {
           historyId: params.historyId,
           serverChatId: chatId,
@@ -414,23 +418,30 @@ export const sendNativeHistoryCharacter = async (
           if (createdCharacterId != null) params.onCreated?.(createdCharacterId)
         }
       )
-      current = controller.getCurrent()
-      if (
-        !loaded ||
-        !receipt ||
-        current.owner !== receipt.owner ||
-        current.view !== receipt.view ||
-        !leaseValid()
-      )
-        throw new Error(
-          !receipt && current.status !== "ready" && current.error &&
-          params.originIsCurrent() && greetingCurrent() && leaseValid() &&
-          current.owner?.kind === "native" && current.owner.validate_lease() &&
-          (!chatId || current.owner.conversation_id === chatId) &&
-          chatDraftOwnerKey(current.owner.request_scope) === chatDraftOwnerKey(snapshot.requestScope)
-            ? current.error
-            : "stale_selection"
+      try {
+        const loaded = await loading
+        current = controller.getCurrent()
+        if (
+          !loaded ||
+          !receipt ||
+          current.owner !== receipt.owner ||
+          current.view !== receipt.view ||
+          !adoptionIsCurrent?.() ||
+          !leaseValid()
         )
+          throw new Error(
+            loaded && !receipt && current.status !== "ready" && current.error &&
+            params.originIsCurrent() && greetingCurrent() && leaseValid() &&
+            current.owner?.kind === "native" && current.owner.validate_lease() &&
+            (!chatId || current.owner.conversation_id === chatId) &&
+            chatDraftOwnerKey(current.owner.request_scope) === chatDraftOwnerKey(snapshot.requestScope)
+              ? current.error
+              : "stale_selection"
+          )
+      } finally {
+        // Inspect the failed load while its lease still belongs to this attempt.
+        if (!receipt) loadPhase = "rejected"
+      }
       if (
         chatId &&
         (receipt.owner.kind !== "native" ||
@@ -514,7 +525,7 @@ export const sendNativeHistoryCharacter = async (
     const sameView = () => {
       const now = controller.getCurrent().view
       return (
-        authValid() && params.sourceIsCurrent?.() !== false &&
+        authValid() && navigationIsCurrent() && params.sourceIsCurrent?.() !== false &&
         !!now &&
         now.owner_key === originView.owner_key &&
         now.conversation_id === originView.conversation_id &&
@@ -726,7 +737,7 @@ export const sendNativeHistoryCharacter = async (
             (await controller.followResult(
               originView,
               resultId!,
-              explicitAction.isCurrent
+              () => navigationIsCurrent() && explicitAction.isCurrent()
             )) !== false
         }
         if (resultFollowed)
@@ -742,7 +753,7 @@ export const sendNativeHistoryCharacter = async (
         await dismissHistoryTurnRecovery(scope, view, operationId, "completed")
         if (sameView() && !followAttempted) {
           followAttempted = true
-          await controller.followResult(originView, resultId!)
+          await controller.followResult(originView, resultId!, navigationIsCurrent)
         }
       }
       if (creationHandle) await markChatCreationSettled(creationHandle, owner.conversation_id)

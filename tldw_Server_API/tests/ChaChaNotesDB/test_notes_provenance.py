@@ -278,6 +278,7 @@ def test_postgres_receipt_upgrade_reopen_and_rls(pg_restricted_backend, monkeypa
         patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 81)
         old = CharactersRAGDB(":memory:", client_id="alice", backend=pg_restricted_backend)
         assert old.runtime_schema_version == 81
+        assert not old.backend.table_exists("notes_provenance_receipts")
         old.close_connection()
     database = CharactersRAGDB(":memory:", client_id="alice", backend=pg_restricted_backend)
     assert database.runtime_schema_version == CharactersRAGDB._POSTGRES_SCHEMA_VERSION

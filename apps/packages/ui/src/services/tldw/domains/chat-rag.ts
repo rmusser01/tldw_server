@@ -468,25 +468,27 @@ export const chatRagMethods = {
     return createJsonResponseLike(data, { status: 200 })
   },
 
-  async *streamChatCompletion(this: TldwApiClientCore, request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
-    request = { ...request, stream: true }
+  async *streamChatCompletion(request: Readonly<ChatCompletionRequest>, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
+    const selectedDurable = request.tldw_turn?.history_v1 !== undefined
+    if (selectedDurable && request.stream !== true) throw new Error("invalid_history_durable_request")
+    const body = selectedDurable ? request : { ...request, stream: true }
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "stream",
-      body: request,
+      body,
       metadata: options?.debugMetadata
     })
     const scopeFields = requestScopeFields(options?.requestScope)
     // Feeds the model chip's readiness (CC-01).
-    for await (const line of trackChatModelStreamOutcome(chatModelOutcomeTarget(request), bgStream({
+    for await (const line of trackChatModelStreamOutcome(chatModelOutcomeTarget(body), bgStream({
       path: `/api/v1/chat/completions${options?.scope ? buildQuery(toChatScopeParams(options.scope)) : ""}`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...scopeFields.headers
       },
-      body: request,
+      body,
       abortSignal: options?.signal,
       onDispatch: options?.onDispatch,
       streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
@@ -496,18 +498,20 @@ export const chatRagMethods = {
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
         : {})
     }))) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed === "[DONE]" || trimmed.startsWith(":")) continue
+      let parsed: unknown
       try {
-        const parsed = JSON.parse(line)
-        yield parsed
-      } catch (e) {
-        if ((request.tldw_history_selection_v1 || request.tldw_history_server_existing_input_v1) && line.trim() && line.trim() !== "[DONE]" && !line.trim().startsWith(":"))
+        parsed = JSON.parse(trimmed)
+      } catch {
+        if (selectedDurable || body.tldw_history_selection_v1 || body.tldw_history_server_existing_input_v1)
           throw new Error("unparseable_native_completion_stream")
-        // Ignore empty/whitespace-only lines and SSE comments (": ...")
-        const trimmed = line.trim()
-        if (trimmed && !trimmed.startsWith(":")) {
-          console.warn("[tldw:stream] Unparseable SSE line:", trimmed.slice(0, 200))
-        }
+        console.warn("[tldw:stream] Unparseable SSE line:", trimmed.slice(0, 200))
+        continue
       }
+      if (selectedDurable && (!parsed || typeof parsed !== "object" || Array.isArray(parsed)))
+        throw new Error("unparseable_native_completion_stream")
+      yield parsed
     }
   },
 
@@ -675,7 +679,7 @@ export const chatRagMethods = {
       }
     }
 
-    return list.map((c) => this.normalizeChatSummary(c))
+    return list.map((c) => chatRagMethods.normalizeChatSummary(c))
   },
 
   async listChatsWithMeta(
@@ -720,7 +724,7 @@ export const chatRagMethods = {
       !(typeof row.id === "string" && row.id.trim() ||
         typeof row.id === "number" && Number.isSafeInteger(row.id) && row.id > 0)))
       throw new Error("The saved chat list response could not be verified.")
-    const chats = list.map((c) => this.normalizeChatSummary(c))
+    const chats = list.map((c) => chatRagMethods.normalizeChatSummary(c))
     return {
       chats,
       total: typeof total === "number" ? total : chats.length
@@ -767,7 +771,7 @@ export const chatRagMethods = {
       }
     }
 
-    const chats = list.map((item) => this.normalizeChatSummary(item))
+    const chats = list.map((item) => chatRagMethods.normalizeChatSummary(item))
     return {
       chats,
       total: typeof total === "number" ? total : chats.length
@@ -806,7 +810,7 @@ export const chatRagMethods = {
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
         : {})
     })
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.normalizeChatSummary(res)
   },
 
   async appendRoleplayResumeInput(
@@ -892,8 +896,6 @@ export const chatRagMethods = {
     options?.signal?.throwIfAborted()
     const query = buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
-      ...scopeFields,
-      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET",
       headers: scopeFields.headers,
@@ -927,7 +929,7 @@ export const chatRagMethods = {
         (key === "state" && !CONVERSATION_STATE_VALUES.includes(res[key])) ||
         (res[key] !== null && (key === "rating" ? !Number.isInteger(res[key]) || res[key] < 1 || res[key] > 5 : typeof res[key] !== "string")))))
       throw new Error("The conversation metadata could not be verified. Reload before saving.")
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.normalizeChatSummary(res)
   },
 
   async getChatSettings(
@@ -1111,7 +1113,7 @@ export const chatRagMethods = {
       !Number.isSafeInteger(res.version) || res.version <= expectedVersion! ||
       Object.entries(patch).some(([key, value]) => !Object.prototype.hasOwnProperty.call(res, key) || res[key] !== value))
       throw new Error("The server did not confirm these conversation changes. Reload before retrying.")
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.normalizeChatSummary(res)
   },
 
   async deleteChat(
@@ -1188,7 +1190,7 @@ export const chatRagMethods = {
           path: `/api/v1/chats/${cid}/restore${query}`,
           method: "POST"
         })
-        return this.normalizeChatSummary(res)
+        return chatRagMethods.normalizeChatSummary(res)
       } catch (error) {
         if (hasRetried || !this.isVersionConflictError(error)) {
           throw error

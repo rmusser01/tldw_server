@@ -177,6 +177,14 @@ export const saveMessageOnError = async ({
     e?.message?.includes?.("AbortError")
 
   const assistantContent = buildAssistantErrorContent(botMessage, e)
+  const userGenerationInfo = generationInfo &&
+    typeof generationInfo === "object" && !Array.isArray(generationInfo)
+    ? Object.fromEntries(Object.entries(generationInfo).filter(([key]) => ![
+        "interrupted", "interruptionReason", "interruptedAt",
+        "partialResponseSaved", "streamTransportInterrupted",
+        "streamTransportInterruptionReason"
+      ].includes(key)))
+    : generationInfo
   const safeSetHistory = resolveHistorySetter(setHistory)
   const errorHistory: ChatHistory = [
     ...history,
@@ -249,7 +257,7 @@ export const saveMessageOnError = async ({
             clusterId,
             modelId: userModelId,
             parent_message_id: userParentMessageId ?? null,
-            generationInfo,
+            generationInfo: userGenerationInfo,
             metadataExtra: userMetadataExtra,
             reasoning_time_taken,
             documents
@@ -312,7 +320,7 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
-          generationInfo,
+          generationInfo: userGenerationInfo,
           metadataExtra: userMetadataExtra,
           reasoning_time_taken,
           documents
@@ -364,7 +372,7 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
-          generationInfo,
+          generationInfo: userGenerationInfo,
           metadataExtra: userMetadataExtra,
           reasoning_time_taken,
           documents
@@ -416,7 +424,7 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
-          generationInfo,
+          generationInfo: userGenerationInfo,
           metadataExtra: userMetadataExtra,
           reasoning_time_taken,
           documents
@@ -464,7 +472,7 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
-          generationInfo,
+          generationInfo: userGenerationInfo,
           metadataExtra: userMetadataExtra,
           reasoning_time_taken,
           documents

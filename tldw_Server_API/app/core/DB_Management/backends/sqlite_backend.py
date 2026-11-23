@@ -15,6 +15,7 @@ import urllib.parse as _url
 import weakref
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager, suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -318,6 +319,25 @@ class SQLiteBackend(DatabaseBackend):
         super().__init__(config)
         self._pool_lock = threading.Lock()
         self._retired = False
+
+    @classmethod
+    @contextmanager
+    def open_existing(cls, config: DatabaseConfig) -> Generator["SQLiteBackend | None", None, None]:
+        """Borrow a file-backed database without creating it or bootstrapping its schema."""
+        path = Path(config.sqlite_path).absolute() if config.sqlite_path else None
+        if path is None or not path.is_file():
+            yield None
+            return
+        backend = cls(replace(config, sqlite_path=f"{path.as_uri()}?mode=rw"))
+        pool = backend.get_pool()
+        try:
+            try:
+                pool.get_connection()
+            except sqlite3.Error as exc:
+                raise DatabaseError("Could not open existing SQLite database") from exc
+            yield backend
+        finally:
+            pool.close_all()
 
     @property
     def backend_type(self) -> BackendType:

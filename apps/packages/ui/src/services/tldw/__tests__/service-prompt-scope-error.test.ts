@@ -21,6 +21,71 @@ describe("B09 scoped analysis versions", () => {
 })
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc?scope_type=global&include_history_recovery_v1=true", "GET", true],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc?scope_type=workspace&workspace_id=original&include_history_recovery_v1=true", "GET", true],
+    ["/api/v1/messages/not-a-uuid?scope_type=global&include_history_recovery_v1=true", "GET", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc?scope_type=global&expected_version=1&include_history_recovery_v1=true", "PUT", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc?scope_type=global&include_history_recovery_v1=true&include_history_recovery_v1=false", "GET", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc", "POST", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc", "PUT", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc", "DELETE", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc/", "GET", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc/extra", "GET", false],
+    ["/api/v1/messages/not-a-uuid", "GET", false],
+    ["/api/v1/messages/a%2fb", "GET", false],
+    ["/api/v1/messages/%2e%2e", "GET", false],
+  ])("bounds the captured recovery message read %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+  it.each([
+    "/api/v1/workspaces/ws-1", "/api/v1/workspaces/ws-1/sources",
+    "/api/v1/workspaces/ws-1/notes"
+  ])("allows only GET for captured activation read %s", (path) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(isServicePromptRequestPath(path, method)).toBe(false)
+    }
+  })
+  it("allows the owned artifact collection read and create, not other methods", () => {
+    const path = "/api/v1/workspaces/ws-1/artifacts"
+    expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+    expect(isServicePromptRequestPath(path, "POST")).toBe(true)
+    for (const method of ["PUT", "PATCH", "DELETE"]) {
+      expect(isServicePromptRequestPath(path, method)).toBe(false)
+    }
+  })
+  it.each(["/api/v1/workspaces", "/api/v1/workspaces/"])(
+    "allows only GET for the canonical workspace list %s",
+    (path) => {
+      expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+      for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+        expect(isServicePromptRequestPath(path, method)).toBe(false)
+      }
+    }
+  )
+  it.each([
+    "/api/v1/workspaces/ws-1/settings",
+    "/api/v1/workspaces/ws-1/sources/status", "/api/v1/workspaces/ws-1/notes/extra",
+    "/api/v1/workspaces/a%2fb", "/api/v1/workspaces/a%5cb/notes",
+    "/api/v1/workspaces/%2e%2e/artifacts", "/api/v1/workspaces/../sources",
+    "/api/v1/workspaces//sources", "/api/v1/workspaces/ws-1/notes/"
+  ])("rejects noncanonical or unapproved activation read %s", (path) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(false)
+  })
+  it.each([
+    ["/api/v1/workspaces/ws-1/sources/s1/preview?max_chars=3000&chunk_limit=3", "GET", true],
+    ["/api/v1/workspaces/ws%20one/sources/source%20one/preview", "GET", true],
+    ["/api/v1/workspaces/ws-1/sources/s1/preview", "POST", false],
+    ["/api/v1/workspaces/ws-1/sources/s1/preview", "DELETE", false],
+    ["/api/v1/workspaces/ws-1/sources/s1", "GET", false],
+    ["/api/v1/workspaces/ws-1/sources/s1/preview/extra", "GET", false],
+    ["/api/v1/workspaces/ws-1/sources/a%2fb/preview", "GET", false],
+    ["/api/v1/workspaces/%2e%2e/sources/s1/preview", "GET", false],
+    ["/api/v1/workspaces/ws-1/sources//preview", "GET", false]
+  ])("bounds captured source preview %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+  it.each([
     ["/api/v1/config/docs-info", "GET", true],
     ["/api/v1/config/docs-info", "POST", false],
     ["/api/v1/config/docs-info/extra", "GET", false],
@@ -116,6 +181,7 @@ describe("Service Prompt scope policy", () => {
     expect(isServicePromptRequestPath(path, method)).toBe(allowed)
   })
   it.each([
+    "/openapi.json",
     "/api/v1/writing/manuscripts/scenes/scene-a",
     "/api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist",
     "/api/v1/writing/manuscripts/projects/project-a/world-info?kind=location",
@@ -127,6 +193,12 @@ describe("Service Prompt scope policy", () => {
   })
 
   it.each([
+    "/api/v1/chats",
+    "/api/v1/chats/%2e%2e",
+    "/api/v1/chats/a%2fb",
+    "/api/v1/chats/a%5cb",
+    "/api/v1/chats/..",
+    "/api/v1/chats//chat-1",
     "/api/v1/writing/manuscripts/projects/project-a",
     "/api/v1/writing/manuscripts/scenes/scene-a/annotations",
     "/api/v1/writing/manuscripts/projects/project-a/characters/relationships",
@@ -419,8 +491,14 @@ describe("canonical raw URL controls", () => {
 
 
 it.each([
-  ["/api/v1/messages/owned", "GET", true],
-  ["/api/v1/messages/owned?scope_type=workspace&workspace_id=original", "PUT", true],
+  ["/api/v1/messages/owned?scope_type=global", "GET", true],
+  ["/api/v1/messages/owned?scope_type=workspace&workspace_id=original", "GET", true],
+  ["/api/v1/messages/owned?expected_version=1&scope_type=workspace&workspace_id=original", "PUT", true],
+  ["/api/v1/messages/owned?scope_type=workspace&workspace_id=original", "PUT", false],
+  ["/api/v1/messages/owned?expected_version=1&scope_type=workspace", "PUT", false],
+  ["/api/v1/messages/owned?expected_version=1&scope_type=global&scope_type=workspace&workspace_id=original", "PUT", false],
+  ["/api/v1/messages/owned?expected_version=1&expected_version=2&scope_type=global", "PUT", false],
+  ["/api/v1/messages/owned?expected_version=9007199254740991&scope_type=global", "PUT", false],
   ["/api/v1/messages/owned", "DELETE", false],
   ["/api/v1/messages/owned", "POST", false],
   ["/api/v1/messages/owned/extra", "PUT", false],

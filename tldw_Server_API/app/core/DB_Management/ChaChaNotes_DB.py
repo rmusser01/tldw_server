@@ -987,6 +987,29 @@ class CharactersRAGDB:
 
         def add_message(self, msg_data: dict[str, Any], *, conn: Any | None = None) -> str | None: ...
 
+        def insert_or_validate_user_turn(
+            self,
+            conversation_id: str,
+            user_message_id: str,
+            content: str,
+            *,
+            owner_client_id: str,
+            conversation_context: dict[str, Any],
+            history_limit: int = 200,
+        ) -> list[dict[str, Any]]: ...
+
+        def read_history_recovery_messages(
+            self,
+            conversation_id: str,
+            *,
+            owner_client_id: str,
+            owner_key: str,
+            scope: Mapping[str, Any],
+            message_id: str | None = None,
+            limit: int = 50,
+            offset: int = 0,
+        ) -> tuple[list[dict[str, Any]], int]: ...
+
         def append_message_from_sync(
             self,
             *,
@@ -1324,12 +1347,14 @@ class CharactersRAGDB:
             semantic_dataset_id: str | None = None,
         ) -> bool: ...
 
-    _CURRENT_SCHEMA_VERSION = 85  # Bounded durable Persona transcripts
-    _POSTGRES_SCHEMA_VERSION = 91
+    _CURRENT_SCHEMA_VERSION = 86  # Reconcile released Chat and dev catalogs
+    _POSTGRES_SCHEMA_VERSION = 92
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     runtime_schema_version: int | None = None  # the bootstrap writes it; a DB built without init reads None (R29)
     from tldw_Server_API.app.core.DB_Management.chacha.schema_sql import (  # noqa: F401
         _CHAT_MACROS_SCHEMA_SQL,
+        _CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES,
+        _CONVERSATION_CREATE_FINGERPRINT_SCHEMA_SQLITE,
         _FTS_CONFIG,
         _FULL_SCHEMA_SQL_V4,
         _HISTORY_PROJECTIONS_SCHEMA_SQL,
@@ -22633,8 +22658,7 @@ for _character_store_method in (
 
 for _message_store_method in (
     "add_message",
-    "lock_message_for_edit",
-    "lock_message_metadata_for_edit",
+    "insert_or_validate_user_turn",
     "get_conversation_history_snapshot",
     "get_conversation_history_selected_content",
     "confirm_legacy_history_projection",
@@ -22644,6 +22668,7 @@ for _message_store_method in (
     "reuse_selected_history_admission",
     "validate_history_admission",
     "settle_history_admission",
+    "read_history_recovery_messages",
     "settle_selected_existing_input",
     "append_message_from_sync",
     "tombstone_message_from_sync",

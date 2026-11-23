@@ -671,7 +671,7 @@ def test_notes_graph_ci_shard_requires_pgvector_service_and_failure_flag() -> No
     assert notes_shard["pgvector_required"] == "1"
     assert job["services"]["postgres"]["image"] == (
         "${{ matrix.shard.postgres_image || "
-        "'mirror.gcr.io/library/postgres:18-bookworm' }}"
+        "'docker.io/library/postgres:18-bookworm' }}"
     )
     assert job["env"][_PGVECTOR_REQUIRED_ENV] == (
         "${{ matrix.shard.pgvector_required || '0' }}"

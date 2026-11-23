@@ -51,6 +51,7 @@ export type HistoryTurnKeepResult =
       settledByKeep?: true
     }
   | { status: "skipped"; reason: string }
+  | { status: "failed"; reason: string }
 
 /** The reason shown on a reply the user did not stop. */
 export const DEFAULT_INTERRUPTION_REASON =
@@ -136,8 +137,9 @@ export const isRetainedPartialReply = (
   turn: HistoryTurnRecovery,
   ownerKind: "local" | "native" | undefined
 ) =>
-  ownerKind === 'native' &&
-  turn.persistence !== 'server' &&
+  ownerKind === "native" &&
+  !isHistoryTurnLive(turn.operation_id) &&
+  turn.persistence !== "server" &&
   Boolean(turn.outcome) &&
   turn.outcome !== "complete" &&
   !turn.settled_message_id &&
@@ -257,10 +259,7 @@ const keep = async (
         await settleAcceptedAssistant(owner, admission!, reply)
       settledByKeep = true
     } catch (error) {
-      // An earlier attempt already wrote this reply (e.g. the page closed
-      // before its record was cleared): follow it rather than write again.
-      if (turn.existing_selection || errorCode(error) !== "message_id_conflict")
-        return skipped(errorCode(error))
+      return { status: "failed", reason: errorCode(error) }
     }
     resultId = turn.assistant_id
   }
@@ -313,7 +312,7 @@ export const keepHistoryTurnRecovery = (
   if (running) return running
   const attempt = keep(controller, entry, stopSignal)
     .catch((error): HistoryTurnKeepResult => ({
-      status: "skipped",
+      status: "failed",
       reason: errorCode(error)
     }))
     .finally(() => {

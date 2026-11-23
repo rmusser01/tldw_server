@@ -1320,7 +1320,8 @@ async def lifespan(app: FastAPI):
         from tldw_Server_API.app.services.startup_auth import refresh_provider_override_snapshot
         from tldw_Server_API.app.services.startup_openapi import warm_openapi_schema
 
-        await warm_openapi_schema(app)
+        if app.openapi_url:
+            await warm_openapi_schema(app)
         await refresh_provider_override_snapshot(services.db_pool)
         yield
     finally:
@@ -2244,7 +2245,7 @@ def _ensure_openapi_operation_tags_declared(openapi_schema: dict[str, Any]) -> N
 
 
 # Add global security schemes, servers, and branding to the generated OpenAPI schema
-def custom_openapi():
+def custom_openapi(app: FastAPI = app):
     # All schema normalization below is covered by FastAPI's OpenAPI schema cache.
     if app.openapi_schema:
         return app.openapi_schema

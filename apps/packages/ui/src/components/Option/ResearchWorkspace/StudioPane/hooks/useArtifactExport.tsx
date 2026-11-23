@@ -321,6 +321,11 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
       artifact: GeneratedArtifact,
       mode: "append" | "replace" = "append"
     ) => {
+      const destination = useWorkspaceStore.getState?.()
+      if (destination?.serverWorkspace || destination?.currentNote?.serverWorkspaceId) {
+        messageApi.warning(t("playground:studio.serverNotesReadOnly", "Server notes are view-only"))
+        return
+      }
       const content = (artifact.content || "").trim()
       if (!content) {
         messageApi.warning(

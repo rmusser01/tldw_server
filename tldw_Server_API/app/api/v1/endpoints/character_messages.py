@@ -38,6 +38,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
 )
 from tldw_Server_API.app.api.v1.utils.chat_message_images import (
     _detect_image_mime_type,
+    expand_message_images,
     format_message_content,
     read_messages_with_images,
 )
@@ -123,7 +124,8 @@ def _convert_db_message_to_response(msg_data: dict[str, Any]) -> MessageResponse
         timestamp=msg_data.get('timestamp', datetime.now(timezone.utc)),
         ranking=msg_data.get('ranking'),
         has_image=bool(msg_data.get('image_data')),
-        version=msg_data.get('version', 1)
+        version=msg_data.get('version', 1),
+        tldw_history_recovery_v1=msg_data.get("tldw_history_recovery_v1"),
     )
 
 
@@ -681,9 +683,157 @@ async def send_message(
         ) from e
 
 
+def _format_chat_completion_page(
+    db: CharactersRAGDB,
+    chat_id: str,
+    paginated: list[dict[str, Any]],
+    attachment_urls: Mapping[str, list[str]],
+    *,
+    character: dict[str, Any] | None,
+    character_name: str,
+    user_name: str,
+    include_character_context: bool,
+    include_deleted: bool,
+    include_message_ids: bool,
+    include_metadata: bool,
+    offset: int,
+    _replace_text: Callable[[Any], str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Build completion messages and their optional metadata sidecar."""
+    # Return format ready for chat completions endpoint
+    formatted_messages = []
+    metadata_extra_map: dict[str, Any] = {}
+
+    # Add system prompt only on the first page and only if no system message exists in DB
+    if character and include_character_context and offset == 0:
+        has_system_in_db = db.has_system_message_for_conversation(
+            chat_id,
+            include_deleted=include_deleted,
+        )
+        if not has_system_in_db:
+            system_prompt = build_character_system_prompt(
+                character,
+                character_name,
+                user_name,
+            )
+            formatted_messages.append({
+                "role": "system",
+                "content": system_prompt.strip()
+            })
+
+    # Add conversation messages with optional tool role messages
+    import re as _re
+    _suffix_re = _re.compile(r"\[tool_calls\]\s*:\s*(\{.*|\[.*)$", _re.DOTALL)
+    for msg in paginated:
+        role = map_sender_to_role(
+            msg.get('sender'),
+            character_name if character else None,
+            default_role="user",
+        )
+        content = _replace_text(msg.get('content'))
+        msg_id = msg.get('id')
+
+        base_message: dict[str, Any] = {
+            "role": role,
+            "content": format_message_content(content, attachment_urls.get(msg_id, []), msg.get("image_details")),
+        }
+        if include_message_ids and msg_id:
+            base_message["message_id"] = msg_id
+
+        # If assistant message has tool_calls in metadata, include tool role messages (OpenAI-compatible)
+        md = None
+        try:
+            md = db.get_message_metadata(msg_id)
+        except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS:
+            md = None
+
+        if include_metadata and md and md.get('extra') is not None and msg_id:
+            metadata_extra_map[msg_id] = md.get('extra')
+
+        # Add the original message first
+        tool_calls_list = None
+        if role == 'assistant':
+            if md and isinstance(md.get('tool_calls'), list) and md.get('tool_calls'):
+                tool_calls_list = md.get('tool_calls')
+            else:
+                # Fallback: parse inline suffix if present
+                try:
+                    match = _suffix_re.search(content or '')
+                    if match:
+                        import json as _json
+                        parsed = _json.loads(match.group(1).strip())
+                        if isinstance(parsed, dict) and 'tool_calls' in parsed:
+                            tool_calls_list = parsed.get('tool_calls')
+                        else:
+                            tool_calls_list = parsed
+                        if not isinstance(tool_calls_list, list):
+                            tool_calls_list = None
+                except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
+                    logger.debug(f"character_messages: failed to parse tool_calls from suffix: {e}")
+                    tool_calls_list = None
+
+        if role == 'assistant' and tool_calls_list:
+            # Optionally include tool_calls array on assistant message for completeness
+            base_message_with_tools = dict(base_message)
+            base_message_with_tools["tool_calls"] = tool_calls_list
+            formatted_messages.append(base_message_with_tools)
+
+            # Emit tool role messages after the assistant message
+            tool_results_by_id: dict[str, Any] = {}
+            try:
+                extra = md.get('extra') or {}
+                # Common pattern: extra.tool_results: { tool_call_id: { ... } }
+                tr = extra.get('tool_results') if isinstance(extra, dict) else None
+                if isinstance(tr, dict):
+                    tool_results_by_id = tr
+            except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"character_messages: failed to extract tool_results: {e}")
+                tool_results_by_id = {}
+
+            for tc in tool_calls_list:
+                tc_id = None
+                tc_name = None
+                try:
+                    tc_id = tc.get('id')
+                    func = tc.get('function') or {}
+                    tc_name = func.get('name')
+                except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
+                    logger.debug(f"character_messages: tool_call parse error: {e}")
+                tool_content = ""
+                # If we have stored results keyed by tool_call_id, include them
+                try:
+                    if tc_id and tool_results_by_id.get(tc_id) is not None:
+                        # Convert result to string; JSON-encode if needed
+                        res = tool_results_by_id.get(tc_id)
+                        if isinstance(res, (dict, list)):
+                            import json as _json
+                            tool_content = _json.dumps(res)
+                        else:
+                            tool_content = str(res)
+                except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
+                    logger.debug(f"character_messages: failed to stringify tool result: {e}")
+                tool_msg: dict[str, Any] = {"role": "tool", "content": tool_content}
+                if tc_id:
+                    tool_msg["tool_call_id"] = tc_id
+                if tc_name:
+                    tool_msg["name"] = tc_name
+                formatted_messages.append(tool_msg)
+        else:
+            # No tools: append base message as-is
+            formatted_messages.append(base_message)
+
+    return formatted_messages, metadata_extra_map
+
+
 @router.get("/chats/{chat_id}/messages",
-            summary="Get messages in a chat", tags=["Messages"])
+            summary="Get messages in a chat", tags=["Messages"],
+            responses={200: {
+                "model": MessageListResponse,
+                "description": "Standard message list. Protected recovery requires this nondeleted, unformatted projection; completion formatting remains opt-in.",
+            }},
+            openapi_extra={"x-tldw-history-recovery-read": {"version": 1, "projection": "protected_live_v1"}})
 async def get_chat_messages(
+    request: Request = None,
     chat_id: str = Path(..., description="Chat session ID"),
     limit: int = Query(50, ge=1, le=200, description="Number of messages to return"),
     offset: int = Query(0, ge=0, description="Number of messages to skip"),
@@ -693,6 +843,7 @@ async def get_chat_messages(
     include_images: bool = Query(False, description="Include complete ordered image data URLs in standard responses"),
     include_tool_calls: bool = Query(False, description="Include tool_calls metadata per message when available (standard format only)"),
     include_metadata: bool = Query(False, description="Include stored message metadata.extra JSON where available"),
+    include_history_recovery_v1: bool = Query(False, description="Include protected live history recovery proof"),
     render_placeholders: bool = Query(
         True,
         description=(
@@ -732,12 +883,40 @@ async def get_chat_messages(
     """
     try:
         scope = _resolve_message_scope(scope_type, workspace_id)
+        if include_history_recovery_v1 is True and (
+            include_deleted is True or include_character_context is True
+            or format_for_completions is True or render_placeholders is not False
+        ):
+            raise HTTPException(422, detail="History recovery requires exact nondeleted, unformatted stored messages.")
         # Verify conversation access
         conversation = _verify_conversation_access(db, chat_id, current_user.id, scope)
 
         # Get messages (honor include_deleted and DB pagination)
         expand_images = include_images is True or format_for_completions is True
-        if expand_images:
+        if include_history_recovery_v1 is True:
+            from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+
+            try:
+                messages, recovery_total = await run_in_threadpool(
+                    db.read_history_recovery_messages,
+                    chat_id, limit=limit, offset=offset, scope=scope.model_dump(),
+                    owner_client_id=str(current_user.id), owner_key=native_history_owner_key(request, current_user.id),
+                )
+            except InputError as exc:
+                if not expand_images:
+                    raise
+                raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.") from exc
+            except CharactersRAGDBError as exc:
+                if not expand_images:
+                    raise
+                raise HTTPException(
+                    status_code=503,
+                    detail="Saved chat attachments could not be read completely. Retry loading the conversation.",
+                ) from exc
+            attachment_urls = await run_in_threadpool(
+                expand_message_images, db, messages, image_byte_limit=_message_store.MAX_CHAT_ATTACHMENT_READ_BYTES,
+            ) if expand_images else {}
+        elif expand_images:
             messages, attachment_urls = await run_in_threadpool(
                 _chat_message_images.read_messages_with_images, db, chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
                 image_byte_limit=_message_store.MAX_CHAT_ATTACHMENT_READ_BYTES,
@@ -755,7 +934,7 @@ async def get_chat_messages(
 
         # Compute total message count for pagination metadata
         try:
-            total_count = db.count_messages_for_conversation(chat_id, include_deleted=include_deleted)
+            total_count = recovery_total if include_history_recovery_v1 is True else db.count_messages_for_conversation(chat_id, include_deleted=include_deleted)
         except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(
                 "count_messages_for_conversation failed for chat_id={} include_deleted={} error={}",
@@ -792,127 +971,13 @@ async def get_chat_messages(
                     return text
 
             if format_for_completions:
-                # Return format ready for chat completions endpoint
-                formatted_messages = []
-                metadata_extra_map: dict[str, Any] = {}
-
-                # Add system prompt only on the first page and only if no system message exists in DB
-                if character and include_character_context and offset == 0:
-                    has_system_in_db = db.has_system_message_for_conversation(
-                        chat_id,
-                        include_deleted=include_deleted,
-                    )
-                    if not has_system_in_db:
-                        system_prompt = build_character_system_prompt(
-                            character,
-                            character_name,
-                            user_name,
-                        )
-                        formatted_messages.append({
-                            "role": "system",
-                            "content": system_prompt.strip()
-                        })
-
-                # Add conversation messages with optional tool role messages
-                import re as _re
-                _suffix_re = _re.compile(r"\[tool_calls\]\s*:\s*(\{.*|\[.*)$", _re.DOTALL)
-                for msg in paginated:
-                    role = map_sender_to_role(
-                        msg.get('sender'),
-                        character_name if character else None,
-                        default_role="user",
-                    )
-                    content = _replace_text(msg.get('content'))
-                    msg_id = msg.get('id')
-
-                    base_message: dict[str, Any] = {
-                        "role": role,
-                        "content": format_message_content(content, attachment_urls.get(msg_id, []), msg.get("image_details")),
-                    }
-                    if include_message_ids and msg_id:
-                        base_message["message_id"] = msg_id
-
-                    # If assistant message has tool_calls in metadata, include tool role messages (OpenAI-compatible)
-                    md = None
-                    try:
-                        md = db.get_message_metadata(msg_id)
-                    except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS:
-                        md = None
-
-                    if include_metadata and md and md.get('extra') is not None and msg_id:
-                        metadata_extra_map[msg_id] = md.get('extra')
-
-                    # Add the original message first
-                    tool_calls_list = None
-                    if role == 'assistant':
-                        if md and isinstance(md.get('tool_calls'), list) and md.get('tool_calls'):
-                            tool_calls_list = md.get('tool_calls')
-                        else:
-                            # Fallback: parse inline suffix if present
-                            try:
-                                match = _suffix_re.search(content or '')
-                                if match:
-                                    import json as _json
-                                    parsed = _json.loads(match.group(1).strip())
-                                    if isinstance(parsed, dict) and 'tool_calls' in parsed:
-                                        tool_calls_list = parsed.get('tool_calls')
-                                    else:
-                                        tool_calls_list = parsed
-                                    if not isinstance(tool_calls_list, list):
-                                        tool_calls_list = None
-                            except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
-                                logger.debug(f"character_messages: failed to parse tool_calls from suffix: {e}")
-                                tool_calls_list = None
-
-                    if role == 'assistant' and tool_calls_list:
-                        # Optionally include tool_calls array on assistant message for completeness
-                        base_message_with_tools = dict(base_message)
-                        base_message_with_tools["tool_calls"] = tool_calls_list
-                        formatted_messages.append(base_message_with_tools)
-
-                        # Emit tool role messages after the assistant message
-                        tool_results_by_id: dict[str, Any] = {}
-                        try:
-                            extra = md.get('extra') or {}
-                            # Common pattern: extra.tool_results: { tool_call_id: { ... } }
-                            tr = extra.get('tool_results') if isinstance(extra, dict) else None
-                            if isinstance(tr, dict):
-                                tool_results_by_id = tr
-                        except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"character_messages: failed to extract tool_results: {e}")
-                            tool_results_by_id = {}
-
-                        for tc in tool_calls_list:
-                            tc_id = None
-                            tc_name = None
-                            try:
-                                tc_id = tc.get('id')
-                                func = tc.get('function') or {}
-                                tc_name = func.get('name')
-                            except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
-                                logger.debug(f"character_messages: tool_call parse error: {e}")
-                            tool_content = ""
-                            # If we have stored results keyed by tool_call_id, include them
-                            try:
-                                if tc_id and tool_results_by_id.get(tc_id) is not None:
-                                    # Convert result to string; JSON-encode if needed
-                                    res = tool_results_by_id.get(tc_id)
-                                    if isinstance(res, (dict, list)):
-                                        import json as _json
-                                        tool_content = _json.dumps(res)
-                                    else:
-                                        tool_content = str(res)
-                            except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
-                                logger.debug(f"character_messages: failed to stringify tool result: {e}")
-                            tool_msg: dict[str, Any] = {"role": "tool", "content": tool_content}
-                            if tc_id:
-                                tool_msg["tool_call_id"] = tc_id
-                            if tc_name:
-                                tool_msg["name"] = tc_name
-                            formatted_messages.append(tool_msg)
-                    else:
-                        # No tools: append base message as-is
-                        formatted_messages.append(base_message)
+                formatted_messages, metadata_extra_map = _format_chat_completion_page(
+                    db, chat_id, paginated, attachment_urls,
+                    character=character, character_name=character_name, user_name=user_name,
+                    include_character_context=include_character_context, include_deleted=include_deleted,
+                    include_message_ids=include_message_ids, include_metadata=include_metadata,
+                    offset=offset, _replace_text=_replace_text,
+                )
 
                 pagination = build_offset_pagination_meta(
                     total=total_count,
@@ -1050,6 +1115,8 @@ async def get_chat_messages(
 
     except HTTPException:
         raise
+    except NotFoundError as exc:
+        raise HTTPException(404, detail="Chat session not found.") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error getting messages for chat {chat_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -1059,11 +1126,14 @@ async def get_chat_messages(
 
 
 @router.get("/messages/{message_id}", response_model=MessageResponse,
-            summary="Get a specific message", tags=["Messages"])
+            summary="Get a specific message", tags=["Messages"],
+            openapi_extra={"x-tldw-history-recovery-read": {"version": 1, "projection": "protected_live_v1"}})
 async def get_message(
+    request: Request = None,
     message_id: str = Path(..., description="Message ID"),
     include_tool_calls: bool = Query(False, description="Include tool_calls metadata when available"),
     include_metadata: bool = Query(False, description="Include stored message metadata.extra JSON where available"),
+    include_history_recovery_v1: bool = Query(False, description="Include protected live history recovery proof"),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -1086,6 +1156,13 @@ async def get_message(
     try:
         scope = _resolve_message_scope(scope_type, workspace_id)
         message = _verify_message_access(db, message_id, current_user.id, scope)
+        if include_history_recovery_v1 is True:
+            from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+
+            messages, _ = await run_in_threadpool(db.read_history_recovery_messages,
+                message["conversation_id"], message_id=message_id, scope=scope.model_dump(),
+                owner_client_id=str(current_user.id), owner_key=native_history_owner_key(request, current_user.id))
+            message = messages[0]
         resp = _convert_db_message_to_response(message)
         if include_tool_calls or include_metadata:
             try:
@@ -1104,6 +1181,8 @@ async def get_message(
 
     except HTTPException:
         raise
+    except NotFoundError as exc:
+        raise HTTPException(404, detail="Message not found.") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error getting message {message_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -1179,9 +1258,9 @@ async def edit_message(
                 lock_for_update=True,
                 owner_client_id=str(current_user.id),
             )
-            db.lock_message_for_edit(message_id, conn=conn)
+            db.message_store.lock_message_for_edit(message_id, conn=conn)
             if metadata_updated:
-                db.lock_message_metadata_for_edit(message_id, conn=conn)
+                db.message_store.lock_message_metadata_for_edit(message_id, conn=conn)
             conversation = resume_state.get("conversation")
             if not isinstance(conversation, Mapping):
                 raise InputError("Conversation resume state is incomplete")

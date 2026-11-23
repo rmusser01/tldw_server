@@ -1,10 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { useStore } from "zustand"
+import { createStore } from "zustand/vanilla"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import { MemoryRouter } from "react-router-dom"
 import { getDesignSystemState } from "@/design-system"
 import { ConnectionPhase } from "@/types/connection"
 import { CHAT_PATH, LOREBOOK_DEBUG_FOCUS } from "@/routes/route-paths"
+import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key"
 import { ChatPane } from "../ChatPane"
 import { fetchChatModels } from "@/services/tldw-server"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
@@ -137,6 +140,7 @@ const messageOptionState = {
     id: string
     isBot: boolean
     name: string
+    role?: "user" | "assistant" | "system"
     message: string
     sources: any[]
   }>,
@@ -156,6 +160,27 @@ const messageOptionState = {
   setHistoryId: mockSetHistoryId,
   serverChatId: null as string | null,
   setServerChatId: mockSetServerChatId
+}
+const legacyMessageStore = createStore(() => ({ ...messageOptionState }))
+let reactiveLegacySession = false
+let ownerRevision = 0
+
+// Persistence cases need real setter-driven renders, not inert spies.
+function enableReactiveLegacySession() {
+  reactiveLegacySession = true
+  legacyMessageStore.setState({ ...messageOptionState }, true)
+  mockSetMessages.mockImplementation((messages: typeof messageOptionState.messages) => legacyMessageStore.setState({ messages }))
+  mockSetHistory.mockImplementation((history: typeof messageOptionState.history) => legacyMessageStore.setState({ history }))
+  mockSetHistoryId.mockImplementation((historyId: string | null) => legacyMessageStore.setState({ historyId }))
+  mockSetServerChatId.mockImplementation((serverChatId: string | null) => legacyMessageStore.setState({ serverChatId }))
+  mockSetStreaming.mockImplementation((streaming: boolean) => legacyMessageStore.setState({ streaming }))
+  mockSetIsProcessing.mockImplementation((isProcessing: boolean) => legacyMessageStore.setState({ isProcessing }))
+  mockSaveWorkspaceChatSession.mockImplementation((key: string, session: NonNullable<ReturnType<typeof workspaceSessions.get>>) => {
+    workspaceSessions.set(key, structuredClone(session))
+  })
+  const { messages, history, historyId, serverChatId } = legacyMessageStore.getState()
+  const key = buildWorkspaceChatSessionKey(workspaceStoreState.workspaceId, workspaceStoreState.workspaceChatReferenceId)
+  workspaceSessions.set(key, structuredClone({ messages, history, historyId, serverChatId }))
 }
 
 const messageOptionStoreState = {
@@ -242,33 +267,44 @@ vi.mock("../ChatPane/useResearchActorScene", async () => {
   return {
     useResearchActorScene: (workspaceId: string, referenceId: string) => ({
       capturePrivateScene: React.useCallback(() => null, []),
-      captureChatReferenceOwner: React.useCallback(() => ({
-        scopeKey: "component-owner",
-        isCurrent: () => workspaceStoreState.workspaceId === workspaceId &&
-          workspaceStoreState.workspaceChatReferenceId === referenceId
-      }), [workspaceId, referenceId])
+      captureChatReferenceOwner: React.useCallback(() => {
+        const captured = ownerRevision
+        return {
+          scopeKey: "component-owner",
+          isCurrent: () => captured === ownerRevision &&
+            workspaceStoreState.workspaceId === workspaceId &&
+            workspaceStoreState.workspaceChatReferenceId === referenceId
+        }
+      }, [workspaceId, referenceId])
     })
   }
 })
 
 vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: (...args: unknown[]) => {
+    const chat = useStore(legacyMessageStore)
     mockUseMessageOption(...args)
-    return { ...messageOptionState, selectedModel: messageOptionState.selectedModel !== undefined ? messageOptionState.selectedModel : messageOptionStoreState.selectedModel }
+    const state = reactiveLegacySession ? chat : messageOptionState
+    return {
+      ...state,
+      selectedModel: state.selectedModel === undefined ? messageOptionStoreState.selectedModel : state.selectedModel
+    }
   }
 }))
 
 vi.mock("@/components/Common/Playground/Message", () => ({
   PlaygroundMessage: ({
     message,
+    role,
     onDeleteMessage,
     currentMessageIndex
   }: {
     message: string
+    role?: "user" | "assistant" | "system"
     onDeleteMessage?: () => Promise<void> | void
     currentMessageIndex?: number
   }) => (
-    <div data-testid="playground-message">
+    <div data-testid="playground-message" data-message-role={role}>
       <span>{message}</span>
       {onDeleteMessage && (
         <button
@@ -334,6 +370,16 @@ function renderChatPane(props: Record<string, unknown> = {}) {
 describe("ChatPane Stage 1 reliability and controls", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    reactiveLegacySession = false
+    ownerRevision = 0
+    mockSetMessages.mockReset()
+    mockSetHistory.mockReset()
+    mockSetHistoryId.mockReset()
+    mockSetServerChatId.mockReset()
+    mockSetStreaming.mockReset()
+    mockSetIsProcessing.mockReset()
+    mockSaveWorkspaceChatSession.mockReset()
+    mockDeleteMessage.mockReset()
     workspaceSessions.clear()
     mockUndoWorkspaceAction.mockReturnValue(true)
     mockScheduleWorkspaceUndoAction.mockImplementation(
@@ -369,6 +415,8 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     mockFocusSourceByMediaId.mockReset()
     workspaceStoreState.chatFocusTarget = null
 
+    messageOptionState.selectedModel = undefined
+    messageOptionState.selectedModelIsLoading = false
     messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
     messageOptionState.messages = []
     messageOptionState.history = []
@@ -376,15 +424,13 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     messageOptionState.serverChatId = null
     messageOptionState.streaming = false
     messageOptionState.isProcessing = false
+    legacyMessageStore.setState({ ...messageOptionState }, true)
     mockOnSubmit.mockResolvedValue(undefined)
     mockUseMessageOption.mockReset()
     mockSetRagMediaIds.mockReset()
     mockSetChatMode.mockReset()
     mockSetFileRetrievalEnabled.mockReset()
     mockSetSelectedModel.mockReset()
-    messageOptionState.selectedModel = undefined
-    messageOptionState.selectedModelIsLoading = false
-    messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
     vi.mocked(fetchChatModels).mockResolvedValue([{ api_provider: "ollama", id: "ollama:gemma3:1b", label: "gemma3:1b", value: "ollama:gemma3:1b" }])
 
     mockGetWorkspaceChatSession.mockImplementation((workspaceId: string) => {
@@ -596,6 +642,18 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     ).toBeDisabled()
     expect(mockOnSubmit).not.toHaveBeenCalled()
     expect(textarea).toHaveValue("Summarize this source")
+  })
+
+  it("retains the draft and blocks Send while a displayed model is hydrating", () => {
+    messageOptionState.selectedModelIsLoading = true
+    renderChatPane()
+
+    const textarea = screen.getByRole("textbox", { name: "Chat message" })
+    fireEvent.change(textarea, { target: { value: "Keep this question" } })
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true })
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(textarea).toHaveValue("Keep this question")
   })
 
   it("puts empty-state prompt chips into the composer and focuses it", async () => {
@@ -940,7 +998,17 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     })
   })
 
+  it.each(["system", "user", "assistant"] as const)("forwards restored %s attribution to the existing message renderer", (role) => {
+    messageOptionState.messages = [{
+      id: "restored-row", role, isBot: role === "assistant", name: role === "system" ? "System" : "Speaker",
+      message: "Restored content", sources: []
+    }]
+    renderChatPane()
+    expect(screen.getByTestId("playground-message")).toHaveAttribute("data-message-role", role)
+  })
+
   it("loads imported workspace chat before autosaving empty local state", () => {
+    enableReactiveLegacySession()
     workspaceSessions.set("workspace-a", {
       messages: [
         {
@@ -963,12 +1031,6 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       historyId: "history-imported",
       serverChatId: null
     })
-
-    // The real chat hook publishes hydration to its next render.
-    mockSetMessages.mockImplementationOnce((messages) => { messageOptionState.messages = messages })
-    mockSetHistory.mockImplementationOnce((history) => { messageOptionState.history = history })
-    mockSetHistoryId.mockImplementationOnce((historyId) => { messageOptionState.historyId = historyId })
-    mockSetServerChatId.mockImplementationOnce((serverChatId) => { messageOptionState.serverChatId = serverChatId })
 
     renderChatPane()
 
@@ -994,12 +1056,12 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       preserveServerChatId: true
     })
     expect(mockSetServerChatId).toHaveBeenCalledWith(null)
-    expect(mockSaveWorkspaceChatSession).not.toHaveBeenCalledWith("workspace-a", {
+    expect(mockSaveWorkspaceChatSession.mock.calls.map(([key, session]) => [key, session])).not.toContainEqual(["workspace-a", {
       messages: [],
       history: [],
       historyId: null,
       serverChatId: null
-    }, expect.anything())
+    }])
   })
 
   it("keeps transcript as a scrollable flex region anchored above the composer", () => {
@@ -1029,6 +1091,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     messageOptionState.history = [{ role: "user", content: "hello" }]
     messageOptionState.historyId = "history-a"
     messageOptionState.serverChatId = "server-chat-a"
+    enableReactiveLegacySession()
 
     const confirmSpy = vi
       .spyOn(Modal, "confirm")
@@ -1057,6 +1120,8 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       historyId: null,
       serverChatId: null
     }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: true}))
+    expect(workspaceSessions.get("workspace-a")).toEqual({ messages: [], history: [], historyId: null, serverChatId: null })
+    expect(screen.queryByTestId("playground-message")).not.toBeInTheDocument()
   })
 
   it("restores previous chat session when clear-chat undo runs", () => {
@@ -1072,6 +1137,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     messageOptionState.history = [{ role: "user", content: "hello" }]
     messageOptionState.historyId = "history-a"
     messageOptionState.serverChatId = "server-chat-a"
+    enableReactiveLegacySession()
 
     const confirmSpy = vi
       .spyOn(Modal, "confirm")
@@ -1092,7 +1158,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       | undefined
     expect(scheduledConfig).toBeDefined()
 
-    scheduledConfig?.undo()
+    act(() => { scheduledConfig?.undo() })
 
     expect(mockSetMessages).toHaveBeenLastCalledWith([
       {
@@ -1124,6 +1190,32 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       historyId: "history-a",
       serverChatId: "server-chat-a"
     }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: false}))
+    expect(workspaceSessions.get("workspace-a")).toEqual({
+      messages: messageOptionState.messages, history: messageOptionState.history,
+      historyId: "history-a", serverChatId: "server-chat-a"
+    })
+    expect(screen.getByTestId("playground-message")).toHaveTextContent("hello")
+  })
+
+  it("does not clear the transcript when the captured owner changes before confirmation", () => {
+    messageOptionState.messages = [
+      { id: "m1", isBot: false, name: "You", message: "Retained", sources: [] }
+    ]
+    enableReactiveLegacySession()
+    const confirm = vi.spyOn(Modal, "confirm").mockReturnValue({
+      destroy: vi.fn(),
+      update: vi.fn()
+    })
+
+    renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Clear chat" }))
+    expect(confirm).toHaveBeenCalledTimes(1)
+
+    ownerRevision++
+    act(() => { confirm.mock.calls[0][0].onOk?.() })
+    expect(mockScheduleWorkspaceUndoAction).not.toHaveBeenCalled()
+    expect(screen.getByTestId("playground-message")).toHaveTextContent("Retained")
+    expect(workspaceSessions.get("workspace-a")?.messages).toEqual(messageOptionState.messages)
   })
 
   it("retains the local conversation Undo restore flow", async () => {
@@ -1149,7 +1241,12 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     ]
     messageOptionState.historyId = "history-a"
     messageOptionState.serverChatId = null
-    mockDeleteMessage.mockResolvedValue(undefined)
+    enableReactiveLegacySession()
+    mockDeleteMessage.mockImplementation(async (messageIndex: number) => {
+      const chat = legacyMessageStore.getState()
+      chat.setMessages(chat.messages.filter((_, index) => index !== messageIndex))
+      chat.setHistory(chat.history.filter((_, index) => index !== messageIndex))
+    })
 
     renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "delete-message-0" }))
@@ -1177,7 +1274,9 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       | { undo: () => void }
       | undefined
     expect(scheduledConfig).toBeDefined()
-    scheduledConfig?.undo()
+    expect(workspaceSessions.get("workspace-a")?.messages.map(row => row.message)).toEqual(["Second"])
+    expect(screen.getAllByTestId("playground-message")).toHaveLength(1)
+    act(() => { scheduledConfig?.undo() })
 
     expect(mockSetMessages).toHaveBeenLastCalledWith([
       {
@@ -1203,6 +1302,11 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       preserveServerChatId: true
     })
     expect(mockSetServerChatId).toHaveBeenLastCalledWith(null)
+    expect(workspaceSessions.get("workspace-a")).toEqual({
+      messages: messageOptionState.messages, history: messageOptionState.history,
+      historyId: "history-a", serverChatId: null
+    })
+    expect(screen.getAllByTestId("playground-message")).toHaveLength(2)
   })
 
   it("shows connection banner and retries connection check", () => {
@@ -1439,6 +1543,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     messageOptionState.serverChatId = "server-chat-a"
 
     workspaceStoreState.workspaceChatReferenceId = "session-a"
+    enableReactiveLegacySession()
 
     workspaceSessions.set("workspace-b::session-b", {
       messages: [
@@ -1493,6 +1598,12 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       preserveServerChatId: true
     })
     expect(mockSetServerChatId).toHaveBeenCalledWith("server-chat-b")
+    expect(workspaceSessions.get("workspace-a::session-a")).toEqual({
+      messages: messageOptionState.messages, history: messageOptionState.history,
+      historyId: "history-a", serverChatId: "server-chat-a"
+    })
+    expect(workspaceSessions.get("workspace-b::session-b")).not.toHaveProperty("checkpoint")
+    expect(screen.getByTestId("playground-message")).toHaveTextContent("Workspace B response")
   })
 
   it("renders full diagnostics link to a valid chat route", () => {
@@ -1535,6 +1646,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       messageOptionState.history = [{ role: "assistant", content: "Saved reply" }]
       messageOptionState.historyId = "owned-mirror"
       messageOptionState.serverChatId = "saved-chat"
+      enableReactiveLegacySession()
       let release!: (value: boolean) => void
       mockDeleteMessage.mockImplementationOnce(
         () =>
@@ -1550,6 +1662,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
         release(accepted)
       })
       expect(mockScheduleWorkspaceUndoAction).not.toHaveBeenCalled()
+      expect(mockSaveWorkspaceChatSession).toHaveBeenCalled()
       for (const [key, saved, owner] of mockSaveWorkspaceChatSession.mock.calls) {
         expect(key).toBe("workspace-a")
         expect(saved).toEqual({
@@ -1560,6 +1673,4 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       }
     }
   )
-
-
 })

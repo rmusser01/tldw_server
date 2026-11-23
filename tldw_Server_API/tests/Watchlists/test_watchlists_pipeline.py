@@ -447,7 +447,6 @@ async def test_pipeline_batches_companion_activity_writes(monkeypatch):
     await run_watchlist_job(
         user_id,
         job.id,
-        capture_companion_activity=True,
         companion_route=f"/api/v1/watchlists/jobs/{job.id}/run",
     )
 

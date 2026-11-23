@@ -1129,6 +1129,18 @@ async def _existing_input_validation_request(
     return request_data.model_copy(deep=True, update={"messages": [message]})
 
 
+def _inference_request_json(payload: dict[str, Any]) -> str:
+    """Exclude persistence proofs without changing estimates for ordinary requests."""
+    history_fields = {
+        "tldw_turn",
+        "tldw_history_selection_v1",
+        "tldw_history_server_existing_input_v1",
+        "tldw_history_branch",
+        "tldw_history_edit_v1",
+    }
+    return json.dumps({key: value for key, value in payload.items() if value is None or key not in history_fields})
+
+
 def _admitted_native_provider_error_response(
     admission: dict[str, Any], error_code: str, message: str | None = None,
 ) -> StreamingResponse:
@@ -2239,6 +2251,171 @@ def _resolve_effective_persona_budget_tokens(
     if adjusted_budget < base_budget:
         return adjusted_budget, True, "ioo_sustained_alert_window"
     return max(1, base_budget), False, None
+
+
+async def _apply_completion_persona_exemplars(
+    *,
+    request_data: ChatCompletionRequest,
+    chat_db: CharactersRAGDB,
+    user_id: str | None,
+    final_system_message: str | None,
+    templated_llm_payload: list[dict[str, Any]],
+    assistant_context: dict[str, Any] | None,
+    persona_strategy: str,
+    is_persona_backed_chat: bool,
+    persona_assistant_id: str,
+    character_db_id_for_context: int | None,
+    uses_versioned_history: bool,
+    persona_debug_meta: dict[str, Any] | None,
+    persona_budget_tokens_used: int,
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Apply exemplar guidance and populate debug metadata when requested."""
+    persona_selected_exemplars: list[dict[str, Any]] = []
+    persona_budget_auto_adjusted = False
+    persona_budget_adjustment_reason: str | None = None
+
+    if persona_strategy != "off" and is_persona_backed_chat:
+        persona_exemplars = await asyncio.to_thread(
+            chat_db.list_persona_exemplars,
+            user_id=str(user_id),
+            persona_id=persona_assistant_id,
+            include_disabled=False,
+            include_deleted=False,
+            limit=50,
+            offset=0,
+        )
+        runtime_guidance = _assemble_persona_runtime_guidance(
+            system_message=final_system_message,
+            assistant_context=assistant_context,
+            exemplars=persona_exemplars,
+            current_turn_text=_extract_latest_user_turn_text(templated_llm_payload),
+        )
+        final_system_message = runtime_guidance["system_message"]
+        persona_selected_exemplars = list(runtime_guidance["selected_exemplars"])
+
+        if persona_debug_meta is not None:
+            persona_debug_meta["source"] = "persona_profile"
+            persona_debug_meta["applied"] = bool(runtime_guidance["applied"])
+            persona_debug_meta["reason"] = (
+                "selected"
+                if runtime_guidance["applied"]
+                else ("no_exemplars_selected" if persona_exemplars else "no_enabled_exemplars")
+            )
+            persona_debug_meta["selection"] = {
+                "selected_count": len(runtime_guidance["selected_exemplars"]),
+                "selected_exemplar_ids": [
+                    str(item.get("id"))
+                    for item in runtime_guidance["selected_exemplars"]
+                    if item.get("id")
+                ],
+                "budget_tokens_used": sum(int(section[2]) for section in runtime_guidance["sections"]),
+                "coverage": {
+                    "boundary": sum(
+                        1
+                        for item in runtime_guidance["selected_exemplars"]
+                        if str(item.get("kind") or "") == "boundary"
+                    ),
+                    "style_like": sum(
+                        1
+                        for item in runtime_guidance["selected_exemplars"]
+                        if str(item.get("kind") or "") != "boundary"
+                    ),
+                },
+            }
+            persona_debug_meta["assembly_sections"] = [
+                str(name) for name, _, _ in runtime_guidance["sections"]
+            ]
+            persona_debug_meta["rejected_exemplars"] = [
+                {
+                    "id": str(item.get("id") or ""),
+                    "reason": str(item.get("reason") or ""),
+                }
+                for item in runtime_guidance["rejected_exemplars"]
+            ]
+    elif persona_strategy != "off" and character_db_id_for_context is not None and not uses_versioned_history:
+        user_turn_text = _extract_latest_user_turn_text(getattr(request_data, "messages", []))
+        if user_turn_text:
+            budget_override = getattr(request_data, "persona_exemplar_budget_tokens", None)
+            budget_tokens, persona_budget_auto_adjusted, persona_budget_adjustment_reason = (
+                _resolve_effective_persona_budget_tokens(
+                    budget_override=budget_override,
+                    user_id=user_id,
+                    character_id=character_db_id_for_context,
+                )
+            )
+            persona_budget_tokens_used = int(budget_tokens)
+            if persona_budget_auto_adjusted:
+                logger.info(
+                    "Persona budget auto-adjust applied user_id={} character_id={} base={} adjusted={} reason={}",
+                    str(user_id or "unknown"),
+                    character_db_id_for_context,
+                    int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET),
+                    int(budget_tokens),
+                    persona_budget_adjustment_reason or "unspecified",
+                )
+            selector_config = PersonaExemplarSelectorConfig(
+                budget_tokens=max(1, budget_tokens),
+                max_exemplar_tokens=120,
+                mmr_lambda=0.7,
+            )
+            embedding_callback = None
+            if persona_strategy in {"hybrid", "embeddings"}:
+
+                def _embedding_callback(turn_text: str, candidates: list[dict[str, Any]]) -> dict[str, float]:
+                    return _persona_exemplar_embeddings.score_exemplars_with_embeddings(
+                        turn_text,
+                        candidates,
+                        user_id=user_id,
+                        character_id=character_db_id_for_context,
+                    )
+
+                embedding_callback = _embedding_callback
+
+            selected_result = select_character_exemplars(
+                db=chat_db,
+                character_id=character_db_id_for_context,
+                user_turn=user_turn_text,
+                config=selector_config,
+                embedding_score_fn=embedding_callback,
+            )
+            persona_selected_exemplars = list(selected_result.selected)
+            persona_guidance_block = _format_persona_exemplar_guidance(selected_result.selected)
+            if persona_guidance_block:
+                if final_system_message and final_system_message.strip():
+                    final_system_message = f"{final_system_message.rstrip()}\n\n{persona_guidance_block}"
+                else:
+                    final_system_message = persona_guidance_block
+
+            if persona_debug_meta is not None:
+                persona_debug_meta["applied"] = bool(persona_guidance_block)
+                persona_debug_meta["reason"] = "selected" if persona_guidance_block else "no_exemplars_selected"
+                persona_debug_meta["selection"] = {
+                    "selected_count": len(selected_result.selected),
+                    "selected_exemplar_ids": [
+                        str(item.get("id")) for item in selected_result.selected if item.get("id")
+                    ],
+                    "budget_tokens_used": selected_result.budget_tokens_used,
+                    "coverage": selected_result.coverage,
+                }
+                persona_debug_meta["budget_tokens"] = selector_config.budget_tokens
+                persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
+                if persona_budget_adjustment_reason:
+                    persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
+        elif persona_debug_meta is not None:
+            persona_debug_meta["reason"] = "no_user_turn_text"
+    elif persona_debug_meta is not None:
+        if persona_strategy == "off":
+            persona_debug_meta["reason"] = "disabled_by_strategy"
+        elif character_db_id_for_context is None:
+            persona_debug_meta["reason"] = "character_context_unavailable"
+
+    if persona_debug_meta is not None and "budget_tokens" not in persona_debug_meta:
+        persona_debug_meta["budget_tokens"] = int(persona_budget_tokens_used)
+        persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
+        if persona_budget_adjustment_reason:
+            persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
+
+    return final_system_message, persona_selected_exemplars
 
 
 def _extract_assistant_text_from_completion_payload(payload: dict[str, Any]) -> str:
@@ -3553,9 +3730,94 @@ async def _persist_system_message_if_needed(
         _release_system_message_lock(conversation_id)
 
 
+async def _verify_selected_durable_wire(request: Request, request_data: ChatCompletionRequest) -> str:
+    """Verify the dispatched body, not a model dump containing server defaults."""
+    from tldw_Server_API.app.core.Chat.history_wire import selected_durable_request_digest
+
+    try:
+        body = json.loads(await request.body())
+        if (type(body.get("stream")) is not bool
+                or any(type(body.get(key)) is not str or not body[key].strip() for key in ("model", "api_provider"))
+                or body["model"].strip().lower() == "auto"):
+            raise ValueError("explicit frozen inference fields required")
+        digest = selected_durable_request_digest(body)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(422, detail={"code": "invalid_selected_durable_wire"}) from exc
+    history = request_data.tldw_turn.history_v1
+    expected = history.selection.request_context_digest if history.kind == "selection" else history.request_context_digest
+    if digest != expected:
+        raise HTTPException(409, detail={"code": "request_context_digest_mismatch"})
+    return digest
+
+
+async def _settle_selected_durable_result(
+    db: Any, cid: str, payload: dict[str, Any], *, reference: dict[str, Any],
+    owner_client_id: str, owner_key: str, scope: dict[str, Any],
+    result_metadata: dict[str, Any], runtime: dict[str, Any],
+) -> str:
+    """Commit the normalized text intent and expose only its live verified receipt."""
+    from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryResultV1
+
+    if (payload.get("role") != "assistant" or not isinstance(payload.get("content"), str)
+            or any(payload.get(key) is not None for key in ("tool_calls", "function_call", "images"))):
+        raise HTTPException(409, detail={"code": "unsupported_history_result_projection"})
+    prepared = {"id": str(uuid.uuid4()), "sender": "assistant", "content": payload["content"],
+        "images": [], "tool_calls": None, "extra_metadata": {
+            **assistant_generation_extra(payload),
+            "sender_role": "assistant", "history_result_v1": result_metadata},
+        "parent_message_id": reference["input_message_id"]}
+    try:
+        mid = await asyncio.to_thread(
+            lambda: db.message_store.settle_history_admission(
+                cid, reference, prepared, owner_client_id=owner_client_id, owner_key=owner_key,
+            ),
+        )
+        rows, _ = await asyncio.to_thread(
+            lambda: db.message_store.read_history_recovery_messages(
+                cid, owner_client_id=owner_client_id, owner_key=owner_key, scope=scope, message_id=mid,
+            ),
+        )
+        proof = rows[0].get("tldw_history_recovery_v1") if len(rows) == 1 else None
+        if not isinstance(proof, dict) or proof.get("status") != "result_verified" or proof.get("scope") != scope:
+            raise HistorySelectionError("unverified_history_result")
+        result = HistoryResultV1.model_validate(proof["result"]).model_dump(mode="json", exclude_none=True)
+        if (result["result_message_id"] != mid or result["admission"] != reference
+                or any(result[key] != result_metadata[key] for key in ("version", "request_context_digest", "sources"))):
+            raise HistorySelectionError("unverified_history_result")
+    except (HistorySelectionError, ValidationError, KeyError) as exc:
+        raise HTTPException(409, detail={"code": "unverified_history_result"}) from exc
+    runtime["tldw_history_result_v1"] = result
+    return mid
+
+
+def _selected_durable_response_payload(
+    payload: dict[str, Any], cid: str, admission: dict[str, Any], runtime: dict[str, Any],
+) -> dict[str, Any]:
+    """Replace provider identity and receipt claims with server-owned values."""
+    owned = {"tldw_message_id", "tldw_user_message_id", "tldw_conversation_id", "tldw_system_message_id",
+        "tldw_history_admission_v1", "tldw_history_result_v1", "tldw_history_recovery_v1", "conversation_id"}
+    cleaned = {key: value for key, value in payload.items() if key not in owned}
+    cleaned.update(tldw_conversation_id=cid, tldw_user_message_id=admission["input_message_id"],
+        tldw_history_admission_v1=admission)
+    result = runtime.get("tldw_history_result_v1")
+    if result is not None:
+        cleaned.update(tldw_message_id=result["result_message_id"], tldw_history_result_v1=result)
+    return cleaned
+
+
 @router.post(
     "/completions",
     response_model=ChatCompletionResponse,
+    openapi_extra={
+        "x-tldw-selected-durable-turn": {
+            "version": 1,
+            "history": "h1_single_input_v1",
+            "result": "rag_source_v1",
+            "request_digest": "history_context_wire_v1",
+            "recovery_read": "protected_live_v1",
+            "inference_guarantee": "multiple_results_possible",
+        }
+    },
     summary="Create chat completion (OpenAI-compatible)",
     description=(
         "Generates an assistant response using the configured LLM provider. "
@@ -3629,6 +3891,8 @@ async def create_chat_completion(
     Returns:
         Response: A StreamingResponse (for streaming requests) or JSONResponse containing the LLM completion payload or an error body; raises HTTPException for client/server errors.
     """
+    selected_durable = getattr(getattr(request_data, "tldw_turn", None), "history_v1", None) is not None
+    selected_request_digest = await _verify_selected_durable_wire(request, request_data) if selected_durable else None
     current_loop = asyncio.get_running_loop()
 
     # Generate unique request ID for tracking and set it in context
@@ -3655,6 +3919,7 @@ async def create_chat_completion(
     strict_model_selection = _should_enforce_strict_model_selection()
     allow_provider_fallback_for_request = (
         ENABLE_PROVIDER_FALLBACK
+        and not selected_durable
         and not (strict_model_selection and explicit_model_requested)
     )
     routing_decision = None
@@ -3672,6 +3937,7 @@ async def create_chat_completion(
             user_base_dir = None
 
     native_history_selection = request_data.tldw_history_selection_v1 or request_data.tldw_history_server_existing_input_v1
+    uses_versioned_history = native_history_selection is not None or selected_durable
     validation_request_data = request_data
     if request_data.tldw_history_server_existing_input_v1 is not None:
         validation_request_data = await _existing_input_validation_request(
@@ -3731,7 +3997,7 @@ async def create_chat_completion(
             provider_hint = request_data.api_provider or _get_default_provider()
             request_data.tools = validate_tool_definitions(tools_as_dicts, provider=provider_hint)
         if (
-            native_history_selection is None
+            not uses_versioned_history
             and user_base_dir is not None
             and current_user
             and getattr(current_user, "id", None) is not None
@@ -3823,6 +4089,8 @@ async def create_chat_completion(
             normalize_default_provider=_get_default_provider(),
             routing_decision=routing_decision,
         )
+        if selected_durable and (selected_provider != raw_api_provider_input or selected_model != raw_model_input):
+            raise HTTPException(409, detail={"code": "resolved_inference_mismatch"})
 
         provider = metrics_provider
         model = metrics_model
@@ -3885,6 +4153,19 @@ async def create_chat_completion(
         try:
             # Authentication is enforced via get_request_user dependency (JWT or X-API-KEY).
             # If it fails, FastAPI raises 401 before reaching here. No further checks needed.
+
+            if (
+                request_data.tldw_turn is not None
+                and command_router.commands_enabled()
+                and command_router.extract_slash_candidate(_extract_latest_user_turn_text(request_data.messages))
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "error_code": "unsupported_durable_slash_command",
+                        "message": "tldw_turn does not support enabled slash commands or chat macros. Disable commands to send literal text.",
+                    },
+                )
 
             # Slash command handling: compute, moderate, then optionally inject
             try:
@@ -4153,7 +4434,8 @@ async def create_chat_completion(
                     raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=error_message)
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_message)
 
-            request_json = json.dumps(validation_request_data.model_dump())
+            request_payload = validation_request_data.model_dump()
+            request_json = json.dumps(request_payload)
             request_json_bytes = request_json.encode()
             metrics.metrics.request_size_bytes.record(len(request_json_bytes))
 
@@ -4169,6 +4451,9 @@ async def create_chat_completion(
                         detail="Request payload too large.",
                     ) from None
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request.") from None
+
+            # Validate the full envelope above, but charge only provider-bound inference.
+            inference_request_json = _inference_request_json(request_payload)
 
             # Apply rate limiting after slash command mutation so estimates are accurate.
             #
@@ -4235,7 +4520,7 @@ async def create_chat_completion(
 
             if rg_ready:
                 # Estimate tokens for rate limiting (heuristic).
-                estimated_tokens = estimate_tokens_from_json(request_json)
+                estimated_tokens = estimate_tokens_from_json(inference_request_json)
                 try:
                     # Derive policy_id from middleware route_map when present.
                     policy_id = str(
@@ -4350,7 +4635,7 @@ async def create_chat_completion(
                 active_count = await _increment_active_request(user_id)
                 try:
                     # Estimate tokens for rate limiting (heuristic).
-                    estimated_tokens = estimate_tokens_from_json(request_json)
+                    estimated_tokens = estimate_tokens_from_json(inference_request_json)
 
                     # In TEST_MODE, avoid cross-test flakiness by scoping limiter to this request
                     # when no explicit conversation_id is provided. This prevents cumulative
@@ -4457,12 +4742,10 @@ async def create_chat_completion(
                 finally:
                     await _decrement_active_request(user_id)
 
-            # Token estimate shared by the billing pre-check and the usage-quota
-            # check below: both need the same estimate for this request body.
+            # Durable persistence envelopes never reach the provider and must
+            # not count citation excerpts a second time against inference quotas.
             try:
-                _estimated_request_tokens = (
-                    estimate_tokens_from_json(request_json) if request_json else 1000
-                )
+                _estimated_request_tokens = estimate_tokens_from_json(inference_request_json)
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                 _estimated_request_tokens = 1000
 
@@ -4664,10 +4947,7 @@ async def create_chat_completion(
             final_conversation_id: str | None = request_data.conversation_id
             persona_debug_requested = bool(getattr(request_data, "persona_debug", False))
             persona_debug_meta: dict[str, Any] | None = None
-            persona_selected_exemplars: list[dict[str, Any]] = []
             persona_budget_tokens_used = int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET)
-            persona_budget_auto_adjusted = False
-            persona_budget_adjustment_reason: str | None = None
             history_admission: dict[str, Any] | None = None
 
             try:
@@ -4799,7 +5079,7 @@ async def create_chat_completion(
                     if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
                         raise _provider_credential_http_exception_for_code("provider_authentication_failed")
 
-                if native_history_selection is None:
+                if native_history_selection is None and request_data.tldw_turn is None:
                     await asyncio.to_thread(
                         save_workspace_chat_model_selection,
                         chat_db=chat_db,
@@ -4814,7 +5094,7 @@ async def create_chat_completion(
 
                 # --- Character/Conversation Context, History, and Current Turn ---
                 continuation_runtime: dict[str, Any] = {}
-                if native_history_selection is not None:
+                if uses_versioned_history:
                     from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
                     from tldw_Server_API.app.core.Chat.persistence_service import (
                         native_history_owner_key,
@@ -4829,7 +5109,13 @@ async def create_chat_completion(
                     if _active_message_sync_service(current_user, history_scope) is not None:
                         raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
                     history_owner = native_history_owner_key(request, current_user.id)
-                    if native_history_selection.owner_key != history_owner:
+                    history_binding = native_history_selection
+                    if selected_durable:
+                        durable_history = request_data.tldw_turn.history_v1
+                        history_binding = (
+                            durable_history.selection if durable_history.kind == "selection" else durable_history.admission
+                        )
+                    if history_binding.owner_key != history_owner:
                         raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
                     from tldw_Server_API.app.core.Chat.history_context import require_history_skill_absence
                     if user_base_dir is None:
@@ -4842,8 +5128,11 @@ async def create_chat_completion(
                     except HistorySelectionError as exc:
                         raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": exc.code}) from exc
                     continuation_runtime.update(history_owner_key=history_owner, history_owner_client_id=str(current_user.id),
-                        history_inputs=[await prepare_native_history_message(message.model_dump(exclude_none=True), final_conversation_id,
-                            _process_content_for_db_sync) for message in request_data.messages if message.role != "system"])
+                        history_scope=history_scope.model_dump())
+                    if not selected_durable:
+                        continuation_runtime["history_inputs"] = [await prepare_native_history_message(
+                            message.model_dump(exclude_none=True), final_conversation_id, _process_content_for_db_sync)
+                            for message in request_data.messages if message.role != "system"]
 
                 (
                     character_card_for_context,
@@ -4862,6 +5151,18 @@ async def create_chat_completion(
                     save_message_fn=_save_message_turn_to_db,
                     runtime_state=continuation_runtime,
                 )
+                if request_data.tldw_turn is not None and not selected_durable:
+                    await asyncio.to_thread(
+                        save_workspace_chat_model_selection,
+                        chat_db=chat_db,
+                        conversation_id=final_conversation_id,
+                        owner_client_id=user_id,
+                        provider=target_api_provider,
+                        model=model,
+                        save_to_db=request_data.save_to_db,
+                        explicit_provider_requested=explicit_provider_requested,
+                        explicit_model_requested=explicit_model_requested,
+                    )
                 completion_save_message = _save_message_turn_to_db
                 history_admission = continuation_runtime.get("tldw_history_admission_v1")
                 existing_input_selection = continuation_runtime.get("tldw_history_server_existing_input_v1")
@@ -4876,6 +5177,25 @@ async def create_chat_completion(
                     async def completion_save_message(db, cid, payload, use_transaction=False):
                         if payload.get("role") == "system":
                             return None
+                        if selected_durable:
+                            result_metadata = request_data.tldw_turn.result_v1.model_dump(mode="json", exclude_none=True)
+                            result_metadata["request_context_digest"] = selected_request_digest
+                            try:
+                                return await _settle_selected_durable_result(
+                                    db,
+                                    cid,
+                                    payload,
+                                    reference=reference,
+                                    owner_client_id=str(current_user.id),
+                                    owner_key=history_owner,
+                                    scope=continuation_runtime["history_scope"],
+                                    result_metadata=result_metadata,
+                                    runtime=continuation_runtime,
+                                )
+                            except Exception:
+                                # Mandatory failure must survive the generic SSE callback's catcher.
+                                continuation_runtime["selected_durable_result_error"] = True
+                                raise
                         if continue_prefix is not None and payload.get("role") == "assistant":
                             # Continue saves the original reply plus its continuation as one sibling reply.
                             from tldw_Server_API.app.core.Chat.history_continuation import merge_continued_reply
@@ -4893,7 +5213,7 @@ async def create_chat_completion(
                                 owner_client_id=str(current_user.id), owner_key=history_owner, **options)
                         except HistorySelectionError as exc:
                             raise HTTPException(409, detail={"code": exc.code}) from exc
-                    if history_admission is not None:
+                    if history_admission is not None and not selected_durable:
                         await asyncio.to_thread(save_workspace_chat_model_selection, chat_db=chat_db,
                             conversation_id=final_conversation_id, owner_client_id=user_id, provider=target_api_provider,
                             model=model, save_to_db=request_data.save_to_db, explicit_provider_requested=explicit_provider_requested,
@@ -4985,148 +5305,23 @@ async def create_chat_completion(
                     is_persona_backed_chat or character_db_id_for_context is not None
                 )
 
-                if persona_strategy != "off" and is_persona_backed_chat:
-                    persona_exemplars = await asyncio.to_thread(
-                        chat_db.list_persona_exemplars,
-                        user_id=str(user_id),
-                        persona_id=persona_assistant_id,
-                        include_disabled=False,
-                        include_deleted=False,
-                        limit=50,
-                        offset=0,
-                    )
-                    runtime_guidance = _assemble_persona_runtime_guidance(
-                        system_message=final_system_message,
-                        assistant_context=assistant_context,
-                        exemplars=persona_exemplars,
-                        current_turn_text=_extract_latest_user_turn_text(templated_llm_payload),
-                    )
-                    final_system_message = runtime_guidance["system_message"]
-                    persona_selected_exemplars = list(runtime_guidance["selected_exemplars"])
+                final_system_message, persona_selected_exemplars = await _apply_completion_persona_exemplars(
+                    request_data=request_data,
+                    chat_db=chat_db,
+                    user_id=user_id,
+                    final_system_message=final_system_message,
+                    templated_llm_payload=templated_llm_payload,
+                    assistant_context=assistant_context,
+                    persona_strategy=persona_strategy,
+                    is_persona_backed_chat=is_persona_backed_chat,
+                    persona_assistant_id=persona_assistant_id,
+                    character_db_id_for_context=character_db_id_for_context,
+                    uses_versioned_history=uses_versioned_history,
+                    persona_debug_meta=persona_debug_meta,
+                    persona_budget_tokens_used=persona_budget_tokens_used,
+                )
 
-                    if persona_debug_meta is not None:
-                        persona_debug_meta["source"] = "persona_profile"
-                        persona_debug_meta["applied"] = bool(runtime_guidance["applied"])
-                        persona_debug_meta["reason"] = (
-                            "selected"
-                            if runtime_guidance["applied"]
-                            else ("no_exemplars_selected" if persona_exemplars else "no_enabled_exemplars")
-                        )
-                        persona_debug_meta["selection"] = {
-                            "selected_count": len(runtime_guidance["selected_exemplars"]),
-                            "selected_exemplar_ids": [
-                                str(item.get("id"))
-                                for item in runtime_guidance["selected_exemplars"]
-                                if item.get("id")
-                            ],
-                            "budget_tokens_used": sum(int(section[2]) for section in runtime_guidance["sections"]),
-                            "coverage": {
-                                "boundary": sum(
-                                    1
-                                    for item in runtime_guidance["selected_exemplars"]
-                                    if str(item.get("kind") or "") == "boundary"
-                                ),
-                                "style_like": sum(
-                                    1
-                                    for item in runtime_guidance["selected_exemplars"]
-                                    if str(item.get("kind") or "") != "boundary"
-                                ),
-                            },
-                        }
-                        persona_debug_meta["assembly_sections"] = [
-                            str(name) for name, _, _ in runtime_guidance["sections"]
-                        ]
-                        persona_debug_meta["rejected_exemplars"] = [
-                            {
-                                "id": str(item.get("id") or ""),
-                                "reason": str(item.get("reason") or ""),
-                            }
-                            for item in runtime_guidance["rejected_exemplars"]
-                        ]
-                elif persona_strategy != "off" and character_db_id_for_context is not None and native_history_selection is None:
-                    user_turn_text = _extract_latest_user_turn_text(getattr(request_data, "messages", []))
-                    if user_turn_text:
-                        budget_override = getattr(request_data, "persona_exemplar_budget_tokens", None)
-                        budget_tokens, persona_budget_auto_adjusted, persona_budget_adjustment_reason = (
-                            _resolve_effective_persona_budget_tokens(
-                                budget_override=budget_override,
-                                user_id=user_id,
-                                character_id=character_db_id_for_context,
-                            )
-                        )
-                        persona_budget_tokens_used = int(budget_tokens)
-                        if persona_budget_auto_adjusted:
-                            logger.info(
-                                "Persona budget auto-adjust applied user_id={} character_id={} base={} adjusted={} reason={}",
-                                str(user_id or "unknown"),
-                                character_db_id_for_context,
-                                int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET),
-                                int(budget_tokens),
-                                persona_budget_adjustment_reason or "unspecified",
-                            )
-                        selector_config = PersonaExemplarSelectorConfig(
-                            budget_tokens=max(1, budget_tokens),
-                            max_exemplar_tokens=120,
-                            mmr_lambda=0.7,
-                        )
-                        embedding_callback = None
-                        if persona_strategy in {"hybrid", "embeddings"}:
-
-                            def _embedding_callback(turn_text: str, candidates: list[dict[str, Any]]) -> dict[str, float]:
-                                return _persona_exemplar_embeddings.score_exemplars_with_embeddings(
-                                    turn_text,
-                                    candidates,
-                                    user_id=user_id,
-                                    character_id=character_db_id_for_context,
-                                )
-
-                            embedding_callback = _embedding_callback
-
-                        selected_result = select_character_exemplars(
-                            db=chat_db,
-                            character_id=character_db_id_for_context,
-                            user_turn=user_turn_text,
-                            config=selector_config,
-                            embedding_score_fn=embedding_callback,
-                        )
-                        persona_selected_exemplars = list(selected_result.selected)
-                        persona_guidance_block = _format_persona_exemplar_guidance(selected_result.selected)
-                        if persona_guidance_block:
-                            if final_system_message and final_system_message.strip():
-                                final_system_message = f"{final_system_message.rstrip()}\n\n{persona_guidance_block}"
-                            else:
-                                final_system_message = persona_guidance_block
-
-                        if persona_debug_meta is not None:
-                            persona_debug_meta["applied"] = bool(persona_guidance_block)
-                            persona_debug_meta["reason"] = "selected" if persona_guidance_block else "no_exemplars_selected"
-                            persona_debug_meta["selection"] = {
-                                "selected_count": len(selected_result.selected),
-                                "selected_exemplar_ids": [
-                                    str(item.get("id")) for item in selected_result.selected if item.get("id")
-                                ],
-                                "budget_tokens_used": selected_result.budget_tokens_used,
-                                "coverage": selected_result.coverage,
-                            }
-                            persona_debug_meta["budget_tokens"] = selector_config.budget_tokens
-                            persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
-                            if persona_budget_adjustment_reason:
-                                persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
-                    elif persona_debug_meta is not None:
-                        persona_debug_meta["reason"] = "no_user_turn_text"
-                elif persona_debug_meta is not None:
-                    if persona_strategy == "off":
-                        persona_debug_meta["reason"] = "disabled_by_strategy"
-                    elif character_db_id_for_context is None:
-                        persona_debug_meta["reason"] = "character_context_unavailable"
-
-                if persona_debug_meta is not None and "budget_tokens" not in persona_debug_meta:
-                    persona_debug_meta["budget_tokens"] = int(persona_budget_tokens_used)
-                    persona_debug_meta["budget_auto_adjusted"] = bool(persona_budget_auto_adjusted)
-                    if persona_budget_adjustment_reason:
-                        persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
-
-                if native_history_selection is None and user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
+                if not uses_versioned_history and user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
                     final_system_message = await _context_integration.build_system_message_with_skills_async(
                         final_system_message,
                         current_user.id,
@@ -5135,7 +5330,7 @@ async def create_chat_completion(
                     )
 
                 system_message_id: str | None = None
-                if should_persist and final_conversation_id:
+                if should_persist and final_conversation_id and request_data.tldw_turn is None:
                     system_message_id = await _persist_system_message_if_needed(
                         db=chat_db,
                         conversation_id=final_conversation_id,
@@ -5387,7 +5582,7 @@ async def create_chat_completion(
                 if admission_queue is not None:
                     try:
                         # Estimate tokens for queue gating (sanitize base64 payloads)
-                        est_tokens_for_queue = estimate_tokens_from_json(request_json)
+                        est_tokens_for_queue = estimate_tokens_from_json(inference_request_json)
                         # Use user_id for per-client fairness; HIGH priority for streaming
                         priority = RequestPriority.HIGH if bool(request_data.stream) else RequestPriority.NORMAL
                         # Use request_id generated for this call
@@ -5693,7 +5888,7 @@ async def create_chat_completion(
                             selected_provider=selected_provider,
                             provider=provider,
                             model=model,
-                            request_json=request_json,
+                            request_json=inference_request_json,
                             request=request,
                             metrics=metrics,
                             provider_manager=provider_manager,
@@ -5703,8 +5898,9 @@ async def create_chat_completion(
                             character_card_for_context=character_card_for_context,
                             chat_db=chat_db,
                             save_message_fn=completion_save_message,
-                            native_persistence=native_stream_persistence(
-                                request_data, history_admission is not None or existing_input_selection is not None
+                            native_persistence="selected_durable_text" if selected_durable else native_stream_persistence(
+                                request_data,
+                                history_admission is not None or existing_input_selection is not None,
                             ),
                             system_message_id=system_message_id,
                             user_message_id=continuation_runtime.get("user_message_id"),
@@ -5977,7 +6173,63 @@ async def create_chat_completion(
                         ),
                     )
                     credential_runtime_owned_by_stream = True
-                    if history_admission is not None:
+                    if selected_durable:
+                        accepted_stream = stream_response.body_iterator
+                        async def with_selected_durable_receipts():
+                            pending = ""
+                            result_emitted = False
+                            try:
+                                yield sse_data(_selected_durable_response_payload({}, final_conversation_id,
+                                    history_admission, {}))
+                                async for chunk in accepted_stream:
+                                    if continuation_runtime.get("selected_durable_result_error"):
+                                        yield sse_data(
+                                            _selected_durable_response_payload(
+                                                {
+                                                    "error": {
+                                                        "code": "selected_durable_result_unverified",
+                                                        "type": "history_result_error",
+                                                        "message": "Selected durable result could not be verified.",
+                                                    }
+                                                },
+                                                final_conversation_id,
+                                                history_admission,
+                                                continuation_runtime,
+                                            )
+                                        )
+                                        yield sse_done()
+                                        return
+                                    pending += chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+                                    pending = pending.replace("\r\n", "\n")
+                                    while "\n\n" in pending:
+                                        frame, pending = pending.split("\n\n", 1)
+                                        lines = frame.splitlines()
+                                        data = "\n".join(line[5:].lstrip(" ") for line in lines if line.startswith("data:"))
+                                        if is_done_line("data: " + data):
+                                            if continuation_runtime.get("tldw_history_result_v1") and not result_emitted:
+                                                yield sse_data(_selected_durable_response_payload({}, final_conversation_id,
+                                                    history_admission, continuation_runtime))
+                                                result_emitted = True
+                                            yield sse_done()
+                                        elif data:
+                                            payload = json.loads(data)
+                                            if not isinstance(payload, dict):
+                                                raise HTTPException(502, detail="Invalid selected durable stream payload.")
+                                            cleaned = _selected_durable_response_payload(payload, final_conversation_id,
+                                                history_admission, continuation_runtime)
+                                            result_emitted = result_emitted or "tldw_history_result_v1" in cleaned
+                                            prefix = "\n".join(line for line in lines if not line.startswith("data:"))
+                                            yield (prefix + "\n" if prefix else "") + sse_data(cleaned)
+                                        else:
+                                            yield frame + "\n\n"
+                                if pending.strip():
+                                    raise HTTPException(502, detail="Incomplete selected durable stream payload.")
+                            finally:
+                                close = getattr(accepted_stream, "aclose", None)
+                                if close is not None:
+                                    await close()
+                        stream_response.body_iterator = with_selected_durable_receipts()
+                    elif history_admission is not None:
                         accepted_stream = stream_response.body_iterator
                         async def with_history_admission():
                             try:
@@ -6000,7 +6252,7 @@ async def create_chat_completion(
                             selected_provider=selected_provider,
                             provider=provider,
                             model=model,
-                            request_json=request_json,
+                            request_json=inference_request_json,
                             request=request,
                             metrics=metrics,
                             provider_manager=provider_manager,
@@ -6024,6 +6276,7 @@ async def create_chat_completion(
                             self_monitoring_service=_self_mon_service,
                             assistant_parent_message_id=assistant_parent_message_id,
                             continuation_metadata=continuation_meta,
+                            selected_durable_text_only=selected_durable,
                         ), records_itself=True)
 
                     while True:
@@ -6160,7 +6413,10 @@ async def create_chat_completion(
                         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
                             logger.debug(f"Billing token recording failed: {_billing_err}")
                     alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
-                    if history_admission is not None:
+                    if selected_durable:
+                        encoded_payload = _selected_durable_response_payload(encoded_payload, final_conversation_id,
+                            history_admission, continuation_runtime)
+                    elif history_admission is not None:
                         encoded_payload["tldw_history_admission_v1"] = history_admission
                     return JSONResponse(content=encoded_payload, headers=alias_headers or None)
 
@@ -6494,7 +6750,7 @@ async def create_chat_completion(
                 # For streaming: the callback handles recording via apply_usage_delta
                 # directly, so __aexit__ only needs to run for non-streaming paths
                 # (where record_actual was called before __aexit__).
-                if _billing_enforcer is not None and _billing_enforcer_entered:
+                if _billing_enforcer is not None and _billing_enforcer_entered and not request_data.stream:
                     try:
                         await _billing_enforcer.__aexit__(exc_type, exc_value, exc_tb)
                     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_exit_err:

@@ -12,12 +12,22 @@ const get = vi.fn(async (keys?: string | string[] | null) => {
 const set = vi.fn(async (values: Record<string, unknown>) => {
   Object.assign(entries, values);
 });
+const originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
 beforeEach(() => {
   localStorage.clear();
   for (const key of Object.keys(entries)) delete entries[key];
   vi.resetModules();
   get.mockClear();
   set.mockClear();
+  const queues = new Map<string, Promise<unknown>>();
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: { request: (key: string, work: () => Promise<unknown>) => {
+      const next = (queues.get(key) ?? Promise.resolve()).catch(() => {}).then(work);
+      queues.set(key, next);
+      return next;
+    } }
+  });
   vi.stubGlobal("browser", {
     storage: {
       local: { get, set, remove: vi.fn() },
@@ -25,7 +35,11 @@ beforeEach(() => {
     },
   });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  if (originalLocks) Object.defineProperty(navigator, "locks", originalLocks);
+  else Reflect.deleteProperty(navigator, "locks");
+  vi.unstubAllGlobals();
+});
 const record = (clipId: string) => ({
   ownerScope: "alice",
   workspaceId: "workspace",

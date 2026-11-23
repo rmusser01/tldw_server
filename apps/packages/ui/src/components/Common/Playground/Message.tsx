@@ -118,6 +118,43 @@ import {
 } from "@/services/settings/chat-opacity-css-vars"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
+const MarkdownHeadingScope = React.lazy(() =>
+  import("../../Common/Markdown").then(module => ({
+    default: module.MarkdownHeadingScope
+  }))
+)
+
+export type MessageRecoveryAction = {
+  id: string
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  disabledReason?: string | null
+}
+
+const RecoveryActionButton = ({ action, className }: {
+  action: MessageRecoveryAction
+  className: string
+}) => {
+  const reasonId = React.useId()
+  return (
+    <span className="inline-flex max-w-full flex-col items-start gap-1">
+      <button
+        type="button"
+        onClick={action.onClick}
+        disabled={action.disabled || Boolean(action.disabledReason)}
+        title={action.disabledReason || undefined}
+        aria-describedby={action.disabledReason ? reasonId : undefined}
+        className={`${className} disabled:cursor-not-allowed disabled:opacity-60`}
+      >
+        {action.label}
+      </button>
+      {action.disabledReason && (
+        <span id={reasonId} className="text-xs text-text-muted">{action.disabledReason}</span>
+      )}
+    </span>
+  )
+}
 
 const savedPartialStatusCopy = {
   interrupted: [
@@ -152,17 +189,10 @@ const savedPartialStatusCopy = {
   ]
 } as const
 
-type ResponseRecoveryAction = {
-  id: string
-  label: string
-  onClick: () => void
-  disabledReason?: string | null
-}
-
 const ErrorBubble: React.FC<{
   payload: ChatErrorPayload
   toggleLabels: { show: string; hide: string }
-  recoveryActions?: ResponseRecoveryAction[]
+  recoveryActions?: MessageRecoveryAction[]
 }> = ({ payload, toggleLabels, recoveryActions = [] }) => {
   const [showDetails, setShowDetails] = React.useState(false)
 
@@ -171,10 +201,10 @@ const ErrorBubble: React.FC<{
       role="alert"
       aria-live="assertive"
       data-chat-error-bubble=""
-      className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+      className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-text">
       <p className="font-semibold">{payload.summary}</p>
       {payload.hint && (
-        <p className="mt-1 text-xs text-danger">
+        <p className="mt-1 text-xs text-text">
           {payload.hint}
         </p>
       )}
@@ -183,28 +213,23 @@ const ErrorBubble: React.FC<{
           type="button"
           onClick={() => setShowDetails((prev) => !prev)}
           title={showDetails ? toggleLabels.hide : toggleLabels.show}
-          className="mt-2 text-xs font-medium text-danger underline hover:text-danger">
+          className="mt-2 min-h-11 text-xs font-medium text-text underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus xl:min-h-8">
           {showDetails ? toggleLabels.hide : toggleLabels.show}
         </button>
       )}
       {showDetails && payload.detail && (
-        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-danger/10 p-2 text-xs text-danger">
+        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-danger/10 p-2 text-xs text-text">
           {payload.detail}
         </pre>
       )}
       {recoveryActions.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {recoveryActions.map((action) => (
-            <button
+            <RecoveryActionButton
               key={action.id}
-              type="button"
-              onClick={action.onClick}
-              disabled={Boolean(action.disabledReason)}
-              title={action.disabledReason || undefined}
-              className="rounded border border-danger/40 bg-surface px-2 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10"
-            >
-              {action.label}
-            </button>
+              action={action}
+              className="min-h-11 rounded border border-danger/40 bg-surface px-2 py-1 text-[11px] font-medium text-text transition hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus xl:min-h-8"
+            />
           ))}
         </div>
       )}
@@ -215,7 +240,7 @@ const ErrorBubble: React.FC<{
 const EmptyAssistantResponseNotice: React.FC<{
   summary: string
   detail: string
-  recoveryActions: ResponseRecoveryAction[]
+  recoveryActions: MessageRecoveryAction[]
 }> = ({ summary, detail, recoveryActions }) => (
   <div
     role="status"
@@ -227,16 +252,11 @@ const EmptyAssistantResponseNotice: React.FC<{
     {recoveryActions.length > 0 && (
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         {recoveryActions.map((action) => (
-          <button
+          <RecoveryActionButton
             key={action.id}
-            type="button"
-            onClick={action.onClick}
-            disabled={Boolean(action.disabledReason)}
-            title={action.disabledReason || undefined}
+            action={action}
             className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10"
-          >
-            {action.label}
-          </button>
+          />
         ))}
       </div>
     )}
@@ -257,6 +277,8 @@ type Props = {
   currentMessageIndex: number
   totalMessages: number
   onRegenerate: () => void
+  // Omit to retain the main Chat recovery behavior; [] suppresses recovery.
+  recoveryActions?: MessageRecoveryAction[]
   regenerateDisabledReason?: string | null
   /**
    * Why Continue can't run on this reply (CM-01). A surface whose one reason
@@ -281,6 +303,7 @@ type Props = {
   sources?: any[]
   hideEditAndRegenerate?: boolean
   hideContinue?: boolean
+  hideSourceActions?: boolean
   onSourceClick?: (source: any) => void
   isTTSEnabled?: boolean
   generationInfo?: any
@@ -366,6 +389,7 @@ type Props = {
   onClearMessageSteering?: () => void
   metadataExtra?: MessageMetadataExtra
   dynamicUISurface?: DynamicUISurface
+  headingOffset?: number
   onDynamicUIAction?: (payload: unknown) => void
   researchActions?: MessageResearchActions
   onRegenerateImage?: (payload: {
@@ -407,7 +431,12 @@ export type MessageResearchActions = {
   onFollowUp?: () => void
 }
 
-// Research callbacks carry the rendered parent's policy and ownership boundary.
+/**
+ * Structural comparison for `researchActions`: render sites rebuild this
+ * object per render (PlaygroundChat memoizes it, PlaygroundCompareCluster
+ * builds it inline). Callback identity must also match so updated handlers
+ * reach the rendered controls.
+ */
 const isEquivalentResearchActions = (
   prev: MessageResearchActions | undefined,
   next: MessageResearchActions | undefined
@@ -556,8 +585,14 @@ const PlaygroundMessageImpl = (props: Props) => {
   const responseRecoveryBusy = props.isStreaming || props.isProcessing
   const recoveryBusyRef = useRef(responseRecoveryBusy)
   recoveryBusyRef.current = responseRecoveryBusy
-  const generationUnavailableRef = useRef(Boolean(props.regenerateDisabledReason))
-  generationUnavailableRef.current = Boolean(props.regenerateDisabledReason)
+  const continueDisabledReason =
+    props.continueDisabledReason === undefined ? props.regenerateDisabledReason : props.continueDisabledReason
+  const recoveryReasons = {
+    retry: props.regenerateDisabledReason,
+    continue: continueDisabledReason
+  }
+  const recoveryReasonsRef = useRef(recoveryReasons)
+  recoveryReasonsRef.current = recoveryReasons
   const detachedReplyRef = useRef<{ id?: string; message: string } | null>(null)
   const detachedReplyId = props.messageId ?? props.serverMessageId
   const originalReply = detachedResponse?.originalReply
@@ -1803,11 +1838,18 @@ const PlaygroundMessageImpl = (props: Props) => {
       props.sources
     ]
   )
-  const runResponseRecovery = React.useCallback((action: () => void, generates = false) => {
+  const runResponseRecovery = React.useCallback((action: () => void, kind?: "retry" | "continue") => {
     const current = useStoreMessageOption.getState()
-    if ((generates && generationUnavailableRef.current) || recoveryBusyRef.current || current.streaming || current.isProcessing) return
+    if ((kind && recoveryReasonsRef.current[kind]) || recoveryBusyRef.current || current.streaming || current.isProcessing) return
     action()
   }, [])
+  const explicitRecoveryActions = React.useMemo(
+    () => props.recoveryActions?.map(action => ({
+      ...action,
+      onClick: () => runResponseRecovery(action.onClick)
+    })),
+    [props.recoveryActions, runResponseRecovery]
+  )
   const handleEnableProviderFallback = React.useCallback(() => {
     runResponseRecovery(() => {
       updateChatModelSetting("apiProvider", undefined)
@@ -1823,13 +1865,12 @@ const PlaygroundMessageImpl = (props: Props) => {
             )
       )
       props.onRegenerate()
-    }, true)
+    }, "retry")
   }, [apiProviderOverride, props.onRegenerate, t, updateChatModelSetting, runResponseRecovery])
-  const continueDisabledReason =
-    props.continueDisabledReason === undefined ? props.regenerateDisabledReason : props.continueDisabledReason
   const errorRecoveryActions = React.useMemo(() => {
     if (!errorPayload || responseRecoveryBusy) return []
-    const actions: ResponseRecoveryAction[] = [
+    if (explicitRecoveryActions !== undefined) return explicitRecoveryActions
+    const actions: MessageRecoveryAction[] = [
       {
         id: "retry",
         label: t(
@@ -1837,7 +1878,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "Retry same model"
         ),
         disabledReason: props.regenerateDisabledReason,
-        onClick: () => runResponseRecovery(props.onRegenerate, true)
+        onClick: () => runResponseRecovery(props.onRegenerate, "retry")
       },
       {
         id: "switch",
@@ -1865,7 +1906,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "Continue from partial"
         ),
         disabledReason: continueDisabledReason,
-        onClick: () => runResponseRecovery(() => props.onContinue?.(), true)
+        onClick: () => runResponseRecovery(() => props.onContinue?.(), "continue")
       })
     }
     if (errorPayload.upgradeUrl) {
@@ -1897,6 +1938,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     return actions
   }, [
     errorPayload,
+    explicitRecoveryActions,
     responseRecoveryBusy,
     runResponseRecovery,
     handleEnableProviderFallback,
@@ -1910,12 +1952,13 @@ const PlaygroundMessageImpl = (props: Props) => {
   ])
   const interruptionRecoveryActions = React.useMemo(() => {
     if (!interruptedGeneration || errorPayload || responseRecoveryBusy) return []
-    const actions: ResponseRecoveryAction[] = [
+    if (explicitRecoveryActions !== undefined) return explicitRecoveryActions
+    const actions: MessageRecoveryAction[] = [
       {
         id: "retry",
         label: t("playground:errorRecovery.retrySameModel", "Retry same model"),
         disabledReason: props.regenerateDisabledReason,
-        onClick: () => runResponseRecovery(props.onRegenerate, true)
+        onClick: () => runResponseRecovery(props.onRegenerate, "retry")
       },
       {
         id: "switch",
@@ -1942,12 +1985,13 @@ const PlaygroundMessageImpl = (props: Props) => {
           "Continue from partial"
         ),
         disabledReason: continueDisabledReason,
-        onClick: () => runResponseRecovery(() => props.onContinue?.(), true)
+        onClick: () => runResponseRecovery(() => props.onContinue?.(), "continue")
       })
     }
     return actions
   }, [
     errorPayload,
+    explicitRecoveryActions,
     responseRecoveryBusy,
     runResponseRecovery,
     handleEnableProviderFallback,
@@ -1966,22 +2010,22 @@ const PlaygroundMessageImpl = (props: Props) => {
     () =>
       (!liveOutputLimited && !recordedIncomplete) || !isLastMessage || errorPayload || responseRecoveryBusy
         ? []
-        : incompleteReplyRecoveryActions({
+        : explicitRecoveryActions ?? incompleteReplyRecoveryActions({
             t: (key, fallback) => t(key, fallback) as string,
             disabledReason: props.regenerateDisabledReason,
             continueDisabledReason,
-            onRetry: () => runResponseRecovery(props.onRegenerate, true),
+            onRetry: () => runResponseRecovery(props.onRegenerate, "retry"),
             onSwitchModel: () => runResponseRecovery(handleOpenModelSettings),
             onContinue: props.onContinue && !props.hideContinue
-              ? () => runResponseRecovery(() => props.onContinue?.(), true) : undefined
+              ? () => runResponseRecovery(() => props.onContinue?.(), "continue") : undefined
           }),
-    [liveOutputLimited, recordedIncomplete, isLastMessage, errorPayload, responseRecoveryBusy, runResponseRecovery,
+    [liveOutputLimited, recordedIncomplete, isLastMessage, errorPayload, responseRecoveryBusy, explicitRecoveryActions, runResponseRecovery,
       handleOpenModelSettings, props.hideContinue, props.onContinue, props.onRegenerate,
       props.regenerateDisabledReason, continueDisabledReason, t]
   )
 
   const emptyResponseRecoveryActions = React.useMemo(
-    () => responseRecoveryBusy ? [] : [
+    () => responseRecoveryBusy ? [] : explicitRecoveryActions ?? [
       {
         id: "retry",
         label: t(
@@ -1989,7 +2033,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "Retry same model"
         ),
         disabledReason: props.regenerateDisabledReason,
-        onClick: () => runResponseRecovery(props.onRegenerate, true)
+        onClick: () => runResponseRecovery(props.onRegenerate, "retry")
       },
       {
         id: "switch",
@@ -2011,6 +2055,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     ],
     [
       responseRecoveryBusy,
+      explicitRecoveryActions,
       runResponseRecovery,
       handleEnableProviderFallback,
       handleOpenModelSettings,
@@ -2950,6 +2995,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                       message={replaceUserDisplayNamePlaceholders(props.message, userDisplayName, shouldUseCharacterIdentity ? props.characterIdentity?.name ?? "" : "")}
                       className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                       searchQuery={props.searchQuery}
+                      headingOffset={props.headingOffset}
                       codeBlockVariant="compact"
                       artifactContextId={`${mermaidArtifactBaseContextId}-greeting`}
                       enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
@@ -2960,7 +3006,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                   <>
                     {parseReasoning(props.message).map((e, i) => {
                       if (e.type === "reasoning") {
-                        return (
+                        const reasoning = (
                           <ReasoningBlock
                             key={`reasoning-${i}`}
                             content={e.content}
@@ -2988,6 +3034,13 @@ const PlaygroundMessageImpl = (props: Props) => {
                             ) : undefined}
                           />
                         )
+                        return props.headingOffset ? (
+                          <React.Suspense key={`reasoning-${i}`} fallback={<p>{t("reasoning.loading")}</p>}>
+                            <MarkdownHeadingScope value={props.headingOffset}>
+                              {reasoning}
+                            </MarkdownHeadingScope>
+                          </React.Suspense>
+                        ) : reasoning
                       }
 
                       if (shouldRenderStreamingPlainText) {
@@ -3015,6 +3068,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                             message={e.content}
                             className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                             searchQuery={props.searchQuery}
+                            headingOffset={props.headingOffset}
                             codeBlockVariant="github"
                             artifactContextId={`${mermaidArtifactBaseContextId}-segment-${i}`}
                             enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
@@ -3176,15 +3230,11 @@ const PlaygroundMessageImpl = (props: Props) => {
               {interruptionRecoveryActions.length > 0 && (
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   {interruptionRecoveryActions.map((action) => (
-                    <button
+                    <RecoveryActionButton
                       key={action.id}
-                      type="button"
-                      onClick={action.onClick}
-                      disabled={Boolean(action.disabledReason)}
-                      title={action.disabledReason || undefined}
-                      className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10">
-                      {action.label}
-                    </button>
+                      action={action}
+                      className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10"
+                    />
                   ))}
                 </div>
               )}
@@ -3372,36 +3422,38 @@ const PlaygroundMessageImpl = (props: Props) => {
                   ),
                   children: (
                     <div className="mb-3 flex flex-col gap-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-2 py-1 text-[11px] text-text-muted">
-                        <span>
-                          {t(
-                            "playground:sources.citationWorkflowHint",
-                            "Inspect source rationale, then seed a follow-up from selected citations."
-                          )}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleAskWithSources(props.sources || [])}
-                            className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text-subtle hover:bg-surface2 hover:text-text"
-                          >
+                      {!props.hideSourceActions && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-2 py-1 text-[11px] text-text-muted">
+                          <span>
                             {t(
-                              "playground:sources.askWithSources",
-                              "Ask with these sources"
+                              "playground:sources.citationWorkflowHint",
+                              "Inspect source rationale, then seed a follow-up from selected citations."
                             )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleOpenKnowledgePanel}
-                            className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text-subtle hover:bg-surface2 hover:text-text"
-                          >
-                            {t(
-                              "playground:sources.openKnowledgePanel",
-                              "Open Search & Context"
-                            )}
-                          </button>
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleAskWithSources(props.sources || [])}
+                              className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text-subtle hover:bg-surface2 hover:text-text"
+                            >
+                              {t(
+                                "playground:sources.askWithSources",
+                                "Ask with these sources"
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleOpenKnowledgePanel}
+                              className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text-subtle hover:bg-surface2 hover:text-text"
+                            >
+                              {t(
+                                "playground:sources.openKnowledgePanel",
+                                "Open Search & Context"
+                              )}
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )}
                       {props?.sources?.map((source, index) => {
                         const sourceKey = getSourceFeedbackKey(source, index)
                         const selected =
@@ -3423,10 +3475,14 @@ const PlaygroundMessageImpl = (props: Props) => {
                                 thumb
                               })
                             }
-                            onAskWithSource={(payload) =>
-                              handleAskWithSources([payload])
+                            onAskWithSource={props.hideSourceActions
+                              ? undefined
+                              : (payload) => handleAskWithSources([payload])
                             }
-                            onOpenKnowledgePanel={handleOpenKnowledgePanel}
+                            onOpenKnowledgePanel={props.hideSourceActions
+                              ? undefined
+                              : handleOpenKnowledgePanel
+                            }
                             onSourceClick={props.onSourceClick}
                             onTrackClick={trackSourceClick}
                             onTrackCitation={trackCitationUsed}

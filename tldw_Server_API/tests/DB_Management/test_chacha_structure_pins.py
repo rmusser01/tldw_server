@@ -236,8 +236,8 @@ def test_schema_sql_imports_nothing_from_chachanotes_db() -> None:
 
 def test_versions_stay_literal() -> None:
     """The schema versions are read by the registry pins and the migration ladders; they are not moved or computed."""
-    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 85  # nosec B101
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 91  # nosec B101
+    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 86  # nosec B101
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 92  # nosec B101
     assert CharactersRAGDB._SCHEMA_NAME == "rag_char_chat_schema"  # nosec B101
 
 
@@ -326,6 +326,7 @@ FROZEN_SQLITE = [
     (82, '_migrate_from_v82_to_v83_sqlite'),
     (83, '_migrate_from_v83_to_v84_sqlite'),
     (84, 'migrate_sqlite_transcripts'),
+    (85, '_migrate_from_v85_to_v86'),
 ]
 FROZEN_POSTGRES = [
     (72, '_migrate_from_v72_to_v73_postgres'),
@@ -347,6 +348,7 @@ FROZEN_POSTGRES = [
     (88, '_migrate_from_v88_to_v89_postgres'),
     (89, '_migrate_from_v89_to_v90_postgres'),
     (90, '_migrate_from_v90_to_v91_postgres'),
+    (91, '_migrate_from_v91_to_v92_postgres'),
 ]
 
 
@@ -369,10 +371,10 @@ def test_every_registry_name_resolves() -> None:
             assert getattr(module, name).__name__ == name, (source, name)  # nosec B101
 
 
-def test_versions_unchanged() -> None:
+def test_registries_end_at_the_reconciled_version() -> None:
     sqlite_steps, postgres_steps = _registries()
-    assert max(sqlite_steps.SQLITE_STEPS) + 1 == CharactersRAGDB._CURRENT_SCHEMA_VERSION == 85  # nosec B101
-    assert max(postgres_steps.POSTGRES_STEPS) + 1 == CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 91  # nosec B101
+    assert max(sqlite_steps.SQLITE_STEPS) + 1 == CharactersRAGDB._CURRENT_SCHEMA_VERSION == 86  # nosec B101
+    assert max(postgres_steps.POSTGRES_STEPS) + 1 == CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 92  # nosec B101
 
 
 def test_class_steps_keep_names() -> None:
@@ -408,7 +410,7 @@ def test_module_patch_reaches_registry_and_direct_calls(monkeypatch: pytest.Monk
 def test_bootstrap_reads_versions_at_call_time(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests patch the version on the class 139 times; the context reads it per call, so a patch reaches the moved bootstrap."""
     db = CharactersRAGDB.__new__(CharactersRAGDB)
-    assert db.ctx.postgres_schema_version == 91  # nosec B101
+    assert db.ctx.postgres_schema_version == 92  # nosec B101
     monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 123)
     assert db.ctx.postgres_schema_version == 123  # nosec B101
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 99)

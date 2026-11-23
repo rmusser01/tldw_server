@@ -1,6 +1,7 @@
 import { useModelSettingsOverlayState } from "@/hooks/useModelSettingsOverlayState"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { WorkspaceChatRouteSearchContext } from "@/hooks/chat/useWorkspaceChatCheckpoint"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
 import React, { lazy, Suspense, useContext, useState } from "react"
 
@@ -72,6 +73,7 @@ const CurrentChatModelSettings = lazy(() =>
 )
 
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
+import { useTutorialStore } from "@/store/tutorials"
 import { DemoModeProvider, useDemoMode } from "@/context/demo-mode"
 
 type OptionLayoutProps = {
@@ -120,6 +122,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const confirmDanger = useConfirmDanger()
   const shellSidebarEnabled = !hideHeader && !hideSidebar
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const activeTutorialId = useTutorialStore((state) => state.activeTutorialId)
+  React.useEffect(() => {
+    if (activeTutorialId) setSidebarOpen(false)
+  }, [activeTutorialId])
   const [chatSidebarOpenResetKey, setChatSidebarOpenResetKey] = useState(0)
   const signalChatSidebarOpen = React.useCallback(() => {
     setChatSidebarOpenResetKey((value) => value + 1)
@@ -788,16 +794,20 @@ function RootLayoutShell({
       </LayoutShellContext.Provider>
     </DemoModeProvider>
   )
+  const isWorkspaceRoute = ["/chat-workspace", "/research-workspace"].includes(location.pathname)
+  const isPlaygroundRoute = ["/chat", "/model-playground"].includes(location.pathname)
   return (
     <HistorySelectionProvider
-      key={["/chat", "/model-playground"].includes(location.pathname) ? "chat" : "sidebar"}
-      storageKey="tldw-h1-playground-reference"
+      key={isWorkspaceRoute ? location.pathname : isPlaygroundRoute ? "chat" : "sidebar"}
+      storageKey={isWorkspaceRoute ? undefined : "tldw-h1-playground-reference"}
       onCapture={(capture) => {
         const display = formatSelectedHistory(capture)
         useStoreMessageOption.setState({ history: display.history, messages: display.messages })
       }}
     >
-      {content}
+      <WorkspaceChatRouteSearchContext.Provider value={location.search}>
+        {content}
+      </WorkspaceChatRouteSearchContext.Provider>
     </HistorySelectionProvider>
   )
 }

@@ -13,11 +13,12 @@ import {
   getCompareBranchBoundaryId,
   withDetachedHistoryResponse
 } from "@/hooks/chat/chat-action-utils"
-import { historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers"
+import { useDeleteChatMessage } from "./use-delete-chat-message"
 import { sendNativeHistoryCharacter } from "./native-history-character-send"
 import { useHistorySelectionContext, type HistoryLoadReceipt } from "./useHistorySelection"
 import { loadHistoryRecoveryRetryContext, retryHistoryTurnRecovery, type HistoryRecoveryRetryContext } from "@/services/history-turn-retry"
 import { resetStaleSelectionForFreshTurn } from "./fresh-chat-selection"
+import { isHistoryTurnLive, markHistoryTurnLive, releaseHistoryTurn } from "@/services/history-turn-keep"
 import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser, isLocalRagDiagnosticInfo } from "@/utils/local-rag-diagnostic"
 import React from "react"
 import { captureChatPromotion, isChatPromotionIncompleteError, waitForChatPromotion, type CapturedChatPromotion } from "@/services/pending-chat-promotion"
@@ -29,7 +30,6 @@ import {
   saveMessage,
   updateHistory,
   updateMessage,
-  removeMessageById,
   updateMessageById,
   formatToChatHistory,
   formatToMessage,
@@ -940,7 +940,10 @@ export const useChatActions = ({
       )
     }
   ): Promise<string | null> => {
-    if (payload?.historyTurn) return baseSaveMessageOnSuccess(payload)
+    if (payload?.historyTurn && !payload.historyTurn.serverOwned)
+      return baseSaveMessageOnSuccess(payload)
+    const originalSourceIsCurrent = sourceIsCurrent
+    sourceIsCurrent = () => originalSourceIsCurrent() && payload?.historyTurn?.canUpdateView() !== false
     const scopeSignal = payload?.scopeSignal
     const scopeInvalidatedSignal = payload?.scopeInvalidatedSignal
     const throwIfScopeChanged = () => {
@@ -962,6 +965,8 @@ export const useChatActions = ({
     let payloadForLocalPersistence = payload
       ? {
           ...payload,
+          // Server-owned turns persist their verified mirror through the ordinary path.
+          historyTurn: undefined,
           setHistoryId: (
             ...args: Parameters<NonNullable<SaveMessagePayload["setHistoryId"]>>
           ) => {
@@ -1066,7 +1071,7 @@ export const useChatActions = ({
         }
       }
 
-      if (isServerConversation && payload?.saveToDb) {
+      if (isServerConversation && payload?.saveToDb && !payload.serverMessagesAlreadyPersisted) {
         try {
           throwIfScopeChanged()
           const caps = await getServerCapabilities()
@@ -1349,7 +1354,7 @@ export const useChatActions = ({
               return serverId;
             };
             // Current-turn save receipts take precedence over capability discovery.
-            if (userContent.length > 0 && !payload.userServerMessageId?.trim()) {
+            if (userContent.length > 0 && !payload.serverOwnsUserMessage && !payload.userServerMessageId?.trim()) {
               retainReceipt(
                 'user',
                 await addMirroredMessage(cid, {
@@ -1588,7 +1593,8 @@ export const useChatActions = ({
       commandSession,
       signal,
       servicePromptSnapshot,
-      capturedPromotion
+      capturedPromotion,
+      qualifiedCommandIsCurrent
     }: {
       actorSceneSend: ActorSceneSend
       commandSource: ReturnType<typeof useStoreMessageOption.getState>
@@ -1596,6 +1602,7 @@ export const useChatActions = ({
       signal: AbortSignal
       servicePromptSnapshot?: ServicePromptSnapshot
       capturedPromotion?: CapturedChatPromotion | null
+      qualifiedCommandIsCurrent?: () => boolean
     }) => {
       const originalCommandIsCurrent =
         actorSceneSend.commandIsCurrent ?? actorSceneSend.isCurrent
@@ -1648,7 +1655,7 @@ export const useChatActions = ({
       }
       const isCurrent = () =>
         viewIsCurrent() &&
-        originalCommandIsCurrent() &&
+        (originalCommandIsCurrent() || qualifiedCommandIsCurrent?.() === true) &&
         useStoreMessageOption.getState().selectedModelRevision ===
           commandSource.selectedModelRevision &&
         !signal.aborted &&
@@ -1666,6 +1673,12 @@ export const useChatActions = ({
       }
       const sceneSend: ActorSceneSend = Object.freeze({
         ...actorSceneSend,
+        ...(qualifiedCommandIsCurrent ? { scene: {
+          ...actorSceneSend.scene,
+          target: { ...actorSceneSend.scene.target,
+            isCurrent: () => actorSceneSend.scene.target.isCurrent() || (qualifiedCommandIsCurrent() && isCurrent())
+          }
+        } } : {}),
         isCurrent,
         acceptHistoryMirror: (id: string) => {
           if (
@@ -1840,16 +1853,20 @@ export const useChatActions = ({
     async ({
       message,
       serverChatIdOverride,
+      isDurableTurn = false,
       servicePromptSnapshot,
       actorSceneSend,
       commandSource,
       commandSession,
       signal,
       capturedPromotion,
-      allowGlobal = false
+      allowGlobal = false,
+      historyOriginIsCurrent,
+      dispatchIsCurrent
     }: {
       message: string
       serverChatIdOverride?: string | null
+      isDurableTurn?: boolean
       servicePromptSnapshot?: ServicePromptSnapshot
       actorSceneSend: ActorSceneSend
       commandSource: ReturnType<typeof useStoreMessageOption.getState>
@@ -1857,14 +1874,57 @@ export const useChatActions = ({
       signal: AbortSignal
       capturedPromotion?: CapturedChatPromotion | null
       allowGlobal?: boolean
-    }): Promise<{ chatId: string | null; historyId: string | null; sceneSend: ActorSceneSend; viewIsCurrent?: () => boolean }> => {
+      historyOriginIsCurrent?: () => boolean
+      dispatchIsCurrent: () => boolean
+    }): Promise<{ chatId: string | null; historyId: string | null; sceneSend: ActorSceneSend; viewIsCurrent?: () => boolean; originIsCurrent?: () => boolean }> => {
       // The scene locator remains original. Only this SDK operation can continue
       // dispatch through its acknowledged local alias and saved-chat metadata.
       if (!actorSceneSend.isCurrent()) throw createServicePromptScopeChangedError()
       if (temporaryChat || (scope?.type !== "workspace" && !allowGlobal)) return { chatId: null, historyId: null, sceneSend: actorSceneSend }
+      let ownedLoadIsCurrent: (() => boolean) | undefined
       const { sceneSend, viewIsCurrent, publish, publishServerChatId, ensureMirror, throwIfTurnCancelled } =
-        captureSdkConversationPublication({ actorSceneSend, commandSource, commandSession, signal, servicePromptSnapshot, capturedPromotion })
-      const result = (chatId: string | null, linkedHistoryId: string | null) => ({ chatId, historyId: linkedHistoryId, sceneSend, viewIsCurrent })
+        captureSdkConversationPublication({ actorSceneSend, commandSource, commandSession, signal, servicePromptSnapshot, capturedPromotion,
+          qualifiedCommandIsCurrent: isDurableTurn && historySelection
+            ? () => ownedLoadIsCurrent?.() === true && dispatchIsCurrent()
+            : undefined
+        })
+      let selectedOrigin = historyOriginIsCurrent
+      const qualifySelectedOwner = async (chatId: string) => {
+        if (!isDurableTurn || !historySelection) return
+        const currentSource = () => viewIsCurrent() && selectedOrigin?.() !== false
+        if (!currentSource()) throw new Error("stale_selection")
+        let current = historySelection.getCurrent()
+        if (current.status === "idle" && !current.owner) {
+          let receipt: HistoryLoadReceipt | undefined
+          const loaded = await historySelection.loadConversation({
+            serverChatId: chatId, scope, isCurrent: viewIsCurrent
+          }, null, value => {
+            const owner = value.owner
+            if (owner.kind !== "native" || owner.conversation_id !== chatId || value.view.conversation_id !== chatId ||
+                !owner.validate_lease() || (owner.scope?.type ?? "global") !== (scope?.type ?? "global") ||
+                (scope?.type === "workspace" && (owner.scope?.type !== "workspace" || owner.scope.workspaceId !== scope.workspaceId)) ||
+                serverChatMirrorOwnerKey({ requestScope: owner.request_scope }) !== serverChatMirrorOwnerKey({ requestScope: actorSceneSend.requestScope }))
+              return
+            receipt = value
+            const fence = historySelection.fence()
+            // The load retires the idle fence; only its exact receipt can continue this command.
+            ownedLoadIsCurrent = () => fence() && owner.validate_lease() &&
+              historySelection.getCurrent().owner === owner && historySelection.getCurrent().view === value.view
+          })
+          current = historySelection.getCurrent()
+          if (!loaded || !receipt || !ownedLoadIsCurrent?.())
+            throw new Error("stale_selection")
+          selectedOrigin = ownedLoadIsCurrent
+          throwIfTurnCancelled()
+        }
+        if (!currentSource()) throw new Error("stale_selection")
+        if (current.status !== "ready" || current.owner?.kind !== "native" ||
+            current.owner.conversation_id !== chatId || !current.owner.validate_lease())
+          throw new Error("owner_conversation_mismatch")
+      }
+      const result = (chatId: string | null, linkedHistoryId: string | null) => ({
+        chatId, historyId: linkedHistoryId, sceneSend, viewIsCurrent, originIsCurrent: selectedOrigin
+      })
       throwIfTurnCancelled()
       const overrideChatId = typeof serverChatIdOverride === "string" && serverChatIdOverride.trim().length > 0 ? serverChatIdOverride.trim() : null
       if (servicePromptSnapshot && (allowGlobal || capturedPromotion)) {
@@ -1880,8 +1940,12 @@ export const useChatActions = ({
         throwIfTurnCancelled()
       }
       const resolvedServerChatId = overrideChatId || useStoreMessageOption.getState().serverChatId
+      const boundDurableTurn = isDurableTurn && Boolean(overrideChatId)
       if (resolvedServerChatId) {
-        if (scope?.type !== "workspace") return result(resolvedServerChatId, await ensureMirror(resolvedServerChatId, serverChatTitle || undefined))
+        if (scope?.type !== "workspace") {
+          await qualifySelectedOwner(resolvedServerChatId)
+          return result(resolvedServerChatId, await ensureMirror(resolvedServerChatId, serverChatTitle || undefined))
+        }
         let validatedServerChatId: string | null = null
         try {
           const chat: ServerChatSummary = await tldwClient.getChat(resolvedServerChatId, { scope, requestScope: servicePromptSnapshot?.requestScope, signal })
@@ -1889,11 +1953,16 @@ export const useChatActions = ({
           validatedServerChatId = validateCachedServerChatId({ cachedId: resolvedServerChatId, serverScope: {
             scope_type: chat.scope_type || "", workspace_id: chat.workspace_id || null
           }, expectedScope: scope })
-        } catch {
+        } catch (error) {
           throwIfTurnCancelled()
+          if (boundDurableTurn || isAbortLikeError(error) || isRequestConfigScopeChangedError(error)) throw error
           validatedServerChatId = null
         }
-        if (validatedServerChatId) return result(validatedServerChatId, await ensureMirror(validatedServerChatId, serverChatTitle || undefined))
+        if (validatedServerChatId) {
+          await qualifySelectedOwner(validatedServerChatId)
+          return result(validatedServerChatId, await ensureMirror(validatedServerChatId, serverChatTitle || undefined))
+        }
+        if (boundDurableTurn) throw new Error("The bound conversation is unavailable in this workspace.")
         publishServerChatId(null)
         publish(() => setServerChatTitle(null))
         publish(() => setServerChatCharacterId(null))
@@ -1925,6 +1994,7 @@ export const useChatActions = ({
       const normalizedId = typeof rawId === "string" || typeof rawId === "number" ? String(rawId).trim() : ""
       if (!normalizedId) throw new Error("Failed to create saved chat session")
       const createdTitle = created && typeof created === "object" ? String(created.title ?? "") : titleSeed
+      await qualifySelectedOwner(normalizedId)
       const ensuredHistoryId = await ensureMirror(normalizedId, createdTitle || titleSeed || undefined)
       // This exact SDK create ACK and mirror ACK locate metadata, not an H1 bind.
       publishServerChatId(normalizedId)
@@ -1945,7 +2015,7 @@ export const useChatActions = ({
       publish(invalidateServerChatHistory)
       return result(normalizedId, ensuredHistoryId)
     },
-    [captureSdkConversationPublication, invalidateServerChatHistory, scope, serverChatClusterId, serverChatExternalRef,
+    [captureSdkConversationPublication, invalidateServerChatHistory, historySelection, scope, serverChatClusterId, serverChatExternalRef,
       serverChatSource, serverChatState, serverChatTitle, serverChatTopic, setServerChatAssistantId, setServerChatAssistantKind,
       setServerChatCharacterId, setServerChatClusterId, setServerChatExternalRef, setServerChatId, setServerChatMetaLoaded,
       setServerChatPersonaMemoryMode, setServerChatSource, setServerChatState, setServerChatTitle, setServerChatTopic,
@@ -3795,6 +3865,7 @@ export const useChatActions = ({
       (temporaryChat && !currentHistorySelection?.owner)
         ? null
         : historySelection
+    const selectedDurableTurn = Boolean(requestOverrides?.tldwTurn && historySelection && !temporaryChat)
 
     const selectedLocalContextTurn = selectedHistoryTurn &&
       currentHistorySelection?.owner?.kind === "local" &&
@@ -3811,8 +3882,14 @@ export const useChatActions = ({
     )) return chatSubmitFailed("unsupported_history_action_context")
     let identityPreflightRefused = false
     try {
+      if (selectedDurableTurn && (compareModeActive || turnResolvedSendMode === "overlay" || turnDynamicUIRequest || historyServerExistingInput))
+        throw new Error("unsupported_history_action_context")
+      if (selectedDurableTurn && turnResolvedSendMode === "tracked_character" &&
+          (!serverChatMetaLoaded || !serverChatId || !serverChatCharacterId ||
+           String(serverChatCharacterId) !== String(selectedCharacter?.id ?? routingSelectedAssistant?.id)))
+        throw new Error("native_history_saved_character_required")
       if (
-        isSavedRoleplayConversation(historySelection) &&
+        !selectedDurableTurn && isSavedRoleplayConversation(historySelection) &&
         !greetingSeed &&
         !historyEditResend &&
         !historyRegenerate &&
@@ -3881,15 +3958,21 @@ export const useChatActions = ({
           documentContext?.length || turnShouldUseRag))
         throw new Error("native_history_greeting_requires_fresh")
       if (
-        historySelection &&
+        (selectedHistoryTurn || selectedDurableTurn ||
+          (historySelection && !temporaryChat && !serverChatIdOverride && !serverChatId && !historyId)) &&
         !compareModeActive &&
-        turnResolvedSendMode === "tracked_persona"
+        (turnResolvedSendMode === "tracked_persona" || isPersonaAssistantSelection(inheritedAssistant))
       ) {
         throw new Error(
           "native_history_persona_unsupported"
         )
       }
       if (
+        (selectedDurableTurn && (
+          isRegenerate || isContinue || turnUsesImageMode ||
+          turnContextFiles.length || docs?.length || documentContext?.length
+        )) ||
+        (!selectedDurableTurn &&
         selectedHistoryTurn &&
         (((historyEditResend || historyRegenerate) && compareModeActive) ||
           (isRegenerate && !historyRegenerate) ||
@@ -3897,6 +3980,7 @@ export const useChatActions = ({
           turnUsesImageMode ||
           (!selectedLocalContextTurn && (turnContextFiles.length ||
             docs?.length || documentContext?.length || turnShouldUseRag)))
+        )
       ) {
         throw new Error("unsupported_history_action_context")
       }
@@ -3914,7 +3998,7 @@ export const useChatActions = ({
         turnResolvedSendMode !== "tracked_character" &&
         turnResolvedSendMode !== "tracked_persona"
       const normalHistorySelection = selectedHistoryTurn ?? (
-        historySelection && needsSavedNormalScope && !isRegenerate
+        historySelection && (needsSavedNormalScope || selectedDurableTurn) && !isRegenerate
           ? historySelection
           : null
       )
@@ -3970,9 +4054,17 @@ export const useChatActions = ({
       )) throw new Error("unsupported_history_action_context")
       // Every persisted turn needs an owner, including local Compare and image
       // histories that have no server conversation or service prompt yet.
-      if (turnPromptIds.length > 0 || !temporaryChat) {
+      if (
+        turnPromptIds.length > 0 || !temporaryChat ||
+        requestOverrides?.requestScope ||
+        (requestOverrides?.tldwTurn &&
+          turnResolvedSendMode !== "tracked_character")
+      ) {
+        if (requestOverrides?.requestScope &&
+            chatDraftOwnerKey(requestOverrides.requestScope) !== chatDraftOwnerKey(actorSceneSend.requestScope))
+          throw createServicePromptScopeChangedError()
         const loadedSnapshot = await loadServicePromptSnapshot(turnPromptIds, {
-          signal, requestScope: actorSceneSend.requestScope
+          signal, requestScope: requestOverrides?.requestScope ?? actorSceneSend.requestScope
         })
         if (chatDraftOwnerKey(loadedSnapshot.requestScope) !== chatDraftOwnerKey(actorSceneSend.requestScope))
           throw createServicePromptScopeChangedError()
@@ -4255,20 +4347,37 @@ export const useChatActions = ({
       }
 
       if (turnShouldUseRag) {
-        const workspaceServerChat = alternateHistoryParams.historySelection
-          ? { chatId: null, historyId: chatModeParams.historyId, sceneSend: actorSceneSend, viewIsCurrent: undefined }
+        const workspaceServerChat = !selectedDurableTurn && alternateHistoryParams.historySelection
+          ? { chatId: null, historyId: chatModeParams.historyId, sceneSend: actorSceneSend, viewIsCurrent: undefined, originIsCurrent: undefined }
           : await ensureWorkspaceServerChatForTurn({
           message,
           serverChatIdOverride,
+          isDurableTurn: Boolean(requestOverrides?.tldwTurn),
           servicePromptSnapshot: turnServicePromptSnapshot,
+          historyOriginIsCurrent,
+          dispatchIsCurrent: normalHistoryPreparation.dispatchIsCurrent,
           actorSceneSend, commandSource: commandDraftSource, commandSession, signal, capturedPromotion
         })
+        if (selectedDurableTurn && !workspaceServerChat.chatId)
+          throw new Error("unsupported_history_durable_turn")
         sdkViewIsCurrent = workspaceServerChat.viewIsCurrent
         const ragModeParamsWithSnapshot = {
           ...chatModeParamsWithRegen,
           ...alternateHistoryParams,
+          actorScene: workspaceServerChat.sceneSend.scene,
           actorSceneSend: workspaceServerChat.sceneSend,
-          servicePromptSnapshot: turnServicePromptSnapshot
+          servicePromptSnapshot: turnServicePromptSnapshot,
+          scope,
+          ...(selectedDurableTurn && workspaceServerChat.chatId ? {
+            surface: "playground" as const,
+            historyPreparation: normalHistoryPreparation,
+            historySelection: {
+              controller: historySelection!,
+              originIsCurrent: workspaceServerChat.originIsCurrent ?? historyOriginIsCurrent!,
+              sourceIsCurrent: commandSessionIsCurrent,
+              temporary: temporaryChat
+            }
+          } : {})
         }
         const scopedRagModeParams = workspaceServerChat.chatId
           ? {
@@ -4401,6 +4510,7 @@ export const useChatActions = ({
                 assistantIdentity,
                 historyId: personaServerChat.historyId,
                 serverChatId: personaServerChat.chatId,
+                conversationId: personaServerChat.chatId,
                 saveMessageOnSuccess: (data: SaveMessageData) =>
                   saveMessageOnSuccess({
                     ...data,
@@ -4434,7 +4544,7 @@ export const useChatActions = ({
           if (historyServerExistingInput && (!historyServerExistingInput.isCurrent() ||
               resolvedSendMode !== "tracked_character" || !resolvedSelectedCharacter?.id || !historySelection))
             throw new Error("native_history_existing_input_owner_required")
-          if (resolvedSendMode === "tracked_character" && resolvedSelectedCharacter?.id) {
+          if (resolvedSendMode === "tracked_character" && resolvedSelectedCharacter?.id && !selectedDurableTurn) {
             const resolvedModel = effectiveSelectedModel?.trim()
             if (!resolvedModel) {
               notification.error({
@@ -4555,17 +4665,24 @@ export const useChatActions = ({
                     effectiveAssistantState.systemPromptSnapshot ?? undefined
                 }
               : servicePromptChatModeParams
-          const workspaceServerChat = normalHistorySelection
-            ? { chatId: null, historyId: chatModeParams.historyId, sceneSend: actorSceneSend, viewIsCurrent: undefined }
+          const workspaceServerChat = normalHistorySelection && !selectedDurableTurn
+            ? { chatId: null, historyId: chatModeParams.historyId, sceneSend: actorSceneSend, viewIsCurrent: undefined, originIsCurrent: undefined }
             : await ensureWorkspaceServerChatForTurn({
                 message,
                 serverChatIdOverride,
+                isDurableTurn: Boolean(requestOverrides?.tldwTurn),
                 servicePromptSnapshot: turnServicePromptSnapshot,
                 actorSceneSend, commandSource: commandDraftSource, commandSession, signal, capturedPromotion,
-                allowGlobal: true
+                allowGlobal: true,
+                historyOriginIsCurrent,
+                dispatchIsCurrent: normalHistoryPreparation.dispatchIsCurrent
               })
           sdkViewIsCurrent = workspaceServerChat.viewIsCurrent
-          const normalParamsWithSdkScene = { ...normalModeParams, actorSceneSend: workspaceServerChat.sceneSend }
+          const normalParamsWithSdkScene = {
+            ...normalModeParams,
+            actorScene: workspaceServerChat.sceneSend.scene,
+            actorSceneSend: workspaceServerChat.sceneSend
+          }
           const scopedNormalModeParams = workspaceServerChat.chatId
             ? {
                 ...normalParamsWithSdkScene,
@@ -4592,7 +4709,8 @@ export const useChatActions = ({
             {
               ...scopedNormalModeParams,
               surface: "playground",
-              onServerChatMutated: invalidateServerChatHistory,
+              // The explicit durable lane refreshes through its fenced mirror save.
+              onServerChatMutated: selectedDurableTurn ? undefined : invalidateServerChatHistory,
               historyPreparation: normalHistoryPreparation,
               setServerChatId,
               scope,
@@ -4601,7 +4719,7 @@ export const useChatActions = ({
               historySelection: normalHistorySelection
                 ? {
                     controller: normalHistorySelection,
-                    originIsCurrent: () => historyOriginIsCurrent!() && (!historyRecoveryRetry || historyRecoveryRetryIsCurrent!()),
+                    originIsCurrent: () => (workspaceServerChat.originIsCurrent ?? historyOriginIsCurrent!)() && (!historyRecoveryRetry || historyRecoveryRetryIsCurrent!()),
                     sourceIsCurrent: commandSessionIsCurrent,
                     onResultFollow: consumeReplyTarget,
                     temporary: temporaryChat,
@@ -5629,6 +5747,10 @@ export const useChatActions = ({
       if (!sourceFence() || !sameSource() || current.owner !== actionSelectionState?.owner) return retired()
       if (!validateBeforeSubmitFn())
         return chatSubmitSkipped("Retry was not submitted")
+      const session = usePlaygroundSessionStore.getState()
+      const navigationIsCurrent = () =>
+        usePlaygroundSessionStore.getState().restoreRevision === session.restoreRevision &&
+        usePlaygroundSessionStore.getState().serverChatSelectionIntent === session.serverChatSelectionIntent
       // Read the records rather than the render's list: a reply that just
       // ended may not have reached it yet.
       const recoveries =
@@ -5638,7 +5760,7 @@ export const useChatActions = ({
               current.view
             ).catch(() => selection.recoveries ?? [])
           : selection.recoveries ?? []
-      if (!sourceFence() || !sameSource()) return retired()
+      if (!sourceFence() || !sameSource() || !navigationIsCurrent()) return retired()
       const retained = recoveries.filter(
         (entry) =>
           entry.scope.profile_id === current.bookmarkScope?.profile_id &&
@@ -5665,45 +5787,45 @@ export const useChatActions = ({
           current.owner,
           question.id
         ).catch(() => null)
-      if (!sourceFence() || !sameSource()) return retired()
+      if (!sourceFence() || !sameSource() || !navigationIsCurrent()) return retired()
       dispatch?.controller?.signal.throwIfAborted()
       dispatch?.assertCurrent?.()
-      const choosing = selection.choose({
-        kind: "before_message",
-        message_id: question.id
-      })
-      // Retain this choice while its capture is still loading.
-      const retryFence = selection.fence()
-      const moved = await choosing
-      dispatch?.controller?.signal.throwIfAborted()
-      dispatch?.assertCurrent?.()
-      if (!retryFence() || !sameSource()) return retired()
-      if (!moved) {
-        notification.error({
-          message: t("error", { defaultValue: "Error" }),
-          description: t(
-            "playground:errorRecovery.retryUnavailable",
-            "This chat changed before the reply could be retried. Send the question again."
-          )
-        })
-        return chatSubmitFailed("history_selection_changed")
+      const retryIds = new Set(retained.map(entry => entry.turn.operation_id))
+      if ([...retryIds].some(isHistoryTurnLive))
+        return chatSubmitSkipped("Retry is already in progress")
+      for (const id of retryIds) markHistoryTurnLive(id)
+      try {
+        const choosing = selection.choose({
+          kind: "before_message",
+          message_id: question.id
+        }, navigationIsCurrent)
+        const retryFence = selection.fence()
+        const moved = await choosing
+        dispatch?.controller?.signal.throwIfAborted()
+        dispatch?.assertCurrent?.()
+        if (!retryFence() || !sameSource() || !navigationIsCurrent()) return retired()
+        if (!moved) {
+          notification.error({
+            message: t("error", { defaultValue: "Error" }),
+            description: t(
+              "playground:errorRecovery.retryUnavailable",
+              "This chat changed before the reply could be retried. Send the question again."
+            )
+          })
+          return chatSubmitFailed("history_selection_changed")
+        }
+        return toChatSubmitResult(
+          await onSubmit({
+            ...dispatch,
+            message: question.message,
+            image: question.images?.[0] ?? "",
+            ...(questionAdmission ? { historyRetryAdmission: questionAdmission } : {}),
+            historyRetryRecoveries: retryRecoveries
+          })
+        )
+      } finally {
+        for (const id of retryIds) releaseHistoryTurn(id)
       }
-      if (!retryFence() || !sameSource()) return retired()
-      dispatch?.controller?.signal.throwIfAborted()
-      dispatch?.assertCurrent?.()
-      return toChatSubmitResult(
-        await onSubmit({
-          ...dispatch,
-          message: question.message,
-          image: question.images?.[0] ?? "",
-          // Without an admission (none was recorded) the question is sent
-          // again as a new branch from the same point.
-          ...(questionAdmission
-            ? { historyRetryAdmission: questionAdmission }
-            : {}),
-          historyRetryRecoveries: retryRecoveries
-        })
-      )
     }
   const regenerateLastMessage = async (dispatch?: { controller?: AbortController; assertCurrent?: () => void; actorSceneSend?: ActorSceneSend }) => {
     const dispatchIsCurrent = captureChatDispatchSource({ selectedModel, toolChoice,
@@ -5813,159 +5935,21 @@ export const useChatActions = ({
     captureSourceFence: () =>
       captureChatDraftSource(() => actionsMountedRef.current).isCurrent
   })
-  const deleteViewCurrent = historySelection?.fence()
-  const deleteDraftCurrent = captureChatDraftSource(
-    () => actionsMountedRef.current
-  ).isCurrent
-  const deleteMessage = React.useCallback(
-    async (index: number) => {
-      const deleteSourceCurrent = () =>
-        deleteDraftCurrent() && (deleteViewCurrent?.() ?? true)
-      const deleteCurrent = () => {
-        const state = useStoreMessageOption.getState()
-        return deleteSourceCurrent() && !state.streaming && !state.isProcessing
-      }
-      if (!deleteSourceCurrent()) return false
-      if (!deleteCurrent()) throw new Error("response_in_progress")
-      const target = messages[index]
-      if (!target?.id) throw new Error("missing_message")
-      if (nativeDeleteOrigin) return nativeDeleteMessage(index)
-      if (serverChatId) throw new Error("native_history_mutation_unavailable")
-      const targetCurrent = () => {
-        const liveTargets = useStoreMessageOption
-          .getState()
-          .messages.filter((row) => row.id === target.id)
-        return (
-          liveTargets.length === 1 &&
-          liveTargets[0].message === target.message &&
-          liveTargets[0].isBot === target.isBot &&
-          liveTargets[0].role === target.role &&
-          JSON.stringify(liveTargets[0].images ?? []) ===
-            JSON.stringify(target.images ?? [])
-        )
-      }
-      if (!targetCurrent()) throw new Error("message_changed")
-      const deletionCurrent = () => deleteCurrent() && targetCurrent()
-      const selectedHistory = ordinaryLocalMutation ? null : historySelection
-      if (
-        !selectedHistory &&
-        !historySelection &&
-        !temporaryChat &&
-        !serverChatId
-      )
-        throw new Error("history_selection_unavailable")
-      if (!selectedHistory) {
-        const serverMessageId = target.serverMessageId
-        try {
-          if (historyId && historyId !== "temp")
-            await removeMessageById(historyId, target.id, undefined, {
-              validate_lease: deletionCurrent
-            })
-          else if (!temporaryChat)
-            throw new Error("history_selection_unavailable")
-        } catch (error) {
-          if (!deletionCurrent()) return false
-          throw error
-        }
-        if (!deletionCurrent()) return false
-        const reply = useStoreMessageOption.getState().replyTarget
-        if (reply?.id === target.id || reply?.id === serverMessageId)
-          clearReplyTarget()
-        if (!deleteCurrent()) return false
-        setMessages((prev) =>
-          deleteCurrent() ? prev.filter((row) => row.id !== target.id) : prev
-        )
-        if (!deleteCurrent()) return false
-        setHistory((prev) =>
-          deleteCurrent()
-            ? buildHistoryFromMessages(
-                useStoreMessageOption
-                  .getState()
-                  .messages.filter((row) => row.id !== target.id)
-              )
-            : prev
-        )
-        return deleteCurrent()
-      }
-      const origin = selectedHistory.getCurrent()
-      const current = deleteCurrent
-      try {
-        const owner = captureLocalMutationOwner(
-          selectedHistory,
-          historyId,
-          serverChatId
-        )
-        const removed = await removeMessageById(
-          owner.conversation_id,
-          target.id,
-          owner,
-          { validate_lease: deletionCurrent }
-        )
-        if (!deletionCurrent()) return false
-        const reply = useStoreMessageOption.getState().replyTarget
-        if (reply?.id === target.id) clearReplyTarget()
-        const remaining = useStoreMessageOption
-          .getState()
-          .messages.filter((row) => row.id !== target.id)
-        if (!current()) return false
-        setMessages(remaining)
-        if (!current()) return false
-        setHistory((previous) =>
-          current()
-            ? historyFromVisibleMessages(
-                useStoreMessageOption
-                  .getState()
-                  .messages.filter((row) => row.id !== target.id)
-              )
-            : previous
-        )
-        const view = origin?.view
-        if (
-          removed &&
-          view?.interpretation.kind === "parent_graph_v1" &&
-          view.cursor.kind !== "empty" &&
-          view.cursor.message_id === target.id
-        ) {
-          if (!current()) return false
-          const following = selectedHistory.choose(
-            removed.parent_message_id
-              ? { kind: "after_message", message_id: removed.parent_message_id }
-              : { kind: "empty" }
-          )
-          const followingCurrent = selectedHistory.fence() ?? (() => false)
-          const followed = await following
-          const state = useStoreMessageOption.getState()
-          return (
-            followed === true &&
-            followingCurrent() &&
-            deleteDraftCurrent() &&
-            !state.streaming &&
-            !state.isProcessing
-          )
-        }
-        return current()
-      } catch (error) {
-        if (!deletionCurrent()) return false
-        throw error
-      }
-    },
-    [
-      nativeDeleteMessage,
-      nativeDeleteOrigin,
-      deleteViewCurrent,
-      deleteDraftCurrent,
-      historyId,
-      serverChatId,
-      temporaryChat,
-      messages,
-      historySelection,
-      ordinaryLocalMutation,
-      clearReplyTarget,
-      setMessages,
-      setHistory,
-      buildHistoryFromMessages
-    ]
-  )
+  const deleteMessage = useDeleteChatMessage({
+    isMounted: () => actionsMountedRef.current,
+    historySelection,
+    nativeDeleteOrigin,
+    nativeDeleteMessage,
+    historyId,
+    serverChatId,
+    temporaryChat,
+    messages,
+    ordinaryLocalMutation,
+    clearReplyTarget,
+    setMessages,
+    setHistory,
+    buildHistoryFromMessages
+  })
 
   const toggleMessagePinned = React.useCallback(
     async (index: number) => {

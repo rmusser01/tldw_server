@@ -60,10 +60,9 @@ def _stub_datasets(monkeypatch, row):
 
 
 @pytest.mark.asyncio
-async def test_an_mmlu_pro_row_reaches_the_judge_with_its_choices_and_answer(monkeypatch):
+async def test_an_mmlu_pro_row_reaches_the_judge_with_its_choices_and_answer(monkeypatch, evaluation_manager):
     """An MMLU-Pro row's options and answer letter reach the judge in the evaluator's fields (it was told the
     correct answer is None, so its scores carried no information)."""
-    from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
     from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
 
     _stub_datasets(monkeypatch, _MMLU_PRO_ROW)
@@ -79,7 +78,7 @@ async def test_an_mmlu_pro_row_reaches_the_judge_with_its_choices_and_answer(mon
 
     (row,) = load_benchmark_dataset("mmlu_pro", limit=1)
     data = get_registry().create_evaluator("mmlu_pro").format_for_custom_metric(row)
-    result = await EvaluationManager().evaluate_custom_metric(
+    result = await evaluation_manager.evaluate_custom_metric(
         metric_name=data["name"],
         description=data["description"],
         evaluation_prompt=data["evaluation_prompt"],
@@ -90,6 +89,7 @@ async def test_an_mmlu_pro_row_reaches_the_judge_with_its_choices_and_answer(mon
     )
 
     assert len(prompts) == 2, prompts  # the model's answer, then the judge
+    assert "briefly explain your reasoning" in prompts[0].lower()
     assert "Compare with the correct answer: B" in prompts[1]
     assert "B. Cranial" in prompts[1] and "J. Dorsal" in prompts[1]
     assert data["metadata"]["category"] == "health"
@@ -104,6 +104,77 @@ def test_simpleqa_verified_loads_its_rows_from_the_shipped_zip():
     assert rows[0]["question"].startswith("How much money, in euros")
     assert rows[0]["answer"] == "120,000 euros"
     assert rows[0]["topic"] == "Politics"
+
+
+def test_verified_benchmark_is_not_advertised_without_the_shipped_archive(monkeypatch):
+    from tldw_Server_API.app.core.Evaluations import benchmark_registry
+
+    real_is_file = Path.is_file
+    monkeypatch.setattr(Path, "is_file", lambda path: path.name != "simpleqa-verified.zip" and real_is_file(path))
+    registry = benchmark_registry.BenchmarkRegistry()
+    monkeypatch.setattr(benchmark_registry, "_registry", registry)
+    monkeypatch.setattr(DatasetLoader, "load_csv", lambda *_args: pytest.fail("do not fall back to unverified data"))
+
+    assert "simpleqa_verified" not in registry.list_benchmarks()
+    assert load_benchmark_dataset("simpleqa_verified") == []
+
+
+def test_remote_csv_keeps_embedded_line_breaks_and_closes_the_response(monkeypatch):
+    from tldw_Server_API.app.core.Evaluations import benchmark_loaders
+
+    closed = []
+    response = SimpleNamespace(text='problem,answer\r\nExample,"One\r\nTwo"\r\n', close=lambda: closed.append(True))
+    monkeypatch.setattr(benchmark_loaders, "fetch", lambda **_kwargs: response)
+    assert DatasetLoader.load_csv("https://benchmark.invalid/example.csv") == [{"problem": "Example", "answer": "One\r\nTwo"}]
+    assert closed == [True]
+
+
+def test_custom_benchmark_loads_its_registered_format_and_source(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Evaluations import benchmark_registry
+    from tldw_Server_API.app.core.Evaluations.benchmark_registry import BenchmarkConfig, BenchmarkRegistry
+
+    source = tmp_path / "dataset"
+    source.write_text('[{"problem":"one"},{"problem":"two"}]', encoding="utf-8")
+    registry = BenchmarkRegistry()
+    registry.register(BenchmarkConfig(
+        name="custom", description="local fixture", evaluation_type="simpleqa",
+        dataset_source=str(source), dataset_format="json", field_mappings={"question": "problem"},
+    ))
+    monkeypatch.setattr(benchmark_registry, "_registry", registry)
+
+    assert [row["question"] for row in load_benchmark_dataset("custom")] == ["one", "two"]
+    assert [row["question"] for row in registry.load_dataset("custom", limit=1)] == ["one"]
+
+
+def test_registered_huggingface_format_accepts_a_plain_dataset_id(monkeypatch):
+    from tldw_Server_API.app.core.Evaluations.benchmark_registry import BenchmarkConfig, BenchmarkRegistry
+
+    calls = _stub_datasets(monkeypatch, {"problem": "example"})
+    registry = BenchmarkRegistry()
+    registry.register(BenchmarkConfig(
+        name="custom_hf", description="dataset fixture", evaluation_type="simpleqa",
+        dataset_source="fixture-owner/example", dataset_format="huggingface", field_mappings={"question": "problem"},
+    ))
+
+    assert [row["question"] for row in registry.load_dataset("custom_hf")] == ["example"]
+    assert calls == [("fixture-owner/example", None, "test")]
+
+
+def test_local_and_zipped_csv_preserve_embedded_line_breaks(tmp_path):
+    from zipfile import ZipFile
+
+    from tldw_Server_API.app.core.Evaluations.benchmark_loaders import BenchmarkDatasetLoader
+
+    raw = b'problem,answer\r\nExample,"One\r\nTwo"\r\n'
+    local = tmp_path / "fixture.csv"
+    local.write_bytes(raw)
+    archived = tmp_path / "fixture.zip"
+    with ZipFile(archived, "w") as archive:
+        archive.writestr("fixture.csv", raw)
+
+    expected = [{"problem": "Example", "answer": "One\r\nTwo"}]
+    assert DatasetLoader.load_csv(str(local)) == expected
+    assert BenchmarkDatasetLoader.load_simpleqa(str(archived)) == expected
 
 
 def test_gpqa_diamond_loads_its_config_and_shapes_the_choices(monkeypatch):

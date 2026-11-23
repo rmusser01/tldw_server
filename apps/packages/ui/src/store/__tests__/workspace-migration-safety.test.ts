@@ -1,8 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import {
-  deleteResearchWorkspaceMigrationLocalValue,
-  runResearchWorkspaceMigration,
-} from "../workspace-migration";
+import { runResearchWorkspaceMigration } from "../workspace-migration";
 import {
   classifyResearchWorkspaceLegacyStorageSurface,
   evaluateResearchWorkspaceLegacyDeletionEligibility,
@@ -22,12 +19,12 @@ const api = () => ({
   finalizeWorkspaceMigration: vi.fn(async (id: string) => ({
     id,
     status: "finalized",
-    client_delete_eligible: true,
+    client_delete_eligible: false,
   })),
   getWorkspaceMigration: vi.fn(async (id: string) => ({
     id,
     status: "finalized",
-    client_delete_eligible: true,
+    client_delete_eligible: false,
   })),
   ackWorkspaceMigrationClientDelete: vi.fn(async () => ({})),
 });
@@ -266,34 +263,37 @@ it("rejects contradictory shared-record ownership even when every row names the 
   expect(values.get("tldw-workspace")).toBe(raw);
 });
 
-it.each(["changed", "retired"])(
-  "preserves real localStorage at the final removal boundary when %s",
-  (kind) => {
+it.each(["unchanged", "changed", "retired"])(
+  "retains real localStorage across metadata readback when %s",
+  async (kind) => {
     const key = snapshotKey(A),
       original = JSON.stringify({
         workspaceId: A,
         currentNote: { content: "Planned" },
       });
     const current = kind === "changed" ? "New unsaved draft" : original;
-    localStorage.setItem(key, current);
-    expect(() =>
-      deleteResearchWorkspaceMigrationLocalValue(
-        key,
-        original,
-        () => kind !== "retired",
-      ),
-    ).toThrow(/Local workspace changed/);
+    localStorage.setItem(key, original);
+    let isCurrent = true;
+    const network = api();
+    network.getWorkspaceMigration.mockImplementationOnce(async (id) => {
+      if (kind === "changed") localStorage.setItem(key, current);
+      if (kind === "retired") isCurrent = false;
+      return { id, status: "finalized", client_delete_eligible: false };
+    });
+    const remove = vi.fn();
+    const result = await run(new Map([[key, original]]), network, {
+      readLocalStorageValue: (name: string) => localStorage.getItem(name),
+      deleteLocalStorageValue: remove,
+      isCurrent: () => isCurrent,
+    });
+    expect(network.getWorkspaceMigration).toHaveBeenCalledOnce();
+    expect(result.status).toBe(kind === "retired" ? "failed" : "finalized_not_delete_eligible");
+    expect(result.deletedSurfaceIds).toEqual([]);
+    expect(remove).not.toHaveBeenCalled();
+    expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
     expect(localStorage.getItem(key)).toBe(current);
   },
 );
-
-it("removes only unchanged captured localStorage while its workspace is current", () => {
-  const key = snapshotKey(A),
-    raw = JSON.stringify({ workspaceId: A });
-  localStorage.setItem(key, raw);
-  deleteResearchWorkspaceMigrationLocalValue(key, raw, () => true);
-  expect(localStorage.getItem(key)).toBeNull();
-});
 
 it("retains an orphan top-level draft despite a target saved-workspace listing", async () => {
   const raw = JSON.stringify({
@@ -350,13 +350,14 @@ it("does not invoke destructive callbacks that could overwrite a queued draft", 
   expect(network.ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled();
 });
 
-it("retains a target-only IndexedDB collection after receipt matching", async () => {
+it("does not inspect a shared IndexedDB store even if its fixture contains only the target", async () => {
   let payload: unknown = {
     workspaceId: A,
     key: "workspace:" + A + ":chat",
     session: { messages: [{ message: "Alpha" }] },
   };
   const network = api(),
+    read = vi.fn(async () => payload),
     remove = vi.fn(async () => {
       payload = null;
     });
@@ -367,10 +368,12 @@ it("retains a target-only IndexedDB collection after receipt matching", async ()
         storeName: "workspace-chat-sessions",
       },
     ],
-    readIndexedDbStorePayload: async () => payload,
+    readIndexedDbStorePayload: read,
     deleteIndexedDbStorePayload: remove,
   });
-  expect(result.status).toBe("finalized_not_delete_eligible");
+  expect(result.status).toBe("blocked");
+  expect(read).not.toHaveBeenCalled();
+  expect(network.createWorkspaceMigration).not.toHaveBeenCalled();
   expect(remove).not.toHaveBeenCalled();
   expect(payload).toEqual({
     workspaceId: A, key: "workspace:" + A + ":chat",

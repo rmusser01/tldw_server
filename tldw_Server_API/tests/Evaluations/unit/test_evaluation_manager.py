@@ -649,6 +649,7 @@ async def test_a_benchmark_item_is_scored_from_the_judges_reply(
         evaluation_prompt=data["evaluation_prompt"],
         input_data=data["input_data"],
         scoring_criteria=data["scoring_criteria"],
+        require_grade=data.get("require_grade", False),
         api_name="openai",
         api_key="sk-test",
     )
@@ -666,6 +667,17 @@ async def test_a_benchmark_item_is_scored_from_the_judges_reply(
     [
         ("8", False, 7 / 9),  # a bare number: json.loads reads an int, not a dict, and the patterns still apply
         ('{"score": "8"}', False, 7 / 9),  # a numeric string
+        ("Score is 8", False, 7 / 9),
+        ("Score is 10 for a correct answer.", False, None),
+        ("SCORE: 8", True, None),
+        ('{"score": 8}', True, None),
+        ("GRADE: [correct / incorrect / not_attempted]\nGRADE: incorrect", True, 0.0),
+        ("Score 10/10 points for a correct answer.", False, None),
+        ("SCORE: 8/10 points EXPLANATION: Weak reasoning.", False, 7 / 9),
+        ("8/10 points EXPLANATION: Weak reasoning.", False, 7 / 9),
+        ("SCORE: 8 points EXPLANATION: Weak reasoning.", False, 7 / 9),
+        ("8/10 points for a correct answer.", False, None),
+        ("SCORE: 8 points for a correct answer.", False, None),
         # exponent form is not a 1-10 score: no leading digit of it is read as one
         ("Score: 1e308", False, None),
         ("Score: 15e3", False, None),
@@ -683,21 +695,26 @@ async def test_a_benchmark_item_is_scored_from_the_judges_reply(
         ('{"score": true}', False, None),  # a boolean is an int in Python, but not a readable score
         ('{"score": false}', False, None),
     ],
-    ids=["bare-number", "numeric-string", "exponent", "exponent-15e3", "exponent-1.5e3", "exponent-10e5",
+    ids=["bare-number", "numeric-string", "score-field", "score-is-rubric-echo", "grade-no-numeric-score",
+         "grade-no-json-score", "grade-spaced-rubric-echo", "points-rubric-echo", "points-with-explanation",
+         "bare-points-with-explanation", "field-points-with-explanation", "bare-points-rubric", "field-points-rubric",
+         "exponent", "exponent-15e3", "exponent-1.5e3", "exponent-10e5",
          "exponent-3.0e2", "underscore-string", "grade-format-echo", "grade-not-attempted", "rubric-echo-rating", "rubric-echo-only", "bool-true", "bool-false"],
 )
 async def test_a_judge_reply_a_human_would_read_as_a_score_is_read(evaluation_manager, reply, asks_grade, expected):
     """Replies a human reads as a score (or a grade) are read as one; one that only looks like a score is not
     (TASK-15487)."""
-    with patch("tldw_Server_API.app.core.Evaluations.evaluation_manager.analyze", return_value=reply):
+    with patch("tldw_Server_API.app.core.Evaluations.evaluation_manager.analyze", return_value=reply) as analyze:
         result = await evaluation_manager.evaluate_custom_metric(
             metric_name="m",
             description="d",
             evaluation_prompt="Grade {answer}.\nGRADE: [correct/incorrect/not_attempted]" if asks_grade else "Rate {answer}",
             input_data={"answer": "a"},
             scoring_criteria={"accuracy": "1-10"},
+            require_grade=asks_grade,
         )
     assert result["score"] == (None if expected is None else pytest.approx(expected))
+    assert ("Provide a score from 1-10" in analyze.call_args.args[2]) is (not asks_grade)
 
 
 @pytest.mark.unit
@@ -735,6 +752,21 @@ async def test_a_failed_model_answer_leaves_the_item_unscored(evaluation_manager
     assert len(prompts) == 1, prompts  # the model's call only
     assert result["score"] is None
     assert result["explanation"].startswith("Error:")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_grade_word_in_question_does_not_change_the_numeric_judge_contract(evaluation_manager):
+    with patch("tldw_Server_API.app.core.Evaluations.evaluation_manager.analyze", return_value="SCORE: 8"):
+        result = await evaluation_manager.evaluate_custom_metric(
+            metric_name="labels",
+            description="Interpret a label",
+            evaluation_prompt="What does GRADE: B mean? Rate {answer} from 1 to 10.",
+            input_data={"answer": "second tier"},
+            scoring_criteria={"accuracy": "Use the numeric score field"},
+        )
+
+    assert result["score"] == pytest.approx(7 / 9)
 
 
 @pytest.mark.unit

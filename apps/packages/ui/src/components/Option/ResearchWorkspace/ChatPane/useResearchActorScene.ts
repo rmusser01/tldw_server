@@ -22,7 +22,7 @@ export const useResearchActorScene = (
   referenceId: string | null,
 ) => {
   const history = useHistorySelectionContext();
-  const { isCurrent: accountIsCurrent, requestScope } = useChatDraftOwner(
+  const { isCurrent: accountIsCurrent, requestScope, serverScopeKey } = useChatDraftOwner(
     () => {},
   );
   const mounted = React.useRef(false);
@@ -122,10 +122,11 @@ export const useResearchActorScene = (
     ],
   );
   const captureChatReferenceOwner = React.useCallback(() => {
-    if (!requestScope || !accountIsCurrent() || !mounted.current)
+    if (!requestScope || !serverScopeKey || !accountIsCurrent() || !mounted.current)
       return undefined;
     return {
       scopeKey: requestScope.scopeKey,
+      serverScopeKey,
       isCurrent: () => {
         const active = useWorkspaceStore.getState();
         return (
@@ -136,6 +137,6 @@ export const useResearchActorScene = (
         );
       },
     };
-  }, [requestScope, accountIsCurrent, workspaceId, referenceId]);
+  }, [requestScope, serverScopeKey, accountIsCurrent, workspaceId, referenceId]);
   return { capturePrivateScene, captureChatReferenceOwner };
 };

@@ -325,7 +325,15 @@ def test_whole_media_uses_saved_content_without_a_transcript(tmp_path, monkeypat
         resolver.resolve([invented])
 
 
-def test_saved_document_cannot_supply_timestamp_evidence(tmp_path):
+@pytest.mark.parametrize(
+    ("locator", "error"),
+    [
+        ({"timestamp_seconds": 0}, "no transcript evidence"),
+        ({"chunk_index": 0}, "no text evidence"),
+    ],
+    ids=["timestamp", "missing-chunk"],
+)
+def test_saved_document_cannot_supply_located_evidence(tmp_path, locator, error):
     db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="study-pack-test")
     media_id, _, _ = db.add_media_with_keywords(
         title="Mercury",
@@ -334,15 +342,27 @@ def test_saved_document_cannot_supply_timestamp_evidence(tmp_path):
         keywords=[],
     )
 
-    with pytest.raises(ValueError, match="no transcript evidence"):
+    with pytest.raises(ValueError, match=error):
         _resolver(media_db=db).resolve(
             [
                 _selection(
                     source_type="media",
                     source_id=str(media_id),
-                    locator={"timestamp_seconds": 0},
+                    locator=locator,
                 )
             ]
+        )
+
+
+def test_missing_chunk_cannot_use_whole_transcript(monkeypatch):
+    _, resolver_mod = _load_study_modules()
+    monkeypatch.setattr(resolver_mod, "get_media_by_id", lambda *args, **kwargs: {"id": 7, "title": "Lecture"})
+    monkeypatch.setattr(resolver_mod, "get_unvectorized_chunks_in_range", lambda *args: [])
+    monkeypatch.setattr(resolver_mod, "get_latest_transcription", lambda *args: "Unrelated transcript")
+
+    with pytest.raises(ValueError, match="no text evidence for chunk 2"):
+        _resolver(media_db=SimpleNamespace()).resolve(
+            [_selection(source_type="media", source_id="7", locator={"chunk_index": 2})]
         )
 
 

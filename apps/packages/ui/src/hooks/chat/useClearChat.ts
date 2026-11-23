@@ -1,6 +1,6 @@
 import React from "react"
+import { useLocation, useNavigate } from "react-router-dom"
 import { captureChatDraftSource, confirmTemporaryChatDiscard } from "./chat-draft-transition"
-import { useNavigate } from "react-router-dom"
 import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -15,6 +15,8 @@ import { cleanupAntOverlays } from "@/utils/cleanup-ant-overlays"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
+import { generateWorkspaceId, useWorkspaceStore } from "@/store/workspace"
+import { CHAT_WORKSPACE_PATH, RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { withoutNotePins } from "@/utils/note-pins"
 import { planServerChatNavigation } from "@/hooks/chat/server-chat-route"
 
@@ -37,6 +39,7 @@ type ResettableChatBase = {
 
 export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const historySelection = useHistorySelectionContext()
   const resetHistorySelection = historySelection?.reset
   const captureSelectionFence = historySelection?.fence
@@ -100,6 +103,10 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   return React.useCallback((options?: { discardTemporaryConfirmed: true } | React.SyntheticEvent) => {
     const source = captureChatDraftSource(captureSelectionFence?.())
     const destination = resolveClearChatPath()
+    const workspace = pathname === CHAT_WORKSPACE_PATH || pathname === RESEARCH_WORKSPACE_PATH
+      ? useWorkspaceStore.getState() : null
+    const workspaceId = workspace?.workspaceId
+    const referenceId = workspace?.workspaceChatReferenceId
     if (!requestSettingsNavigation(destination) || !source.isCurrent()) return false
     const confirmed = options &&
       "discardTemporaryConfirmed" in options &&
@@ -122,6 +129,10 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     const target = destination === "/chat" ? planServerChatNavigation(null) : { to: destination, replace: false }
     if (target.replace) navigate(target.to, { replace: true })
     else navigate(target.to)
+    if (workspaceId && referenceId) {
+      useWorkspaceStore.setState(state => state.workspaceId === workspaceId && state.workspaceChatReferenceId === referenceId
+        ? { workspaceChatReferenceId: generateWorkspaceId() } : state)
+    }
     const resetBaseState = (base: ResettableChatBase) => {
       base.setMessages([])
       base.setHistory([])
@@ -175,6 +186,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     currentChatModelSettings,
     defaultInternetSearchOn,
     navigate,
+    pathname,
     resetHistorySelection,
     resolveClearChatPath,
     setActionInfo,

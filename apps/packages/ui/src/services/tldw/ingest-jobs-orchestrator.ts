@@ -218,12 +218,7 @@ export const createIngestJobsTracker = <TMeta>() => {
 }
 
 type LegacyPerJobFetch = {
-  /**
-   * Per-job status fetch (legacy N+1 path). At least one of `fetchJob` /
-   * `fetchJobs` must be provided; `fetchJob` is ignored when `fetchJobs` is
-   * present. Omitting both is a caller bug that previously spun silently to
-   * the poll timeout (PR #3210 review follow-up).
-   */
+  /** Fetch each job when no batch endpoint is available. */
   fetchJob: (jobId: number) => Promise<IngestJobStatusResponse | undefined>
   fetchJobs?: never
 }
@@ -235,7 +230,7 @@ type BatchedJobsFetch = {
    * returned response is expected to carry the reconciled status of every
    * requested job under `data.jobs` (an array of job status objects with an
    * `id` field, matching `GET /api/v1/media/ingest/jobs?batch_id=...`).
-   * Callers can opt in to individual reads for omitted jobs with `fetchMissingJob`.
+   * Omitted jobs may use a scoped `fetchMissingJob` or legacy `fetchJob`.
    */
   fetchJobs: (
     batchId: string,
@@ -245,17 +240,6 @@ type BatchedJobsFetch = {
 
 type PollTrackedIngestJobsBase<TMeta, TResult> = {
   tracker: ReturnType<typeof createIngestJobsTracker<TMeta>>
-  /**
-   * Batched status fetch: ONE request per tracked batch per poll cycle. The
-   * returned response is expected to carry the reconciled status of every
-   * requested job under `data.jobs` (an array of job status objects with an
-   * `id` field, matching `GET /api/v1/media/ingest/jobs?batch_id=...`).
-   * Callers can opt in to individual reads for omitted jobs with `fetchMissingJob`.
-   */
-  fetchJobs?: (
-    batchId: string,
-    jobIds: number[]
-  ) => Promise<IngestJobStatusResponse | undefined>
   fetchMissingJob?: LegacyPerJobFetch["fetchJob"]
   timeoutMs: number
   pollIntervalMs?: number | (() => number)
@@ -436,10 +420,12 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
 
     let observedTerminal = false
     for (const [jobId, item] of Array.from(unresolved.entries())) {
+      // Idempotent replay can return a job still owned by an earlier batch.
+      const fetchMissing = options.fetchMissingJob ?? options.fetchJob
       const response = responsesByJob.has(jobId)
         ? responsesByJob.get(jobId)
-        : options.fetchMissingJob
-          ? await options.fetchMissingJob(jobId)
+        : fetchMissing
+          ? await fetchMissing(jobId)
           : { ok: false, status: 404, error: "Ingest job missing from batch status response." }
       if (consumeJobResponse(jobId, item, response)) {
         observedTerminal = true

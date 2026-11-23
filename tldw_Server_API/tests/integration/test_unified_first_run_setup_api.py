@@ -7,6 +7,7 @@ from starlette.requests import Request
 
 from tldw_Server_API.app import main as app_main
 from tldw_Server_API.app.api.v1.endpoints import setup as setup_endpoint
+from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.Setup.first_run_state import (
     REQUIRED_FIRST_RUN_STEPS,
     FirstRunStateStore,
@@ -71,7 +72,7 @@ def setup_client():
 
 def _setup_needs_setup(monkeypatch):
     monkeypatch.setattr(
-        setup_endpoint.setup_manager,
+        setup_manager,
         "get_status_snapshot",
         lambda: {
             "enabled": True,
@@ -87,7 +88,7 @@ def _setup_needs_setup(monkeypatch):
 
 def _setup_completed(monkeypatch):
     monkeypatch.setattr(
-        setup_endpoint.setup_manager,
+        setup_manager,
         "get_status_snapshot",
         lambda: {
             "enabled": True,
@@ -992,7 +993,7 @@ def test_first_run_provider_save_masks_key_and_writes_config(monkeypatch, tmp_pa
     config_path = tmp_path / "config.txt"
     config_path.write_text("[API]\ndefault_api = openai\n", encoding="utf-8")
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
-    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    monkeypatch.setattr(setup_manager, "get_config_file_path", lambda: config_path)
     _setup_needs_setup(monkeypatch)
 
     raw_key = "sk-abcdefghijklmnopqrstuvwxyz"
@@ -1025,7 +1026,7 @@ def test_first_run_provider_save_places_new_key_in_api_section(
         encoding="utf-8",
     )
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
-    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    monkeypatch.setattr(setup_manager, "get_config_file_path", lambda: config_path)
     _setup_needs_setup(monkeypatch)
 
     response = setup_client.post(
@@ -1051,7 +1052,7 @@ def test_first_run_provider_save_rejects_blank_hosted_api_key_without_config_wri
     config_path = tmp_path / "config.txt"
     config_path.write_text("[API]\ndefault_api = openai\n", encoding="utf-8")
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
-    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    monkeypatch.setattr(setup_manager, "get_config_file_path", lambda: config_path)
     _setup_needs_setup(monkeypatch)
 
     response = setup_client.post(
@@ -1077,7 +1078,7 @@ def test_first_run_provider_save_keeps_existing_hosted_key_on_blank_update(
         encoding="utf-8",
     )
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
-    monkeypatch.setattr(setup_endpoint.setup_manager, "get_config_file_path", lambda: config_path)
+    monkeypatch.setattr(setup_manager, "get_config_file_path", lambda: config_path)
     _setup_needs_setup(monkeypatch)
 
     response = setup_client.post(
@@ -1300,6 +1301,34 @@ def test_first_run_first_chat_endpoint_records_success_on_ready_response(
     assert state.first_chat.response_id == "chatcmpl-first-run"
 
 
+@pytest.mark.parametrize("model", ["/models/gemma/model.gguf", r"C:\models\gemma.gguf"])
+def test_first_run_first_chat_preserves_local_model_identifier(
+    monkeypatch, tmp_path, setup_client, model,
+):
+    async def resolve_principal(request):
+        return SimpleNamespace(permissions=["system.configure"])
+
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", resolve_principal)
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    async def verify_model(*, provider, model, prompt):
+        return {"status": "ready", "provider": provider, "model": model,
+                "response_id": "chatcmpl-local", "response_text": "Hello."}
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Setup.first_chat_verifier.verify_first_chat", verify_model)
+    response = setup_client.post(
+        "/api/v1/setup/first-run/first-chat",
+        json={"provider": "llamacpp", "model": model},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["model"] == model
+    restored = setup_client.get("/api/v1/setup/first-run/state")
+    assert restored.json()["first_chat"]["model"] == model
+
+
 def test_first_run_first_chat_endpoint_failure_does_not_record_or_echo_raw_details(
     monkeypatch,
     tmp_path,
@@ -1342,6 +1371,7 @@ def test_first_run_first_chat_endpoint_failure_does_not_record_or_echo_raw_detai
         {"provider": "sk-secret-token", "model": "gpt-4.1-mini"},
         {"provider": "openai", "model": "/Users/me/.env"},
         {"provider": "llamacpp", "model": "/opt/models/sk-secret-model.gguf"},
+        {"provider": "llamacpp", "model": "/models/sk-secret-token/gemma.gguf"},
     ],
 )
 def test_first_run_first_chat_endpoint_rejects_unsafe_provider_or_model_before_verify(
@@ -1985,6 +2015,10 @@ def test_remote_provider_validation_guard_precedes_scope_and_network(monkeypatch
         client.close()
 
     assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Setup writes are only available from localhost unless remote setup access is explicitly enabled.",
+    }
+    assert not state_path.exists()
 
 
 def test_first_run_hosted_provider_validate_rejects_blank_key_with_typed_response(
@@ -2738,6 +2772,8 @@ def test_first_run_state_rejects_path_model_for_hosted_provider(monkeypatch, tmp
         json={"step": "providers", "data": {"default_provider": "openai", "default_model": "/Users/me/.env"}},
     )
     assert response.status_code == 400
+    assert response.json() == {"detail": setup_endpoint.UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL}
+    assert "providers" not in FirstRunStateStore(state_path).load().step_data
 
 
 @pytest.mark.parametrize("model_id", ["/opt/models/sk-secret-model.gguf", "hf_abcdef1234567890"])
@@ -2838,6 +2874,55 @@ def test_first_run_state_persists_allowed_public_step_data(
     assert providers_data["default_model"] == "gpt-4.1-mini"
 
 
+@pytest.mark.parametrize("model", ["/models/gemma/model.gguf", r"C:\models\gemma.gguf", "llama//models/gemma.gguf"])
+def test_first_run_provider_progress_preserves_local_model_identifier(
+    monkeypatch, tmp_path, setup_client, model,
+):
+    async def resolve_principal(request):
+        return SimpleNamespace(permissions=["system.configure"])
+
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", resolve_principal)
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={"step": "providers", "data": {
+            "acknowledged": True, "default_provider": "llamacpp", "default_model": model,
+        }},
+    )
+
+    assert response.status_code == 200
+    assert model not in response.text
+    restored = setup_client.get("/api/v1/setup/first-run/state")
+    assert restored.json()["step_data"]["providers"]["default_model"] == model
+
+
+@pytest.mark.parametrize("data", [
+    {"default_model": "/models/sk-secret-token/gemma.gguf"},
+    {"default_model": "hf_abcdef1234567890"},
+    {"default_provider": "/private/provider/config"},
+    {"default_model": "/Users/me/.env"},
+])
+def test_first_run_provider_progress_rejects_secrets_and_other_paths(
+    monkeypatch, tmp_path, setup_client, data,
+):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    store = FirstRunStateStore(state_path)
+    existing = {"default_provider": "openai", "default_model": "gpt-4.1-mini", "acknowledged": False}
+    store.update_step("providers", existing)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={"step": "providers", "data": {"acknowledged": True, **data}},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": setup_endpoint.UNSUPPORTED_FIRST_RUN_STEP_DATA_DETAIL}
+    assert store.load().step_data["providers"] == existing
 
 @pytest.mark.parametrize("base_url", [None, "http://127.0.0.1:8010/v1", "https://example.invalid/api/v1"])
 def test_provider_endpoint_draft_roundtrips_without_acknowledging(monkeypatch, tmp_path, setup_client, base_url):
@@ -3050,10 +3135,12 @@ def test_first_run_state_get_filters_huggingface_token_like_allowed_public_step_
     assert "hf_abcdef1234567890" not in str(body)
 
 
+@pytest.mark.parametrize("model", ["/Users/me/.env", "/models/sk-secret-token/gemma.gguf"])
 def test_first_run_state_get_filters_unsafe_first_chat_metadata(
     monkeypatch,
     tmp_path,
     setup_client,
+    model,
 ):
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
@@ -3066,7 +3153,7 @@ def test_first_run_state_get_filters_unsafe_first_chat_metadata(
     payload["first_chat"].update(
         {
             "provider": "sk-secret-token",
-            "model": "/Users/me/.env",
+            "model": model,
             "response_id": "hf_abcdef1234567890",
         }
     )
@@ -3082,7 +3169,7 @@ def test_first_run_state_get_filters_unsafe_first_chat_metadata(
     assert body["first_chat"]["response_id"] is None
     rendered_body = str(body)
     assert "sk-secret-token" not in rendered_body
-    assert "/Users/me/.env" not in rendered_body
+    assert model not in rendered_body
     assert "hf_abcdef1234567890" not in rendered_body
 
 

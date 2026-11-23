@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { StyleProvider } from "@ant-design/cssinjs"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesEditorHeader from "../NotesEditorHeader"
 
@@ -33,6 +34,7 @@ type HeaderOverrideProps = Partial<React.ComponentProps<typeof NotesEditorHeader
 
 const renderHeader = (overrides: HeaderOverrideProps = {}) =>
   render(
+    <StyleProvider hashPriority="high">
     <NotesEditorHeader
       title="Stage 2 note"
       selectedId="note-1"
@@ -60,11 +62,88 @@ const renderHeader = (overrides: HeaderOverrideProps = {}) =>
       onDelete={() => undefined}
       {...overrides}
     />
+    </StyleProvider>
   )
+
+const finishMenuAnimation = async (popup: Element) => {
+  await waitFor(() => expect(popup.className).toMatch(/(?:appear|enter|leave)-active/))
+  // jsdom does not run CSS animations; deliver the normal completion events.
+  fireEvent(popup, new Event("webkitAnimationEnd", { bubbles: true }))
+  fireEvent.animationEnd(popup)
+}
 
 describe("NotesEditorHeader stage 2 touch layout", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it.each([false, true])("keeps click-open Export available after the pointer leaves (mobile=%s)", async (isMobile) => {
+    responsiveState.isMobile = isMobile
+    const onExport = vi.fn()
+    renderHeader({ onExport })
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    const exportMenu = (await screen.findByText("Export", { selector: ".ant-dropdown-menu-title-content" })).closest("[role=menuitem]")!
+    await finishMenuAnimation(exportMenu.closest(".ant-dropdown")!)
+    expect(exportMenu).toBeVisible()
+    fireEvent.click(exportMenu)
+    const printLabel = await screen.findByText("Print / Save as PDF")
+    await finishMenuAnimation(printLabel.closest(".ant-dropdown-menu-submenu-popup")!)
+    const print = await screen.findByRole("menuitem", { name: "Print / Save as PDF" })
+
+    vi.useFakeTimers()
+    fireEvent.mouseLeave(exportMenu)
+    fireEvent.mouseLeave(print.closest("ul")!)
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(exportMenu).toHaveAttribute("aria-expanded", "true")
+    expect(print).toBeVisible()
+    vi.useRealTimers()
+
+    fireEvent.click(print)
+    expect(onExport).toHaveBeenCalledExactlyOnceWith("print")
+    await finishMenuAnimation(exportMenu.closest(".ant-dropdown")!)
+    const printPopup = print.closest(".ant-dropdown-menu-submenu-popup")!
+    await waitFor(() => expect(printPopup.className).toContain("leave-active"))
+    await finishMenuAnimation(printPopup)
+    await waitFor(() => expect(print).not.toBeVisible())
+  })
+
+  it("does not open or dispatch a disabled Export submenu", async () => {
+    responsiveState.isMobile = false
+    const onExport = vi.fn()
+    renderHeader({ canExport: false, onExport })
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    const exportMenu = (await screen.findByText("Export", { selector: ".ant-dropdown-menu-title-content" })).closest("[role=menuitem]")!
+    await finishMenuAnimation(exportMenu.closest(".ant-dropdown")!)
+    expect(exportMenu).toBeVisible()
+    expect(exportMenu).toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(exportMenu)
+    expect(screen.queryByRole("menuitem", { name: "Print / Save as PDF" })).not.toBeInTheDocument()
+    expect(onExport).not.toHaveBeenCalled()
+  })
+
+  it.each(["Copy", "From Template"])("keeps %s submenu dispatch after click-open", async (label) => {
+    responsiveState.isMobile = false
+    const onCopy = vi.fn()
+    const onApplyTemplate = vi.fn()
+    renderHeader({ onCopy, onApplyTemplate, templateOptions: [{ id: "template-1", label: "Template one" }] })
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    const title = await screen.findByText(label, { selector: ".ant-dropdown-menu-title-content" })
+    const submenu = title.closest("[role=menuitem]")!
+    await finishMenuAnimation(submenu.closest(".ant-dropdown")!)
+    expect(submenu).toBeVisible()
+    fireEvent.click(submenu)
+    const itemLabel = await screen.findByText(label === "Copy" ? "Content only" : "Template one")
+    await finishMenuAnimation(itemLabel.closest(".ant-dropdown-menu-submenu-popup")!)
+    const item = screen.getByRole("menuitem", { name: label === "Copy" ? "Content only" : "Template one" })
+    expect(item).toBeVisible()
+    fireEvent.click(item)
+    if (label === "Copy") {
+      expect(onCopy).toHaveBeenCalledExactlyOnceWith("content")
+      expect(onApplyTemplate).not.toHaveBeenCalled()
+    } else {
+      expect(onApplyTemplate).toHaveBeenCalledExactlyOnceWith("template-1")
+      expect(onCopy).not.toHaveBeenCalled()
+    }
   })
 
   it("uses wrapped toolbar layout and 44px touch targets on mobile", () => {

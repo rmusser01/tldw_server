@@ -2847,16 +2847,14 @@ def test_pin_edit_acquires_conversation_before_message_metadata_locks(
         return real_resume(*args, **kwargs)
 
     monkeypatch.setattr(
-        character_db,
+        character_db.message_store,
         "lock_message_for_edit",
         record_message_lock,
-        raising=False,
     )
     monkeypatch.setattr(
-        character_db,
+        character_db.message_store,
         "lock_message_metadata_for_edit",
         record_metadata_lock,
-        raising=False,
     )
     monkeypatch.setattr(
         character_db.conversation_resume_store,

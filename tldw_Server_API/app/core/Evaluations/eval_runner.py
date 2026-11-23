@@ -155,7 +155,7 @@ def _call_adapter_text(
     response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
     content = extract_response_content(response)
     # Empty content from a call that succeeded is a non-answer (""), not a label hiding in the response's repr (TASK-15491)
-    return content if content is not None else str(response)
+    return content if isinstance(content, str) else ""
 
 
 _LLM_RUN_TYPES = frozenset({"model_graded", "label_choice", "nli_factcheck"})
@@ -224,13 +224,12 @@ class EvaluationRunner:
         if not isinstance(run_config, dict):
             run_config = {}
 
-        named = str(
-            eval_spec.get("api_name")
-            or eval_spec.get("provider")
-            or run_config.get("api_name")
-            or run_config.get("provider")
-            or ""
-        ).strip()
+        provider_names = (
+            str(source.get(key) or "").strip()
+            for source in (eval_spec, run_config)
+            for key in ("api_name", "provider")
+        )
+        named = next((name for name in provider_names if name), "")
         api_name = named or "openai"
         api_key = (
             eval_spec.get("api_key")
@@ -1599,7 +1598,7 @@ class EvaluationRunner:
                 try:
                     scores[metric_name] = float(score_val)
                 except (TypeError, ValueError):
-                    scores[metric_name] = 0.0
+                    continue
 
             # Calculate pass/fail. Alias keys (answer_relevance, ...) mirror their
             # canonical metric; averaging both would count that metric twice.
@@ -1608,7 +1607,9 @@ class EvaluationRunner:
                 for name, value in scores.items()
                 if _CANONICAL_METRIC_FOR_ALIAS.get(name) not in scores
             ]
-            avg_score = statistics.mean(scored) if scored else 0
+            if not scored:
+                return {"sample_id": sample_id, "error": "No RAG metric scores were returned."}
+            avg_score = statistics.mean(scored)
             passed = self._evaluate_passed(scores, avg_score, eval_spec, default_threshold=0.7)
 
             return {
@@ -1659,13 +1660,16 @@ class EvaluationRunner:
                 try:
                     scores[metric_name] = float(score_val)
                 except (TypeError, ValueError):
-                    scores[metric_name] = 0.0
+                    continue
 
-            # Add overall quality
-            scores["overall_quality"] = result.get("overall_quality", 0)
+            overall = result.get("overall_quality")
+            if isinstance(overall, (int, float)) and not isinstance(overall, bool):
+                scores["overall_quality"] = float(overall)
 
             # Calculate pass/fail
-            avg_score = scores.get("overall_quality", 0)
+            if not scores:
+                return {"sample_id": sample_id, "error": "No response quality scores were returned."}
+            avg_score = scores["overall_quality"] if "overall_quality" in scores else statistics.mean(scores.values())
             passed = self._evaluate_passed(scores, avg_score, eval_spec, default_threshold=0.7)
 
             return {
@@ -2014,14 +2018,14 @@ class EvaluationRunner:
                             parsed = obj["label"]
                     except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS:
                         parsed = None
-                if parsed is None:
+                else:
                     up = txt.upper()
                     for lab in allowed_up:
                         if lab in up or up.strip() == lab:
                             parsed = lab
                             break
 
-            pred_norm = norm_label(parsed) if parsed is not None else None
+            pred_norm = norm_label(parsed) if isinstance(parsed, str) else None
             gold_norm = norm_label(gold)
 
             if pred_norm is None:
@@ -2205,14 +2209,14 @@ class EvaluationRunner:
                             parsed = obj["label"]
                     except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS:
                         parsed = None
-                if parsed is None:
+                else:
                     up = txt.upper()
                     for lab in allowed_up:
                         if lab in up or up.strip() == lab:
                             parsed = lab
                             break
 
-            pred_norm = norm_label(parsed) if parsed is not None else None
+            pred_norm = norm_label(parsed) if isinstance(parsed, str) else None
             gold_norm = norm_label(gold)
 
             if pred_norm is None:
@@ -2429,9 +2433,6 @@ class EvaluationRunner:
                     "min": min(scores),
                     "max": max(scores)
                 }
-            else:
-                metric_stats[metric] = {"mean": 0, "std": 0, "min": 0, "max": 0}
-
         return metric_stats
 
     def _calculate_usage(self, results: list[dict[str, Any]]) -> dict[str, int]:

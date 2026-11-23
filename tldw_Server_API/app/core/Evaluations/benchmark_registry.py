@@ -108,9 +108,10 @@ class BenchmarkRegistry:
         ))
 
         # SimpleQA Verified: the curated set ships in the repo as a zip holding one CSV ("problem", "answer", "topic")
-        try:
-            repo_root = Path(__file__).resolve().parents[4]
-            dataset_source = str(repo_root / "Helper_Scripts" / "Evals" / "simpleqa-verified.zip")
+        repo_root = Path(__file__).resolve().parents[4]
+        verified_archive = repo_root / "Helper_Scripts" / "Evals" / "simpleqa-verified.zip"
+        if verified_archive.is_file():
+            dataset_source = str(verified_archive)
             self.register(BenchmarkConfig(
                 name="simpleqa_verified",
                 description="SimpleQA Verified - curated factuality set (local)",
@@ -131,8 +132,6 @@ class BenchmarkRegistry:
                     "path": dataset_source
                 }
             ))
-        except Exception as e:
-            logger.warning(f"Failed to register simpleqa_verified: {e}")
 
         # Bullshit Benchmark (packaged local snapshot)
         self.register(BenchmarkConfig(
@@ -231,6 +230,14 @@ class BenchmarkRegistry:
     def get(self, name: str) -> Optional[BenchmarkConfig]:
         """Get a benchmark configuration."""
         return self.benchmarks.get(name)
+
+    def load_dataset(self, benchmark_name: str, limit: Optional[int] = None) -> list[dict[str, Any]]:
+        """Load a registered benchmark using the common dataset parser."""
+        from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
+
+        if self.get(benchmark_name) is None:
+            return []
+        return load_benchmark_dataset(benchmark_name, limit=limit, registry=self)
 
     def list_benchmarks(self) -> list[str]:
         """List all registered benchmark names."""

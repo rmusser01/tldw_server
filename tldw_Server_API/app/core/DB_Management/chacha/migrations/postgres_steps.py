@@ -11,7 +11,7 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     build_chacha_rls_sql,
     build_shared_workspace_chat_rls_sql,
 )
-from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_sql
+from tldw_Server_API.app.core.DB_Management.chacha import message_order_schema, postgres_schema, schema_sql
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.chacha.postgres_note_schema_contracts import (
     MOODBOARD_STUDIO_V61_INDEX_STATEMENTS,
@@ -2061,13 +2061,19 @@ def _migrate_from_v80_to_v81_postgres(ctx, conn: Any) -> None:
 
 
 def _migrate_from_v78_to_v79_postgres(ctx, conn: Any) -> None:
-    """Add PostgreSQL client-id create fingerprints in the caller's upgrade transaction."""
-    for statement in split_sql_statements(schema_sql._MIGRATION_SQL_V78_TO_V79_POSTGRES):
-        ctx.backend.execute(statement, connection=conn)
+    """Install ordering and fingerprints in the caller's upgrade transaction."""
+    # The prior native V78 installed ordering instead of startup receipts.
+    if not ctx.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
+        _migrate_from_v77_to_v78_postgres(ctx, conn)
+    message_order_schema.ensure_message_order_postgres(
+        ctx.backend, conn, schema_sql._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES,
+    )
+    ctx.backend.execute(
+        "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
+        (79, ctx.schema_name, 78), connection=conn,
+    )
     if postgres_schema._get_schema_version_postgres(ctx, conn) != 79:
-        raise SchemaError(  # noqa: TRY003
-            "Conversation create fingerprint PostgreSQL migration V78->V79 failed version verification."
-        )
+        raise SchemaError("Message insertion-order PostgreSQL migration V78->V79 failed version verification.")  # noqa: TRY003
 
 
 def _migrate_from_v79_to_v80_postgres(ctx, conn: Any) -> None:
@@ -2337,7 +2343,17 @@ def _migrate_from_v64_to_v65_postgres(ctx, conn: Any) -> None:
         )
 
 
-# Source schema version -> step name for the v72 to v91 upgrades, in order (R3, R12). The v5 to v71 ladder stays inline in
+def _migrate_from_v91_to_v92_postgres(ctx, conn: Any) -> None:
+    message_order_schema.migrate_postgres_chat_catalog(
+        conn,
+        backend=ctx.backend,
+        fingerprint_sql=schema_sql._CONVERSATION_CREATE_FINGERPRINT_SCHEMA_POSTGRES,
+        schema_name=ctx.schema_name,
+        get_version=lambda connection: postgres_schema._get_schema_version_postgres(ctx, connection),
+    )
+
+
+# Source schema version -> step name for the v72 to v92 upgrades, in order (R3, R12). The v5 to v71 ladder stays inline in
 # `_initialize_schema_postgres`. Names are resolved on this module at call time. Pinned by test_chacha_structure_pins.py
 # (FROZEN_POSTGRES). To add a migration: write `_migrate_from_v<N>_to_v<N+1>_postgres(ctx, conn)` here, add its key below, raise
 # `_POSTGRES_SCHEMA_VERSION` on CharactersRAGDB, and extend FROZEN_POSTGRES in the pins file.
@@ -2361,4 +2377,5 @@ POSTGRES_STEPS: dict[int, str] = {
     88: "_migrate_from_v88_to_v89_postgres",
     89: "_migrate_from_v89_to_v90_postgres",
     90: "_migrate_from_v90_to_v91_postgres",
+    91: "_migrate_from_v91_to_v92_postgres",
 }

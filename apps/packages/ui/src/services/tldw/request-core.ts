@@ -1177,15 +1177,20 @@ const performTldwRequest = async (
     const retryAfterMs = parseRetryAfter(resp.headers?.get?.("retry-after"));
     const contentType = resp.headers.get("content-type") || "";
     let data: any = null;
-    const handleBodyReadError = (error: unknown) => {
-      if (isExplicitRequestCancellation(error)) throw error;
-      return null;
+    const readJsonBody = async () => {
+      // Preserve the empty/invalid JSON fallback, but never swallow transfer failures.
+      const text = await resp.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return null;
+      }
     };
     const readDefaultBody = async () => {
       if (contentType.includes("application/json")) {
-        return await resp.json().catch(handleBodyReadError);
+        return await readJsonBody();
       }
-      return await resp.text().catch(handleBodyReadError);
+      return await resp.text();
     };
     if (responseType === "arrayBuffer") {
       if (maxResponseBytes !== undefined) {
@@ -1197,11 +1202,13 @@ const performTldwRequest = async (
             try { data = JSON.parse(text); } catch { data = null; }
           } else data = text;
         }
-      } else data = resp.ok ? await resp.arrayBuffer().catch(handleBodyReadError) : await readDefaultBody();
+      } else {
+        data = resp.ok ? await resp.arrayBuffer() : await readDefaultBody();
+      }
     } else if (responseType === "json") {
-      data = await resp.json().catch(handleBodyReadError);
+      data = await readJsonBody();
     } else if (responseType === "text") {
-      data = await resp.text().catch(handleBodyReadError);
+      data = await resp.text();
     } else {
       data = await readDefaultBody();
     }

@@ -14,6 +14,7 @@ import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
 import { canRetryHistoryTurnRecovery, type HistoryRecoveryRetryContext } from "@/services/history-turn-retry"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import type { HistoryCursorV1 } from "@/types/history-selection"
+import type { HistoryTurnRecovery } from "@/db/dexie/types"
 import {
   chronologicalHistoryNodes,
   hasReviewableHistory,
@@ -70,6 +71,7 @@ export function HistorySelectionReview({
   selection,
   onExpand,
   onBind,
+  onReprepareRecovery,
   hideRecovery,
   getRetryContext,
   onRetryRecovery,
@@ -86,6 +88,7 @@ export function HistorySelectionReview({
   onSwitchModel?: () => void
   onExpand?: () => void
   onBind?: () => void
+  onReprepareRecovery?: (turn: HistoryTurnRecovery) => void
   /** Leave out retained turns the transcript already shows or still handles (CS-04). */
   hideRecovery?: (
     entry: NonNullable<HistorySelectionController["recoveries"]>[number]
@@ -872,7 +875,7 @@ export function HistorySelectionReview({
             setFailedKeep(null)
             try {
               const result = await keepHistoryTurnRecovery(selection, entry)
-              if (current() && result.status === "skipped") setFailedKeep(entry.turn.operation_id)
+              if (current() && result.status !== "kept") setFailedKeep(entry.turn.operation_id)
             } catch {
               if (current()) setFailedKeep(entry.turn.operation_id)
             } finally {
@@ -954,6 +957,30 @@ export function HistorySelectionReview({
         onClick={(event) => void acknowledgeRecovery("copy", entry, event.currentTarget)}>
         {text("copyRecovery", "Copy recovered text")}
       </Button>
+      {entry.turn.persistence === "server" && entry.turn.logical_user_message_id && (
+        <Button
+          disabled={!selection.settingsQualified || sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending}
+          onClick={() => {
+            if (mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent())
+              void selection.inspectRecovery(entry)
+          }}>
+          {text("verifyRecovery", "Verify saved outcome")}
+        </Button>
+      )}
+      {onReprepareRecovery && entry.turn.persistence === "server" && entry.turn.admission &&
+        entry.turn.finalized_selection && entry.turn.logical_user_message_id && !entry.turn.observed_result && (
+          <>
+            <p>{text("reprepareWarning", "A new send can produce another answer. The earlier outcome remains unresolved.")}</p>
+            <Button
+              disabled={!selection.settingsQualified || sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending}
+              onClick={() => {
+                if (mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent())
+                  onReprepareRecovery(entry.turn)
+              }}>
+              {text("reprepareRecovery", "Reprepare input")}
+            </Button>
+          </>
+        )}
       {(((entry.turn.action === 'edit_resend' ||
         entry.turn.action === 'regenerate' ||
         entry.turn.action === 'continue' ||

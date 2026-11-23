@@ -1111,6 +1111,8 @@ class StreamingResponseHandler:
             if self.saved_message_id:
                 payload["tldw_message_id"] = self.saved_message_id
                 payload["tldw_conversation_id"] = self.conversation_id
+        elif self.user_message_id:
+            payload["tldw_user_message_id"] = self.user_message_id
         if not CHAT_STREAM_INCLUDE_METADATA:
             return payload
         if self.conversation_id:

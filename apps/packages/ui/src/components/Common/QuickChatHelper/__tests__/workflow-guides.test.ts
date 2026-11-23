@@ -8,6 +8,16 @@ import {
 } from "../workflow-guides"
 
 describe("quick chat workflow guides", () => {
+  it("finds the Chat Workspace workflow when searching for staged sources", () => {
+    const results = filterQuickChatWorkflowGuides("staged sources")
+
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ route: "/chat-workspace" })
+      ])
+    )
+  })
+
   it("returns all guides when query is empty", () => {
     const results = filterQuickChatWorkflowGuides("")
     expect(results).toHaveLength(QUICK_CHAT_WORKFLOW_GUIDES.length)
