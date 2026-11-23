@@ -380,7 +380,7 @@ async def test_create_study_pack_from_request_rolls_back_empty_deck_on_persisten
         original_add_study_pack_cards(study_pack_id, flashcard_uuids)
         raise CharactersRAGDBError("membership write failed")
 
-    monkeypatch.setattr(db, "add_study_pack_cards", fail_membership_insert)
+    monkeypatch.setattr(db.flashcard_store, "add_study_pack_cards", fail_membership_insert)
 
     with pytest.raises(CharactersRAGDBError, match="membership write failed"):
         await service_mod.create_study_pack_from_request(
@@ -524,7 +524,7 @@ async def test_create_study_pack_from_request_passes_expected_version_when_super
             expected_version=expected_version,
         )
 
-    monkeypatch.setattr(db, "supersede_study_pack", capture_supersede)
+    monkeypatch.setattr(db.flashcard_store, "supersede_study_pack", capture_supersede)
 
     await service_mod.create_study_pack_from_request(
         note_db=db,

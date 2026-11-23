@@ -142,7 +142,7 @@ def test_foreign_suggestion_reads_and_writes_preserve_owner_data(suggestion_owne
         elif operation in {"create_link", "replace_link"}:
             error = InputError if foreign.backend_type is BackendType.POSTGRESQL else CharactersRAGDBError
             with pytest.raises(error):
-                getattr(foreign, f"{operation.split('_')[0]}_suggestion_generation_link")(
+                getattr(foreign.flashcard_store, f"{operation.split('_')[0]}_suggestion_generation_link")(
                     **{**link, "selection_fingerprint": "foreign"},
                     target_id="foreign-deck",
                 )

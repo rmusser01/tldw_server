@@ -81,8 +81,8 @@ def test_selected_store_hides_foreign_pack_and_provenance(pack_owners, method):
     ids = _seed(owner)
     key = ids["pack"] if method in {"get_study_pack", "list_study_pack_cards"} else ids["card"]
     with chacha_operation(independent=True):
-        assert getattr(owner, method)(key)
-        result = getattr(foreign, method)(key)
+        assert getattr(owner.flashcard_store, method)(key)
+        result = getattr(foreign.flashcard_store, method)(key)
     assert result == ([] if method.startswith("list_") else None)
 
 

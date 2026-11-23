@@ -464,7 +464,7 @@ def test_flashcard_review_session_rollup_reload_after_conditional_repair_race(
         return False
 
     monkeypatch.setattr(
-        db,
+        db.flashcard_store,
         "_repair_flashcard_review_session_aggregates_if_unchanged",
         _lose_repair_race,
     )

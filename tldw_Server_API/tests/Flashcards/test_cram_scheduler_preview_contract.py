@@ -159,7 +159,7 @@ def test_preview_preserves_mixed_deck_page_and_reads_each_deck_once(cram_db, mon
     ]
     before = {uuid: db.flashcard_store.get_flashcard(uuid) for uuid in uuids}
     lookup = Mock(wraps=db.flashcard_store.get_deck)
-    monkeypatch.setattr(db, "get_deck", lookup)
+    monkeypatch.setattr(db.flashcard_store, "get_deck", lookup)
     db.close_connection()
     with _client(db) as client:
         params = {"limit": 3, "offset": 1, "order_by": "due_at", "due_status": "all"}
@@ -200,7 +200,7 @@ def test_preview_errors_do_not_change_ordinary_listing_or_card_state(cram_db, mo
             }
         return {**result, "scheduler_type": "fsrs", "scheduler_settings_json": {"fsrs": {"target_retention": 2}}}
 
-    monkeypatch.setattr(db, "get_deck", fail_lookup)
+    monkeypatch.setattr(db.flashcard_store, "get_deck", fail_lookup)
     db.close_connection()
     with _client(db) as client:
         for params in ({}, {"include_scheduler_preview": False}):
@@ -217,7 +217,7 @@ def test_preview_errors_do_not_change_ordinary_listing_or_card_state(cram_db, mo
 @pytest.mark.integration
 def test_empty_opt_in_page_does_not_lookup_decks(cram_db, monkeypatch):
     lookup = Mock(side_effect=AssertionError("No cards require a deck read"))
-    monkeypatch.setattr(cram_db, "get_deck", lookup)
+    monkeypatch.setattr(cram_db.flashcard_store, "get_deck", lookup)
     cram_db.close_connection()
     with _client(cram_db) as client:
         response = client.get("/api/v1/flashcards", params={"include_scheduler_preview": True})

@@ -68,7 +68,7 @@ core.DB_Management -> core.CodeGraph: 1
 core.DB_Management -> core.Collections: 1
 core.DB_Management -> core.Evaluations: 3  # bump: Evaluations_DB reads RunStatus and the recipe-run models that moved from api.v1.schemas into core.Evaluations; core.DB_Management -> api.v1.schemas falls by the same 2 (TASK-13950.15)
 core.DB_Management -> core.Explainer: 1
-core.DB_Management -> core.Flashcards: 7  # bump: +1 import statement: chacha.postgres_schema imports scheduler_settings_to_json from core.Flashcards.scheduler_sm2 (moved body); ChaChaNotes_DB still imports it (TASK-13950.22 T7); was 6: +2 import statements: chacha.context imports sanitize_flashcard_text_for_search (static member build_flashcard_search_shadow_fields) and chacha.sqlite_schema imports scheduler_settings_to_json (moved body); ChaChaNotes_DB keeps all 4 of its own (TASK-13950.22 T6)
+core.DB_Management -> core.Flashcards: 8  # bump: chacha.flashcard_store needs coerce_queue_state; ChaChaNotes_DB still imports it (TASK-13950.22 T13)
 core.DB_Management -> core.Ingestion_Media_Processing: 9
 core.DB_Management -> core.Jobs: 3
 core.DB_Management -> core.Monitoring: 1
