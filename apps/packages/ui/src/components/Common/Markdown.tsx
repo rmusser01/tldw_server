@@ -7,7 +7,7 @@ import ReactMarkdown, {
   type ExtraProps
 } from "react-markdown"
 import rehypeKatex from "rehype-katex"
-import { Highlight } from "prism-react-renderer"
+import { Highlight, type PrismTheme } from "prism-react-renderer"
 
 import "property-information"
 import React from "react"
@@ -321,10 +321,16 @@ function MarkdownContent({
     [enableMermaidDiagrams, processedMessage]
   )
   const shouldUseComponentMermaid = closedMermaidFenceSources.length > 0
+  const autoCodeTheme = React.useSyncExternalStore(
+    subscribeToPageTheme,
+    readAutoCodeTheme,
+    readAutoCodeTheme
+  )
   const renderContext = React.useMemo<MarkdownRenderContextValue>(
     () => ({
       allowExternalImages: resolvedAllowExternalImages,
       artifactContextId,
+      autoCodeTheme,
       blockIndexRef,
       closedMermaidFenceSources,
       codeBlockVariant,
@@ -338,6 +344,7 @@ function MarkdownContent({
     }),
     [
       artifactContextId,
+      autoCodeTheme,
       closedMermaidFenceSources,
       codeBlockVariant,
       codeTheme,
@@ -390,6 +397,11 @@ type CodeBlockVariant = "default" | "plain" | "compact" | "github"
 type MarkdownRenderContextValue = {
   allowExternalImages: boolean
   artifactContextId?: string
+  /**
+   * The page theme's code colours. Changing it re-renders every code block,
+   * including CodeBlock, which resolves its own theme from the page.
+   */
+  autoCodeTheme: PrismTheme
   blockIndexRef: React.MutableRefObject<number>
   closedMermaidFenceSources: ClosedMermaidFenceSource[]
   codeBlockVariant: CodeBlockVariant
@@ -402,9 +414,47 @@ type MarkdownRenderContextValue = {
   searchQuery?: string
 }
 
-const MarkdownRenderContext = React.createContext(
-  {} as MarkdownRenderContextValue
-)
+const MarkdownRenderContext =
+  React.createContext<MarkdownRenderContextValue | null>(null)
+
+const useMarkdownRenderContext = (): MarkdownRenderContextValue => {
+  const value = React.useContext(MarkdownRenderContext)
+  if (!value) {
+    throw new Error(
+      "Markdown tag components must render inside <Markdown>, which provides their context."
+    )
+  }
+  return value
+}
+
+// resolveTheme("auto") reads the <html> theme class and the OS colour scheme.
+// Markdown is memoized, so it subscribes to both: otherwise a theme switch
+// leaves existing code blocks in the old colours until their message changes.
+// ponytail: one observer per Markdown instance; share a module-level one if
+// very long chats make that measurable.
+const subscribeToPageTheme = (onChange: () => void) => {
+  if (typeof document === "undefined") return () => {}
+  const observer =
+    typeof MutationObserver === "undefined"
+      ? null
+      : new MutationObserver(onChange)
+  observer?.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"]
+  })
+  const colorScheme =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null
+  colorScheme?.addEventListener?.("change", onChange)
+  return () => {
+    observer?.disconnect()
+    colorScheme?.removeEventListener?.("change", onChange)
+  }
+}
+
+// Returns one of two module constants, so the snapshot is stable.
+const readAutoCodeTheme = () => resolveTheme("auto")
 
 const renderHighlightedChildren = (
   children: React.ReactNode,
@@ -433,7 +483,7 @@ const createHeading = (Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") =>
     ...props
   }: React.ComponentProps<"h1"> & ExtraProps) {
     const { headingAnchorIds, headingIndexRef, searchQuery } =
-      React.useContext(MarkdownRenderContext)
+      useMarkdownRenderContext()
     const anchorId = headingAnchorIds?.[headingIndexRef.current]
     headingIndexRef.current += 1
     const anchorProps = anchorId
@@ -450,6 +500,7 @@ const MARKDOWN_COMPONENTS: Components = {
   pre: function MarkdownPre({ children, ...props }) {
     const {
       artifactContextId,
+      autoCodeTheme,
       blockIndexRef,
       closedMermaidFenceSources,
       codeBlockVariant,
@@ -457,7 +508,7 @@ const MARKDOWN_COMPONENTS: Components = {
       enableCodeArtifactActions,
       enableMermaidArtifactActions,
       enableMermaidDiagrams
-    } = React.useContext(MarkdownRenderContext)
+    } = useMarkdownRenderContext()
     const childArray = React.Children.toArray(children)
     const codeChild = childArray.find((child) => {
       if (!React.isValidElement(child)) return false
@@ -526,7 +577,7 @@ const MARKDOWN_COMPONENTS: Components = {
         <div data-code-block className={`not-prose my-2 rounded-lg border border-border bg-surface2/70 ${CODE_BLOCK_GROUP_CLASS}`}>
           <CodeBlockToolbar language={highlightLanguage} value={value} />
           <div className="overflow-x-auto px-3 py-2">
-            <Highlight code={value} language={safeLanguage(highlightLanguage)} theme={resolveTheme(codeTheme || "dracula")}>
+            <Highlight code={value} language={safeLanguage(highlightLanguage)} theme={codeTheme === "auto" ? autoCodeTheme : resolveTheme(codeTheme || "dracula")}>
               {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
                 <pre
                   className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
@@ -566,7 +617,7 @@ const MARKDOWN_COMPONENTS: Components = {
             <Highlight
               code={value}
               language={safeLanguage(normalizedLanguage)}
-              theme={resolveTheme("auto")}
+              theme={autoCodeTheme}
             >
               {({
                 className: highlightClassName,
@@ -633,7 +684,7 @@ const MARKDOWN_COMPONENTS: Components = {
     )
   },
   img: function MarkdownImage({ src, alt }) {
-    const { allowExternalImages } = React.useContext(MarkdownRenderContext)
+    const { allowExternalImages } = useMarkdownRenderContext()
     const resolvedSrc = typeof src === "string" ? src : ""
     const managedAssetUuid = parseManagedAssetReference(resolvedSrc)
     const isExternal = /^https?:\/\//i.test(resolvedSrc) || /^\/\/[^/]/.test(resolvedSrc)
@@ -660,7 +711,7 @@ const MARKDOWN_COMPONENTS: Components = {
   },
   p: function MarkdownParagraph({ children, className, ...props }) {
     const { codeBlockVariant, searchQuery } =
-      React.useContext(MarkdownRenderContext)
+      useMarkdownRenderContext()
     const paragraphClass =
       codeBlockVariant === "plain" ||
       codeBlockVariant === "compact" ||
@@ -676,15 +727,15 @@ const MARKDOWN_COMPONENTS: Components = {
     )
   },
   li: function MarkdownListItem({ children, ...props }) {
-    const { searchQuery } = React.useContext(MarkdownRenderContext)
+    const { searchQuery } = useMarkdownRenderContext()
     return <li {...props}>{renderHighlightedChildren(children, searchQuery)}</li>
   },
   td: function MarkdownTableCell({ children, ...props }) {
-    const { searchQuery } = React.useContext(MarkdownRenderContext)
+    const { searchQuery } = useMarkdownRenderContext()
     return <td {...props}>{renderHighlightedChildren(children, searchQuery)}</td>
   },
   th: function MarkdownTableHeader({ children, ...props }) {
-    const { searchQuery } = React.useContext(MarkdownRenderContext)
+    const { searchQuery } = useMarkdownRenderContext()
     return <th {...props}>{renderHighlightedChildren(children, searchQuery)}</th>
   },
   h1: createHeading("h1"),

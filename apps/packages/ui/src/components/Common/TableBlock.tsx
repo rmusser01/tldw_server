@@ -195,7 +195,9 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
       { auto: true }
     )
     autoOpenStateMap.set(artifactId, true)
-  }, [autoOpenStateMap, isPinned, isProMode, openArtifact, t])
+    // `children` re-runs this as rows stream in; the id guard above stops
+    // repeat opens of the same table state.
+  }, [autoOpenStateMap, children, isPinned, isProMode, openArtifact, t])
 
   const downloadFile = (
     content: string,
