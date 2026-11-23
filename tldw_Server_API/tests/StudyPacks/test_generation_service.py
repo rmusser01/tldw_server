@@ -834,4 +834,4 @@ async def test_heading_dense_media_packs_sections_into_few_passes_and_keeps_chap
     if headings == 300:
         assert cards_by_chapter == {f"Topic {n}": [f"Fact {n} is short."] for n in range(headings)}  # nosec B101
     else:  # too many headings to list: fixed windows, every card still lands in some window
-        assert sum(map(len, cards_by_chapter.values())) == headings  # nosec B101
+        assert sum(chapter["card_count"] for chapter in page["chapters"]) == headings  # nosec B101
