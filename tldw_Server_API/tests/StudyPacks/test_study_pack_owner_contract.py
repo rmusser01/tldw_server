@@ -494,11 +494,11 @@ def _seed_chapter_cards(db):
     ids = _seed(db)
     with chacha_operation(independent=True):
         cards = [
-            db.add_flashcard({"deck_id": ids["deck"], "front": f"Chapter question {number}", "back": "Answer"})
+            db.flashcard_store.add_flashcard({"deck_id": ids["deck"], "front": f"Chapter question {number}", "back": "Answer"})
             for number in (1, 2)
         ]
         for card in cards:
-            db.add_flashcard_citations(
+            db.flashcard_store.add_flashcard_citations(
                 card, [{"source_type": "media", "source_id": "7", "locator": _chapter_locator("Chapter 1")}]
             )
     return ids["deck"], cards

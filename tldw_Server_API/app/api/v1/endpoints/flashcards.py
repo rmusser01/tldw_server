@@ -2452,7 +2452,7 @@ def browse_study_pack_deck_cards(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> StudyPackDeckCardsResponse:
     try:
-        deck = db.get_deck(deck_id)
+        deck = db.flashcard_store.get_deck(deck_id)
         if deck is None or deck["deleted"]:
             raise HTTPException(status_code=404, detail="Deck not found")
         page = browse_deck_cards(db, deck_id, chapter_id=chapter_id, limit=limit, offset=offset)

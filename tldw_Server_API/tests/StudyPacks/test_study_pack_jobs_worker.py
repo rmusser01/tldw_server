@@ -244,7 +244,7 @@ async def test_worker_finishes_only_after_citation_validation(
     async def generate(**kwargs):
         running = jm.get_job(job_id)
         assert running is not None and not running.get("result")  # nosec B101
-        assert db.get_study_pack(1) is None  # nosec B101
+        assert db.flashcard_store.get_study_pack(1) is None  # nosec B101
         calls.append(kwargs)
         if kwargs["system_message"].startswith("Verify each flashcard"):
             return {"content": '{"supported":[true]}'}
@@ -271,13 +271,13 @@ async def test_worker_finishes_only_after_citation_validation(
     assert len(calls) == (3 if repair_succeeds else 2)  # nosec B101
     if repair_succeeds:
         assert stored["status"] == "completed"  # nosec B101
-        pack = db.get_study_pack(stored["result"]["pack_id"])
+        pack = db.flashcard_store.get_study_pack(stored["result"]["pack_id"])
         assert pack is not None and pack["deck_id"] == stored["result"]["deck_id"]  # nosec B101
     else:
         assert stored["status"] == "failed"  # nosec B101
         assert stored["error_code"] == "study_pack_invalid_citations"  # nosec B101
         assert not stored.get("result")  # nosec B101
-        assert db.get_study_pack(1) is None  # nosec B101
+        assert db.flashcard_store.get_study_pack(1) is None  # nosec B101
 
 
 async def test_worker_sdk_cancellation_marks_study_pack_job_cancelled_without_running_handler(

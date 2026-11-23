@@ -700,7 +700,7 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
             with pytest.raises(ValueError, match=match):
                 await service.create_from_request(request)
             assert passages == []  # nosec B101
-            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
+            assert not db.flashcard_store.get_deck_by_name("Plant study guide")  # nosec B101
             return
         if selection_mode == "budget":
             with pytest.raises(ValueError, match="too many generation passes"):
@@ -711,19 +711,19 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
             with pytest.raises(ValueError, match="too many generation passes"):
                 await service.create_from_request(request)
             assert len(capped_passages) == 1  # nosec B101
-            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
+            assert not db.flashcard_store.get_deck_by_name("Plant study guide")  # nosec B101
             return
         if selection_mode == "bad_citation":
             with pytest.raises(ValueError, match="citation_text must match source evidence"):
                 await service.create_from_request(request)
             assert len(passages) == 3 and len(repair_prompts) == 1  # nosec B101
-            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
-            assert db.get_study_pack(1) is None  # nosec B101
+            assert not db.flashcard_store.get_deck_by_name("Plant study guide")  # nosec B101
+            assert db.flashcard_store.get_study_pack(1) is None  # nosec B101
             return
         if selection_mode == "bad_repair":
             with pytest.raises(ValueError, match="repair returned no cards"):
                 await service.create_from_request(request)
-            assert not db.get_deck_by_name("Plant study guide")  # nosec B101
+            assert not db.flashcard_store.get_deck_by_name("Plant study guide")  # nosec B101
             return
         result = await service.create_from_request(request)
     finally:
@@ -732,7 +732,7 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
     expected_text = final_chapter if selection_mode == "last" else book
     assert "".join("".join(passage.split()) for passage in passages) == "".join(expected_text.split())  # nosec B101
     assert max(map(len, passages)) <= 12_000  # nosec B101
-    citation = db.list_flashcard_citations(result.card_uuids[-1])[0]
+    citation = db.flashcard_store.list_flashcard_citations(result.card_uuids[-1])[0]
     assert citation["citation_text"] == final_chapter  # nosec B101
     saved_locator = json.loads(citation["locator"])
     assert saved_locator["study_pack_chapter"] == {  # nosec B101
@@ -755,7 +755,7 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
             assert max(map(len, passages)) <= 6_100  # nosec B101
             first_chapter_cards = 3
             for uuid, passage in zip(result.card_uuids, passages, strict=True):
-                locator = json.loads(db.list_flashcard_citations(uuid)[0]["locator"])
+                locator = json.loads(db.flashcard_store.list_flashcard_citations(uuid)[0]["locator"])
                 assert item.evidence_text[locator["start_char"]:locator["end_char"]] == passage  # nosec B101
         assert len(passages) == first_chapter_cards + 1  # nosec B101
         first_set_id = f"{media_id}:0:{revision}"
@@ -770,7 +770,7 @@ async def test_whole_media_pack_generates_cited_cards_through_the_end(
         assert [card["uuid"] for card in first_set["items"]] == result.card_uuids[:first_chapter_cards]  # nosec B101
         assert all(card["deck_id"] == result.deck_id for card in all_cards["items"])  # nosec B101
 
-    pack = db.get_study_pack(result.pack_id)
+    pack = db.flashcard_store.get_study_pack(result.pack_id)
     assert pack is not None  # nosec B101
     snapshot = pack["source_bundle_json"]
     if isinstance(snapshot, str):
