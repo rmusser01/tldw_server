@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
     ConversationStore,
 )
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendConnectionWrapper,
@@ -187,8 +188,8 @@ def test_schema_head_allocates_exactly_v65_and_both_ladders_advance_once() -> No
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     assert db._sqlite_linear_migration_steps()[63].__name__ == "_migrate_from_v63_to_v64_sqlite"
     assert db._sqlite_linear_migration_steps()[64].__name__ == "_migrate_from_v64_to_v65"
-    assert hasattr(CharactersRAGDB, "_migrate_from_v63_to_v64_postgres")
-    assert hasattr(CharactersRAGDB, "_migrate_from_v64_to_v65_postgres")
+    assert callable(postgres_steps._migrate_from_v63_to_v64_postgres)
+    assert callable(postgres_steps._migrate_from_v64_to_v65_postgres)
 
 
 def test_sqlite_v64_to_v65_migrates_catalog_and_legacy_reads_missing(
@@ -1884,11 +1885,11 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
     class _ReachedV65(Exception):
         pass
 
-    def _record_migration(conn: object) -> None:
+    def _record_migration(_ctx: object, conn: object) -> None:
         applied.append("64-to-65")
         raise _ReachedV65
 
-    monkeypatch.setattr(db, "_migrate_from_v64_to_v65_postgres", _record_migration)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v64_to_v65_postgres", _record_migration)
     with pytest.raises(_ReachedV65):
         db._initialize_schema_postgres()
 
@@ -1944,7 +1945,7 @@ def test_postgres_v65_migration_executes_exact_version_advance() -> None:
     db = _postgres_db(backend)
 
     with backend.transaction() as conn:
-        db._migrate_from_v64_to_v65_postgres(conn)
+        postgres_steps._migrate_from_v64_to_v65_postgres(db.ctx, conn)
 
     assert backend.schema_version == 65
     assert any("conversation_behavior_snapshots" in sql for sql in backend.committed_statements)
@@ -1963,7 +1964,7 @@ def test_postgres_v65_rejects_partial_preexisting_schema_and_preserves_v64(
 
     with pytest.raises(BackendDatabaseError, match="pre-existing PostgreSQL"):
         with backend.transaction() as conn:
-            db._migrate_from_v64_to_v65_postgres(conn)
+            postgres_steps._migrate_from_v64_to_v65_postgres(db.ctx, conn)
 
     assert backend.rolled_back is True
     assert backend.schema_version == 64

@@ -54,14 +54,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from functools import cached_property, wraps  # noqa: E402
-from functools import partial as bind_migration
 from pathlib import Path  # noqa: E402
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Protocol, TypeAlias, overload  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
 from tldw_Server_API.app.core.DB_Management.chacha.postgres_note_schema_contracts import (
-    MOODBOARD_STUDIO_V61_INDEX_STATEMENTS,
     POSTGRES_CORE_INDEX_STATEMENTS,
     require_moodboard_migration_complete,
 )
@@ -113,10 +111,6 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E
     release_managed_backend,
 )
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator  # noqa: E402
-from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  # noqa: E402
-    build_chacha_rls_sql,
-    build_shared_workspace_chat_rls_sql,
-)
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
     prepare_backend_many_statement,
@@ -134,7 +128,6 @@ from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # n
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
-from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed  # noqa: E402
 from tldw_Server_API.app.core.Flashcards.asset_refs import (  # noqa: E402
     extract_flashcard_asset_uuids,
@@ -2690,97 +2683,8 @@ class CharactersRAGDB:
 
     def _sqlite_linear_migration_steps(self) -> dict[int, Callable[[sqlite3.Connection], None]]:
         """Return SQLite schema migrations keyed by their source schema version."""
-        steps: dict[int, Callable[[sqlite3.Connection], None]] = {
-            4: self._migrate_from_v4_to_v5,
-            5: self._migrate_from_v5_to_v6,
-            6: self._migrate_from_v6_to_v7,
-            7: self._migrate_from_v7_to_v8,
-            8: self._migrate_from_v8_to_v9,
-            9: self._migrate_from_v9_to_v10,
-            10: self._migrate_from_v10_to_v11,
-            11: self._migrate_from_v11_to_v12,
-            12: self._migrate_from_v12_to_v13,
-            13: self._migrate_from_v13_to_v14,
-            14: self._migrate_from_v14_to_v15,
-            15: self._migrate_from_v15_to_v16,
-            16: self._migrate_from_v16_to_v17,
-            17: self._migrate_from_v17_to_v18,
-            18: self._migrate_from_v18_to_v19,
-            19: self._migrate_from_v19_to_v20,
-            20: self._migrate_from_v20_to_v21,
-            21: self._migrate_from_v21_to_v22,
-            22: self._migrate_from_v22_to_v23,
-            23: self._migrate_from_v23_to_v24,
-            24: self._migrate_from_v24_to_v25,
-            25: self._migrate_from_v25_to_v26,
-            26: self._migrate_from_v26_to_v27,
-            27: self._migrate_from_v27_to_v28,
-            28: self._migrate_from_v28_to_v29,
-            29: self._migrate_from_v29_to_v30,
-            30: self._migrate_from_v30_to_v31,
-            31: self._migrate_from_v31_to_v32,
-            32: self._migrate_from_v32_to_v33,
-            33: self._migrate_from_v33_to_v34,
-            34: self._migrate_from_v34_to_v35,
-            35: self._migrate_from_v35_to_v36,
-            36: self._migrate_from_v36_to_v37,
-            37: self._migrate_from_v37_to_v38,
-            38: self._migrate_from_v38_to_v39,
-            39: self._migrate_from_v39_to_v40,
-            40: self._migrate_from_v40_to_v41,
-            41: self._migrate_from_v41_to_v42,
-            42: self._migrate_from_v42_to_v43,
-            43: self._migrate_from_v43_to_v44,
-            44: self._migrate_from_v44_to_v45,
-            45: self._migrate_from_v45_to_v46,
-            46: self._migrate_from_v46_to_v47,
-        }
-        for version, method_name in (
-            (47, "_migrate_from_v47_to_v48"),
-            (48, "_migrate_from_v48_to_v49"),
-            (49, "_migrate_from_v49_to_v50"),
-            (50, "_migrate_from_v50_to_v51"),
-            (51, "_migrate_from_v51_to_v52"),
-            (52, "_migrate_from_v52_to_v53"),
-            (53, "_migrate_from_v53_to_v54"),
-            (54, "_migrate_from_v54_to_v55"),
-            (55, "_migrate_from_v55_to_v56"),
-            (56, "_migrate_from_v56_to_v57"),
-            (57, "_migrate_from_v57_to_v58"),
-            (58, "_migrate_from_v58_to_v59"),
-            (59, "_migrate_from_v59_to_v60_sqlite"),
-            (60, "_migrate_from_v60_to_v61_sqlite"),
-            (61, "_migrate_from_v61_to_v62_sqlite"),
-            (62, "_migrate_from_v62_to_v63_sqlite"),
-            (63, "_migrate_from_v63_to_v64_sqlite"),
-            (64, "_migrate_from_v64_to_v65"),
-            (65, "_migrate_from_v65_to_v66"),
-            (66, "_migrate_from_v66_to_v67"),
-            (67, "_migrate_from_v67_to_v68"),
-            (68, "_migrate_from_v68_to_v69"),
-            (69, "_migrate_from_v69_to_v70"),
-            (70, "_migrate_from_v70_to_v71"),
-            (71, "_migrate_from_v71_to_v72"),
-            (72, "_migrate_from_v72_to_v73_persona_companion"),
-            (73, "_migrate_from_v73_to_v74"),
-            (74, "_migrate_from_v74_to_v75"),
-            (75, "_migrate_from_v75_to_v76"),
-            (76, "_migrate_from_v76_to_v77"),
-            (77, "_migrate_from_v77_to_v78"),
-            (78, "_migrate_from_v78_to_v79"),
-            (79, "_migrate_from_v79_to_v80"),
-            (80, "_migrate_from_v80_to_v81"),
-            (81, "_migrate_from_v81_to_v82_sqlite"),
-            (82, "_migrate_from_v82_to_v83_sqlite"),
-            (83, "_migrate_from_v83_to_v84_sqlite"),
-        ):
-            method = getattr(self, method_name, None)
-            if method is not None:
-                steps[version] = method
-        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import migrate_sqlite_transcripts
+        return {version: bind(getattr(sqlite_steps, name), self.ctx) for version, name in sqlite_steps.SQLITE_STEPS.items()}
 
-        steps[84] = bind_migration(migrate_sqlite_transcripts, schema_name=self._SCHEMA_NAME, get_version=self._get_db_version)
-        return steps
     def _run_sqlite_linear_migration_step(
         self,
         conn: sqlite3.Connection,
@@ -2839,2910 +2743,6 @@ class CharactersRAGDB:
         """
         return sqlite_schema._get_db_version(self.ctx, conn)
 
-    def _migrate_from_v4_to_v5(self, conn: sqlite3.Connection):
-        """
-        Migrates the existing database from schema version 4 to 5 (adds
-        flashcards/decks/reviews and related triggers/indices).
-        """
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V4 to V5 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V4_TO_V5)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 5:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V4->V5 failed version check. Expected 5, got: {final_version}")
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V5 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V4->V5 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V4->V5 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V4->V5: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V5 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v5_to_v6(self, conn: sqlite3.Connection):
-        """
-        Migrates schema from V5 to V6 (adds model_type, extra to flashcards).
-        """
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V5 to V6 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V5_TO_V6)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 6:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V5->V6 failed version check. Expected 6, got: {final_version}")
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V6 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V5->V6 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V5->V6 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V5->V6: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V6 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v6_to_v7(self, conn: sqlite3.Connection):
-        """Migrates schema from V6 to V7 (adds reverse flag)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V6 to V7 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V6_TO_V7)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 7:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V6->V7 failed version check. Expected 7, got: {final_version}")
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V7 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V6->V7 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V6->V7 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V6->V7: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V7 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v7_to_v8(self, conn: sqlite3.Connection):
-        """Migrates schema from V7 to V8 (introduces message_images table)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V7 to V8 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V7_TO_V8)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 8:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V7->V8 failed version check. Expected 8, got: {final_version}")
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V8 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V7->V8 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V7->V8 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V7->V8: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V8 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v8_to_v9(self, conn: sqlite3.Connection):
-        """Migrates schema from V8 to V9 (adds note_edges for manual links)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V8 to V9 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V8_TO_V9)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 9:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V8->V9 failed version check. Expected 9, got: {final_version}")
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V9 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V8->V9 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V8->V9 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V8->V9: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V9 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v9_to_v10(self, conn: sqlite3.Connection):
-        """Migrates schema from V9 to V10 (chat metadata + note backlinks + indexes)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V9 to V10 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V9_TO_V10)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 10:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V9->V10 failed version check. Expected 10, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V10 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V9->V10 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V9->V10 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V9->V10: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V10 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v10_to_v11(self, conn: sqlite3.Connection):
-        """Migrates schema from V10 to V11 (nullable message content)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V10 to V11 for DB: {self.db_path_str}...")
-        try:
-            # Legacy safety: ensure columns referenced by the migration exist.
-            # Some older databases marked as v10 may be missing message image/ranking columns.
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info('messages')").fetchall()}
-            column_additions = {
-                "image_data": "BLOB",
-                "image_mime_type": "TEXT",
-                "ranking": "INTEGER",
-            }
-            for col_name, col_type in column_additions.items():
-                if col_name not in existing_cols:
-                    conn.execute(f"ALTER TABLE messages ADD COLUMN {col_name} {col_type}")
-            conn.executescript(self._MIGRATION_SQL_V10_TO_V11)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 11:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V10->V11 failed version check. Expected 11, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V11 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V10->V11 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V10->V11 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V10->V11: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V11 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v11_to_v12(self, conn: sqlite3.Connection):
-        """Migrates schema from V11 to V12 (quizzes + attempts)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V11 to V12 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V11_TO_V12)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 12:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V11->V12 failed version check. Expected 12, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V12 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V11->V12 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V11->V12 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V11->V12: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V12 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v12_to_v13(self, conn: sqlite3.Connection):
-        """Migrates schema from V12 to V13 (message metadata)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V12 to V13 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V12_TO_V13)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 13:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V12->V13 failed version check. Expected 13, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V13 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V12->V13 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V12->V13 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V12->V13: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V13 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v13_to_v14(self, conn: sqlite3.Connection):
-        """Migrates schema from V13 to V14 (chat topic metadata + clusters + flashcard backlinks)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V13 to V14 for DB: {self.db_path_str}...")
-        try:
-            conn.execute("PRAGMA foreign_keys = ON")
-
-            def _column_names(table_name: str) -> set[str]:
-                rows = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
-                names: set[str] = set()
-                for row in rows:
-                    if isinstance(row, dict):
-                        name = row.get("name")
-                    else:
-                        try:
-                            name = row["name"]
-                        except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                            name = row[1] if len(row) > 1 else None
-                    if name:
-                        names.add(str(name))
-                return names
-
-            conv_cols = _column_names("conversations")
-            if "topic_label_source" not in conv_cols:
-                conn.execute(
-                    "ALTER TABLE conversations ADD COLUMN topic_label_source TEXT CHECK(topic_label_source IN ('manual','auto'))"
-                )
-            if "topic_last_tagged_at" not in conv_cols:
-                conn.execute("ALTER TABLE conversations ADD COLUMN topic_last_tagged_at DATETIME")
-            if "topic_last_tagged_message_id" not in conv_cols:
-                conn.execute("ALTER TABLE conversations ADD COLUMN topic_last_tagged_message_id TEXT")
-
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS conversation_clusters(
-                  cluster_id TEXT PRIMARY KEY,
-                  title TEXT,
-                  centroid TEXT,
-                  size INTEGER NOT NULL DEFAULT 0,
-                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-                """
-            )
-
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_conversations_source_external_ref ON conversations(source, external_ref)"
-            )
-
-            flash_cols = _column_names("flashcards")
-            if "conversation_id" not in flash_cols:
-                conn.execute(
-                    "ALTER TABLE flashcards ADD COLUMN conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL"
-                )
-            if "message_id" not in flash_cols:
-                conn.execute(
-                    "ALTER TABLE flashcards ADD COLUMN message_id TEXT REFERENCES messages(id) ON DELETE SET NULL"
-                )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_conversation ON flashcards(conversation_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_message ON flashcards(message_id)")
-
-            conn.execute(
-                "UPDATE db_schema_version SET version = 14 WHERE schema_name = 'rag_char_chat_schema' AND version < 14"
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 14:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V13->V14 failed version check. Expected 14, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V14 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V13->V14 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V13->V14 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V13->V14: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V14 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v14_to_v15(self, conn: sqlite3.Connection):
-        """Migrates schema from V14 to V15 (Writing Playground persistence)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V14 to V15 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V14_TO_V15)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 15:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V14->V15 failed version check. Expected 15, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V15 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V14->V15 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V14->V15 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V14->V15: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V15 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v15_to_v16(self, conn: sqlite3.Connection):
-        """Migrates schema from V15 to V16 (Writing Wordclouds)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V15 to V16 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V15_TO_V16)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 16:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V15->V16 failed version check. Expected 16, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V16 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V15->V16 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V15->V16 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V15->V16: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V16 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v16_to_v17(self, conn: sqlite3.Connection):
-        """Migrates schema from V16 to V17 (Workspace tag for quizzes)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V16 to V17 for DB: {self.db_path_str}...")
-        try:
-            # quizzes.workspace_tag already exists in earlier schema versions.
-            # Add column only if missing to keep migration idempotent.
-            try:
-                cursor = conn.execute("PRAGMA table_info(quizzes)")
-                columns = {row[1] for row in cursor.fetchall()}
-            except sqlite3.Error:
-                columns = set()
-
-            if "workspace_tag" not in columns:
-                conn.execute("ALTER TABLE quizzes ADD COLUMN workspace_tag TEXT")
-
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_quizzes_workspace_tag ON quizzes(workspace_tag)")
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 17
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 17;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 17:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V16->V17 failed version check. Expected 17, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V17 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V16->V17 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V16->V17 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V16->V17: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V17 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v17_to_v18(self, conn: sqlite3.Connection):
-        """Migrates schema from V17 to V18 (Voice Assistant tables)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V17 to V18 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V17_TO_V18)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 18:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V17->V18 failed version check. Expected 18, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V18 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V17->V18 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V17->V18 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V17->V18: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V18 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v18_to_v19(self, conn: sqlite3.Connection):
-        """Migrates schema from V18 to V19 (Voice Assistant analytics)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V18 to V19 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V18_TO_V19)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 19:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V18->V19 failed version check. Expected 19, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V19 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V18->V19 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V18->V19 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V18->V19: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V19 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v19_to_v20(self, conn: sqlite3.Connection):
-        """Migrates schema from V19 to V20 (Skills registry)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V19 to V20 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V19_TO_V20)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 20:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V19->V20 failed version check. Expected 20, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V20 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V19->V20 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V19->V20 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V19->V20: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V20 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v20_to_v21(self, conn: sqlite3.Connection):
-        """Migrates schema from V20 to V21 (Conversation settings)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V20 to V21 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V20_TO_V21)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 21:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V20->V21 failed version check. Expected 21, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V21 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V20->V21 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V20->V21 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V20->V21: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V21 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v21_to_v22(self, conn: sqlite3.Connection):
-        """Migrates schema from V21 to V22 (Character exemplars)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V21 to V22 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V21_TO_V22)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 22:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V21->V22 failed version check. Expected 22, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V22 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V21->V22 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V21->V22 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V21->V22: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V22 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v22_to_v23(self, conn: sqlite3.Connection):
-        """Migrates schema from V22 to V23 (Quiz multi-select support)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V22 to V23 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V22_TO_V23)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 23:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V22->V23 failed version check. Expected 23, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V23 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V22->V23 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V22->V23 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V22->V23: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V23 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v23_to_v24(self, conn: sqlite3.Connection):
-        """Migrates schema from V23 to V24 (Quiz matching support)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V23 to V24 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V23_TO_V24)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 24:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V23->V24 failed version check. Expected 24, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V24 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V23->V24 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V23->V24 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V23->V24: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V24 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v24_to_v25(self, conn: sqlite3.Connection):
-        """Migrates schema from V24 to V25 (Quiz hint metadata and source citations)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V24 to V25 for DB: {self.db_path_str}...")
-        try:
-            cols = {row[1] for row in conn.execute("PRAGMA table_info('quiz_questions')").fetchall()}
-            if "hint" not in cols:
-                conn.execute("ALTER TABLE quiz_questions ADD COLUMN hint TEXT")
-            if "hint_penalty_points" not in cols:
-                conn.execute(
-                    "ALTER TABLE quiz_questions ADD COLUMN hint_penalty_points INTEGER NOT NULL DEFAULT 0 "
-                    "CHECK(hint_penalty_points >= 0)"
-                )
-            if "source_citations_json" not in cols:
-                conn.execute("ALTER TABLE quiz_questions ADD COLUMN source_citations_json TEXT")
-
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 25
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 25;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 25:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V24->V25 failed version check. Expected 25, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V25 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V24->V25 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V24->V25 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V24->V25: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V25 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v25_to_v26(self, conn: sqlite3.Connection) -> None:
-        """Migrates schema from V25 to V26 (Persona profile/scoping persistence tables)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V25 to V26 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V25_TO_V26)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 26:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V25->V26 failed version check. Expected 26, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V26 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V25->V26 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V25->V26 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V25->V26: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V26 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v26_to_v27(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V26 to V27 (persona memory namespace columns + indexes)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V26 to V27 for DB: {self.db_path_str}...")
-        try:
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_memory_entries')").fetchall()}
-            if "scope_snapshot_id" not in existing_cols:
-                conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN scope_snapshot_id TEXT")
-            if "session_id" not in existing_cols:
-                conn.execute("ALTER TABLE persona_memory_entries ADD COLUMN session_id TEXT")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_persona_memory_scope "
-                "ON persona_memory_entries(user_id, persona_id, scope_snapshot_id, archived, deleted)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_persona_memory_session "
-                "ON persona_memory_entries(user_id, persona_id, session_id, archived, deleted)"
-            )
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 27
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 27;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 27:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V26->V27 failed version check. Expected 27, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V27 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V26->V27 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V26->V27 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V26->V27: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V27 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v27_to_v28(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V27 to V28 (persona profile state-context default flag)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V27 to V28 for DB: {self.db_path_str}...")
-        try:
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_profiles')").fetchall()}
-            if "use_persona_state_context_default" not in existing_cols:
-                conn.execute(
-                    "ALTER TABLE persona_profiles "
-                    "ADD COLUMN use_persona_state_context_default BOOLEAN NOT NULL DEFAULT 1"
-                )
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 28
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 28;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 28:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V27->V28 failed version check. Expected 28, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V28 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V27->V28 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V27->V28 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V27->V28: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V28 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v28_to_v29(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V28 to V29 (notes moodboards + board memberships)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V28 to V29 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V28_TO_V29)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 29:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V28->V29 failed version check. Expected 29, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V29 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V28->V29 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V28->V29 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V28->V29: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V29 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v29_to_v30(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V29 to V30 (quiz source bundle metadata)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V29 to V30 for DB: {self.db_path_str}...")
-        try:
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info('quizzes')").fetchall()}
-            if "source_bundle_json" not in existing_cols:
-                conn.execute("ALTER TABLE quizzes ADD COLUMN source_bundle_json TEXT")
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 30
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 30;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 30:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V29->V30 failed version check. Expected 30, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V30 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V29->V30 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V29->V30 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V29->V30: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V30 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v30_to_v31(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V30 to V31 (persona origin snapshots)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V30 to V31 for DB: {self.db_path_str}...")
-        try:
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_profiles')").fetchall()}
-            if "origin_character_id" not in existing_cols:
-                conn.execute("ALTER TABLE persona_profiles ADD COLUMN origin_character_id INTEGER")
-            if "origin_character_name" not in existing_cols:
-                conn.execute("ALTER TABLE persona_profiles ADD COLUMN origin_character_name TEXT")
-            if "origin_character_snapshot_at" not in existing_cols:
-                conn.execute("ALTER TABLE persona_profiles ADD COLUMN origin_character_snapshot_at TEXT")
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 31
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 31;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 31:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V30->V31 failed version check. Expected 31, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V31 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V30->V31 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V30->V31 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V30->V31: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V31 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v31_to_v32(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V31 to V32 (conversation assistant identity)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V31 to V32 for DB: {self.db_path_str}...")
-        try:
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info('conversations')").fetchall()}
-            if "assistant_kind" not in existing_cols:
-                conn.execute(
-                    "ALTER TABLE conversations ADD COLUMN assistant_kind TEXT CHECK(assistant_kind IN ('character','persona'))"
-                )
-            if "assistant_id" not in existing_cols:
-                conn.execute("ALTER TABLE conversations ADD COLUMN assistant_id TEXT")
-            if "persona_memory_mode" not in existing_cols:
-                conn.execute(
-                    "ALTER TABLE conversations ADD COLUMN persona_memory_mode TEXT CHECK(persona_memory_mode IN ('read_only','read_write'))"
-                )
-            sqlite_schema._ensure_conversations_fts_triggers_sqlite(self.ctx, conn)
-            sqlite_schema._rebuild_conversations_fts_sqlite(self.ctx, conn)
-            conn.execute(
-                """
-                UPDATE conversations
-                   SET assistant_kind = 'character'
-                 WHERE character_id IS NOT NULL
-                   AND COALESCE(TRIM(assistant_kind), '') = ''
-                """
-            )
-            conn.execute(
-                """
-                UPDATE conversations
-                   SET assistant_id = CAST(character_id AS TEXT)
-                 WHERE character_id IS NOT NULL
-                   AND COALESCE(TRIM(assistant_id), '') = ''
-                """
-            )
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 32
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 32;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 32:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V31->V32 failed version check. Expected 32, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V32 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V31->V32 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V31->V32 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V31->V32: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V32 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v32_to_v33(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V32 to V33 (persona exemplar persistence)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V32 to V33 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V32_TO_V33)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 33:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V32->V33 failed version check. Expected 33, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V33 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V32->V33 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V32->V33 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V32->V33: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V33 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v33_to_v34(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V33 to V34 (persona session activity surfaces)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V33 to V34 for DB: {self.db_path_str}...")
-        try:
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_sessions')").fetchall()}
-            if "activity_surface" not in existing_cols:
-                conn.execute(
-                    "ALTER TABLE persona_sessions ADD COLUMN activity_surface TEXT NOT NULL DEFAULT 'api.persona'"
-                )
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 34
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 34;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 34:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V33->V34 failed version check. Expected 34, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V34 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V33->V34 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V33->V34 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V33->V34: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V34 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v34_to_v35(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V34 to V35 (persona session preferences)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V34 to V35 for DB: {self.db_path_str}...")
-        try:
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_sessions')").fetchall()}
-            if "preferences_json" not in existing_cols:
-                conn.execute(
-                    "ALTER TABLE persona_sessions ADD COLUMN preferences_json TEXT NOT NULL DEFAULT '{}'"
-                )
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 35
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 35;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 35:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V34->V35 failed version check. Expected 35, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V35 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V34->V35 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V34->V35 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V34->V35: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V35 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v35_to_v36(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V35 to V36 (workspaces table + conversation scope columns)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V35 to V36 for DB: {self.db_path_str}...")
-        try:
-            # 1. Create workspaces table
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS workspaces (
-                    id            TEXT    PRIMARY KEY NOT NULL,
-                    name          TEXT    NOT NULL,
-                    description   TEXT,
-                    metadata_json TEXT    NOT NULL DEFAULT '{}',
-                    workspace_profile TEXT NOT NULL DEFAULT 'research',
-                    archived      BOOLEAN  NOT NULL DEFAULT 0,
-                    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    deleted       BOOLEAN  NOT NULL DEFAULT 0,
-                    client_id     TEXT    NOT NULL DEFAULT 'unknown',
-                    version       INTEGER  NOT NULL DEFAULT 1,
-                    assistant_defaults_json TEXT
-                )
-            """)
-
-            # 2. Add scope columns to conversations
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info('conversations')").fetchall()}
-            if "scope_type" not in existing_cols:
-                conn.execute(
-                    "ALTER TABLE conversations ADD COLUMN scope_type TEXT NOT NULL DEFAULT 'global' "
-                    "CHECK(scope_type IN ('global','workspace'))"
-                )
-            if "workspace_id" not in existing_cols:
-                conn.execute(
-                    "ALTER TABLE conversations ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL"
-                )
-
-            # 3. Create index for scope filtering
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_conversations_scope ON conversations(scope_type, workspace_id)"
-            )
-
-            # 4. Update schema version
-            conn.execute(
-                """
-                UPDATE db_schema_version
-                   SET version = 36
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 36;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 36:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V35->V36 failed version check. Expected 36, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V36 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V35->V36 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V35->V36 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V35->V36: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V36 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v36_to_v37(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V36 to V37 (workspace sub-resources + flashcard scheduler state)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V36 to V37 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_workspace_subresource_schema_sqlite(self.ctx, conn)
-            sqlite_schema._ensure_flashcard_asset_schema_sqlite(self.ctx, conn)
-            sqlite_schema._ensure_flashcard_scheduler_schema_sqlite(self.ctx, conn)
-            conn.executescript(self._MIGRATION_SQL_V36_TO_V37)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 37:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V36->V37 failed version check. Expected 37, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V37 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V36->V37 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V36->V37 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V36->V37: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V37 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v37_to_v38(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V37 to V38 (quiz remediation conversion state)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V37 to V38 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_quiz_remediation_conversion_schema_sqlite(self.ctx, conn)
-            conn.executescript(self._MIGRATION_SQL_V37_TO_V38)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 38:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V37->V38 failed version check. Expected 38, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V38 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V37->V38 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V37->V38 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V37->V38: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V38 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v38_to_v39(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V38 to V39 (workspace ownership and workspace study materials policy)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V38 to V39 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_workspace_study_material_schema_sqlite(self.ctx, conn)
-            conn.executescript(self._MIGRATION_SQL_V38_TO_V39)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 39:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V38->V39 failed version check. Expected 39, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V39 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V38->V39 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V38->V39 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V38->V39: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V39 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v39_to_v40(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V39 to V40 (persona buddy storage contract)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V39 to V40 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V39_TO_V40)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 40:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V39->V40 failed version check. Expected 40, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V40 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V39->V40 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V39->V40 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V39->V40: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V40 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v40_to_v41(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V40 to V41 (manuscript management tables)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V40 to V41 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V40_TO_V41)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 41:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V40->V41 failed version check. Expected 41, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V41 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V40->V41 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V40->V41 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V40->V41: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V41 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v41_to_v42(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V41 to V42 (characters, world info, plot, citations)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V41 to V42 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V41_TO_V42)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 42:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V41->V42 failed version check. Expected 42, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V42 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V41->V42 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V41->V42 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V41->V42: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V42 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v42_to_v43(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V42 to V43 (manuscript AI analyses)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V42 to V43 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V42_TO_V43)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 43:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V42->V43 failed version check. Expected 43, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V43 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V42->V43 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V42->V43 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V42->V43: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V43 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v43_to_v44(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V43 to V44 (sync metadata on scene-link tables)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V43 to V44 for DB: {self.db_path_str}...")
-        try:
-            # Only add columns if they don't exist (fresh DBs already have them).
-            for table in ("manuscript_scene_characters", "manuscript_scene_world_info"):
-                existing_cols = {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
-                for col, coldef in (
-                    ("last_modified", "TEXT NOT NULL DEFAULT ''"),
-                    ("deleted", "BOOLEAN NOT NULL DEFAULT 0"),
-                    ("client_id", "TEXT"),
-                    ("version", "INTEGER NOT NULL DEFAULT 1"),
-                ):
-                    if col not in existing_cols:
-                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")  # nosec B608
-
-            # Backfill and create triggers (idempotent via IF EXISTS/IF NOT EXISTS).
-            conn.executescript(self._MIGRATION_SQL_V43_TO_V44)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 44:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V43->V44 failed version check. Expected 44, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V44 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V43->V44 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V43->V44 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V43->V44: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V44 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v44_to_v45(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V44 to V45 (persona visual packs)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V44 to V45 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_persona_persistence_schema_sqlite(self.ctx, conn)
-            conn.executescript(self._MIGRATION_SQL_V44_TO_V45)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 45:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V44->V45 failed version check. Expected 45, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V45 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V44->V45 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V44->V45 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V44->V45: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V45 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v45_to_v46(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V45 to V46 (persona visual library items)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V45 to V46 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V45_TO_V46)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 46:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V45->V46 failed version check. Expected 46, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V46 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V45->V46 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V45->V46 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V45->V46: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V46 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v46_to_v47(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V46 to V47 (Research Workspace migration protocol)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V46 to V47 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_workspace_migration_schema_sqlite(self.ctx, conn)
-            candidate_columns = sqlite_schema._sqlite_column_names(conn, "persona_visual_candidates")
-            if "generation_provenance_json" not in candidate_columns:
-                conn.execute(
-                    "ALTER TABLE persona_visual_candidates "
-                    "ADD COLUMN generation_provenance_json TEXT NOT NULL DEFAULT '{}'"
-                )
-            conn.executescript(self._MIGRATION_SQL_V46_TO_V47)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 47:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V46->V47 failed version check. Expected 47, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V47 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V46->V47 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V46->V47 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V46->V47: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V47 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v47_to_v48(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V47 to V48 (Notes task-backed checklist storage)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V47 to V48 for DB: {self.db_path_str}...")
-        try:
-            conn.executescript(self._MIGRATION_SQL_V47_TO_V48)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 48:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V47->V48 failed version check. Expected 48, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V48 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V47->V48 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V47->V48 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V47->V48: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V48 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v48_to_v49(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V48 to V49 (Workspace Assistant Defaults storage)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V48 to V49 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_workspace_assistant_defaults_schema_sqlite(self.ctx, conn)
-            conn.executescript(self._MIGRATION_SQL_V48_TO_V49)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 49:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V48->V49 failed version check. Expected 49, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V49 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V48->V49 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V48->V49 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V48->V49: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V49 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v49_to_v50(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V49 to V50 (Workspace activity event storage)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V49 to V50 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_workspace_activity_events_schema_sqlite(self.ctx, conn)
-            conn.executescript(self._MIGRATION_SQL_V49_TO_V50)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 50:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V49->V50 failed version check. Expected 50, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V50 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V49->V50 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V49->V50 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V49->V50: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V50 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v50_to_v51(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V50 to V51 (Manuscript annotations)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V50 to V51 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_manuscript_annotations_schema_sqlite(self.ctx, conn)
-            conn.executescript(
-                """
-                UPDATE db_schema_version
-                   SET version = 51
-                 WHERE schema_name = 'rag_char_chat_schema'
-                   AND version < 51;
-                """
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 51:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V50->V51 failed version check. Expected 51, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V51 completed.")
-        except sqlite3.Error as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V50->V51 failed: {e}", exc_info=True)
-            raise SchemaError(f"Migration V50->V51 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V50->V51: {e}", exc_info=True)
-            raise SchemaError(f"Unexpected error migrating to V51 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
-
-    def _migrate_from_v51_to_v52(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V51 to V52 (source review plan storage)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V51 to V52 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_source_review_schema_sqlite(self.ctx, conn)
-            conn.execute(
-                "UPDATE db_schema_version SET version = 52 WHERE schema_name = ? AND version < 52",
-                (self._SCHEMA_NAME,),
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 52:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V51->V52 failed version check. Expected 52, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V52 completed.")
-        except sqlite3.Error as exc:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V51->V52 failed: {exc}", exc_info=True)
-            raise SchemaError(f"Migration V51->V52 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V51->V52: {exc}", exc_info=True)
-            raise SchemaError(
-                f"Unexpected error migrating to V52 for '{self._SCHEMA_NAME}': {exc}"
-            ) from exc  # noqa: TRY003
-
-    def _migrate_from_v52_to_v53(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V52 to V53 (EMQ question group metadata)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V52 to V53 for DB: {self.db_path_str}...")
-        try:
-            columns = sqlite_schema._sqlite_column_names(conn, "quiz_questions")
-            if "group_id" not in columns:
-                conn.execute("ALTER TABLE quiz_questions ADD COLUMN group_id TEXT")
-            if "group_prompt" not in columns:
-                conn.execute("ALTER TABLE quiz_questions ADD COLUMN group_prompt TEXT")
-            conn.executescript(self._MIGRATION_SQL_V52_TO_V53)
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 53:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V52->V53 failed version check. Expected 53, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V53 completed.")
-        except sqlite3.Error as exc:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V52->V53 failed: {exc}", exc_info=True)
-            raise SchemaError(f"Migration V52->V53 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V52->V53: {exc}", exc_info=True)
-            raise SchemaError(
-                f"Unexpected error migrating to V53 for '{self._SCHEMA_NAME}': {exc}"
-            ) from exc  # noqa: TRY003
-
-    def _migrate_from_v53_to_v54(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V53 to V54 (workspace source saved views)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V53 to V54 for DB: {self.db_path_str}...")
-        try:
-            sqlite_schema._ensure_workspace_source_saved_view_schema_sqlite(self.ctx, conn)
-            conn.execute(
-                "UPDATE db_schema_version SET version = 54 WHERE schema_name = ? AND version < 54",
-                (self._SCHEMA_NAME,),
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 54:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V53->V54 failed version check. Expected 54, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V54 completed.")
-        except sqlite3.Error as exc:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V53->V54 failed: {exc}", exc_info=True)
-            raise SchemaError(f"Migration V53->V54 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V53->V54: {exc}", exc_info=True)
-            raise SchemaError(
-                f"Unexpected error migrating to V54 for '{self._SCHEMA_NAME}': {exc}"
-            ) from exc  # noqa: TRY003
-
-    def _migrate_from_v54_to_v55(self, conn: sqlite3.Connection) -> None:
-        """Migrate organization resources to stable, unique UUIDv4 identities."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V54 to V55 for DB: {self.db_path_str}...")
-        try:
-            from tldw_Server_API.app.core.Sync_Contracts.notes_organization import new_organization_sync_id
-
-            if "note_folders" not in sqlite_schema._sqlite_table_names(conn):
-                sqlite_schema._ensure_note_folder_schema_sqlite(self.ctx, conn)
-            else:
-                sqlite_schema._ensure_note_folder_sync_suppression_schema_sqlite(conn)
-            table_indexes = (
-                ("keywords", "idx_keywords_sync_id_unique"),
-                ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
-                ("note_folders", "idx_note_folders_sync_id_unique"),
-            )
-            for table_name, index_name in table_indexes:
-                columns = sqlite_schema._sqlite_column_names(conn, table_name)
-                if "sync_id" not in columns:
-                    conn.execute(
-                        f"ALTER TABLE {table_name} "  # nosec B608
-                        "ADD COLUMN sync_id TEXT NOT NULL DEFAULT ''"
-                    )
-                rows = conn.execute(
-                    f"SELECT id FROM {table_name} WHERE sync_id = ''"  # nosec B608
-                ).fetchall()
-                for row in rows:
-                    conn.execute(
-                        f"UPDATE {table_name} SET sync_id = ? WHERE id = ?"  # nosec B608
-                        ,
-                        (new_organization_sync_id(), row["id"]),
-                    )
-
-                invalid = conn.execute(
-                    f"SELECT COUNT(*) FROM {table_name} WHERE sync_id IS NULL OR sync_id = ''"  # nosec B608
-                ).fetchone()[0]
-                duplicates = conn.execute(
-                    f"SELECT COUNT(*) FROM ("  # nosec B608
-                    f"SELECT sync_id FROM {table_name} GROUP BY sync_id HAVING COUNT(*) > 1)"
-                ).fetchone()[0]
-                if invalid or duplicates:
-                    raise SchemaError(  # noqa: TRY003
-                        f"Cannot migrate {table_name} stable identities: "
-                        f"invalid={invalid}, duplicates={duplicates}."
-                    )
-                conn.execute(
-                    f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table_name}(sync_id)"  # nosec B608
-                )
-
-            conn.execute("DROP TRIGGER IF EXISTS keyword_collections_au")
-            conn.execute("DROP TRIGGER IF EXISTS keyword_collections_ad")
-            conn.execute(
-                """
-                CREATE TRIGGER keyword_collections_au
-                AFTER UPDATE ON keyword_collections BEGIN
-                  INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
-                  SELECT 'delete',old.id,old.name WHERE old.deleted = 0;
-                  INSERT INTO keyword_collections_fts(rowid,name)
-                  SELECT new.id,new.name WHERE new.deleted = 0;
-                END
-                """
-            )
-            conn.execute(
-                """
-                CREATE TRIGGER keyword_collections_ad
-                AFTER DELETE ON keyword_collections BEGIN
-                  INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
-                  SELECT 'delete',old.id,old.name WHERE old.deleted = 0;
-                END
-                """
-            )
-
-            conn.execute(
-                "UPDATE db_schema_version SET version = 55 WHERE schema_name = ? AND version < 55",
-                (self._SCHEMA_NAME,),
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 55:
-                raise SchemaError(  # noqa: TRY003
-                    f"[{self._SCHEMA_NAME}] Migration V54->V55 failed version check. Expected 55, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V55 completed.")
-        except sqlite3.Error as exc:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V54->V55 failed: {exc}", exc_info=True)
-            raise SchemaError(f"Migration V54->V55 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
-        except SchemaError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V54->V55: {exc}", exc_info=True)
-            raise SchemaError(
-                f"Unexpected error migrating to V55 for '{self._SCHEMA_NAME}': {exc}"
-            ) from exc  # noqa: TRY003
-
-    def _migrate_from_v54_to_v55_postgres(self, conn: Any) -> None:
-        """Backfill stable organization identities inside the caller's transaction."""
-        from tldw_Server_API.app.core.Sync_Contracts.notes_organization import new_organization_sync_id
-
-        postgres_schema._ensure_note_folder_sync_suppression_schema_postgres(self.ctx, conn)
-        table_indexes = (
-            ("chacha_keywords", "idx_keywords_sync_id_unique"),
-            ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
-            ("note_folders", "idx_note_folders_sync_id_unique"),
-        )
-        for table_name, index_name in table_indexes:
-            self.backend.execute(
-                f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS sync_id TEXT",  # nosec B608
-                connection=conn,
-            )
-            rows = self.backend.execute(
-                f"SELECT id FROM {table_name} WHERE sync_id IS NULL OR sync_id = %s ORDER BY id",  # nosec B608
-                ("",),
-                connection=conn,
-            ).rows
-            for row in rows:
-                self.backend.execute(
-                    f"UPDATE {table_name} SET sync_id = %s WHERE id = %s",  # nosec B608
-                    (new_organization_sync_id(), int(row["id"])),
-                    connection=conn,
-                )
-
-            invalid = self.backend.execute(
-                f"SELECT COUNT(*) FROM {table_name} WHERE sync_id IS NULL OR sync_id = %s",  # nosec B608
-                ("",),
-                connection=conn,
-            ).scalar
-            duplicates = self.backend.execute(
-                f"SELECT COUNT(*) FROM ("  # nosec B608
-                f"SELECT sync_id FROM {table_name} GROUP BY sync_id HAVING COUNT(*) > 1"
-                ") duplicate_sync_ids",
-                connection=conn,
-            ).scalar
-            if int(invalid or 0) or int(duplicates or 0):
-                raise SchemaError(  # noqa: TRY003
-                    f"Cannot migrate {table_name} stable identities: "
-                    f"invalid={int(invalid or 0)}, duplicates={int(duplicates or 0)}."
-                )
-
-            self.backend.execute(
-                f"ALTER TABLE {table_name} ALTER COLUMN sync_id SET NOT NULL",  # nosec B608
-                connection=conn,
-            )
-            self.backend.execute(
-                f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table_name}(sync_id)",  # nosec B608
-                connection=conn,
-            )
-
-        postgres_schema._set_schema_version_postgres(self.ctx, conn, 55)
-
-    def _migrate_from_v55_to_v56(self, conn: sqlite3.Connection) -> None:
-        """Decouple public WebClipper keys and atomically rekey legacy notes."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V55 to V56 for DB: {self.db_path_str}...")
-        try:
-            tables = sqlite_schema._sqlite_table_names(conn)
-            if "note_clipper_documents" not in tables:
-                sqlite_schema._ensure_web_clipper_schema_sqlite(self.ctx, conn)
-                conn.execute(
-                    "UPDATE db_schema_version SET version = 56 WHERE schema_name = ? AND version < 56",
-                    (self._SCHEMA_NAME,),
-                )
-                return
-
-            rows = conn.execute(
-                """
-                SELECT d.clip_id, d.note_id, n.id AS existing_note_id
-                  FROM note_clipper_documents d
-                  LEFT JOIN notes n ON n.id = d.note_id
-                 ORDER BY d.clip_id
-                """
-            ).fetchall()
-            plan = migration_support._web_clipper_v56_rekey_plan(rows)
-            old_ids = [old_id for _, old_id, _ in plan]
-
-            for _, old_id, replacement in plan:
-                if conn.execute("SELECT 1 FROM notes WHERE id = ?", (replacement,)).fetchone():
-                    raise SchemaError(  # noqa: TRY003
-                        f"WebClipper note rekey target '{replacement}' already exists."
-                    )
-                if conn.execute(
-                    "SELECT 1 FROM sync_log "
-                    "WHERE entity = 'notes' AND entity_id = ? LIMIT 1",
-                    (replacement,),
-                ).fetchone():
-                    raise SchemaError(  # noqa: TRY003
-                        f"WebClipper note rekey target '{replacement}' already has Sync history."
-                    )
-                invalid_payloads = conn.execute(
-                    "SELECT COUNT(*) FROM sync_log "
-                    "WHERE entity = 'notes' AND entity_id = ? "
-                    "AND CASE WHEN json_valid(payload) "
-                    "THEN json_type(payload) <> 'object' "
-                    "OR (SELECT COUNT(*) FROM json_each(sync_log.payload) "
-                    "WHERE key = 'id') <> 1 "
-                    "OR COALESCE(json_type(payload, '$.id'), '') <> 'text' "
-                    "OR COALESCE(CAST(json_extract(payload, '$.id') AS TEXT), '') <> ? "
-                    "ELSE 1 END",
-                    (old_id, old_id),
-                ).fetchone()[0]
-                if invalid_payloads:
-                    raise SchemaError("WebClipper legacy sync_log payload cannot be verified.")  # noqa: TRY003
-
-            for table_name, id_column in (
-                ("sync_envelopes", "entity_id"),
-                ("sync_object_state", "object_id"),
-            ):
-                if not old_ids or table_name not in tables:
-                    continue
-                columns = {
-                    str(row[1])
-                    for row in conn.execute(
-                        f"PRAGMA table_info({sqlite_schema._quoted_sqlite_identifier(table_name)})"  # nosec B608
-                    ).fetchall()
-                }
-                if "domain" not in columns or id_column not in columns:
-                    raise SchemaError("Co-located canonical Sync history cannot be verified.")  # noqa: TRY003
-                for old_id in old_ids:
-                    found = conn.execute(
-                        f"SELECT 1 FROM {sqlite_schema._quoted_sqlite_identifier(table_name)} "  # nosec B608
-                        f"WHERE domain = ? AND {sqlite_schema._quoted_sqlite_identifier(id_column)} = ? LIMIT 1",
-                        ("notes.note", old_id),
-                    ).fetchone()
-                    if found:
-                        raise SchemaError(  # noqa: TRY003
-                            f"WebClipper note '{old_id}' has canonical Sync history; explicit migration is required."
-                        )
-                for _, _, replacement in plan:
-                    found = conn.execute(
-                        f"SELECT 1 FROM {sqlite_schema._quoted_sqlite_identifier(table_name)} "  # nosec B608
-                        f"WHERE domain = ? AND {sqlite_schema._quoted_sqlite_identifier(id_column)} = ? LIMIT 1",
-                        ("notes.note", replacement),
-                    ).fetchone()
-                    if found:
-                        raise SchemaError(  # noqa: TRY003
-                            f"WebClipper note rekey target '{replacement}' already has canonical Sync history."
-                        )
-
-            if old_ids:
-                for table_name in tables:
-                    if table_name.startswith("sqlite_"):
-                        continue
-                    quoted_table = sqlite_schema._quoted_sqlite_identifier(table_name)
-                    for foreign_key in conn.execute(
-                        f"PRAGMA foreign_key_list({quoted_table})"  # nosec B608
-                    ).fetchall():
-                        if str(foreign_key["table"]) != "notes":
-                            continue
-                        if str(foreign_key["on_update"]).upper() == "CASCADE":
-                            continue
-                        column_name = str(foreign_key["from"] or "")
-                        if not column_name:
-                            raise SchemaError("A Notes foreign-key reference cannot be verified.")  # noqa: TRY003
-                        quoted_column = sqlite_schema._quoted_sqlite_identifier(column_name)
-                        for old_id in old_ids:
-                            referenced = conn.execute(
-                                f"SELECT 1 FROM {quoted_table} WHERE {quoted_column} = ? LIMIT 1",  # nosec B608
-                                (old_id,),
-                            ).fetchone()
-                            if referenced:
-                                raise SchemaError(  # noqa: TRY003
-                                    f"Cannot rekey WebClipper note '{old_id}': live non-cascading reference "
-                                    f"from {table_name}.{column_name}."
-                                )
-
-            for table_name in tables:
-                if table_name.startswith("sqlite_") or table_name in {
-                    "note_clipper_documents",
-                    "note_clipper_workspace_placements",
-                }:
-                    continue
-                quoted_table = sqlite_schema._quoted_sqlite_identifier(table_name)
-                for foreign_key in conn.execute(
-                    f"PRAGMA foreign_key_list({quoted_table})"  # nosec B608
-                ).fetchall():
-                    if str(foreign_key["table"]) in {
-                        "note_clipper_documents",
-                        "note_clipper_workspace_placements",
-                    }:
-                        raise SchemaError(  # noqa: TRY003
-                            f"Cannot rebuild WebClipper sidecars while {table_name} declares an external reference."
-                        )
-
-            legacy_documents = "note_clipper_documents_v55"
-            legacy_placements = "note_clipper_workspace_placements_v55"
-            if legacy_documents in tables or legacy_placements in tables:
-                raise SchemaError("WebClipper v56 temporary migration tables already exist.")  # noqa: TRY003
-            has_placements = "note_clipper_workspace_placements" in tables
-            if has_placements:
-                conn.execute(
-                    "ALTER TABLE note_clipper_workspace_placements "
-                    "RENAME TO note_clipper_workspace_placements_v55"
-                )
-            conn.execute(
-                "ALTER TABLE note_clipper_documents RENAME TO note_clipper_documents_v55"
-            )
-            sqlite_schema._ensure_web_clipper_schema_sqlite(self.ctx, conn)
-            conn.execute(
-                """
-                INSERT INTO note_clipper_documents(
-                  clip_id, note_id, clip_type, source_url, source_title,
-                  capture_metadata_json, analysis_json, content_budget_json,
-                  source_note_version, created_at, last_modified, deleted
-                )
-                SELECT clip_id, note_id, clip_type, source_url, source_title,
-                       capture_metadata_json, analysis_json, content_budget_json,
-                       source_note_version, created_at, last_modified, deleted
-                  FROM note_clipper_documents_v55
-                """
-            )
-            if has_placements:
-                conn.execute(
-                    """
-                    INSERT INTO note_clipper_workspace_placements(
-                      clip_id, workspace_id, workspace_note_id, source_note_id,
-                      source_note_version, created_at, last_modified, deleted
-                    )
-                    SELECT clip_id, workspace_id, workspace_note_id, source_note_id,
-                           source_note_version, created_at, last_modified, deleted
-                      FROM note_clipper_workspace_placements_v55
-                    """
-                )
-            copied_documents = conn.execute(
-                "SELECT COUNT(*) FROM note_clipper_documents"
-            ).fetchone()[0]
-            legacy_document_count = conn.execute(
-                "SELECT COUNT(*) FROM note_clipper_documents_v55"
-            ).fetchone()[0]
-            copied_placements = conn.execute(
-                "SELECT COUNT(*) FROM note_clipper_workspace_placements"
-            ).fetchone()[0]
-            legacy_placement_count = (
-                conn.execute(
-                    "SELECT COUNT(*) FROM note_clipper_workspace_placements_v55"
-                ).fetchone()[0]
-                if has_placements
-                else 0
-            )
-            if copied_documents != legacy_document_count or copied_placements != legacy_placement_count:
-                raise SchemaError("WebClipper v56 sidecar copy count verification failed.")  # noqa: TRY003
-            if has_placements:
-                conn.execute("DROP TABLE note_clipper_workspace_placements_v55")
-            conn.execute("DROP TABLE note_clipper_documents_v55")
-            sqlite_schema._ensure_web_clipper_schema_sqlite(self.ctx, conn)
-
-            for clip_id, old_id, replacement in plan:
-                conn.execute("UPDATE notes SET id = ? WHERE id = ?", (replacement, old_id))
-                conn.execute(
-                    "UPDATE sync_log SET entity_id = ?, payload = json_set(payload, '$.id', ?) "
-                    "WHERE entity = 'notes' AND entity_id = ?",
-                    (replacement, replacement, old_id),
-                )
-                invalid_rewrites = conn.execute(
-                    "SELECT COUNT(*) FROM sync_log "
-                    "WHERE entity = 'notes' AND entity_id = ? "
-                    "AND CASE WHEN json_valid(payload) "
-                    "THEN json_type(payload) <> 'object' "
-                    "OR (SELECT COUNT(*) FROM json_each(sync_log.payload) "
-                    "WHERE key = 'id') <> 1 "
-                    "OR COALESCE(json_type(payload, '$.id'), '') <> 'text' "
-                    "OR COALESCE(CAST(json_extract(payload, '$.id') AS TEXT), '') <> ? "
-                    "ELSE 1 END",
-                    (replacement, replacement),
-                ).fetchone()[0]
-                if invalid_rewrites:
-                    raise SchemaError("WebClipper sync_log payload rewrite verification failed.")  # noqa: TRY003
-                mapping = conn.execute(
-                    "SELECT note_id FROM note_clipper_documents WHERE clip_id = ?",
-                    (clip_id,),
-                ).fetchone()
-                if mapping is None or str(mapping[0]) != replacement:
-                    raise SchemaError("WebClipper v56 mapping verification failed.")  # noqa: TRY003
-
-            mismatched_placements = conn.execute(
-                """
-                SELECT COUNT(*)
-                  FROM note_clipper_workspace_placements p
-                  JOIN note_clipper_documents d ON d.clip_id = p.clip_id
-                 WHERE p.source_note_id <> d.note_id
-                """
-            ).fetchone()[0]
-            if mismatched_placements:
-                raise SchemaError("WebClipper v56 placement verification failed.")  # noqa: TRY003
-            foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
-            if foreign_key_errors:
-                raise SchemaError("WebClipper v56 foreign-key integrity verification failed.")  # noqa: TRY003
-            conn.execute(
-                "UPDATE db_schema_version SET version = 56 WHERE schema_name = ? AND version < 56",
-                (self._SCHEMA_NAME,),
-            )
-            if sqlite_schema._get_db_version(self.ctx, conn) != 56:
-                raise SchemaError("WebClipper V55->V56 migration failed version verification.")  # noqa: TRY003
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V56 completed.")
-        except sqlite3.Error as exc:
-            raise SchemaError(f"Migration V55->V56 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
-
-    def _migrate_from_v55_to_v56_postgres(self, conn: Any) -> None:
-        """Owner-scope and rekey WebClipper rows in one serialized transaction."""
-        backend = self.backend
-        if not backend.table_exists("note_clipper_documents", connection=conn):
-            postgres_schema._ensure_web_clipper_schema_postgres(self.ctx, conn)
-            postgres_schema._set_schema_version_postgres(self.ctx, conn, 56)
-            return
-
-        has_placements = backend.table_exists(
-            "note_clipper_workspace_placements", connection=conn
-        )
-        sync_tables = tuple(
-            table_name
-            for table_name in ("sync_envelopes", "sync_object_state")
-            if backend.table_exists(table_name, connection=conn)
-        )
-        lock_tables = ["notes", "workspaces", "sync_log", "note_clipper_documents"]
-        if has_placements:
-            lock_tables.append("note_clipper_workspace_placements")
-        lock_tables.extend(sync_tables)
-        backend.execute(
-            f"LOCK TABLE {', '.join(lock_tables)} IN ACCESS EXCLUSIVE MODE",  # nosec B608
-            connection=conn,
-        )
-
-        rls_state = backend.execute(
-            """
-            SELECT notes_table.relrowsecurity,
-                   notes_table.relforcerowsecurity,
-                   notes_table.relowner = current_user::regrole AS is_schema_owner
-              FROM pg_class notes_table
-             WHERE notes_table.oid = 'notes'::regclass
-            """,
-            connection=conn,
-        ).first
-        if rls_state is None or not bool(rls_state.get("is_schema_owner")):
-            raise SchemaError(  # noqa: TRY003
-                "WebClipper v56 requires the verified PostgreSQL schema-owner migration path."
-            )
-        rls_enabled = bool(rls_state.get("relrowsecurity"))
-        rls_forced = bool(rls_state.get("relforcerowsecurity"))
-        if rls_forced and not rls_enabled:
-            raise SchemaError("PostgreSQL notes RLS state cannot be verified.")  # noqa: TRY003
-        if rls_forced:
-            backend.execute(
-                "ALTER TABLE notes NO FORCE ROW LEVEL SECURITY",
-                connection=conn,
-            )
-
-        backend.execute(
-            "ALTER TABLE note_clipper_documents ADD COLUMN IF NOT EXISTS client_id TEXT",
-            connection=conn,
-        )
-        if has_placements:
-            backend.execute(
-                "ALTER TABLE note_clipper_workspace_placements "
-                "ADD COLUMN IF NOT EXISTS client_id TEXT",
-                connection=conn,
-            )
-
-        invalid_owners = backend.execute(
-            """
-            SELECT COUNT(*) AS invalid_owner_count
-              FROM note_clipper_documents document
-              LEFT JOIN notes note ON note.id = document.note_id
-             WHERE note.id IS NULL
-                OR note.client_id IS NULL
-                OR BTRIM(note.client_id) = ''
-                OR note.client_id <> BTRIM(note.client_id)
-                OR BTRIM(note.client_id) !~ '^[1-9][0-9]*$'
-                OR (
-                     document.client_id IS NOT NULL
-                     AND document.client_id IS DISTINCT FROM note.client_id
-                   )
-            """,
-            connection=conn,
-        ).scalar
-        if int(invalid_owners or 0):
-            raise SchemaError(  # noqa: TRY003
-                "Cannot migrate WebClipper mappings: an authoritative note owner is missing or invalid."
-            )
-
-        if has_placements:
-            invalid_placement_owners = backend.execute(
-                """
-                SELECT COUNT(*) AS invalid_owner_count
-                  FROM note_clipper_workspace_placements placement
-                  LEFT JOIN note_clipper_documents document
-                    ON document.clip_id = placement.clip_id
-                  LEFT JOIN notes owner_note
-                    ON owner_note.id = document.note_id
-                  LEFT JOIN notes source_note
-                    ON source_note.id = placement.source_note_id
-                  LEFT JOIN workspaces workspace
-                    ON workspace.id = placement.workspace_id
-                 WHERE document.clip_id IS NULL
-                    OR owner_note.id IS NULL
-                    OR placement.source_note_id IS DISTINCT FROM document.note_id
-                    OR source_note.client_id IS DISTINCT FROM owner_note.client_id
-                    OR workspace.client_id IS DISTINCT FROM owner_note.client_id
-                    OR (
-                         document.client_id IS NOT NULL
-                         AND document.client_id IS DISTINCT FROM owner_note.client_id
-                       )
-                    OR (
-                         placement.client_id IS NOT NULL
-                         AND placement.client_id IS DISTINCT FROM owner_note.client_id
-                       )
-                """,
-                connection=conn,
-            ).scalar
-            if int(invalid_placement_owners or 0):
-                raise SchemaError(  # noqa: TRY003
-                    "Cannot migrate WebClipper placements: owner relationships are invalid."
-                )
-
-        rows = backend.execute(
-            """
-            SELECT document.clip_id,
-                   document.note_id,
-                   note.id AS existing_note_id,
-                   note.client_id AS owner_client_id
-              FROM note_clipper_documents document
-              LEFT JOIN notes note ON note.id = document.note_id
-             ORDER BY note.client_id, document.clip_id
-            """,
-            connection=conn,
-        ).rows
-        plan = migration_support._web_clipper_v56_rekey_plan(rows)
-        owner_by_clip_id = {
-            str(row["clip_id"]): str(row["owner_client_id"])
-            for row in rows
-        }
-        old_ids = [old_id for _, old_id, _ in plan]
-        for clip_id, _, replacement in plan:
-            collision = backend.execute(
-                "SELECT 1 FROM notes WHERE id = %s LIMIT 1",
-                (replacement,),
-                connection=conn,
-            ).first
-            if collision:
-                raise SchemaError(f"WebClipper note rekey target '{replacement}' already exists.")  # noqa: TRY003
-            owner_client_id = owner_by_clip_id[clip_id]
-            sync_log_collision = backend.execute(
-                "SELECT 1 FROM sync_log "
-                "WHERE client_id = %s AND entity = %s AND entity_id = %s LIMIT 1",
-                (owner_client_id, "notes", replacement),
-                connection=conn,
-            ).first
-            if sync_log_collision:
-                raise SchemaError(  # noqa: TRY003
-                    f"WebClipper note rekey target '{replacement}' already has Sync history."
-                )
-
-        for table_name, id_column in (
-            ("sync_envelopes", "entity_id"),
-            ("sync_object_state", "object_id"),
-        ):
-            if not old_ids or table_name not in sync_tables:
-                continue
-            for old_id in old_ids:
-                found = backend.execute(
-                    f"SELECT 1 FROM {table_name} "  # nosec B608
-                    f"WHERE domain = %s AND {id_column} = %s LIMIT 1",
-                    ("notes.note", old_id),
-                    connection=conn,
-                ).first
-                if found:
-                    raise SchemaError(  # noqa: TRY003
-                        f"WebClipper note '{old_id}' has canonical Sync history; explicit migration is required."
-                    )
-            for _, _, replacement in plan:
-                found = backend.execute(
-                    f"SELECT 1 FROM {table_name} "  # nosec B608
-                    f"WHERE domain = %s AND {id_column} = %s LIMIT 1",
-                    ("notes.note", replacement),
-                    connection=conn,
-                ).first
-                if found:
-                    raise SchemaError(  # noqa: TRY003
-                        f"WebClipper note rekey target '{replacement}' already has canonical Sync history."
-                    )
-
-        if old_ids:
-            foreign_keys = backend.execute(
-                """
-                SELECT c.conname,
-                       ns.nspname AS table_schema,
-                       rel.relname AS table_name,
-                       att.attname AS column_name,
-                       c.confupdtype AS on_update
-                  FROM pg_constraint c
-                  JOIN pg_class rel ON rel.oid = c.conrelid
-                  JOIN pg_namespace ns ON ns.oid = rel.relnamespace
-                  JOIN LATERAL unnest(c.conkey) AS key(attnum) ON TRUE
-                  JOIN pg_attribute att
-                    ON att.attrelid = c.conrelid AND att.attnum = key.attnum
-                 WHERE c.contype = 'f' AND c.confrelid = 'notes'::regclass
-                """,
-                connection=conn,
-            ).rows
-            for foreign_key in foreign_keys:
-                if str(foreign_key["on_update"]) == "c":
-                    continue
-                schema_name = str(foreign_key["table_schema"])
-                table_name = str(foreign_key["table_name"])
-                column_name = str(foreign_key["column_name"])
-                qualified_table = (
-                    f"{postgres_schema._quoted_postgres_identifier(schema_name)}."
-                    f"{postgres_schema._quoted_postgres_identifier(table_name)}"
-                )
-                quoted_column = postgres_schema._quoted_postgres_identifier(column_name)
-                for old_id in old_ids:
-                    found = backend.execute(
-                        f"SELECT 1 FROM {qualified_table} WHERE {quoted_column} = %s LIMIT 1",  # nosec B608
-                        (old_id,),
-                        connection=conn,
-                    ).first
-                    if found:
-                        raise SchemaError(  # noqa: TRY003
-                            f"Cannot rekey WebClipper note '{old_id}': live non-cascading reference "
-                            f"from {table_name}.{column_name}."
-                        )
-
-        constraints = backend.execute(
-            """
-            SELECT c.conname,
-                   c.contype,
-                   pg_get_constraintdef(c.oid) AS definition,
-                   ARRAY(
-                     SELECT a.attname
-                       FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
-                       JOIN pg_attribute a
-                         ON a.attrelid = c.conrelid AND a.attnum = key.attnum
-                      ORDER BY key.ord
-                   ) AS columns
-              FROM pg_constraint c
-             WHERE c.conrelid = 'note_clipper_documents'::regclass
-            """,
-            connection=conn,
-        ).rows
-        has_clip_primary_key = any(
-            str(constraint["contype"]) == "p"
-            and [str(column) for column in (constraint.get("columns") or [])] == ["clip_id"]
-            for constraint in constraints
-        )
-        has_unique_note_id = any(
-            str(constraint["contype"]) == "u"
-            and [str(column) for column in (constraint.get("columns") or [])] == ["note_id"]
-            for constraint in constraints
-        )
-        has_cascading_note_fk = any(
-            str(constraint["contype"]) == "f"
-            and [str(column) for column in (constraint.get("columns") or [])] == ["note_id"]
-            and re.search(
-                r"REFERENCES\s+(?:\w+\.)?notes\s*\(",
-                str(constraint.get("definition") or "").replace('"', ""),
-                re.IGNORECASE,
-            )
-            and "ON UPDATE CASCADE" in str(constraint.get("definition") or "").upper()
-            for constraint in constraints
-        )
-        if not (has_clip_primary_key and has_unique_note_id and has_cascading_note_fk):
-            raise SchemaError("WebClipper durable note mapping constraints cannot be verified.")  # noqa: TRY003
-
-        placement_constraints: list[Any] = []
-        if has_placements:
-            placement_constraints = backend.execute(
-                """
-                SELECT c.conname,
-                       c.contype,
-                       pg_get_constraintdef(c.oid) AS definition,
-                       ARRAY(
-                         SELECT a.attname
-                           FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
-                           JOIN pg_attribute a
-                             ON a.attrelid = c.conrelid AND a.attnum = key.attnum
-                          ORDER BY key.ord
-                       ) AS columns
-                  FROM pg_constraint c
-                 WHERE c.conrelid = 'note_clipper_workspace_placements'::regclass
-                """,
-                connection=conn,
-            ).rows
-            has_placement_primary_key = any(
-                str(constraint["contype"]) == "p"
-                and [str(column) for column in (constraint.get("columns") or [])]
-                == ["clip_id", "workspace_id"]
-                for constraint in placement_constraints
-            )
-            has_document_fk = any(
-                str(constraint["contype"]) == "f"
-                and [str(column) for column in (constraint.get("columns") or [])] == ["clip_id"]
-                and "REFERENCES note_clipper_documents" in str(
-                    constraint.get("definition") or ""
-                ).replace('"', "")
-                for constraint in placement_constraints
-            )
-            if not (has_placement_primary_key and has_document_fk):
-                raise SchemaError("WebClipper placement constraints cannot be verified.")  # noqa: TRY003
-
-        for constraint in placement_constraints:
-            constraint_type = str(constraint["contype"])
-            columns = [str(column) for column in (constraint.get("columns") or [])]
-            definition = str(constraint.get("definition") or "").replace('"', "")
-            if not (
-                (constraint_type == "p" and columns == ["clip_id", "workspace_id"])
-                or (
-                    constraint_type == "f"
-                    and columns == ["clip_id"]
-                    and "REFERENCES note_clipper_documents" in definition
-                )
-            ):
-                continue
-            backend.execute(
-                "ALTER TABLE note_clipper_workspace_placements DROP CONSTRAINT "
-                f"{postgres_schema._quoted_postgres_identifier(str(constraint['conname']))}",  # nosec B608
-                connection=conn,
-            )
-
-        for constraint in constraints:
-            constraint_name = str(constraint["conname"])
-            constraint_type = str(constraint["contype"])
-            definition = str(constraint.get("definition") or "")
-            columns = [str(column) for column in (constraint.get("columns") or [])]
-            normalized_definition = definition.replace('"', "")
-            is_clip_fk = constraint_type == "f" and columns == ["clip_id"]
-            is_legacy_clip_fk = is_clip_fk and bool(
-                re.search(r"REFERENCES\s+(?:\w+\.)?notes\s*\(", normalized_definition, re.IGNORECASE)
-            )
-            if is_clip_fk and not is_legacy_clip_fk:
-                raise SchemaError("WebClipper clip_id has an unverifiable PostgreSQL reference.")  # noqa: TRY003
-            is_legacy_identity_check = constraint_type == "c" and bool(
-                re.search(
-                    r"(?:clip_id\s*=\s*note_id|note_id\s*=\s*clip_id)",
-                    normalized_definition,
-                )
-            )
-            if (
-                constraint_type == "c"
-                and "clip_id" in normalized_definition
-                and "note_id" in normalized_definition
-                and not is_legacy_identity_check
-            ):
-                raise SchemaError("WebClipper identity check constraint cannot be verified.")  # noqa: TRY003
-            should_drop = (
-                is_legacy_clip_fk
-                or is_legacy_identity_check
-                or (constraint_type == "p" and columns == ["clip_id"])
-                or (constraint_type == "u" and columns == ["note_id"])
-            )
-            if should_drop:
-                backend.execute(
-                    "ALTER TABLE note_clipper_documents DROP CONSTRAINT "
-                    f"{postgres_schema._quoted_postgres_identifier(constraint_name)}",  # nosec B608
-                    connection=conn,
-                )
-
-        backend.execute(
-            """
-            UPDATE note_clipper_documents document
-               SET client_id = note.client_id
-              FROM notes note
-             WHERE note.id = document.note_id
-            """,
-            connection=conn,
-        )
-        backend.execute(
-            "ALTER TABLE note_clipper_documents ALTER COLUMN client_id SET NOT NULL",
-            connection=conn,
-        )
-        backend.execute(
-            "ALTER TABLE note_clipper_documents ADD CONSTRAINT "
-            "note_clipper_documents_pkey PRIMARY KEY (client_id, clip_id)",
-            connection=conn,
-        )
-        backend.execute(
-            "ALTER TABLE note_clipper_documents ADD CONSTRAINT "
-            "note_clipper_documents_client_note_key UNIQUE (client_id, note_id)",
-            connection=conn,
-        )
-
-        if has_placements:
-            backend.execute(
-                """
-                UPDATE note_clipper_workspace_placements placement
-                   SET client_id = document.client_id
-                  FROM note_clipper_documents document
-                 WHERE document.clip_id = placement.clip_id
-                """,
-                connection=conn,
-            )
-            backend.execute(
-                "ALTER TABLE note_clipper_workspace_placements "
-                "ALTER COLUMN client_id SET NOT NULL",
-                connection=conn,
-            )
-            backend.execute(
-                "ALTER TABLE note_clipper_workspace_placements ADD CONSTRAINT "
-                "note_clipper_workspace_placements_pkey "
-                "PRIMARY KEY (client_id, clip_id, workspace_id)",
-                connection=conn,
-            )
-            backend.execute(
-                "ALTER TABLE note_clipper_workspace_placements ADD CONSTRAINT "
-                "note_clipper_workspace_placements_document_fkey "
-                "FOREIGN KEY (client_id, clip_id) "
-                "REFERENCES note_clipper_documents(client_id, clip_id) "
-                "ON DELETE CASCADE ON UPDATE CASCADE",
-                connection=conn,
-            )
-
-        for index_name in (
-            "idx_note_clipper_documents_note_id",
-            "idx_note_clipper_workspace_placements_workspace",
-            "idx_note_clipper_workspace_placements_source_note",
-        ):
-            backend.execute(
-                f"DROP INDEX IF EXISTS {postgres_schema._quoted_postgres_identifier(index_name)}",  # nosec B608
-                connection=conn,
-            )
-
-        for clip_id, old_id, replacement in plan:
-            owner_client_id = owner_by_clip_id[clip_id]
-            invalid_payloads = backend.execute(
-                "SELECT COUNT(*) FROM sync_log "
-                "WHERE client_id = %s AND entity = %s AND entity_id = %s "
-                "AND (jsonb_typeof(payload::jsonb) IS DISTINCT FROM 'object' "
-                "OR jsonb_typeof(payload::jsonb -> 'id') IS DISTINCT FROM 'string' "
-                "OR (payload::jsonb ->> 'id') IS DISTINCT FROM %s)",
-                (owner_client_id, "notes", old_id, old_id),
-                connection=conn,
-            ).scalar
-            if int(invalid_payloads or 0):
-                raise SchemaError("WebClipper legacy sync_log payload cannot be verified.")  # noqa: TRY003
-            backend.execute(
-                "UPDATE notes SET id = %s WHERE client_id = %s AND id = %s",
-                (replacement, owner_client_id, old_id),
-                connection=conn,
-            )
-            backend.execute(
-                "UPDATE sync_log SET entity_id = %s, "
-                "payload = jsonb_set(payload::jsonb, '{id}', to_jsonb(%s::text), true)::text "
-                "WHERE client_id = %s AND entity = %s AND entity_id = %s",
-                (replacement, replacement, owner_client_id, "notes", old_id),
-                connection=conn,
-            )
-            invalid_rewrites = backend.execute(
-                "SELECT COUNT(*) FROM sync_log "
-                "WHERE client_id = %s AND entity = %s AND entity_id = %s "
-                "AND (jsonb_typeof(payload::jsonb) IS DISTINCT FROM 'object' "
-                "OR jsonb_typeof(payload::jsonb -> 'id') IS DISTINCT FROM 'string' "
-                "OR (payload::jsonb ->> 'id') IS DISTINCT FROM %s)",
-                (owner_client_id, "notes", replacement, replacement),
-                connection=conn,
-            ).scalar
-            if int(invalid_rewrites or 0):
-                raise SchemaError("WebClipper sync_log payload rewrite verification failed.")  # noqa: TRY003
-            mapping = backend.execute(
-                "SELECT note_id FROM note_clipper_documents "
-                "WHERE client_id = %s AND clip_id = %s",
-                (owner_client_id, clip_id),
-                connection=conn,
-            ).first
-            if mapping is None or str(mapping["note_id"]) != replacement:
-                raise SchemaError("WebClipper v56 mapping verification failed.")  # noqa: TRY003
-
-        if has_placements:
-            mismatched = backend.execute(
-                """
-                SELECT COUNT(*)
-                  FROM note_clipper_workspace_placements placement
-                  JOIN note_clipper_documents document
-                    ON document.client_id = placement.client_id
-                   AND document.clip_id = placement.clip_id
-                 WHERE placement.source_note_id <> document.note_id
-                """,
-                connection=conn,
-            ).scalar
-            if int(mismatched or 0):
-                raise SchemaError("WebClipper v56 placement verification failed.")  # noqa: TRY003
-
-        if rls_forced:
-            backend.execute(
-                "ALTER TABLE notes FORCE ROW LEVEL SECURITY",
-                connection=conn,
-            )
-        postgres_schema._ensure_web_clipper_schema_postgres(self.ctx, conn)
-        if has_placements:
-            backend.execute(
-                "ALTER TABLE note_clipper_workspace_placements VALIDATE CONSTRAINT "
-                "note_clipper_workspace_placements_document_fkey",
-                connection=conn,
-            )
-        postgres_schema._set_schema_version_postgres(self.ctx, conn, 56)
-
-    def _migrate_from_v56_to_v57(self, conn: sqlite3.Connection) -> None:
-        """Advance per-user SQLite without applying shared PostgreSQL tenancy rules."""
-        try:
-            conn.execute(
-                "UPDATE db_schema_version SET version = 57 "
-                "WHERE schema_name = ? AND version < 57",
-                (self._SCHEMA_NAME,),
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 57:
-                raise SchemaError(  # noqa: TRY003
-                    f"[{self._SCHEMA_NAME}] Migration V56->V57 failed version check. "
-                    f"Expected 57, got: {final_version}"
-                )
-        except sqlite3.Error as exc:
-            raise SchemaError(
-                f"Migration V56->V57 failed for '{self._SCHEMA_NAME}': {exc}"
-            ) from exc  # noqa: TRY003
-
-    def _migrate_from_v56_to_v57_postgres(self, conn: Any) -> None:
-        """Owner-scope shared Notes organization uniqueness without guessing owners."""
-        backend = self.backend
-        locked_tables = (
-            "chacha_keywords",
-            "collection_keywords",
-            "conversation_keywords",
-            "conversations",
-            "keyword_collections",
-            "note_folder_memberships",
-            "note_folder_source_memberships",
-            "note_folder_sync_suppressions",
-            "note_folders",
-            "note_keywords",
-            "notes",
-        )
-        backend.execute(
-            """
-            LOCK TABLE
-              chacha_keywords,
-              collection_keywords,
-              conversation_keywords,
-              conversations,
-              keyword_collections,
-              note_folder_memberships,
-              note_folder_source_memberships,
-              note_folder_sync_suppressions,
-              note_folders,
-              note_keywords,
-              notes
-            IN SHARE ROW EXCLUSIVE MODE
-            """,
-            connection=conn,
-        )
-        rls_states = backend.execute(
-            """
-            SELECT table_row.relname AS table_name,
-                   table_row.relrowsecurity,
-                   table_row.relforcerowsecurity,
-                   table_row.relowner = current_user::regrole AS is_schema_owner
-              FROM pg_class AS table_row
-              JOIN pg_namespace AS namespace_row
-                ON namespace_row.oid = table_row.relnamespace
-             WHERE namespace_row.nspname = current_schema()
-               AND table_row.relkind IN ('r', 'p')
-               AND table_row.relname IN (
-                 'chacha_keywords',
-                 'collection_keywords',
-                 'conversation_keywords',
-                 'conversations',
-                 'keyword_collections',
-                 'note_folder_memberships',
-                 'note_folder_source_memberships',
-                 'note_folder_sync_suppressions',
-                 'note_folders',
-                 'note_keywords',
-                 'notes'
-               )
-            """,
-            connection=conn,
-        ).rows
-        state_by_table = {
-            str(row["table_name"]): row
-            for row in rls_states
-        }
-        if set(state_by_table) != set(locked_tables) or any(
-            not bool(state_by_table[table_name].get("is_schema_owner"))
-            for table_name in locked_tables
-        ):
-            raise SchemaError(  # noqa: TRY003
-                "Notes organization v57 requires the verified PostgreSQL "
-                "schema-owner migration path for every locked table."
-            )
-        forced_rls_tables: list[str] = []
-        for table_name in locked_tables:
-            state = state_by_table[table_name]
-            rls_enabled = bool(state.get("relrowsecurity"))
-            rls_forced = bool(state.get("relforcerowsecurity"))
-            if rls_forced and not rls_enabled:
-                raise SchemaError(  # noqa: TRY003
-                    f"PostgreSQL RLS state cannot be verified for {table_name}."
-                )
-            if not rls_forced:
-                continue
-            backend.execute(
-                f"ALTER TABLE {postgres_schema._quoted_postgres_identifier(table_name)} "  # nosec B608
-                "NO FORCE ROW LEVEL SECURITY",
-                connection=conn,
-            )
-            forced_rls_tables.append(table_name)
-
-        resource_tables = (
-            "chacha_keywords",
-            "keyword_collections",
-            "note_folders",
-        )
-        for table_name in resource_tables:
-            invalid_owners = backend.execute(
-                f"""
-                SELECT COUNT(*)
-                  FROM {table_name}
-                 WHERE client_id IS NULL
-                    OR BTRIM(client_id) = ''
-                    OR client_id <> BTRIM(client_id)
-                    OR BTRIM(client_id) !~ '^[1-9][0-9]*$'
-                """,  # nosec B608 -- table names are fixed migration constants.
-                connection=conn,
-            ).scalar
-            if int(invalid_owners or 0):
-                raise SchemaError(  # noqa: TRY003
-                    f"Cannot migrate {table_name}: {int(invalid_owners)} row(s) lack "
-                    "a canonical authenticated owner. Refusing to infer ownership."
-                )
-
-        collision_checks = (
-            ("chacha_keywords", "sync_id", None),
-            ("chacha_keywords", "LOWER(keyword)", None),
-            ("keyword_collections", "sync_id", None),
-            ("keyword_collections", "LOWER(name)", None),
-            ("note_folders", "sync_id", None),
-            ("note_folders", "LOWER(path)", "deleted = FALSE"),
-        )
-        for table_name, key_expression, predicate in collision_checks:
-            where_clause = f" WHERE {predicate}" if predicate else ""
-            collisions = backend.execute(
-                f"""
-                SELECT COUNT(*)
-                  FROM (
-                    SELECT client_id, {key_expression}
-                      FROM {table_name}{where_clause}
-                     GROUP BY client_id, {key_expression}
-                    HAVING COUNT(*) > 1
-                  ) duplicate_owner_keys
-                """,  # nosec B608 -- all SQL fragments are fixed migration constants.
-                connection=conn,
-            ).scalar
-            if int(collisions or 0):
-                raise SchemaError(  # noqa: TRY003
-                    f"Cannot migrate {table_name} owner-scoped uniqueness: "
-                    f"{int(collisions)} colliding owner/key group(s)."
-                )
-
-        ownership_checks = (
-            (
-                "keyword collection hierarchy",
-                """
-                SELECT COUNT(*)
-                  FROM keyword_collections AS child
-                  JOIN keyword_collections AS parent ON parent.id = child.parent_id
-                 WHERE child.client_id IS DISTINCT FROM parent.client_id
-                """,
-            ),
-            (
-                "folder hierarchy",
-                """
-                SELECT COUNT(*)
-                  FROM note_folders AS child
-                  JOIN note_folders AS parent ON parent.id = child.parent_id
-                 WHERE child.client_id IS DISTINCT FROM parent.client_id
-                """,
-            ),
-            (
-                "note keyword link",
-                """
-                SELECT COUNT(*)
-                  FROM note_keywords AS link
-                  JOIN notes AS note ON note.id = link.note_id
-                  JOIN chacha_keywords AS keyword ON keyword.id = link.keyword_id
-                 WHERE note.client_id IS DISTINCT FROM keyword.client_id
-                """,
-            ),
-            (
-                "conversation keyword link",
-                """
-                SELECT COUNT(*)
-                  FROM conversation_keywords AS link
-                  JOIN conversations AS conversation ON conversation.id = link.conversation_id
-                  JOIN chacha_keywords AS keyword ON keyword.id = link.keyword_id
-                 WHERE conversation.client_id IS DISTINCT FROM keyword.client_id
-                """,
-            ),
-            (
-                "collection keyword link",
-                """
-                SELECT COUNT(*)
-                  FROM collection_keywords AS link
-                  JOIN keyword_collections AS collection ON collection.id = link.collection_id
-                  JOIN chacha_keywords AS keyword ON keyword.id = link.keyword_id
-                 WHERE collection.client_id IS DISTINCT FROM keyword.client_id
-                """,
-            ),
-            (
-                "note folder membership",
-                """
-                SELECT COUNT(*)
-                  FROM note_folder_memberships AS link
-                  JOIN notes AS note ON note.id = link.note_id
-                  JOIN note_folders AS folder ON folder.id = link.folder_id
-                 WHERE note.client_id IS DISTINCT FROM folder.client_id
-                """,
-            ),
-            (
-                "note folder source membership",
-                """
-                SELECT COUNT(*)
-                  FROM note_folder_source_memberships AS link
-                  JOIN notes AS note ON note.id = link.note_id
-                  JOIN note_folders AS folder ON folder.id = link.folder_id
-                 WHERE note.client_id IS DISTINCT FROM folder.client_id
-                """,
-            ),
-            (
-                "note folder suppression",
-                """
-                SELECT COUNT(*)
-                  FROM note_folder_sync_suppressions AS link
-                  JOIN notes AS note ON note.id = link.note_id
-                  JOIN note_folders AS folder ON folder.id = link.folder_id
-                 WHERE note.client_id IS DISTINCT FROM folder.client_id
-                """,
-            ),
-        )
-        for relationship_name, statement in ownership_checks:
-            cross_owner_rows = backend.execute(statement, connection=conn).scalar
-            if int(cross_owner_rows or 0):
-                raise SchemaError(  # noqa: TRY003
-                    f"Cannot migrate {relationship_name}: {int(cross_owner_rows)} "
-                    "cross-owner relation(s) require authoritative repair."
-                )
-
-        constraints = backend.execute(
-            """
-            SELECT rel.relname AS table_name,
-                   constraint_row.conname,
-                   ARRAY(
-                     SELECT attribute_row.attname
-                       FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key(attnum, ord)
-                       JOIN pg_attribute attribute_row
-                         ON attribute_row.attrelid = constraint_row.conrelid
-                        AND attribute_row.attnum = key.attnum
-                      ORDER BY key.ord
-                   ) AS columns
-              FROM pg_constraint constraint_row
-              JOIN pg_class rel ON rel.oid = constraint_row.conrelid
-              JOIN pg_namespace namespace_row ON namespace_row.oid = rel.relnamespace
-             WHERE constraint_row.contype = 'u'
-               AND namespace_row.nspname = current_schema()
-               AND rel.relname IN ('chacha_keywords', 'keyword_collections', 'note_folders')
-            """,
-            connection=conn,
-        ).rows
-        natural_key_columns = {
-            "chacha_keywords": ["keyword"],
-            "keyword_collections": ["name"],
-            "note_folders": ["path"],
-        }
-        for constraint in constraints:
-            table_name = str(constraint["table_name"])
-            columns = [str(column) for column in (constraint.get("columns") or [])]
-            if columns != natural_key_columns.get(table_name):
-                continue
-            quoted_table = postgres_schema._quoted_postgres_identifier(table_name)
-            quoted_constraint = postgres_schema._quoted_postgres_identifier(str(constraint["conname"]))
-            backend.execute(
-                f"ALTER TABLE {quoted_table} DROP CONSTRAINT IF EXISTS {quoted_constraint}",  # nosec B608
-                connection=conn,
-            )
-
-        for index_name in (
-            "idx_keywords_sync_id_unique",
-            "idx_keyword_collections_sync_id_unique",
-            "idx_note_folders_sync_id_unique",
-            "idx_note_folders_path_lower",
-        ):
-            backend.execute(
-                f"DROP INDEX IF EXISTS {postgres_schema._quoted_postgres_identifier(index_name)}",  # nosec B608
-                connection=conn,
-            )
-
-        owner_indexes = (
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_sync_id_unique "
-            "ON chacha_keywords(client_id, sync_id)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_keyword_lower_unique "
-            "ON chacha_keywords(client_id, LOWER(keyword))",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keyword_collections_sync_id_unique "
-            "ON keyword_collections(client_id, sync_id)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keyword_collections_name_lower_unique "
-            "ON keyword_collections(client_id, LOWER(name))",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_sync_id_unique "
-            "ON note_folders(client_id, sync_id)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
-            "ON note_folders(client_id, LOWER(path)) WHERE deleted = FALSE",
-        )
-        for statement in owner_indexes:
-            backend.execute(statement, connection=conn)
-
-        for table_name in forced_rls_tables:
-            backend.execute(
-                f"ALTER TABLE {postgres_schema._quoted_postgres_identifier(table_name)} "  # nosec B608
-                "FORCE ROW LEVEL SECURITY",
-                connection=conn,
-            )
-        postgres_schema._set_schema_version_postgres(self.ctx, conn, 57)
-
-    def _migrate_from_v57_to_v58(self, conn: sqlite3.Connection) -> None:
-        """Canonicalize explicit Notes links and install local graph state."""
-
-        if sqlite_schema._get_db_version(self.ctx, conn) >= 58:
-            return
-        conn.executescript(
-            """
-            DROP TRIGGER IF EXISTS notes_graph_notes_ai;
-            DROP TRIGGER IF EXISTS notes_graph_notes_au;
-            DROP TRIGGER IF EXISTS notes_graph_notes_ad;
-            DROP TRIGGER IF EXISTS notes_graph_edges_ai;
-            DROP TRIGGER IF EXISTS notes_graph_edges_au;
-            DROP TRIGGER IF EXISTS notes_graph_edges_ad;
-            DROP TRIGGER IF EXISTS notes_graph_keywords_ai;
-            DROP TRIGGER IF EXISTS notes_graph_keywords_au;
-            DROP TRIGGER IF EXISTS notes_graph_keywords_ad;
-            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ai;
-            DROP TRIGGER IF EXISTS notes_graph_note_keywords_au;
-            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ad;
-            DROP TRIGGER IF EXISTS notes_graph_conversations_ai;
-            DROP TRIGGER IF EXISTS notes_graph_conversations_au;
-            DROP TRIGGER IF EXISTS notes_graph_conversations_ad;
-            """
-        )
-        raw_rows = [dict(row) for row in conn.execute("SELECT * FROM note_edges").fetchall()]
-        canonical_rows: list[dict[str, Any]] = []
-        for raw_row in raw_rows:
-            owners = conn.execute(
-                "SELECT source.client_id AS source_owner, target.client_id AS target_owner "
-                "FROM notes AS source JOIN notes AS target ON target.id = ? "
-                "WHERE source.id = ?",
-                (raw_row.get("to_note_id"), raw_row.get("from_note_id")),
-            ).fetchone()
-            canonical_rows.append(
-                migration_support._notes_link_v58_transform_row(
-                    raw_row,
-                    source_owner=owners["source_owner"] if owners else None,
-                    target_owner=owners["target_owner"] if owners else None,
-                )
-            )
-        migration_support._validate_notes_link_v58_unique(canonical_rows)
-
-        conn.execute("ALTER TABLE note_edges RENAME TO note_edges_v57")
-        conn.execute(
-            """
-            CREATE TABLE note_edges(
-              edge_id TEXT PRIMARY KEY,
-              user_id TEXT NOT NULL,
-              from_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              to_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              type TEXT NOT NULL CHECK(type = 'manual'),
-              directed INTEGER NOT NULL CHECK(directed IN (0, 1)),
-              weight REAL NOT NULL CHECK(weight >= 0 AND weight <= 1000000),
-              label TEXT CHECK(label IS NULL OR length(label) <= 256),
-              properties TEXT NOT NULL DEFAULT '{}'
-                CHECK(json_valid(properties) AND json_type(properties) = 'object'),
-              created_at TEXT NOT NULL,
-              last_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              created_by TEXT NOT NULL CHECK(length(created_by) > 0),
-              version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
-              deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0, 1)),
-              deleted_at TEXT,
-              metadata TEXT,
-              CHECK(from_note_id <> to_note_id),
-              UNIQUE(user_id, type, directed, from_note_id, to_note_id)
-            )
-            """
-        )
-        insert_sql = (
-            "INSERT INTO note_edges(edge_id, user_id, from_note_id, to_note_id, type, directed, "
-            "weight, label, properties, created_at, last_modified, created_by, version, deleted, "
-            "deleted_at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        )
-        for row in canonical_rows:
-            properties_json = json.dumps(
-                row["properties"],
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-                allow_nan=False,
-            )
-            conn.execute(
-                insert_sql,
-                (
-                    row["edge_id"], row["user_id"], row["from_note_id"], row["to_note_id"],
-                    row["type"], int(row["directed"]), row["weight"], row["label"],
-                    properties_json, row["created_at"], row["last_modified"], row["created_by"],
-                    row["version"], int(row["deleted"]), row["deleted_at"], properties_json,
-                ),
-            )
-        conn.execute("DROP TABLE note_edges_v57")
-        conn.executescript(
-            """
-            CREATE INDEX idx_note_edges_owner_live
-              ON note_edges(user_id, deleted, type, edge_id);
-            CREATE INDEX idx_note_edges_from_live
-              ON note_edges(user_id, from_note_id, edge_id) WHERE deleted = 0;
-            CREATE INDEX idx_note_edges_to_live
-              ON note_edges(user_id, to_note_id, edge_id) WHERE deleted = 0;
-            """
-        )
-        sqlite_schema._notes_graph_schema_sqlite(conn)
-        conn.execute(
-            "INSERT INTO note_graph_dirty(note_id, generation, last_modified) "
-            "SELECT id, 1, CURRENT_TIMESTAMP FROM notes WHERE TRUE "
-            "ON CONFLICT(note_id) DO UPDATE SET generation = generation + 1, "
-            "last_modified = CURRENT_TIMESTAMP"
-        )
-        conn.execute(
-            "UPDATE note_graph_projection_state SET parser_version = 1, "
-            "rebuild_state = 'pending', rebuild_cursor = NULL, updated_at = CURRENT_TIMESTAMP "
-            "WHERE singleton_id = 1 AND EXISTS (SELECT 1 FROM notes)"
-        )
-        conn.execute(
-            "UPDATE db_schema_version SET version = 58 WHERE schema_name = ? AND version = 57",
-            (self._SCHEMA_NAME,),
-        )
-        if sqlite_schema._get_db_version(self.ctx, conn) != 58:
-            raise SchemaError("Notes link v58 migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v57_to_v58_postgres(self, conn: Any) -> None:
-        """Migrate shared PostgreSQL Notes links under verified schema authority."""
-
-        backend = self.backend
-        locked_tables = (
-            "notes",
-            "note_edges",
-            "chacha_keywords",
-            "note_keywords",
-            "conversations",
-        )
-        backend.execute(
-            "LOCK TABLE notes, note_edges, chacha_keywords, note_keywords, conversations "
-            "IN ACCESS EXCLUSIVE MODE",
-            connection=conn,
-        )
-        states = backend.execute(
-            """
-            SELECT table_row.relname AS table_name,
-                   table_row.relrowsecurity,
-                   table_row.relforcerowsecurity,
-                   table_row.relowner = current_user::regrole AS is_schema_owner
-              FROM pg_class AS table_row
-              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
-             WHERE namespace_row.nspname = current_schema()
-               AND table_row.relkind IN ('r', 'p')
-               AND table_row.relname IN (
-                 'notes', 'note_edges', 'chacha_keywords', 'note_keywords', 'conversations'
-               )
-            """,
-            connection=conn,
-        ).rows
-        state_by_table = {str(row["table_name"]): row for row in states}
-        if set(state_by_table) != set(locked_tables) or any(
-            not bool(state_by_table[table]["is_schema_owner"]) for table in locked_tables
-        ):
-            raise SchemaError(  # noqa: TRY003
-                "Notes link v58 requires the verified PostgreSQL schema-owner migration path."
-            )
-        notes_state = state_by_table["notes"]
-        notes_forced = bool(notes_state["relforcerowsecurity"])
-        if notes_forced and not bool(notes_state["relrowsecurity"]):
-            raise SchemaError("Notes link v58 cannot verify the notes RLS state.")  # noqa: TRY003
-        if notes_forced:
-            backend.execute("ALTER TABLE notes NO FORCE ROW LEVEL SECURITY", connection=conn)
-
-        raw_rows = backend.execute(
-            """
-            SELECT edge.*,
-                   source_note.client_id AS source_owner,
-                   target_note.client_id AS target_owner
-              FROM note_edges AS edge
-              LEFT JOIN notes AS source_note ON source_note.id = edge.from_note_id
-              LEFT JOIN notes AS target_note ON target_note.id = edge.to_note_id
-             ORDER BY edge.edge_id
-            """,
-            connection=conn,
-        ).rows
-        canonical_rows = [
-            migration_support._notes_link_v58_transform_row(
-                row,
-                source_owner=row.get("source_owner"),
-                target_owner=row.get("target_owner"),
-            )
-            for row in raw_rows
-        ]
-        migration_support._validate_notes_link_v58_unique(canonical_rows)
-
-        backend.execute(
-            """
-            ALTER TABLE note_edges
-              ADD COLUMN IF NOT EXISTS label TEXT,
-              ADD COLUMN IF NOT EXISTS properties JSONB,
-              ADD COLUMN IF NOT EXISTS last_modified TIMESTAMPTZ,
-              ADD COLUMN IF NOT EXISTS version INTEGER,
-              ADD COLUMN IF NOT EXISTS deleted BOOLEAN,
-              ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
-            """,
-            connection=conn,
-        )
-        canonical_payload = json.dumps(
-            [
-                {
-                    "edge_id": row["edge_id"],
-                    "weight": row["weight"],
-                    "label": row["label"],
-                    "properties": row["properties"],
-                }
-                for row in canonical_rows
-            ],
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-        backend.execute(
-            """
-            UPDATE note_edges AS edge
-               SET weight = staged.weight,
-                   label = staged.label,
-                   properties = staged.properties,
-                   last_modified = edge.created_at,
-                   version = 1,
-                   deleted = FALSE,
-                   deleted_at = NULL
-              FROM jsonb_to_recordset(%s::jsonb) AS staged(
-                edge_id TEXT, weight DOUBLE PRECISION, label TEXT, properties JSONB
-              )
-             WHERE edge.edge_id = staged.edge_id
-            """,
-            (canonical_payload,),
-            connection=conn,
-        )
-        backend.execute(
-            """
-            ALTER TABLE note_edges
-              ALTER COLUMN properties SET DEFAULT '{}'::jsonb,
-              ALTER COLUMN properties SET NOT NULL,
-              ALTER COLUMN weight SET DEFAULT 1.0,
-              ALTER COLUMN weight SET NOT NULL,
-              ALTER COLUMN last_modified SET DEFAULT CURRENT_TIMESTAMP,
-              ALTER COLUMN last_modified SET NOT NULL,
-              ALTER COLUMN version SET DEFAULT 1,
-              ALTER COLUMN version SET NOT NULL,
-              ALTER COLUMN deleted SET DEFAULT FALSE,
-              ALTER COLUMN deleted SET NOT NULL
-            """,
-            connection=conn,
-        )
-        backend.execute(
-            "ALTER TABLE note_edges DROP CONSTRAINT IF EXISTS note_edges_source_note_fkey",
-            connection=conn,
-        )
-        backend.execute(
-            "ALTER TABLE note_edges DROP CONSTRAINT IF EXISTS note_edges_target_note_fkey",
-            connection=conn,
-        )
-        constraints = (
-            (
-                "note_edges_source_note_fkey",
-                "FOREIGN KEY (from_note_id) REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE",
-            ),
-            (
-                "note_edges_target_note_fkey",
-                "FOREIGN KEY (to_note_id) REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE",
-            ),
-            ("note_edges_manual_type_check", "CHECK (type = 'manual')"),
-            ("note_edges_directed_check", "CHECK (directed IN (0, 1))"),
-            (
-                "note_edges_weight_check",
-                "CHECK (weight >= 0 AND weight <= 1000000 AND weight NOT IN "
-                "('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8))",
-            ),
-            ("note_edges_label_check", "CHECK (label IS NULL OR char_length(label) <= 256)"),
-            ("note_edges_self_link_check", "CHECK (from_note_id <> to_note_id)"),
-            ("note_edges_version_check", "CHECK (version >= 1)"),
-            (
-                "note_edges_id_check",
-                "CHECK (edge_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
-            ),
-            (
-                "note_edges_source_id_check",
-                "CHECK (from_note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
-            ),
-            (
-                "note_edges_target_id_check",
-                "CHECK (to_note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
-            ),
-            (
-                "note_edges_created_by_check",
-                "CHECK (created_by IS NOT NULL AND char_length(created_by) > 0)",
-            ),
-            (
-                "note_edges_logical_identity_key",
-                "UNIQUE (user_id, type, directed, from_note_id, to_note_id)",
-            ),
-        )
-        for constraint_name, definition in constraints:
-            backend.execute(
-                f"""
-                DO $migration$
-                BEGIN
-                  IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint
-                     WHERE conrelid = 'note_edges'::regclass
-                       AND conname = '{constraint_name}'
-                  ) THEN
-                    ALTER TABLE note_edges ADD CONSTRAINT {constraint_name} {definition};
-                  END IF;
-                END
-                $migration$
-                """,  # nosec B608 -- names and definitions are fixed migration constants.
-                connection=conn,
-            )
-        backend.execute(
-            "CREATE INDEX IF NOT EXISTS idx_note_edges_owner_live "
-            "ON note_edges(user_id, deleted, type, edge_id)",
-            connection=conn,
-        )
-        backend.execute(
-            "CREATE INDEX IF NOT EXISTS idx_note_edges_from_live "
-            "ON note_edges(user_id, from_note_id, edge_id) WHERE deleted = FALSE",
-            connection=conn,
-        )
-        backend.execute(
-            "CREATE INDEX IF NOT EXISTS idx_note_edges_to_live "
-            "ON note_edges(user_id, to_note_id, edge_id) WHERE deleted = FALSE",
-            connection=conn,
-        )
-        postgres_schema._notes_graph_schema_postgres(self.ctx, conn)
-        backend.execute(
-            "INSERT INTO note_graph_dirty(owner_user_id, note_id, generation, last_modified) "
-            "SELECT client_id, id, 1, CURRENT_TIMESTAMP FROM notes "
-            "ON CONFLICT(owner_user_id, note_id) DO UPDATE SET "
-            "generation = note_graph_dirty.generation + 1, last_modified = CURRENT_TIMESTAMP",
-            connection=conn,
-        )
-        backend.execute(
-            "INSERT INTO note_graph_projection_state(owner_user_id, parser_version, rebuild_state, "
-            "rebuild_cursor, updated_at) "
-            "SELECT DISTINCT client_id, 1, 'pending', NULL, CURRENT_TIMESTAMP FROM notes "
-            "ON CONFLICT(owner_user_id) DO UPDATE SET parser_version = 1, "
-            "rebuild_state = 'pending', rebuild_cursor = NULL, updated_at = CURRENT_TIMESTAMP",
-            connection=conn,
-        )
-        if notes_forced:
-            backend.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY", connection=conn)
-        postgres_schema._set_schema_version_postgres(self.ctx, conn, 58)
-
-    def _migrate_from_v58_to_v59(self, conn: sqlite3.Connection) -> None:
-        """Create schema-v59 registry state without importing legacy attachment bytes."""
-
-        current_version = sqlite_schema._get_db_version(self.ctx, conn)
-        if current_version >= 59:
-            return
-        if current_version != 58:
-            raise SchemaError("Notes attachment v59 migration requires schema version 58.")  # noqa: TRY003
-        tables = sqlite_schema._sqlite_table_names(conn)
-        if "note_attachments" in tables:
-            raise SchemaError(  # noqa: TRY003
-                "Notes attachment v59 registry collision requires explicit repair."
-            )
-        if "notes" not in tables:
-            raise SchemaError("Notes attachment v59 requires the canonical notes relation.")  # noqa: TRY003
-        sqlite_schema._create_note_attachment_schema_sqlite(self.ctx, conn)
-        cursor = conn.execute(
-            "UPDATE db_schema_version SET version = 59 WHERE schema_name = ? AND version = 58",
-            (self._SCHEMA_NAME,),
-        )
-        if cursor.rowcount != 1 or sqlite_schema._get_db_version(self.ctx, conn) != 59:
-            raise SchemaError("Notes attachment v59 migration failed version verification.")  # noqa: TRY003
-
     @staticmethod
     def _note_task_v60_hash(value: object) -> str:
         """Forward to ``ChaChaContext.note_task_v60_hash``."""
@@ -5771,86 +2771,6 @@ class CharactersRAGDB:
         from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 
         return ChaChaContext.note_task_v60_json_safe(value)
-
-    def _migrate_from_v59_to_v60_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Transactionally replace the legacy task graph with scoped v60 tables."""
-        if sqlite_schema._get_db_version(self.ctx, conn) != 59:
-            raise SchemaError("Notes task v60 migration requires exact schema version 59.")  # noqa: TRY003
-        source_tables = set(self._NOTE_TASK_V60_TABLES[:-1])
-        tables = sqlite_schema._sqlite_table_names(conn)
-        if not source_tables.issubset(tables):
-            raise SchemaError("Notes task v60 migration source catalog is incomplete.")  # noqa: TRY003
-        sqlite_schema._verify_note_task_v59_catalog_sqlite(self.ctx, conn)
-        targets = {f"{table}_v60" for table in self._NOTE_TASK_V60_RELATIONS}
-        if (
-            "task_projection_drifts" in tables
-            or self._NOTE_TASK_SCOPE_AUTHORITY_TABLE in tables
-            or tables.intersection(targets)
-        ):
-            raise SchemaError("Notes task v60 target-table collision requires explicit repair.")  # noqa: TRY003
-        sqlite_schema._create_note_task_schema_v60_sqlite(self.ctx, conn)
-        migration_support._note_task_v60_migration_checkpoint("create")
-        sqlite_schema._copy_note_task_graph_v60_sqlite(self.ctx, conn)
-        migration_support._note_task_v60_migration_checkpoint("copy")
-        for table in ("task_event_read_state","task_note_projections","note_task_reconciliation_state",
-                      "task_events","note_tasks"):
-            conn.execute(f"DROP TABLE {table}")  # nosec B608 - fixed relation names.
-        for table in self._NOTE_TASK_V60_RELATIONS:
-            conn.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}")  # nosec B608
-        sqlite_schema._create_note_task_indexes_v60_sqlite(conn)
-        migration_support._note_task_v60_migration_checkpoint("index")
-        sqlite_schema._verify_note_task_schema_sqlite(self.ctx, conn)
-        migration_support._note_task_v60_migration_checkpoint("verify")
-        cursor = conn.execute(
-            "UPDATE db_schema_version SET version=60 WHERE schema_name=? AND version=59",
-            (self._SCHEMA_NAME,),
-        )
-        if cursor.rowcount != 1 or sqlite_schema._get_db_version(self.ctx, conn) != 60:
-            raise SchemaError("Notes task v60 migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v60_to_v61_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Add recipient-owned shared workspace chat threads and receipts."""
-        if sqlite_schema._get_db_version(self.ctx, conn) != 60:
-            raise SchemaError("Shared workspace chat v61 migration requires schema version 60.")  # noqa: TRY003
-        try:
-            conn.executescript(self._MIGRATION_SQL_V60_TO_V61)
-        except sqlite3.Error as exc:
-            raise SchemaError(f"Shared workspace chat v61 SQLite migration failed: {exc}") from exc
-        if sqlite_schema._get_db_version(self.ctx, conn) != 61:
-            raise SchemaError("Shared workspace chat v61 SQLite version verification failed.")  # noqa: TRY003
-
-    def _migrate_from_v61_to_v62_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Add operation-fenced staged Workspace clone lifecycle markers."""
-        if sqlite_schema._get_db_version(self.ctx, conn) != 61:
-            raise SchemaError("Workspace clone lifecycle v62 migration requires schema version 61.")  # noqa: TRY003
-        savepoint = "workspace_clone_v62_migration"
-        savepoint_active = False
-        try:
-            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-            savepoint_active = True
-            for statement in split_sql_statements(self._MIGRATION_SQL_V61_TO_V62):
-                conn.execute(statement)
-            cursor = conn.execute(
-                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
-                (62, self._SCHEMA_NAME, 61),
-            )
-            if cursor.rowcount != 1 or sqlite_schema._get_db_version(self.ctx, conn) != 62:
-                raise SchemaError("Workspace clone lifecycle v62 SQLite version transition failed.")  # noqa: TRY003
-            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-            savepoint_active = False
-        except (SchemaError, sqlite3.Error) as exc:
-            if savepoint_active:
-                try:
-                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-                except sqlite3.Error as rollback_exc:
-                    raise SchemaError(  # noqa: TRY003
-                        "Workspace clone lifecycle v62 SQLite migration rollback failed: "
-                        f"{rollback_exc}"
-                    ) from exc
-            if isinstance(exc, SchemaError):
-                raise
-            raise SchemaError(f"Workspace clone lifecycle v62 SQLite migration failed: {exc}") from exc
 
     @staticmethod
     def _canonical_json_text_v61(value: object) -> str:
@@ -5956,1607 +2876,8 @@ class CharactersRAGDB:
             logger.warning("Legacy moodboard smart rule blocked canonical readiness: {}", type(exc).__name__)
             return None, diagnostic["code"], diagnostic["source_hash"]
 
-    def _migrate_from_v62_to_v63_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Transactionally upgrade scoped moodboard, placement, Studio, and authority storage."""
-        sqlite_schema._validate_notes_moodboard_studio_v60_source_sqlite(self.ctx, conn)
-        source_proof = sqlite_schema._notes_moodboard_studio_v61_data_proof_sqlite(self.ctx,
-            conn, target=False
-        )
-        source_semantic_proof = (
-            sqlite_schema._notes_moodboard_studio_v61_semantic_proof_sqlite(self.ctx,
-                conn, target=False
-            )
-        )
-        targets = {f"{table}_v61" for table in self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS}
-        if sqlite_schema._sqlite_table_names(conn).intersection(targets):
-            raise SchemaError("Notes moodboard/Studio v61 target-table collision requires repair.")  # noqa: TRY003
-        sqlite_schema._create_notes_moodboard_studio_schema_v61_sqlite(self.ctx, conn)
-        sqlite_schema._notes_moodboard_studio_v61_migration_checkpoint("create")
-        target_proof = sqlite_schema._copy_notes_moodboard_studio_graph_v61_sqlite(self.ctx, conn)
-        sqlite_schema._notes_moodboard_studio_v61_migration_checkpoint("copy")
-        sqlite_schema._verify_notes_moodboard_studio_v61_copy_sqlite(self.ctx,
-            conn,
-            source_proof=source_proof,
-            source_semantic_proof=source_semantic_proof,
-            target_proof=target_proof,
-        )
-        sqlite_schema._notes_moodboard_studio_v61_migration_checkpoint("copy_verify")
-        for table in ("moodboard_notes", "note_studio_documents", "moodboards", "note_task_scope_authority"):
-            if table in sqlite_schema._sqlite_table_names(conn):
-                conn.execute(f"DROP TABLE {table}")  # nosec B608 - fixed migration relations.
-        for table in self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS:
-            conn.execute(f"ALTER TABLE {table}_v61 RENAME TO {table}")  # nosec B608
-        sqlite_schema._create_notes_moodboard_studio_indexes_v61_sqlite(conn)
-        sqlite_schema._notes_moodboard_studio_v61_migration_checkpoint("index")
-        sqlite_schema._verify_notes_moodboard_studio_schema_sqlite(self.ctx, conn)
-        sqlite_schema._notes_moodboard_studio_v61_migration_checkpoint("verify")
-        cursor = conn.execute(
-            "UPDATE db_schema_version SET version=63 WHERE schema_name=? AND version=62",
-            (self._SCHEMA_NAME,),
-        )
-        if cursor.rowcount != 1 or sqlite_schema._get_db_version(self.ctx, conn) != 63:
-            raise SchemaError("Notes moodboard/Studio v63 migration failed version verification.")  # noqa: TRY003
-        sqlite_schema._notes_moodboard_studio_v61_migration_checkpoint("version")
 
-    def _migrate_from_v63_to_v64_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Add durable, owner/dataset-scoped Notes graph suggestion storage."""
-        if sqlite_schema._get_db_version(self.ctx, conn) != 63:
-            raise SchemaError("Notes graph suggestion v64 migration requires schema version 63.")  # noqa: TRY003
-        savepoint = "note_graph_suggestion_v64_migration"
-        savepoint_active = False
-        try:
-            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-            savepoint_active = True
-            for statement in split_sql_statements(self._MIGRATION_SQL_V63_TO_V64):
-                conn.execute(statement)
-            conn.execute(self._NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL)
-            cursor = conn.execute(
-                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
-                (64, self._SCHEMA_NAME, 63),
-            )
-            if cursor.rowcount != 1 or sqlite_schema._get_db_version(self.ctx, conn) != 64:
-                raise SchemaError("Notes graph suggestion v64 SQLite version transition failed.")  # noqa: TRY003
-            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-            savepoint_active = False
-        except (SchemaError, sqlite3.Error) as exc:
-            if savepoint_active:
-                try:
-                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-                except sqlite3.Error as rollback_exc:
-                    raise SchemaError(
-                        "Notes graph suggestion v64 SQLite migration rollback failed: "
-                        f"{rollback_exc}"
-                    ) from exc
-            if isinstance(exc, SchemaError):
-                raise
-            raise SchemaError(f"Notes graph suggestion v64 SQLite migration failed: {exc}") from exc
 
-    def _migrate_from_v81_to_v82_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Add the durable owner/dataset Notes semantic-index authority ledger."""
-        if sqlite_schema._get_db_version(self.ctx, conn) != 81:
-            raise SchemaError("Notes semantic v82 migration requires schema version 81.")  # noqa: TRY003
-        savepoint = "note_semantic_v82_migration"
-        savepoint_active = False
-        try:
-            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-            savepoint_active = True
-            for statement in split_sql_statements(self._MIGRATION_SQL_V81_TO_V82):
-                conn.execute(statement)
-            cursor = conn.execute(
-                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
-                (82, self._SCHEMA_NAME, 81),
-            )
-            if cursor.rowcount != 1 or sqlite_schema._get_db_version(self.ctx, conn) != 82:
-                raise SchemaError("Notes semantic v82 SQLite version transition failed.")  # noqa: TRY003
-            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-            savepoint_active = False
-        except (SchemaError, sqlite3.Error) as exc:
-            if savepoint_active:
-                try:
-                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-                except sqlite3.Error as rollback_exc:
-                    raise SchemaError(
-                        "Notes semantic v82 SQLite migration rollback failed: "
-                        f"{rollback_exc}"
-                    ) from exc
-            if isinstance(exc, SchemaError):
-                raise
-            raise SchemaError(f"Notes semantic v82 SQLite migration failed: {exc}") from exc
-
-    def _migrate_from_v82_to_v83_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Add crash-durable semantic obsolete-vector cleanup authority."""
-        if sqlite_schema._get_db_version(self.ctx, conn) != 82:
-            raise SchemaError("Notes semantic v83 migration requires schema version 82.")  # noqa: TRY003
-        savepoint = "note_semantic_v83_migration"
-        savepoint_active = False
-        try:
-            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-            savepoint_active = True
-            for statement in split_sql_statements(self._MIGRATION_SQL_V82_TO_V83):
-                conn.execute(statement)
-            cursor = conn.execute(
-                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
-                (83, self._SCHEMA_NAME, 82),
-            )
-            if cursor.rowcount != 1 or sqlite_schema._get_db_version(self.ctx, conn) != 83:
-                raise SchemaError("Notes semantic v83 SQLite version transition failed.")  # noqa: TRY003
-            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
-            savepoint_active = False
-        except (SchemaError, sqlite3.Error) as exc:
-            if savepoint_active:
-                try:
-                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
-                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
-                except sqlite3.Error as rollback_exc:
-                    raise SchemaError(
-                        "Notes semantic v83 SQLite migration rollback failed: "
-                        f"{rollback_exc}"
-                    ) from exc
-            if isinstance(exc, SchemaError):
-                raise
-            raise SchemaError(f"Notes semantic v83 SQLite migration failed: {exc}") from exc
-
-
-    def _migrate_from_v89_to_v90_postgres(self, conn: Any) -> None:
-        """Install transcripts and forced owner/parent RLS before publishing the version."""
-        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
-            persona_transcript_rls_sql,
-            persona_transcript_schema_sql,
-        )
-
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 89:
-            raise SchemaError("Persona transcript migration requires PostgreSQL version 89.")
-        for statement in (
-            persona_transcript_schema_sql(),
-            "CREATE INDEX persona_transcript_owner_activity ON persona_session_transcripts(user_id,last_activity) WHERE turn_count>0",
-            *persona_transcript_rls_sql(),
-        ):
-            self.backend.execute(statement, connection=conn)
-        from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import (
-            verify_persona_transcript_postgres,
-        )
-
-        verify_persona_transcript_postgres(
-            self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
-        )
-        self.backend.execute(
-            "UPDATE db_schema_version SET version=90 WHERE schema_name=%s AND version=89",
-            (self._SCHEMA_NAME,),
-            connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 90:
-            raise SchemaError("Persona transcript PostgreSQL version transition failed.")
-
-
-    def _migrate_from_v83_to_v84_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Add durable semantic operation and resolved-model authority."""
-        if sqlite_schema._get_db_version(self.ctx, conn) != 83:
-            raise SchemaError("Notes semantic v84 migration requires schema version 83.")
-        savepoint = "note_semantic_v84_migration"
-        savepoint_active = False
-        try:
-            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608
-            savepoint_active = True
-            for statement in split_sql_statements(self._MIGRATION_SQL_V83_TO_V84):
-                conn.execute(statement)
-            cursor = conn.execute(
-                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
-                (84, self._SCHEMA_NAME, 83),
-            )
-            if cursor.rowcount != 1 or sqlite_schema._get_db_version(self.ctx, conn) != 84:
-                raise SchemaError("Notes semantic v84 SQLite version transition failed.")
-            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
-            savepoint_active = False
-        except (SchemaError, sqlite3.Error) as exc:
-            if savepoint_active:
-                try:
-                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
-                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
-                except sqlite3.Error as rollback_exc:
-                    raise SchemaError(
-                        "Notes semantic v84 SQLite migration rollback failed: "
-                        f"{rollback_exc}"
-                    ) from exc
-            if isinstance(exc, SchemaError):
-                raise
-            raise SchemaError(f"Notes semantic v84 SQLite migration failed: {exc}") from exc
-
-    def _migrate_from_v62_to_v63_postgres(self, conn: Any) -> None:
-        """Run the durable bounded PostgreSQL v63 migration, version last."""
-        def begin_phase(label: str) -> bool:
-            version = postgres_schema._begin_notes_moodboard_studio_v61_postgres_transaction(self.ctx,
-                conn
-            )
-            if version == 63:
-                postgres_schema._verify_notes_moodboard_studio_schema_postgres(self.ctx, conn)
-                require_moodboard_migration_complete(postgres_schema._postgres_v61_progress_row(self.ctx, conn, "migration"))
-                conn.commit()
-                return False
-            if version != 62:
-                raise SchemaError(  # noqa: TRY003
-                    f"Notes moodboard/Studio v63 {label} observed schema version {version}."
-                )
-            return True
-
-        if not begin_phase("schema phase"):
-            return
-        progress_exists = self.backend.table_exists(
-            "chacha_schema_migration_progress", connection=conn
-        )
-        if progress_exists and postgres_schema._postgres_v61_phase_is_complete(self.ctx, conn, "schema"):
-            conn.commit()
-        else:
-            self.backend.execute(
-                "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
-                "note_studio_documents IN SHARE ROW EXCLUSIVE MODE",
-                connection=conn,
-            )
-            for statement in postgres_schema._notes_moodboard_studio_v61_postgres_schema_sql():
-                self.backend.execute(statement, connection=conn)
-            postgres_schema._complete_postgres_v61_phase(self.ctx, conn, "schema")
-            conn.commit()
-            postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint("schema")
-
-        while True:
-            if not begin_phase("moodboard identity allocation phase"):
-                return
-            progress = postgres_schema._postgres_v61_progress_row(self.ctx, conn, "moodboard_identities")
-            if progress["status"] == "complete":
-                conn.commit()
-                break
-            rows, cursor, source_exhausted = (
-                postgres_schema._postgres_v61_allocate_board_identity_page(self.ctx,
-                    conn, progress=progress
-                )
-            )
-            added, fingerprint = postgres_schema._postgres_v61_progress_fingerprint(
-                str(progress["aggregate_fingerprint"]), rows
-            )
-            total = int(progress["copied_count"]) + added
-            status = "complete" if source_exhausted else "running"
-            postgres_schema._upsert_postgres_v61_progress(self.ctx,
-                conn,
-                phase="moodboard_identities",
-                cursor=cursor,
-                count=total,
-                fingerprint=fingerprint,
-                status=status,
-            )
-            conn.commit()
-            postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint(
-                f"identity:moodboards:{total}"
-            )
-            if status == "complete":
-                break
-
-        for source_phase in (
-            "moodboards", "moodboard_notes", "note_studio_documents",
-        ):
-            prediction_phase = f"source_prediction:{source_phase}"
-            while True:
-                if not begin_phase(f"{source_phase} source prediction phase"):
-                    return
-                progress = postgres_schema._postgres_v61_progress_row(self.ctx, conn, prediction_phase)
-                if progress["status"] == "complete":
-                    conn.commit()
-                    break
-                page = postgres_schema._postgres_v61_fingerprint_phase_page(self.ctx,
-                    conn,
-                    source_phase=source_phase,
-                    progress=progress,
-                    predict=True,
-                )
-                postgres_schema._upsert_postgres_v61_progress(self.ctx,
-                    conn,
-                    phase=prediction_phase,
-                    cursor=page["cursor"],
-                    count=page["count"],
-                    fingerprint=page["fingerprint"],
-                    status=page["status"],
-                )
-                conn.commit()
-                postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint(
-                    f"{prediction_phase}:{page['count']}"
-                )
-                if page["status"] == "complete":
-                    break
-
-        for phase in ("moodboards", "moodboard_notes", "note_studio_documents"):
-            while True:
-                if not begin_phase(f"{phase} copy phase"):
-                    return
-                progress = postgres_schema._postgres_v61_progress_row(self.ctx, conn, phase)
-                if progress["status"] == "complete":
-                    conn.commit()
-                    break
-                rows, cursor, source_exhausted = postgres_schema._postgres_v61_copy_page(self.ctx,
-                    conn, phase=phase, progress=progress
-                )
-                added, fingerprint = postgres_schema._postgres_v61_progress_fingerprint(
-                    str(progress["aggregate_fingerprint"]), rows
-                )
-                total = int(progress["copied_count"]) + added
-                status = "complete" if source_exhausted else "running"
-                postgres_schema._upsert_postgres_v61_progress(self.ctx,
-                    conn, phase=phase, cursor=cursor, count=total,
-                    fingerprint=fingerprint, status=status,
-                )
-                conn.commit()
-                postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint(
-                    f"copy:{phase}:{total}"
-                )
-                if status == "complete":
-                    break
-
-        # Prove every durable target field while the migration owner can still
-        # read all legacy tenants; forced RLS is installed only after this
-        # global aggregate succeeds.
-        for source_phase in ("moodboards", "moodboard_notes", "note_studio_documents"):
-            verification_phase = f"aggregate_verification:{source_phase}"
-            while True:
-                if not begin_phase(f"{source_phase} aggregate verification phase"):
-                    return
-                progress = postgres_schema._postgres_v61_progress_row(self.ctx, conn, verification_phase)
-                if progress["status"] == "complete":
-                    conn.commit()
-                    break
-                page = postgres_schema._postgres_v61_fingerprint_phase_page(self.ctx,
-                    conn,
-                    source_phase=source_phase,
-                    progress=progress,
-                    predict=False,
-                )
-                postgres_schema._upsert_postgres_v61_progress(self.ctx,
-                    conn,
-                    phase=verification_phase,
-                    cursor=page["cursor"],
-                    count=page["count"],
-                    fingerprint=page["fingerprint"],
-                    status=page["status"],
-                )
-                conn.commit()
-                postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint(
-                    f"{verification_phase}:{page['count']}"
-                )
-                if page["status"] == "complete":
-                    break
-
-        if not begin_phase("aggregate verification phase"):
-            return
-        if postgres_schema._postgres_v61_phase_is_complete(self.ctx, conn, "aggregate_verification"):
-            conn.commit()
-        else:
-            for source_phase in (
-                "moodboards",
-                "moodboard_notes",
-                "note_studio_documents",
-            ):
-                predicted = postgres_schema._postgres_v61_progress_row(self.ctx,
-                    conn, f"source_prediction:{source_phase}"
-                )
-                copied = postgres_schema._postgres_v61_progress_row(self.ctx, conn, source_phase)
-                verified = postgres_schema._postgres_v61_progress_row(self.ctx,
-                    conn, f"aggregate_verification:{source_phase}"
-                )
-                if (
-                    predicted["status"] != "complete"
-                    or copied["status"] != "complete"
-                    or verified["status"] != "complete"
-                    or int(predicted["copied_count"])
-                    != int(copied["copied_count"])
-                    or int(copied["copied_count"])
-                    != int(verified["copied_count"])
-                    or predicted["aggregate_fingerprint"]
-                    != copied["aggregate_fingerprint"]
-                    or copied["aggregate_fingerprint"]
-                    != verified["aggregate_fingerprint"]
-                ):
-                    raise SchemaError(
-                        "Notes moodboard/Studio v61 aggregate verification failed."
-                    )  # noqa: TRY003
-            postgres_schema._complete_postgres_v61_phase(self.ctx, conn, "aggregate_verification")
-            conn.commit()
-            postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint(
-                "aggregate_verification"
-            )
-
-        if not begin_phase("constraint phase"):
-            return
-        run_constraints = not postgres_schema._postgres_v61_phase_is_complete(self.ctx,
-            conn, "constraints"
-        )
-        if run_constraints:
-            self.backend.execute(
-                "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
-                "note_studio_documents IN SHARE ROW EXCLUSIVE MODE",
-                connection=conn,
-            )
-        constraint_statements = (
-            "ALTER TABLE moodboards ALTER COLUMN owner_user_id SET NOT NULL",
-            "ALTER TABLE moodboards ALTER COLUMN dataset_id SET NOT NULL",
-            "ALTER TABLE moodboards ALTER COLUMN sync_id SET NOT NULL",
-            "ALTER TABLE moodboards ALTER COLUMN canvas_json SET NOT NULL",
-            "ALTER TABLE moodboards ALTER COLUMN canonical_revision SET NOT NULL",
-            "ALTER TABLE moodboards ALTER COLUMN canonical_hash SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN owner_user_id SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN dataset_id SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN placement_id SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN x SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN y SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN width SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN height SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN order_index SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN display_json SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN last_modified SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN deleted SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN version SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN canonical_revision SET NOT NULL",
-            "ALTER TABLE moodboard_notes ALTER COLUMN canonical_hash SET NOT NULL",
-            "ALTER TABLE note_studio_documents ALTER COLUMN owner_user_id SET NOT NULL",
-            "ALTER TABLE note_studio_documents ALTER COLUMN dataset_id SET NOT NULL",
-            "ALTER TABLE note_studio_documents ALTER COLUMN note_revision SET NOT NULL",
-            "ALTER TABLE note_studio_documents ALTER COLUMN note_hash SET NOT NULL",
-            "ALTER TABLE note_studio_documents ALTER COLUMN accepted_provenance_json SET NOT NULL",
-            "ALTER TABLE note_studio_documents ALTER COLUMN deleted SET NOT NULL",
-            "ALTER TABLE note_studio_documents ALTER COLUMN version SET NOT NULL",
-            "ALTER TABLE note_studio_documents ALTER COLUMN canonical_revision SET NOT NULL",
-            "ALTER TABLE note_studio_documents ALTER COLUMN canonical_hash SET NOT NULL",
-            "ALTER TABLE moodboards ALTER COLUMN canonical_revision SET DEFAULT 1",
-            "ALTER TABLE moodboard_notes ALTER COLUMN x SET DEFAULT 0",
-            "ALTER TABLE moodboard_notes ALTER COLUMN y SET DEFAULT 0",
-            "ALTER TABLE moodboard_notes ALTER COLUMN width SET DEFAULT 320",
-            "ALTER TABLE moodboard_notes ALTER COLUMN height SET DEFAULT 220",
-            "ALTER TABLE moodboard_notes ALTER COLUMN order_index SET DEFAULT 0",
-            "ALTER TABLE moodboard_notes ALTER COLUMN display_json SET DEFAULT '{}'",
-            "ALTER TABLE moodboard_notes ALTER COLUMN deleted SET DEFAULT FALSE",
-            "ALTER TABLE moodboard_notes ALTER COLUMN version SET DEFAULT 1",
-            "ALTER TABLE moodboard_notes ALTER COLUMN canonical_revision SET DEFAULT 1",
-            "ALTER TABLE note_studio_documents ALTER COLUMN note_revision SET DEFAULT 1",
-            "ALTER TABLE note_studio_documents ALTER COLUMN deleted SET DEFAULT FALSE",
-            "ALTER TABLE note_studio_documents ALTER COLUMN version SET DEFAULT 1",
-            "ALTER TABLE note_studio_documents ALTER COLUMN canonical_revision SET DEFAULT 1",
-            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_scope_sync_unique UNIQUE(owner_user_id,dataset_id,sync_id)",
-            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_scope_id_unique UNIQUE(owner_user_id,dataset_id,id)",
-            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_owner_check CHECK(char_length(btrim(owner_user_id))>0) NOT VALID",
-            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_dataset_check CHECK(char_length(btrim(dataset_id))>0) NOT VALID",
-            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_sync_id_check CHECK(sync_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') NOT VALID",
-            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_canonical_revision_check CHECK(canonical_revision>=1) NOT VALID",
-            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_canonical_hash_check CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
-            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_diagnostic_code_check CHECK(source_diagnostic_code IS NULL OR char_length(source_diagnostic_code) BETWEEN 1 AND 64) NOT VALID",
-            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_diagnostic_hash_check CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_scope_placement_unique UNIQUE(owner_user_id,dataset_id,placement_id)",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_owner_check CHECK(char_length(btrim(owner_user_id))>0) NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_dataset_check CHECK(char_length(btrim(dataset_id))>0) NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_note_id_check CHECK(char_length(btrim(note_id))>0) NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_placement_id_check CHECK(placement_id ~ '^notes[.]moodboard_note:sha256:[0-9a-f]{64}$') NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_width_check CHECK(width BETWEEN 1 AND 1000000) NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_height_check CHECK(height BETWEEN 1 AND 1000000) NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_version_check CHECK(version>=1) NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_canonical_revision_check CHECK(canonical_revision>=1) NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_canonical_hash_check CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_diagnostic_code_check CHECK(source_diagnostic_code IS NULL OR char_length(source_diagnostic_code) BETWEEN 1 AND 64) NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_diagnostic_hash_check CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_owner_check CHECK(char_length(btrim(owner_user_id))>0) NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_dataset_check CHECK(char_length(btrim(dataset_id))>0) NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_id_check CHECK(char_length(btrim(note_id))>0) NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_revision_check CHECK(note_revision>=1) NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_hash_check CHECK(note_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_version_check CHECK(version>=1) NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_canonical_revision_check CHECK(canonical_revision>=1) NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_canonical_hash_check CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_diagnostic_code_check CHECK(source_diagnostic_code IS NULL OR char_length(source_diagnostic_code) BETWEEN 1 AND 64) NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_diagnostic_hash_check CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_board_fk FOREIGN KEY(owner_user_id,dataset_id,moodboard_id) REFERENCES moodboards(owner_user_id,dataset_id,id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID",
-            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_note_fk FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID",
-            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_fk FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID",
-        )
-        if run_constraints:
-            existing_constraints = {
-                str(row["conname"])
-                for row in self.backend.execute(
-                    "SELECT conname FROM pg_constraint k JOIN pg_namespace n ON n.oid=k.connamespace "
-                    "WHERE n.nspname=current_schema()", connection=conn,
-                ).rows
-            }
-            for statement in constraint_statements:
-                match = re.search(r"ADD CONSTRAINT ([a-z0-9_]+)", statement)
-                if match and match.group(1) in existing_constraints:
-                    continue
-                self.backend.execute(statement, connection=conn)
-            postgres_schema._complete_postgres_v61_phase(self.ctx, conn, "constraints")
-            conn.commit()
-            postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint("constraint")
-        else:
-            conn.commit()
-
-        validation_constraints = tuple(
-            statement.partition("ADD CONSTRAINT ")[2].partition(" ")[0]
-            for statement in constraint_statements
-            if "ADD CONSTRAINT " in statement and " NOT VALID" in statement
-        )
-        for constraint in validation_constraints:
-            if not begin_phase(f"{constraint} validation phase"):
-                return
-            progress_phase = f"constraint_validation:{constraint}"
-            if postgres_schema._postgres_v61_phase_is_complete(self.ctx, conn, progress_phase):
-                conn.commit()
-                continue
-            table = (
-                "note_studio_documents"
-                if constraint.startswith("note_studio")
-                else "moodboards"
-                if constraint.startswith("moodboards_")
-                else "moodboard_notes"
-            )
-            self.backend.execute(
-                f"ALTER TABLE {table} VALIDATE CONSTRAINT {constraint}",  # nosec B608 - fixed names.
-                connection=conn,
-            )
-            postgres_schema._complete_postgres_v61_phase(self.ctx, conn, progress_phase)
-            conn.commit()
-            postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint(progress_phase)
-
-        indexes = MOODBOARD_STUDIO_V61_INDEX_STATEMENTS
-        for index, statement in enumerate(indexes):
-            if not begin_phase(f"index {index} phase"):
-                return
-            progress_phase = f"index:{index}"
-            if postgres_schema._postgres_v61_phase_is_complete(self.ctx, conn, progress_phase):
-                conn.commit()
-                continue
-            self.backend.execute(statement, connection=conn)
-            postgres_schema._complete_postgres_v61_phase(self.ctx, conn, progress_phase)
-            conn.commit()
-            postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint(progress_phase)
-
-        if not begin_phase("RLS phase"):
-            return
-        if postgres_schema._postgres_v61_phase_is_complete(self.ctx, conn, "rls"):
-            conn.commit()
-        else:
-            self.backend.execute(
-                "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
-                "note_studio_documents IN SHARE ROW EXCLUSIVE MODE",
-                connection=conn,
-            )
-            for statement in build_chacha_rls_sql():
-                if any(table in statement for table in self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS):
-                    self.backend.execute(statement, connection=conn)
-            postgres_schema._complete_postgres_v61_phase(self.ctx, conn, "rls")
-            conn.commit()
-            postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint("rls")
-
-        if not begin_phase("version phase"):
-            return
-        self.backend.execute(
-            "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
-            "note_studio_documents IN SHARE MODE",
-            connection=conn,
-        )
-        postgres_schema._verify_notes_moodboard_studio_schema_postgres(self.ctx, conn)
-        postgres_schema._postgres_v61_progress_row(self.ctx, conn, "migration")
-        postgres_schema._upsert_postgres_v61_progress(self.ctx,
-            conn, phase="migration", cursor=None, count=0,
-            fingerprint=f"sha256:{hashlib.sha256().hexdigest()}", status="complete",
-        )
-        postgres_schema._set_schema_version_postgres(self.ctx, conn, 63)
-        conn.commit()
-        postgres_schema._notes_moodboard_studio_v61_postgres_checkpoint("version")
-
-    def _migrate_from_v58_to_v59_postgres(self, conn: Any) -> None:
-        """Install the empty registry under verified PostgreSQL schema authority."""
-
-        backend = self.backend
-        backend.execute("LOCK TABLE notes IN ACCESS EXCLUSIVE MODE", connection=conn)
-        states = backend.execute(
-            """
-            SELECT table_row.relname AS table_name,
-                   table_row.relrowsecurity,
-                   table_row.relforcerowsecurity,
-                   table_row.relowner = current_user::regrole AS is_schema_owner,
-                   pg_has_role(current_user, namespace_row.nspowner, 'USAGE')
-                     AS is_current_schema_owner
-              FROM pg_class AS table_row
-              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
-             WHERE namespace_row.nspname = current_schema()
-               AND table_row.relkind IN ('r', 'p')
-               AND table_row.relname = 'notes'
-            """,
-            connection=conn,
-        ).rows
-        if len(states) != 1 or str(states[0].get("table_name")) != "notes":
-            raise SchemaError("Notes attachment v59 cannot verify the notes relation.")  # noqa: TRY003
-        notes_state = states[0]
-        if not bool(notes_state.get("is_schema_owner")) or not bool(
-            notes_state.get("is_current_schema_owner")
-        ):
-            raise SchemaError(  # noqa: TRY003
-                "Notes attachment v59 requires the verified PostgreSQL schema-owner migration path."
-            )
-        notes_rls_enabled = bool(notes_state.get("relrowsecurity"))
-        notes_rls_forced = bool(notes_state.get("relforcerowsecurity"))
-        if notes_rls_forced and not notes_rls_enabled:
-            raise SchemaError("Notes attachment v59 cannot verify the notes RLS state.")  # noqa: TRY003
-        if backend.table_exists("note_attachments", connection=conn):
-            raise SchemaError(  # noqa: TRY003
-                "Notes attachment v59 registry collision requires explicit repair."
-            )
-        if notes_rls_forced:
-            backend.execute("ALTER TABLE notes NO FORCE ROW LEVEL SECURITY", connection=conn)
-
-        postgres_schema._create_note_attachment_schema_postgres(self.ctx, conn)
-
-        if notes_rls_forced:
-            backend.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY", connection=conn)
-        chacha_rls = build_chacha_rls_sql()
-        notes_rls = [
-            statement
-            for statement in chacha_rls
-            if "ALTER TABLE IF EXISTS notes " in statement
-            or "DROP POLICY IF EXISTS notes_tenant_isolation ON notes" in statement
-            or "CREATE POLICY notes_tenant_isolation ON notes" in statement
-        ]
-        attachment_rls = [
-            statement
-            for statement in chacha_rls
-            if "note_attachments" in statement
-        ]
-        if len(notes_rls) != 4 or len(attachment_rls) != 4:
-            raise SchemaError("Notes attachment v59 RLS definition is not canonical.")  # noqa: TRY003
-        for statement in (*notes_rls, *attachment_rls):
-            backend.execute(statement, connection=conn)
-        postgres_schema._verify_note_attachment_schema_postgres(self.ctx, conn)
-        postgres_schema._set_schema_version_postgres(self.ctx, conn, 59)
-
-    def _migrate_from_v59_to_v60_postgres(self, conn: Any) -> None:
-        """Atomically rebuild the PostgreSQL task graph under owner/dataset tenancy."""
-        backend = self.backend
-        backend.execute(
-            "LOCK TABLE notes, note_tasks, task_note_projections, task_events, "
-            "task_event_read_state, note_task_reconciliation_state IN ACCESS EXCLUSIVE MODE",
-            connection=conn,
-        )
-        source_relations = ("notes", *self._NOTE_TASK_V60_TABLES[:-1])
-        relation_rows = backend.execute(
-            """
-            SELECT table_row.relname AS table_name, table_row.relrowsecurity AS rls_enabled,
-                   table_row.relforcerowsecurity AS rls_forced,
-                   table_row.relowner=current_user::regrole AS is_table_owner,
-                   pg_has_role(current_user, namespace_row.nspowner, 'USAGE')
-                     AS is_schema_owner
-              FROM pg_class AS table_row
-              JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
-             WHERE namespace_row.nspname=current_schema() AND table_row.relkind IN ('r','p')
-               AND table_row.relname = ANY(%s)
-            """,
-            (list(source_relations),),
-            connection=conn,
-        ).rows
-        policy_rows = backend.execute(
-            """
-            SELECT tablename AS table_name, policyname AS policy_name, permissive,
-                   roles::text AS roles, cmd AS command, qual AS using_expression,
-                   with_check AS check_expression
-              FROM pg_policies
-             WHERE schemaname=current_schema() AND tablename = ANY(%s)
-             ORDER BY tablename,policyname
-            """,
-            (list(source_relations),),
-            connection=conn,
-        ).rows
-        forced_relations = postgres_schema._verify_note_task_v59_authority_catalog(
-            relation_rows, policy_rows
-        )
-        collision_names = (
-            "task_projection_drifts",
-            self._NOTE_TASK_SCOPE_AUTHORITY_TABLE,
-            *(f"{table}_v60" for table in self._NOTE_TASK_V60_RELATIONS),
-        )
-        collisions = backend.execute(
-            """
-            SELECT table_row.relname AS relation_name
-              FROM pg_class AS table_row
-              JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
-             WHERE namespace_row.nspname=current_schema() AND table_row.relname = ANY(%s)
-            """,
-            (list(collision_names),),
-            connection=conn,
-        ).rows
-        if collisions:
-            raise SchemaError("Notes task v60 target collision requires explicit repair.")  # noqa: TRY003
-        note_index_collision = backend.execute(
-            "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-            "WHERE n.nspname=current_schema() AND c.relname='uq_notes_owner_id'",
-            connection=conn,
-        ).rows
-        if note_index_collision:
-            raise SchemaError("Notes task v60 notes-owner index collision requires explicit repair.")  # noqa: TRY003
-
-        for table in forced_relations:
-            backend.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY", connection=conn)  # nosec B608
-        source = postgres_schema._validate_note_task_source_postgres(self.ctx, conn)
-        migration_support._note_task_v60_migration_checkpoint("validate")
-
-        postgres_schema._rename_note_task_v59_postgres_constraints(self.ctx, conn)
-        postgres_schema._create_note_task_schema_v60_postgres(self.ctx, conn)
-        migration_support._note_task_v60_migration_checkpoint("create")
-
-        dataset = self._LOCAL_UNBOUND_TASK_DATASET_ID
-        for row in source["tasks"]:
-            owner, _note_id = source["task_scopes"][str(row["id"])]
-            canonical_source = self._note_task_v60_json_safe(row)
-            canonical_hash, diagnostic_code, diagnostic_hash = self._canonicalize_legacy_task_v60(
-                canonical_source, owner_user_id=owner
-            )
-            backend.execute(
-                """
-                INSERT INTO note_tasks_v60(
-                  owner_user_id,dataset_id,id,note_id,text,status,metadata_json,projection_status,
-                  deleted,created_at,updated_at,completed_at,client_id,version,canonical_revision,
-                  canonical_hash,source_diagnostic_code,source_diagnostic_hash
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    owner, dataset, row["id"], row["note_id"], row["text"], row["status"],
-                    row["metadata_json"], row["projection_status"], row["deleted"], row["created_at"],
-                    row["updated_at"], row["completed_at"], row["client_id"], row["version"],
-                    row["version"], canonical_hash, diagnostic_code, diagnostic_hash,
-                ),
-                connection=conn,
-            )
-        for row in source["projections"]:
-            owner, _note_id = source["task_scopes"][str(row["task_id"])]
-            backend.execute(
-                """
-                INSERT INTO task_note_projections_v60(
-                  owner_user_id,dataset_id,task_id,note_id,note_version,line_number,start_offset,
-                  end_offset,normalized_text_hash,occurrence_index,block_fingerprint,raw_line,
-                  has_child_content,projection_status,updated_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (owner, dataset, *tuple(row.values())),
-                connection=conn,
-            )
-        for row, owner, note_id, source_hash in source["events"]:
-            backend.execute(
-                """
-                INSERT INTO task_events_v60(
-                  owner_user_id,dataset_id,id,task_id,note_id,event_type,actor_type,actor_id,tool_name,
-                  policy_mode,approval_id,old_value_json,new_value_json,created_at,client_id,sync_revision,
-                  sync_object_hash,sync_server_cursor,source_device_id,client_occurred_at,source_kind,
-                  corrects_activity_id,deleted,deleted_at,delete_reason,source_diagnostic_code,
-                  source_diagnostic_hash
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    owner, dataset, row["id"], row["task_id"], note_id, row["event_type"],
-                    row["actor_type"], row["actor_id"], row["tool_name"], row["policy_mode"],
-                    row["approval_id"], row["old_value_json"], row["new_value_json"],
-                    row["created_at"], row["client_id"], 1, source_hash, None, None,
-                    row["created_at"], "trusted_bootstrap_v1", None, False, None, None,
-                    "legacy_task_activity_unverified", source_hash,
-                ),
-                connection=conn,
-            )
-        event_owners = {str(row[0]["id"]): row[1] for row in source["events"]}
-        for row in source["read_states"]:
-            backend.execute(
-                "INSERT INTO task_event_read_state_v60 VALUES (%s,%s,%s,%s,%s,%s)",
-                (event_owners[str(row["event_id"])], dataset, *tuple(row.values())),
-                connection=conn,
-            )
-        for row in source["reconciliation"]:
-            backend.execute(
-                "INSERT INTO note_task_reconciliation_state_v60 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (source["notes"][str(row["note_id"])], dataset, *tuple(row.values())),
-                connection=conn,
-            )
-        migration_support._note_task_v60_migration_checkpoint("copy")
-
-        verification_queries = {
-            "note_tasks": (source["tasks"], "id"),
-            "task_note_projections": (source["projections"], "task_id"),
-            "task_events": ([row[0] for row in source["events"]], "id"),
-            "task_event_read_state": (source["read_states"], "event_id,user_id"),
-            "note_task_reconciliation_state": (source["reconciliation"], "note_id"),
-        }
-        for table, (source_rows, ordering) in verification_queries.items():
-            source_columns = tuple(source_rows[0]) if source_rows else {
-                "note_tasks": ("id","note_id","text","status","metadata_json","projection_status","deleted","created_at","updated_at","completed_at","client_id","version"),
-                "task_note_projections": ("task_id","note_id","note_version","line_number","start_offset","end_offset","normalized_text_hash","occurrence_index","block_fingerprint","raw_line","has_child_content","projection_status","updated_at"),
-                "task_events": ("id","task_id","note_id","event_type","actor_type","actor_id","tool_name","policy_mode","approval_id","old_value_json","new_value_json","created_at","client_id"),
-                "task_event_read_state": ("event_id","user_id","read_at","dismissed_at"),
-                "note_task_reconciliation_state": ("note_id","note_version","status","reconciled_at","item_count","warning_count","cursor"),
-            }[table]
-            target_rows = [
-                dict(row) for row in backend.execute(
-                    f"SELECT {','.join(source_columns)} FROM {table}_v60 ORDER BY {ordering}",  # nosec B608
-                    connection=conn,
-                ).rows
-            ]
-            if len(source_rows) != len(target_rows) or self._note_task_v60_hash(
-                self._note_task_v60_json_safe(source_rows)
-            ) != self._note_task_v60_hash(self._note_task_v60_json_safe(target_rows)):
-                raise SchemaError(f"Notes task v60 source verification failed for {table}.")  # noqa: TRY003
-
-        for table in (
-            "task_event_read_state", "task_note_projections", "note_task_reconciliation_state",
-            "task_events", "note_tasks",
-        ):
-            backend.execute(f"DROP TABLE {table}", connection=conn)  # nosec B608
-        for table in self._NOTE_TASK_V60_RELATIONS:
-            backend.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}", connection=conn)  # nosec B608
-        for statement in postgres_schema._note_task_v60_postgres_indexes():
-            backend.execute(statement, connection=conn)
-        migration_support._note_task_v60_migration_checkpoint("index")
-
-        for table in forced_relations:
-            backend.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY", connection=conn)  # nosec B608
-        task_rls: list[str] = []
-        for statement in build_chacha_rls_sql():
-            if any(
-                f"ALTER TABLE IF EXISTS {table} " in statement
-                or f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}" in statement
-                or f"CREATE POLICY {table}_tenant_isolation ON {table}" in statement
-                for table in self._NOTE_TASK_V60_RELATIONS
-            ):
-                task_rls.append(statement)
-        if len(task_rls) != 4 * len(self._NOTE_TASK_V60_RELATIONS):
-            raise SchemaError("Notes task v60 RLS definition is not canonical.")  # noqa: TRY003
-        for statement in task_rls:
-            backend.execute(statement, connection=conn)
-        postgres_schema._verify_note_task_schema_postgres(self.ctx, conn)
-        migration_support._note_task_v60_migration_checkpoint("verify")
-        version_cursor = backend.execute(
-            "UPDATE db_schema_version SET version=60 WHERE schema_name=%s AND version=59",
-            (self._SCHEMA_NAME,),
-            connection=conn,
-        )
-        if version_cursor.rowcount != 1 or postgres_schema._get_schema_version_postgres(self.ctx, conn) != 60:
-            raise SchemaError("Notes task v60 PostgreSQL migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v60_to_v61_postgres(self, conn: Any) -> None:
-        """Add recipient-owned shared chat state with verified forced RLS."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 60:
-            raise SchemaError("Shared workspace chat v61 migration requires schema version 60.")  # noqa: TRY003
-        migration_script = "\n".join(
-            (
-                self._MIGRATION_SQL_V60_TO_V61_POSTGRES,
-                *build_shared_workspace_chat_rls_sql(),
-                self._SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL,
-            )
-        )
-        postgres_schema._apply_postgres_migration_script(self.ctx,
-            migration_script,
-            conn,
-            expected_version=61,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 61:
-            raise SchemaError("Shared workspace chat v61 PostgreSQL version verification failed.")  # noqa: TRY003
-
-    def _migrate_from_v61_to_v62_postgres(self, conn: Any) -> None:
-        """Add operation-fenced staged Workspace clone lifecycle markers."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 61:
-            raise SchemaError("Workspace clone lifecycle v62 migration requires schema version 61.")  # noqa: TRY003
-        postgres_schema._apply_postgres_migration_script(self.ctx,
-            self._MIGRATION_SQL_V61_TO_V62_POSTGRES,
-            conn,
-            expected_version=62,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 62:
-            raise SchemaError("Workspace clone lifecycle v62 PostgreSQL version verification failed.")  # noqa: TRY003
-
-    def _migrate_from_v63_to_v64_postgres(self, conn: Any) -> None:
-        """Add durable, forced-RLS Notes graph suggestion persistence."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 63:
-            raise SchemaError("Notes graph suggestion v64 PostgreSQL migration requires schema version 63.")  # noqa: TRY003
-        postgres_schema._apply_postgres_migration_script(self.ctx,
-            self._MIGRATION_SQL_V63_TO_V64_POSTGRES,
-            conn,
-            expected_version=64,
-        )
-        postgres_schema._configure_note_graph_suggestion_receipt_delete_trigger_postgres(self.ctx, conn)
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 64:
-            raise SchemaError("Notes graph suggestion v64 PostgreSQL version verification failed.")  # noqa: TRY003
-
-    def _migrate_from_v85_to_v86_postgres(self, conn: Any) -> None:
-        """Add durable, forced-RLS Notes semantic-index persistence."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 85:
-            raise SchemaError("Notes semantic v86 PostgreSQL migration requires schema version 85.")  # noqa: TRY003
-        postgres_schema._apply_postgres_migration_script(self.ctx,
-            self._MIGRATION_SQL_V85_TO_V86_POSTGRES,
-            conn,
-            expected_version=86,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 86:
-            raise SchemaError("Notes semantic v86 PostgreSQL version verification failed.")  # noqa: TRY003
-
-    def _migrate_from_v86_to_v87_postgres(self, conn: Any) -> None:
-        """Add forced-RLS crash-durable semantic cleanup authority."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 86:
-            raise SchemaError("Notes semantic v87 PostgreSQL migration requires schema version 86.")  # noqa: TRY003
-        postgres_schema._apply_postgres_migration_script(self.ctx,
-            self._MIGRATION_SQL_V86_TO_V87_POSTGRES,
-            conn,
-            expected_version=87,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 87:
-            raise SchemaError("Notes semantic v87 PostgreSQL version verification failed.")  # noqa: TRY003
-
-    def _migrate_from_v87_to_v88_postgres(self, conn: Any) -> None:
-        """Add forced-RLS operation receipts and resolved-model authority."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 87:
-            raise SchemaError("Notes semantic v88 PostgreSQL migration requires schema version 87.")
-        postgres_schema._apply_postgres_migration_script(self.ctx,
-            self._MIGRATION_SQL_V87_TO_V88_POSTGRES,
-            conn,
-            expected_version=88,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 88:
-            raise SchemaError("Notes semantic v88 PostgreSQL version verification failed.")
-
-    def _migrate_from_v65_to_v66(self, conn: sqlite3.Connection) -> None:
-        """Create principal-owned Buddy snapshots without changing Persona rows."""
-        from tldw_Server_API.app.core.DB_Management.Buddy_DB import BUDDY_SCHEMA_SQL
-        from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BUDDY_TURNS_SCHEMA_SQL
-
-        for statement in split_sql_statements(BUDDY_SCHEMA_SQL + BUDDY_TURNS_SCHEMA_SQL):
-            conn.execute(statement)
-        conn.execute(
-            "UPDATE db_schema_version SET version = 66 WHERE schema_name = ? AND version = 65",
-            (self._SCHEMA_NAME,),
-        )
-
-    def _migrate_from_v65_to_v66_postgres(self, conn: Any) -> None:
-        """Create Buddy storage and its tenant policies in the caller transaction."""
-        from tldw_Server_API.app.core.DB_Management.Buddy_DB import BUDDY_SCHEMA_SQL
-        from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BUDDY_TURNS_SCHEMA_SQL
-
-        for statement in split_sql_statements(BUDDY_SCHEMA_SQL + BUDDY_TURNS_SCHEMA_SQL):
-            self.backend.execute(statement, connection=conn)
-        for table in (
-            "buddy_profiles",
-            "buddy_assets",
-            "buddy_attachments",
-            "buddy_result_acknowledgements",
-            "buddy_turn_owners",
-            "buddy_turns",
-        ):
-            self.backend.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY", connection=conn)
-            self.backend.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY", connection=conn)
-            self.backend.execute(
-                f"CREATE POLICY {table}_tenant_isolation ON {table} "
-                "USING (user_id = current_setting('app.current_user_id', true)) "
-                "WITH CHECK (user_id = current_setting('app.current_user_id', true))",
-                connection=conn,
-            )
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
-            (66, self._SCHEMA_NAME, 65),
-            connection=conn,
-        )
-
-    def _migrate_from_v70_to_v71(self, conn: sqlite3.Connection) -> None:
-        """Preserve legacy rows; only specialized admission may set protected provenance."""
-        keyword_columns = {row[1] for row in conn.execute("PRAGMA table_info(keywords)")}
-        if "merged_into_sync_id" not in keyword_columns:
-            conn.execute(
-                "ALTER TABLE keywords ADD COLUMN merged_into_sync_id TEXT "
-                "CONSTRAINT keyword_merge_tombstone CHECK (merged_into_sync_id IS NULL "
-                "OR (deleted = 1 AND merged_into_sync_id <> sync_id))"
-            )
-        conn.execute(self._HISTORY_PROJECTIONS_SCHEMA_SQL)
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
-        if "history_admission_json" not in columns:
-            conn.execute("ALTER TABLE messages ADD COLUMN history_admission_json TEXT")
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS history_projection_immutable
-            BEFORE UPDATE ON conversation_history_projections
-            BEGIN SELECT RAISE(ABORT, 'History projections are immutable'); END
-        """)
-        conn.execute(
-            "UPDATE db_schema_version SET version = 71 WHERE schema_name = ? AND version = 70",
-            (self._SCHEMA_NAME,),
-        )
-        if sqlite_schema._get_db_version(self.ctx, conn) != 71:
-            raise SchemaError("History projection migration V70->V71 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v71_to_v72(self, conn: sqlite3.Connection) -> None:
-        """Install durable native fork receipts and asset ownership in one transaction."""
-        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import native_fork_schema_statements
-
-        if not migration_support._native_fork_schema_is_installed(self.ctx, conn):
-            for statement in native_fork_schema_statements(postgres=False):
-                conn.execute(statement)
-        conn.execute(
-            "UPDATE db_schema_version SET version = 72 WHERE schema_name = ? AND version = 71",
-            (self._SCHEMA_NAME,),
-        )
-        if sqlite_schema._get_db_version(self.ctx, conn) != 72:
-            raise SchemaError("Native fork migration V71->V72 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v75_to_v76_postgres(self, conn: Any) -> None:
-        """Install native fork storage and direct-owner RLS with the version bump."""
-        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import native_fork_schema_statements
-
-        if not migration_support._native_fork_schema_is_installed(self.ctx, conn):
-            for statement in native_fork_schema_statements(postgres=True):
-                self.backend.execute(statement, connection=conn)
-        postgres_schema._ensure_chacha_rls_postgres(self.ctx, conn)
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 75",
-            (76, self._SCHEMA_NAME), connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 76:
-            raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v80_to_v81(self, conn: sqlite3.Connection) -> None:
-        """Issue private row identity independently of copied IDs and journal retention."""
-        conn.execute("ALTER TABLE conversations ADD COLUMN source_incarnation_id TEXT")
-        conn.execute("UPDATE conversations SET source_incarnation_id = lower(hex(randomblob(16)))")
-        conn.execute(
-            """CREATE TRIGGER conversation_incarnation_input BEFORE INSERT ON conversations
-            WHEN NEW.source_incarnation_id IS NOT NULL BEGIN
-            SELECT RAISE(ABORT, 'conversation_incarnation_reserved'); END"""
-        )
-        conn.execute(
-            """CREATE TRIGGER conversation_incarnation_create AFTER INSERT ON conversations BEGIN
-            UPDATE conversations SET source_incarnation_id = lower(hex(randomblob(16))) WHERE id = NEW.id; END"""
-        )
-        conn.execute(
-            """CREATE TRIGGER conversation_incarnation_immutable BEFORE UPDATE OF source_incarnation_id ON conversations
-            WHEN OLD.source_incarnation_id IS NOT NULL AND NEW.source_incarnation_id IS NOT OLD.source_incarnation_id BEGIN
-            SELECT RAISE(ABORT, 'conversation_incarnation_immutable'); END"""
-        )
-        conn.execute(
-            "UPDATE db_schema_version SET version = 81 WHERE schema_name = ? AND version = 80", (self._SCHEMA_NAME,)
-        )
-        if sqlite_schema._get_db_version(self.ctx, conn) != 81:
-            raise SchemaError("Conversation incarnation migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v84_to_v85_postgres(self, conn: Any) -> None:
-        """Use server UUID issuance on all INSERT paths, preserving forced-owner RLS."""
-        self.backend.execute(
-            "ALTER TABLE conversations ADD COLUMN source_incarnation_id TEXT NOT NULL DEFAULT gen_random_uuid()::text",
-            connection=conn,
-        )
-        self.backend.execute(
-            """CREATE FUNCTION conversation_source_incarnation_guard() RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN
-                IF TG_OP = 'INSERT' THEN
-                    NEW.source_incarnation_id := gen_random_uuid()::text;
-                ELSIF NEW.source_incarnation_id IS DISTINCT FROM OLD.source_incarnation_id THEN
-                    RAISE EXCEPTION 'conversation_incarnation_immutable';
-                END IF;
-                RETURN NEW;
-            END; $$""",
-            connection=conn,
-        )
-        self.backend.execute(
-            "CREATE TRIGGER conversation_incarnation_guard BEFORE INSERT OR UPDATE OF source_incarnation_id ON conversations FOR EACH ROW EXECUTE FUNCTION conversation_source_incarnation_guard()",
-            connection=conn,
-        )
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = 85 WHERE schema_name = %s AND version = 84",
-            (self._SCHEMA_NAME,),
-            connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 85:
-            raise SchemaError("Conversation incarnation migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v79_to_v80(self, conn: sqlite3.Connection) -> None:
-        """Preserve unknown legacy roles rather than infer them from representation."""
-        conn.execute(
-            "ALTER TABLE native_chat_asset_references ADD COLUMN role TEXT "
-            "CHECK (role IN ('message_image','document_context','generated_image','reference_image'))"
-        )
-        conn.execute(
-            "UPDATE db_schema_version SET version = 80 WHERE schema_name = ? AND version = 79",
-            (self._SCHEMA_NAME,),
-        )
-        if sqlite_schema._get_db_version(self.ctx, conn) != 80:
-            raise SchemaError("Native reference role migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v83_to_v84_postgres(self, conn: Any) -> None:
-        """Add explicit roles without changing existing forced-owner RLS or rows."""
-        self.backend.execute(
-            "ALTER TABLE native_chat_asset_references ADD COLUMN role TEXT "
-            "CHECK (role IN ('message_image','document_context','generated_image','reference_image'))",
-            connection=conn,
-        )
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = 84 WHERE schema_name = %s AND version = 83",
-            (self._SCHEMA_NAME,),
-            connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 84:
-            raise SchemaError("Native reference role migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v78_to_v79(self, conn: sqlite3.Connection) -> None:
-        """Freeze quota identity before external authority work in the native store."""
-        conn.execute('ALTER TABLE native_chat_quota_intents ADD COLUMN quota_owner_json TEXT')
-        conn.execute('UPDATE db_schema_version SET version = 79 WHERE schema_name = ? AND version = 78', (self._SCHEMA_NAME,))
-        if sqlite_schema._get_db_version(self.ctx, conn) != 79:
-            raise SchemaError('Native quota descriptor migration failed version verification.')
-
-    def _migrate_from_v82_to_v83_postgres(self, conn: Any) -> None:
-        """Retain the existing forced-owner RLS while adding frozen quota identity."""
-        self.backend.execute('ALTER TABLE native_chat_quota_intents ADD COLUMN quota_owner_json TEXT', connection=conn)
-        self.backend.execute('UPDATE db_schema_version SET version = 83 WHERE schema_name = %s AND version = 82', (self._SCHEMA_NAME,), connection=conn)
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 83:
-            raise SchemaError('Native quota descriptor migration failed version verification.')
-
-    def _migrate_from_v77_to_v78(self, conn: sqlite3.Connection) -> None:
-        """Install owner-scoped local provenance receipts in the Notes transaction."""
-        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
-            notes_provenance_receipts_schema_sql,
-        )
-
-        conn.execute(notes_provenance_receipts_schema_sql())
-        conn.execute(
-            "UPDATE db_schema_version SET version = 78 WHERE schema_name = ? AND version = 77", (self._SCHEMA_NAME,)
-        )
-        if sqlite_schema._get_db_version(self.ctx, conn) != 78:
-            raise SchemaError("Knowledge provenance receipt SQLite migration failed version verification.")
-
-
-    def _migrate_from_v90_to_v91_postgres(self, conn: Any) -> None:
-        """Preserve unowned legacy rows before publishing forced registry isolation."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 90:
-            raise SchemaError("Skill registry PostgreSQL owner migration requires schema version90.")
-        from tldw_Server_API.app.core.DB_Management.chacha.skill_registry_schema import (
-            postgres_skill_registry_statements,
-        )
-
-        for statement in postgres_skill_registry_statements():
-            self.backend.execute(statement, connection=conn)
-        from tldw_Server_API.app.core.DB_Management.chacha.skill_registry_schema import verify_postgres_skill_registry
-
-        verify_postgres_skill_registry(
-            self.backend, getattr(conn, "_connection", conn), self._normalize_postgres_catalog_expression
-        )
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 90",
-            (91, self._SCHEMA_NAME),
-            connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 91:
-            raise SchemaError("Skill registry PostgreSQL owner migration failed version verification.")
-
-    def _migrate_from_v88_to_v89_postgres(self, conn: Any) -> None:
-        """Quarantine unowned legacy dictionaries before publishing forced RLS."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 88:
-            raise SchemaError("Dictionary PostgreSQL owner migration requires schema version 88.")
-        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_dictionary_rls_sql
-        from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import (
-            postgres_dictionary_schema_statements,
-        )
-
-        for statement in (*postgres_dictionary_schema_statements(), *build_dictionary_rls_sql()):
-            self.backend.execute(statement, connection=conn)
-        postgres_schema._verify_dictionary_schema_postgres(self.ctx, conn)
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 88",
-            (89, self._SCHEMA_NAME), connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 89:
-            raise SchemaError("Dictionary PostgreSQL owner migration failed version verification.")
-
-    def _migrate_from_v81_to_v82_postgres(self, conn: Any) -> None:
-        """Install permanent local receipts with forced owner RLS before the version bump."""
-        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
-            build_notes_provenance_receipts_rls_sql,
-        )
-        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
-            notes_provenance_receipts_schema_sql,
-        )
-
-        for statement in (notes_provenance_receipts_schema_sql(), *build_notes_provenance_receipts_rls_sql()):
-            self.backend.execute(statement, connection=conn)
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 81",
-            (82, self._SCHEMA_NAME),
-            connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 82:
-            raise SchemaError("Knowledge provenance receipt PostgreSQL migration failed version verification.")
-
-    def _migrate_from_v76_to_v77(self, conn: sqlite3.Connection) -> None:
-        """Install owner-bound Knowledge evidence in the registered SQLite migration."""
-        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
-
-        conn.execute(notes_provenance_schema_sql(postgres=False))
-        conn.execute("UPDATE db_schema_version SET version = 77 WHERE schema_name = ? AND version = 76", (self._SCHEMA_NAME,))
-        if sqlite_schema._get_db_version(self.ctx, conn) != 77:
-            raise SchemaError("Knowledge provenance SQLite migration failed version verification.")
-
-    def _migrate_from_v80_to_v81_postgres(self, conn: Any) -> None:
-        """Install owner-bound Knowledge evidence and forced RLS before version bump."""
-        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_notes_provenance_rls_sql
-        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
-
-        for statement in (notes_provenance_schema_sql(postgres=True), *build_notes_provenance_rls_sql()):
-            self.backend.execute(statement, connection=conn)
-        self.backend.execute("UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 80", (81, self._SCHEMA_NAME), connection=conn)
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 81:
-            raise SchemaError("Knowledge provenance PostgreSQL migration failed version verification.")
-
-    def _migrate_from_v73_to_v74(self, conn: sqlite3.Connection) -> None:
-        """Install permanent startup receipts inside the registered SQLite migration."""
-        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
-            workspace_chat_startup_schema_statements,
-        )
-
-        for statement in workspace_chat_startup_schema_statements(postgres=False):
-            conn.execute(statement)
-        conn.execute("UPDATE db_schema_version SET version = 74 WHERE schema_name = ? AND version = 73", (self._SCHEMA_NAME,))
-        if sqlite_schema._get_db_version(self.ctx, conn) != 74:
-            raise SchemaError("Workspace startup migration V73->V74 failed version verification.")
-
-    def _migrate_from_v74_to_v75(self, conn: sqlite3.Connection) -> None:
-        """Add client-id create fingerprints without inferring them for existing chats."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V74_TO_V75):
-            conn.execute(statement)
-        if sqlite_schema._get_db_version(self.ctx, conn) != 75:
-            raise SchemaError("Conversation create fingerprint migration V74->V75 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v78_to_v79_postgres(self, conn: Any) -> None:
-        """Add PostgreSQL client-id create fingerprints in the caller's upgrade transaction."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V78_TO_V79_POSTGRES):
-            self.backend.execute(statement, connection=conn)
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 79:
-            raise SchemaError(  # noqa: TRY003
-                "Conversation create fingerprint PostgreSQL migration V78->V79 failed version verification."
-            )
-
-    def _migrate_from_v75_to_v76(self, conn: sqlite3.Connection) -> None:
-        """Clear the retired Sync placeholder persona from this owner's chats."""
-        conn.execute(self._RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL)
-        conn.execute(
-            "UPDATE db_schema_version SET version = 76 WHERE schema_name = ? AND version = 75", (self._SCHEMA_NAME,)
-        )
-        if sqlite_schema._get_db_version(self.ctx, conn) != 76:
-            raise SchemaError("Sync placeholder repair migration V75->V76 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v79_to_v80_postgres(self, conn: Any) -> None:
-        """Clear the retired Sync placeholder persona from every owner's chats.
-
-        One PostgreSQL database holds every owner's chats, and `conversations`
-        has a forced tenant policy. Startup refuses a SUPERUSER or BYPASSRLS role
-        for the content backend, but this migration can still run under an admin
-        DSN, and such a role sees all rows. A table owner that does not
-        bypass it would repair only the rows its session happens to see and then
-        record the version, leaving the other owners' chats broken for good. So
-        the policy is lifted for the owner inside this transaction, behind an
-        ACCESS EXCLUSIVE lock that keeps every other session out of the table,
-        and put back before the version bump.
-        """
-        backend = self.backend
-        backend.execute("LOCK TABLE conversations IN ACCESS EXCLUSIVE MODE", connection=conn)
-        states = backend.execute(
-            """
-            SELECT table_row.relrowsecurity,
-                   table_row.relforcerowsecurity,
-                   pg_has_role(current_user, table_row.relowner, 'USAGE') AS is_table_owner,
-                   (SELECT role_row.rolsuper OR role_row.rolbypassrls
-                      FROM pg_roles AS role_row
-                     WHERE role_row.rolname = current_user) AS bypasses_rls
-              FROM pg_class AS table_row
-              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
-             WHERE namespace_row.nspname = current_schema()
-               AND table_row.relkind IN ('r', 'p')
-               AND table_row.relname = 'conversations'
-            """,
-            connection=conn,
-        ).rows
-        if len(states) != 1:
-            raise SchemaError("Sync placeholder repair v80 cannot verify the conversations relation.")  # noqa: TRY003
-        state = states[0]
-        policy_applies = bool(state.get("relrowsecurity")) and not bool(state.get("bypasses_rls"))
-        is_table_owner = bool(state.get("is_table_owner"))
-        if policy_applies and not is_table_owner:
-            raise SchemaError(  # noqa: TRY003
-                "Sync placeholder repair v80 requires the PostgreSQL schema-owner migration path."
-            )
-        lift_forced_policy = policy_applies and bool(state.get("relforcerowsecurity"))
-        if lift_forced_policy:
-            backend.execute("ALTER TABLE conversations NO FORCE ROW LEVEL SECURITY", connection=conn)
-        backend.execute(self._RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL, connection=conn)
-        if lift_forced_policy:
-            backend.execute("ALTER TABLE conversations FORCE ROW LEVEL SECURITY", connection=conn)
-        backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 79",
-            (80, self._SCHEMA_NAME), connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 80:
-            raise SchemaError(  # noqa: TRY003
-                "Sync placeholder repair PostgreSQL migration V79->V80 failed version verification."
-            )
-
-    def _migrate_from_v77_to_v78_postgres(self, conn: Any) -> None:
-        """Install PostgreSQL receipts with forced owner RLS before the version bump."""
-        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_workspace_chat_startup_rls_sql
-        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
-            workspace_chat_startup_schema_statements,
-        )
-
-        for statement in (*workspace_chat_startup_schema_statements(postgres=True), *build_workspace_chat_startup_rls_sql()):
-            self.backend.execute(statement, connection=conn)
-        self.backend.execute("UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 77", (78, self._SCHEMA_NAME), connection=conn)
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 78:
-            raise SchemaError("Workspace startup PostgreSQL migration V77->V78 failed version verification.")
-
-    def _migrate_from_v74_to_v75_postgres(self, conn: Any) -> None:
-        """Create the PostgreSQL projection store and protected nullable provenance."""
-        statements = (
-            self._HISTORY_PROJECTIONS_SCHEMA_SQL,
-            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS history_admission_json TEXT",
-            """CREATE OR REPLACE FUNCTION history_projection_immutable() RETURNS TRIGGER AS $$
-               BEGIN RAISE EXCEPTION 'History projections are immutable'; END;
-               $$ LANGUAGE plpgsql""",
-            "DROP TRIGGER IF EXISTS history_projection_immutable ON conversation_history_projections",
-            "CREATE TRIGGER history_projection_immutable BEFORE UPDATE ON conversation_history_projections "
-            "FOR EACH ROW EXECUTE FUNCTION history_projection_immutable()",
-        )
-        for statement in statements:
-            self.backend.execute(statement, connection=conn)
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 74",
-            (75, self._SCHEMA_NAME), connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 75:
-            raise SchemaError("History projection PostgreSQL migration V74->V75 failed version verification.")  # noqa: TRY003
-        postgres_schema._ensure_chacha_rls_postgres(self.ctx, conn)
-
-    def _migrate_from_v66_to_v67(self, conn: sqlite3.Connection) -> None:
-        """Add OSCE quiz activity metadata, stations, and practice attempts."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67):
-            conn.execute(statement)
-        if sqlite_schema._get_db_version(self.ctx, conn) != 67:
-            raise SchemaError("OSCE schema migration V66->V67 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v66_to_v67_postgres(self, conn: Any) -> None:
-        """Add PostgreSQL OSCE quiz storage in the caller transaction."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67_POSTGRES):
-            self.backend.execute(statement, connection=conn)
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 67:
-            raise SchemaError("OSCE PostgreSQL migration V66->V67 failed version verification.")  # noqa: TRY003
-        postgres_schema._sync_postgres_sequences(self.ctx, conn)
-
-    def _migrate_from_v67_to_v68(self, conn: sqlite3.Connection) -> None:
-        """Retain local merge targets without changing historical keyword records."""
-        if sqlite_schema._get_db_version(self.ctx, conn) != 67:
-            raise SchemaError("Keyword survivor migration requires SQLite schema V67.")  # noqa: TRY003
-        conn.execute(
-            "ALTER TABLE keywords ADD COLUMN merged_into_sync_id TEXT "
-            "CONSTRAINT keyword_merge_tombstone CHECK (merged_into_sync_id IS NULL "
-            "OR (deleted = 1 AND merged_into_sync_id <> sync_id))"
-        )
-        conn.execute(
-            "UPDATE db_schema_version SET version = 68 WHERE schema_name = ? AND version = 67",
-            (self._SCHEMA_NAME,),
-        )
-        if sqlite_schema._get_db_version(self.ctx, conn) != 68:
-            raise SchemaError("Keyword survivor SQLite migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v72_to_v73_persona_companion(self, conn: sqlite3.Connection) -> None:
-        """Add Persona companion preferences and immutable visual-pack reviews."""
-        if sqlite_schema._get_db_version(self.ctx, conn) != 72:
-            raise SchemaError("Persona companion migration requires SQLite schema V72.")  # noqa: TRY003
-        migration_sql = self._MIGRATION_SQL_V72_TO_V73_PERSONA_COMPANION
-        existing_columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info('persona_visual_packs')")
-        }
-        if "companion_behavior_json" in existing_columns:
-            migration_sql = migration_sql.replace(
-                "ALTER TABLE persona_visual_packs ADD COLUMN companion_behavior_json TEXT;", ""
-            )
-        for statement in split_sql_statements(migration_sql):
-            conn.execute(statement)
-        if sqlite_schema._get_db_version(self.ctx, conn) != 73:
-            raise SchemaError("Persona companion SQLite migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v76_to_v77_persona_companion_postgres(self, conn: Any) -> None:
-        """Add Persona companion storage in the PostgreSQL migration transaction."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 76:
-            raise SchemaError("Persona companion migration requires PostgreSQL schema V76.")  # noqa: TRY003
-        postgres_schema._apply_postgres_migration_script(self.ctx,
-            self._MIGRATION_SQL_V76_TO_V77_PERSONA_COMPANION_POSTGRES,
-            conn,
-            expected_version=77,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 77:
-            raise SchemaError("Persona companion PostgreSQL migration failed version verification.")  # noqa: TRY003
-        postgres_schema._ensure_chacha_rls_postgres(self.ctx, conn)
-
-    def _migrate_from_v69_to_v70_postgres(self, conn: Any) -> None:
-        """Add local tombstone metadata in the existing PostgreSQL migration transaction."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 69:
-            raise SchemaError("Keyword survivor migration requires PostgreSQL schema V69.")  # noqa: TRY003
-        self.backend.execute(
-            "ALTER TABLE chacha_keywords ADD COLUMN merged_into_sync_id TEXT "
-            "CONSTRAINT keyword_merge_tombstone CHECK (merged_into_sync_id IS NULL "
-            "OR (deleted = TRUE AND merged_into_sync_id <> sync_id))",
-            connection=conn,
-        )
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
-            (70, self._SCHEMA_NAME, 69), connection=conn,
-        )
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 70:
-            raise SchemaError("Keyword survivor PostgreSQL migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v67_to_v68_postgres(self, conn: Any) -> None:
-        """Reserve character names per owner without changing existing rows or IDs."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 67:
-            raise SchemaError("Character name migration requires PostgreSQL schema V67.")  # noqa: TRY003
-        catalog_query = (
-            "SELECT c.conname, array_agg(a.attname ORDER BY k.ordinality) AS columns "
-            "FROM pg_constraint c "
-            "CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality) "
-            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
-            "WHERE c.conrelid = 'character_cards'::regclass AND c.contype = 'u' "
-            "GROUP BY c.oid, c.conname"
-        )
-        constraints = self.backend.execute(catalog_query, connection=conn).rows
-        old_keys = [row for row in constraints if row["columns"] == ["name"]]
-        new_key = "character_cards_client_id_name_key"
-        if len(old_keys) != 1 or any(row["conname"] == new_key for row in constraints):
-            raise SchemaError("Unexpected character name constraint catalog at PostgreSQL V67.")  # noqa: TRY003
-        self.backend.execute(
-            "ALTER TABLE character_cards ADD CONSTRAINT character_cards_client_id_name_key "
-            "UNIQUE (client_id, name)",
-            connection=conn,
-        )
-        old_key = self.backend.escape_identifier(old_keys[0]["conname"])
-        self.backend.execute(
-            f"ALTER TABLE character_cards DROP CONSTRAINT {old_key}",  # nosec B608 # Catalog-validated, quoted identifier
-            connection=conn,
-        )
-        final_constraints = self.backend.execute(catalog_query, connection=conn).rows
-        remaining_global_name_key = self.backend.execute(
-            "SELECT EXISTS (SELECT 1 FROM pg_index i "
-            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0] "
-            "WHERE i.indrelid = 'character_cards'::regclass AND i.indisunique "
-            "AND i.indnkeyatts = 1 AND a.attname = 'name')",
-            connection=conn,
-        ).scalar
-        if remaining_global_name_key or not any(
-            row["conname"] == new_key and row["columns"] == ["client_id", "name"]
-            for row in final_constraints
-        ):
-            raise SchemaError("Character owner/name constraint verification failed.")  # noqa: TRY003
-        result = self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s RETURNING version",
-            (68, self._SCHEMA_NAME, 67),
-            connection=conn,
-        )
-        if result.rowcount != 1 or postgres_schema._get_schema_version_postgres(self.ctx, conn) != 68:
-            raise SchemaError("Character name PostgreSQL migration V67->V68 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v68_to_v69_postgres(self, conn: Any) -> None:
-        """Reserve deck names per owner without changing records or tombstones."""
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 68:
-            raise SchemaError("Deck name migration requires PostgreSQL schema V68.")  # noqa: TRY003
-        catalog_query = (
-            "SELECT c.conname, array_agg(a.attname ORDER BY k.ordinality) AS columns "
-            "FROM pg_constraint c "
-            "CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality) "
-            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
-            "WHERE c.conrelid = 'decks'::regclass AND c.contype = 'u' "
-            "GROUP BY c.oid, c.conname"
-        )
-        constraints = self.backend.execute(catalog_query, connection=conn).rows
-        old_keys = [row for row in constraints if row["columns"] == ["name"]]
-        new_key = "decks_client_id_name_key"
-        if len(old_keys) != 1 or any(row["conname"] == new_key for row in constraints):
-            raise SchemaError("Unexpected deck name constraint catalog at PostgreSQL V68.")  # noqa: TRY003
-        self.backend.execute(
-            "ALTER TABLE decks ADD CONSTRAINT decks_client_id_name_key UNIQUE (client_id, name)",
-            connection=conn,
-        )
-        old_key = self.backend.escape_identifier(old_keys[0]["conname"])
-        self.backend.execute(
-            f"ALTER TABLE decks DROP CONSTRAINT {old_key}",  # nosec B608 # Catalog-validated, quoted identifier
-            connection=conn,
-        )
-        final_constraints = self.backend.execute(catalog_query, connection=conn).rows
-        remaining_global_name_key = self.backend.execute(
-            "SELECT EXISTS (SELECT 1 FROM pg_index i "
-            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0] "
-            "WHERE i.indrelid = 'decks'::regclass AND i.indisunique "
-            "AND i.indnkeyatts = 1 AND a.attname = 'name')",
-            connection=conn,
-        ).scalar
-        if remaining_global_name_key or not any(
-            row["conname"] == new_key and row["columns"] == ["client_id", "name"]
-            for row in final_constraints
-        ):
-            raise SchemaError("Deck owner/name constraint verification failed.")  # noqa: TRY003
-        result = self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s RETURNING version",
-            (69, self._SCHEMA_NAME, 68),
-            connection=conn,
-        )
-        if result.rowcount != 1 or postgres_schema._get_schema_version_postgres(self.ctx, conn) != 69:
-            raise SchemaError("Deck name PostgreSQL migration V68->V69 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v68_to_v69(self, conn: sqlite3.Connection) -> None:
-        """Persist opt-out, conservatively protecting legacy null defaults in an offline upgrade."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V68_TO_V69):
-            conn.execute(statement)
-        if sqlite_schema._get_db_version(self.ctx, conn) != 69:
-            raise SchemaError("Workspace Persona migration V68->V69 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v72_to_v73_postgres(self, conn: Any) -> None:
-        """Apply PostgreSQL opt-out storage and legacy backfill in the caller transaction."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V72_TO_V73_POSTGRES):
-            self.backend.execute(statement, connection=conn)
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 73:
-            raise SchemaError("Workspace Persona PostgreSQL migration V72->V73 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v69_to_v70(self, conn: sqlite3.Connection) -> None:
-        """Add bounded local startup storage without inferring historical provenance."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V69_TO_V70):
-            conn.execute(statement)
-        if sqlite_schema._get_db_version(self.ctx, conn) != 70:
-            raise SchemaError("Conversation startup migration V69->V70 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v73_to_v74_postgres(self, conn: Any) -> None:
-        """Add PostgreSQL startup storage in the caller's offline upgrade transaction."""
-        for statement in split_sql_statements(self._MIGRATION_SQL_V73_TO_V74_POSTGRES):
-            self.backend.execute(statement, connection=conn)
-        if postgres_schema._get_schema_version_postgres(self.ctx, conn) != 74:
-            raise SchemaError("Conversation startup PostgreSQL migration V73->V74 failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v64_to_v65(self, conn: sqlite3.Connection) -> None:
-        """Migrate schema from V64 to V65 (character resume snapshot state)."""
-        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V64 to V65 for DB: {self.db_path_str}...")
-        try:
-            ddl, _, _version_update = self._MIGRATION_SQL_V64_TO_V65.partition(
-                "UPDATE db_schema_version"
-            )
-            for statement in split_sql_statements(ddl):
-                conn.execute(statement)
-            migration_support._migration_v65_checkpoint(self.ctx, "schema-created")
-            conn.execute(
-                "UPDATE db_schema_version SET version = 65 WHERE schema_name = ? AND version = 64",
-                (self._SCHEMA_NAME,),
-            )
-            final_version = sqlite_schema._get_db_version(self.ctx, conn)
-            if final_version != 65:
-                raise SchemaError(  # noqa: TRY003, TRY301
-                    f"[{self._SCHEMA_NAME}] Migration V64->V65 failed version check. Expected 65, got: {final_version}"
-                )
-            logger.info(f"[{self._SCHEMA_NAME}] Migration to V65 completed.")
-        except sqlite3.Error as exc:
-            logger.error(f"[{self._SCHEMA_NAME}] Migration V64->V65 failed: {exc}", exc_info=True)
-            raise SchemaError(f"Migration V64->V65 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
-        except RuntimeError as exc:
-            raise SchemaError(f"Migration V64->V65 checkpoint failed: {exc}") from exc  # noqa: TRY003
-        except SchemaError:
-            raise
-
-    def _migrate_from_v64_to_v65_postgres(self, conn: Any) -> None:
-        """Migrate PostgreSQL schema from V64 to V65 in the caller transaction."""
-        ddl, _, _version_update = self._MIGRATION_SQL_V64_TO_V65_POSTGRES.partition(
-            "UPDATE db_schema_version"
-        )
-        for statement in split_sql_statements(ddl):
-            self.backend.execute(statement, connection=conn)
-        migration_support._migration_v65_checkpoint(self.ctx, "schema-created")
-        result = self.backend.execute(
-            "UPDATE db_schema_version SET version = %s "
-            "WHERE schema_name = %s AND version = %s RETURNING version",
-            (65, self._SCHEMA_NAME, 64),
-            connection=conn,
-        )
-        if result is None or result.rowcount != 1:
-            raise SchemaError(  # noqa: TRY003
-                f"[{self._SCHEMA_NAME}] Migration V64->V65 did not advance exactly one V64 schema row."
-            )
 
     def repair_conversation_assistant_identity(self, conn: Any) -> None:
         """Repair only historical missing Character fields, comparing locked normalized bindings."""
@@ -8222,124 +3543,124 @@ class CharactersRAGDB:
                     sqlite_schema._apply_schema_v4(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 5 and current_db_version == 4:
-                        self._migrate_from_v4_to_v5(conn)
+                        sqlite_steps._migrate_from_v4_to_v5(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 6 and current_db_version == 5:
-                        self._migrate_from_v5_to_v6(conn)
+                        sqlite_steps._migrate_from_v5_to_v6(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 7 and current_db_version == 6:
-                        self._migrate_from_v6_to_v7(conn)
+                        sqlite_steps._migrate_from_v6_to_v7(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 8 and current_db_version == 7:
-                        self._migrate_from_v7_to_v8(conn)
+                        sqlite_steps._migrate_from_v7_to_v8(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 9 and current_db_version == 8:
-                        self._migrate_from_v8_to_v9(conn)
+                        sqlite_steps._migrate_from_v8_to_v9(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 10 and current_db_version == 9:
-                        self._migrate_from_v9_to_v10(conn)
+                        sqlite_steps._migrate_from_v9_to_v10(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 11 and current_db_version == 10:
-                        self._migrate_from_v10_to_v11(conn)
+                        sqlite_steps._migrate_from_v10_to_v11(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 12 and current_db_version == 11:
-                        self._migrate_from_v11_to_v12(conn)
+                        sqlite_steps._migrate_from_v11_to_v12(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 13 and current_db_version == 12:
-                        self._migrate_from_v12_to_v13(conn)
+                        sqlite_steps._migrate_from_v12_to_v13(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 14 and current_db_version == 13:
-                        self._migrate_from_v13_to_v14(conn)
+                        sqlite_steps._migrate_from_v13_to_v14(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 15 and current_db_version == 14:
-                        self._migrate_from_v14_to_v15(conn)
+                        sqlite_steps._migrate_from_v14_to_v15(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 16 and current_db_version == 15:
-                        self._migrate_from_v15_to_v16(conn)
+                        sqlite_steps._migrate_from_v15_to_v16(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 17 and current_db_version == 16:
-                        self._migrate_from_v16_to_v17(conn)
+                        sqlite_steps._migrate_from_v16_to_v17(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 18 and current_db_version == 17:
-                        self._migrate_from_v17_to_v18(conn)
+                        sqlite_steps._migrate_from_v17_to_v18(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 19 and current_db_version == 18:
-                        self._migrate_from_v18_to_v19(conn)
+                        sqlite_steps._migrate_from_v18_to_v19(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 20 and current_db_version == 19:
-                        self._migrate_from_v19_to_v20(conn)
+                        sqlite_steps._migrate_from_v19_to_v20(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 21 and current_db_version == 20:
-                        self._migrate_from_v20_to_v21(conn)
+                        sqlite_steps._migrate_from_v20_to_v21(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 22 and current_db_version == 21:
-                        self._migrate_from_v21_to_v22(conn)
+                        sqlite_steps._migrate_from_v21_to_v22(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 23 and current_db_version == 22:
-                        self._migrate_from_v22_to_v23(conn)
+                        sqlite_steps._migrate_from_v22_to_v23(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 24 and current_db_version == 23:
-                        self._migrate_from_v23_to_v24(conn)
+                        sqlite_steps._migrate_from_v23_to_v24(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 25 and current_db_version == 24:
-                        self._migrate_from_v24_to_v25(conn)
+                        sqlite_steps._migrate_from_v24_to_v25(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 26 and current_db_version == 25:
-                        self._migrate_from_v25_to_v26(conn)
+                        sqlite_steps._migrate_from_v25_to_v26(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 27 and current_db_version == 26:
-                        self._migrate_from_v26_to_v27(conn)
+                        sqlite_steps._migrate_from_v26_to_v27(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 28 and current_db_version == 27:
-                        self._migrate_from_v27_to_v28(conn)
+                        sqlite_steps._migrate_from_v27_to_v28(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 29 and current_db_version == 28:
-                        self._migrate_from_v28_to_v29(conn)
+                        sqlite_steps._migrate_from_v28_to_v29(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 30 and current_db_version == 29:
-                        self._migrate_from_v29_to_v30(conn)
+                        sqlite_steps._migrate_from_v29_to_v30(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 31 and current_db_version == 30:
-                        self._migrate_from_v30_to_v31(conn)
+                        sqlite_steps._migrate_from_v30_to_v31(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 32 and current_db_version == 31:
-                        self._migrate_from_v31_to_v32(conn)
+                        sqlite_steps._migrate_from_v31_to_v32(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 33 and current_db_version == 32:
-                        self._migrate_from_v32_to_v33(conn)
+                        sqlite_steps._migrate_from_v32_to_v33(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 34 and current_db_version == 33:
-                        self._migrate_from_v33_to_v34(conn)
+                        sqlite_steps._migrate_from_v33_to_v34(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 35 and current_db_version == 34:
-                        self._migrate_from_v34_to_v35(conn)
+                        sqlite_steps._migrate_from_v34_to_v35(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 36 and current_db_version == 35:
-                        self._migrate_from_v35_to_v36(conn)
+                        sqlite_steps._migrate_from_v35_to_v36(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 37 and current_db_version == 36:
-                        self._migrate_from_v36_to_v37(conn)
+                        sqlite_steps._migrate_from_v36_to_v37(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 38 and current_db_version == 37:
-                        self._migrate_from_v37_to_v38(conn)
+                        sqlite_steps._migrate_from_v37_to_v38(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 39 and current_db_version == 38:
-                        self._migrate_from_v38_to_v39(conn)
+                        sqlite_steps._migrate_from_v38_to_v39(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 40 and current_db_version == 39:
-                        self._migrate_from_v39_to_v40(conn)
+                        sqlite_steps._migrate_from_v39_to_v40(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 41 and current_db_version == 40:
-                        self._migrate_from_v40_to_v41(conn)
+                        sqlite_steps._migrate_from_v40_to_v41(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 42 and current_db_version == 41:
-                        self._migrate_from_v41_to_v42(conn)
+                        sqlite_steps._migrate_from_v41_to_v42(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 43 and current_db_version == 42:
-                        self._migrate_from_v42_to_v43(conn)
+                        sqlite_steps._migrate_from_v42_to_v43(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 44 and current_db_version == 43:
-                        self._migrate_from_v43_to_v44(conn)
+                        sqlite_steps._migrate_from_v43_to_v44(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 45 and current_db_version == 44:
                         current_db_version = self._run_sqlite_linear_migration_step(
@@ -8349,112 +3670,112 @@ class CharactersRAGDB:
                             initial_version=current_initial_version,
                         )
                     if target_version >= 46 and current_db_version == 45:
-                        self._migrate_from_v45_to_v46(conn)
+                        sqlite_steps._migrate_from_v45_to_v46(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 47 and current_db_version == 46:
-                        self._migrate_from_v46_to_v47(conn)
+                        sqlite_steps._migrate_from_v46_to_v47(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 48 and current_db_version == 47:
-                        self._migrate_from_v47_to_v48(conn)
+                        sqlite_steps._migrate_from_v47_to_v48(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 49 and current_db_version == 48:
-                        self._migrate_from_v48_to_v49(conn)
+                        sqlite_steps._migrate_from_v48_to_v49(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 50 and current_db_version == 49:
-                        self._migrate_from_v49_to_v50(conn)
+                        sqlite_steps._migrate_from_v49_to_v50(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 51 and current_db_version == 50:
-                        self._migrate_from_v50_to_v51(conn)
+                        sqlite_steps._migrate_from_v50_to_v51(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 52 and current_db_version == 51:
-                        self._migrate_from_v51_to_v52(conn)
+                        sqlite_steps._migrate_from_v51_to_v52(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 53 and current_db_version == 52:
-                        self._migrate_from_v52_to_v53(conn)
+                        sqlite_steps._migrate_from_v52_to_v53(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 54 and current_db_version == 53:
-                        self._migrate_from_v53_to_v54(conn)
+                        sqlite_steps._migrate_from_v53_to_v54(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 55 and current_db_version == 54:
-                        self._migrate_from_v54_to_v55(conn)
+                        sqlite_steps._migrate_from_v54_to_v55(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 56 and current_db_version == 55:
-                        self._migrate_from_v55_to_v56(conn)
+                        sqlite_steps._migrate_from_v55_to_v56(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 57 and current_db_version == 56:
-                        self._migrate_from_v56_to_v57(conn)
+                        sqlite_steps._migrate_from_v56_to_v57(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 58 and current_db_version == 57:
-                        self._migrate_from_v57_to_v58(conn)
+                        sqlite_steps._migrate_from_v57_to_v58(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 59 and current_db_version == 58:
-                        self._migrate_from_v58_to_v59(conn)
+                        sqlite_steps._migrate_from_v58_to_v59(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 60 and current_db_version == 59:
-                        self._migrate_from_v59_to_v60_sqlite(conn)
+                        sqlite_steps._migrate_from_v59_to_v60_sqlite(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 61 and current_db_version == 60:
-                        self._migrate_from_v60_to_v61_sqlite(conn)
+                        sqlite_steps._migrate_from_v60_to_v61_sqlite(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 62 and current_db_version == 61:
-                        self._migrate_from_v61_to_v62_sqlite(conn)
+                        sqlite_steps._migrate_from_v61_to_v62_sqlite(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 63 and current_db_version == 62:
-                        self._migrate_from_v62_to_v63_sqlite(conn)
+                        sqlite_steps._migrate_from_v62_to_v63_sqlite(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 64 and current_db_version == 63:
-                        self._migrate_from_v63_to_v64_sqlite(conn)
+                        sqlite_steps._migrate_from_v63_to_v64_sqlite(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 65 and current_db_version == 64:
-                        self._migrate_from_v64_to_v65(conn)
+                        sqlite_steps._migrate_from_v64_to_v65(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 66 and current_db_version == 65:
-                        self._migrate_from_v65_to_v66(conn)
+                        sqlite_steps._migrate_from_v65_to_v66(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 67 and current_db_version == 66:
-                        self._migrate_from_v66_to_v67(conn)
+                        sqlite_steps._migrate_from_v66_to_v67(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 68 and current_db_version == 67:
-                        self._migrate_from_v67_to_v68(conn)
+                        sqlite_steps._migrate_from_v67_to_v68(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 69 and current_db_version == 68:
-                        self._migrate_from_v68_to_v69(conn)
+                        sqlite_steps._migrate_from_v68_to_v69(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 70 and current_db_version == 69:
-                        self._migrate_from_v69_to_v70(conn)
+                        sqlite_steps._migrate_from_v69_to_v70(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 71 and current_db_version == 70:
-                        self._migrate_from_v70_to_v71(conn)
+                        sqlite_steps._migrate_from_v70_to_v71(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 72 and current_db_version == 71:
-                        self._migrate_from_v71_to_v72(conn)
+                        sqlite_steps._migrate_from_v71_to_v72(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 73 and current_db_version == 72:
-                        self._migrate_from_v72_to_v73_persona_companion(conn)
+                        sqlite_steps._migrate_from_v72_to_v73_persona_companion(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 74 and current_db_version == 73:
-                        self._migrate_from_v73_to_v74(conn)
+                        sqlite_steps._migrate_from_v73_to_v74(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 75 and current_db_version == 74:
-                        self._migrate_from_v74_to_v75(conn)
+                        sqlite_steps._migrate_from_v74_to_v75(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 76 and current_db_version == 75:
-                        self._migrate_from_v75_to_v76(conn)
+                        sqlite_steps._migrate_from_v75_to_v76(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 77 and current_db_version == 76:
-                        self._migrate_from_v76_to_v77(conn)
+                        sqlite_steps._migrate_from_v76_to_v77(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 78 and current_db_version == 77:
-                        self._migrate_from_v77_to_v78(conn)
+                        sqlite_steps._migrate_from_v77_to_v78(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 79 and current_db_version == 78:
-                        self._migrate_from_v78_to_v79(conn)
+                        sqlite_steps._migrate_from_v78_to_v79(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 80 and current_db_version == 79:
-                        self._migrate_from_v79_to_v80(conn)
+                        sqlite_steps._migrate_from_v79_to_v80(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     if target_version >= 81 and current_db_version == 80:
-                        self._migrate_from_v80_to_v81(conn)
+                        sqlite_steps._migrate_from_v80_to_v81(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -8519,205 +3840,205 @@ class CharactersRAGDB:
                             initial_version=current_initial_version,
                         )
                         if target_version >= 6 and current_db_version == 5:
-                            self._migrate_from_v5_to_v6(conn)
+                            sqlite_steps._migrate_from_v5_to_v6(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 7 and current_db_version == 6:
-                            self._migrate_from_v6_to_v7(conn)
+                            sqlite_steps._migrate_from_v6_to_v7(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 8 and current_db_version == 7:
-                            self._migrate_from_v7_to_v8(conn)
+                            sqlite_steps._migrate_from_v7_to_v8(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 9 and current_db_version == 8:
-                            self._migrate_from_v8_to_v9(conn)
+                            sqlite_steps._migrate_from_v8_to_v9(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
+                            sqlite_steps._migrate_from_v9_to_v10(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
+                            sqlite_steps._migrate_from_v10_to_v11(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 5 and target_version >= 6:
-                        self._migrate_from_v5_to_v6(conn)
+                        sqlite_steps._migrate_from_v5_to_v6(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 7 and current_db_version == 6:
-                            self._migrate_from_v6_to_v7(conn)
+                            sqlite_steps._migrate_from_v6_to_v7(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 8 and current_db_version == 7:
-                            self._migrate_from_v7_to_v8(conn)
+                            sqlite_steps._migrate_from_v7_to_v8(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 9 and current_db_version == 8:
-                            self._migrate_from_v8_to_v9(conn)
+                            sqlite_steps._migrate_from_v8_to_v9(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
+                            sqlite_steps._migrate_from_v9_to_v10(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
+                            sqlite_steps._migrate_from_v10_to_v11(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 6 and target_version >= 7:
-                        self._migrate_from_v6_to_v7(conn)
+                        sqlite_steps._migrate_from_v6_to_v7(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 8 and current_db_version == 7:
-                            self._migrate_from_v7_to_v8(conn)
+                            sqlite_steps._migrate_from_v7_to_v8(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 9 and current_db_version == 8:
-                            self._migrate_from_v8_to_v9(conn)
+                            sqlite_steps._migrate_from_v8_to_v9(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
+                            sqlite_steps._migrate_from_v9_to_v10(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
+                            sqlite_steps._migrate_from_v10_to_v11(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 7 and target_version >= 8:
-                        self._migrate_from_v7_to_v8(conn)
+                        sqlite_steps._migrate_from_v7_to_v8(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 9 and current_db_version == 8:
-                            self._migrate_from_v8_to_v9(conn)
+                            sqlite_steps._migrate_from_v8_to_v9(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
+                            sqlite_steps._migrate_from_v9_to_v10(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
+                            sqlite_steps._migrate_from_v10_to_v11(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 8 and target_version >= 9:
-                        self._migrate_from_v8_to_v9(conn)
+                        sqlite_steps._migrate_from_v8_to_v9(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 10 and current_db_version == 9:
-                            self._migrate_from_v9_to_v10(conn)
+                            sqlite_steps._migrate_from_v9_to_v10(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
+                            sqlite_steps._migrate_from_v10_to_v11(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 9 and target_version >= 10:
-                        self._migrate_from_v9_to_v10(conn)
+                        sqlite_steps._migrate_from_v9_to_v10(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 11 and current_db_version == 10:
-                            self._migrate_from_v10_to_v11(conn)
+                            sqlite_steps._migrate_from_v10_to_v11(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 10 and target_version >= 11:
-                        self._migrate_from_v10_to_v11(conn)
+                        sqlite_steps._migrate_from_v10_to_v11(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 11 and target_version >= 12:
-                        self._migrate_from_v11_to_v12(conn)
+                        sqlite_steps._migrate_from_v11_to_v12(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 12 and target_version >= 13:
-                        self._migrate_from_v12_to_v13(conn)
+                        sqlite_steps._migrate_from_v12_to_v13(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 14 and current_db_version == 13:
-                            self._migrate_from_v13_to_v14(conn)
+                            sqlite_steps._migrate_from_v13_to_v14(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 15 and current_db_version == 14:
-                            self._migrate_from_v14_to_v15(conn)
+                            sqlite_steps._migrate_from_v14_to_v15(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 16 and current_db_version == 15:
-                            self._migrate_from_v15_to_v16(conn)
+                            sqlite_steps._migrate_from_v15_to_v16(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 13 and target_version >= 14:
-                        self._migrate_from_v13_to_v14(conn)
+                        sqlite_steps._migrate_from_v13_to_v14(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 15 and current_db_version == 14:
-                            self._migrate_from_v14_to_v15(conn)
+                            sqlite_steps._migrate_from_v14_to_v15(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 16 and current_db_version == 15:
-                            self._migrate_from_v15_to_v16(conn)
+                            sqlite_steps._migrate_from_v15_to_v16(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 14 and target_version >= 15:
-                        self._migrate_from_v14_to_v15(conn)
+                        sqlite_steps._migrate_from_v14_to_v15(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 16 and current_db_version == 15:
-                            self._migrate_from_v15_to_v16(conn)
+                            sqlite_steps._migrate_from_v15_to_v16(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 15 and target_version >= 16:
-                        self._migrate_from_v15_to_v16(conn)
+                        sqlite_steps._migrate_from_v15_to_v16(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 16 and target_version >= 17:
-                        self._migrate_from_v16_to_v17(conn)
+                        sqlite_steps._migrate_from_v16_to_v17(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 17 and target_version >= 18:
-                        self._migrate_from_v17_to_v18(conn)
+                        sqlite_steps._migrate_from_v17_to_v18(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 18 and target_version >= 19:
-                        self._migrate_from_v18_to_v19(conn)
+                        sqlite_steps._migrate_from_v18_to_v19(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 19 and target_version >= 20:
-                        self._migrate_from_v19_to_v20(conn)
+                        sqlite_steps._migrate_from_v19_to_v20(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 20 and target_version >= 21:
-                        self._migrate_from_v20_to_v21(conn)
+                        sqlite_steps._migrate_from_v20_to_v21(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 22 and current_db_version == 21:
-                            self._migrate_from_v21_to_v22(conn)
+                            sqlite_steps._migrate_from_v21_to_v22(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 23 and current_db_version == 22:
-                            self._migrate_from_v22_to_v23(conn)
+                            sqlite_steps._migrate_from_v22_to_v23(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 24 and current_db_version == 23:
-                            self._migrate_from_v23_to_v24(conn)
+                            sqlite_steps._migrate_from_v23_to_v24(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 25 and current_db_version == 24:
-                            self._migrate_from_v24_to_v25(conn)
+                            sqlite_steps._migrate_from_v24_to_v25(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 21 and target_version >= 22:
-                        self._migrate_from_v21_to_v22(conn)
+                        sqlite_steps._migrate_from_v21_to_v22(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 23 and current_db_version == 22:
-                            self._migrate_from_v22_to_v23(conn)
+                            sqlite_steps._migrate_from_v22_to_v23(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 24 and current_db_version == 23:
-                            self._migrate_from_v23_to_v24(conn)
+                            sqlite_steps._migrate_from_v23_to_v24(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 25 and current_db_version == 24:
-                            self._migrate_from_v24_to_v25(conn)
+                            sqlite_steps._migrate_from_v24_to_v25(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 22 and target_version >= 23:
-                        self._migrate_from_v22_to_v23(conn)
+                        sqlite_steps._migrate_from_v22_to_v23(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 24 and current_db_version == 23:
-                            self._migrate_from_v23_to_v24(conn)
+                            sqlite_steps._migrate_from_v23_to_v24(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 25 and current_db_version == 24:
-                            self._migrate_from_v24_to_v25(conn)
+                            sqlite_steps._migrate_from_v24_to_v25(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 23 and target_version >= 24:
-                        self._migrate_from_v23_to_v24(conn)
+                        sqlite_steps._migrate_from_v23_to_v24(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 25 and current_db_version == 24:
-                            self._migrate_from_v24_to_v25(conn)
+                            sqlite_steps._migrate_from_v24_to_v25(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 24 and target_version >= 25:
-                        self._migrate_from_v24_to_v25(conn)
+                        sqlite_steps._migrate_from_v24_to_v25(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 25 and target_version >= 26:
-                        self._migrate_from_v25_to_v26(conn)
+                        sqlite_steps._migrate_from_v25_to_v26(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 27 and current_db_version == 26:
-                            self._migrate_from_v26_to_v27(conn)
+                            sqlite_steps._migrate_from_v26_to_v27(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 28 and current_db_version == 27:
-                            self._migrate_from_v27_to_v28(conn)
+                            sqlite_steps._migrate_from_v27_to_v28(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 29 and current_db_version == 28:
-                            self._migrate_from_v28_to_v29(conn)
+                            sqlite_steps._migrate_from_v28_to_v29(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 26 and target_version >= 27:
-                        self._migrate_from_v26_to_v27(conn)
+                        sqlite_steps._migrate_from_v26_to_v27(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 28 and current_db_version == 27:
-                            self._migrate_from_v27_to_v28(conn)
+                            sqlite_steps._migrate_from_v27_to_v28(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 29 and current_db_version == 28:
-                            self._migrate_from_v28_to_v29(conn)
+                            sqlite_steps._migrate_from_v28_to_v29(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 27 and target_version >= 28:
-                        self._migrate_from_v27_to_v28(conn)
+                        sqlite_steps._migrate_from_v27_to_v28(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                         if target_version >= 29 and current_db_version == 28:
-                            self._migrate_from_v28_to_v29(conn)
+                            sqlite_steps._migrate_from_v28_to_v29(self.ctx, conn)
                             current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     elif current_initial_version == 28 and target_version >= 29:
-                        self._migrate_from_v28_to_v29(conn)
+                        sqlite_steps._migrate_from_v28_to_v29(self.ctx, conn)
                         current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                     else:
                         # Fallback through the shared registry so late migrations
@@ -8735,103 +4056,103 @@ class CharactersRAGDB:
                     raise SchemaError(f"Unexpected schema state: current {current_initial_version}, target {target_version}")  # noqa: TRY003, TRY301
 
                 if target_version >= 12 and current_db_version == 11:
-                    self._migrate_from_v11_to_v12(conn)
+                    sqlite_steps._migrate_from_v11_to_v12(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 13 and current_db_version == 12:
-                    self._migrate_from_v12_to_v13(conn)
+                    sqlite_steps._migrate_from_v12_to_v13(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 14 and current_db_version == 13:
-                    self._migrate_from_v13_to_v14(conn)
+                    sqlite_steps._migrate_from_v13_to_v14(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 15 and current_db_version == 14:
-                    self._migrate_from_v14_to_v15(conn)
+                    sqlite_steps._migrate_from_v14_to_v15(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 16 and current_db_version == 15:
-                    self._migrate_from_v15_to_v16(conn)
+                    sqlite_steps._migrate_from_v15_to_v16(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 17 and current_db_version == 16:
-                    self._migrate_from_v16_to_v17(conn)
+                    sqlite_steps._migrate_from_v16_to_v17(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 18 and current_db_version == 17:
-                    self._migrate_from_v17_to_v18(conn)
+                    sqlite_steps._migrate_from_v17_to_v18(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 19 and current_db_version == 18:
-                    self._migrate_from_v18_to_v19(conn)
+                    sqlite_steps._migrate_from_v18_to_v19(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 20 and current_db_version == 19:
-                    self._migrate_from_v19_to_v20(conn)
+                    sqlite_steps._migrate_from_v19_to_v20(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 21 and current_db_version == 20:
-                    self._migrate_from_v20_to_v21(conn)
+                    sqlite_steps._migrate_from_v20_to_v21(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 22 and current_db_version == 21:
-                    self._migrate_from_v21_to_v22(conn)
+                    sqlite_steps._migrate_from_v21_to_v22(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 23 and current_db_version == 22:
-                    self._migrate_from_v22_to_v23(conn)
+                    sqlite_steps._migrate_from_v22_to_v23(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 24 and current_db_version == 23:
-                    self._migrate_from_v23_to_v24(conn)
+                    sqlite_steps._migrate_from_v23_to_v24(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 25 and current_db_version == 24:
-                    self._migrate_from_v24_to_v25(conn)
+                    sqlite_steps._migrate_from_v24_to_v25(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 26 and current_db_version == 25:
-                    self._migrate_from_v25_to_v26(conn)
+                    sqlite_steps._migrate_from_v25_to_v26(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 27 and current_db_version == 26:
-                    self._migrate_from_v26_to_v27(conn)
+                    sqlite_steps._migrate_from_v26_to_v27(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 28 and current_db_version == 27:
-                    self._migrate_from_v27_to_v28(conn)
+                    sqlite_steps._migrate_from_v27_to_v28(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 29 and current_db_version == 28:
-                    self._migrate_from_v28_to_v29(conn)
+                    sqlite_steps._migrate_from_v28_to_v29(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 30 and current_db_version == 29:
-                    self._migrate_from_v29_to_v30(conn)
+                    sqlite_steps._migrate_from_v29_to_v30(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 31 and current_db_version == 30:
-                    self._migrate_from_v30_to_v31(conn)
+                    sqlite_steps._migrate_from_v30_to_v31(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 32 and current_db_version == 31:
-                    self._migrate_from_v31_to_v32(conn)
+                    sqlite_steps._migrate_from_v31_to_v32(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 33 and current_db_version == 32:
-                    self._migrate_from_v32_to_v33(conn)
+                    sqlite_steps._migrate_from_v32_to_v33(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 34 and current_db_version == 33:
-                    self._migrate_from_v33_to_v34(conn)
+                    sqlite_steps._migrate_from_v33_to_v34(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 35 and current_db_version == 34:
-                    self._migrate_from_v34_to_v35(conn)
+                    sqlite_steps._migrate_from_v34_to_v35(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 36 and current_db_version == 35:
-                    self._migrate_from_v35_to_v36(conn)
+                    sqlite_steps._migrate_from_v35_to_v36(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 37 and current_db_version == 36:
-                    self._migrate_from_v36_to_v37(conn)
+                    sqlite_steps._migrate_from_v36_to_v37(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 38 and current_db_version == 37:
-                    self._migrate_from_v37_to_v38(conn)
+                    sqlite_steps._migrate_from_v37_to_v38(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 39 and current_db_version == 38:
-                    self._migrate_from_v38_to_v39(conn)
+                    sqlite_steps._migrate_from_v38_to_v39(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 40 and current_db_version == 39:
-                    self._migrate_from_v39_to_v40(conn)
+                    sqlite_steps._migrate_from_v39_to_v40(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 41 and current_db_version == 40:
-                    self._migrate_from_v40_to_v41(conn)
+                    sqlite_steps._migrate_from_v40_to_v41(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 42 and current_db_version == 41:
-                    self._migrate_from_v41_to_v42(conn)
+                    sqlite_steps._migrate_from_v41_to_v42(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 43 and current_db_version == 42:
-                    self._migrate_from_v42_to_v43(conn)
+                    sqlite_steps._migrate_from_v42_to_v43(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 44 and current_db_version == 43:
-                    self._migrate_from_v43_to_v44(conn)
+                    sqlite_steps._migrate_from_v43_to_v44(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 45 and current_db_version == 44:
                     current_db_version = self._run_sqlite_linear_migration_step(
@@ -8841,112 +4162,112 @@ class CharactersRAGDB:
                         initial_version=current_initial_version,
                     )
                 if target_version >= 46 and current_db_version == 45:
-                    self._migrate_from_v45_to_v46(conn)
+                    sqlite_steps._migrate_from_v45_to_v46(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 47 and current_db_version == 46:
-                    self._migrate_from_v46_to_v47(conn)
+                    sqlite_steps._migrate_from_v46_to_v47(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 48 and current_db_version == 47:
-                    self._migrate_from_v47_to_v48(conn)
+                    sqlite_steps._migrate_from_v47_to_v48(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 49 and current_db_version == 48:
-                    self._migrate_from_v48_to_v49(conn)
+                    sqlite_steps._migrate_from_v48_to_v49(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 50 and current_db_version == 49:
-                    self._migrate_from_v49_to_v50(conn)
+                    sqlite_steps._migrate_from_v49_to_v50(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 51 and current_db_version == 50:
-                    self._migrate_from_v50_to_v51(conn)
+                    sqlite_steps._migrate_from_v50_to_v51(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 52 and current_db_version == 51:
-                    self._migrate_from_v51_to_v52(conn)
+                    sqlite_steps._migrate_from_v51_to_v52(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 53 and current_db_version == 52:
-                    self._migrate_from_v52_to_v53(conn)
+                    sqlite_steps._migrate_from_v52_to_v53(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 54 and current_db_version == 53:
-                    self._migrate_from_v53_to_v54(conn)
+                    sqlite_steps._migrate_from_v53_to_v54(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 55 and current_db_version == 54:
-                    self._migrate_from_v54_to_v55(conn)
+                    sqlite_steps._migrate_from_v54_to_v55(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 56 and current_db_version == 55:
-                    self._migrate_from_v55_to_v56(conn)
+                    sqlite_steps._migrate_from_v55_to_v56(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 57 and current_db_version == 56:
-                    self._migrate_from_v56_to_v57(conn)
+                    sqlite_steps._migrate_from_v56_to_v57(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 58 and current_db_version == 57:
-                    self._migrate_from_v57_to_v58(conn)
+                    sqlite_steps._migrate_from_v57_to_v58(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 59 and current_db_version == 58:
-                    self._migrate_from_v58_to_v59(conn)
+                    sqlite_steps._migrate_from_v58_to_v59(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 60 and current_db_version == 59:
-                    self._migrate_from_v59_to_v60_sqlite(conn)
+                    sqlite_steps._migrate_from_v59_to_v60_sqlite(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 61 and current_db_version == 60:
-                    self._migrate_from_v60_to_v61_sqlite(conn)
+                    sqlite_steps._migrate_from_v60_to_v61_sqlite(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 62 and current_db_version == 61:
-                    self._migrate_from_v61_to_v62_sqlite(conn)
+                    sqlite_steps._migrate_from_v61_to_v62_sqlite(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 63 and current_db_version == 62:
-                    self._migrate_from_v62_to_v63_sqlite(conn)
+                    sqlite_steps._migrate_from_v62_to_v63_sqlite(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 64 and current_db_version == 63:
-                    self._migrate_from_v63_to_v64_sqlite(conn)
+                    sqlite_steps._migrate_from_v63_to_v64_sqlite(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 65 and current_db_version == 64:
-                    self._migrate_from_v64_to_v65(conn)
+                    sqlite_steps._migrate_from_v64_to_v65(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 66 and current_db_version == 65:
-                    self._migrate_from_v65_to_v66(conn)
+                    sqlite_steps._migrate_from_v65_to_v66(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 67 and current_db_version == 66:
-                    self._migrate_from_v66_to_v67(conn)
+                    sqlite_steps._migrate_from_v66_to_v67(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 68 and current_db_version == 67:
-                    self._migrate_from_v67_to_v68(conn)
+                    sqlite_steps._migrate_from_v67_to_v68(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 69 and current_db_version == 68:
-                    self._migrate_from_v68_to_v69(conn)
+                    sqlite_steps._migrate_from_v68_to_v69(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 70 and current_db_version == 69:
-                    self._migrate_from_v69_to_v70(conn)
+                    sqlite_steps._migrate_from_v69_to_v70(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 71 and current_db_version == 70:
-                    self._migrate_from_v70_to_v71(conn)
+                    sqlite_steps._migrate_from_v70_to_v71(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 72 and current_db_version == 71:
-                    self._migrate_from_v71_to_v72(conn)
+                    sqlite_steps._migrate_from_v71_to_v72(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 73 and current_db_version == 72:
-                    self._migrate_from_v72_to_v73_persona_companion(conn)
+                    sqlite_steps._migrate_from_v72_to_v73_persona_companion(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 74 and current_db_version == 73:
-                    self._migrate_from_v73_to_v74(conn)
+                    sqlite_steps._migrate_from_v73_to_v74(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 75 and current_db_version == 74:
-                    self._migrate_from_v74_to_v75(conn)
+                    sqlite_steps._migrate_from_v74_to_v75(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 76 and current_db_version == 75:
-                    self._migrate_from_v75_to_v76(conn)
+                    sqlite_steps._migrate_from_v75_to_v76(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 77 and current_db_version == 76:
-                    self._migrate_from_v76_to_v77(conn)
+                    sqlite_steps._migrate_from_v76_to_v77(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 78 and current_db_version == 77:
-                    self._migrate_from_v77_to_v78(conn)
+                    sqlite_steps._migrate_from_v77_to_v78(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 79 and current_db_version == 78:
-                    self._migrate_from_v78_to_v79(conn)
+                    sqlite_steps._migrate_from_v78_to_v79(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 80 and current_db_version == 79:
-                    self._migrate_from_v79_to_v80(conn)
+                    sqlite_steps._migrate_from_v79_to_v80(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 81 and current_db_version == 80:
-                    self._migrate_from_v80_to_v81(conn)
+                    sqlite_steps._migrate_from_v80_to_v81(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
                 if target_version >= 66 and current_db_version == 65:
                     self._migrate_from_v65_to_v66_sqlite(conn)
@@ -9157,63 +4478,10 @@ class CharactersRAGDB:
                     postgres_schema._ensure_study_pack_sync_triggers_postgres(self.ctx, conn)
                     postgres_schema._set_schema_version_postgres(self.ctx, conn, 72)
                     current_version = 72
-                if target_version >= 73 and current_version < 73:
-                    self._migrate_from_v72_to_v73_postgres(conn)
-                    current_version = 73
-                if target_version >= 74 and current_version < 74:
-                    self._migrate_from_v73_to_v74_postgres(conn)
-                    current_version = 74
-                if target_version >= 75 and current_version < 75:
-                    self._migrate_from_v74_to_v75_postgres(conn)
-                    current_version = 75
-                if target_version >= 76 and current_version < 76:
-                    self._migrate_from_v75_to_v76_postgres(conn)
-                    current_version = 76
-                if target_version >= 77 and current_version < 77:
-                    self._migrate_from_v76_to_v77_persona_companion_postgres(conn)
-                    current_version = 77
-                if target_version >= 78 and current_version < 78:
-                    self._migrate_from_v77_to_v78_postgres(conn)
-                    current_version = 78
-                if target_version >= 79 and current_version < 79:
-                    self._migrate_from_v78_to_v79_postgres(conn)
-                    current_version = 79
-                if target_version >= 80 and current_version < 80:
-                    self._migrate_from_v79_to_v80_postgres(conn)
-                    current_version = 80
-                if target_version >= 81 and current_version < 81:
-                    self._migrate_from_v80_to_v81_postgres(conn)
-                    current_version = 81
-                if target_version >= 82 and current_version < 82:
-                    self._migrate_from_v81_to_v82_postgres(conn)
-                    current_version = 82
-                if target_version >= 83 and current_version < 83:
-                    self._migrate_from_v82_to_v83_postgres(conn)
-                    current_version = 83
-                if target_version >= 84 and current_version < 84:
-                    self._migrate_from_v83_to_v84_postgres(conn)
-                    current_version = 84
-                if target_version >= 85 and current_version < 85:
-                    self._migrate_from_v84_to_v85_postgres(conn)
-                    current_version = 85
-                if target_version >= 86 and current_version < 86:
-                    self._migrate_from_v85_to_v86_postgres(conn)
-                    current_version = 86
-                if target_version >= 87 and current_version < 87:
-                    self._migrate_from_v86_to_v87_postgres(conn)
-                    current_version = 87
-                if target_version >= 88 and current_version < 88:
-                    self._migrate_from_v87_to_v88_postgres(conn)
-                    current_version = 88
-                if target_version >= 89 and current_version < 89:
-                    self._migrate_from_v88_to_v89_postgres(conn)
-                    current_version = 89
-                if target_version >= 90 and current_version < 90:
-                    self._migrate_from_v89_to_v90_postgres(conn)
-                    current_version = 90
-                if target_version >= 91 and current_version < 91:
-                    self._migrate_from_v90_to_v91_postgres(conn)
-                    current_version = 91
+                for source, step_name in postgres_steps.POSTGRES_STEPS.items():
+                    if current_version <= source < target_version:
+                        getattr(postgres_steps, step_name)(self.ctx, conn)
+                        current_version = source + 1
                 if target_version >= 74:
                     self.repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -9418,53 +4686,53 @@ class CharactersRAGDB:
                     )
                 if not backend.table_exists("note_folders", connection=conn):
                     postgres_schema._ensure_note_folder_schema_postgres(self.ctx, conn)
-                self._migrate_from_v54_to_v55_postgres(conn)
+                postgres_steps._migrate_from_v54_to_v55_postgres(self.ctx, conn)
                 current_version = 55
             if current_version < 56:
-                self._migrate_from_v55_to_v56_postgres(conn)
+                postgres_steps._migrate_from_v55_to_v56_postgres(self.ctx, conn)
                 current_version = 56
             if current_version < 57:
-                self._migrate_from_v56_to_v57_postgres(conn)
+                postgres_steps._migrate_from_v56_to_v57_postgres(self.ctx, conn)
                 current_version = 57
             if current_version < 58:
-                self._migrate_from_v57_to_v58_postgres(conn)
+                postgres_steps._migrate_from_v57_to_v58_postgres(self.ctx, conn)
                 current_version = 58
             if current_version < 59:
-                self._migrate_from_v58_to_v59_postgres(conn)
+                postgres_steps._migrate_from_v58_to_v59_postgres(self.ctx, conn)
                 current_version = 59
             if current_version < 60:
-                self._migrate_from_v59_to_v60_postgres(conn)
+                postgres_steps._migrate_from_v59_to_v60_postgres(self.ctx, conn)
                 current_version = 60
             if current_version < 61:
-                self._migrate_from_v60_to_v61_postgres(conn)
+                postgres_steps._migrate_from_v60_to_v61_postgres(self.ctx, conn)
                 current_version = 61
             if current_version < 62:
-                self._migrate_from_v61_to_v62_postgres(conn)
+                postgres_steps._migrate_from_v61_to_v62_postgres(self.ctx, conn)
                 current_version = 62
             if current_version < 63:
                 postgres_schema._ensure_note_studio_schema_postgres(self.ctx, conn)
-                self._migrate_from_v62_to_v63_postgres(conn)
+                postgres_steps._migrate_from_v62_to_v63_postgres(self.ctx, conn)
                 current_version = 63
             if current_version < 64:
-                self._migrate_from_v63_to_v64_postgres(conn)
+                postgres_steps._migrate_from_v63_to_v64_postgres(self.ctx, conn)
                 current_version = 64
             if target_version >= 65 and current_version < 65:
-                self._migrate_from_v64_to_v65_postgres(conn)
+                postgres_steps._migrate_from_v64_to_v65_postgres(self.ctx, conn)
                 current_version = 65
             if target_version >= 66 and current_version < 66:
-                self._migrate_from_v65_to_v66_postgres(conn)
+                postgres_steps._migrate_from_v65_to_v66_postgres(self.ctx, conn)
                 current_version = 66
             if target_version >= 67 and current_version < 67:
-                self._migrate_from_v66_to_v67_postgres(conn)
+                postgres_steps._migrate_from_v66_to_v67_postgres(self.ctx, conn)
                 current_version = 67
             if target_version >= 68 and current_version < 68:
-                self._migrate_from_v67_to_v68_postgres(conn)
+                postgres_steps._migrate_from_v67_to_v68_postgres(self.ctx, conn)
                 current_version = 68
             if target_version >= 69 and current_version < 69:
-                self._migrate_from_v68_to_v69_postgres(conn)
+                postgres_steps._migrate_from_v68_to_v69_postgres(self.ctx, conn)
                 current_version = 69
             if target_version >= 70 and current_version < 70:
-                self._migrate_from_v69_to_v70_postgres(conn)
+                postgres_steps._migrate_from_v69_to_v70_postgres(self.ctx, conn)
                 current_version = 70
             self._runtime_schema_version = current_version
 
@@ -9534,90 +4802,11 @@ class CharactersRAGDB:
                 self._runtime_schema_version = 72
                 current_version = 72
 
-            if target_version >= 73 and current_version < 73:
-                self._migrate_from_v72_to_v73_postgres(conn)
-                self._runtime_schema_version = 73
-                current_version = 73
-
-            if target_version >= 74 and current_version < 74:
-                self._migrate_from_v73_to_v74_postgres(conn)
-                self._runtime_schema_version = 74
-                current_version = 74
-
-            if target_version >= 75 and current_version < 75:
-                self._migrate_from_v74_to_v75_postgres(conn)
-                self._runtime_schema_version = 75
-                current_version = 75
-
-            if target_version >= 76 and current_version < 76:
-                self._migrate_from_v75_to_v76_postgres(conn)
-                self._runtime_schema_version = 76
-                current_version = 76
-
-            if target_version >= 77 and current_version < 77:
-                self._migrate_from_v76_to_v77_persona_companion_postgres(conn)
-                self._runtime_schema_version = 77
-                current_version = 77
-
-            if target_version >= 78 and current_version < 78:
-                self._migrate_from_v77_to_v78_postgres(conn)
-                self._runtime_schema_version = 78
-                current_version = 78
-            if target_version >= 79 and current_version < 79:
-                self._migrate_from_v78_to_v79_postgres(conn)
-                self._runtime_schema_version = 79
-                current_version = 79
-
-            if target_version >= 80 and current_version < 80:
-                self._migrate_from_v79_to_v80_postgres(conn)
-                self._runtime_schema_version = 80
-                current_version = 80
-
-            if target_version >= 81 and current_version < 81:
-                self._migrate_from_v80_to_v81_postgres(conn)
-                self._runtime_schema_version = 81
-                current_version = 81
-
-            if target_version >= 82 and current_version < 82:
-                self._migrate_from_v81_to_v82_postgres(conn)
-                self._runtime_schema_version = 82
-                current_version = 82
-            if target_version >= 83 and current_version < 83:
-                self._migrate_from_v82_to_v83_postgres(conn)
-                self._runtime_schema_version = 83
-                current_version = 83
-            if target_version >= 84 and current_version < 84:
-                self._migrate_from_v83_to_v84_postgres(conn)
-                self._runtime_schema_version = 84
-                current_version = 84
-            if target_version >= 85 and current_version < 85:
-                self._migrate_from_v84_to_v85_postgres(conn)
-                self._runtime_schema_version = 85
-                current_version = 85
-            if target_version >= 86 and current_version < 86:
-                self._migrate_from_v85_to_v86_postgres(conn)
-                self._runtime_schema_version = 86
-                current_version = 86
-            if target_version >= 87 and current_version < 87:
-                self._migrate_from_v86_to_v87_postgres(conn)
-                self._runtime_schema_version = 87
-                current_version = 87
-            if target_version >= 88 and current_version < 88:
-                self._migrate_from_v87_to_v88_postgres(conn)
-                self._runtime_schema_version = 88
-                current_version = 88
-            if target_version >= 89 and current_version < 89:
-                self._migrate_from_v88_to_v89_postgres(conn)
-                self._runtime_schema_version = 89
-                current_version = 89
-            if target_version >= 90 and current_version < 90:
-                self._migrate_from_v89_to_v90_postgres(conn)
-                self._runtime_schema_version = 90
-                current_version = 90
-            if target_version >= 91 and current_version < 91:
-                self._migrate_from_v90_to_v91_postgres(conn)
-                self._runtime_schema_version = 91
-                current_version = 91
+            for source, step_name in postgres_steps.POSTGRES_STEPS.items():
+                if current_version <= source < target_version:
+                    getattr(postgres_steps, step_name)(self.ctx, conn)
+                    self._runtime_schema_version = source + 1
+                    current_version = source + 1
 
             postgres_schema._ensure_note_semantic_schema_postgres(self.ctx, conn)
 
@@ -29169,7 +24358,11 @@ from tldw_Server_API.app.core.DB_Management.chacha import (
     postgres_schema,  # noqa: E402
     sqlite_schema,  # noqa: E402
 )
-from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import (
+    bind,  # noqa: E402
+    postgres_steps,  # noqa: E402
+    sqlite_steps,  # noqa: E402
+)
 
 #
 # End of ChaChaNotes_DB.py

@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseConfig,
     QueryResult,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
 )
@@ -909,7 +910,7 @@ def test_postgres_v55_migration_uses_transactional_nullable_backfill_validation_
     db._uses_shared_content_backend = False
     connection = object()
 
-    db._migrate_from_v54_to_v55_postgres(connection)
+    postgres_steps._migrate_from_v54_to_v55_postgres(db.ctx, connection)
 
     statements = [statement for statement, _, _ in backend.calls]
     assert all(call_connection is connection for _, _, call_connection in backend.calls)

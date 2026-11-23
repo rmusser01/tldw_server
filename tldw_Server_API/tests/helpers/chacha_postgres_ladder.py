@@ -3,7 +3,8 @@
 Source-text tests of ``_initialize_schema_postgres`` break when a call site is rewritten
 (``self._x(conn)`` becomes ``postgres_schema._x(self.ctx, conn)``). These helpers read the
 callee names and keyword arguments instead, so the same tests survive a move. Positional
-arguments are not kept, so the extra ``ctx`` argument of a moved call changes nothing.
+arguments are not kept, so the extra ``ctx`` argument of a moved call changes nothing. A loop over
+``POSTGRES_STEPS`` stands for the registry's steps in key order, so a test sees the v72 to v91 steps.
 """
 
 from __future__ import annotations
@@ -43,11 +44,30 @@ def _keyword_value(node: ast.expr) -> object:
         return ast.unparse(node)
 
 
+def _is_registry_loop(node: ast.AST) -> bool:
+    """A ``for ... in postgres_steps.POSTGRES_STEPS.items()`` loop, the shape that replaced the 73..91 if-chains."""
+    return isinstance(node, ast.For) and ast.unparse(node.iter).endswith("POSTGRES_STEPS.items()")
+
+
+def _registry_names() -> list[str]:
+    from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
+
+    return list(postgres_steps.POSTGRES_STEPS.values())
+
+
 def _calls_in(nodes: Iterable[ast.AST]) -> list[LadderCall]:
+    """Calls in source order. A registry loop counts as one call per registry step, in key order, at the loop's position."""
+    roots = list(nodes)
     found: list[tuple[int, int, LadderCall]] = []
-    for root in nodes:
+    skipped: set[int] = set()
+    for root in roots:
         for node in ast.walk(root):
-            if not isinstance(node, ast.Call):
+            if _is_registry_loop(node):
+                found.extend((node.lineno, node.col_offset, LadderCall(name, {})) for name in _registry_names())  # type: ignore[attr-defined]
+                skipped.update(id(call) for call in ast.walk(node) if isinstance(call, ast.Call))
+    for root in roots:
+        for node in ast.walk(root):
+            if not isinstance(node, ast.Call) or id(node) in skipped:
                 continue
             func = node.func
             if isinstance(func, ast.Attribute):
@@ -78,12 +98,14 @@ def names(calls: Iterable[LadderCall]) -> list[str]:
     return [call.name for call in calls]
 
 
-def loaded_names(fn: Callable) -> set[str]:
-    """Every attribute name and bare name ``fn`` reads, for 'the function reads X' checks."""
-    out: set[str] = set()
+def assigned_names(fn: Callable, target: str) -> set[str]:
+    """Every attribute and bare name read by the right-hand side of each ``<target> = ...`` in ``fn`` (empty when never assigned)."""
+    found: set[str] = set()
     for node in ast.walk(_tree(fn)):
-        if isinstance(node, ast.Attribute):
-            out.add(node.attr)
-        elif isinstance(node, ast.Name):
-            out.add(node.id)
-    return out
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == target for t in node.targets):
+            for part in ast.walk(node.value):
+                if isinstance(part, ast.Attribute):
+                    found.add(part.attr)
+                elif isinstance(part, ast.Name):
+                    found.add(part.id)
+    return found

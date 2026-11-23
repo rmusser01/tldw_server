@@ -10,6 +10,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import (
     NotesLink,
     NotesLinkStore,
@@ -34,7 +35,7 @@ def test_postgres_initializer_serializes_v58_before_policy_install() -> None:
 
 
 def test_postgres_v58_schema_uses_owner_and_live_query_indexes() -> None:
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v57_to_v58_postgres)
+    source = inspect.getsource(postgres_steps._migrate_from_v57_to_v58_postgres)
 
     assert "idx_note_edges_owner_live" in source
     assert "user_id, deleted" in source

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -32,7 +33,7 @@ EVENT_ID = "33333333-3333-4333-8333-333333333333"
 def test_postgres_initializer_preserves_v60_v61_and_v62_steps_before_current_v63() -> None:
     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 63
     fn = ladder.postgres_init_function()
-    assert {"_POSTGRES_SCHEMA_VERSION", "postgres_schema_version"} & ladder.loaded_names(fn)
+    assert {"_POSTGRES_SCHEMA_VERSION", "postgres_schema_version"} & ladder.assigned_names(fn, "target_version")
     called = set(ladder.names(ladder.ladder_calls(fn)))
     assert "_migrate_from_v59_to_v60_postgres" in called
     assert "_migrate_from_v60_to_v61_postgres" in called
@@ -82,7 +83,7 @@ def test_postgres_v60_ddl_is_fixed_and_scopes_graph_plus_authority() -> None:
 
 
 def test_postgres_v60_migration_uses_fixed_lock_and_version_last_order() -> None:
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v59_to_v60_postgres)
+    source = inspect.getsource(postgres_steps._migrate_from_v59_to_v60_postgres)
 
     assert "LOCK TABLE notes, note_tasks, task_note_projections, task_events" in source
     assert "task_event_read_state, note_task_reconciliation_state IN ACCESS EXCLUSIVE MODE" in source
@@ -117,7 +118,7 @@ def test_postgres_v60_frees_only_fixed_v59_constraint_collisions() -> None:
 
 def test_postgres_v60_uses_effective_schema_owner_and_exact_table_owner() -> None:
     for method in (
-        CharactersRAGDB._migrate_from_v59_to_v60_postgres,
+        postgres_steps._migrate_from_v59_to_v60_postgres,
         postgres_schema._verify_note_task_schema_postgres,
     ):
         source = inspect.getsource(method).replace(" ", "")
@@ -160,7 +161,7 @@ def test_postgres_v59_source_authority_accepts_only_reviewed_catalog() -> None:
         relation_rows, policy_rows
     ) == ("notes",)
 
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v59_to_v60_postgres)
+    source = inspect.getsource(postgres_steps._migrate_from_v59_to_v60_postgres)
     authority_pos = source.index("_verify_note_task_v59_authority_catalog")
     assert authority_pos < source.index("collision_names")
     assert source.index("for table in forced_relations") < source.index(

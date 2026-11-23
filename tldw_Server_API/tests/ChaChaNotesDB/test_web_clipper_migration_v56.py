@@ -12,6 +12,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import QueryResult
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
     CharactersRAGDB,
@@ -617,7 +618,7 @@ def test_postgres_v55_to_v56_locks_before_preflight_and_restores_forced_rls() ->
     db._backend = backend
     db._uses_shared_content_backend = False
 
-    db._migrate_from_v55_to_v56_postgres(object())
+    postgres_steps._migrate_from_v55_to_v56_postgres(db.ctx, object())
 
     lock_index = _migration_statement_index(backend, "LOCK TABLE")
     rls_state_index = _migration_statement_index(backend, "relforcerowsecurity")
@@ -664,7 +665,7 @@ def test_postgres_v55_to_v56_verifies_sync_payload_is_an_object_and_rewritten() 
     db._backend = backend
     db._uses_shared_content_backend = False
 
-    db._migrate_from_v55_to_v56_postgres(object())
+    postgres_steps._migrate_from_v55_to_v56_postgres(db.ctx, object())
 
     statements = [" ".join(statement.split()) for statement, _ in backend.statements]
     preflight_index = next(
@@ -693,7 +694,7 @@ def test_postgres_v55_to_v56_checks_replacement_history_after_locks_before_rekey
     db._backend = backend
     db._uses_shared_content_backend = False
 
-    db._migrate_from_v55_to_v56_postgres(object())
+    postgres_steps._migrate_from_v55_to_v56_postgres(db.ctx, object())
 
     replacement = _replacement_note_id("clip-legacy")
     normalized = [" ".join(statement.split()) for statement, _ in backend.statements]
@@ -724,7 +725,7 @@ def test_postgres_v55_to_v56_fails_closed_for_invalid_authoritative_owner() -> N
     db._uses_shared_content_backend = False
 
     with pytest.raises(SchemaError, match="owner"):
-        db._migrate_from_v55_to_v56_postgres(object())
+        postgres_steps._migrate_from_v55_to_v56_postgres(db.ctx, object())
 
     assert not any("INSERT INTO db_schema_version" in statement for statement, _ in backend.statements)
 
@@ -844,7 +845,7 @@ def test_postgres_v55_to_v56_removes_legacy_identity_constraints_and_advances_ve
     db._backend = backend
     db._uses_shared_content_backend = False
 
-    db._migrate_from_v55_to_v56_postgres(object())
+    postgres_steps._migrate_from_v55_to_v56_postgres(db.ctx, object())
 
     sql = "\n".join(statement for statement, _ in backend.statements)
     assert 'DROP CONSTRAINT "note_clipper_documents_clip_id_fkey"' in sql
@@ -896,4 +897,4 @@ def test_postgres_v55_to_v56_fails_closed_without_durable_note_mapping_constrain
     db._uses_shared_content_backend = False
 
     with pytest.raises(SchemaError, match="durable note mapping constraints"):
-        db._migrate_from_v55_to_v56_postgres(object())
+        postgres_steps._migrate_from_v55_to_v56_postgres(db.ctx, object())

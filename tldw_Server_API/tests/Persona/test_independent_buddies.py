@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -144,7 +145,7 @@ def test_v66_migration_remains_registered_for_sqlite_and_postgres():
         CharactersRAGDB.__new__(CharactersRAGDB)._sqlite_linear_migration_steps()[65].__name__
         == "_migrate_from_v65_to_v66"
     )
-    assert hasattr(CharactersRAGDB, "_migrate_from_v65_to_v66_postgres")
+    assert callable(postgres_steps._migrate_from_v65_to_v66_postgres)
 
 
 def test_profile_deleted_schema_matches_postgres_boolean_query_contract(db):

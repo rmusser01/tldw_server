@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
 
@@ -144,14 +146,14 @@ def test_companion_upgrade_failure_rolls_back_new_catalog_and_marker(
     """A failure after companion writes leaves the pre-upgrade dev catalog intact."""
     db_path = tmp_path / "companion_rollback.sqlite"
     _seed_database(db_path, monkeypatch, 72)
-    migrate = CharactersRAGDB._migrate_from_v72_to_v73_persona_companion
+    migrate = sqlite_steps._migrate_from_v72_to_v73_persona_companion
 
-    def interrupted(self: CharactersRAGDB, conn: sqlite3.Connection) -> None:
-        migrate(self, conn)
+    def interrupted(ctx: ChaChaContext, conn: sqlite3.Connection) -> None:
+        migrate(ctx, conn)
         raise RuntimeError("companion migration interrupted")
 
     with monkeypatch.context() as patch:
-        patch.setattr(CharactersRAGDB, "_migrate_from_v72_to_v73_persona_companion", interrupted)
+        patch.setattr(sqlite_steps, "_migrate_from_v72_to_v73_persona_companion", interrupted)
         with pytest.raises(Exception, match="companion migration interrupted"):
             CharactersRAGDB(db_path, "rollback-owner")
     with sqlite3.connect(db_path) as conn:

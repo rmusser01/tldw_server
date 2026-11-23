@@ -10,6 +10,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import ConstraintViolationError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import _reserve
 
@@ -189,15 +190,16 @@ def test_interrupted_role_upgrade_rolls_back_ddl_version_and_records(
         before = snapshot(old)
         old.close_connection()
     name = "_migrate_from_v83_to_v84_postgres" if backend_name == "postgres" else "_migrate_from_v79_to_v80"
-    migrate = getattr(CharactersRAGDB, name)
+    steps_module = postgres_steps if name.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, name)
 
-    def interrupted(self: CharactersRAGDB, conn: Any) -> None:
-        migrate(self, conn)
+    def interrupted(ctx, conn) -> None:
+        migrate(ctx, conn)
         raise RuntimeError("role migration interrupted")
 
     try:
         with monkeypatch.context() as patch:
-            patch.setattr(CharactersRAGDB, name, interrupted)
+            patch.setattr(steps_module, name, interrupted)
             with pytest.raises(Exception, match="role migration interrupted"):
                 CharactersRAGDB(**kwargs)
         assert old.execute_query("SELECT version FROM db_schema_version").fetchone()["version"] == (

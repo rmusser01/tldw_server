@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -53,8 +54,8 @@ def test_postgres_companion_upgrade_finishes_fast_path_and_installs_rls(
     monkeypatch.setattr(db, "repair_conversation_assistant_identity", lambda _conn: None)
     for version in range(72, 76):
         monkeypatch.setattr(
-            db, f"_migrate_from_v{version}_to_v{version + 1}_postgres",
-            lambda _conn, target=version + 1: state.update(version=target),
+            postgres_steps, f"_migrate_from_v{version}_to_v{version + 1}_postgres",
+            lambda _ctx, _conn, target=version + 1: state.update(version=target),
         )
 
     def apply_sql(_ctx: object, sql: str, migration_conn: object, *, expected_version: int) -> None:

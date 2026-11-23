@@ -9,6 +9,7 @@ import pytest
 from psycopg import sql
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import native_fork_schema_statements
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
@@ -131,14 +132,15 @@ def test_native_schema_failure_rolls_back_tables_and_version(
         old = CharactersRAGDB(**kwargs)
         old.close_connection()
     method_name = "_migrate_from_v75_to_v76_postgres" if backend_name == "postgres" else "_migrate_from_v71_to_v72"
-    migrate = getattr(CharactersRAGDB, method_name)
+    steps_module = postgres_steps if method_name.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, method_name)
 
-    def interrupted(self: CharactersRAGDB, conn: Any) -> None:
-        migrate(self, conn)
+    def interrupted(ctx, conn) -> None:
+        migrate(ctx, conn)
         raise RuntimeError("native migration interrupted")
 
     with monkeypatch.context() as patch:
-        patch.setattr(CharactersRAGDB, method_name, interrupted)
+        patch.setattr(steps_module, method_name, interrupted)
         with pytest.raises(Exception, match="native migration interrupted"):
             CharactersRAGDB(**kwargs)
     assert old.execute_query(

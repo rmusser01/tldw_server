@@ -16,6 +16,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import (
     MoodboardSyncStore,
@@ -294,7 +295,7 @@ def _relevant_catalog(db: CharactersRAGDB) -> dict[str, object]:
 
 def test_sqlite_schema_authority_is_v63_and_version_update_is_last() -> None:
     assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 63
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v62_to_v63_sqlite)
+    source = inspect.getsource(sqlite_steps._migrate_from_v62_to_v63_sqlite)
     for operation in (
         "_create_notes_moodboard_studio_schema_v61_sqlite",
         "_copy_notes_moodboard_studio_graph_v61_sqlite",

@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_sql
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticDimensionState,
     SemanticGenerationState,
@@ -996,9 +996,9 @@ def test_postgres_v86_live_migration_failure_rolls_back_to_v85(
     _prepare_live_v85(pg_database_config)
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     monkeypatch.setattr(
-        CharactersRAGDB,
+        schema_sql,
         "_MIGRATION_SQL_V85_TO_V86_POSTGRES",
-        CharactersRAGDB._MIGRATION_SQL_V85_TO_V86_POSTGRES + "\nTHIS IS AN INJECTED MIGRATION FAILURE;",
+        schema_sql._MIGRATION_SQL_V85_TO_V86_POSTGRES + "\nTHIS IS AN INJECTED MIGRATION FAILURE;",
     )
 
     try:

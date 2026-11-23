@@ -12,6 +12,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -141,7 +142,7 @@ def test_postgres_v59_source_authority_drift_fails_before_migration_ddl(
 
         with pytest.raises(SchemaError, match="v59 PostgreSQL source authority"):
             with db.transaction() as conn:
-                db._migrate_from_v59_to_v60_postgres(conn)
+                postgres_steps._migrate_from_v59_to_v60_postgres(db.ctx, conn)
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
@@ -1164,7 +1165,7 @@ def test_postgres_populated_v59_upgrade_matches_fresh_v60_catalog(
         _restore_reviewed_postgres_v59_task_source(db)
         note_id, task_id, event_id = _populate_reviewed_postgres_v59_source(db)
         with db.transaction() as conn:
-            db._migrate_from_v59_to_v60_postgres(conn)
+            postgres_steps._migrate_from_v59_to_v60_postgres(db.ctx, conn)
 
         assert _postgres_v60_task_catalog_snapshot(db) == fresh_catalog
         with db.transaction() as conn:
@@ -1217,7 +1218,7 @@ def test_postgres_v60_checkpoint_failure_restores_exact_populated_v59_state(
         monkeypatch.setattr(migration_support, "_note_task_v60_migration_checkpoint", fail_at_stage)
         with pytest.raises(SchemaError, match=f"injected PostgreSQL v60 {stage} failure"):
             with db.transaction() as conn:
-                db._migrate_from_v59_to_v60_postgres(conn)
+                postgres_steps._migrate_from_v59_to_v60_postgres(db.ctx, conn)
 
         assert _postgres_v59_source_snapshot(db) == before
     finally:
