@@ -6,13 +6,14 @@
  * The edited question goes out once, on /chat/completions with `save_to_db`
  * and `tldw_history_edit_v1`; the client never appends it through
  * `POST /chats/{id}/messages`. The server saves the reply with its generation
- * metadata, so a reply cut off at the output limit keeps its marker after the
- * view follows it from the server.
+ * metadata, so a reply cut off at the output limit keeps its marker and model
+ * after the view follows it from the server, and after a reload.
  */
 import {
   completionMessages,
   createFakeTldwServer,
   deferred,
+  FAKE_MODEL,
   getHarnessDb,
   HARNESS_WAIT,
   openSavedServerChat,
@@ -93,7 +94,7 @@ describe("server-settled Edit and send (D7 P5)", { timeout: 60_000 }, () => {
       expect.objectContaining({ role: "user", content: "Edited question", parent_message_id: originals[0].parent_message_id }),
       expect.objectContaining({ role: "assistant", content: "Edited answer that was cut off mid-", parent_message_id: added[0]?.id })
     ])
-    expect(added[1].metadata_extra).toMatchObject({ generation_status: "length" })
+    expect(added[1].metadata_extra).toMatchObject({ generation_status: "length", model_id: FAKE_MODEL })
 
     // The view follows the saved reply, which keeps its output-limit marker.
     await waitFor(() => {
@@ -119,6 +120,8 @@ describe("server-settled Edit and send (D7 P5)", { timeout: 60_000 }, () => {
     })
     await openSavedServerChat(reloaded, { title: "Saved topic", lastMessage: "Edited answer that was cut off mid-" })
     await within(lastReply()).findByRole("status", { name: "Output limit reached" }, HARNESS_WAIT)
+    // The model is the server's too (CM-04 (1)): the reply still names it after the reload.
+    expect(within(lastReply()).getByTestId("message-model-badge")).toHaveTextContent(FAKE_MODEL)
     expect(server.completionRequests()).toHaveLength(1)
   })
 })
