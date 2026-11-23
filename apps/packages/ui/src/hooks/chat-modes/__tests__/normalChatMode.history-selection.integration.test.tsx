@@ -2643,6 +2643,134 @@ it.each(
   }
 )
 
+// CM-14 (#3101): a send that creates a server chat shows its question before
+// the create and the new chat's quiet first load. Any other first load replaces
+// the transcript, so those sends show the question only when the turn draws it.
+describe("early question (CM-14)", () => {
+  type Rows = import("@/store/option").Message[]
+  type SetRows = Parameters<typeof normalChatMode>[6]["setMessages"]
+  const firstSendParams = (
+    controller: HistorySelectionController,
+    setMessages: SetRows,
+    {
+      surface = "playground",
+      createServerChat = true,
+      serverChatId
+    }: { surface?: "playground" | "sidepanel"; createServerChat?: boolean; serverChatId?: string } = {}
+  ): Parameters<typeof normalChatMode>[6] => ({
+    selectedModel: "test",
+    selectedSystemPrompt: "",
+    useOCR: false,
+    currentChatModelSettings: {},
+    toolChoice: "none",
+    servicePromptSnapshot: snapshot(),
+    historyId: null,
+    serverChatId,
+    ...{ surface },
+    historySelection: { controller, originIsCurrent: controller.fence(), createServerChat },
+    setServerChatId: publishFixtureServerChatId,
+    setHistoryId: publishFixtureHistoryId,
+    setMessages,
+    setHistory: () => {},
+    setIsProcessing: () => {},
+    setStreaming: () => {},
+    setAbortController: () => {},
+    saveMessageOnSuccess,
+    saveMessageOnError
+  })
+  /** A setter that only records what each call would publish. */
+  const recordingSetter = () => {
+    let rows: Rows = []
+    const published: Rows[] = []
+    const setMessages: SetRows = (next) => {
+      rows = typeof next === "function" ? next(rows) : next
+      published.push(rows)
+    }
+    return { setMessages, published }
+  }
+  const startSend = (message: string, params: Parameters<typeof normalChatMode>[6]) => {
+    let attempt!: Promise<unknown>
+    act(() => {
+      attempt = normalChatMode(message, "", false, [], [], new AbortController().signal, params)
+    })
+    return attempt
+  }
+  afterEach(() => {
+    useStoreMessageOption.getState().setMessages([])
+  })
+
+  it.each(["playground", "sidepanel"] as const)(
+    "removes its question from the live transcript, past the retired view setter, when the new chat's first load fails (%s)",
+    async (surface) => {
+      vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+      vi.spyOn(tldwClient, "captureHistorySelection").mockRejectedValue(new Error("load failed"))
+      useStoreMessageOption.getState().setMessages([])
+      const hook = renderHook(() => useHistorySelection())
+      // Both surfaces guard a turn's view setters with the selection's origin
+      // fence, which the new chat's load breaks as soon as it starts.
+      const origin = hook.result.current.fence()
+      const params = firstSendParams(hook.result.current, (next) => {
+        if (origin()) useStoreMessageOption.getState().setMessages(next)
+      }, { surface })
+
+      const attempt = startSend("Load fails", params)
+      expect(useStoreMessageOption.getState().messages.map((row) => row.message)).toEqual(["Load fails"])
+      await act(async () => {
+        await attempt.catch(() => undefined)
+      })
+
+      expect(origin()).toBe(false)
+      expect(useStoreMessageOption.getState().messages).toEqual([])
+      hook.unmount()
+    }
+  )
+
+  it.each([
+    { path: "server create", createServerChat: true, quiet: true },
+    { path: "local create", createServerChat: false, quiet: false }
+  ])("after a $path, the first load is quiet and the question shows early only for a new server chat", async ({ createServerChat, quiet }) => {
+    vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+      async (_id, request) => emptyServerCapture(request)
+    )
+    const hook = renderHook(() => useHistorySelection())
+    const load = vi.spyOn(hook.result.current, "loadConversation")
+    const { setMessages, published } = recordingSetter()
+
+    const attempt = startSend("First question", firstSendParams(hook.result.current, setMessages, { createServerChat }))
+    expect(published.map((rows) => rows.map((row) => row.message))).toEqual(quiet ? [["First question"]] : [])
+    await act(async () => {
+      await attempt.catch(() => undefined)
+    })
+
+    expect(load).toHaveBeenCalled()
+    expect(load.mock.calls[0][0].quietLoad).toBe(quiet ? true : undefined)
+    hook.unmount()
+  })
+
+  it("shows no early question when the turn first loads an existing chat", async () => {
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+      async (_id, request) => emptyServerCapture(request, "existing-server")
+    )
+    const hook = renderHook(() => useHistorySelection())
+    const load = vi.spyOn(hook.result.current, "loadConversation")
+    const { setMessages, published } = recordingSetter()
+
+    const attempt = startSend(
+      "Existing question",
+      firstSendParams(hook.result.current, setMessages, { createServerChat: false, serverChatId: "existing-server" })
+    )
+    expect(published).toEqual([])
+    await act(async () => {
+      await attempt.catch(() => undefined)
+    })
+
+    expect(load).toHaveBeenCalled()
+    expect(load.mock.calls[0][0].quietLoad).toBeUndefined()
+    hook.unmount()
+  })
+})
+
 describe("native latest intent and owned refusal", () => {
   it.each(
     ["playground", "sidepanel"].flatMap((surface) =>

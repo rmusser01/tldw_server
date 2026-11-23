@@ -3,6 +3,7 @@ import { usePageAssist } from "@/context"
 import { useStoreMessageOption } from "@/store/option"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { focusComposer } from "@/hooks/useComposerFocus"
+import { useShowAfterDelay } from "@/hooks/useShowAfterDelay"
 import { classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { Button } from "@/components/Common/Button"
@@ -65,6 +66,8 @@ const forkCopy = {
 /** A hidden list longer than this shows only its latest messages (CC-04). */
 const HIDDEN_PREVIEW_LIMIT = 4
 const HIDDEN_PREVIEW_SHOWN = 3
+/** A load shorter than this shows no loading panel (CM-14). */
+const LOADING_PANEL_DELAY_MS = 300
 
 export function HistorySelectionReview({
   selection,
@@ -562,6 +565,11 @@ export function HistorySelectionReview({
     if (stale && expanded && !selection.freshnessConflict)
       errorRegion.current?.focus()
   }, [stale, expanded, selection.freshnessConflict])
+  // A new chat's first load is quiet; any other load shows only when slow (CM-14).
+  const showLoading = useShowAfterDelay(
+    selection.status === "loading" && !selection.quietLoad,
+    LOADING_PANEL_DELAY_MS
+  )
 
   const focusRow = (index: number) => {
     const node = nodes[Math.max(0, Math.min(index, nodes.length - 1))]
@@ -1089,7 +1097,7 @@ export function HistorySelectionReview({
       )}
       {openRecoveryError && <p role="alert">{openRecoveryError}</p>}
       {recoveryAction?.feedback && <p role={recoveryAction.failed ? "alert" : "status"}>{recoveryAction.feedback}</p>}
-      {selection.status === "loading" && (
+      {showLoading && (
         <StatePanel
           state="loading"
           title={text("loading", "Loading selected history")}

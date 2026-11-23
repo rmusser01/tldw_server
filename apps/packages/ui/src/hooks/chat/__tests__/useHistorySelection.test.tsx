@@ -511,6 +511,34 @@ it.each([
   expect(onCapture).toHaveBeenCalled()
 })
 
+// CM-14 (#3101): a new chat's first send renders its own question; its empty
+// load must neither flash a loading panel nor replace that question.
+it.each([true, false])("publishes a quiet load as quiet and installs it without onCapture: quiet=%s", async (quiet) => {
+  const capture = mocks.capture.getMockImplementation()!
+  let finish!: () => void
+  const held = new Promise<void>((resolve) => { finish = resolve })
+  mocks.capture.mockImplementationOnce(async (...args) => {
+    await held
+    return capture(...args)
+  })
+  const onCapture = vi.fn()
+  const { result } = renderHook(() => useHistorySelection({ onCapture }))
+  let pending!: Promise<boolean>
+  act(() => {
+    pending = result.current.loadConversation({ serverChatId: "chat", ...(quiet ? { quietLoad: true as const } : {}) })
+  })
+  await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+  expect(result.current.status).toBe("loading")
+  expect(result.current.quietLoad).toBe(quiet ? true : undefined)
+  await act(async () => {
+    finish()
+    expect(await pending).toBe(true)
+  })
+  expect(result.current.status).toBe("ready")
+  expect(result.current.quietLoad).toBeUndefined()
+  expect(onCapture).toHaveBeenCalledTimes(quiet ? 0 : 1)
+})
+
 it("does not install ownership on an unowned local cache", async () => {
   mocks.details.mockResolvedValue({ id: "unowned" })
   const { result } = renderHook(() => useHistorySelection())
