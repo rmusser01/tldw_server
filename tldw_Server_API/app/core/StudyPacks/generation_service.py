@@ -147,7 +147,8 @@ def _locator_names_passage(raw_locator: Any, item: StudySourceBundleItem) -> boo
         return False
     chapter = raw_locator.get(CHAPTER_LOCATOR_KEY)
     wanted = chapter.get("section_index") if isinstance(chapter, Mapping) else None
-    have = item.locator.get(CHAPTER_LOCATOR_KEY, {}).get("section_index")
+    item_chapter = item.locator.get(CHAPTER_LOCATOR_KEY)
+    have = item_chapter.get("section_index") if isinstance(item_chapter, Mapping) else None
     span = (raw_locator.get("start_char"), raw_locator.get("end_char"))
     return (wanted is not None and wanted == have) or (
         None not in span and span == (item.locator.get("start_char"), item.locator.get("end_char"))
