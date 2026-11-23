@@ -30,11 +30,13 @@ Root cause verified in source: the viewer and worker both run pdfjs-dist 4.8.69 
 Fix: ReleasingPage in PdfPage.tsx wraps react-pdf's Page and calls the public PDFPageProxy.cleanup() in onRenderSuccess and on unmount / pageNumber change; PdfPage (single, continuous and thumbnail modes of PdfDocument) and PagesTab both use it. No private _maybeCleanupAfterRender flag. pdf.js's own viewer uses the same public call (PDFPageView.destroy and the thumbnailrendered handler in web/pdf_viewer.mjs).
 Real pdf.js 4.8.69 check (throwaway Node script with node-canvas, scratchpad only): 30 scanned pages +196 MB array buffers without release, +0 MB with cleanup after paint; cleanup-then-cancel and cancel-then-cleanup both end with the data released (immediately, or within pdf.js's 5 s delayed cleanup); cleanup() returns false while a second canvas renders the same proxy, that render still paints correctly, and the data is released 5 s later; a released page renders again.
 Tests: red 7 failed (cleanup never called), green 8 passed for PdfPage.release.test.tsx + PagesTab.test.tsx; neighbours PdfDocument.memory, DocumentViewerAlerts.design-system, DocumentWorkspacePageAlerts.design-system, usePdfSearch: 42/42 passed. eslint (lint:ui config) clean; targeted tsc on PdfPage.tsx + PagesTab.tsx clean.
+Remaining memory (pdf.js alone in Playwright's Chromium headless shell, 300-page 176 MB scanned PDF opened from a blob: URL, renderer RSS after forced GC and a 20 s settle): without release, load 288 MB, then 1,689 and 1,688 MB after passes 1 and 2. With release: pass 1 adds a one-time ~456 MB (742-839 MB), pass 2 adds nothing (840 MB). Neither a worker-isolate GC nor PDFDocumentProxy.cleanup() frees that step. doc.destroy() plus worker.terminate() frees ~180 MB (the worker's copy of the file) and leaves 560 MB against a 110 MB blank page, so the step is Chromium's working-set high-water mark from decoding and drawing large images, not referenced data. No further fix belongs in this task. While a document is open, the worker holds one copy of the file; the Pages sidebar's own <Document> adds a second worker and a second copy.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PDF pages now release pdf.js's per-page render data (operator list and decoded images) through the public PDFPageProxy.cleanup() once their canvas is painted, and on unmount or page switch. ReleasingPage in PdfPage.tsx does this for every viewer mode and for the Pages sidebar thumbnails. Real pdf.js 4.8.69 in Chromium: reading a 300-page scan grows the renderer by a one-time ~456 MB instead of ~4.7 MB per page (+1,400 MB), with no growth on later passes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
