@@ -160,4 +160,51 @@ describe("fake API protected edit admission", () => {
       expect(chat.messages).toEqual(retained)
     } finally { hold.resolve() }
   })
+
+  // The real server's 409 bodies (HistoryEditTargetChangedError, HistoryBranchChangedError),
+  // so the client's exact refusal checks run against them in the harness.
+  it.each(["completion", "append"])("refuses a changed edit target through %s with the server's full detail", async operation => {
+    const server = createFakeTldwServer()
+    const { chat, target, body } = await prepare(server)
+    const revision = String(target.version)
+    target.version++
+    const response = operation === "completion"
+      ? await request(server, "/api/v1/chat/completions", body)
+      : await request(server, `/api/v1/chats/${chat.id}/messages`, { id: "new-edit", role: "user", content: "Edited question",
+          tldw_history_selection_v1: body.tldw_history_selection_v1, tldw_history_branch: true, tldw_history_edit_v1: body.tldw_history_edit_v1 })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ detail: { status: "stale_selection", code: "history_edit_target_changed",
+      conversation_id: chat.id, message_id: target.id, message_revision: revision,
+      selection_digest: body.tldw_history_selection_v1.selection_digest } })
+  })
+
+  it("refuses a completion that must extend a tip another window already continued", async () => {
+    const server = createFakeTldwServer({ nativeCompletion: true })
+    const chat = server.seedChat({ id: "tip", title: "Tip", turns: [
+      { role: "user", content: "Question" }, { role: "assistant", content: "Answer" }
+    ] })
+    const capture = await (await request(server, "/api/v1/chat/conversations/tip/history/selection", {
+      purpose: "send", view: { view_session_id: "tip-view", owner_key: "harness-native-owner", conversation_id: "tip",
+        interpretation: { kind: "parent_graph_v1" }, cursor: { kind: "after_message", message_id: "tip-m2" }, selection_revision: 1 }
+    })).json()
+    const context = { model: FAKE_MODEL, stream: false, save_to_db: true, conversation_id: "tip",
+      messages: [{ role: "user", content: "Question" }, { role: "assistant", content: "Answer" }, { role: "user", content: "Next" }] }
+    const selected = resolveHistorySelection(capture.snapshot, capture.view, "send", historyDigest(context))
+    if (selected.status !== "ready") throw new Error("Fixture selection is unavailable")
+    const body = { ...context, tldw_history_selection_v1: selected.selection, tldw_history_branch: false }
+    // Another window continues the tip after this capture.
+    chat.messages.push({ id: "elsewhere-q", role: "user", content: "Elsewhere", parent_message_id: "tip-m2", created_at: "", version: 1 },
+      { id: "elsewhere-a", role: "assistant", content: "Elsewhere answer", parent_message_id: "elsewhere-q", created_at: "", version: 1 })
+    const rows = structuredClone(chat.messages)
+    server.planCompletion({ reply: "Still queued after refusal" })
+
+    const response = await request(server, "/api/v1/chat/completions", body)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ detail: { status: "stale_selection", code: "history_branch_changed",
+      conversation_id: "tip", parent_message_id: "tip-m2", leaf_ids: ["elsewhere-a"], history_version: 4 } })
+    expect(chat.messages).toEqual(rows)
+    // An explicit branch is admitted beside the newer messages and gets the queued reply.
+    const branched = await (await request(server, "/api/v1/chat/completions", { ...body, tldw_history_branch: true })).json()
+    expect(branched.choices[0].message.content).toBe("Still queued after refusal")
+  })
 })

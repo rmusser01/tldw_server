@@ -351,8 +351,11 @@ export const createFakeTldwServer = ({
         (operation === "completion" ? body!.save_to_db !== true || !Array.isArray(body!.messages) || body!.messages.at(-1)?.role !== "user" : body!.role !== "user"))
       throw new Error("invalid_history_edit")
     const target = chat?.messages.find(row => row.id === edit.message_id)
+    // Like HistoryEditTargetChangedError: every echo identifies the original request.
     if (!chat || target?.role !== "user" || String(target.version) !== edit.message_revision)
-      throw new Error("history_edit_target_changed")
+      throw Object.assign(new Error("history_edit_target_changed"), { details: {
+        conversation_id: chat?.id ?? String(body!.conversation_id ?? ""), message_id: edit.message_id,
+        message_revision: edit.message_revision, selection_digest: selection.selection_digest } })
     const captured = captureSelection(chat, { purpose: "send", view: selection })
     if (selection.owner_key !== captured.view.owner_key || selection.conversation_id !== chat.id ||
         captured.status !== "captured" ||
@@ -378,7 +381,41 @@ export const createFakeTldwServer = ({
     inputAdmissions.set(user.id, admission)
     return { chat: chat!, user, admission }
   }
-  const editRefusal = (error: unknown) => json({ detail: { code: error instanceof Error ? error.message : "invalid_history_edit" } }, 409)
+  // The server's 409 shape for a refused history admission: {status, code, ...details}.
+  const editRefusal = (error: unknown) => json({ detail: { status: "stale_selection",
+    code: error instanceof Error ? error.message : "invalid_history_edit",
+    ...(error as { details?: Record<string, unknown> } | null)?.details } }, 409)
+  /**
+   * Like `_require_history_tip`: a new input that must extend the latest message
+   * (`tldw_history_branch: false`) is refused when its selection's last message,
+   * or the root for an empty selection, already has a live child. Nothing is
+   * written and no provider work is consumed.
+   */
+  const branchTipRefusal = (body: JsonBody | undefined) => {
+    const selection = body?.tldw_history_selection_v1
+    const chat = body?.conversation_id ? chats.get(String(body.conversation_id)) : undefined
+    if (!chat || !selection || body!.tldw_history_branch !== false || body!.tldw_history_edit_v1 != null ||
+        body!.metadata?.tldw_regenerate_from_message_id !== undefined || body!.metadata?.tldw_continue_from_message_id !== undefined)
+      return null
+    const tip: string | null = selection.messages?.at(-1)?.id ?? null
+    const children = new Map<string | null, string[]>()
+    chat.messages.forEach((row, index) => {
+      const parent = parentIdOf(chat, row, index)
+      children.set(parent, [...(children.get(parent) ?? []), row.id])
+    })
+    const leaves = new Set<string>()
+    const pending = [...(children.get(tip) ?? [])]
+    while (pending.length) {
+      const id = pending.pop()!
+      const below = children.get(id)
+      if (below?.length) pending.push(...below)
+      else leaves.add(id)
+    }
+    if (!leaves.size) return null
+    return json({ detail: { status: "stale_selection", code: "history_branch_changed", conversation_id: chat.id,
+      parent_message_id: tip, leaf_ids: chat.messages.filter(row => leaves.has(row.id)).map(row => row.id),
+      history_version: chat.messages.length } }, 409)
+  }
 
   /**
    * `save_to_db: true` on /chat/completions persists the turn server side, into
@@ -473,6 +510,18 @@ export const createFakeTldwServer = ({
     return { conversationId: chat.id, settle, admission }
   }
 
+  /**
+   * A row's parent as the capture reports it. A stored null parent is a root
+   * (e.g. a question reasked from the start); only rows that never recorded a
+   * parent read as linear.
+   */
+  const parentIdOf = (chat: FakeChat, message: FakeChatMessage, index: number) =>
+    message.parent_message_id !== undefined
+      ? message.parent_message_id
+      : index
+        ? chat.messages[index - 1].id
+        : null
+
   /** Emulates the native history-selection capture with the client's own resolver. */
   const captureSelection = (chat: FakeChat, request: JsonBody, advertiseNativeCompletion = false, advertiseInstructions = false) => {
     const ownerKey = "harness-native-owner"
@@ -481,14 +530,7 @@ export const createFakeTldwServer = ({
       id: message.id,
       revision: String(message.version),
       role: message.role,
-      // A stored null parent is a root (e.g. a question reasked from the
-      // start); only rows that never recorded a parent read as linear.
-      parent_id:
-        message.parent_message_id !== undefined
-          ? message.parent_message_id
-          : index
-            ? chat.messages[index - 1].id
-            : null,
+      parent_id: parentIdOf(chat, message, index),
       settled: true,
       preview: message.content.slice(0, 120)
     }))
@@ -552,6 +594,8 @@ export const createFakeTldwServer = ({
     let edited: ReturnType<typeof admitEditedCompletion>
     try { edited = admitEditedCompletion(body, canonical, originalEditChat) }
     catch (error) { return editRefusal(error) }
+    const staleTip = branchTipRefusal(body)
+    if (staleTip) return staleTip
     const plan = completionPlans.shift() ?? {}
     if (plan.gate) await plan.gate
     if (plan.status && plan.status >= 400) {
