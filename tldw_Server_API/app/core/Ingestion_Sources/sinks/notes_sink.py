@@ -383,7 +383,7 @@ def apply_notes_change(
                 source_id=int(source_id),
                 folder_paths=folder_paths,
             )
-        elif source_id is not None and hasattr(notes_db, "workspace_store"):
+        elif source_id is not None and hasattr(getattr(notes_db, "workspace_store", None), "sync_note_source_folders"):
             notes_db.workspace_store.sync_note_source_folders(note_id, int(source_id), folder_paths)
         return {"action": "updated", "note_id": note_id, "sync_status": "sync_managed"}
 
@@ -416,6 +416,6 @@ def apply_notes_change(
             source_id=int(source_id),
             folder_paths=folder_paths,
         )
-    elif source_id is not None and hasattr(notes_db, "workspace_store"):
+    elif source_id is not None and hasattr(getattr(notes_db, "workspace_store", None), "sync_note_source_folders"):
         notes_db.workspace_store.sync_note_source_folders(note_id, int(source_id), folder_paths)
     return {"action": "created", "note_id": note_id, "sync_status": "sync_managed"}

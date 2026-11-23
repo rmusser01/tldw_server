@@ -47,7 +47,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.Flashcards.source_review import build_source_review_launch_metadata
-from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 from tldw_Server_API.app.core.Workspaces.file_inventory_models import (
     bounded_inventory_diagnostics,
     decode_inventory_cursor,
@@ -133,6 +132,7 @@ _WORKSPACE_ARTIFACT_JSON_FIELDS: tuple[tuple[str, str, Any], ...] = (
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+    from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
 
 class WorkspaceStore:

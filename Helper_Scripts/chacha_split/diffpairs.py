@@ -48,11 +48,9 @@ def git_show(root: Path, ref: str, path: str) -> str:
     return result.stdout
 
 
-def find_def(body: list[ast.stmt], name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
-    for node in body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            return node
-    return None
+def find_defs(body: list[ast.stmt], name: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Every def of a name in source order: an ``@overload`` function has several."""
+    return [n for n in body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name]
 
 
 def normalized_base(node: ast.FunctionDef | ast.AsyncFunctionDef, functions_mode: bool) -> ast.FunctionDef | ast.AsyncFunctionDef:
@@ -154,19 +152,19 @@ def check_manifest(root: Path, ref: str, manifest: dict, counts: Counter, bad: l
     renames = manifest.get("renames", {})
     checked = check_constants(base_tree, base_class, head_tree, manifest, counts, bad) if manifest["mode"] in {"constants", "store"} else 0
     for name in manifest["names"]:
-        old = find_def(base_class.body, name)
-        new = find_def(head_body, name)
-        if old is None or new is None:
-            bad.append(f"{name}: def missing in {'base' if old is None else 'head'}")
+        olds, news = find_defs(base_class.body, name), find_defs(head_body, name)
+        if not olds or not news or len(olds) != len(news):
+            bad.append(f"{name}: {len(olds)} defs in the base, {len(news)} in the head")
             continue
-        pairs: list[tuple[ast.AST, ast.AST]] = []
-        walk(normalized_base(old, functions_mode), new, pairs)
-        checked += 1
-        for a, b in pairs:
-            key = (ast.unparse(a), ast.unparse(b))
-            counts[key] += 1
-            if not allowed(a, b, renames, manifest.get("store_class")):
-                bad.append(f"{name}: {key[0]!r} -> {key[1]!r}")
+        for old, new in zip(olds, news, strict=True):
+            pairs: list[tuple[ast.AST, ast.AST]] = []
+            walk(normalized_base(old, functions_mode), new, pairs)
+            checked += 1
+            for a, b in pairs:
+                key = (ast.unparse(a), ast.unparse(b))
+                counts[key] += 1
+                if not allowed(a, b, renames, manifest.get("store_class")):
+                    bad.append(f"{name}: {key[0]!r} -> {key[1]!r}")
     return checked
 
 

@@ -922,23 +922,28 @@ def run_verify(root: Path, manifest_paths: list[Path], base: str) -> int:
             constants_ok += _verify_constants(root, manifest, base_tree, head_tree, failures)
             continue
         t_tree = ast.parse((root / manifest["target"]).read_text(encoding="utf-8"))
-        store_defs = _defs(_class_node(t_tree, manifest["store_class"]).body)
+        store_defs = _all_defs(_class_node(t_tree, manifest["store_class"]).body)
+        base_all = _all_defs(_class_node(base_tree, CLASS).body)
         for name in manifest["names"]:
             if name in head_defs:
                 failures.append(f"{name}: still on {CLASS}")
-            if name not in base_defs or name not in store_defs:
-                failures.append(f"{name}: missing from the {'base class' if name not in base_defs else 'store'}")
+            if name not in base_all or name not in store_defs:
+                failures.append(f"{name}: missing from the {'base class' if name not in base_all else 'store'}")
                 continue
-            rewriter = _Rewriter(manifest, index, renames)
-            expected = rewriter.visit(copy.deepcopy(base_defs[name]))
-            if rewriter.unmapped or ast.dump(expected) != ast.dump(store_defs[name]):
-                failures.append(f"{name}: the moved body differs from the base")
-                failures += _diff(expected, store_defs[name])
-            else:
-                moved += 1
-        for name in manifest["constants"]:
-            old = _module_constant(base_tree, name)
-            new = _module_constant(t_tree, name)
+            if len(base_all[name]) != len(store_defs[name]):  # every def of a name, overload stubs included, in order
+                failures.append(f"{name}: {len(base_all[name])} defs in the base, {len(store_defs[name])} in the store")
+                continue
+            for old_def, new_def in zip(base_all[name], store_defs[name], strict=True):
+                rewriter = _Rewriter(manifest, index, renames)
+                expected = rewriter.visit(copy.deepcopy(old_def))
+                if rewriter.unmapped or ast.dump(expected) != ast.dump(new_def):
+                    failures.append(f"{name}: the moved body differs from the base")
+                    failures += _diff(expected, new_def)
+                else:
+                    moved += 1
+        for name in [*manifest["constants"], *manifest["class_constants"]]:
+            old = _const_value(base_tree, name)
+            new = _const_value(t_tree, name, module_only=True)
             if old is None or new is None or ast.dump(old) != ast.dump(new):
                 failures.append(f"{name}: the moved constant differs from the base")
     identical, structural_seen = 0, []
@@ -975,6 +980,16 @@ def run_verify(root: Path, manifest_paths: list[Path], base: str) -> int:
         print(f"constants {constants_ok} identical")
     print(f"moved {moved} identical; class defs {identical} identical; structural {sorted(set(structural_seen))}")
     return 1 if failures else 0
+
+
+def _const_value(tree: ast.Module, name: str, module_only: bool = False) -> ast.expr | None:
+    """The value of a module constant or, unless ``module_only``, of a CharactersRAGDB class constant."""
+    bodies = [tree.body] if module_only else [_class_node(tree, CLASS).body, tree.body]
+    for body in bodies:
+        for n in body:
+            if _const_name(n) == name:
+                return n.value  # type: ignore[attr-defined]
+    return None
 
 
 def _module_constant(tree: ast.Module, name: str) -> ast.expr | None:
