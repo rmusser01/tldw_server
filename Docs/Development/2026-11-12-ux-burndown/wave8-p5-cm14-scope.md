@@ -76,7 +76,8 @@ turns need:
 ## Lanes
 
 The lanes run in parallel. Shared files are touched only in disjoint hunks.
-Merge order: 8A, 8B, 8C.
+Planned merge order: 8A, 8B, 8C. The lanes were merged 8A, 8C, 8B (see the
+Wave 8 log).
 
 ### 8A — P5 Edit and send (S)
 
