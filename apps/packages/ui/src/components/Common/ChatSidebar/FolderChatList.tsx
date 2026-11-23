@@ -33,7 +33,7 @@ const isGlobalChat = (chat: ServerChatSummary, id: string) =>
 export function FolderChatList({ className, onConversationSelected, owner,
   verificationState = "pending", onRetryVerification, readOnly = false }: FolderChatListProps) {
   const { t } = useTranslation(["common"])
-  const { isConnected } = useConnectionState()
+  const { isConnected } = useConnectionState((s) => ({ isConnected: s.isConnected }))
   const checkConnection = useConnectionStore((state) => state.checkOnce)
   const { restoreRevision, sourceSelectionRevision } = usePlaygroundSessionStore(useShallow(state => ({
     restoreRevision: state.restoreRevision, sourceSelectionRevision: state.sourceSelectionRevision

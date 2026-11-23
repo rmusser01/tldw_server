@@ -341,7 +341,10 @@ vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: useMessageOptionMock
 }))
 
-vi.mock("@/hooks/useConnectionState", () => ({ useConnectionState: () => ({ serverUrl: "http://chat.test", lastConfigUpdatedAt: 0, isConnected: true, phase: "connected" }) }))
+vi.mock("@/hooks/useConnectionState", () => {
+  const state = { serverUrl: "http://chat.test", lastConfigUpdatedAt: 0, isConnected: true, phase: "connected" }
+  return { useConnectionState: (select?: (s: typeof state) => unknown) => (select ? select(state) : state) }
+})
 vi.mock("@/hooks/usePlaygroundSessionPersistence", async importOriginal => {
   const actual = await importOriginal<typeof import("@/hooks/usePlaygroundSessionPersistence")>()
   const { useHistorySelectionContext } = await import("@/hooks/chat/useHistorySelection")

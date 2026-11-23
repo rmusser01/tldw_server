@@ -863,6 +863,32 @@ describe("NotificationLifecycleProvider", () => {
     expect(view.latest().unreadCount).toBe(6)
   })
 
+  it.each([
+    ["the initial heartbeat event", { event: "heartbeat", payload: {} }],
+    ["a heartbeat data frame", { event: "message", payload: { heartbeat: true } }]
+  ])("ignores %s without changing the context value", async (_label, heartbeat) => {
+    let streamOptions: Record<string, unknown> | undefined
+    mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
+      streamOptions = options
+      return vi.fn()
+    })
+    const view = renderProvider()
+    await waitFor(() => expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(view.latest().unreadCount).toBe(5))
+    const onEvent = streamOptions?.onEvent as ((event: unknown) => void) | undefined
+    const before = view.latest()
+
+    act(() => onEvent?.(heartbeat))
+
+    expect(view.latest()).toBe(before)
+    expect(view.latest().events).toEqual([])
+
+    act(() => onEvent?.({ event: "notification", id: 11, payload: { notification_id: 11 } }))
+
+    expect(view.latest()).not.toBe(before)
+    expect(view.latest().events.map(({ event }) => event.id)).toEqual([11])
+  })
+
   it("adds a validated coalesced count to the lifecycle unread total", async () => {
     let streamOptions: Record<string, unknown> | undefined
     mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
