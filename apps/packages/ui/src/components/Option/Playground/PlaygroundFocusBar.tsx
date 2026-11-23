@@ -52,7 +52,7 @@ export const PlaygroundFocusBar = ({
   return (
     <header
       data-testid="playground-focus-bar"
-      className="flex min-h-12 w-full shrink-0 items-center gap-1 border-b border-border/60 bg-surface px-1"
+      className="flex min-h-12 w-full shrink-0 items-center gap-1 border-b border-border/60 bg-surface px-1 [@media(max-height:500px)]:min-h-11"
     >
       <button
         type="button"

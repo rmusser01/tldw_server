@@ -598,7 +598,7 @@ describe("SidepanelPersona", () => {
     await waitForLiveSessionPanel()
     const diagnostics = await screen.findByTestId("persona-buddy-diagnostics")
 
-    expect(diagnostics).toHaveTextContent("Persona Buddy degraded")
+    expect(diagnostics).toHaveTextContent("Persona avatar degraded")
     expect(diagnostics).toHaveTextContent("Visual pack did not load")
     expect(diagnostics).toHaveTextContent("Pack ID: pack-1")
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument()
@@ -650,7 +650,7 @@ describe("SidepanelPersona", () => {
     await waitForLiveSessionPanel()
     const diagnostics = await screen.findByTestId("persona-buddy-diagnostics")
 
-    expect(diagnostics).toHaveTextContent("Persona Buddy degraded")
+    expect(diagnostics).toHaveTextContent("Persona avatar degraded")
     expect(diagnostics).toHaveTextContent("Profile")
     expect(diagnostics).toHaveTextContent("Load failed")
     expect(diagnostics).toHaveTextContent("Profile service offline")
@@ -1606,7 +1606,7 @@ describe("SidepanelPersona", () => {
       expect(screen.getByTestId("assistant-setup-overlay")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Buddy builder" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open avatar builder" }))
 
     await waitFor(() => {
       expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
@@ -5127,7 +5127,7 @@ describe("SidepanelPersona", () => {
                   idx: 0,
                   tool: "rag_search",
                   args: { query: "private search" },
-                  description: "Review the original Buddy search"
+                  description: "Review the original avatar search"
                 }
               ]
             }
@@ -5165,7 +5165,7 @@ describe("SidepanelPersona", () => {
       )
       const ws = MockWebSocket.instances[0]
       act(() => ws.emitOpen())
-      const plan = await screen.findByText(/Review the original Buddy search/)
+      const plan = await screen.findByText(/Review the original avatar search/)
       const checkbox = within(plan.closest("label")!).getByRole("checkbox")
       expect(checkbox).not.toBeChecked()
       expect(
@@ -5273,7 +5273,7 @@ describe("SidepanelPersona", () => {
       </React.StrictMode>
     )
     await screen.findByText(
-      "Reviewing this Buddy session. Setup is still incomplete."
+      "Reviewing this avatar session. Setup is still incomplete."
     )
     expect(
       screen.queryByRole("tab", { name: "Profiles" })
@@ -5331,7 +5331,7 @@ describe("SidepanelPersona", () => {
     expect(screen.getByTestId("assistant-setup-overlay")).toBeInTheDocument()
     expect(
       screen.queryByText(
-        "Reviewing this Buddy session. Setup is still incomplete."
+        "Reviewing this avatar session. Setup is still incomplete."
       )
     ).not.toBeInTheDocument()
   })

@@ -53,6 +53,7 @@ export interface TldwApiClientCore {
       limit?: number
       offset?: number
       include_keywords?: boolean
+      legacy_aliases?: boolean
     },
     options?: { signal?: AbortSignal }
   ): Promise<any>
@@ -85,6 +86,16 @@ export const collectionsMethods = {
     })
   },
 
+  /** One note by id, in full (a search row may be trimmed). */
+  async getNote(noteId: string | number, options?: ScopedRequestOptions): Promise<any> {
+    return await bgRequest<any>({
+      ...requestScopeFields(options?.requestScope),
+      path: `/api/v1/notes/${encodeURIComponent(String(noteId))}`,
+      method: "GET",
+      abortSignal: options?.signal
+    })
+  },
+
   async listNotes(
     this: TldwApiClientCore,
     params?: {
@@ -93,6 +104,7 @@ export const collectionsMethods = {
       limit?: number
       offset?: number
       include_keywords?: boolean
+      legacy_aliases?: boolean
     },
     options?: { signal?: AbortSignal }
   ): Promise<any> {
@@ -105,7 +117,8 @@ export const collectionsMethods = {
     const query = buildQuery({
       limit,
       offset,
-      include_keywords: params?.include_keywords
+      include_keywords: params?.include_keywords,
+      legacy_aliases: params?.legacy_aliases
     } as Record<string, any>)
     return await bgRequest<any>({
       path: `/api/v1/notes/${query}`,
@@ -122,13 +135,14 @@ export const collectionsMethods = {
   ): Promise<any> {
     const normalized = query.trim()
     if (!normalized) {
-      return await this.listNotes({ limit: params?.limit, offset: params?.offset }, options)
+      return await this.listNotes({ limit: params?.limit, offset: params?.offset, legacy_aliases: params?.legacy_aliases }, options)
     }
     const queryString = buildQuery({
       query: normalized,
       limit: params?.limit,
       offset: params?.offset,
       legacy_aliases: params?.legacy_aliases,
+      include_snippets: params?.include_snippets,
     })
     return await bgRequest<any>({
       ...requestScopeFields(options?.requestScope),

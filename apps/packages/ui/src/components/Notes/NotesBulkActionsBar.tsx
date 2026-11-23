@@ -32,6 +32,8 @@ const MAX_LISTED_FAILURES = 5
 const fill = (text: string, values: Record<string, string | number>) =>
   text.replace(/\{\{(\w+)\}\}/g, (match, name: string) => (name in values ? String(values[name]) : match))
 
+// A bulk delete's Undo restores from the notes list, so its progress and
+// failures show there, not in Trash.
 const actionMode = (action: NotesBulkAction): 'active' | 'trash' => (action === 'restore' ? 'trash' : 'active')
 
 const noteLabel = (note: { id: string | number; title?: string | null }) => note.title || `Note ${note.id}`
@@ -67,7 +69,8 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
     const text = {
       delete: () => t('option:notesSearch.bulkProgressDelete', { defaultValue: 'Deleting {{done}}/{{total}}…', ...values }),
       addTags: () => t('option:notesSearch.bulkProgressAddTags', { defaultValue: 'Adding tags {{done}}/{{total}}…', ...values }),
-      restore: () => t('option:notesSearch.bulkProgressRestore', { defaultValue: 'Restoring {{done}}/{{total}}…', ...values })
+      restore: () => t('option:notesSearch.bulkProgressRestore', { defaultValue: 'Restoring {{done}}/{{total}}…', ...values }),
+      undoDelete: () => t('option:notesSearch.bulkProgressRestore', { defaultValue: 'Restoring {{done}}/{{total}}…', ...values })
     }[value.action]()
     return fill(text, values)
   }
@@ -76,7 +79,8 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
     const text = {
       delete: () => t('option:notesSearch.bulkFailedDelete', { defaultValue: 'Delete failed for {{count}}:', ...values }),
       addTags: () => t('option:notesSearch.bulkFailedAddTags', { defaultValue: 'Adding tags failed for {{count}}:', ...values }),
-      restore: () => t('option:notesSearch.bulkFailedRestore', { defaultValue: 'Restore failed for {{count}}:', ...values })
+      restore: () => t('option:notesSearch.bulkFailedRestore', { defaultValue: 'Restore failed for {{count}}:', ...values }),
+      undoDelete: () => t('option:notesSearch.bulkFailedRestore', { defaultValue: 'Restore failed for {{count}}:', ...values })
     }[value.action]()
     return fill(text, values)
   }
@@ -218,7 +222,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
             onClick={onDelete}
             data-testid="notes-bulk-delete"
           >
-            {t('option:notesSearch.bulkDelete', { defaultValue: 'Delete selected' })}
+            {t('option:notesSearch.bulkDelete', { defaultValue: 'Move selected to Trash' })}
           </Button>
         </div>
       )}

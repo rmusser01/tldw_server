@@ -32,7 +32,6 @@ import { buildNotesSortOptions } from './notes-sort-options'
 import { useHasContentBelow } from './hooks/useHasContentBelow'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NotesRecentOpenedEntry } from '@/services/settings/ui-settings'
-import { CAPTURED_NOTE_KEYWORD } from '@/services/notes-capture'
 import {
   NOTES_SEARCH_INPUT_ATTR,
   useNotesOffCanvasList,
@@ -177,7 +176,9 @@ export interface NotesSidebarProps {
   addTagsToSelectedBulk: () => Promise<void>
   deleteSelectedBulk: () => Promise<void>
   /** Trash: restore the selected notes (NL-05). */
-  restoreSelectedBulk?: () => Promise<void>
+  restoreSelectedBulk?: () => Promise<unknown>
+  /** The Move to Trash Undo offer, shown above the list while the list is visible (XP-17). */
+  undoBanner?: React.ReactNode
   /** Trash search (NL-05). */
   trashQuery?: string
   setTrashQuery?: (query: string) => void
@@ -209,7 +210,25 @@ export interface NotesSidebarProps {
 // Component
 // ---------------------------------------------------------------------------
 
+type DescribedButtonProps = React.ComponentProps<typeof Button> & {
+  /** Always describes the button; antd's Tooltip sets aria-describedby only while open. */
+  descriptionId: string
+}
+
+/** A Tooltip child that keeps its own description when the tooltip is closed (NL-12 review). */
+const DescribedButton = React.forwardRef<HTMLButtonElement, DescribedButtonProps>(
+  ({ descriptionId, 'aria-describedby': tooltipId, ...props }, ref) => (
+    <Button
+      ref={ref}
+      {...props}
+      aria-describedby={[descriptionId, tooltipId].filter(Boolean).join(' ')}
+    />
+  )
+)
+DescribedButton.displayName = 'DescribedButton'
+
 const NotesSidebar: React.FC<NotesSidebarProps> = ({
+  undoBanner,
   // Layout
   isMobileViewport,
   mobileSidebarOpen,
@@ -396,10 +415,10 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           defaultValue: '{{total}} total',
           total
         })
-  const capturedFilterActive = keywordTokens.some(
-    (keyword) => keyword.trim().toLocaleLowerCase() === CAPTURED_NOTE_KEYWORD
-  )
 
+  const inboxDescription = t('option:notesSearch.viewModeInboxDescription', {
+    defaultValue: 'Notes saved from browser capture.'
+  })
   const switchViewMode = React.useCallback(
     (mode: NotesListViewMode) => {
       setListViewMode(mode)
@@ -523,6 +542,69 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             </div>
 
             <div className="space-y-2">
+              {/* ---- Search first: above Views, so it is the first control after the header (NL-04, NL-12) ---- */}
+              {listMode === 'active' ? (
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <Input
+                      allowClear
+                      placeholder={t('option:notesSearch.placeholder', {
+                        defaultValue: 'Search notes... (use quotes for exact match)'
+                      })}
+                      prefix={(<SearchIcon className="w-4 h-4 text-text-subtle" />)}
+                      value={queryInput}
+                      aria-label={t('option:notesSearch.searchInputAriaLabel', {
+                        defaultValue: 'Search notes'
+                      })}
+                      onChange={(e) => {
+                        setQueryInput(e.target.value)
+                      }}
+                      onPressEnter={() => {
+                        clearSearchQueryTimeout()
+                        setQuery(queryInput)
+                        setPage(1)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey) return
+                        // First Escape clears the search; the next one moves to the results (AX-03).
+                        if (queryInput.length > 0) {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          clearSearchQueryTimeout()
+                          setQueryInput('')
+                          setQuery('')
+                          setPage(1)
+                          return
+                        }
+                        // In the mobile dialog an empty-search Escape closes the list instead.
+                        if (offCanvas.isModal) return
+                        const aside = offCanvas.asideRef.current
+                        if (focusActiveNotesListRow(aside)) event.preventDefault()
+                      }}
+                      ref={searchInputRef}
+                      {...{ [NOTES_SEARCH_INPUT_ATTR]: '' }}
+                    />
+                  </div>
+                  <Select
+                    value={sortOption}
+                    onChange={(value) => {
+                      setSortOption(value as NotesSortOption)
+                      setPage(1)
+                    }}
+                    className="w-[160px] flex-shrink-0"
+                    size="small"
+                    data-testid="notes-sort-select"
+                    aria-label={t('option:notesSearch.sortAriaLabel', {
+                      defaultValue: 'Sort notes'
+                    })}
+                    options={buildNotesSortOptions(t, {
+                      bestMatchAvailable: Boolean(sortBestMatchAvailable)
+                    })}
+                  />
+                </div>
+              ) : setTrashQuery ? (
+                <NotesTrashSearch value={trashQuery} onSearch={setTrashQuery} />
+              ) : null}
               {/* ---- Collapsible: Views (always visible) ---- */}
               <CollapsibleSection
                 title={t('option:notesSearch.viewOrganizeSectionTitle', {
@@ -596,18 +678,25 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       defaultValue: 'Timeline'
                     })}
                   </Button>
-                  <Button
-                    size="small"
-                    type={listViewMode === 'inbox' ? 'primary' : 'default'}
-                    aria-pressed={listViewMode === 'inbox'}
-                    onClick={() => switchViewMode('inbox')}
-                    disabled={listMode !== 'active'}
-                    data-testid="notes-view-mode-inbox"
-                  >
-                    {t('option:notesSearch.viewModeInbox', {
-                      defaultValue: 'Inbox'
-                    })}
-                  </Button>
+                  {/* The description is the button's own, not just a hover tooltip (NL-12 review). */}
+                  <span id="notes-view-mode-inbox-description" className="sr-only">
+                    {inboxDescription}
+                  </span>
+                  <Tooltip title={inboxDescription} trigger={['hover', 'focus']}>
+                    <DescribedButton
+                      size="small"
+                      type={listViewMode === 'inbox' ? 'primary' : 'default'}
+                      aria-pressed={listViewMode === 'inbox'}
+                      descriptionId="notes-view-mode-inbox-description"
+                      onClick={() => switchViewMode('inbox')}
+                      disabled={listMode !== 'active'}
+                      data-testid="notes-view-mode-inbox"
+                    >
+                      {t('option:notesSearch.viewModeInbox', {
+                        defaultValue: 'Inbox'
+                      })}
+                    </DescribedButton>
+                  </Tooltip>
                   <Button
                     size="small"
                     type={listViewMode === 'moodboard' ? 'primary' : 'default'}
@@ -731,13 +820,18 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       data-testid="notes-notebook-helper-text"
                     >
                       {selectedNotebook
-                        ? t('option:notesSearch.notebookHelperSelected', {
-                            defaultValue: 'Saved filter applies {{count}} tag filters.',
-                            count: selectedNotebook.keywords.length
-                          })
-                        : t('option:notesSearch.notebookHelperDefault', {
+                        ? selectedNotebook.keywords.length === 0
+                          ? t('option:notesSearch.notebookHelperSelectedNoTags', {
+                              defaultValue: 'This saved filter has no tags, so it does not narrow the list.'
+                            })
+                          : t('option:notesSearch.notebookHelperSelectedAllTags', {
+                              // A saved filter always matches all of its tags (decision 19).
+                              defaultValue: 'Shows notes that have all of its tags: {{tags}}.',
+                              tags: selectedNotebook.keywords.join(', ')
+                            })
+                        : t('option:notesSearch.notebookHelperDefaultAllTags', {
                             defaultValue:
-                              'Save current tag filters as saved filters.'
+                              'Save the picked tags as a saved filter. A saved filter shows notes that have all of its tags.'
                           })}
                     </Typography.Text>
                   </div>
@@ -747,66 +841,6 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
               {listMode === 'active' ? (
                 <>
-                  {/* ---- Always visible: Search + Sort row ---- */}
-                  <div className="flex items-center gap-2">
-                    <div className="min-w-0 flex-1">
-                      <Input
-                        allowClear
-                        placeholder={t('option:notesSearch.placeholder', {
-                          defaultValue: 'Search notes... (use quotes for exact match)'
-                        })}
-                        prefix={(<SearchIcon className="w-4 h-4 text-text-subtle" />)}
-                        value={queryInput}
-                        aria-label={t('option:notesSearch.searchInputAriaLabel', {
-                          defaultValue: 'Search notes'
-                        })}
-                        onChange={(e) => {
-                          setQueryInput(e.target.value)
-                        }}
-                        onPressEnter={() => {
-                          clearSearchQueryTimeout()
-                          setQuery(queryInput)
-                          setPage(1)
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey) return
-                          // First Escape clears the search; the next one moves to the results (AX-03).
-                          if (queryInput.length > 0) {
-                            event.preventDefault()
-                            event.stopPropagation()
-                            clearSearchQueryTimeout()
-                            setQueryInput('')
-                            setQuery('')
-                            setPage(1)
-                            return
-                          }
-                          // In the mobile dialog an empty-search Escape closes the list instead.
-                          if (offCanvas.isModal) return
-                          const aside = offCanvas.asideRef.current
-                          if (focusActiveNotesListRow(aside)) event.preventDefault()
-                        }}
-                        ref={searchInputRef}
-                        {...{ [NOTES_SEARCH_INPUT_ATTR]: '' }}
-                      />
-                    </div>
-                    <Select
-                      value={sortOption}
-                      onChange={(value) => {
-                        setSortOption(value as NotesSortOption)
-                        setPage(1)
-                      }}
-                      className="w-[160px] flex-shrink-0"
-                      size="small"
-                      data-testid="notes-sort-select"
-                      aria-label={t('option:notesSearch.sortAriaLabel', {
-                        defaultValue: 'Sort notes'
-                      })}
-                      options={buildNotesSortOptions(t, {
-                        bestMatchAvailable: Boolean(sortBestMatchAvailable)
-                      })}
-                    />
-                  </div>
-
                   {/* ---- Collapsible: Filters ---- */}
                   <CollapsibleSection
                     title={t('option:notesSearch.filtersSectionTitle', {
@@ -817,27 +851,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     storageKey="filters"
                     testId="notes-section-filters"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <Tooltip
-                        title={t('option:notesSearch.capturedFilterTooltip', {
-                          defaultValue: 'Show notes saved from browser capture.'
-                        })}
-                      >
-                        <Button
-                          size="small"
-                          type={capturedFilterActive ? 'primary' : 'default'}
-                          aria-pressed={capturedFilterActive}
-                          onClick={() => {
-                            handleKeywordFilterChange([CAPTURED_NOTE_KEYWORD])
-                            setPage(1)
-                          }}
-                          data-testid="notes-captured-filter"
-                        >
-                          {t('option:notesSearch.capturedFilterAction', {
-                            defaultValue: 'Captured'
-                          })}
-                        </Button>
-                      </Tooltip>
+                    {/* Inbox is the one way to list captured notes (NL-12). */}
+                    <div className="flex items-center justify-end gap-2">
                       <Popover
                         trigger="click"
                         content={searchTipsContent}
@@ -1020,7 +1035,6 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 </>
               ) : (
                 <>
-                  {setTrashQuery && <NotesTrashSearch value={trashQuery} onSearch={setTrashQuery} />}
                   <Typography.Text
                     type="secondary"
                     className="text-[11px] text-text-muted block"
@@ -1058,6 +1072,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
               </div>
             )}
           </div>
+
+          {undoBanner}
 
           {/* Notes List Section */}
           <div className="min-h-[240px] flex-1 overflow-y-auto" data-testid="notes-sidebar-results">

@@ -861,11 +861,11 @@ export function ChatHeader({
           <div className="flex shrink-0 items-center gap-2 text-text">
             <img
               src={logoSrc}
-              alt={toText(t("common:pageAssist", "tldw Assistant"))}
+              alt={toText(t("common:pageAssist", "tldw"))}
               className="h-5 w-auto"
             />
             <span className="text-sm font-medium">
-              {toText(t("common:pageAssist", "tldw Assistant"))}
+              {toText(t("common:pageAssist", "tldw"))}
             </span>
             <Tooltip title={companionHomeLabel}>
               <button

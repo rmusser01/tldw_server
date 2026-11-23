@@ -309,6 +309,15 @@ describe("default palette text tokens", () => {
     expect(failures).toEqual([])
   })
 
+  // Decision 9 (#3101): light subtle text (95 104 119) was a near-copy of
+  // muted (91 100 114), so the light theme keeps one secondary text tier.
+  it("merges default light subtle text into muted", () => {
+    const light = getDefaultTheme().palette.light
+    expect(light.textSubtle).toBe(light.textMuted)
+    const values = stylesheetTokens(":root")
+    expect(values.get("--color-text-subtle")).toBe(values.get("--color-text-muted"))
+  })
+
   it.each([
     [":root", "light"],
     [".dark", "dark"]

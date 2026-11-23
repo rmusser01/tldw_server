@@ -28,7 +28,7 @@ test('selected sidepanel expansion opens extension full page with an independent
   } finally { await context.close(); await server.close() }
 })
 
-test('explicit Continue in WebUI composer action preserves its existing full-app draft handoff', async () => {
+test('Open in full page from Tools carries the draft to the extension full page (XP-09)', async () => {
   const server = await startHistoryServer()
   const { context, page, optionsUrl, extensionId, openSidepanel } = await launchWithExtension(EXT_PATH, { seedConfig: historySeedConfig(server.url) })
   try {
@@ -43,7 +43,7 @@ test('explicit Continue in WebUI composer action preserves its existing full-app
     await sidepanel.reload()
     await sidepanel.getByTestId('chat-input').fill('H1 explicit composer draft')
     await sidepanel.getByTestId('control-more-menu').click()
-    const [expanded] = await Promise.all([context.waitForEvent('page'), sidepanel.getByTestId('chat-continue-in-webui').click()])
+    const [expanded] = await Promise.all([context.waitForEvent('page'), sidepanel.getByTestId('chat-open-full-app').click()])
     await expect.poll(() => expanded.url()).toContain(`${extensionId}/options.html`)
     await expect(expanded.getByTestId('chat-input')).toHaveValue('H1 explicit composer draft')
     expect(server.requests.filter(row => row.method === 'POST' && row.path === '/api/v1/chats/')).toHaveLength(0)

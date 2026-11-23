@@ -208,7 +208,7 @@ describe("PromptAssistComposerAction real shell wiring", () => {
       /const v5SendSlot = \(\s*<SidepanelComposerControlArea[\s\S]*?variant="v5"[\s\S]*?sendSlot=\{v5SendSlot\}/
     )
     expect(sidepanelFormSource).toMatch(
-      /return \(\s*<>\s*\{composerTextareaShellNode\}\s*\{composerInlineMessagesNode\}\s*(?:\{composerResponseStatusNode\}\s*)?\{composerControlAreaNode\}/
+      /return \(\s*(?:<>|<div data-sidepanel-dock-essential[^>]*>)\s*\{composerTextareaShellNode\}\s*\{composerInlineMessagesNode\}\s*(?:\{composerResponseStatusNode\}\s*)?\{composerControlAreaNode\}/
     )
   })
 
@@ -221,7 +221,7 @@ describe("PromptAssistComposerAction real shell wiring", () => {
       /path:\s*"\/chat"[\s\S]*element:\s*<SidepanelChat\s*\/>/
     )
     expect(sidepanelChatSource).toMatch(
-      /import\s*\{\s*SidepanelForm,\s*type\s*SidepanelWebUiOpenSource\s*\}\s*from\s*["']~\/components\/Sidepanel\/Chat\/form["']/,
+      /import\s*\{\s*SidepanelForm,(?:\s*type\s*SidepanelFullPageInfo,)?\s*type\s*SidepanelWebUiOpenSource\s*\}\s*from\s*["']~\/components\/Sidepanel\/Chat\/form["']/,
     );
     expect(
       occurrences(sidepanelFormSource, "<PromptAssistComposerAction")

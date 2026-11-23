@@ -456,7 +456,7 @@ describe("calm conversation header", () => {
         {...createProps({ showChatTitle: false, showSessionModeBadge: false })}
       />
     )
-    expect(screen.getByText("tldw Assistant")).toBeVisible()
+    expect(screen.getByText("tldw")).toBeVisible()
     expect(screen.getByRole("button", { name: "Companion Home" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Open settings" })).toBeVisible()
   })

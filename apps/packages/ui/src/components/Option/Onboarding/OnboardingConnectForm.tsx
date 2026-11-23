@@ -1586,7 +1586,7 @@ export function OnboardingConnectForm({
           {setupState.label}
         </span>
         <h2 className="text-2xl font-semibold text-text tracking-tight">
-          {t("settings:onboarding.title", "Welcome to tldw Assistant")}
+          {t("settings:onboarding.title", "Welcome to tldw")}
         </h2>
         <p className="mt-2 text-sm text-text-muted">
           {t(

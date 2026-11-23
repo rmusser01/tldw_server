@@ -227,7 +227,7 @@ export const IndependentBuddySession = ({
         )
       } catch (e) {
         if (active) {
-          const message = e instanceof Error ? e.message : "Buddy unavailable"
+          const message = e instanceof Error ? e.message : "Avatar unavailable"
           setError(message)
           setConversations([])
           // The same failure again (Buddies disabled, forbidden, server down)
@@ -313,7 +313,7 @@ export const IndependentBuddySession = ({
       refresh()
     } catch (e) {
       if (alive.current)
-        setError(e instanceof Error ? e.message : "Could not detach Buddy")
+        setError(e instanceof Error ? e.message : "Could not detach avatar")
     }
   }
   return (
@@ -356,7 +356,7 @@ export const IndependentBuddySession = ({
           ) : null}
           <button
             type="button"
-            aria-label={label("move", "Move Buddy with arrow keys")}
+            aria-label={label("move", "Move avatar with arrow keys")}
             title={label(
               "moveHint",
               "Drag to move, or focus and use arrow keys. Home resets position."
@@ -425,7 +425,7 @@ export const IndependentBuddySession = ({
           className="fixed bottom-4 right-4 z-40 rounded-md border border-border bg-surface p-3 text-sm text-text"
           onClick={() => management.show()}
         >
-          {label("repair", "Buddy attachment needs attention")}
+          {label("repair", "Avatar attachment needs attention")}
         </button>
       ) : null}
       {binding && profile ? (
@@ -516,7 +516,7 @@ export const IndependentBuddySession = ({
             />
             <details className="border-t border-border pt-3 text-sm text-text">
               <summary className="cursor-pointer font-medium">
-                {label("options", "Buddy options")}
+                {label("options", "Avatar options")}
               </summary>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <label htmlFor={expressionsId}>
@@ -554,13 +554,13 @@ export const IndependentBuddySession = ({
                     management.show()
                   }}
                 >
-                  {label("manage", "Manage Buddy & Persona")}
+                  {label("manage", "Manage avatar")}
                 </Button>
                 <Button
                   icon={<Unplug size={16} />}
                   onClick={() => void detach()}
                 >
-                  {label("detach", "Detach Buddy")}
+                  {label("detach", "Detach avatar")}
                 </Button>
               </div>
             </details>
@@ -571,7 +571,7 @@ export const IndependentBuddySession = ({
         <Modal
           open
           footer={null}
-          title={label("title", "Buddy & Persona Management")}
+          title={label("title", "Avatar settings")}
           onCancel={management.close}
         >
           <p role="alert" className="mb-3 text-danger">
@@ -601,7 +601,7 @@ export const IndependentBuddySession = ({
         <Modal
           open
           footer={null}
-          title={label("title", "Buddy & Persona Management")}
+          title={label("title", "Avatar settings")}
           onCancel={management.close}
         >
           <p role="status">{label("loading", "Loading available choices…")}</p>

@@ -37,7 +37,7 @@ export const BuddySourcePicker: React.FC<BuddySourcePickerProps> = ({
     {
       source: "bundled",
       label: t("sidepanel:personaGarden.visuals.builder.bundledSource", {
-        defaultValue: "Browse ready-made Buddies"
+        defaultValue: "Browse ready-made avatars"
       }),
       description: t("sidepanel:personaGarden.visuals.builder.bundledSourceHelp", {
         defaultValue: "Return to the artwork gallery."
@@ -95,7 +95,7 @@ export const BuddySourcePicker: React.FC<BuddySourcePickerProps> = ({
         defaultValue: "Start blank"
       }),
       description: t("sidepanel:personaGarden.visuals.builder.blankSourceHelp", {
-        defaultValue: "Create a draft when the buddy needs custom states."
+        defaultValue: "Create a draft when the avatar needs custom states."
       }),
       icon: <PenLine className="h-4 w-4" />
     }

@@ -34,11 +34,12 @@ describe("Chat model selector text size", () => {
 
     const chip = screen.getByTestId("model-selector")
     expect(chip.className).not.toMatch(/\btext-\[(?:[0-9]|10)px\]/)
-    expect(chip).toHaveClass("text-xs")
+    // The toolbar's 13px label token (decision [3]).
+    expect(chip).toHaveClass("text-[13px]")
     expect(screen.getByTestId("model-selector-status")).toHaveClass("sr-only")
   })
 
-  it("renders the one-click model switch at 12px with a visible focus ring", () => {
+  it("renders the one-click model switch at 13px with a visible focus ring", () => {
     render(
       <ConfigProvider theme={{ token: { motion: false } }}>
         <ChatModelSelectorDropdown
@@ -63,6 +64,6 @@ describe("Chat model selector text size", () => {
 
     const switchButton = screen.getByTestId("model-readiness-switch")
     expect(switchButton.className).not.toMatch(/\btext-\[(?:[0-9]|10)px\]/)
-    expect(switchButton).toHaveClass("text-xs", "focus-visible:ring-2", "focus-visible:ring-focus")
+    expect(switchButton).toHaveClass("text-[13px]", "focus-visible:ring-2", "focus-visible:ring-focus")
   })
 })

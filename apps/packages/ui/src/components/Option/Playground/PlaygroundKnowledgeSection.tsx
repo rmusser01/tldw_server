@@ -25,7 +25,6 @@ export type PlaygroundKnowledgeSectionProps = {
   onClearFiles: () => void
   onFileRetrievalChange: (enabled: boolean) => void
   wrapComposerProfile: (id: string, element: React.ReactNode) => React.ReactNode
-  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
 export const PlaygroundKnowledgeSection = React.memo(
@@ -53,8 +52,7 @@ export const PlaygroundKnowledgeSection = React.memo(
       onRemoveFile,
       onClearFiles,
       onFileRetrievalChange,
-      wrapComposerProfile,
-      t
+      wrapComposerProfile
     } = props
 
     return (
@@ -62,15 +60,15 @@ export const PlaygroundKnowledgeSection = React.memo(
         className={contextToolsOpen ? "mb-2" : "hidden"}
         aria-hidden={!contextToolsOpen}
       >
-        <div className="rounded-md bg-surface2/50 p-3">
+        {/* The panel titles itself "Search & Context" (CC-08); no second
+            heading. Its own height cap and internal scroll keep the textarea
+            and Send in the composer's view (CC-10, decision [2]). */}
+        <div
+          data-testid="composer-knowledge-section"
+          className="max-h-[min(30dvh,22rem)] overflow-y-auto overscroll-contain rounded-md bg-surface2/50 p-3"
+        >
           <div className="flex flex-col gap-4">
             <div>
-              <div className="mb-2 text-xs font-semibold text-text">
-                {t(
-                  "playground:composer.knowledgeSearch",
-                  "Search & Context"
-                )}
-              </div>
               {wrapComposerProfile(
                 "knowledge-panel",
                 <KnowledgePanel

@@ -62,31 +62,22 @@ const baseProps = (
   onToggleCompare: vi.fn(),
   selectedCharacterName: null,
   onOpenActorSettings: vi.fn(),
-  contextToolsOpen: false,
-  onToggleKnowledgePanel: vi.fn(),
-  voiceChatEnabled: false,
-  voiceChatAvailable: true,
-  isSending: false,
-  onVoiceChatToggle: vi.fn(),
-  webSearch: false,
-  hasWebSearch: true,
-  onToggleWebSearch: vi.fn(),
   onModeAnnouncement: vi.fn(),
   t: (key: string, fallback?: string) => fallback || key
 })
 
 // CM-05 (#3101), owner decision D4: Compare stays hidden until it is verified.
 describe("PlaygroundModeLauncher compare availability", () => {
-  it("hides Compare responses while compare is unavailable", () => {
+  it("hides Compare models while compare is unavailable", () => {
     render(<PlaygroundModeLauncher {...baseProps(false)} />)
 
-    expect(screen.queryByRole("button", { name: /Compare responses/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /Compare models/i })).toBeNull()
     expect(screen.getByRole("button", { name: /Character \/ Scene/i })).toBeEnabled()
   })
 
-  it("offers Compare responses once compare is enabled", () => {
+  it("offers Compare models once compare is enabled", () => {
     render(<PlaygroundModeLauncher {...baseProps(true)} />)
 
-    expect(screen.getByRole("button", { name: /Compare responses/i })).toBeEnabled()
+    expect(screen.getByRole("button", { name: /Compare models/i })).toBeEnabled()
   })
 })

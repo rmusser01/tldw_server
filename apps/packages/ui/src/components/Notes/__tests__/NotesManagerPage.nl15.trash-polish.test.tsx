@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
 // NL-15: Trash is labelled as Trash, shows Trash guidance instead of a blank
-// editor, and restoring a note clears its stale "Note deleted · Undo" toast.
+// editor, and restoring a note retires its stale inline Undo offer (XP-17).
 
 const notesConnectionConfig = {
   serverUrl: "https://notes.example.test",
@@ -235,14 +235,44 @@ describe("NotesManagerPage NL-15 Trash polish", { timeout: 60_000 }, () => {
     expect(screen.queryByTestId("notes-trash-guidance")).not.toBeInTheDocument()
   })
 
-  it("dismisses the note's \"Note deleted · Undo\" toast when it is restored from Trash", async () => {
+  it("retires the note's inline Undo offer when it is restored from Trash", async () => {
+    let inTrash = false
+    const activeNote = { ...trashedNote, deleted: false, version: 2 }
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+      if (path.startsWith("/api/v1/notes/trash?")) {
+        return inTrash ? { items: [trashedNote], total: 1 } : { items: [], total: 0 }
+      }
+      if (path.startsWith("/api/v1/notes/?")) {
+        return inTrash
+          ? { items: [], pagination: { total_items: 0, total_pages: 1 } }
+          : { items: [activeNote], pagination: { total_items: 1, total_pages: 1 } }
+      }
+      if (path.startsWith("/api/v1/notes/n-trash?expected_version=2") && method === "DELETE") {
+        inTrash = true
+        return {}
+      }
+      if (path.startsWith("/api/v1/notes/n-trash/restore") && method === "POST") {
+        inTrash = false
+        return { ...trashedNote, deleted: false, version: 4 }
+      }
+      if (path === "/api/v1/notes/n-trash" && method === "GET") return activeNote
+      return {}
+    })
     renderPage()
 
-    fireEvent.click(await screen.findByTestId("notes-mode-trash"))
+    fireEvent.click(await screen.findByTestId("notes-open-button-n-trash", undefined, { timeout: 10_000 }))
+    await screen.findByDisplayValue("Old draft")
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText("Delete"))
+    expect(await screen.findByTestId("notes-undo-undo")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("notes-mode-trash"))
     fireEvent.click(await screen.findByTestId("notes-restore-n-trash", undefined, { timeout: 10_000 }))
 
     await waitFor(() => {
-      expect(mockMessageDestroy).toHaveBeenCalledWith("notes-delete-n-trash")
+      expect(screen.queryByTestId("notes-undo-undo")).not.toBeInTheDocument()
     })
   })
 })

@@ -233,6 +233,7 @@ import { isFreshChatSelectionPending } from "~/hooks/chat/fresh-chat-selection";
 import { useMessageOption } from "~/hooks/useMessageOption";
 import { useTabMentions } from "~/hooks/useTabMentions";
 import { composerMentionsAvailable } from "./composer-shortcut-hint";
+import { sendablePins } from "@/utils/note-pins";
 import { isAwaitingFirstConnectionCheck, notifySendNeedsConnection } from "./composer-connection";
 import { hasSendableDraft } from "./composer-draft-content";
 import { useWebUI } from "~/store/webui";
@@ -253,6 +254,7 @@ import {
   usePlaygroundChatErrorBanner,
 } from "./PlaygroundChatErrorBanner";
 import { PlaygroundKnowledgeSection } from "./PlaygroundKnowledgeSection";
+import { SHORT_VIEWPORT_COMPOSER_ROW, SHORT_VIEWPORT_INPUT, SHORT_VIEWPORT_TOOLBAR_SLOT } from "./composer-short-viewport";
 import { PlaygroundMcpControl } from "./PlaygroundMcpControl";
 import { PlaygroundModelCatalogControls } from "./PlaygroundModelCatalogControls";
 import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher";
@@ -3770,7 +3772,7 @@ export const PlaygroundForm = ({
       ),
       description: t(
         "playground:attachments.imageDisabledBody",
-        "Disable Knowledge Search to attach images.",
+        "Images can't be attached while answers come from Search & Context. Type /search to turn that off.",
       ),
     });
   }, [notificationApi, t]);
@@ -5107,7 +5109,7 @@ export const PlaygroundForm = ({
     navigate("/settings");
   }, [navigate]);
 
-  const composerDraftSendable = hasSendableDraft({ message: form.values.message, image: form.values.image, attachmentCount: selectedDocuments.length + uploadedFiles.length, hasImportedContext: Boolean(importedSidepanelContext), pinnedResultCount: fileRetrievalEnabled ? 0 : ragPinnedResults.length });
+  const composerDraftSendable = hasSendableDraft({ message: form.values.message, image: form.values.image, attachmentCount: selectedDocuments.length + uploadedFiles.length, hasImportedContext: Boolean(importedSidepanelContext), pinnedResultCount: sendablePins(ragPinnedResults, { fileRetrievalEnabled }).length });
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isFirefoxTarget) {
       if (e.key === "Process" || e.key === "229") return;
@@ -5606,16 +5608,6 @@ export const PlaygroundForm = ({
       onToggleCompare={toggleCompareMode}
       selectedCharacterName={selectedCharacter?.name || null}
       onOpenActorSettings={() => setOpenActorSettings(true)}
-      contextToolsOpen={contextToolsOpen}
-      onToggleKnowledgePanel={toggleKnowledgePanel}
-      voiceChatEnabled={voiceChatEnabled}
-      voiceChatAvailable={voiceChatAvailable}
-      voiceChatUnavailableReason={voiceChatUnavailableReason}
-      isSending={isSending}
-      onVoiceChatToggle={handleVoiceChatToggle}
-      webSearch={webSearch}
-      hasWebSearch={!!capabilities?.hasWebSearch}
-      onToggleWebSearch={handleToggleWebSearch}
       onModeAnnouncement={setModeAnnouncement}
       t={t}
     />
@@ -5999,12 +5991,9 @@ export const PlaygroundForm = ({
       onToolsPopoverChange={handleToolsPopoverChange}
       isProMode={isProMode}
       onOpenImageGenerate={openImageGenerateModal}
-      onOpenKnowledgePanel={openKnowledgePanel}
       useOCR={useOCR}
       onUseOCRChange={setUseOCR}
       hasWebSearch={!!capabilities?.hasWebSearch}
-      webSearch={webSearch}
-      onWebSearchChange={setWebSearch}
       simpleInternetSearch={simpleInternetSearch}
       onSimpleInternetSearchChange={setSimpleInternetSearch}
       defaultInternetSearchOn={defaultInternetSearchOn}
@@ -6037,7 +6026,6 @@ export const PlaygroundForm = ({
   const attachmentButton = (
     <PlaygroundAttachmentButton
       isProMode={isProMode}
-      isMobileViewport={isMobileViewport}
       chatMode={chatMode}
       onImageUpload={handleImageUpload}
       onDocumentUpload={handleDocumentUpload}
@@ -6970,7 +6958,6 @@ export const PlaygroundForm = ({
                           setFileRetrievalEnabled(enabled);
                         }}
                         wrapComposerProfile={wrapComposerProfile}
-                        t={t}
                       />
                       {(() => {
                         const replyTargetNode =
@@ -7003,7 +6990,7 @@ export const PlaygroundForm = ({
                           ) : null;
 
                         const composerTextareaNode = (
-                          <div className="relative min-w-0">
+                          <div className={`relative min-w-0 ${SHORT_VIEWPORT_INPUT}`}>
                             {replyTargetNode}
                                 {wrapComposerProfile(
                                   "composer-textarea",
@@ -7029,19 +7016,13 @@ export const PlaygroundForm = ({
                                     isMobile={isMobileViewport}
                                     isConnectionReady={isConnectionReady}
                                     isCollapsed={isMessageCollapsed}
-                                    compactWhenInactive={
-                                      shouldCompactComposerTextarea
-                                    }
-                                    formInputProps={form.getInputProps(
-                                      "message",
-                                    )}
+                                    compactWhenInactive={shouldCompactComposerTextarea}
+                                    formInputProps={form.getInputProps("message")}
                                     showSlashMenu={showSlashMenu}
                                     slashCommands={filteredSlashCommands}
                                     slashActiveIndex={slashActiveIndex}
                                     onSlashSelect={handleSlashCommandSelect}
-                                    onSlashActiveIndexChange={
-                                      setSlashActiveIndex
-                                    }
+                                    onSlashActiveIndexChange={setSlashActiveIndex}
                                     slashEmptyLabel={t(
                                       "common:commandPalette.noResults",
                                       "No results found",
@@ -7054,6 +7035,7 @@ export const PlaygroundForm = ({
                                     onMentionRefetch={handleMentionRefetch}
                                     onMentionsOpen={handleMentionsOpen}
                                     draftSaved={draftSaved}
+                                    onSetMessage={setMessageValue}
                                   />,
                                 )}
                           </div>
@@ -7267,14 +7249,14 @@ export const PlaygroundForm = ({
                         );
 
                         const composerToolbarNode = (
-                          <div className="w-full">
+                          <div className={`w-full ${SHORT_VIEWPORT_TOOLBAR_SLOT}`}>
                             {wrapComposerProfile(
                               "composer-toolbar",
                               <ComposerToolbar
                                 isProMode={isProMode}
                                 isMobile={isMobileViewport}
                                 isConnectionReady={isConnectionReady}
-                                mentionsAvailable={composerMentionsAvailable(tabMentionsEnabled)}
+                                mentionsAvailable={composerMentionsAvailable(tabMentionsEnabled, undefined, Boolean(capabilities?.hasNotes))}
                                 isSending={isSending}
                                 optionsExpanded={composerOptionsExpanded}
                                 optionsLoading={composerOptionsLoading}
@@ -7436,7 +7418,7 @@ export const PlaygroundForm = ({
                                   uploadedFiles.length >
                                 0,
                               onClick: () => toggleKnowledgePanel(),
-                              "aria-label": "Open knowledge panel",
+                              "aria-label": "Open Search & Context",
                             },
                             {
                               id: "web",
@@ -7530,8 +7512,10 @@ export const PlaygroundForm = ({
 
                         return (
                           <>
-                            {composerTextareaNode}
-                            {composerToolbarSlot}
+                            <div data-composer-row className={`flex w-full min-w-0 flex-col ${SHORT_VIEWPORT_COMPOSER_ROW}`}>
+                              {composerTextareaNode}
+                              {composerToolbarSlot}
+                            </div>
                             {composerInlineMessagesNode}
                             {composerNoticesNode}
                           </>
