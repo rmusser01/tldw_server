@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState, useCallback, useEffect, useReducer, useRef } from "react"
 import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import type { DocumentProps } from "react-pdf"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
@@ -93,7 +93,22 @@ export function usePdfSearch(
   // document never sees (or is overwritten by) another document's index.
   const [entry, setEntry] = useState<IndexEntry | null>(null)
   const entryRef = useRef<IndexEntry | null>(null)
-  const pdfDocument = pdfDocumentRef.current
+  // The ref is assigned by react-pdf without a re-render, so a changed proxy is
+  // also noticed from the text-layer event below (forceRender).
+  const [, forceRender] = useReducer((n: number) => n + 1, 0)
+  const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
+  const seenActiveIdRef = useRef(activeDocumentId)
+  const staleDocRef = useRef<PdfDocumentProxy | null>(null)
+  if (seenActiveIdRef.current !== activeDocumentId) {
+    // Tab switch: the proxy still in the ref belongs to the previous document
+    // until react-pdf assigns the new one.
+    seenActiveIdRef.current = activeDocumentId
+    staleDocRef.current = pdfDocumentRef.current
+  }
+  const rawDoc = pdfDocumentRef.current
+  const pdfDocument = rawDoc && rawDoc !== staleDocRef.current ? rawDoc : null
+  const renderedDocRef = useRef<PdfDocumentProxy | null>(null)
+  renderedDocRef.current = rawDoc
   const current = entry && entry.doc === pdfDocument ? entry : null
   const searchIndex = current?.index ?? null
   const isIndexing = current?.status === "building"
@@ -305,6 +320,7 @@ export function usePdfSearch(
   useEffect(() => {
     if (!searchOpen) return
     const onTextLayerReady = (event: Event) => {
+      if (pdfDocumentRef.current !== renderedDocRef.current) forceRender()
       const page = Number((event.target as HTMLElement).dataset.pageNumber)
       highlightMatches(searchQuery, activeSearchIndex, pendingScrollPageRef.current === page)
     }
@@ -330,6 +346,14 @@ export function usePdfSearch(
     clearSearch()
     clearHighlights()
   }, [setSearchOpen, clearSearch, clearHighlights])
+
+  // Drop a closed document's index (and orphan its in-flight build) when the proxy changes.
+  useEffect(() => {
+    if (entryRef.current && entryRef.current.doc !== pdfDocument) {
+      entryRef.current = null
+      setEntry(null)
+    }
+  }, [pdfDocument])
 
   // Build lazily when search is open. Deps deliberately exclude build state: a
   // failed build is retried only when search is reopened or the document changes.
