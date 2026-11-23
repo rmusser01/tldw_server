@@ -486,3 +486,16 @@ def test_preview_saved_media_sections_returns_titles_without_book_text(client: T
     assert all(section["character_count"] > 0 for section in preview["sections"])  # nosec B101
     assert "Seeds germinate with water" not in response.text  # nosec B101
     assert len(preview["revision"]) == 64  # nosec B101
+
+
+def test_preview_missing_media_sections_is_not_found(client: TestClient, tmp_path):
+    media_db = MediaDatabase(db_path=str(tmp_path / "missing.db"), client_id="study-pack-missing")
+    app = client.app
+    assert isinstance(app, FastAPI)  # nosec B101
+    app.dependency_overrides[get_media_db_for_user] = lambda: media_db
+    try:
+        response = client.get("/api/v1/flashcards/study-packs/media/9999/sections")
+    finally:
+        media_db.close_connection()
+
+    assert response.status_code == 404  # nosec B101

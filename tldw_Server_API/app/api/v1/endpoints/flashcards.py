@@ -2325,7 +2325,8 @@ def preview_study_pack_media_sections(
         limit = _max_evidence_chars_per_source()
         revision, sections = plan_media_sections(item.evidence_text, limit)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        missing = str(exc).endswith(" not found")
+        raise HTTPException(status_code=404 if missing else 422, detail=str(exc)) from exc
 
     return StudyPackMediaSectionPreview(
         revision=revision,
