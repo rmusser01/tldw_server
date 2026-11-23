@@ -171,6 +171,17 @@ describe("native refusals wrapped by the chat transport", () => {
     expect(isDefinitiveNativeBranchRejection(wrap(branchRefusal({ parent_message_id: "foreign" })), branchSelection)).toBe(false)
     expect(isDefinitiveNativeBranchRejection(wrap(branchRefusal({ leaf_ids: [] })), branchSelection)).toBe(false)
   })
+  // An error with an HTTP status is the response the client received; a refusal
+  // found only below it is not evidence about that response.
+  it("reads only the first HTTP response in the chain", () => {
+    const outerResponse = (cause: unknown) => Object.assign(new Error("Bad gateway", { cause }), { status: 502 })
+    expect(isDefinitiveNativeEditRejection(outerResponse(editRefusal()), editSelection, target)).toBe(false)
+    expect(isDefinitiveNativeEditRejection(wrap(outerResponse(editRefusal())), editSelection, target)).toBe(false)
+    expect(isDefinitiveNativeBranchRejection(outerResponse(branchRefusal()), branchSelection)).toBe(false)
+    expect(isDefinitiveNativeBranchRejection(wrap(outerResponse(branchRefusal())), branchSelection)).toBe(false)
+    // A wrapper without a status is still read through.
+    expect(isDefinitiveNativeEditRejection(wrap(Object.assign(editRefusal(), { cause: { status: 500 } })), editSelection, target)).toBe(true)
+  })
   it("stops on a cause chain that loops", () => {
     const looped: Error & { cause?: unknown } = new Error("Stream completion failed")
     looped.cause = looped

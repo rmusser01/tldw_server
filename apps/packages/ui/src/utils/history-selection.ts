@@ -226,8 +226,9 @@ export const resolveHistorySelection = (
 
 /**
  * Transports wrap the server's response (TldwChat throws "Stream completion
- * failed" with the HTTP error as its `cause`), so a refusal is read wherever it
- * sits in the cause chain.
+ * failed" with the HTTP error as its `cause`), so a refusal is read through
+ * wrappers. The walk stops at the first error with an HTTP status: that is the
+ * response this request got, and anything below it is not evidence about it.
  */
 const someErrorInCauseChain = (
   error: unknown,
@@ -236,6 +237,7 @@ const someErrorInCauseChain = (
   let current = error
   for (let depth = 0; depth < 8 && current && typeof current === "object"; depth++) {
     if (matches(current)) return true
+    if (typeof (current as { status?: unknown }).status === "number") return false
     current = (current as { cause?: unknown }).cause
   }
   return false
