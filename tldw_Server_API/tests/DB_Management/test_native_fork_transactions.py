@@ -691,7 +691,7 @@ def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_datab
         return original_delete_lock(conn, workspace_id)
 
     monkeypatch.setattr(db.native_forks, "lock_open_workspace", pause_after_admission)
-    monkeypatch.setattr(db, "_lock_native_workspace_delete", observe_delete_lock)
+    monkeypatch.setattr(db.workspace_store, "_lock_native_workspace_delete", observe_delete_lock)
 
     def admit_candidate() -> None:
         with db.transaction() as conn:

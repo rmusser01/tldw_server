@@ -59,8 +59,10 @@ if TYPE_CHECKING:
 # ``_sqlite_linear_migration_steps`` on the class), and one pinned reach here replaces four in the moved body. PR H offset it, and
 # the bootstrap's two ``ctx.db._ensure_*_table`` calls (kept on the DB so an instance stub of them stays live), by moving six reaches of
 # ``shared_workspace_chat_store`` and ``note_graph_suggestion_store`` onto the ``ctx.new_uuid`` and ``ctx.map_table`` they forward to.
+# ``_connection_state`` is the second call-through: the workspace store reads the transaction depth, and tests give a fake DB their own
+# ``_connection_state``. The two workspace bodies that read it reach it through one pinned reach here (PR I2).
 PINNED_DB_PRIVATES: frozenset[str] = frozenset(
-    {"_CURRENT_SCHEMA_VERSION", "_POSTGRES_SCHEMA_VERSION", "_SCHEMA_NAME", "_run_sqlite_linear_migration_step"}
+    {"_CURRENT_SCHEMA_VERSION", "_POSTGRES_SCHEMA_VERSION", "_SCHEMA_NAME", "_run_sqlite_linear_migration_step", "_connection_state"}
 )
 PINNED_MODULE_PRIVATES: frozenset[str] = frozenset({"_owner_is_scoped", "_SAFE_IDENTIFIER_RE"})
 
@@ -151,6 +153,10 @@ class ChaChaContext:
     def execute_many(self, query: str, params_list: Any, *, commit: bool = False) -> Any:
         """Run one statement over many parameter sets through the DB."""
         return self._db.execute_many(query, params_list, commit=commit)
+
+    def connection_state(self) -> Any:
+        """Return the DB's connection state for this operation: ``tx_depth`` tells whether a transaction is open."""
+        return self._db._connection_state()
 
     def run_sqlite_migration_step(self, conn: Any, *, from_version: int, target_version: int, initial_version: int) -> int:
         """Run the SQLite migration step that leaves ``from_version``, through the DB's step map, and return the new version."""

@@ -17,12 +17,12 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
+from tldw_Server_API.app.api.v1.schemas import workspace_schemas
 from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
 )
-from tldw_Server_API.app.api.v1.schemas import workspace_schemas
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     SOURCE_VIEW_LIMIT_REACHED,
     SOURCE_VIEW_MAX_COUNT,
@@ -201,7 +201,7 @@ def test_routes_delegate_workspace_access_checks_to_transactional_crud(
     def _forbid_route_precheck(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("saved-view routes must not call get_workspace outside CRUD transactions")
 
-    monkeypatch.setattr(db, "get_workspace", _forbid_route_precheck)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", _forbid_route_precheck)
 
     assert client.get("/api/v1/workspaces/ws-1/source-views").status_code == 200
     assert _post(client, _create_payload(name="Created")).status_code == 201
@@ -402,7 +402,7 @@ def test_duplicate_limit_and_version_conflicts_have_exact_detail(
             SOURCE_VIEW_LIMIT_REACHED, {"limit": SOURCE_VIEW_MAX_COUNT}
         )
 
-    monkeypatch.setattr(db, "create_workspace_source_saved_view", _limit)
+    monkeypatch.setattr(db.workspace_store, "create_workspace_source_saved_view", _limit)
     limit = _post(client, _create_payload(name="Limit"), workspace_id="ws-2")
     assert limit.status_code == 409
     assert limit.json()["detail"] == {"code": "source_view_limit_reached", "limit": 100}

@@ -122,7 +122,8 @@ def _is_store(node: ast.expr, attr: str) -> bool:
     """True for ``*.<attr>`` and for the ``getattr(x, "<attr>", ...)`` a probe rewrite leaves."""
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr":
         return len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and node.args[1].value == attr
-    return receivers.last_identifier(node) == attr
+    camel = "".join(part.title() for part in attr.split("_"))  # the store class: ``WorkspaceStore.<name>``
+    return receivers.last_identifier(node) in {attr, camel}
 
 
 def _class_has(cls: ast.ClassDef, attr: str) -> bool:
@@ -477,7 +478,7 @@ def run(root: Path, attr: str, wanted: set[str], check: bool, show_tests: bool) 
 # --- Manifests, ``store``, ``verify``, ``check``, ``tests`` (TASK-13950.22 PR C2) ------------------------------------
 
 MANIFEST_DIR = "Helper_Scripts/chacha_split/manifests"
-LIST_KEYS = ("names", "shims", "structural", "constants")
+LIST_KEYS = ("names", "shims", "structural", "constants", "class_constants")
 DICT_KEYS = ("rewrites", "renames")
 
 
@@ -553,6 +554,8 @@ def store_replacement(attr: str, manifest: dict, index: dict[str, str], renames:
         return None
     if attr in index:
         return f"self._ctx.db.{index[attr]}.{attr}"
+    if attr in manifest["class_constants"]:  # a constant only this group reads: a module constant of the store module
+        return attr
     if attr in manifest["rewrites"]:
         value = manifest["rewrites"][attr]
         return "self._ctx" + value[3:] if value.startswith("ctx") else value
@@ -573,6 +576,22 @@ def _is_self(node: ast.AST) -> bool:
     return isinstance(node, ast.Name) and node.id == "self"
 
 
+STORE_DECORATORS = frozenset({"staticmethod", "classmethod", "overload"})
+
+
+def class_receiver_replacement(recv: str, attr: str, manifest: dict, index: dict[str, str]) -> str | None:
+    """The text for ``cls.<attr>`` or ``CharactersRAGDB.<attr>`` inside a def moved into a store.
+
+    A name of the group is a member of the store class; a constant only the group reads is a module constant of the store
+    module. Anything else has no class to reach and fails closed.
+    """
+    if index.get(attr) == manifest["store_attr"]:
+        return f"{manifest['store_class']}.{attr}" if recv == CLASS else None
+    if attr in manifest["class_constants"]:
+        return attr
+    raise Unmapped(attr)
+
+
 def _store_edits(
     node: ast.AST, manifest: dict, index: dict[str, str], renames: dict[str, str]
 ) -> tuple[list[tuple[int, int, int, int, str]], list[str]]:
@@ -580,7 +599,15 @@ def _store_edits(
     problems: list[str] = []
     handled: set[int] = set()
     for n in ast.walk(node):
-        if isinstance(n, ast.Attribute) and _is_self(n.value):
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id in {"cls", CLASS}:
+            try:
+                new = class_receiver_replacement(n.value.id, n.attr, manifest, index)
+            except Unmapped:
+                problems.append(f"{n.lineno}: {n.value.id}.{n.attr}")
+                continue
+            if new is not None:
+                edits.append((n.lineno, n.col_offset, n.end_lineno, n.end_col_offset, new))
+        elif isinstance(n, ast.Attribute) and _is_self(n.value):
             handled.add(id(n.value))
             if not isinstance(n.ctx, ast.Load):
                 problems.append(f"{n.lineno}: self.{n.attr} is assigned")
@@ -604,6 +631,15 @@ def _store_edits(
 
 def _lines(text: str) -> list[str]:
     return text.split("\n")
+
+
+def _all_defs(body: list[ast.stmt]) -> dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]]:
+    """Every def of each name, in source order: a function with ``@overload`` stubs has more than one."""
+    found: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+    for n in body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found.setdefault(n.name, []).append(n)
+    return found
 
 
 def free_names(def_text: str, node: ast.AST) -> set[str]:
@@ -676,7 +712,7 @@ def _move_into_store(root: Path, manifest: dict, index: dict[str, str], renames:
     source, target = root / manifest["source"], root / manifest["target"]
     text, tree = _parse(source)
     cls = _class_node(tree, CLASS)
-    defs = _defs(cls.body)
+    defs = _all_defs(cls.body)
     missing = [n for n in manifest["names"] if n not in defs]
     if missing:
         print(f"not in {CLASS}: {missing}")
@@ -684,30 +720,32 @@ def _move_into_store(root: Path, manifest: dict, index: dict[str, str], renames:
     edits: list[tuple[int, int, int, int, str]] = []
     problems: list[str] = []
     for name in manifest["names"]:
-        node = defs[name]
-        if node.decorator_list:
-            problems.append(f"{node.lineno}: {name} has a decorator (store mode fails closed)")
-        new_edits, new_problems = _store_edits(node, manifest, index, renames)
-        edits += new_edits
-        problems += [f"{name}: {p}" for p in new_problems]
+        for node in defs[name]:
+            if any(ast.unparse(d) not in STORE_DECORATORS for d in node.decorator_list):
+                problems.append(f"{node.lineno}: {name} has a decorator other than staticmethod, classmethod or overload (store mode fails closed)")
+            new_edits, new_problems = _store_edits(node, manifest, index, renames)
+            edits += new_edits
+            problems += [f"{name}: {p}" for p in new_problems]
     if problems:
         print("unmapped private DB members (resolve them in the manifest's rewrites or renames, then re-run):")
         print("\n".join(f"  {p}" for p in problems))
         return 1
     rewritten = replace_spans(text, edits)
     new_tree = ast.parse(rewritten)
-    new_defs = _defs(_class_node(new_tree, CLASS).body)
+    new_defs = _all_defs(_class_node(new_tree, CLASS).body)
     new_lines = _lines(rewritten)
     pieces: dict[str, list[str]] = {}
     free: set[str] = set()
     for name in manifest["names"]:
-        start, end = _span(new_lines, new_defs[name])
-        pieces[name] = new_lines[start:end]
-        free |= free_names("\n".join(pieces[name]), new_defs[name])
+        pieces[name] = []
+        for node in new_defs[name]:  # every def of a name: the overloads of a function come with it
+            start, end = _span(new_lines, node)
+            pieces[name] += new_lines[start:end]
+            free |= free_names("\n".join(new_lines[start:end]), node)
     # the source: delete each def (right to left), and one blank line where two would meet
     lines = _lines(text)
-    for name in sorted(manifest["names"], key=lambda n: defs[n].lineno, reverse=True):
-        start, end = _span(lines, defs[name])
+    for node in sorted((d for n in manifest["names"] for d in defs[n]), key=lambda d: d.lineno, reverse=True):
+        start, end = _span(lines, node)
         del lines[start:end]
         if 0 < start < len(lines) and not lines[start - 1].strip() and not lines[start].strip():
             del lines[start]
@@ -744,21 +782,21 @@ def _move_into_store(root: Path, manifest: dict, index: dict[str, str], renames:
 
 
 def _take_constants(manifest: dict, tree: ast.Module, original: list[str], lines: list[str]) -> list[tuple[str, list[str]]]:
-    """Cut each module constant the manifest lists out of the source lines, and return its text."""
+    """Cut each module constant (``constants``) and class constant (``class_constants``) the manifest lists out of the source
+    lines, and return its text at module level."""
     taken: list[tuple[str, list[str]]] = []
-    for name in manifest["constants"]:
-        node = next(
-            (n for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets)),
-            None,
-        )
+    class_body = _class_node(tree, CLASS).body
+    sites = [(name, tree.body, False) for name in manifest["constants"]] + [(name, class_body, True) for name in manifest["class_constants"]]
+    for name, body, in_class in sites:
+        node = next((n for n in body if _const_name(n) == name), None)
         if node is None:
-            raise SystemExit(f"constant {name} is not a module-level assignment in {DB_MODULE}")
+            raise SystemExit(f"constant {name} is not an assignment in {CLASS if in_class else 'the module of ' + DB_MODULE}")
         piece = original[node.lineno - 1 : node.end_lineno]
         at = next(i for i, line in enumerate(lines) if line == piece[0] and lines[i : i + len(piece)] == piece)
         del lines[at : at + len(piece)]
         if 0 < at < len(lines) and not lines[at - 1].strip() and not lines[at].strip():
             del lines[at]
-        taken.append((name, piece))
+        taken.append((name, _dedent(piece) if in_class else piece))
     return taken
 
 
@@ -820,6 +858,13 @@ class _Rewriter(ast.NodeTransformer):
         self.unmapped: list[str] = []
 
     def visit_Attribute(self, node: ast.Attribute) -> ast.AST:  # noqa: N802
+        if isinstance(node.value, ast.Name) and node.value.id in {"cls", CLASS}:
+            try:
+                new = class_receiver_replacement(node.value.id, node.attr, self.manifest, self.index)
+            except Unmapped:
+                self.unmapped.append(node.attr)
+                return node
+            return node if new is None else ast.parse(new, mode="eval").body
         if _is_self(node.value) and isinstance(node.ctx, ast.Load):
             try:
                 new = store_replacement(node.attr, self.manifest, self.index, self.renames)

@@ -343,6 +343,57 @@ def test_store_fails_closed_on_an_unmapped_private(tmp_path: Path, capsys: pytes
     assert _text(root, S_STORE) == before
 
 
+STATIC_DB = '''
+import re
+from typing import overload
+
+
+class CharactersRAGDB:
+    _LIMIT = 5
+    _KEY_RE = re.compile("k")
+
+    def keep(self):
+        return self._pure(1) + self._cm(2)
+
+    @overload
+    @staticmethod
+    def _pure(a: int) -> int: ...
+
+    @staticmethod
+    def _pure(a):
+        return CharactersRAGDB._helper(a) + 1
+
+    @staticmethod
+    def _helper(a):
+        return a
+
+    @classmethod
+    def _cm(cls, a):
+        return cls._LIMIT + cls._helper(a) + len(cls._KEY_RE.pattern)
+'''
+STATIC_MANIFEST = MANIFEST_SRC.replace('"names": ["_moved"]', '"names": ["_pure", "_helper", "_cm"], "class_constants": ["_LIMIT", "_KEY_RE"]').replace(
+    '"renames": {"_renamed": "renamed"}', '"renames": {}'
+)
+
+
+def test_store_moves_statics_classmethods_overloads_and_class_constants(tmp_path: Path) -> None:
+    _seed(tmp_path, {S_STORE: STORE_MODULE, MANIFEST_PATH: STATIC_MANIFEST}, db=STATIC_DB)
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    assert _store(tmp_path) == 0
+    store = _text(tmp_path, S_STORE)
+    assert store.count("@overload") == 1 and store.count("def _pure") == 2  # the stub moves with its implementation
+    assert "SStore._helper(a)" in store  # a class reference to a moved static now names the store class
+    assert "@classmethod" in store and "cls._helper(a)" in store  # a classmethod stays one, and ``cls`` stays
+    assert "return _LIMIT + cls._helper(a) + len(_KEY_RE.pattern)" in store  # a constant is read by its module name
+    assert "\n_LIMIT = 5\n" in store and '_KEY_RE = re.compile("k")' in store  # class constants become module constants
+    db = _text(tmp_path, DB)
+    assert "_LIMIT" not in db and "_pure" not in db.split("def keep")[0] and "self.s_store._pure(1)" in db
+    assert _verify(tmp_path) == 0
+    assert diffpairs.main([str(tmp_path / MANIFEST_PATH), "--base", "HEAD", "--root", str(tmp_path)]) == 0
+
+
 def test_verify_passes_on_tool_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _store_tree(tmp_path)
     assert _store(root) == 0

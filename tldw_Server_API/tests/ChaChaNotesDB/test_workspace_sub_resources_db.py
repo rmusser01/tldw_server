@@ -6,6 +6,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 
@@ -478,7 +479,7 @@ class TestWorkspaceArtifacts:
         monkeypatch,
     ):
         monkeypatch.setattr(
-            db,
+            db.workspace_store,
             "_get_workspace_artifact",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("late reload")),
         )
@@ -534,7 +535,7 @@ class TestWorkspaceArtifacts:
             _capture_warning,
         )
 
-        loaded = CharactersRAGDB._load_workspace_artifact_json("{bad-json", {}, field_name="source_lineage_json")
+        loaded = WorkspaceStore._load_workspace_artifact_json("{bad-json", {}, field_name="source_lineage_json")
 
         assert loaded == {}
         assert warnings
@@ -637,7 +638,7 @@ class TestWorkspaceNotes:
         monkeypatch,
     ):
         monkeypatch.setattr(
-            db,
+            db.workspace_store,
             "_get_workspace_note",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("late reload")),
         )

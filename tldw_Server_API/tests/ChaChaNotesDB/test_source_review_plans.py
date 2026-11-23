@@ -876,7 +876,7 @@ def test_source_review_occurrence_transition_table(
 ) -> None:
     plan_id, occurrence_id = _occurrence_in_status(source_review_db, current_status)
     before = _occurrence_rows(source_review_db, plan_id)[0]
-    method = getattr(source_review_db, f"{action}_source_review_occurrence")
+    method = getattr(source_review_db.workspace_store, f"{action}_source_review_occurrence")
 
     if expected_status is None:
         with pytest.raises(ConflictError):
@@ -911,7 +911,7 @@ def test_deleted_source_review_occurrence_actions_act_not_found(
     assert source_review_db.workspace_store.soft_delete_source_review_plan(plan_id) is True  # nosec B101
 
     with pytest.raises(NotFoundError, match="not found"):
-        getattr(source_review_db, f"{action}_source_review_occurrence")(occurrence_id)
+        getattr(source_review_db.workspace_store, f"{action}_source_review_occurrence")(occurrence_id)
 
 
 def test_source_review_start_wraps_invalid_stored_launch_metadata(
@@ -925,7 +925,7 @@ def test_source_review_start_wraps_invalid_stored_launch_metadata(
         raise ValueError("Unsupported activity_type")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.build_source_review_launch_metadata",
+        "tldw_Server_API.app.core.DB_Management.chacha.workspace_store.build_source_review_launch_metadata",
         reject_launch_metadata,
     )
 

@@ -111,7 +111,7 @@ def test_workspace_preflight_does_not_block_the_event_loop(
     """The availability read runs off-loop before asynchronous quota admission."""
     lookup_threads: list[int] = []
     limiter_threads: list[int] = []
-    lookup = startup_api.db.get_workspace
+    lookup = startup_api.db.workspace_store.get_workspace
 
     def observed_lookup(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
         lookup_threads.append(threading.get_ident())
@@ -120,7 +120,7 @@ def test_workspace_preflight_does_not_block_the_event_loop(
     async def observed_limit(*args: Any, **kwargs: Any) -> None:
         limiter_threads.append(threading.get_ident())
 
-    monkeypatch.setattr(startup_api.db, "get_workspace", observed_lookup)
+    monkeypatch.setattr(startup_api.db.workspace_store, "get_workspace", observed_lookup)
     startup_api.limiter.check_rate_limit.side_effect = observed_limit
     response = startup_api.client.post(
         "/api/v1/chats/", json={"scope_type": "workspace", "workspace_id": "ws", "assistant_kind": None},
@@ -188,7 +188,7 @@ def test_chat_list_startup_cache_expires_after_request(
         db.add_conversation({"title": title}, assistant_startup=AssistantStartup(
             source="system_fallback", workspace_id="list-origin", workspace_version=1,
         ))
-    lookup = db.get_workspace
+    lookup = db.workspace_store.get_workspace
     reads: list[str] = []
 
     def counted_lookup(workspace_id: str, **kwargs: Any) -> dict[str, Any] | None:
@@ -196,7 +196,7 @@ def test_chat_list_startup_cache_expires_after_request(
         reads.append(workspace_id)
         return lookup(workspace_id, **kwargs)
 
-    monkeypatch.setattr(db, "get_workspace", counted_lookup)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", counted_lookup)
     first = startup_api.client.get("/api/v1/chats/")
     assert first.status_code == 200, first.text
     assert [item["assistant_startup"]["source"] for item in first.json()["chats"]] == ["system_fallback"] * 2
@@ -226,7 +226,7 @@ def test_chat_startup_visibility_failure_is_not_successful_unknown(
         """Fail at the origin DB boundary, not at conversation authorization."""
         raise CharactersRAGDBError("Workspace storage unavailable")
 
-    monkeypatch.setattr(db, "get_workspace", unavailable)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", unavailable)
     path = f"/api/v1/chats/{cid}"
     if surface == "list":
         response = startup_api.client.get("/api/v1/chats/")
