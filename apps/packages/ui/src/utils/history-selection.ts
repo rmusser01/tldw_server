@@ -224,8 +224,24 @@ export const resolveHistorySelection = (
   }
 }
 
-/** Only this exact scoped leaf-check response proves that input was not admitted. */
-export const isDefinitiveNativeBranchRejection = (
+/**
+ * Transports wrap the server's response (TldwChat throws "Stream completion
+ * failed" with the HTTP error as its `cause`), so a refusal is read wherever it
+ * sits in the cause chain.
+ */
+const someErrorInCauseChain = (
+  error: unknown,
+  matches: (value: unknown) => boolean
+): boolean => {
+  let current = error
+  for (let depth = 0; depth < 8 && current && typeof current === "object"; depth++) {
+    if (matches(current)) return true
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
+}
+
+const isBranchRejectionResponse = (
   error: unknown,
   selection: { conversation_id: string; messages: readonly { id: string }[] }
 ): boolean => {
@@ -257,8 +273,7 @@ export const isDefinitiveNativeBranchRejection = (
   )
 }
 
-/** Only the original excluded-target refusal proves a protected Edit was not admitted. */
-export const isDefinitiveNativeEditRejection = (
+const isEditRejectionResponse = (
   error: unknown,
   selection: Pick<
     HistorySelectionV1,
@@ -303,3 +318,21 @@ export const isDefinitiveNativeEditRejection = (
     (direct === undefined || matches(direct))
   )
 }
+
+/** Only this exact scoped leaf-check response proves that input was not admitted. */
+export const isDefinitiveNativeBranchRejection = (
+  error: unknown,
+  selection: { conversation_id: string; messages: readonly { id: string }[] }
+): boolean =>
+  someErrorInCauseChain(error, (value) => isBranchRejectionResponse(value, selection))
+
+/** Only the original excluded-target refusal proves a protected Edit was not admitted. */
+export const isDefinitiveNativeEditRejection = (
+  error: unknown,
+  selection: Pick<
+    HistorySelectionV1,
+    "conversation_id" | "cursor" | "selection_digest"
+  >,
+  target: HistoryEditTargetV1
+): boolean =>
+  someErrorInCauseChain(error, (value) => isEditRejectionResponse(value, selection, target))

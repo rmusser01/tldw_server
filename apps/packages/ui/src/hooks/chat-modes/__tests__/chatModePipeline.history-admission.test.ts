@@ -345,6 +345,67 @@ describe("Retry of a reply that ended early (CS-04)", () => {
   })
 })
 
+describe("Edit and send in a server-settled chat (D7 P5)", () => {
+  const makeNativeEditTurn = (supported: boolean) => {
+    const view = {
+      owner_key: "native-key",
+      conversation_id: "server-chat",
+      view_session_id: "view",
+      cursor: { kind: "before_message", message_id: "question" },
+      interpretation: { kind: "parent_graph_v1" },
+      selection_revision: 1
+    }
+    const turn = makeTurn()
+    turn.owner = { kind: "native", conversation_id: "server-chat", owner_key: "native-key", validate_lease: () => true }
+    turn.capture = {
+      ...turn.capture,
+      view,
+      snapshot: { ...turn.capture.snapshot, owner_key: "native-key", conversation_id: "server-chat" },
+      native_completion_v1: { policy: "selected_history_v1", supported, storage_context_digest: "storage" }
+    }
+    turn.currentView = () => view
+    turn.historyBranch = true
+    turn.historyEdit = Object.freeze({ version: 1, message_id: "question", message_revision: "1" })
+    return turn
+  }
+  const nativeMode = {
+    ...mode,
+    preparePrompt: async () => ({
+      chatHistory: [new SystemMessage("system")],
+      nativeCurrentInput: [new SystemMessage("system")],
+      humanMessage: new HumanMessage("question")
+    })
+  }
+  const modelClient = () => {
+    const client = {
+      saveToDb: false,
+      prepareNativeHistoryRequest: vi.fn(() => ({ messages: [{ role: "user", content: "question" }], model: "test", stream: true })),
+      prepareClientManagedRequest: vi.fn(() => ({ messages: [{ role: "user", content: "question" }], model: "test", stream: true })),
+      stream: mocks.stream
+    }
+    mocks.model.mockResolvedValue(client)
+    return client
+  }
+
+  it("asks the server to save the edited question and its reply", async () => {
+    const client = modelClient()
+    await invoke(makeNativeEditTurn(true), {}, nativeMode).catch(() => undefined)
+    expect(mocks.model).toHaveBeenCalledOnce()
+    const options = mocks.model.mock.calls[0][0]
+    expect(options).toMatchObject({ saveToDb: true, conversationId: "server-chat" })
+    expect(options).not.toHaveProperty("clientManagedHistory")
+    expect(client.prepareNativeHistoryRequest).toHaveBeenCalledOnce()
+    expect(client.prepareClientManagedRequest).not.toHaveBeenCalled()
+  })
+
+  it("stays client-managed when the server does not settle turns (Sync v2 owners, older servers)", async () => {
+    const client = modelClient()
+    await invoke(makeNativeEditTurn(false), {}, nativeMode).catch(() => undefined)
+    expect(mocks.model.mock.calls[0][0]).toMatchObject({ clientManagedHistory: true, saveToDb: false })
+    expect(client.prepareNativeHistoryRequest).not.toHaveBeenCalled()
+  })
+})
+
 it("clears owned streaming state before following a settled result changes the cursor", async () => {
   const turn = makeTurn()
   const streaming = vi.fn()

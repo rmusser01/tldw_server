@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolveLegacyProjection, bindSelectedHistoryContent, resolveParentPath, resolveHistorySelection, selectionDigest, canonicalSelectionJson, resolveComparisonProjection, canonicalComparisonJson, comparisonDigest } from "../history-selection"
+import { resolveLegacyProjection, bindSelectedHistoryContent, resolveParentPath, resolveHistorySelection, selectionDigest, canonicalSelectionJson, resolveComparisonProjection, canonicalComparisonJson, comparisonDigest, isDefinitiveNativeBranchRejection, isDefinitiveNativeEditRejection } from "../history-selection"
 import type { HistoryNodeV1, HistorySelectedContentV1, HistorySelectionSnapshotV1, HistoryViewSelectionV1 } from "@/types/history-selection"
 import vectors from "../../../../../../tldw_Server_API/tests/Chat/fixtures/history_selection_v1.json"
 
@@ -130,4 +130,51 @@ it("retains detached historical tool fields in the revision-bound capture", () =
   content.tool_calls[0].function.name = "changed"
   expect(bound[0].tool_calls).toEqual([{ id: "call", function: { name: "lookup" } }])
   expect(bound[0].extra_metadata).toEqual({ sender_role: "tool", tool_call_id: "call" })
+})
+
+// TldwChat wraps a failed completion as `new Error("Stream completion failed", { cause })`,
+// so a server refusal of a server-settled turn arrives as the cause of the error.
+describe("native refusals wrapped by the chat transport", () => {
+  const editSelection = {
+    conversation_id: "owned",
+    cursor: { kind: "before_message" as const, message_id: "target" },
+    selection_digest: "original-selection"
+  }
+  const target = { version: 1 as const, message_id: "target", message_revision: "opaque-original" }
+  const editRefusal = (detail: Record<string, unknown> = {}, status = 409) => ({
+    status,
+    details: { detail: { status: "stale_selection", code: "history_edit_target_changed", conversation_id: "owned",
+      message_id: "target", message_revision: "opaque-original", selection_digest: "original-selection", ...detail } }
+  })
+  const branchSelection = { conversation_id: "owned", messages: [{ id: "old-tip" }] }
+  const branchRefusal = (detail: Record<string, unknown> = {}) => ({
+    status: 409,
+    details: { detail: { status: "stale_selection", code: "history_branch_changed", conversation_id: "owned",
+      parent_message_id: "old-tip", leaf_ids: ["elsewhere"], history_version: 2, ...detail } }
+  })
+  const wrap = (cause: unknown) => new Error("Stream completion failed", { cause })
+
+  it("reads an edit refusal through one or more wrappers", () => {
+    expect(isDefinitiveNativeEditRejection(wrap(editRefusal()), editSelection, target)).toBe(true)
+    expect(isDefinitiveNativeEditRejection(wrap(wrap(editRefusal())), editSelection, target)).toBe(true)
+  })
+  it("keeps a wrapped edit response that is not the exact refusal uncertain", () => {
+    expect(isDefinitiveNativeEditRejection(wrap(editRefusal({}, 503)), editSelection, target)).toBe(false)
+    expect(isDefinitiveNativeEditRejection(wrap(editRefusal({ selection_digest: "foreign" })), editSelection, target)).toBe(false)
+    expect(isDefinitiveNativeEditRejection(wrap(new Error("history_edit_target_changed")), editSelection, target)).toBe(false)
+  })
+  it("reads a branch refusal through one or more wrappers", () => {
+    expect(isDefinitiveNativeBranchRejection(wrap(branchRefusal()), branchSelection)).toBe(true)
+    expect(isDefinitiveNativeBranchRejection(wrap(wrap(branchRefusal())), branchSelection)).toBe(true)
+  })
+  it("keeps a wrapped branch response that is not the exact refusal uncertain", () => {
+    expect(isDefinitiveNativeBranchRejection(wrap(branchRefusal({ parent_message_id: "foreign" })), branchSelection)).toBe(false)
+    expect(isDefinitiveNativeBranchRejection(wrap(branchRefusal({ leaf_ids: [] })), branchSelection)).toBe(false)
+  })
+  it("stops on a cause chain that loops", () => {
+    const looped: Error & { cause?: unknown } = new Error("Stream completion failed")
+    looped.cause = looped
+    expect(isDefinitiveNativeEditRejection(looped, editSelection, target)).toBe(false)
+    expect(isDefinitiveNativeBranchRejection(looped, branchSelection)).toBe(false)
+  })
 })
