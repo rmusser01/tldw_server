@@ -623,6 +623,97 @@ review fixes went on top. The lanes were then merged into
   (`e2e:chat-cockpit:real:focused`) wasn't run locally. It needs a live
   server.
 
+## Wave 8 log
+
+The three lanes were built in their own worktrees (`.worktrees/bd8-lane-a`,
+`-b`, `-c`) from the Wave 8 plan commit. 8A was reviewed by one reviewer, 8B
+in two halves (backend and docs, then frontend), and 8C by one reviewer. Their
+review fixes went on the lanes. The lanes were merged into
+`ux/burndown-wave8` in the order 8A, 8C, 8B, with no conflicts.
+
+**Review fixes:**
+- **8C:** a question that was never sent could stay in the transcript. This
+  happened when the turn ended (a Stop, or a failed first load) between the
+  start of the new chat's quiet load and the draft bind, because the turn's
+  view setters retire in that window. The question is now removed from the
+  message store by identity. The early question and the quiet load apply only
+  to a new server chat or a ready chat; a local create and an unloaded
+  existing chat behave as before.
+- **8B, server side:**
+  - Instructions go only on a plain chat's Retry; a character Retry with
+    instructions gets 409.
+  - Blank instructions get 422.
+  - The check after moderation also compares the instructions' content.
+  - ADR-068 says the capability flag is the fail-closed guard, and B02 points
+    at the amendment.
+- **8B, frontend:**
+  - "Review saved question" shows only where the server can answer it.
+  - A Stop after whitespace-only output counts as before any text.
+  - Plain chats get plain wording for settings refusals, and the side panel
+    gets a specific reason.
+  - Selections with saved system rows, error rows, or reasoning the server
+    can't keep stay client-settled.
+  - Smaller changes: a double-click guard, accessibility fixes, and a leaf
+    module for the store-free rules.
+
+**Choices made during review and integration:**
+- **A failed first-send create:** the question leaves the transcript. Its
+  text stays in D7 P4's "Server save unconfirmed" recovery, not the composer,
+  as on dev. Sending again from the same draft is refused, and a new chat
+  could duplicate the server chat. The scope's "restores the composer text"
+  was wrong.
+- **The 300 ms delay:** only the plain "Loading selected history" panel waits.
+  Error, pending, unsupported and recovery panels still show at once.
+- **Plain Retry instructions:** the same set the client-managed recovery Retry
+  reviews, in the same order. That is the default non-RAG prompt when no
+  prompt is selected, then the temporary system prompt or the selected prompt;
+  the full page adds the output-formatting appendix. Overlay, actor and
+  web-search contexts are refused.
+- **The side panel:** tested at hook level only; there is no side-panel
+  harness.
+
+**Integration:**
+- **An edited question stopped before its reply (8A with 8B):** after a Stop,
+  `recover` followed the edit's capture, a selection revision that is never
+  mounted. The page fell back to the original question, and only a reload
+  showed the edited one. It now follows from the mounted view, as the turn's
+  own follow does. Tests cover a Stop with no output, two whitespace-only
+  first chunks, and a provider failure after admission. Each keeps the edited
+  question and retries it through existing input.
+- **The early question and a server-settled Stop (8B with 8C):** there is no
+  flash. `recover` starts the follow before the pipeline's cleanup, and that
+  cleanup is fenced off. A test records every published transcript and checks
+  the question never drops out.
+- **The test server's refusals:** they now have the server's real shape (an
+  edit-target refusal, and a new stale-tip refusal on completions).
+  Playground tests drive both through the real bgStream → TldwChat wrapping.
+- **Side panel:** hook tests show a side-panel edit is server-settled, and a
+  wrapped 409 is refused with the edit kept.
+- **The model after a reload:** an edited reply keeps its model badge (CM-04
+  (1)).
+- **Native refusals:** a refusal is read only from the response the request
+  got. The cause walk stops at the first error with an HTTP status.
+
+### Follow-ups from Wave 8
+- **Plain native Retry, Regenerate and Continue:** they go through the
+  character settings validator, which refuses settings an ordinary plain send
+  accepts (topK, seed, minP, numCtx, thinking, historyMessageLimit, Auto model,
+  client tools). Plain Regenerate and Continue also drop the default non-RAG
+  prompt.
+- **"Server save unconfirmed" during a slow first send:**
+  `createChatWithRecovery` writes the recovery record before the create, so
+  `ChatDraftRecovery` shows it while a live turn owns the create. This
+  contradicts CM-14's calm first send and touches frozen P4 files.
+- **Stopping a Retry before its first token:** it shows an "Aborted" error
+  bubble and "Could not retry…". This is pre-existing in the shared send.
+- **A Stop during the turn's selection read:** it shows a raw
+  `request_config_scope_changed` notification.
+- **After a successful Retry:** the earlier "Reply not confirmed" card keeps
+  its reload wording.
+- **CM-04 (3):** sources at server settlement (size M, needs a design note).
+- **Saved system and error rows in the server's model context.**
+- **The test harness:** make `nativeCompletion: true` the default.
+
 ## Status
 
 | Wave | Status |
@@ -630,4 +721,4 @@ review fixes went on top. The lanes were then merged into
 | 5 | Landed (#3461, 2026-11-13) |
 | 6 | Landed (#3526, 2026-11-22) |
 | 7 | Landed (#3559, 2026-11-22) |
-| 8 | In progress: P5 and CM-14; the rest blocked |
+| 8 | P5 and CM-14 integrated, PR pending; the rest blocked |

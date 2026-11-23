@@ -187,7 +187,8 @@ Merge order: 8A, 8B, 8C.
   - Hold `POST /api/v1/chats/`, type, press Enter. The bubble is visible, there
     is no "Loading selected history", and the composer is empty. Release:
     exactly one user bubble, and the right server rows.
-  - A failed create removes the bubble and restores the composer text.
+  - A failed create removes the bubble. The text stays in D7 P4's "Server save
+    unconfirmed" recovery, as on dev, not in the composer (see the Wave 8 log).
   - A later send in a saved chat shows no duplicate bubble.
   - A Stop right after the quiet load leaves no stale history.
   - Fake timers: the panel is hidden before 300 ms, shown after, and hidden for
