@@ -1,4 +1,4 @@
-export const updatePageTitle = (title: string = 'tldw Assistant') => {
+export const updatePageTitle = (title: string = 'tldw') => {
   if (typeof document === "undefined") return
   // Next pages own their titles through Head (Chat observes its active history).
   // An asynchronous Chat callback must not override the current route's title.

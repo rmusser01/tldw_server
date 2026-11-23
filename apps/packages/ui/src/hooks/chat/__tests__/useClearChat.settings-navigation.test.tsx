@@ -251,6 +251,22 @@ describe("useClearChat settings navigation", () => {
     )
   })
 
+  // Decision [4] review: an attached note belongs to a message in the old chat.
+  it("drops attached notes but keeps other pins on New chat", () => {
+    const notePin = { id: "note:7", type: "note", title: "Rebase notes", snippet: "Use rebase." }
+    const searchPin = { id: "rag-1", title: "Doc", snippet: "A result." }
+    ;(optionState as Record<string, unknown>).ragPinnedResults = [notePin, searchPin]
+    try {
+      const { result } = renderHook(() => useClearChat())
+      act(() => expect(result.current()).toBe(true))
+      expect(optionStoreSetStateMock).toHaveBeenCalledWith(
+        expect.objectContaining({ ragPinnedResults: [searchPin] })
+      )
+    } finally {
+      delete (optionState as Record<string, unknown>).ragPinnedResults
+    }
+  })
+
   it("still clears standalone surfaces without a history selection provider", () => {
     historySelectionContextMock.mockReturnValue(null)
     const { result } = renderHook(() => useClearChat())

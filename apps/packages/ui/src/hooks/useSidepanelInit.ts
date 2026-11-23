@@ -8,7 +8,7 @@ export interface UseSidepanelInitOptions {
 }
 
 export function useSidepanelInit(options: UseSidepanelInitOptions = {}) {
-  const { titleDefaultValue = "tldw Assistant" } = options
+  const { titleDefaultValue = "tldw" } = options
   const { t, i18n } = useTranslation()
   const [direction, setDirection] = useState<SidepanelDirection>("ltr")
 

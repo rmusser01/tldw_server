@@ -325,7 +325,7 @@ describe("VisualPackEditor", () => {
     )
 
     const builder = await findGuidedBuilder()
-    expect(builder).toHaveTextContent("Choose a ready-made Buddy")
+    expect(builder).toHaveTextContent("Choose a ready-made avatar")
     expect(builder).toHaveTextContent("Search Lens Buddy")
   })
 
@@ -2041,7 +2041,7 @@ describe("VisualPackEditor", () => {
     expect(ownership).toHaveTextContent("attached to Garden Helper by default")
     expect(ownership).toHaveTextContent("stored as manifests")
     expect(ownership).toHaveTextContent(
-      "The active pack is the one Persona Buddy renders now"
+      "The active pack is the one the persona avatar renders now"
     )
   })
 
@@ -2622,9 +2622,9 @@ describe("VisualPackEditor", () => {
 
     const emptyState = await screen.findByTestId("persona-visual-pack-empty")
     expect(emptyState).toHaveTextContent(
-      "Garden Helper's Persona Buddy does not have a visual pack yet."
+      "Garden Helper's persona avatar does not have a visual pack yet."
     )
-    expect(emptyState).toHaveTextContent("Choose a ready-made Buddy above, or create a custom draft here.")
+    expect(emptyState).toHaveTextContent("Choose a ready-made avatar above, or create a custom draft here.")
     expect(emptyState).toHaveTextContent(
       "Custom drafts support uploaded artwork, state animations, and generation. Review and activate when ready."
     )
@@ -3019,7 +3019,7 @@ describe("VisualPackEditor", () => {
     const activePack = makeVisualPack({
       id: "pack-active",
       persona_id: "persona-1",
-      title: "Active Buddy",
+      title: "Active avatar",
       status: "active"
     })
     const forkedPack = {
@@ -3721,7 +3721,7 @@ describe("VisualPackEditor", () => {
 
     const readiness = await screen.findByTestId("persona-visual-generation-readiness")
     expect(readiness).toHaveTextContent("No image generation provider is configured.")
-    expect(readiness).toHaveTextContent("Enable an image backend before queueing a Persona Buddy visual generation job.")
+    expect(readiness).toHaveTextContent("Enable an image backend before queueing a persona avatar visual generation job.")
 
     fireEvent.change(screen.getByTestId("persona-visual-generation-prompt-input"), {
       target: { value: "make an idle pose" }
@@ -4965,7 +4965,7 @@ describe("VisualPackEditor", () => {
     const diagnostics = screen.getByTestId(
       "persona-visual-import-buddy-packet-diagnostics"
     )
-    expect(diagnostics).toHaveTextContent("Buddy pipeline packet")
+    expect(diagnostics).toHaveTextContent("Avatar pipeline packet")
     expect(diagnostics).toHaveTextContent("Neutral anchor")
     expect(diagnostics).toHaveTextContent("Static talking sheet")
     expect(diagnostics).toHaveTextContent("Static reaction sheet")

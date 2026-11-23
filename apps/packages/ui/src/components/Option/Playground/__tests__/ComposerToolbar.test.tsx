@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens";
+import { OPEN_PROMPT_SELECT_EVENT } from "../playground-cockpit-actions";
 import { ComposerToolbar } from "../ComposerToolbar";
 
 const assistantSelectMock = vi.hoisted(() => vi.fn());
@@ -349,6 +351,105 @@ describe("calm composer", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
     expect(onDictationToggle).toHaveBeenCalledOnce();
+  });
+
+  // Decision [3]: toolbar controls use the size tokens (32px desktop, 44px touch).
+  it("sizes Tools, persistence and dictation with the text-control token", () => {
+    render(
+      <ToolbarHarness hasDictation speechAvailable isListening optionsExpanded />,
+    );
+    for (const control of [
+      screen.getByTestId("composer-options-toggle"),
+      screen.getByTestId("composer-persistence"),
+      screen.getByTestId("dictation-button"),
+      screen.getByTestId("knowledge-search-toggle"),
+    ]) {
+      for (const className of COMPOSER_TOOLBAR_TOKENS.textControl.split(" ")) {
+        expect(control).toHaveClass(className);
+      }
+      expect(control.className).not.toMatch(/(^|\s)(min-h-9|text-sm)(\s|$)/);
+    }
+  });
+
+  // AX-04 (#3124), decision [14]: in short viewports (max-height 500px, e.g.
+  // 400% zoom) the toolbar row collapses behind one "Composer options" button
+  // first; the input and Send stay. The layout is measured in
+  // e2e/smoke/composer-calm.spec.ts.
+  it("collapses the toolbar row in short viewports but keeps Send", () => {
+    const shortHidden = "[@media(max-height:500px)]:hidden";
+    render(<ToolbarHarness hasDictation speechAvailable isListening />);
+    const toggle = screen.getByTestId("composer-short-options-toggle");
+    expect(toggle).toHaveAccessibleName("Composer options");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.className).toContain("[@media(max-height:500px)]:inline-flex");
+    const collapsed = [
+      screen.getByRole("button", { name: "Attach" }),
+      screen.getByTestId("composer-options-toggle"),
+      screen.getByTestId("composer-persistence"),
+      screen.getByRole("button", { name: "Model selector" }),
+      screen.getByTestId("dictation-button"),
+    ];
+    for (const control of collapsed) {
+      expect(control.closest(`[class*="${shortHidden}"]`)).not.toBeNull();
+    }
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send.closest(`[class*="${shortHidden}"]`)).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    for (const control of collapsed) {
+      expect(control.closest(`[class*="${shortHidden}"]`)).toBeNull();
+    }
+  });
+
+  // AX-04 review: a prompt or assistant picker opened from elsewhere reveals
+  // the collapsed row first, so it doesn't anchor to a hidden panel.
+  it("reveals the collapsed short-viewport row when a picker is opened by event", () => {
+    render(<ToolbarHarness />);
+    const toggle = screen.getByTestId("composer-short-options-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    act(() => {
+      window.dispatchEvent(new Event(OPEN_PROMPT_SELECT_EVENT));
+    });
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("composer-options-panel").className).not.toContain(
+      "[@media(max-height:500px)]:hidden",
+    );
+  });
+
+  it("controls the whole toolbar it collapses", () => {
+    render(<ToolbarHarness />);
+    const toggle = screen.getByTestId("composer-short-options-toggle");
+    const controlled = document.getElementById(
+      toggle.getAttribute("aria-controls") ?? "",
+    );
+    expect(controlled).toBe(screen.getByTestId("composer-toolbar"));
+  });
+
+  it("flags hidden warnings and active context on Composer options", () => {
+    const { rerender } = render(<ToolbarHarness />);
+    const toggle = screen.getByTestId("composer-short-options-toggle");
+    expect(toggle).not.toHaveAttribute("data-attention");
+    expect(toggle).not.toHaveAttribute("aria-describedby");
+
+    rerender(
+      <ToolbarHarness
+        contextItems={[
+          { id: "model", label: "Model", value: "None", tone: "warning" },
+        ]}
+      />,
+    );
+    expect(toggle).toHaveAttribute("data-attention", "warning");
+    expect(toggle).toHaveAccessibleDescription(
+      "Some hidden options need attention.",
+    );
+
+    rerender(<ToolbarHarness selectedDocumentsCount={2} />);
+    expect(toggle).toHaveAttribute("data-attention", "active");
+    expect(toggle).toHaveAccessibleDescription("Some hidden options are in use.");
   });
 
   it("toggles the formatting guide inside Tools", () => {

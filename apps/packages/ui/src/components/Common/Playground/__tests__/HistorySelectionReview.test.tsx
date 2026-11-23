@@ -713,7 +713,7 @@ describe("available history-path actions (TASK-13550)", () => {
     const onExpand = vi.fn()
     render(<HistorySelectionReview selection={selection} onExpand={onExpand} />)
     expect(screen.getByText("Retained answer")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Expand in full page" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open in full page" }))
     expect(onExpand).toHaveBeenCalledOnce()
     expect(
       screen.getByRole("button", { name: "Dismiss recovery" })

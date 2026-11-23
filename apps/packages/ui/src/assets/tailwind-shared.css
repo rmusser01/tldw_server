@@ -96,7 +96,8 @@
   --color-border-strong: 207 200 186;
   --color-text: 31 35 40;
   --color-text-muted: 91 100 114;
-  --color-text-subtle: 95 104 119;
+  /* Same as muted: the light theme has one secondary text tier (#3101). */
+  --color-text-subtle: 91 100 114;
   --color-focus: 13 134 119;
   --state-ready: var(--color-success);
   --state-unavailable: var(--color-danger);

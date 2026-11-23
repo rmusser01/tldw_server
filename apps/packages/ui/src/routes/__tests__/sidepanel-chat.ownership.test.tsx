@@ -45,6 +45,7 @@ import { useComposerText } from "@/components/Chat/composer/hooks/useComposerTex
 import { chatDraftAddressKey, conversationDraftKey } from "@/utils/chat-draft-address"
 import { decodeSidepanelChatWebUiHandoff } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { PRO_SIDEBAR_COLLAPSED_STORAGE_KEY } from "@/components/Sidepanel/Chat/sidepanel-sidebar-layout"
+import { useSidepanelOpenFullPage } from "@/components/Sidepanel/Chat/hooks/useSidepanelOpenFullPage"
 
 const io = vi.hoisted(() => ({
   noop: () => {},
@@ -80,6 +81,7 @@ const io = vi.hoisted(() => ({
   server: vi.fn(),
   submit: vi.fn(),
   notifyError: vi.fn(),
+  notifyInfo: vi.fn(),
   capture: vi.fn(),
   settle: vi.fn()
 }))
@@ -231,7 +233,7 @@ vi.mock("@/hooks/useConnectionState", () => ({
 }))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: io.noop }))
 vi.mock("@/hooks/useAntdNotification", () => {
-  const notification = { warning: io.noop, error: io.notifyError }
+  const notification = { warning: io.noop, error: io.notifyError, info: io.notifyInfo }
   return { useAntdNotification: () => notification }
 })
 vi.mock("@/hooks/useCharacterGreeting", () => ({
@@ -321,7 +323,7 @@ const formOpeningNodes: ts.Node[] = []
 const collectOpening = (node: ts.Node) => { formOpeningNodes.push(node); ts.forEachChild(node, collectOpening) }
 collectOpening(formAst)
 const openingDeclaration = (name: string) => formOpeningNodes.find((node): node is ts.VariableDeclaration => ts.isVariableDeclaration(node) && node.name.getText(formAst) === name)
-const openingNames = ["documentWebUiHandoffRef", "getHandoffInputRevision", "handoffInputRevision", "handoffSelectionIsCurrent", "captureHandoffGuard", "openChatInWebUiWithDocumentHandoff"]
+const openingNames = ["documentWebUiHandoffRef", "getHandoffInputRevision", "handoffInputRevision", "handoffSelectionIsCurrent", "captureHandoffGuard", "openChatInWebUiWithDocumentHandoff", "fullPage"]
 const registrations = formOpeningNodes.filter(node => ts.isExpressionStatement(node) && node.getText(formAst).startsWith("React.useLayoutEffect") && node.getText(formAst).includes("onWebUiOpenReady"))
 const composerReadyRegistration = formOpeningNodes.find(node => ts.isExpressionStatement(node) && /React\.use(?:Layout)?Effect/.test(node.getText(formAst)) && node.getText(formAst).includes("onComposerReady"))!
 const openingCleanup = formOpeningNodes.find(node => ts.isExpressionStatement(node) && /React\.use(?:Layout)?Effect\(\(\) => \(\) => documentWebUiHandoffRef/.test(node.getText(formAst)))
@@ -336,12 +338,20 @@ const openingCode = ts.transpileModule(`function useFormOpening(props, composer)
   const onWebUiOpenReady = props.onWebUiOpenReady;
   const onComposerReady = props.onComposerReady;
   const keyboardShortcutsEnabled = props.keyboardShortcutsEnabled ?? true;
+  // XP-09: the probe has no page context or character; the one action still runs through the real hook.
+  const handoffSourceKey = "ownership-probe";
+  const pageContextActive = false;
+  const selectedDocuments = [];
+  const getVisiblePageContextForHandoff = undefined;
+  const selectedCharacterId = null;
+  const temporaryChat = false;
+  const draftOwnerVerificationState = "ready";
   ${openingNames.map(name => `const ${openingDeclaration(name)!.getText(formAst)};`).join("\n")}
   ${openingCleanup?.getText(formAst) ?? ""}
   ${registrations.map(node => node.getText(formAst)).join("\n")}
   ${composerReadyRegistration.getText(formAst)}
 }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-const useFormOpening = new Function("React", "useStoreMessageOption", "useHistorySelectionContext", "notification", "t", "tldwClient", `${openingCode}; return useFormOpening;`)(React, useStoreMessageOption, useHistorySelectionContext, { error: io.noop }, io.t, {})
+const useFormOpening = new Function("React", "useStoreMessageOption", "useHistorySelectionContext", "notification", "t", "tldwClient", "useSidepanelOpenFullPage", `${openingCode}; return useFormOpening;`)(React, useStoreMessageOption, useHistorySelectionContext, { error: io.noop }, io.t, {}, useSidepanelOpenFullPage)
 
 const ComposerProbe = (props: { draftKey: string; inputRef?: React.RefObject<HTMLTextAreaElement>; onRecoverDraft?: RestoreChatDraft; keyboardShortcutsEnabled?: boolean; onComposerReady?: () => void }) => {
   const { draftKey, inputRef, onRecoverDraft } = props
@@ -373,7 +383,7 @@ vi.mock("@/components/Sidepanel/Chat/form", () => ({
 vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
   SidepanelHeaderSimple: (props: {
     chatReady?: boolean
-    onOpenChatInWebUi?: () => void
+    onOpenFullPage?: () => void
     sidebarOpen: boolean
     setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
   }) => (
@@ -386,7 +396,7 @@ vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
       </button>
       <button
         disabled={!props.chatReady}
-        onClick={() => props.onOpenChatInWebUi?.()}>
+        onClick={() => props.onOpenFullPage?.()}>
         Open full chat in WebUI
       </button>
     </>
@@ -2708,7 +2718,7 @@ describe.each([
     expect(useSidepanelChatTabsStore.getState().tabs.some(tab => tab.id === "alice-one")).toBe(true)
   })
 
-  it("expands the selected history review through its qualified bookmark in the web compact view", async () => {
+  it("runs the composer's one Open in full page action from the history review (XP-09)", async () => {
     io.localId = "owned"
     io.local.mockResolvedValue({ historyInfo: { id: "owned", title: "Owned review", server_scope_key: ownerKey("alice") },
       messages: [{ id: "row", role: "user", content: "OWNED REVIEW TEXT" }] })
@@ -2716,11 +2726,11 @@ describe.each([
     await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).not.toBeNull())
     fireEvent.click(await screen.findByRole("button", { name: "Open cached history" }))
     await screen.findByText("OWNED REVIEW TEXT")
-    fireEvent.click(await screen.findByRole("button", { name: "Expand in full page" }))
-    await waitFor(() => expect(window.open).toHaveBeenCalled())
-    const route = String(vi.mocked(window.open).mock.calls.at(-1)![0])
-    expect(parseHistorySelectionHandoff(route)).toMatchObject({ owner_kind: "local", conversation_id: "owned" })
-    expect(route).not.toContain("handoff=")
+    expect(screen.queryByRole("button", { name: "Expand in full page" })).toBeNull()
+    // No composer is mounted here, so nothing has published the action: it says why, and opens nothing.
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: "Open in full page" })) })
+    expect(window.open).not.toHaveBeenCalled()
+    expect(io.notifyInfo).toHaveBeenCalledWith({ message: "Restore or start a conversation before opening it in a full page." })
   })
 
   it.each(["pending", "target failure"])("does not expand unresolved %s restoration from the header", async state => {

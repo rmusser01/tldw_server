@@ -52,14 +52,14 @@ const dock = (props: React.ComponentProps<typeof BuddyShellDock>) => (
   </MemoryRouter>
 );
 
-describe("Buddy draft lifetime", () => {
+describe("Avatar draft lifetime", () => {
   it.each([false, true])(
     "retains a closed draft with dormant=%s without exposing controls",
     (isDormant) => {
       const props = buildProps();
       const { rerender } = render(dock(props));
       fireEvent.change(
-        screen.getByRole("textbox", { name: "Message your Buddy" }),
+        screen.getByRole("textbox", { name: "Message your avatar" }),
         {
           target: { value: "Keep this unsent draft" },
         },
@@ -67,7 +67,7 @@ describe("Buddy draft lifetime", () => {
 
       rerender(dock({ ...props, isOpen: false, isDormant }));
       expect(
-        screen.queryByRole("textbox", { name: "Message your Buddy" }),
+        screen.queryByRole("textbox", { name: "Message your avatar" }),
       ).not.toBeInTheDocument();
       expect(
         screen.queryByRole("button", { name: "Send" }),
@@ -75,7 +75,7 @@ describe("Buddy draft lifetime", () => {
       rerender(dock(props));
 
       expect(
-        screen.getByRole("textbox", { name: "Message your Buddy" }),
+        screen.getByRole("textbox", { name: "Message your avatar" }),
       ).toHaveValue("Keep this unsent draft");
     },
   );
@@ -95,7 +95,7 @@ describe("Buddy draft lifetime", () => {
     );
     const { rerender } = render(dock(props));
     fireEvent.change(
-      screen.getByRole("textbox", { name: "Message your Buddy" }),
+      screen.getByRole("textbox", { name: "Message your avatar" }),
       {
         target: { value: "Retry this message" },
       },
@@ -109,7 +109,7 @@ describe("Buddy draft lifetime", () => {
     rerender(dock({ ...props, isOpen: false }));
     rerender(dock(props));
     expect(
-      screen.getByRole("textbox", { name: "Message your Buddy" }),
+      screen.getByRole("textbox", { name: "Message your avatar" }),
     ).toHaveValue("Retry this message");
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     await act(async () =>
@@ -135,7 +135,7 @@ describe("Buddy draft lifetime", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole("textbox", { name: "Message your Buddy" }),
+        screen.getByRole("textbox", { name: "Message your avatar" }),
       ).toHaveValue(""),
     );
   });
@@ -144,18 +144,18 @@ describe("Buddy draft lifetime", () => {
     const props = buildProps();
     const { rerender } = render(dock(props));
     fireEvent.change(
-      screen.getByRole("textbox", { name: "Message your Buddy" }),
+      screen.getByRole("textbox", { name: "Message your avatar" }),
       {
         target: { value: "Persona one's draft" },
       },
     );
     rerender(dock({ ...props, personaId: "persona-2" }));
     expect(
-      screen.getByRole("textbox", { name: "Message your Buddy" }),
+      screen.getByRole("textbox", { name: "Message your avatar" }),
     ).toHaveValue("");
     rerender(dock(props));
     expect(
-      screen.getByRole("textbox", { name: "Message your Buddy" }),
+      screen.getByRole("textbox", { name: "Message your avatar" }),
     ).toHaveValue("");
   });
 
@@ -163,7 +163,7 @@ describe("Buddy draft lifetime", () => {
     const props = buildProps();
     const { unmount } = render(dock(props));
     fireEvent.change(
-      screen.getByRole("textbox", { name: "Message your Buddy" }),
+      screen.getByRole("textbox", { name: "Message your avatar" }),
       {
         target: { value: "Previous owner draft" },
       },
@@ -171,7 +171,7 @@ describe("Buddy draft lifetime", () => {
     unmount();
     render(dock(props));
     expect(
-      screen.getByRole("textbox", { name: "Message your Buddy" }),
+      screen.getByRole("textbox", { name: "Message your avatar" }),
     ).toHaveValue("");
   });
 });

@@ -71,7 +71,7 @@ const noop = () => {}
  * KnowledgePanel - Main container for the 4-tab RAG interface
  *
  * Implements the 4-tab architecture:
- * - QA Search tab: Full RAG pipeline with generated answers and source chunks
+ * - QA Search tab: source chunks first; an answer is generated on request
  * - File Search tab: Media library search for document discovery and attachment
  * - Settings tab: All RAG settings organized in collapsible sections
  * - Context tab: Manage attached tabs, files, and pinned results
@@ -300,7 +300,7 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
           onClick={() => setOpenState(true)}
           className="flex items-center gap-2 px-3 py-1.5 text-sm text-text-muted hover:text-text transition-colors"
         >
-          {t("sidepanel:rag.show", "Show Knowledge Search")}
+          {t("sidepanel:rag.show", "Show Search & Context")}
         </button>
       )
     }
@@ -322,7 +322,7 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
         <div className="flex items-center justify-between px-3 py-2 border-b border-border">
           <div className="min-w-0 pr-3">
             <h3 className="text-sm font-semibold text-text">
-              {t("sidepanel:knowledge.title", "Knowledge Search")}
+              {t("sidepanel:knowledge.title", "Search & Context")}
             </h3>
             <p className="mt-0.5 text-[11px] leading-4 text-text-muted">
               {t(
@@ -381,6 +381,9 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
             hasAttemptedSearch={qaSearch.hasAttemptedSearch}
             timedOut={qaSearch.timedOut}
             pinnedResults={search.pinnedResults}
+            onGenerateAnswer={qaSearch.generateAnswer}
+            answerLoading={qaSearch.answerLoading}
+            answerError={qaSearch.answerError}
             onCopyAnswer={qaSearch.copyAnswer}
             onInsertAnswer={qaSearch.insertAnswer}
             onCopyChunk={qaSearch.copyChunk}
@@ -389,6 +392,7 @@ const KnowledgePanelBase: React.FC<KnowledgePanelProps> = ({
             onPreviewChunk={handlePreviewChunk}
             isConnected={isConnected}
             autoFocus={autoFocus}
+            embedded={variant === "embedded"}
             onOpenContext={() => handleTabChange("context")}
           />
         )}

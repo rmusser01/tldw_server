@@ -131,10 +131,70 @@ Started 2026-11-13 on `ux/burndown-wave6` from dev @ 4b6b9ec446 (#3461).
 
 ### Wave 7: after owner decisions
 
-CC-08, CC-10, toolbar size tokens, CO-04, CC-11 "@ Notes" (with XP-04),
-XP-01 (temporary chats), XP-11, XP-13, XP-17 with the Trash Undo follow-up
-and AX-06, `text-subtle`/`text-muted`, XS-12 "Open dashboard", NL-11, NL-12,
-the tag-match follow-up, NL-06, NL-10, XP-09, XP-12, XP-18, AX-04.
+Started 2026-11-19, after the owner's answers (see "Owner decisions"). It is
+built on `ux/burndown-wave7`, from the Wave 6 head 45188b5e13, while #3526
+landed. Dev, with #3526, was merged in on 2026-11-22. The numbers in brackets
+are the decision numbers.
+
+**Lane 7A — Composer names, search and size**
+- CC-08 [1]:
+  - Keep the redesign's names ("Search & Context", "Runtime") and update the
+    glossary.
+  - Move the Modes menu's toggles to where they belong.
+  - Give web search one home and one spelling.
+- CC-10 [2]:
+  - Search stays in the composer, with its own height cap.
+  - Sources are shown first.
+  - The generated answer is opt-in.
+- Size tokens [3]: 32px desktop controls and 44px touch, applied to the
+  remaining toolbar controls. D9 and D10 are dropped.
+- CO-04: the rails at 1024px (width-aware, one rail at a time), and the
+  leftover jargon, using the names from [1].
+- AX-04 [14]:
+  - In short viewports the toolbar row collapses first; the input and Send
+    stay.
+  - Reflow tests at 320×256 and 640×400.
+  - Measure the composer share.
+
+**Lane 7B — Notes views, Graph and filters**
+- NL-11 [15]:
+  - Graph filters, and an All-notes cap of 500.
+  - Picking a note re-centres the graph and opens a preview without leaving
+    Graph.
+- NL-12 [16]: keep the Inbox view, and fix the tag-match toggle counting
+  Inbox's hidden token.
+- Move notes search above Views.
+- Saved filters always match all of their tags [19].
+
+**Lane 7C — Delete policy, Undo and shared copy**
+- XP-17 and AX-06 [8]:
+  - One delete policy: soft deletes get a persistent inline Undo, and only
+    permanent deletes ask for confirmation. Message delete keeps its confirm.
+  - A shared undo helper, which also covers the G07 Trash Undo keyboard
+    follow-up and Undo for the Notes bulk delete.
+- XP-13 [7]: the glossary terms (Character, Persona, Buddy and the product
+  name).
+- XP-11 [6]: the chat list leaves routes that aren't chat.
+- `text-subtle` merges into `text-muted` in the light theme [9].
+- XS-12 [10]: "Open dashboard" becomes "Flashcards".
+
+**Lane 7D — Side panel, temporary chats and notes in chat**
+- XP-09 [11]: one "Open in full page" action. The extension may open a
+  configured WebUI.
+- XP-12 [12]: align the side-panel composer's strings and menus with the full
+  page; no rebuild.
+- XS-15: the Pro composer's share of the side panel, as the review specifies
+  it, plus the measurement.
+- XP-01 [5]: a temporary chat's answer can be saved to Notes.
+- Web "@" Notes and `/note` [4]: attach a note's content as a removable chip
+  in the composer. XP-04's note-side action waits for #3226.
+
+**Still blocked (Wave 8):**
+- NL-06 [17] and NL-10 [18] wait for #3226.
+- XP-18 [13] needs D7 P7 and the server pin field, which collides with #3226's
+  migrations.
+- #3182 [20]: the outbox is approved, but it is sequenced after #3226 and
+  #3071/#3159.
 
 ### Wave 8: blocked by other work
 
@@ -374,11 +434,165 @@ The four lanes were built in the Wave 5 worktrees on new branches, merged into
   - moving notes search above Views (decision 16);
   - Undo for bulk delete (decision 8).
 
+## Wave 7 log
+
+The four lanes were built in the Wave 5 worktrees on new branches, from the
+Wave 6 head. They were reviewed per lane (two reviewers each), and their
+review fixes went on top. The lanes were then merged into
+`ux/burndown-wave7`.
+
+**Integration:**
+- **Lane 7C commit order:** its `UndoOutcome` export was moved ahead of the
+  commits that import it, so every commit compiles. The tree is unchanged.
+- **Lane 7D conflicts:**
+  - 7D conflicted with 7A in the English locale files, and with 7C in the
+    side-panel header and its test.
+  - The header keeps 7D's shared `openOptionsRoute` and 7C's "Flashcards"
+    name.
+- **Note chip:** the remove button uses 7A's composer size tokens.
+- **Side-panel strings:** two strings 7D no longer reads ("Web Search",
+  "Knowledge Search") now say "Web search" and "Search & Context". 7A's
+  one-name guard allowlists only the /knowledge page title.
+- **`getNote`:** it lives only on the Notes domain client. A delegating copy
+  on `TldwApiClientBase` failed the client ownership guard.
+- **Dev merges (2026-11-22):** dev @ cee4433eb2 is merged in. It brings
+  #3526, the ChaCha owner-scope work (TASK-13950.23) and the first
+  CharactersRAGDB shrink (TASK-13950.22). The only conflict was the OpenAPI
+  fingerprint, which was regenerated from the merged tree.
+  - Wave 7 was built on an earlier Wave 6 head, so this also brings Wave 6's
+    CI fixes: the NL-05 selection reset now happens during render, and the
+    XP-06 test waits longer.
+  - The frontend tests were rerun under Node 20, the version CI uses. Before
+    the merge, the NL-05 Notes → Trash → Notes test failed there.
+  - Dev @ 37cc558814 (#3557, TASK-13950.22 c2) followed. It moves the note
+    and keyword stores onto ChaChaContext. The only conflict was the two
+    keyword-token filter calls in `note_store.py`: dev's
+    `self._ctx.map_table(...)` with Wave 7's `required_tokens` argument.
+- **CI fixes on #3559 (2026-11-22):**
+  - The real-server cockpit spec opens the Tools tray before it checks the
+    MCP control. Its CC-08 update closed the tray after the web-search step,
+    and the MCP control lives in the tray. It was rerun locally against a
+    live server: 6 passed, and the check fails the same way as CI without it.
+  - pre-commit's whitespace nits in `note-mentions.ts` and `ocr.ts` are fixed.
+
+**Choices made during review and integration:**
+- **Delete and Undo (7C):**
+  - Soft deletes of notes, chats and side-panel tabs no longer confirm.
+  - They get one inline Undo that stays until it is used, dismissed or
+    replaced, and that reports what was actually restored.
+  - The side-panel bulk delete still confirms when any selected tab has no
+    server chat (local-only or Temporary).
+  - Moving the open note to Trash saves its unsaved edits first.
+- **XP-11:** off `/chat` the sidebar keeps navigation and settings, under one
+  name ("Menu"), and reads no chat history. The mobile drawer is named to
+  match.
+- **CC-10 (7A):**
+  - QA search never generates an answer.
+  - "Generate answer" re-runs the searched query with the answer settings
+    chosen at click time.
+  - The button sits in the results header and moves focus to the answer.
+  - The "Enable generation" switch no longer hides those answer settings.
+- **Short viewports (7A):**
+  - The transcript floor is `min(42dvh, 45%)`, and the dock floor is 4.5rem.
+  - A rail panel saved open isn't restored there.
+  - The overlay rail stops above the dock. Closing it keeps the other rail
+    closed.
+- **NL-11 (7B):**
+  - A tag or source filter shows exactly its notes, with no one-hop
+    neighbours.
+  - Graphs with no focus note get 4 links per node.
+  - A lower `NOTES_GRAPH_MAX_NODES` or `_MAX_EDGES` shrinks those budgets.
+    Values of 0 or less count as unset.
+  - "Linked notes only" reads `has_note_links` from
+    `include_link_status=true`, computed before pruning. Similarity
+    suggestions don't count as links.
+- **Tag match (7B):** "Any" means required AND (any picked tag). A picked tag
+  the view already requires satisfies it.
+- **"@" and `/note` (7D):**
+  - A note attaches to one message: the chip clears after a send or a queue,
+    and a failed send keeps it.
+  - Notes are sent even with file retrieval on, as a labelled, fenced block.
+  - An unpicked `/note …` isn't sent.
+- **XP-09 (7D):**
+  - In the extension, "Open in full page" always opens the extension's page,
+    with the chat and the draft.
+  - A configured WebUI gets its own "Open in WebUI" item in Tools, which
+    carries the draft only.
+  - The web-hosted panel keeps the WebUI hand-off.
+- **XP-12 (7D):** the side panel's "Tools" ends with a "More tools" group
+  (Images, Advanced, Quick ingest, Open in full page), matching the full page.
+- **XS-15 (7D):** the textarea and Send always stay in view, which outranks
+  the 60% conversation target.
+  - The optional dock content scrolls above them.
+  - Side-panel controls are 32px on a fine pointer and 44px on a coarse one.
+  - Measured on `/__debug__/sidepanel-chat`. Send was hidden in 26 of 27
+    states before, and is visible in all 27 now. At 600px tall, the Pro
+    composer takes 64–71% of the panel.
+
+**For the owner:**
+- **Pro side-panel composer:** a conversation share near 60% needs a shorter
+  composer: a one-row control row, or the Send-row extras moved into Tools.
+- **Persona on chat surfaces:** Persona-vs-Character labels were left alone.
+  Removing the word would merge two kinds of reply source.
+- **Extension name:** the extension name and the toolbar title are still
+  "tldw Assistant", because renaming them changes the Chrome Web Store
+  listing.
+- **"Avatar settings":** the dialog also holds the conversation's Persona
+  settings.
+- **Modes:** it has one entry while Compare is hidden (D4). Hide it until
+  Compare returns?
+- **Short viewports:** at 500px tall or less, Send sits beside the textarea.
+  This is close to the dropped D10.
+- **"More tools":** the full page's overflow menu keeps that name and icon.
+- **Side-panel QA search:** the shared Search & Context panel also makes the
+  answer opt-in there.
+- **Other theme presets:** they keep two light text tiers. Decision 9 was
+  applied to the default preset.
+
+### Follow-ups from Wave 7
+
+- **Graph recency filter:**
+  - Not built: `time_range` on `GET /notes/graph` is documented but can't be
+    reached, because a nested `Query()` model returns 422.
+  - It needs a flat parameter, and a seed query for libraries over the cap.
+  - Filed as #3558.
+- **Graph build:** `generate_graph` still runs on the event loop. The
+  suggestion routes show the `run_in_threadpool` plus
+  `release_context_connection` pattern.
+- **NL-12:** only the Wave 7 slice is done (keep Inbox, drop the Captured
+  chip, tag match). The segmented Notes/Trash control and the View select
+  remain.
+- **Saved filters:** they allow 25 tags, but the server caps each token list
+  at 20, so a filter with 21 or more tags gets a 400. This predates Wave 7.
+- **Older servers:** they ignore `required_tokens`, so Inbox or a saved filter
+  plus "Any" of two or more tags widens to OR there. That is no worse than
+  before.
+- **AX-06:** an app-wide announcer for antd toasts.
+- **Undo toasts:** Flashcards, WorldBooks, Watchlists and the Notes bulk-tag
+  Undo still use the 8 s Undo toast.
+- **XP-11:** the Notes Dock icon, the "Quick note" label and "Archive" →
+  "Notes".
+- **7D leftovers:**
+  - carrying a draft into a new Character or Persona chat;
+  - a client-side Notes permission check (the picker uses the `hasNotes`
+    capability);
+  - trimming the note list and search payloads, which needs a backend content
+    flag.
+- **Locale mirror:** `public/_locales/en/sidepanel.json` drifts about 435 lines
+  from `assets/locale/en`.
+- **`MessageActionsBar.real-popover.test.tsx`:** "opens a native button
+  Popover as an independent trigger fixture control" now fails when run
+  alone. It fails on the Wave 6 branch merged with dev as well, so it is not
+  from Wave 7.
+- **Real-server gate:** the advisory /chat real-server cockpit gate
+  (`e2e:chat-cockpit:real:focused`) wasn't run locally. It needs a live
+  server.
+
 ## Status
 
 | Wave | Status |
 |---|---|
 | 5 | Landed (#3461, 2026-11-13) |
-| 6 | In progress |
-| 7 | Decisions answered 2026-11-19; not started |
+| 6 | Landed (#3526, 2026-11-22) |
+| 7 | Integrated, PR pending |
 | 8 | Blocked |

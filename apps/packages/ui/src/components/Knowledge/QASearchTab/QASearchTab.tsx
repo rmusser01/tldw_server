@@ -39,6 +39,11 @@ type QASearchTabProps = {
   // Pinned results
   pinnedResults: RagPinnedResult[]
 
+  // Opt-in answer (CC-10)
+  onGenerateAnswer?: () => void
+  answerLoading?: boolean
+  answerError?: string | null
+
   // Result actions
   onCopyAnswer: () => void
   onInsertAnswer: () => void
@@ -50,11 +55,13 @@ type QASearchTabProps = {
   // Connection state
   isConnected?: boolean
   autoFocus?: boolean
+  /** Inside the composer's capped Search & Context box (CC-10 review). */
+  embedded?: boolean
   onOpenContext?: () => void
 }
 
 /**
- * QA Search tab — full RAG pipeline search with answer generation.
+ * QA Search tab: retrieves source chunks; an answer is generated on request.
  */
 export const QASearchTab: React.FC<QASearchTabProps> = ({
   query,
@@ -78,6 +85,9 @@ export const QASearchTab: React.FC<QASearchTabProps> = ({
   hasAttemptedSearch,
   timedOut,
   pinnedResults,
+  onGenerateAnswer,
+  answerLoading,
+  answerError,
   onCopyAnswer,
   onInsertAnswer,
   onCopyChunk,
@@ -86,6 +96,7 @@ export const QASearchTab: React.FC<QASearchTabProps> = ({
   onPreviewChunk,
   isConnected = true,
   autoFocus = true,
+  embedded = false,
   onOpenContext
 }) => {
   const { t } = useTranslation(["sidepanel"])
@@ -131,6 +142,10 @@ export const QASearchTab: React.FC<QASearchTabProps> = ({
         query={query}
         pinnedResults={pinnedResults}
         onRetry={onSearch}
+        embedded={embedded}
+        onGenerateAnswer={onGenerateAnswer}
+        answerLoading={answerLoading}
+        answerError={answerError}
         onCopyAnswer={onCopyAnswer}
         onInsertAnswer={onInsertAnswer}
         onCopyChunk={onCopyChunk}

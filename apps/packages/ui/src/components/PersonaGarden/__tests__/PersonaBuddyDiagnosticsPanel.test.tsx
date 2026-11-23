@@ -10,7 +10,7 @@ describe("PersonaBuddyDiagnosticsPanel", () => {
       <PersonaBuddyDiagnosticsPanel
         diagnostics={{
           state: "degraded",
-          title: "Persona Buddy degraded",
+          title: "Persona avatar degraded",
           message: "Visual pack needs attention.",
           rows: [
             { label: "Persona", value: "Ada", state: "healthy" },
@@ -21,7 +21,7 @@ describe("PersonaBuddyDiagnosticsPanel", () => {
     )
 
     expect(screen.getByTestId("persona-buddy-diagnostics")).toBeInTheDocument()
-    expect(screen.getByText("Persona Buddy degraded")).toBeInTheDocument()
+    expect(screen.getByText("Persona avatar degraded")).toBeInTheDocument()
     expect(screen.getByText("Visual pack")).toBeInTheDocument()
     expect(screen.getByText("Missing manifest")).toBeInTheDocument()
   })
@@ -31,7 +31,7 @@ describe("PersonaBuddyDiagnosticsPanel", () => {
       <PersonaBuddyDiagnosticsPanel
         diagnostics={{
           state: "recovering",
-          title: "Persona Buddy recovering",
+          title: "Persona avatar recovering",
           message: "Live session is reconnecting.",
           rows: [{ label: "Live session", value: "Reconnecting", state: "recovering" }]
         }}

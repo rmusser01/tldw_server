@@ -74,7 +74,7 @@ const messageOptionOverrides = vi.hoisted(() => ({
   value: {} as Record<string, unknown>, base: {} as Record<string, unknown>
 }))
 
-let capturedModeLauncherProps: { voiceChatUnavailableReason?: string | null } | null =
+let capturedToolsPopoverProps: { voiceChatUnavailableReason?: string | null } | null =
   null
 
 vi.mock("react-i18next", () => ({
@@ -735,27 +735,31 @@ vi.mock("@/components/Common/Beta", () => ({
 vi.mock("../ComposerToolbar", () => ({
   ComposerToolbar: ({
     modeLauncherButton,
+    toolsButton,
     voiceChatButton
   }: {
     modeLauncherButton?: React.ReactNode
+    toolsButton?: React.ReactNode
     voiceChatButton: React.ReactNode
   }) => (
     <div data-testid="composer-toolbar">
       {modeLauncherButton}
+      {toolsButton}
       {voiceChatButton}
     </div>
   )
 }))
 
 vi.mock("../PlaygroundModeLauncher", () => ({
-  PlaygroundModeLauncher: (props: { voiceChatUnavailableReason?: string | null }) => {
-    capturedModeLauncherProps = props
-    return null
-  }
+  PlaygroundModeLauncher: () => null
 }))
 
+// Voice left Modes (CC-08); More tools' Voice settings carries the reason.
 vi.mock("../PlaygroundToolsPopover", () => ({
-  PlaygroundToolsPopover: () => null
+  PlaygroundToolsPopover: (props: { voiceChatUnavailableReason?: string | null }) => {
+    capturedToolsPopoverProps = props
+    return null
+  }
 }))
 
 vi.mock("../PlaygroundMcpControl", () => ({
@@ -853,11 +857,11 @@ describe("PlaygroundForm voice visibility", () => {
   })
 
   it("hides the main voice button but forwards the shared unavailable reason when voice transport is missing", () => {
-    capturedModeLauncherProps = null
+    capturedToolsPopoverProps = null
     render(<PlaygroundForm droppedFiles={[]} />)
 
     expect(screen.queryByTestId("voice-chat-button")).toBeNull()
-    expect(capturedModeLauncherProps?.voiceChatUnavailableReason).toBe(
+    expect(capturedToolsPopoverProps?.voiceChatUnavailableReason).toBe(
       "This server does not advertise voice conversation streaming."
     )
   })

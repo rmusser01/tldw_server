@@ -12,7 +12,8 @@ import type { NoteListItem } from '../notes-manager-types'
  * them with Retry.
  */
 
-export type NotesBulkAction = 'delete' | 'addTags' | 'restore'
+/** `undoDelete` restores the notes a bulk delete moved to Trash (XP-17). */
+export type NotesBulkAction = 'delete' | 'addTags' | 'restore' | 'undoDelete'
 
 export type NotesBulkProgress = {
   action: NotesBulkAction

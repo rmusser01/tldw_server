@@ -11,13 +11,15 @@ type GeneratedAnswerCardProps = {
   cacheHit?: boolean
   onCopy: () => void
   onInsert: () => void
+  /** Focus lands here when a requested answer arrives (CC-10 review). */
+  headingRef?: React.Ref<HTMLHeadingElement>
 }
 
 /**
  * Card displaying the generated RAG answer with copy/insert actions.
  */
 export const GeneratedAnswerCard: React.FC<GeneratedAnswerCardProps> =
-  React.memo(({ answer, totalTime, cacheHit, onCopy, onInsert }) => {
+  React.memo(({ answer, totalTime, cacheHit, onCopy, onInsert, headingRef }) => {
     const { t } = useTranslation(["sidepanel"])
     const [copied, setCopied] = React.useState(false)
 
@@ -30,7 +32,11 @@ export const GeneratedAnswerCard: React.FC<GeneratedAnswerCardProps> =
     return (
       <div className="rounded-lg border border-accent/30 bg-accent/5 p-4">
         <div className="flex items-center justify-between mb-2">
-          <h4 className="text-sm font-semibold text-text">
+          <h4
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-sm font-semibold text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
             {t("sidepanel:qaSearch.generatedAnswer", "Generated Answer")}
           </h4>
           <div className="flex items-center gap-2 text-xs text-text-muted">

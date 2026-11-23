@@ -51,7 +51,7 @@ interface AttachmentsSummaryProps {
   onRemoveFile: (id: string) => void
   /** Callback to clear all files */
   onClearFiles: () => void
-  /** Callback to open Knowledge Panel for managing context */
+  /** Callback to open Search & Context for managing context */
   onOpenKnowledgePanel?: () => void
   /** Render as read-only summary (no remove actions). */
   readOnly?: boolean
@@ -367,17 +367,17 @@ export const AttachmentsSummary: React.FC<AttachmentsSummaryProps> = ({
             </div>
           )}
 
-          {/* Manage in Knowledge Panel link */}
+          {/* Manage in Search & Context link */}
           {onOpenKnowledgePanel && (
             <div className="pt-2 border-t border-border/50">
               <button
                 type="button"
                 onClick={onOpenKnowledgePanel}
                 className="flex items-center gap-1.5 text-[11px] text-accent hover:text-accent/80 transition-colors"
-                title={t("playground:attachments.manageContext", "Manage in Knowledge Panel") as string}
+                title={t("playground:attachments.manageContext", "Manage in Search & Context") as string}
               >
                 <Settings2 className="h-3.5 w-3.5" />
-                <span>{t("playground:attachments.manageContext", "Manage in Knowledge Panel")}</span>
+                <span>{t("playground:attachments.manageContext", "Manage in Search & Context")}</span>
               </button>
             </div>
           )}

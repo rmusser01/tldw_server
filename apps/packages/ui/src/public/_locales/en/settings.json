@@ -654,7 +654,7 @@
     "message": "Content size (default 4028)"
   },
   "generalSettings_webSearch_heading": {
-    "message": "Manage Web Search"
+    "message": "Manage web search"
   },
   "generalSettings_webSearch_searchMode_label": {
     "message": "Perform Simple Internet Search"
@@ -825,7 +825,7 @@
     "message": "Segmentation embeddings model"
   },
   "generalSettings_empty_connectTitle": {
-    "message": "Connect tldw Assistant to your server"
+    "message": "Connect tldw to your server"
   },
   "generalSettings_empty_connectDescription": {
     "message": "Some settings only take effect when your tldw server is reachable. Connect your server to get the full experience."
@@ -837,7 +837,7 @@
     "message": "Use Diagnostics to confirm your server is healthy before trying advanced tools."
   },
   "generalSettings_empty_title": {
-    "message": "Tune how tldw Assistant behaves"
+    "message": "Tune how tldw behaves"
   },
   "generalSettings_empty_description": {
     "message": "Adjust defaults for the Web UI, sidepanel, speech, search, and data handling from one place."
@@ -1242,7 +1242,7 @@
     "message": "Enable or Disable Server Integration Globally"
   },
   "ollamaSettings_settings_globalEnable_warning": {
-    "message": "By disabling the server integration globally, tldw Browser_Assistant won't fetch models from the server. You can still add providers from the <anchor>OpenAI compatible API</anchor> section if needed."
+    "message": "By disabling the server integration globally, tldw won't fetch models from the server. You can still add providers from the <anchor>OpenAI compatible API</anchor> section if needed."
   },
   "ollamaSettings_settings_advanced_label": {
     "message": "Advanced Server URL Configuration"
@@ -1281,10 +1281,10 @@
     "message": "If you have connection issues with the server, you can configure a custom origin URL. To learn more about the configuration, <anchor>click here</anchor>."
   },
   "manageSearch_title": {
-    "message": "Manage Web Search"
+    "message": "Manage web search"
   },
   "manageSearch_heading": {
-    "message": "Configure Web Search"
+    "message": "Configure web search"
   },
   "about_title": {
     "message": "About"
@@ -1293,13 +1293,13 @@
     "message": "About"
   },
   "about_chromeVersion": {
-    "message": "tldw Browser_Assistant Version"
+    "message": "tldw Version"
   },
   "about_ollamaVersion": {
     "message": "Server Version"
   },
   "about_support": {
-    "message": "You can support the tldw Browser_Assistant project by donating or sponsoring through the following platforms:"
+    "message": "You can support the tldw project by donating or sponsoring through the following platforms:"
   },
   "about_koFi": {
     "message": "Support on Ko-fi"
@@ -1881,7 +1881,7 @@
     "message": "Enter System Prompt"
   },
   "rag_prompt_webSearchPrompt": {
-    "message": "Web Search Prompt"
+    "message": "Web search prompt"
   },
   "rag_prompt_webSearchPromptHelp": {
     "message": "Do not remove `{search_results}` from the prompt."
@@ -1890,19 +1890,19 @@
     "message": "Please enter a web search prompt"
   },
   "rag_prompt_webSearchPromptPlaceholder": {
-    "message": "Enter Web Search Prompt"
+    "message": "Enter web search prompt"
   },
   "rag_prompt_webSearchFollowUpPrompt": {
-    "message": "Web Search Follow Up Prompt"
+    "message": "Web search follow-up prompt"
   },
   "rag_prompt_webSearchFollowUpPromptHelp": {
     "message": "Do not remove `{chat_history}` and `{question}` from the prompt."
   },
   "rag_prompt_webSearchFollowUpPromptError": {
-    "message": "Please input your Web Search Follow Up Prompt!"
+    "message": "Please enter your web search follow-up prompt."
   },
   "rag_prompt_webSearchFollowUpPromptPlaceholder": {
-    "message": "Your Web Search Follow Up Prompt"
+    "message": "Your web search follow-up prompt"
   },
   "chunkingPlayground_nav": {
     "message": "Chunking Playground"
@@ -2394,7 +2394,7 @@
     "message": "Host permission granted for {{origin}}"
   },
   "onboarding_title": {
-    "message": "Welcome to tldw Browser Assistant— Let’s get you connected"
+    "message": "Welcome to tldw — Let’s get you connected"
   },
   "onboarding_description": {
     "message": "Connect this extension to your tldw server (a separate app running on your machine or server). We’ll walk through adding the URL, API key, and checking that everything is reachable."

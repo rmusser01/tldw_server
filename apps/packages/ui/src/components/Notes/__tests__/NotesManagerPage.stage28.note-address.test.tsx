@@ -206,7 +206,7 @@ describe("Notes addresses (XP-05)", { timeout: 60_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
-    document.title = "tldw Assistant — Options"
+    document.title = "Options | tldw"
     canonicalBoundary.storage = {
       serverUrl: "https://notes.test",
       authMode: "multi-user",

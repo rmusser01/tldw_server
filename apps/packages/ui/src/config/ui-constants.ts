@@ -5,7 +5,8 @@
 
 export const COMPOSER_CONSTANTS = {
   // Textarea sizing
-  TEXTAREA_MAX_HEIGHT_PRO: 160,
+  // XS-15 review: as tall as Casual's; the dock's 40% cap keeps the conversation's share.
+  TEXTAREA_MAX_HEIGHT_PRO: 120,
   TEXTAREA_MAX_HEIGHT_CASUAL: 120,
   TEXTAREA_MIN_HEIGHT_PRO: 60,
   TEXTAREA_MIN_HEIGHT_CASUAL: 44,

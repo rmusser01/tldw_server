@@ -221,6 +221,41 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
     return screen.findByRole("dialog", { name: "Delete selected chats?" })
   }
 
+  /** Bulk Delete of saved chats only: no dialog, they go to Trash at once (XP-17). */
+  const deleteAllSelected = () => {
+    fireEvent.click(screen.getByRole("button", { name: "Select chats" }))
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+  }
+
+  // XP-17 review: only a selection that would discard a local or Temporary
+  // tab asks first; saved chats go to Trash at once with one inline Undo.
+  it("moves selected saved chats to Trash without asking and offers one Undo for them", async () => {
+    const props = renderSidebar({ tabs: [serverTab] })
+    deleteAllSelected()
+
+    await waitFor(() => expect(io.deleteChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope }))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    const offer = await screen.findByTestId("sidepanel-chat-undo")
+    await waitFor(() => expect(offer).toHaveTextContent('Moved "Quarterly plan" to Trash.'))
+    expect(io.messageSuccess).not.toHaveBeenCalled()
+
+    fireEvent.click(within(offer).getByRole("button", { name: "Undo" }))
+    await waitFor(() => expect(io.restoreChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope }))
+    await waitFor(() =>
+      expect(props.onOpenServerChat).toHaveBeenCalledWith(expect.objectContaining({ id: "chat-1" }))
+    )
+  })
+
+  it("asks first when the selection would close a local tab, then offers Undo for the trashed chats", async () => {
+    renderSidebar()
+    const dialog = await openBulkDialog()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+
+    const offer = await screen.findByTestId("sidepanel-chat-undo")
+    await waitFor(() => expect(offer).toHaveTextContent('Moved "Quarterly plan" to Trash.'))
+  })
+
   it("names local Temporary discard before accepting one bulk choice, and Cancel closes nothing", async () => {
     const props = renderSidebar({ tabs: [localTab] })
     const dialog = await openBulkDialog()
@@ -453,13 +488,7 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
       const props = renderSidebar({
         owner: { ...owner, isCurrent: () => current }
       })
-      await chooseTabMenuItem("Quarterly plan", "Delete")
-      const dialog = await screen.findByRole("dialog", {
-        name: "Delete conversation"
-      })
-      fireEvent.click(
-        within(dialog).getByRole("button", { name: "Move to Trash" })
-      )
+      await chooseTabMenuItem("Quarterly plan", "Move to Trash")
       await waitFor(() => expect(io.deleteChat).toHaveBeenCalledTimes(1))
       if (ending === "owner") current = false
       else props.view.unmount()
@@ -482,13 +511,7 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
           })
       )
     })
-    await chooseTabMenuItem("Quarterly plan", "Delete")
-    const dialog = await screen.findByRole("dialog", {
-      name: "Delete conversation"
-    })
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Move to Trash" })
-    )
+    await chooseTabMenuItem("Quarterly plan", "Move to Trash")
     await waitFor(() => expect(props.onCloseTab).toHaveBeenCalled())
     expect(io.removeServerChatMirror).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: "chat-1", ownerKey: "alice-owner" })
@@ -501,9 +524,9 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
       requestScope: owner.snapshot.requestScope
     })
     // Trash already succeeded; keep its Undo available even when the tab stays open.
-    expect(io.showUndoNotification).toHaveBeenCalledTimes(1)
+    expect(await screen.findByTestId("sidepanel-chat-undo-undo")).toBeInTheDocument()
   })
-  it.each(["cancel", "binding", "owner"])(
+  it.each(["clear", "binding", "owner"])(
     "retires held compact cleanup at %s before any close or aggregate feedback",
     async (ending) => {
       let current = true
@@ -517,13 +540,12 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
         owner: { ...owner, isCurrent: () => current },
         tabs: [serverTab]
       })
-      const dialog = await openBulkDialog()
-      fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+      deleteAllSelected()
       await waitFor(() => expect(io.removeServerChatMirror).toHaveBeenCalled())
       const lease = io.removeServerChatMirror.mock.calls[0][0]
         .validate_lease as () => boolean
-      if (ending === "cancel")
-        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+      if (ending === "clear")
+        fireEvent.click(screen.getByRole("button", { name: "Clear" }))
       else if (ending === "owner") current = false
       else
         props.view.rerender(
@@ -549,8 +571,7 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
       tabs: [serverTab],
       onCloseTab: vi.fn().mockResolvedValue(false)
     })
-    const dialog = await openBulkDialog()
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    deleteAllSelected()
     await waitFor(() => expect(props.onCloseTab).toHaveBeenCalled())
     expect(io.removeServerChatMirror).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -571,50 +592,50 @@ describe("side-panel tab menu acts on the real conversation (XS-07)", () => {
       tabs: [serverTab],
       onCloseTab: vi.fn().mockResolvedValue(true)
     })
-    const dialog = await openBulkDialog()
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    deleteAllSelected()
     await waitFor(() => expect(io.messageWarning).toHaveBeenCalled())
     expect(props.onCloseTab).toHaveBeenCalledTimes(1)
     expect(io.deleteChat).toHaveBeenCalledTimes(1)
     expect(io.messageError).not.toHaveBeenCalled()
-    expect(io.messageSuccess).toHaveBeenCalledWith("Chats moved to trash.")
+    // The inline Undo offer reports the move, in place of a success toast.
+    expect(await screen.findByTestId("sidepanel-chat-undo")).toHaveTextContent("to Trash.")
   })
 
-  it("moves a server chat to Trash, drops its local copy and closes its tab, with Undo", async () => {
+  // XP-17 (#3101, decision 8): Move to Trash happens at once, with no
+  // dialog, and Undo stays inline in the panel until it is dismissed.
+  it("moves a server chat to Trash without asking, drops its local copy and closes its tab, with inline Undo", async () => {
     const props = renderSidebar()
-    await chooseTabMenuItem("Quarterly plan", "Delete")
-    const dialog = await screen.findByRole("dialog", { name: "Delete conversation" })
-    expect(dialog).not.toHaveTextContent(/cannot be undone/i)
-    expect(dialog).toHaveTextContent(/Trash/)
-    fireEvent.click(within(dialog).getByRole("button", { name: "Move to Trash" }))
+    await chooseTabMenuItem("Quarterly plan", "Move to Trash")
 
     await waitFor(() => expect(props.onCloseTab).toHaveBeenCalledWith("tab-server"))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(io.deleteChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope })
     expect(io.deleteChat.mock.calls[0][1]).not.toHaveProperty("hardDelete")
     expect(io.removeServerChatMirror).toHaveBeenCalledWith(expect.objectContaining({ chatId: "chat-1", ownerKey: "alice-owner" }))
-    expect(io.showUndoNotification).toHaveBeenCalledTimes(1)
+    expect(io.showUndoNotification).not.toHaveBeenCalled()
 
-    const undo = io.showUndoNotification.mock.calls[0][0] as { title: string; onUndo: () => Promise<void> }
-    expect(undo.title).toBe("Moved to Trash")
-    await act(async () => {
-      await undo.onUndo()
-    })
-    expect(io.restoreChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope })
-    expect(props.onOpenServerChat).toHaveBeenCalledWith(expect.objectContaining({ id: "chat-1", title: "Quarterly plan" }))
+    const offer = await screen.findByTestId("sidepanel-chat-undo")
+    expect(offer).toHaveTextContent('Moved "Quarterly plan" to Trash.')
+    fireEvent.click(within(offer).getByRole("button", { name: "Undo" }))
+
+    await waitFor(() =>
+      expect(io.restoreChat).toHaveBeenCalledWith("chat-1", { requestScope: owner.snapshot.requestScope })
+    )
+    await waitFor(() =>
+      expect(props.onOpenServerChat).toHaveBeenCalledWith(expect.objectContaining({ id: "chat-1", title: "Quarterly plan" }))
+    )
+    await waitFor(() => expect(within(offer).queryByRole("button", { name: "Undo" })).not.toBeInTheDocument())
   })
 
-  it("keeps the tab and the dialog when the server cannot move the chat to Trash", async () => {
+  it("keeps the tab and offers no Undo when the server cannot move the chat to Trash", async () => {
     io.deleteChat.mockRejectedValue(new Error("HTTP 500"))
     const props = renderSidebar()
-    await chooseTabMenuItem("Quarterly plan", "Delete")
-    const dialog = await screen.findByRole("dialog", { name: "Delete conversation" })
-    fireEvent.click(within(dialog).getByRole("button", { name: "Move to Trash" }))
+    await chooseTabMenuItem("Quarterly plan", "Move to Trash")
 
     await waitFor(() => expect(io.messageError).toHaveBeenCalled())
     expect(props.onCloseTab).not.toHaveBeenCalled()
     expect(io.removeServerChatMirror).not.toHaveBeenCalled()
-    expect(io.showUndoNotification).not.toHaveBeenCalled()
-    expect(isClosing(screen.getByRole("dialog", { name: "Delete conversation" }))).toBe(false)
+    expect(screen.queryByTestId("sidepanel-chat-undo-undo")).not.toBeInTheDocument()
   })
 
   it("offers 'Close tab' rather than 'Delete' for a tab with no server chat", async () => {

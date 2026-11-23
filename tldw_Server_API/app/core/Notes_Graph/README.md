@@ -53,6 +53,8 @@ Notes_Graph builds bounded authoritative graph views over notes using manual not
 - `dataset_id` is optional. Active Sync resolves omission to the one active default-personal Notes dataset and rejects any other supplied dataset; inactive omission preserves the legacy product path.
 - Manual links come from owner-scoped canonical link rows. Derived links come from persisted projection rows, not read-time parsing. Tag and source nodes remain compatible projections.
 - Environment variables such as `NOTES_GRAPH_ENABLED`, `NOTES_GRAPH_MAX_NODES`, `NOTES_GRAPH_MAX_EDGES`, `NOTES_GRAPH_MAX_DEGREE`, and cache settings tune runtime behavior.
+- `NOTES_GRAPH_ALL_NOTES_NOTE_CAP` (500) is the knob for graphs with no focus note (All notes, or a `tag`/`source` filter; NL-11). It sets All-notes eligibility, the seedless guard, and those graphs' budgets: the cap plus 75 tag and 50 source nodes, and 4 links per node. `NOTES_GRAPH_MAX_NODES` and `_MAX_EDGES` bound focused graphs; set lower than these budgets, they bound library graphs too, and the reported `all_notes_note_cap` shrinks to `NOTES_GRAPH_MAX_NODES`.
+- A `tag` or `source` filter with no focus note shows exactly the notes with that tag or source: the seeds are not expanded.
 - Suggestion routes are nested below `/notes/{note_id}/graph/suggestions`. They require `notes.graph.read`, `notes.graph.suggest`, and token scope `notes`; acceptance additionally checks the canonical link or keyword mutation permission required by the suggestion kind.
 - Provider disclosure is authoritative. A boundary of `unknown` is treated as external, and generation requires the disclosed ETag in `If-Match` plus a bounded `Idempotency-Key`.
 

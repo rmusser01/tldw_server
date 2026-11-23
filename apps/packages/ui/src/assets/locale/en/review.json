@@ -5,7 +5,7 @@
     "connectExample1": "Open Settings → tldw server to add your server URL.",
     "connectExample2": "Once connected, browse media and notes, then generate structured reviews and summaries.",
     "demoTitle": "Explore Review in demo mode",
-    "demoDescription": "This demo shows how tldw Assistant can turn media and notes into structured reviews. Connect your own server later to analyze your own content.",
+    "demoDescription": "This demo shows how tldw can turn media and notes into structured reviews. Connect your own server later to analyze your own content.",
     "demoExample1": "See how selected media and notes appear in the review workspace.",
     "demoExample2": "When you connect, you’ll be able to generate summaries and action items from your own recordings and notes."
   },
@@ -199,7 +199,7 @@
   },
   "mediaEmpty": {
     "demoTitle": "Explore Media in demo mode",
-    "demoDescription": "This demo shows how tldw Assistant can display and inspect processed media. Connect your own server later to browse your own recordings and documents.",
+    "demoDescription": "This demo shows how tldw can display and inspect processed media. Connect your own server later to browse your own recordings and documents.",
     "demoExample1": "See how processed media items appear in the Media viewer.",
     "demoExample2": "When you connect, you’ll be able to browse and inspect media ingested from your own recordings and files.",
     "demoExample3": "Use Media together with Review to summarize or analyze recordings.",
