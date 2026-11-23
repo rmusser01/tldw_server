@@ -4640,7 +4640,8 @@ async def create_chat_completion(
                 )
                 if request_data.tldw_history_server_existing_input_v1 is not None and (
                     len(validation_request_data.messages) != len(request_data.messages) + 1
-                    or any(message.role != "system" for message in validation_request_data.messages[:-1])
+                    or [(m.role, m.content) for m in validation_request_data.messages[:-1]]
+                    != [(m.role, m.content) for m in request_data.messages]
                     or validation_request_data.messages[-1].role != "user"
                     or validation_request_data.messages[-1].content != original_saved_content
                 ):

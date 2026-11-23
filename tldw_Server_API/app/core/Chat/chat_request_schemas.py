@@ -1007,9 +1007,9 @@ class ChatCompletionRequest(BaseModel):
             # instructions may come along; they are model context and are never saved.
             if (self.tldw_history_selection_v1 is not None or self.tldw_history_branch is not None
                     or self.tldw_continuation is not None or not self.stream or self.tools
-                    or any(message.role != "system" for message in self.messages)):
+                    or any(message.role != "system" or not message.content.strip() for message in self.messages)):
                 raise ValueError("Existing-input completion requires only its selection, streaming, "
-                                 "system-only current messages and no tools")
+                                 "non-blank system-only current messages and no tools")
             if (existing.purpose != "send" or existing.cursor.kind != "after_message"
                     or not existing.messages or existing.cursor.message_id != existing.messages[-1].id):
                 raise ValueError("Existing-input completion requires a selected saved question")
