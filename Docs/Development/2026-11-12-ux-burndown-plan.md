@@ -671,6 +671,10 @@ review fixes went on the lanes. The lanes were merged into
   web-search contexts are refused.
 - **The side panel:** tested at hook level only; there is no side-panel
   harness.
+- **8C in the side panel:** the side panel's plain first send in a new chat
+  also gets 8C's early question, quiet first load and 300 ms loading delay.
+  It shares `normalChatMode` and `HistorySelectionReview`, and `useMessage`
+  sets `createServerChat`. A hook test covers it.
 
 **Integration:**
 - **An edited question stopped before its reply (8A with 8B):** after a Stop,

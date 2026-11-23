@@ -176,8 +176,10 @@ Merge order: 8A, 8B, 8C.
     empty → bubble flash.
 - `HistorySelectionReview.tsx:1092-1098`: hide the loading panel for a quiet
   load; otherwise show it only after 300 ms.
-- `chatModePipeline.ts` does not change. Character first sends and the side
-  panel are out of scope.
+- `chatModePipeline.ts` does not change. Character first sends are out of
+  scope. The side panel shares `normalChatMode` and `HistorySelectionReview`,
+  so its plain first send gets the early question, the quiet load and the
+  300 ms delay too (see the Wave 8 log).
 - Files: `normalChatMode.ts` (the target block and `runChatModeWithHistory`),
   `useHistorySelection.ts`, `HistorySelectionReview.tsx:1092-1098`,
   `HistorySelectionReview.test.tsx`, a new

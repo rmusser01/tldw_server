@@ -6053,3 +6053,69 @@ describe("side-panel Edit and send in a server-settled chat (D7 P5)", () => {
     expect(h1.controller.followResult).not.toHaveBeenCalled()
   })
 })
+
+// CM-14 (8C) reaches the side panel: its first send in a new chat creates the
+// server chat, so the question shows on Enter and the new chat's first load
+// stays quiet. The side panel's onCapture replaces the transcript with the
+// capture, so a quiet load must not reach it.
+describe("side-panel first send in a new chat (CM-14)", () => {
+  it("shows the question at once and keeps the empty first load away from onCapture", async () => {
+    const { useConnectionStore } = await import("@/store/connection")
+    const { ConnectionPhase } = await import("@/types/connection")
+    const connection = useConnectionStore.getState().state
+    useConnectionStore.setState({ state: { ...connection, isConnected: true, phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
+    const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    actual.useStoreMessageOption.getState().startNewChatDraft(false)
+    actual.useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+    bridgeDraftStore(actual.useStoreMessageOption)
+    const { useHistorySelection } = await import("@/hooks/chat/useHistorySelection")
+    // Like the side panel's controller: onCapture publishes each installed capture.
+    const onCapture = vi.fn()
+    const selection = renderHook(() => useHistorySelection({ onCapture }))
+    h1.controller = { ...selection.result.current, draftAccount: makeDraftAccount() }
+    h1.native = false
+    mocks.chatBaseState.historyId = null
+    mocks.storeState.serverChatId = null
+    mocks.storeState.messages = []
+    mocks.chatBaseState.history = []
+    h1.create.mockImplementation(createdNativeChat)
+    let releaseLoad!: () => void
+    const loadHeld = new Promise<void>((resolve) => { releaseLoad = resolve })
+    let loadArrived!: () => void
+    const arrived = new Promise<void>((resolve) => { loadArrived = resolve })
+    let firstCapture = true
+    h1.capture.mockImplementation(async (_id, request) => {
+      if (firstCapture) {
+        firstCapture = false
+        loadArrived()
+        await loadHeld
+      }
+      const result = captureFor({ ...request.view, owner_key: "native-key" })
+      return { ...result, rows: [], selected_content: [], snapshot: { ...result.snapshot, nodes: [] } }
+    })
+    const hook = renderHook(() => useMessage())
+    try {
+      let sent!: Promise<unknown>
+      act(() => { sent = hook.result.current.onSubmit({ message: "First side question", image: "" }) })
+      await act(async () => { await arrived })
+
+      // The new chat was created and its load is held: the question is already shown.
+      expect(h1.create).toHaveBeenCalledOnce()
+      const shown = mocks.setMessages.mock.calls.map(([next]) => typeof next === "function" ? next([]) : next)
+      expect(shown.at(-1)?.map((row: { message: string }) => row.message)).toEqual(["First side question"])
+      expect(h1.controller.getCurrent()).toMatchObject({ status: "loading", quietLoad: true })
+
+      releaseLoad()
+      await act(async () => { await sent })
+      // The empty first capture never reached onCapture (no overwrite of the question).
+      expect(onCapture.mock.calls.every(([capture]) => capture.rows.length > 0)).toBe(true)
+      const published = mocks.setMessages.mock.calls.map(([next]) => typeof next === "function" ? next(shown.at(-1)!) : next)
+      expect(published.every((rows) => rows.some((row: { message: string }) => row.message === "First side question"))).toBe(true)
+    } finally {
+      releaseLoad()
+      hook.unmount()
+      selection.unmount()
+      useConnectionStore.setState({ state: connection })
+    }
+  })
+})
