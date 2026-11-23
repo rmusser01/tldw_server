@@ -913,6 +913,8 @@ describe("runtime-bootstrap chrome shim", () => {
     })
 
     fetchMock.mockImplementation(healthyFetch)
+    // The failed check started the retry backoff; the account Retry click skips it.
+    document.body.click()
     const { tldwClient } = await import("@/services/tldw/TldwApiClient")
     expect(await tldwClient.getConfig()).toEqual({
       authMode: "single-user",
@@ -1352,6 +1354,123 @@ describe("runtime-bootstrap chrome shim", () => {
     } finally {
       cleanup()
     }
+  })
+
+  const SIGN_IN_START = Date.parse("2026-11-23T12:00:00Z")
+
+  /** Answer the session POST and profile probe with the given statuses; record POST times in seconds. */
+  const startSignInRecovery = async (statuses: { session: number; probe: number }) => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    process.env.NEXT_PUBLIC_API_URL = "/api"
+    setWindowLocation("http://localhost:19769/chat")
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(SIGN_IN_START)
+    const fetchMock = stubCookieRuntimeFetch()
+    const runtimeFetch = fetchMock.getMockImplementation()!
+    const postedAt: number[] = []
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url === "/api/_tldw-webui/session") {
+        postedAt.push((Date.now() - SIGN_IN_START) / 1000)
+        return { ok: statuses.session === 200, status: statuses.session }
+      }
+      if (url === "/api/v1/users/me/profile") {
+        return { ok: statuses.probe === 200, status: statuses.probe }
+      }
+      return await runtimeFetch(input, init)
+    })
+    await importAndAwaitBootstrap()
+    const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+    return { client: new TldwApiClient(), postedAt }
+  }
+
+  /** The disconnected health poll initializes every 5 s; requests add bursts. */
+  const pollFor = async (
+    client: { initialize: () => Promise<void> },
+    seconds: number
+  ) => {
+    for (let tick = 0; tick < seconds / 5; tick++) {
+      await Promise.all([
+        client.initialize(),
+        client.initialize(),
+        client.initialize()
+      ])
+      vi.setSystemTime(Date.now() + 5_000)
+    }
+  }
+
+  it("stops signing in once the browser shows it does not keep the session cookie", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { client, postedAt } = await startSignInRecovery({
+      session: 200,
+      probe: 401
+    })
+
+    await pollFor(client, 120)
+
+    // The page-load attempt plus one retry, so one racy probe cannot lock the user out.
+    expect(postedAt).toEqual([0, 0])
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0][0])).toContain("SESSION_COOKIE_SECURE=0")
+    const recovery = await import("@/services/tldw/runtime-bootstrap-recovery")
+    expect(recovery.isRuntimeAuthCookieNotKept()).toBe(true)
+
+    // Manual API-key sign-in still works and clears the notice.
+    await client.saveManualSingleUserCredential({
+      serverUrl: "http://localhost:19769",
+      apiKey: "manual-key",
+      persistence: "session"
+    })
+    expect(recovery.isRuntimeAuthCookieNotKept()).toBe(false)
+    expect((await client.getConfig())?.apiKey).toBe("manual-key")
+    expect(postedAt).toEqual([0, 0])
+  })
+
+  it.each([403, 503])(
+    "stops signing in when the WebUI refuses runtime sign-in with %i",
+    async (status) => {
+      const { client, postedAt } = await startSignInRecovery({
+        session: status,
+        probe: 200
+      })
+
+      await pollFor(client, 60)
+
+      expect(postedAt).toEqual([0])
+    }
+  )
+
+  it("backs off transient sign-in failures and recovers once the API answers", async () => {
+    const statuses = { session: 502, probe: 200 }
+    const { client, postedAt } = await startSignInRecovery(statuses)
+
+    await pollFor(client, 200)
+
+    // Page load, first initialize, then 5, 10, 20 and 40 s apart, capped at 60 s.
+    expect(postedAt).toEqual([0, 0, 5, 15, 35, 75, 135, 195])
+    expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+
+    statuses.session = 200
+    await pollFor(client, 60)
+
+    expect(postedAt).toEqual([0, 0, 5, 15, 35, 75, 135, 195, 255])
+    expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
+  })
+
+  it("lets a user click retry a backed-off sign-in at once", async () => {
+    const statuses = { session: 502, probe: 200 }
+    const { client, postedAt } = await startSignInRecovery(statuses)
+    await client.initialize()
+    statuses.session = 200
+
+    await client.initialize()
+    expect(postedAt).toEqual([0, 0])
+
+    document.body.click()
+    await client.initialize()
+
+    expect(postedAt).toEqual([0, 0, 0])
+    expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
   })
 
   it("does not fetch runtime config for extension protocols", async () => {

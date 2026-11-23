@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { FormInstance } from "antd"
 import type { TFunction } from "i18next"
@@ -205,6 +205,10 @@ vi.mock("@/config/platform", () => ({
 import { TldwBillingSettings } from "../TldwBillingSettings"
 import { TldwConnectionSettings } from "../TldwConnectionSettings"
 import { parseSeconds } from "../TldwTimeoutSettings"
+import {
+  cancelRuntimeAuthBootstrapRecovery,
+  reportRuntimeAuthCookieNotKept
+} from "@/services/tldw/runtime-bootstrap-recovery"
 
 const t = ((key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
   if (typeof fallbackOrOptions === "string") return fallbackOrOptions
@@ -563,6 +567,25 @@ describe("settings PR review fixes", () => {
       "aria-busy",
       "true"
     )
+  })
+
+  it("explains how to connect when the browser did not keep the sign-in cookie", () => {
+    render(
+      <TldwConnectionSettings
+        {...createConnectionProps({ configuredServerUrl: "", authSource: undefined })}
+      />
+    )
+    expect(screen.queryByText(/did not keep the sign-in cookie/)).toBeNull()
+
+    act(() => reportRuntimeAuthCookieNotKept())
+    expect(
+      screen.getByText("This browser did not keep the sign-in cookie")
+    ).toBeInTheDocument()
+    expect(screen.getByText(/SESSION_COOKIE_SECURE=0/)).toBeInTheDocument()
+
+    // Saving a connection retires runtime sign-in, which clears the notice.
+    act(() => cancelRuntimeAuthBootstrapRecovery())
+    expect(screen.queryByText(/did not keep the sign-in cookie/)).toBeNull()
   })
 
   it("formats invoice amounts using the invoice currency instead of a hardcoded dollar prefix", () => {

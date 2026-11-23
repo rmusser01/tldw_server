@@ -18,6 +18,10 @@ import { Button as AuthButton } from "@/components/Common/Button"
 import { useAntdModal } from "@/hooks/useAntdModal"
 import { shouldClearManualApiKeyForServerChange } from "@/components/Option/Onboarding/validation"
 import {
+  isRuntimeAuthCookieNotKept,
+  subscribeRuntimeAuthCookieNotKept
+} from "@/services/tldw/runtime-bootstrap-recovery"
+import {
   getCoreStatusLabel,
   getRagStatusLabel,
   type CoreStatus,
@@ -126,6 +130,11 @@ export const TldwConnectionSettings = ({
   onOpenHealthDiagnostics
 }: TldwConnectionSettingsProps) => {
   const modal = useAntdModal()
+  const cookieNotKept = React.useSyncExternalStore(
+    subscribeRuntimeAuthCookieNotKept,
+    isRuntimeAuthCookieNotKept,
+    () => false
+  )
   return (
     <>
       <Form.Item
@@ -232,6 +241,21 @@ export const TldwConnectionSettings = ({
 
       {authMode === 'single-user' && authSource !== 'cookie-session' && (
         <>
+          {cookieNotKept && (
+            <Alert
+              title={t(
+                'settings:tldw.cookieNotKept.title',
+                'This browser did not keep the sign-in cookie'
+              )}
+              variant="warning"
+              className="mb-4"
+            >
+              {t(
+                'settings:tldw.cookieNotKept.description',
+                'Automatic sign-in stopped. Enter your API key below to connect, or, if the server runs on plain http (for example http://127.0.0.1), restart it with SESSION_COOKIE_SECURE=0 and reload this page.'
+              )}
+            </Alert>
+          )}
           <Form.Item
             label={t('settings:tldw.fields.apiKey.label', 'API Key')}
             name="apiKey"

@@ -2721,6 +2721,10 @@
       "title": "Login Required",
       "description": "Please login with your tldw_server credentials"
     },
+    "cookieNotKept": {
+      "title": "This browser did not keep the sign-in cookie",
+      "description": "Automatic sign-in stopped. Enter your API key below to connect, or, if the server runs on plain http (for example http://127.0.0.1), restart it with SESSION_COOKIE_SECURE=0 and reload this page."
+    },
     "loggedIn": {
       "title": "Logged In",
       "description": "You are currently logged in to tldw_server"
