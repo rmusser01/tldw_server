@@ -4269,12 +4269,6 @@ class CharactersRAGDB:
                 if target_version >= 81 and current_db_version == 80:
                     sqlite_steps._migrate_from_v80_to_v81(self.ctx, conn)
                     current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
-                if target_version >= 66 and current_db_version == 65:
-                    self._migrate_from_v65_to_v66_sqlite(conn)
-                    current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
-                if target_version >= 67 and current_db_version == 66:
-                    self._migrate_from_v66_to_v67_sqlite(conn)
-                    current_db_version = sqlite_schema._get_db_version(self.ctx, conn)
 
                 sqlite_schema._ensure_recent_persona_schema_sqlite(self.ctx, conn)
                 sqlite_schema._ensure_recent_voice_command_schema_sqlite(self.ctx, conn)
