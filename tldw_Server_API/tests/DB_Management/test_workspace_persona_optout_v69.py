@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError
 
@@ -322,10 +322,10 @@ def test_sqlite_compatible_initializer_can_finish_during_version_probe(
         historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
         legacy = CharactersRAGDB(path, client_id="user-1")
         legacy.close_all_connections()
-    initialize = CharactersRAGDB._initialize_schema_sqlite_legacy
+    initialize = schema_bootstrap._initialize_schema_sqlite_legacy
     raced = False
 
-    def finish_competing_upgrade(self: CharactersRAGDB, *, target_version: int) -> None:
+    def finish_competing_upgrade(ctx: object, *, target_version: int) -> None:
         """Interleave another handle between the preliminary probe and transaction."""
         nonlocal raced
         if not raced:
@@ -335,10 +335,11 @@ def test_sqlite_compatible_initializer_can_finish_during_version_probe(
                 assert peer.upsert_workspace("fresh-after-upgrade", "Fresh")[FLAG] is False
             finally:
                 peer.close_all_connections()
-        initialize(self, target_version=target_version)
+        initialize(ctx, target_version=target_version)
 
-    monkeypatch.setattr(CharactersRAGDB, "_initialize_schema_sqlite_legacy", finish_competing_upgrade)
+    monkeypatch.setattr(schema_bootstrap, "_initialize_schema_sqlite_legacy", finish_competing_upgrade)
     db = CharactersRAGDB(path, client_id="user-1")
+    assert raced is True  # the patch was reached, so the competing upgrade really ran between the probe and the transaction
     try:
         assert db.get_workspace("fresh-after-upgrade")[FLAG] is False
     finally:

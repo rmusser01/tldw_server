@@ -630,6 +630,10 @@ def test_the_context_reaches_only_pinned_db_members() -> None:
     }
 
     assert reached == set(PINNED_DB_PRIVATES)
+    # R29: the three class attributes tests patch, and the one step-runner call-through. ``_runtime_schema_version`` is public now.
+    assert set(PINNED_DB_PRIVATES) == {
+        "_CURRENT_SCHEMA_VERSION", "_SCHEMA_NAME", "_POSTGRES_SCHEMA_VERSION", "_run_sqlite_linear_migration_step",
+    }
 
 
 def test_raised_surface_ceilings_carry_a_new_reason() -> None:

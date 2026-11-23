@@ -131,5 +131,5 @@ def test_pure_helpers_match_the_db_forwarders(db) -> None:
 
 def test_runtime_schema_version_reads_the_db(db) -> None:
     assert db.ctx.runtime_schema_version is None
-    db._runtime_schema_version = 81
+    db.runtime_schema_version = 81
     assert db.ctx.runtime_schema_version == 81

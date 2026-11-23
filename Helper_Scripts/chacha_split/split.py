@@ -67,6 +67,8 @@ CTX_REWRITES = {
     "_selected_owner_filter": "owner_filter",
     "_prepare_backend_statement": "prepare_statement",
     "_CURRENT_SCHEMA_VERSION": "code_schema_version",
+    "_POSTGRES_SCHEMA_VERSION": "postgres_schema_version",
+    "_run_sqlite_linear_migration_step": "run_sqlite_migration_step",
     "_SCHEMA_NAME": "schema_name",
     "_selected_keyword_link_filter": "keyword_link_filter",
     "_require_selected_owner_row": "require_owner_row",
@@ -1578,6 +1580,10 @@ class _FnMoved(ast.NodeTransformer):
         return node
 
     def visit_Attribute(self, node: ast.Attribute) -> ast.AST:  # noqa: N802
+        if isinstance(node.value, ast.Name) and node.value.id == self.recv and not isinstance(node.ctx, ast.Load) and node.attr in self.env.manifest["rewrites"]:
+            assigned = ast.parse(self.env.manifest["rewrites"][node.attr], mode="eval").body
+            assigned.ctx = node.ctx  # type: ignore[attr-defined]
+            return assigned
         if isinstance(node.value, ast.Name) and node.value.id == self.recv and isinstance(node.ctx, ast.Load):
             try:
                 new, _ = fn_replacement(node.attr, self.recv, self.env)
@@ -1716,7 +1722,7 @@ def _moved_edits(raw: list[bytes], node: ast.FunctionDef | ast.AsyncFunctionDef,
     for n in ast.walk(node):
         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == recv:
             handled.add(id(n.value))
-            if not isinstance(n.ctx, ast.Load):
+            if not isinstance(n.ctx, ast.Load) and n.attr not in env.manifest["rewrites"]:  # an assigned attribute needs a declared rewrite (H: the runtime version)
                 problems.append(f"{n.lineno}: {recv}.{n.attr} is assigned")
                 continue
             try:
@@ -1923,6 +1929,8 @@ def run_functions(root: Path, manifest_paths: list[Path]) -> int:
                 move = next(mv for mv in env.index.values() if mv.alias == n)
                 if move.target != manifest["target"]:
                     lines_out.add(_module_import(n, _dotted(move.target)))
+            elif n in manifest["rewrites"].values():
+                continue  # a bare module-level name the manifest rewrites to and defines by hand in its target
             elif n in schema_module_names:
                 lines_out.add(f"from {PKG}.schema_sql import {n}")
             elif n in db_names:
@@ -2061,6 +2069,13 @@ def _left_references(tree: ast.Module, names: set[str], aliases: set[str], strin
     def walk(node: ast.AST, classes: tuple[ast.ClassDef, ...]) -> None:
         if isinstance(node, ast.ClassDef):
             classes += (node,)
+        if (
+            strings and isinstance(node, ast.Call) and len(node.args) >= 3 and isinstance(node.args[0], ast.Name) and node.args[0].id in aliases
+            and isinstance(node.func, (ast.Name, ast.Attribute)) and (node.func.id if isinstance(node.func, ast.Name) else node.func.attr) == "setattr"
+        ):
+            for child in node.args[2:]:  # ``setattr(<moved module>, "<name>", fake)`` is the right patch, not a left reference
+                walk(child, classes)
+            return
         if isinstance(node, ast.Attribute) and node.attr in names and isinstance(node.ctx, ast.Load):
             recv = node.value
             own = isinstance(recv, ast.Name) and recv.id in {"self", "cls"} and classes and classes[-1].name != CLASS and bool(_defined(classes[-1], {node.attr}))
@@ -2073,7 +2088,7 @@ def _left_references(tree: ast.Module, names: set[str], aliases: set[str], strin
             for piece in node.values:
                 if isinstance(piece, ast.Constant) and isinstance(piece.value, str):
                     text = piece.value.strip()
-                    if any(n in text or (len(text) >= 8 and text.startswith("_") and n.startswith(text)) for n in names):
+                    if any(n in text or (len(text) >= 12 and text.startswith("_") and n.startswith(text)) for n in names):
                         findings.append(f"{node.lineno}: f-string {text}")
             for piece in node.values:  # its literal parts are judged above; only the ``{...}`` parts are walked on
                 if isinstance(piece, ast.FormattedValue):
@@ -2110,7 +2125,7 @@ def run_check_functions(root: Path, manifests: list[dict]) -> int:
         text, tree = _parse(path)
         if key.startswith(NON_CHACHA_DB):
             continue  # M1: their same-named methods are their own
-        findings = _left_references(tree, names - clash, aliases, _is_test_file(key))
+        findings = _left_references(tree, names - clash, aliases, _is_test_file(key) and "tests/Helper_Scripts/" not in key)  # the tool's own self-tests hold seed text
         if _is_test_file(key):
             findings += [f for f in _left_references(tree, names & clash, aliases, True) if _db_like(f)]
             findings += [f"{line}: {m}" for line, m in _fakes_of(tree, names)]

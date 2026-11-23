@@ -24,10 +24,10 @@ class LadderCall(NamedTuple):
 
 
 def postgres_init_function() -> Callable:
-    """Return the function that holds the PostgreSQL ladder (Task 9 repoints this one line)."""
-    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    """Return the function that holds the PostgreSQL ladder: the bootstrap module's, not the class's forwarder."""
+    from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 
-    return CharactersRAGDB._initialize_schema_postgres
+    return schema_bootstrap._initialize_schema_postgres
 
 
 def _tree(fn: Callable) -> ast.FunctionDef:

@@ -1019,3 +1019,14 @@ def test_check_flags_a_moved_name_held_in_a_string(tmp_path: Path, capsys: pytes
         (root / TEST).write_text(f"def t(db, suffix, fake):\n    {body}")
         assert split.main(["check", manifest, str(root / FN_B), "--root", str(root)]) == 1, body
         assert "_a" in capsys.readouterr().out
+
+
+def test_check_accepts_a_setattr_on_the_moved_module(tmp_path: Path) -> None:
+    """The correct retarget of a patch, ``monkeypatch.setattr(mod_a, "_a", fake)``, is not a left reference; the same on a db is."""
+    root = _fn_tree(tmp_path, a=["_a"], b=["_b", "_c", "_s"])
+    assert _functions(root) == 0
+    (root / TEST).parent.mkdir(parents=True, exist_ok=True)
+    (root / TEST).write_text('def t(monkeypatch, mod_a, fake):\n    monkeypatch.setattr(mod_a, "_a", fake)\n')
+    assert split.main(["check", str(root / FN_A), str(root / FN_B), "--root", str(root)]) == 0
+    (root / TEST).write_text('def t(monkeypatch, db, fake):\n    monkeypatch.setattr(db, "_a", fake)\n')
+    assert split.main(["check", str(root / FN_A), str(root / FN_B), "--root", str(root)]) == 1

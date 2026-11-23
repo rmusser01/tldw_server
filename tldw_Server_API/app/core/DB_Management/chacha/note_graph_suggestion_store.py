@@ -1665,7 +1665,7 @@ class NoteGraphSuggestionStore:
                 return None
             display = str(keyword["keyword"]).strip()
             return display.casefold(), display
-        keyword_table = self._db._map_table_for_backend("keywords")
+        keyword_table = self._db.ctx.map_table("keywords")
         keyword = conn.execute(
             f"SELECT keyword FROM {keyword_table} WHERE client_id=? AND sync_id=? AND deleted=?",  # nosec B608
             (self.owner_user_id, sync_id, self._deleted_value()),
@@ -1683,7 +1683,7 @@ class NoteGraphSuggestionStore:
         source_note_id: str,
         normalized_tag: str,
     ) -> bool:
-        keyword_table = self._db._map_table_for_backend("keywords")
+        keyword_table = self._db.ctx.map_table("keywords")
         local_sqlite = self._db.backend_type == BackendType.SQLITE and dataset_id == f"legacy:{self.owner_user_id}"
         owner_clause = "" if local_sqlite else " AND keyword.client_id=?"
         owner_params = () if local_sqlite else (self.owner_user_id,)
@@ -3305,7 +3305,7 @@ class NoteGraphSuggestionStore:
         )
         if not secrets.compare_digest(accepted_resource_identity, expected_identity):
             return None
-        keyword_table = self._db._map_table_for_backend("keywords")
+        keyword_table = self._db.ctx.map_table("keywords")
         local_sqlite = (
             self._db.backend_type == BackendType.SQLITE and suggestion.dataset_id == f"legacy:{self.owner_user_id}"
         )
@@ -5192,7 +5192,7 @@ class NoteGraphSuggestionStore:
         if not terms or not 1 <= limit <= 100:
             return ()
         predicates = " OR ".join("LOWER(k.keyword) LIKE ?" for _ in terms)
-        keyword_table = self._db._map_table_for_backend("keywords")
+        keyword_table = self._db.ctx.map_table("keywords")
         params: tuple[object, ...] = (
             self.owner_user_id,
             self._deleted_value(),

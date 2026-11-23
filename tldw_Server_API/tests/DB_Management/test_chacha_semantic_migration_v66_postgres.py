@@ -17,7 +17,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -62,7 +62,9 @@ def _fake_postgres_initializer(
     for name in vars(CharactersRAGDB):
         if name.startswith("_ensure_"):
             monkeypatch.setattr(db, name, lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: False)
+    is_current_calls: list[object] = []
+    monkeypatch.setattr(schema_bootstrap, "_postgres_schema_is_current", lambda _ctx, conn: is_current_calls.append(conn) or False)
+    db.is_current_calls = is_current_calls  # a positive anchor: the patch was reached, so the stub is not inert
     monkeypatch.setattr(db, "repair_conversation_assistant_identity", lambda _conn: None)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
@@ -170,6 +172,7 @@ def test_postgres_initializer_routes_schema_v86_through_v87(
 
     with pytest.raises(RuntimeError, match="^reached-v87$"):
         db._initialize_schema_postgres()
+    assert db.is_current_calls
 
 
 def test_postgres_initializer_honors_target_v86_without_dispatching_v87(
@@ -187,6 +190,7 @@ def test_postgres_initializer_honors_target_v86_without_dispatching_v87(
     monkeypatch.setattr(postgres_steps, "_migrate_from_v86_to_v87_postgres", _unexpected_v87)
 
     db._initialize_schema_postgres()
+    assert db.is_current_calls
 
 
 def test_postgres_v87_live_schema_has_cleanup_constraints_indexes_and_forced_rls(
