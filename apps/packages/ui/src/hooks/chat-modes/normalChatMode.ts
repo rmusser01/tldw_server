@@ -1605,7 +1605,7 @@ const resolveTurnImage = (image: string) =>
 /**
  * CM-14: an ordinary send shows its question on Enter, before its history turn
  * awaits a chat create or load. The pipeline later rebuilds the list with the
- * same id. Until it does, the row is this turn's to withdraw, by its id.
+ * same id. Until it does, the row is this turn's to withdraw.
  */
 const showQuestionEarly = <TParams extends ChatModeParamsBase & HistoryChatModeParams>(
   mode: ChatModeDefinition<TParams>,
@@ -1629,23 +1629,18 @@ const showQuestionEarly = <TParams extends ChatModeParamsBase & HistoryChatModeP
     createdAt: Date.now(),
     id: params.userMessageId ?? generateID()
   }
-  const { setMessages } = params
-  // A retired view's setter drops the row, and an existing row keeps its owner.
-  let added = false
-  setMessages(rows => {
-    if (rows.some(row => row.id === question.id)) return rows
-    added = true
-    return [...rows, question]
-  })
+  params.setMessages(rows => rows.some(row => row.id === question.id) ? rows : [...rows, question])
   return {
     id: question.id!,
-    // Only a row this turn added goes. A row the pipeline drew under this id is the pipeline's.
-    withdraw: () => {
-      if (!added) return
-      added = false
-      setMessages(rows =>
-        rows.includes(question) ? rows.filter(row => row.id !== question.id) : rows)
-    }
+    // The turn's view setters retire once the new chat's load starts, so this
+    // removes the row from the live transcript directly, and only this row (by
+    // identity): a row the pipeline drew under the same id is the pipeline's.
+    // The full page and the side panel both keep their rows in this store.
+    withdraw: () =>
+      useStoreMessageOption.setState(state =>
+        state.messages.includes(question)
+          ? { messages: state.messages.filter(row => row !== question) }
+          : state)
   }
 }
 

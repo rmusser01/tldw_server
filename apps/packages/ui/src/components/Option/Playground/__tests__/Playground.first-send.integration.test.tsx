@@ -198,6 +198,47 @@ describe("Playground first send in a new chat (CM-14)", { timeout: 60_000 }, () 
     expect(questionRowId("Second question")).toBe(earlyId)
   })
 
+  // The turn's view setters retire as soon as the quiet load starts, so these
+  // ends must remove the question from the live transcript past that guard.
+  it("removes the question when the new chat's first load fails", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+    const load = server.holdRequest("POST", SELECTION_PATH)
+
+    try {
+      await pressEnterWith(view, "Load fails")
+      await load.arrived
+      await waitFor(() => expectRendered(["Load fails"]), HARNESS_WAIT)
+    } finally {
+      load.fail(500, { detail: "Harness: load failed" })
+    }
+
+    await waitForChatIdle()
+    await waitFor(() => expect(transcript()).toEqual([]), HARNESS_WAIT)
+    expectRendered([])
+    expect(server.completionRequests()).toHaveLength(0)
+  })
+
+  it("removes the question after a Stop during the new chat's first load", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+    const load = server.holdRequest("POST", SELECTION_PATH)
+
+    try {
+      await pressEnterWith(view, "Stop during load")
+      await load.arrived
+      await waitFor(() => expectRendered(["Stop during load"]), HARNESS_WAIT)
+      await view.user.click(await screen.findByRole("button", { name: "Stop Streaming" }, HARNESS_WAIT))
+    } finally {
+      load.release()
+    }
+
+    await waitForChatIdle()
+    await waitFor(() => expect(transcript()).toEqual([]), HARNESS_WAIT)
+    expectRendered([])
+    expect(server.completionRequests()).toHaveLength(0)
+  })
+
   it("leaves no stale question or history after a Stop right after the quiet load", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })
