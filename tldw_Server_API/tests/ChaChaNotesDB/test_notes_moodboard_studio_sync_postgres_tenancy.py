@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -964,9 +964,9 @@ def test_current_postgres_ordinary_runtime_still_rejects_writable_migration_vers
                 assert authority == [{"owner_authority": False, "writable_version": writable, "journal_read": False}]  # nosec B101 -- real nonowner privileges and private-journal denial.
                 if writable:
                     with pytest.raises(SchemaError, match="runtime migration-version authority is unsafe"):
-                        db._postgres_schema_is_current(conn)
+                        schema_bootstrap._postgres_schema_is_current(db.ctx, conn)
                 else:
-                    assert db._postgres_schema_is_current(conn) is True  # nosec B101 -- real read-only nonowner passes the complete current-runtime boundary.
+                    assert schema_bootstrap._postgres_schema_is_current(db.ctx, conn) is True  # nosec B101 -- real read-only nonowner passes the complete current-runtime boundary.
     finally:
         if created:
             with backend.transaction() as conn:

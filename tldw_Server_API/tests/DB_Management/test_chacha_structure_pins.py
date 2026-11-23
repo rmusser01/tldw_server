@@ -6,6 +6,7 @@ import ast
 import inspect
 import subprocess  # nosec B404  # standalone-import pin, fixed argv
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -50,9 +51,9 @@ def test_retired_names_are_gone() -> None:
 CONTEXT_SURFACE = frozenset(
     {
         "db", "backend", "backend_type", "client_id", "owner_user_id", "db_path_str", "is_memory_db",
-        "code_schema_version", "schema_name",
+        "code_schema_version", "postgres_schema_version", "schema_name",
         "transaction", "get_connection", "execute_query", "execute_many",
-        "utc_now_iso", "new_uuid", "normalize_nullable_text", "map_table", "owner_filter",
+        "run_sqlite_migration_step", "utc_now_iso", "new_uuid", "normalize_nullable_text", "map_table", "owner_filter",
         "current_db_version", "prepare_statement",
         "keyword_link_filter", "require_owner_row", "case_insensitive_order_expression", "case_insensitive_order_clause",
         "unique_text_match_sql", "is_unique_violation", "chunk_list", "canonical_json_text_v61", "note_task_v60_hash",
@@ -135,6 +136,7 @@ def test_context_module_privates_are_pinned() -> None:
         "tldw_Server_API.app.core.DB_Management.chacha.sqlite_schema",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.support",
         "tldw_Server_API.app.core.DB_Management.chacha.postgres_schema",
+        "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.sqlite_steps",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.postgres_steps",
     ],
@@ -397,3 +399,54 @@ def test_module_patch_reaches_registry_and_direct_calls(monkeypatch: pytest.Monk
     class_step(sentinel)
     getattr(sqlite_steps, sqlite_steps.SQLITE_STEPS[49])(None, sentinel)
     assert calls == [sentinel, sentinel]  # nosec B101
+
+
+# --- schema bootstrap (TASK-13950.22 PR H, R5/R29/R34) -------------------------------------------------------------------
+
+
+def test_bootstrap_reads_versions_at_call_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests patch the version on the class 139 times; the context reads it per call, so a patch reaches the moved bootstrap."""
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    assert db.ctx.postgres_schema_version == 91  # nosec B101
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 123)
+    assert db.ctx.postgres_schema_version == 123  # nosec B101
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 99)
+    assert db.ctx.code_schema_version == 99  # nosec B101
+
+
+def test_runtime_schema_version_is_public_with_a_default() -> None:
+    """R29: the instance attribute the bootstrap writes is public, so the context pins no write reach for it."""
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    assert db.runtime_schema_version is None  # nosec B101
+    assert db.ctx.runtime_schema_version is None  # nosec B101
+    db.runtime_schema_version = 81
+    assert db.ctx.runtime_schema_version == 81  # nosec B101
+    assert [n for n in dir(db) if n.endswith("runtime_schema_version")] == ["runtime_schema_version"]  # nosec B101  # the private spelling is gone
+
+
+def test_postgres_init_repairs_legacy_markers_in_order() -> None:
+    """The three repairs of a legacy PostgreSQL marker run in this order (R34): the v86 dictionary bridge, then the
+    v68 history projections check, then the v73/74 stamp back to 72. AST only, so it needs no database."""
+    from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(ladder.postgres_init_function())))
+
+    def _if_at(*needles: str) -> ast.If:
+        found = [n for n in ast.walk(tree) if isinstance(n, ast.If) and all(s in ast.unparse(n.test) for s in needles)]
+        assert len(found) == 1, (needles, len(found))  # nosec B101
+        return found[0]
+
+    def _calls(node: ast.If, callee: str, last_arg: int | None = None) -> list[ast.Call]:
+        return [
+            c for c in ast.walk(node)
+            if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr == callee
+            and (last_arg is None or (isinstance(c.args[-1], ast.Constant) and c.args[-1].value == last_arg))
+        ]
+
+    bridge = _if_at("current_version == 86", "target_version >= 89")
+    history = _if_at("current_version == 68", "conversation_history_projections")
+    stamp = _if_at("current_version in (73, 74)", "assistant_defaults_explicit_none")
+    assert _calls(bridge, "_bridge_legacy_dictionary_v86_postgres")  # nosec B101
+    assert _calls(history, "_set_schema_version_postgres", 67)  # nosec B101
+    assert _calls(stamp, "_set_schema_version_postgres", 72)  # nosec B101
+    assert bridge.lineno < history.lineno < stamp.lineno  # nosec B101

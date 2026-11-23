@@ -821,9 +821,9 @@ def test_shim_forwards_and_class_call_sites_rewrite(tmp_path: Path) -> None:
 
 
 def test_test_call_sites_take_receiver_ctx(tmp_path: Path) -> None:
-    root = _fn_tree(tmp_path, a=["_b"], files={TEST: "def f(db, conn):\n    return db._b(conn) + db.other._b(conn)\n"})
+    root = _fn_tree(tmp_path, a=["_b"], files={TEST: "def f(db, conn):\n    return db._b(conn) + self.db._b(conn)\n"})
     assert _functions(root) == 0
-    assert "mod_a._b(db.ctx, conn) + mod_a._b(db.other.ctx, conn)" in _text(root, TEST)
+    assert "mod_a._b(db.ctx, conn) + mod_a._b(self.db.ctx, conn)" in _text(root, TEST)
 
 
 def test_a_call_whose_arguments_start_on_the_next_line_gets_no_trailing_space(tmp_path: Path) -> None:
@@ -988,3 +988,45 @@ def test_registry_snapshot_fails_when_the_two_postgres_chains_differ(tmp_path: P
     root = _seed(tmp_path, db=SNAPSHOT_DB.replace("self._migrate_from_v73_to_v74_persona_postgres(conn)\n            if target", "self._migrate_from_v73_to_v74_other_postgres(conn)\n            if target", 1))
     assert split.main(["registry-snapshot", "--root", str(root)]) == 1
     assert "differ" in capsys.readouterr().out
+
+
+def test_functions_leaves_a_same_named_method_outside_chacha_alone(tmp_path: Path) -> None:
+    """M1: T7 and T8 rewrote Media DB files that call their own ``_b``. Neither a path nor a receiver that is not a ChaCha DB is ours."""
+    media = "tldw_Server_API/app/core/DB_Management/media_db/schema/helper.py"
+    app = "tldw_Server_API/app/api/helper.py"
+    source = "def f(db, obj, conn):\n    return db._b(conn), obj._b(conn)\n"
+    root = _fn_tree(tmp_path, a=["_b"], files={media: source, app: source})
+    assert _functions(root) == 0
+    assert _text(root, media) == source  # a path of another DB package: untouched, even on a ``db`` receiver
+    assert "obj._b(conn)" in _text(root, app) and "mod_a._b(db.ctx, conn)" in _text(root, app)  # a free function's ``obj`` is not a ChaCha DB
+
+
+def test_check_flags_a_moved_name_held_in_a_string(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """M2: ``patches`` cannot see a name in a variable, an f-string or a setattr probe; ``check`` must."""
+    root = _fn_tree(tmp_path, a=["_a"], b=["_b", "_c", "_s"])
+    assert _functions(root) == 0
+    clean = "def t(db):\n    return 1\n"
+    (root / TEST).parent.mkdir(parents=True, exist_ok=True)
+    (root / TEST).write_text(clean)
+    manifest = str(root / FN_A)
+    assert split.main(["check", manifest, str(root / FN_B), "--root", str(root)]) == 0
+    for body in (
+        'method = "_a"\n',
+        'name = f"_a{suffix}"\n',
+        'name = f"_a"\n',
+        'setattr(db, "_a", fake)\n',
+    ):
+        (root / TEST).write_text(f"def t(db, suffix, fake):\n    {body}")
+        assert split.main(["check", manifest, str(root / FN_B), "--root", str(root)]) == 1, body
+        assert "_a" in capsys.readouterr().out
+
+
+def test_check_accepts_a_setattr_on_the_moved_module(tmp_path: Path) -> None:
+    """The correct retarget of a patch, ``monkeypatch.setattr(mod_a, "_a", fake)``, is not a left reference; the same on a db is."""
+    root = _fn_tree(tmp_path, a=["_a"], b=["_b", "_c", "_s"])
+    assert _functions(root) == 0
+    (root / TEST).parent.mkdir(parents=True, exist_ok=True)
+    (root / TEST).write_text('def t(monkeypatch, mod_a, fake):\n    monkeypatch.setattr(mod_a, "_a", fake)\n')
+    assert split.main(["check", str(root / FN_A), str(root / FN_B), "--root", str(root)]) == 0
+    (root / TEST).write_text('def t(monkeypatch, db, fake):\n    monkeypatch.setattr(db, "_a", fake)\n')
+    assert split.main(["check", str(root / FN_A), str(root / FN_B), "--root", str(root)]) == 1

@@ -115,7 +115,7 @@ def test_postgres_migration_and_forced_owner_rls(pg_database_config):
                 "SELECT qual, with_check FROM pg_policies WHERE tablename = 'notes_knowledge_provenance'"
             ).fetchall()
             assert len(policies) == 1 and "app.current_user_id" in policies[0]["qual"]
-        assert database._runtime_schema_version == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+        assert database.runtime_schema_version == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
     finally:
         database.close_all_connections()
 
@@ -187,7 +187,7 @@ def test_postgres_v80_upgrade_and_reopen(pg_database_config, monkeypatch):
         )
         try:
             old.add_note("Note", "Body", note_id="own")
-            assert old._runtime_schema_version == 80
+            assert old.runtime_schema_version == 80
         finally:
             old.close_all_connections()
     for _ in range(2):
@@ -195,7 +195,7 @@ def test_postgres_v80_upgrade_and_reopen(pg_database_config, monkeypatch):
             ":memory:", client_id="alice", backend=DatabaseBackendFactory.create_backend(pg_database_config)
         )
         try:
-            assert migrated._runtime_schema_version == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+            assert migrated.runtime_schema_version == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
             assert migrated.get_note_by_id("own")["content"] == "Body"
             assert migrated.note_provenance_store.get("own") is None
         finally:
@@ -277,10 +277,10 @@ def test_postgres_receipt_upgrade_reopen_and_rls(pg_restricted_backend, monkeypa
     with monkeypatch.context() as patch:
         patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 81)
         old = CharactersRAGDB(":memory:", client_id="alice", backend=pg_restricted_backend)
-        assert old._runtime_schema_version == 81
+        assert old.runtime_schema_version == 81
         old.close_connection()
     database = CharactersRAGDB(":memory:", client_id="alice", backend=pg_restricted_backend)
-    assert database._runtime_schema_version == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+    assert database.runtime_schema_version == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
     store = database.note_provenance_store
     with database.transaction() as conn:
         store.claim_receipt("same", "fingerprint", conn)

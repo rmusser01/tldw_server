@@ -48,7 +48,9 @@ def test_postgres_companion_upgrade_finishes_fast_path_and_installs_rls(
     monkeypatch.setattr(db, "_backend", backend)
     monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_args: nullcontext(conn))
     monkeypatch.setattr(postgres_schema, "_configure_notes_moodboard_studio_v61_postgres_transaction", lambda _ctx, _conn: None)
-    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: state["version"] == 77)
+    monkeypatch.setattr(
+        schema_bootstrap, "_postgres_schema_is_current", lambda _ctx, _conn: state.update(is_current_calls=state.get("is_current_calls", 0) + 1) or state["version"] == 77
+    )
     monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _conn, **_kwargs: state["version"])
     monkeypatch.setattr(postgres_schema, "_set_schema_version_postgres", lambda _ctx, _conn, version: state.update(version=version))
     monkeypatch.setattr(db, "repair_conversation_assistant_identity", lambda _conn: None)
@@ -72,6 +74,7 @@ def test_postgres_companion_upgrade_finishes_fast_path_and_installs_rls(
     try:
         db._initialize_schema_postgres()
         assert state["version"] == 77
+        assert state["is_current_calls"] >= 1  # the patched current-schema probe was reached, not bypassed
         assert "CREATE TABLE IF NOT EXISTS persona_buddy_preferences" in state["companion_sql"]
         assert state["rls_version"] == 77
     finally:

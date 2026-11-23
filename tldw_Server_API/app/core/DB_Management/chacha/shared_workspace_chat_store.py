@@ -431,8 +431,8 @@ class SharedWorkspaceChatStore:
         if not 1 <= effective_source_count <= _MAX_SOURCE_IDS:
             raise InputError("effective_source_count must be between 1 and 500.")
 
-        user_message_id = self._db._generate_uuid()
-        assistant_message_id = self._db._generate_uuid()
+        user_message_id = self._db.ctx.new_uuid()
+        assistant_message_id = self._db.ctx.new_uuid()
         try:
             with self._db.transaction() as conn:
                 receipt = self._assert_current_claim(conn, claim)

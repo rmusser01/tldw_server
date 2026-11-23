@@ -53,9 +53,15 @@ from tldw_Server_API.app.core.Sync_Contracts.notes_task_contract import (
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-# Class attributes tests patch or init mutates. ``_runtime_schema_version`` is written by the schema bootstrap, so a
-# context property reads it (Task 9 makes it public, and the pin goes with it: R29).
-PINNED_DB_PRIVATES: frozenset[str] = frozenset({"_CURRENT_SCHEMA_VERSION", "_SCHEMA_NAME", "_runtime_schema_version"})
+# Class attributes tests patch (139 and 49 times for the two versions), so the context reads them at call time.
+# R29: the runtime version is public (``db.runtime_schema_version``) and the bootstrap writes it, so it is no pin.
+# ``_run_sqlite_linear_migration_step`` is the one call-through: the legacy SQLite init must reach the class's step map (tests patch
+# ``_sqlite_linear_migration_steps`` on the class), and one pinned reach here replaces four in the moved body. PR H offset it, and
+# the bootstrap's two ``ctx.db._ensure_*_table`` calls (kept on the DB so an instance stub of them stays live), by moving six reaches of
+# ``shared_workspace_chat_store`` and ``note_graph_suggestion_store`` onto the ``ctx.new_uuid`` and ``ctx.map_table`` they forward to.
+PINNED_DB_PRIVATES: frozenset[str] = frozenset(
+    {"_CURRENT_SCHEMA_VERSION", "_POSTGRES_SCHEMA_VERSION", "_SCHEMA_NAME", "_run_sqlite_linear_migration_step"}
+)
 PINNED_MODULE_PRIVATES: frozenset[str] = frozenset({"_owner_is_scoped", "_SAFE_IDENTIFIER_RE"})
 
 _ORDER_BY_COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$")
@@ -110,6 +116,11 @@ class ChaChaContext:
         return self._db._CURRENT_SCHEMA_VERSION
 
     @property
+    def postgres_schema_version(self) -> int:
+        """The PostgreSQL schema version this code builds."""
+        return self._db._POSTGRES_SCHEMA_VERSION
+
+    @property
     def schema_name(self) -> str:
         """The schema's name in the version table."""
         return self._db._SCHEMA_NAME
@@ -117,7 +128,7 @@ class ChaChaContext:
     @property
     def runtime_schema_version(self) -> int | None:
         """The schema version the bootstrap recorded for this DB, or None before it ran."""
-        return getattr(self._db, "_runtime_schema_version", None)
+        return self._db.runtime_schema_version
 
     # --- Call-throughs ------------------------------------------------------------------------------
 
@@ -140,6 +151,12 @@ class ChaChaContext:
     def execute_many(self, query: str, params_list: Any, *, commit: bool = False) -> Any:
         """Run one statement over many parameter sets through the DB."""
         return self._db.execute_many(query, params_list, commit=commit)
+
+    def run_sqlite_migration_step(self, conn: Any, *, from_version: int, target_version: int, initial_version: int) -> int:
+        """Run the SQLite migration step that leaves ``from_version``, through the DB's step map, and return the new version."""
+        return self._db._run_sqlite_linear_migration_step(
+            conn, from_version=from_version, target_version=target_version, initial_version=initial_version
+        )
 
     # --- Helpers ------------------------------------------------------------------------------------
 

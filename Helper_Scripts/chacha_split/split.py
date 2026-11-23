@@ -67,6 +67,8 @@ CTX_REWRITES = {
     "_selected_owner_filter": "owner_filter",
     "_prepare_backend_statement": "prepare_statement",
     "_CURRENT_SCHEMA_VERSION": "code_schema_version",
+    "_POSTGRES_SCHEMA_VERSION": "postgres_schema_version",
+    "_run_sqlite_linear_migration_step": "run_sqlite_migration_step",
     "_SCHEMA_NAME": "schema_name",
     "_selected_keyword_link_filter": "keyword_link_filter",
     "_require_selected_owner_row": "require_owner_row",
@@ -1402,6 +1404,8 @@ def run_select(root: Path, group: str) -> int:
 
 # --- ``functions`` (TASK-13950.22 PR E, A.3, R24) ---------------------------------------------------------------------
 
+_DBM = "tldw_Server_API/app/core/DB_Management/"
+NON_CHACHA_DB = tuple(_DBM + d + "/" for d in ("media_db", "prompt_studio_db", "codegraph", "backends", "migrations"))
 PKG = "tldw_Server_API.app.core.DB_Management.chacha"
 CONTEXT_MODULE = STORES + "context.py"
 KNOWN_MODULES = {"schema_sql": f"{PKG}.schema_sql", "conversation_store": f"{PKG}.conversation_store", "note_store": f"{PKG}.note_store"}
@@ -1545,7 +1549,9 @@ def fn_callsite(node: ast.Attribute, env: FnEnv, *, in_class: bool, is_call: boo
         return (name, None) if move.static else None  # an unbound instance method is listed by ``check`` (Appendix D)
     if move.shim or not is_call:
         return None
-    if node.attr in env.clash and not (in_test and receivers.RECEIVER.search(receivers.last_identifier(recv))):
+    if not receivers.RECEIVER.search(receivers.last_identifier(recv)):
+        return None  # M1: outside the class only a ``db``-like receiver is ours (a free function's ``backend._x`` is not); ``check`` lists the rest
+    if node.attr in env.clash and not in_test:
         return None  # another app class defines the name; a test call on a ``db``-like receiver is still ours
     return (name, None) if move.static else (name, f"{source}.ctx")
 
@@ -1574,6 +1580,10 @@ class _FnMoved(ast.NodeTransformer):
         return node
 
     def visit_Attribute(self, node: ast.Attribute) -> ast.AST:  # noqa: N802
+        if isinstance(node.value, ast.Name) and node.value.id == self.recv and not isinstance(node.ctx, ast.Load) and node.attr in self.env.manifest["rewrites"]:
+            assigned = ast.parse(self.env.manifest["rewrites"][node.attr], mode="eval").body
+            assigned.ctx = node.ctx  # type: ignore[attr-defined]
+            return assigned
         if isinstance(node.value, ast.Name) and node.value.id == self.recv and isinstance(node.ctx, ast.Load):
             try:
                 new, _ = fn_replacement(node.attr, self.recv, self.env)
@@ -1712,7 +1722,7 @@ def _moved_edits(raw: list[bytes], node: ast.FunctionDef | ast.AsyncFunctionDef,
     for n in ast.walk(node):
         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == recv:
             handled.add(id(n.value))
-            if not isinstance(n.ctx, ast.Load):
+            if not isinstance(n.ctx, ast.Load) and n.attr not in env.manifest["rewrites"]:  # an assigned attribute needs a declared rewrite (H: the runtime version)
                 problems.append(f"{n.lineno}: {recv}.{n.attr} is assigned")
                 continue
             try:
@@ -1919,6 +1929,8 @@ def run_functions(root: Path, manifest_paths: list[Path]) -> int:
                 move = next(mv for mv in env.index.values() if mv.alias == n)
                 if move.target != manifest["target"]:
                     lines_out.add(_module_import(n, _dotted(move.target)))
+            elif n in manifest["rewrites"].values():
+                continue  # a bare module-level name the manifest rewrites to and defines by hand in its target
             elif n in schema_module_names:
                 lines_out.add(f"from {PKG}.schema_sql import {n}")
             elif n in db_names:
@@ -1964,8 +1976,8 @@ def run_functions(root: Path, manifest_paths: list[Path]) -> int:
     touched = 0
     targets = {m["target"] for m in manifests}
     for key, path in _py_files(root):
-        if key == DB_MODULE or key in targets:
-            continue
+        if key == DB_MODULE or key in targets or key.startswith(NON_CHACHA_DB):
+            continue  # M1: the other DB packages define same-named methods of their own
         f_text, f_tree = _parse(path)
         f_edits, f_used, f_problems = _callsite_edits(f_text, f_tree, env, False, set(), _is_test_file(key))
         for p in f_problems:
@@ -2046,23 +2058,46 @@ def run_verify_functions(root: Path, manifests: list[dict], base: str) -> int:
     return 1 if failures else 0
 
 
-def _left_references(tree: ast.Module, names: set[str], aliases: set[str]) -> list[str]:
-    """References to ``names`` that go through anything but a moved module: attributes, probes and patch strings."""
+def _left_references(tree: ast.Module, names: set[str], aliases: set[str], strings: bool = False) -> list[str]:
+    """References to ``names`` that go through anything but a moved module: attributes, probes and patch strings.
+
+    ``strings`` (M2, tests): also a string that is exactly a name (a ``method = "_x"`` variable), an f-string whose literal part is a name
+    or the start of one, and a ``setattr``/``delattr`` probe, the forms ``patches`` cannot see.
+    """
     findings: list[str] = []
 
     def walk(node: ast.AST, classes: tuple[ast.ClassDef, ...]) -> None:
         if isinstance(node, ast.ClassDef):
             classes += (node,)
+        if (
+            strings and isinstance(node, ast.Call) and len(node.args) >= 3 and isinstance(node.args[0], ast.Name) and node.args[0].id in aliases
+            and isinstance(node.func, (ast.Name, ast.Attribute)) and (node.func.id if isinstance(node.func, ast.Name) else node.func.attr) == "setattr"
+        ):
+            for child in node.args[2:]:  # ``setattr(<moved module>, "<name>", fake)`` is the right patch, not a left reference
+                walk(child, classes)
+            return
         if isinstance(node, ast.Attribute) and node.attr in names and isinstance(node.ctx, ast.Load):
             recv = node.value
             own = isinstance(recv, ast.Name) and recv.id in {"self", "cls"} and classes and classes[-1].name != CLASS and bool(_defined(classes[-1], {node.attr}))
             if not (isinstance(recv, ast.Name) and recv.id in aliases) and not own:
                 findings.append(f"{node.lineno}: {ast.unparse(recv)}.{node.attr}")
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"getattr", "hasattr"} and len(node.args) >= 2:
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ({"getattr", "hasattr", "setattr", "delattr"} if strings else {"getattr", "hasattr"}) and len(node.args) >= 2:
             if isinstance(node.args[1], ast.Constant) and node.args[1].value in names:
                 findings.append(f"{node.lineno}: {node.func.id} probe of {node.args[1].value}")
+        elif strings and isinstance(node, ast.JoinedStr):
+            for piece in node.values:
+                if isinstance(piece, ast.Constant) and isinstance(piece.value, str):
+                    text = piece.value.strip()
+                    if any(n in text or (len(text) >= 12 and text.startswith("_") and n.startswith(text)) for n in names):
+                        findings.append(f"{node.lineno}: f-string {text}")
+            for piece in node.values:  # its literal parts are judged above; only the ``{...}`` parts are walked on
+                if isinstance(piece, ast.FormattedValue):
+                    walk(piece, classes)
+            return
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             findings.extend(f"{node.lineno}: string {node.value}" for n in names if node.value.endswith(f"{CLASS}.{n}"))
+            if strings and node.value in names:
+                findings.append(f"{node.lineno}: string {node.value}")
         for child in ast.iter_child_nodes(node):
             walk(child, classes)
 
@@ -2088,9 +2123,11 @@ def run_check_functions(root: Path, manifests: list[dict]) -> int:
         if key in targets:
             continue
         text, tree = _parse(path)
-        findings = _left_references(tree, names - clash, aliases)
+        if key.startswith(NON_CHACHA_DB):
+            continue  # M1: their same-named methods are their own
+        findings = _left_references(tree, names - clash, aliases, _is_test_file(key) and "tests/Helper_Scripts/" not in key)  # the tool's own self-tests hold seed text
         if _is_test_file(key):
-            findings += [f for f in _left_references(tree, names & clash, aliases) if _db_like(f)]
+            findings += [f for f in _left_references(tree, names & clash, aliases, True) if _db_like(f)]
             findings += [f"{line}: {m}" for line, m in _fakes_of(tree, names)]
         for finding in findings:
             print(f"left {key}:{finding}")
