@@ -499,3 +499,31 @@ def test_preview_missing_media_sections_is_not_found(client: TestClient, tmp_pat
         media_db.close_connection()
 
     assert response.status_code == 404  # nosec B101
+
+
+def test_preview_media_sections_only_reads_the_requesting_users_media(client: TestClient, tmp_path, monkeypatch):
+    monkeypatch.setenv("STUDY_PACK_MAX_EVIDENCE_CHARS_PER_SOURCE", "80")
+    owner_media = MediaDatabase(db_path=str(tmp_path / "owner-media.db"), client_id="owner")
+    other_media = MediaDatabase(db_path=str(tmp_path / "other-media.db"), client_id="other")
+    book = "# Private Owner Chapter\n" + "Owner only text. " * 8 + "\n# Second\n" + "More text. " * 8
+    owner_id, _, _ = owner_media.add_media_with_keywords(title="Owner", content=book, media_type="ebook", keywords=[])
+    app = client.app
+    assert isinstance(app, FastAPI)  # nosec B101
+    path = f"/api/v1/flashcards/study-packs/media/{owner_id}/sections"
+    try:
+        app.dependency_overrides[get_media_db_for_user] = lambda: other_media
+        assert client.get(path).status_code == 404  # nosec B101
+
+        other_book = "# Other Chapter\n" + "Other text. " * 9 + "\n# Another\n" + "Other more. " * 9
+        other_id, _, _ = other_media.add_media_with_keywords(
+            title="Other", content=other_book, media_type="ebook", keywords=[]
+        )
+        assert other_id == owner_id  # nosec B101  (per-user databases reuse ids)
+        response = client.get(path)
+    finally:
+        owner_media.close_connection()
+        other_media.close_connection()
+
+    assert response.status_code == 200  # nosec B101
+    assert [section["title"] for section in response.json()["sections"]] == ["Other Chapter", "Another"]  # nosec B101
+    assert "Private Owner Chapter" not in response.text  # nosec B101
