@@ -10,40 +10,17 @@ import type { MemoryDexie } from "@/components/Option/Playground/__tests__/harne
  * or written and whatever the row count.
  *
  * jsdom has no IndexedDB and the repo ships no fake-indexeddb, so the real
- * import, token-index and search code runs on the in-memory Dexie stand-in.
- * The stand-in lets a nested transaction join any parent, which is how the
- * v17 `searchTokens` gap went unnoticed; this file adds Dexie 4's
- * parent-scope check (`Dexie.prototype._transaction`) on top of it.
+ * import, token-index and search code runs on the in-memory Dexie stand-in,
+ * which enforces Dexie's parent-scope rule.
  */
 const memory = vi.hoisted(() => ({ db: null as unknown }))
 
 vi.mock("@/db/dexie/schema", async () => {
-  const { AsyncLocalStorage } = await import("node:async_hooks")
   const { createMemoryDexie } = await import(
     "@/components/Option/Playground/__tests__/harness/memory-dexie"
   )
-  const db = createMemoryDexie()
-  const run = db.transaction
-  const parentScope = new AsyncLocalStorage<Set<string>>()
-  db.transaction = (...args: unknown[]) => {
-    const operation = args.at(-1) as (tx: unknown) => Promise<unknown>
-    const tables = args
-      .slice(1, -1)
-      .flat()
-      .map((table) => (typeof table === "string" ? table : (table as { name: string }).name))
-    const parent = parentScope.getStore()
-    const missing = parent && tables.find((table) => !parent.has(table))
-    if (missing) {
-      const error = new Error(`Table ${missing} not included in parent transaction.`)
-      error.name = "SubTransactionError"
-      return Promise.reject(error)
-    }
-    return run(...args.slice(0, -1), (tx: unknown) =>
-      parentScope.run(parent ?? new Set(tables), () => operation(tx))
-    )
-  }
-  memory.db = db
-  return { db }
+  memory.db = createMemoryDexie()
+  return { db: memory.db }
 })
 // Only the deprecated pre-Dexie restore imports from the legacy barrel.
 vi.mock("@/db", () => ({ importChatHistory: vi.fn(), importPrompts: vi.fn() }))
@@ -133,13 +110,17 @@ describe("Import Data restores local chats in one transaction", () => {
     expect(found.map((history) => history.id)).toEqual(["long"])
   })
 
-  it("leaves no history, message or token behind when a row fails", async () => {
-    const broken = chatBackup("broken", [{ ...message("broken", 0, "orphan words"), id: undefined }])
+  it("rolls back indexed chats when a later section of the backup fails", async () => {
+    // Prompts import after chats are written and indexed; a prompt without an
+    // id fails there, so only the enclosing transaction can undo the chats.
+    const backup = { chat: [longChat("long")], prompts: [{ title: "no id", content: "x" }] }
 
-    await expect(importFile({ chat: [longChat("long"), broken] })).rejects.toThrow(/DataError/)
+    await expect(importFile(backup)).rejects.toThrow(/DataError/)
 
-    expect(await db().chatHistories.count()).toBe(0)
-    expect(await db().messages.count()).toBe(0)
-    expect(await db().searchTokens.count()).toBe(0)
+    expect({
+      histories: await db().chatHistories.count(),
+      messages: await db().messages.count(),
+      tokens: await db().searchTokens.count()
+    }).toEqual({ histories: 0, messages: 0, tokens: 0 })
   })
 })

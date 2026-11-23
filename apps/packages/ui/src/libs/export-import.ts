@@ -56,11 +56,13 @@ export const importPageAssistData = async (file: File) => {
         const promptOptions = { ownerScope }
         await db.transaction(
           "rw",
+          // Must cover every table the import helpers below open or touch: chat
+          // (chatHistories, messages, compareStates, searchTokens), prompts,
+          // modelNickname, customModels. sessionFiles is currently unused.
           [
             db.chatHistories,
             db.messages,
             db.compareStates,
-            // importChatHistoryV2's nested transaction indexes message search tokens.
             db.searchTokens,
             db.prompts,
             db.sessionFiles,
