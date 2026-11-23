@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -33,7 +35,7 @@ def db_path(tmp_path: Path) -> Path:
 @pytest.fixture
 def db(db_path: Path) -> Iterator[CharactersRAGDB]:
     database = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
-    database.upsert_workspace(WORKSPACE_A, "Workspace A")
+    database.workspace_store.upsert_workspace(WORKSPACE_A, "Workspace A")
     try:
         yield database
     finally:
@@ -49,7 +51,7 @@ def _create(
     schema_version: int = 1,
     state_json: str = '{"schema_version":1}',
 ) -> dict[str, Any]:
-    return database.create_workspace_source_saved_view(
+    return database.workspace_store.create_workspace_source_saved_view(
         owner,
         workspace_id,
         name=name,
@@ -94,10 +96,10 @@ def test_create_list_get_update_and_delete_round_trip_raw_state(db: CharactersRA
     assert created["schema_version"] == 1
     assert created["state_json"] == "not-json-yet"
     assert created["version"] == 1
-    assert db.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"]) == created
-    assert db.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A) == [created]
+    assert db.workspace_store.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"]) == created
+    assert db.workspace_store.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A) == [created]
 
-    updated = db.update_workspace_source_saved_view(
+    updated = db.workspace_store.update_workspace_source_saved_view(
         OWNER_A,
         WORKSPACE_A,
         created["id"],
@@ -112,8 +114,8 @@ def test_create_list_get_update_and_delete_round_trip_raw_state(db: CharactersRA
     assert updated["state_json"] == '{"future":true}'
     assert updated["version"] == 2
     assert updated["created_at"] == created["created_at"]
-    db.delete_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"])
-    assert db.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A) == []
+    db.workspace_store.delete_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"])
+    assert db.workspace_store.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A) == []
 
 
 def test_list_order_is_updated_desc_then_name_key_then_id(db: CharactersRAGDB) -> None:
@@ -132,7 +134,7 @@ def test_list_order_is_updated_desc_then_name_key_then_id(db: CharactersRAGDB) -
         commit=True,
     )
 
-    listed = db.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A)
+    listed = db.workspace_store.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A)
 
     assert [row["id"] for row in listed] == [tied[0]["id"], tied[1]["id"], older["id"]]
 
@@ -163,7 +165,7 @@ def test_name_key_uses_python_nfkc_and_casefold(db: CharactersRAGDB) -> None:
 def test_duplicate_update_reports_owned_conflicting_view_and_version(db: CharactersRAGDB) -> None:
     first = _create(db, name="First")
     second = _create(db, name="Second")
-    second = db.update_workspace_source_saved_view(
+    second = db.workspace_store.update_workspace_source_saved_view(
         OWNER_A,
         WORKSPACE_A,
         second["id"],
@@ -173,7 +175,7 @@ def test_duplicate_update_reports_owned_conflicting_view_and_version(db: Charact
     )
 
     with pytest.raises(CharactersRAGDBError) as exc_info:
-        db.update_workspace_source_saved_view(
+        db.workspace_store.update_workspace_source_saved_view(
             OWNER_A,
             WORKSPACE_A,
             first["id"],
@@ -193,21 +195,21 @@ def test_every_operation_requires_active_workspace_owned_by_supplied_owner(
 ) -> None:
     owner_a = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
     owner_b = CharactersRAGDB(db_path=db_path, client_id=OWNER_B)
-    owner_a.upsert_workspace(WORKSPACE_A, "Workspace A")
-    owner_b.upsert_workspace(WORKSPACE_B, "Workspace B")
+    owner_a.workspace_store.upsert_workspace(WORKSPACE_A, "Workspace A")
+    owner_b.workspace_store.upsert_workspace(WORKSPACE_B, "Workspace B")
     view = _create(owner_a)
     operations: list[Callable[[], object]] = [
-        lambda: owner_b.list_workspace_source_saved_views(OWNER_B, WORKSPACE_A),
-        lambda: owner_b.get_workspace_source_saved_view(OWNER_B, WORKSPACE_A, view["id"]),
+        lambda: owner_b.workspace_store.list_workspace_source_saved_views(OWNER_B, WORKSPACE_A),
+        lambda: owner_b.workspace_store.get_workspace_source_saved_view(OWNER_B, WORKSPACE_A, view["id"]),
         lambda: _create(owner_b, owner=OWNER_B, workspace_id=WORKSPACE_A, name="Probe"),
-        lambda: owner_b.update_workspace_source_saved_view(
+        lambda: owner_b.workspace_store.update_workspace_source_saved_view(
             OWNER_B,
             WORKSPACE_A,
             view["id"],
             expected_version=1,
             name="Probe",
         ),
-        lambda: owner_b.delete_workspace_source_saved_view(OWNER_B, WORKSPACE_A, view["id"]),
+        lambda: owner_b.workspace_store.delete_workspace_source_saved_view(OWNER_B, WORKSPACE_A, view["id"]),
     ]
 
     try:
@@ -215,8 +217,8 @@ def test_every_operation_requires_active_workspace_owned_by_supplied_owner(
             with pytest.raises(CharactersRAGDBError) as exc_info:
                 operation()
             _assert_saved_view_error(exc_info, "source_view_not_found", {})
-        assert owner_a.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, view["id"]) == view
-        assert owner_b.list_workspace_source_saved_views(OWNER_B, WORKSPACE_B) == []
+        assert owner_a.workspace_store.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, view["id"]) == view
+        assert owner_b.workspace_store.list_workspace_source_saved_views(OWNER_B, WORKSPACE_B) == []
     finally:
         owner_a.close_all_connections()
         owner_b.close_all_connections()
@@ -318,7 +320,7 @@ def test_saved_view_expected_version_rejects_nonportable_values(
     created = _create(db)
 
     with pytest.raises(InputError, match="expected_version"):
-        db.update_workspace_source_saved_view(
+        db.workspace_store.update_workspace_source_saved_view(
             OWNER_A,
             WORKSPACE_A,
             created["id"],
@@ -335,7 +337,7 @@ def test_saved_view_integer_validators_accept_postgres_integer_max(
     created = _create(db, schema_version=maximum)
 
     assert created["schema_version"] == maximum
-    assert db._validate_workspace_source_saved_view_expected_version(maximum) == maximum
+    assert db.workspace_store._validate_workspace_source_saved_view_expected_version(maximum) == maximum
 
 
 def test_update_rejects_maximum_stored_version_without_mutating_row(
@@ -350,7 +352,7 @@ def test_update_rejects_maximum_stored_version_without_mutating_row(
     )
 
     with pytest.raises(CharactersRAGDBError) as stale_exc:
-        db.update_workspace_source_saved_view(
+        db.workspace_store.update_workspace_source_saved_view(
             OWNER_A,
             WORKSPACE_A,
             created["id"],
@@ -364,7 +366,7 @@ def test_update_rejects_maximum_stored_version_without_mutating_row(
     )
 
     with pytest.raises(InputError, match="maximum"):
-        db.update_workspace_source_saved_view(
+        db.workspace_store.update_workspace_source_saved_view(
             OWNER_A,
             WORKSPACE_A,
             created["id"],
@@ -372,14 +374,14 @@ def test_update_rejects_maximum_stored_version_without_mutating_row(
             name="Overflowing change",
         )
 
-    current = db.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"])
+    current = db.workspace_store.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"])
     assert current["version"] == maximum
     assert current["name"] == "Maximum version"
 
 
 def test_stale_update_reports_only_view_id_and_current_version(db: CharactersRAGDB) -> None:
     created = _create(db, state_json="private raw state")
-    current = db.update_workspace_source_saved_view(
+    current = db.workspace_store.update_workspace_source_saved_view(
         OWNER_A,
         WORKSPACE_A,
         created["id"],
@@ -389,7 +391,7 @@ def test_stale_update_reports_only_view_id_and_current_version(db: CharactersRAG
     )
 
     with pytest.raises(CharactersRAGDBError) as exc_info:
-        db.update_workspace_source_saved_view(
+        db.workspace_store.update_workspace_source_saved_view(
             OWNER_A,
             WORKSPACE_A,
             created["id"],
@@ -407,7 +409,7 @@ def test_stale_update_reports_only_view_id_and_current_version(db: CharactersRAG
 
 def test_repeated_unowned_and_missing_deletes_do_not_leak_metadata(db: CharactersRAGDB) -> None:
     created = _create(db)
-    db.delete_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"])
+    db.workspace_store.delete_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"])
 
     for owner, view_id in (
         (OWNER_A, created["id"]),
@@ -415,7 +417,7 @@ def test_repeated_unowned_and_missing_deletes_do_not_leak_metadata(db: Character
         (OWNER_B, created["id"]),
     ):
         with pytest.raises(CharactersRAGDBError) as exc_info:
-            db.delete_workspace_source_saved_view(owner, WORKSPACE_A, view_id)
+            db.workspace_store.delete_workspace_source_saved_view(owner, WORKSPACE_A, view_id)
         _assert_saved_view_error(exc_info, "source_view_not_found", {})
 
 
@@ -423,21 +425,21 @@ def test_soft_deleted_workspace_retains_rows_but_hides_all_saved_view_methods(
     db: CharactersRAGDB,
 ) -> None:
     created = _create(db)
-    workspace = db.get_workspace(WORKSPACE_A)
+    workspace = db.workspace_store.get_workspace(WORKSPACE_A)
     assert workspace is not None
-    assert db.delete_workspace(WORKSPACE_A, expected_version=workspace["version"]) is True
+    assert db.workspace_store.delete_workspace(WORKSPACE_A, expected_version=workspace["version"]) is True
     operations: list[Callable[[], object]] = [
-        lambda: db.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A),
-        lambda: db.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"]),
+        lambda: db.workspace_store.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A),
+        lambda: db.workspace_store.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"]),
         lambda: _create(db, name="After delete"),
-        lambda: db.update_workspace_source_saved_view(
+        lambda: db.workspace_store.update_workspace_source_saved_view(
             OWNER_A,
             WORKSPACE_A,
             created["id"],
             expected_version=1,
             name="After delete",
         ),
-        lambda: db.delete_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"]),
+        lambda: db.workspace_store.delete_workspace_source_saved_view(OWNER_A, WORKSPACE_A, created["id"]),
     ]
 
     for operation in operations:
@@ -454,7 +456,7 @@ def test_soft_deleted_workspace_retains_rows_but_hides_all_saved_view_methods(
 def test_physical_workspace_delete_cascades_saved_views(db: CharactersRAGDB) -> None:
     _create(db)
 
-    db.hard_delete_workspace(WORKSPACE_A)
+    db.workspace_store.hard_delete_workspace(WORKSPACE_A)
 
     row = db.execute_query(
         "SELECT COUNT(*) AS total FROM workspace_source_saved_views WHERE workspace_id = ?",
@@ -470,7 +472,7 @@ def test_saved_view_mutation_then_workspace_soft_delete_serializes(
 ) -> None:
     mutation_db = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
     deletion_db = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
-    mutation_db.upsert_workspace(WORKSPACE_A, "Workspace A")
+    mutation_db.workspace_store.upsert_workspace(WORKSPACE_A, "Workspace A")
     existing = _create(mutation_db)
     mutation_finished = threading.Event()
     allow_commit = threading.Event()
@@ -482,7 +484,7 @@ def test_saved_view_mutation_then_workspace_soft_delete_serializes(
                 if operation == "create":
                     results["mutation"] = _create(mutation_db, name="Concurrent")
                 elif operation == "update":
-                    results["mutation"] = mutation_db.update_workspace_source_saved_view(
+                    results["mutation"] = mutation_db.workspace_store.update_workspace_source_saved_view(
                         OWNER_A,
                         WORKSPACE_A,
                         existing["id"],
@@ -490,7 +492,7 @@ def test_saved_view_mutation_then_workspace_soft_delete_serializes(
                         name="Concurrent",
                     )
                 else:
-                    results["mutation"] = mutation_db.delete_workspace_source_saved_view(
+                    results["mutation"] = mutation_db.workspace_store.delete_workspace_source_saved_view(
                         OWNER_A,
                         WORKSPACE_A,
                         existing["id"],
@@ -503,9 +505,9 @@ def test_saved_view_mutation_then_workspace_soft_delete_serializes(
     def soft_delete() -> None:
         assert mutation_finished.wait(timeout=5)
         try:
-            workspace = deletion_db.get_workspace(WORKSPACE_A)
+            workspace = deletion_db.workspace_store.get_workspace(WORKSPACE_A)
             assert workspace is not None
-            results["deleted"] = deletion_db.delete_workspace(
+            results["deleted"] = deletion_db.workspace_store.delete_workspace(
                 WORKSPACE_A,
                 expected_version=workspace["version"],
             )
@@ -527,7 +529,7 @@ def test_saved_view_mutation_then_workspace_soft_delete_serializes(
         assert "delete_error" not in results
         assert results["deleted"] is True
         with pytest.raises(CharactersRAGDBError) as exc_info:
-            mutation_db.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A)
+            mutation_db.workspace_store.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A)
         _assert_saved_view_error(exc_info, "source_view_not_found", {})
     finally:
         allow_commit.set()
@@ -545,12 +547,12 @@ def test_workspace_soft_delete_then_saved_view_mutation_fails_after_serializatio
 ) -> None:
     deletion_db = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
     mutation_db = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
-    deletion_db.upsert_workspace(WORKSPACE_A, "Workspace A")
+    deletion_db.workspace_store.upsert_workspace(WORKSPACE_A, "Workspace A")
     existing = _create(deletion_db)
     delete_finished = threading.Event()
     allow_commit = threading.Event()
     results: dict[str, object] = {}
-    original_finish = deletion_db._finish_native_workspace_delete
+    original_finish = deletion_db.workspace_store._finish_native_workspace_delete
 
     def pause_after_final_transition(conn: Any, workspace_id: str, **kwargs: Any) -> None:
         original_finish(conn, workspace_id, **kwargs)
@@ -561,9 +563,9 @@ def test_workspace_soft_delete_then_saved_view_mutation_fails_after_serializatio
 
     def soft_delete() -> None:
         try:
-            workspace = deletion_db.get_workspace(WORKSPACE_A)
+            workspace = deletion_db.workspace_store.get_workspace(WORKSPACE_A)
             assert workspace is not None
-            results["deleted"] = deletion_db.delete_workspace(
+            results["deleted"] = deletion_db.workspace_store.delete_workspace(
                 WORKSPACE_A,
                 expected_version=workspace["version"],
             )
@@ -576,7 +578,7 @@ def test_workspace_soft_delete_then_saved_view_mutation_fails_after_serializatio
             if operation == "create":
                 _create(mutation_db, name="Concurrent")
             elif operation == "update":
-                mutation_db.update_workspace_source_saved_view(
+                mutation_db.workspace_store.update_workspace_source_saved_view(
                     OWNER_A,
                     WORKSPACE_A,
                     existing["id"],
@@ -584,7 +586,7 @@ def test_workspace_soft_delete_then_saved_view_mutation_fails_after_serializatio
                     name="Concurrent",
                 )
             else:
-                mutation_db.delete_workspace_source_saved_view(
+                mutation_db.workspace_store.delete_workspace_source_saved_view(
                     OWNER_A,
                     WORKSPACE_A,
                     existing["id"],
@@ -640,13 +642,13 @@ def test_raw_corrupt_unsupported_and_invalid_v1_rows_remain_retrievable(
         commit=True,
     )
 
-    listed = db.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A)
+    listed = db.workspace_store.list_workspace_source_saved_views(OWNER_A, WORKSPACE_A)
     by_id = {row["id"]: row for row in listed}
 
     for view_id, _name, _key, schema_version, state_json in raw_rows:
         assert by_id[view_id]["schema_version"] == schema_version
         assert by_id[view_id]["state_json"] == state_json
-        assert db.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, view_id)["state_json"] == state_json
+        assert db.workspace_store.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, view_id)["state_json"] == state_json
 
 
 def test_real_v53_sqlite_database_migrates_additively_to_v54(
@@ -654,7 +656,7 @@ def test_real_v53_sqlite_database_migrates_additively_to_v54(
 ) -> None:
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 53):
                 steps[version](conn)
@@ -681,7 +683,7 @@ def test_real_v53_sqlite_database_migrates_additively_to_v54(
             original_table_sql = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_sources'"
             ).fetchone()["sql"]
-            seed._migrate_from_v53_to_v54(conn)
+            sqlite_steps._migrate_from_v53_to_v54(seed.ctx, conn)
             assert seed._get_db_version(conn) == 54
             assert "workspace_source_saved_views" in seed._sqlite_table_names(conn)
             assert conn.execute(
@@ -701,7 +703,7 @@ def test_real_v53_sqlite_database_migrates_additively_to_v54(
         assert {key: current[key] for key in before} == {
             **before, "review_state_updated_at": before["added_at"],
         }
-        source = migrated.get_workspace_source(WORKSPACE_A, "source-1")
+        source = migrated.workspace_store.get_workspace_source(WORKSPACE_A, "source-1")
         assert source is not None and source["title"] == "Source"
     finally:
         migrated.close_all_connections()

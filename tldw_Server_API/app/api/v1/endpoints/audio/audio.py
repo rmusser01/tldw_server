@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async as chat_api_call_async,
 )
 from tldw_Server_API.app.core.config_llm_providers import get_api_keys
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.Metrics.metrics_manager import (
     get_metrics_registry,
 )
@@ -129,6 +130,7 @@ _TTS_CREDENTIAL_ERROR_MESSAGES = {
     "credential_scope_revoked": "The selected provider credential scope is no longer available.",
     "provider_disabled": "The selected provider is disabled by administrator policy.",
     "model_not_allowed": "The selected model is not allowed for this provider.",
+    "model_denied": "The selected model is disabled by administrator policy.",
 }
 
 
@@ -142,7 +144,7 @@ def _tts_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
     return TTSPublicHTTPException(
         status_code=(
             status.HTTP_403_FORBIDDEN
-            if code in {"provider_disabled", "model_not_allowed", "credential_scope_revoked"}
+            if code in ADMIN_POLICY_CODES | {"credential_scope_revoked"}
             else status.HTTP_503_SERVICE_UNAVAILABLE
         ),
         detail={"error_code": code, "message": message},

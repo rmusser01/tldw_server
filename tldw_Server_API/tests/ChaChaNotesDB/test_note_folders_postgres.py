@@ -6,6 +6,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.integration
@@ -108,7 +109,7 @@ def test_postgres_note_folder_schema_backfills_active_duplicates_and_uses_partia
         )
 
         with db.transaction() as conn:
-            db._ensure_note_folder_schema_postgres(conn)
+            postgres_schema._ensure_note_folder_schema_postgres(db.ctx, conn)
 
         active_rows = list(
             backend.execute(

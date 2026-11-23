@@ -2979,6 +2979,7 @@ async def test_audio_chat_ws_existing_session_merges_settings_with_version_cas(
     existing_resume_state["settings"] = existing_settings
 
     class _ExistingChatDB:
+        conversation_resume_store = property(lambda self: self)
         client_id = "1"
 
         def __init__(self) -> None:
@@ -3166,6 +3167,7 @@ def test_audio_writer_rejects_pending_greeting_for_different_character() -> None
     }
 
     class _SettingsDB:
+        conversation_resume_store = property(lambda self: self)
         client_id = "1"
 
         def __init__(self) -> None:
@@ -3233,6 +3235,7 @@ def test_audio_writer_uses_transactional_conversation_identity(monkeypatch) -> N
     }
 
     class _SettingsDB:
+        conversation_resume_store = property(lambda self: self)
         client_id = "1"
 
         def __init__(self) -> None:
@@ -3302,6 +3305,7 @@ def test_audio_writer_allows_small_public_update_with_large_valid_internal_autho
     settings, resume_state = _valid_roleplay_settings_with_blob(210_000)
 
     class _SettingsDB:
+        conversation_resume_store = property(lambda self: self)
         client_id = "1"
 
         def __init__(self) -> None:
@@ -3371,6 +3375,7 @@ def test_audio_writer_rejects_invalid_preserved_internal_authority(
     resume_state["settings"] = settings
 
     class _SettingsDB:
+        conversation_resume_store = property(lambda self: self)
         client_id = "1"
 
         def __init__(self) -> None:
@@ -3531,6 +3536,7 @@ async def test_audio_chat_ws_existing_session_conflict_does_not_blind_replace(
     existing_resume_state["settings_version"] = 9
 
     class _ConflictingChatDB:
+        conversation_resume_store = property(lambda self: self)
         client_id = "1"
 
         def __init__(self) -> None:
@@ -3629,6 +3635,7 @@ async def test_audio_chat_ws_existing_resumable_session_rejects_credential_metad
     existing_resume_state["settings_version"] = 4
 
     class _ExistingResumableDB:
+        conversation_resume_store = property(lambda self: self)
         client_id = "1"
 
         def __init__(self) -> None:

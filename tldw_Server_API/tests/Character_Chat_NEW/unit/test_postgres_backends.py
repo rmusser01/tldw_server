@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.Character_Chat.chat_dictionary import (
 )
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, ConflictError, InputError
 
 
@@ -112,10 +113,7 @@ class StubDB:
         self._state = SimpleNamespace(tx_depth=0)
         self.query_calls = []
         self.verified_dictionary_connections: list[RecordingConnection] = []
-
-    def _verify_dictionary_schema_postgres(self, conn: RecordingConnection) -> None:
-        """Stand in for database-owned catalog validation."""
-        self.verified_dictionary_connections.append(conn)
+        self.ctx = SimpleNamespace(db=self)
 
     def get_connection(self):
 
@@ -148,6 +146,16 @@ class StubDB:
             self._state.tx_depth -= 1
             conn.transaction_depth -= 1
             conn.info.transaction_status.name = "IDLE"
+
+
+@pytest.fixture(autouse=True)
+def _stub_dictionary_schema_verification(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for the catalog validation the schema module owns, recording each connection it is given."""
+
+    def verify(ctx: Any, conn: RecordingConnection) -> None:
+        ctx.db.verified_dictionary_connections.append(conn)
+
+    monkeypatch.setattr(postgres_schema, "_verify_dictionary_schema_postgres", verify)
 
 
 def _gather_sql(connection: RecordingConnection) -> str:

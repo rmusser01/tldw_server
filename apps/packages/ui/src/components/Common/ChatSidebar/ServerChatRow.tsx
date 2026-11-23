@@ -5,6 +5,10 @@ import {
   CheckCircle2,
   Circle,
   Clock,
+  Download,
+  FileJson,
+  FileText,
+  FolderInput,
   GitBranch,
   MoreHorizontal,
   Pencil,
@@ -24,6 +28,7 @@ import { CONVERSATION_STATE_OPTIONS } from "@/utils/conversation-state"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { cn } from "@/libs/utils"
 import { ChatStateBadge } from "./ChatStateBadge"
+import type { TranscriptFormat } from "@/utils/chat-transcript"
 
 const STATE_ICON_BY_VALUE: Record<ConversationState, React.ReactElement> = {
   "in-progress": <Circle className="size-3 text-primary" />,
@@ -49,6 +54,10 @@ type ServerChatRowCommonProps = {
   onRenameChat: (chat: ServerChatHistoryItem) => void
   onCreateTable: (chat: ServerChatHistoryItem) => void
   onEditTopic: (chat: ServerChatHistoryItem) => void
+  /** Export the saved chat from the server (CS-09). */
+  onExportChat?: (chat: ServerChatHistoryItem, format: TranscriptFormat) => void
+  /** Choose the folders this chat belongs to: add it to some, remove it from others (CS-09). */
+  onEditFolders?: (chat: ServerChatHistoryItem) => void
   onDeleteChat: (chat: ServerChatHistoryItem) => void | Promise<void>
   onRestoreChat: (chat: ServerChatHistoryItem) => void | Promise<void>
   onUpdateState?: (
@@ -89,6 +98,8 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
     onRenameChat,
     onCreateTable,
     onEditTopic,
+    onExportChat,
+    onEditFolders,
     onDeleteChat,
     onRestoreChat,
     onUpdateState,
@@ -134,8 +145,9 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
     {
       key: "settings",
       icon: <Settings2 className="size-3" />,
-      label: t("playground:composer.openModelSettings", {
-        defaultValue: "Open current chat settings"
+      // It also opens the chat, so it isn't "current" chat settings (CS-09).
+      label: t("common:chatSidebar.chatSettings", {
+        defaultValue: "Chat settings"
       }),
       onClick: () => {
         setOpenMenuFor(null)
@@ -165,6 +177,54 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
       label: t("sidepanel:contextMenu.status", "Status"),
       children: stateMenuItems
     },
+    ...(onEditFolders
+      ? [
+          {
+            key: "add-to-folder",
+            icon: <FolderInput className="size-3" />,
+            label: t("common:chatSidebar.addToFolder", {
+              defaultValue: "Add to folder…"
+            }),
+            onClick: () => {
+              setOpenMenuFor(null)
+              onEditFolders(chat)
+            }
+          }
+        ]
+      : []),
+    ...(onExportChat
+      ? [
+          {
+            key: "export",
+            icon: <Download className="size-3" />,
+            label: t("sidepanel:contextMenu.export", "Export"),
+            children: [
+              {
+                key: "export-markdown",
+                icon: <FileText className="size-3" />,
+                label: t("common:chatSidebar.exportMarkdown", {
+                  defaultValue: "Markdown"
+                }),
+                onClick: () => {
+                  setOpenMenuFor(null)
+                  onExportChat(chat, "markdown")
+                }
+              },
+              {
+                key: "export-json",
+                icon: <FileJson className="size-3" />,
+                label: t("common:chatSidebar.exportJson", {
+                  defaultValue: "JSON"
+                }),
+                onClick: () => {
+                  setOpenMenuFor(null)
+                  onExportChat(chat, "json")
+                }
+              }
+            ]
+          }
+        ]
+      : []),
     {
       key: "topic",
       icon: <Tag className="size-3" />,

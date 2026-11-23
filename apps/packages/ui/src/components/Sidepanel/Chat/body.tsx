@@ -1,9 +1,12 @@
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { savedReplyActionAvailability, savedReplyRegenerateUnavailableReason, savedReplyStatusOffersActions } from "@/hooks/chat/saved-reply-actions"
+import { isReplyRequestPending } from "@/hooks/chat/pending-reply"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
+import { ChatReplyAnnouncerProvider } from "~/components/Common/Playground/ChatReplyAnnouncer"
 import { useMessage } from "~/hooks/useMessage"
 import { usePageAssist } from "@/context"
 import { EmptySidePanel } from "../Chat/empty"
@@ -12,6 +15,7 @@ import { useUiModeStore } from "@/store/ui-mode"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useStorage } from "@plasmohq/storage/hook"
 import { applyVariantToMessage } from "@/utils/message-variants"
+import { variantBranchCursor } from "@/utils/newest-leaf-path"
 import { generateID } from "@/db/dexie/helpers"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useStoreMessageOption } from "@/store/option"
@@ -64,6 +68,7 @@ export const SidePanelBody = ({
     streaming,
     isProcessing,
     regenerateLastMessage,
+    continueLastMessage,
     effectiveAssistantState,
     editMessage,
     deleteMessage,
@@ -76,21 +81,18 @@ export const SidePanelBody = ({
     isEmbedding
   } = useMessage()
   const { t } = useTranslation(["option"])
-  // A request is in flight from the moment it has a controller, before the
-  // server accepts it and streaming starts (G19); the reply bubble offers Stop
-  // until the request is stopped. Only the reply the request is filling counts:
-  // the last row once it is a bot row ending in the "▋" placeholder. While the
-  // request is prepared, the previous finished reply is still last.
+  // G19: the reply bubble a request is filling offers Stop before streaming starts.
   const { controller: requestController } = usePageAssist()
-  const lastMessage = messages[messages.length - 1]
-  const requestPending = Boolean(
-    requestController && !requestController.signal.aborted &&
-      lastMessage?.isBot && String(lastMessage.message ?? "").endsWith("▋")
-  )
+  const requestPending = isReplyRequestPending(requestController, messages)
   const regenerateDisabledReason = isProtectedTrackedPersonaUnavailable(
     Boolean(historySelection), effectiveAssistantState?.kind,
     effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
   ) ? t("assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null
+  // CM-03: Continue and a saved reply's recorded-status actions follow the
+  // full page's rules: a saved server chat's reply continues through the
+  // server, and a reply the server refused to continue no longer offers it.
+  const savedReplyActions = savedReplyActionAvailability({ historySelection, messages, temporaryChat })
+  const savedStatusActions = savedReplyStatusOffersActions(historySelection, messages)
   const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const { ttsEnabled } = useWebUI()
   const [openReasoning] = useStorage("openReasoning", false)
@@ -128,7 +130,8 @@ export const SidePanelBody = ({
         const variants = message?.variants || []
         const currentIndex = message?.activeVariantIndex ?? variants.length - 1
         const candidate = variants[currentIndex + (direction === "prev" ? -1 : 1)]
-        if (candidate?.id) void historySelection.choose({ kind: "after_message", message_id: candidate.id })
+        // CM-N2: show the rest of that alternative's branch, not just the reply.
+        if (candidate?.id) void historySelection.choose(variantBranchCursor(historySelection, candidate.id))
         return
       }
       setMessages((prev) =>
@@ -166,6 +169,7 @@ export const SidePanelBody = ({
     createChatBranch,
     handleVariantSwipe,
     regenerateLastMessage,
+    continueLastMessage,
     stopStreaming: stopStreamingFromUi
   })
   latestRowHandlers.current = {
@@ -174,6 +178,7 @@ export const SidePanelBody = ({
     createChatBranch,
     handleVariantSwipe,
     regenerateLastMessage,
+    continueLastMessage,
     stopStreaming: stopStreamingFromUi
   }
   const handleRegenerateRow = React.useCallback(
@@ -181,6 +186,9 @@ export const SidePanelBody = ({
       latestRowHandlers.current.regenerateLastMessage(...args),
     []
   )
+  const handleContinueRow = React.useCallback(() => {
+    void latestRowHandlers.current.continueLastMessage()
+  }, [])
   const handleStopStreamingRow = React.useCallback(
     (...args: Parameters<typeof stopStreamingFromUi>) => {
       latestRowHandlers.current.stopStreaming(...args)
@@ -478,14 +486,13 @@ export const SidePanelBody = ({
   }, [selectedCharacter?.id, serverChatCharacterId, serverChatId])
 
   return (
-    <>
+    <ChatReplyAnnouncerProvider>
       <div
-        role="log"
-        aria-live="polite"
         className={`relative flex w-full flex-col items-center ${topPaddingClass} pb-4`}
       >
         {messages.length === 0 && !(selectedCharacter && getAssistantSelectionMode(characterToAssistantSelection(selectedCharacter)) === "tracked" && !historyId && !serverChatId) && <EmptySidePanel inputRef={inputRef} />}
-        <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+        {/* The side panel's one log: only the message rows, busy from send until the reply settles (AX-11). */}
+        <div role="log" aria-label={t("playground:aria.chatTranscript", "Chat messages")} aria-live="polite" aria-relevant="additions" aria-busy={streaming || requestPending || undefined} style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
           {rowVirtualizer.getVirtualItems().map((vr) => {
             const index = vr.index
             const message = messages[index]
@@ -501,7 +508,10 @@ export const SidePanelBody = ({
                   currentMessageIndex={index}
                   totalMessages={messages.length}
                   onRegenerate={handleRegenerateRow}
-                  regenerateDisabledReason={regenerateDisabledReason}
+                  regenerateDisabledReason={regenerateDisabledReason ?? savedReplyRegenerateUnavailableReason(savedReplyActions.regenerate, t)}
+                  onContinue={savedReplyActions.continue ? undefined : handleContinueRow}
+                  continueDisabledReason={regenerateDisabledReason}
+                  savedStatusActions={savedStatusActions && index === messages.length - 1}
                   message_type={resolveCharacterMessageType(message, index, Boolean(serverChatId && characterIdentityEnabled))}
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}
@@ -550,7 +560,6 @@ export const SidePanelBody = ({
           })}
         </div>
       </div>
-
-    </>
+    </ChatReplyAnnouncerProvider>
   )
 }

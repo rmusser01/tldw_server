@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -47,7 +48,7 @@ def _create_persona_and_pack(
 def test_migration_v45_to_latest_creates_persona_visual_library_table(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 45):
                 steps[version](conn)

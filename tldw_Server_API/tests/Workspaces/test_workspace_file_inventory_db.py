@@ -23,8 +23,8 @@ def _workspace_with_root(
     workspace_id: str = "ws-1",
     root_id: str = "root-1",
 ) -> dict:
-    db.upsert_workspace(workspace_id, "Workspace")
-    return db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace(workspace_id, "Workspace")
+    return db.workspace_store.upsert_workspace_primary_root(
         workspace_id,
         {
             "root_id": root_id,
@@ -43,14 +43,14 @@ def _begin_attached_scan(
     root_version: int,
     policy_fingerprint: str = "policy-a",
 ) -> dict:
-    scan = db.begin_workspace_file_inventory_scan(
+    scan = db.workspace_store.begin_workspace_file_inventory_scan(
         workspace_id,
         root_id,
         root_version,
         policy_fingerprint,
         requested_by="user-1",
     )
-    return db.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 42, "uuid": "job-42"})
+    return db.workspace_store.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 42, "uuid": "job-42"})
 
 
 def test_file_inventory_schema_tables_and_indexes_exist(db: CharactersRAGDB) -> None:
@@ -73,7 +73,7 @@ def test_file_inventory_schema_tables_and_indexes_exist(db: CharactersRAGDB) -> 
 def test_begin_scan_creates_queued_record_and_updates_root_state(db: CharactersRAGDB) -> None:
     root = _workspace_with_root(db)
 
-    scan = db.begin_workspace_file_inventory_scan(
+    scan = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-1",
         "root-1",
         root["version"],
@@ -86,7 +86,7 @@ def test_begin_scan_creates_queued_record_and_updates_root_state(db: CharactersR
     assert scan["root_version"] == root["version"]
     assert scan["state"] == "queued"
     assert scan["job_id"] is None
-    stored_root = db.get_workspace_primary_root("ws-1")
+    stored_root = db.workspace_store.get_workspace_primary_root("ws-1")
     assert stored_root is not None
     assert stored_root["file_inventory_state"] == "queued"
 
@@ -94,14 +94,14 @@ def test_begin_scan_creates_queued_record_and_updates_root_state(db: CharactersR
 def test_begin_scan_reuses_active_scan_only_after_job_is_attached(db: CharactersRAGDB) -> None:
     root = _workspace_with_root(db)
 
-    orphaned = db.begin_workspace_file_inventory_scan(
+    orphaned = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-1",
         "root-1",
         root["version"],
         "policy-a",
         requested_by="user-1",
     )
-    fresh = db.begin_workspace_file_inventory_scan(
+    fresh = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-1",
         "root-1",
         root["version"],
@@ -110,8 +110,8 @@ def test_begin_scan_reuses_active_scan_only_after_job_is_attached(db: Characters
     )
     assert fresh["scan_id"] != orphaned["scan_id"]
 
-    attached = db.attach_workspace_file_inventory_job(fresh["scan_id"], {"id": 42, "uuid": "job-42"})
-    retry = db.begin_workspace_file_inventory_scan(
+    attached = db.workspace_store.attach_workspace_file_inventory_job(fresh["scan_id"], {"id": 42, "uuid": "job-42"})
+    retry = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-1",
         "root-1",
         root["version"],
@@ -123,7 +123,7 @@ def test_begin_scan_reuses_active_scan_only_after_job_is_attached(db: Characters
 
 def test_attach_job_is_idempotent_but_rejects_different_job(db: CharactersRAGDB) -> None:
     root = _workspace_with_root(db)
-    scan = db.begin_workspace_file_inventory_scan(
+    scan = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-1",
         "root-1",
         root["version"],
@@ -131,17 +131,17 @@ def test_attach_job_is_idempotent_but_rejects_different_job(db: CharactersRAGDB)
         requested_by="user-1",
     )
 
-    attached = db.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 42, "uuid": "job-42"})
-    retried = db.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 42, "uuid": "job-42"})
+    attached = db.workspace_store.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 42, "uuid": "job-42"})
+    retried = db.workspace_store.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 42, "uuid": "job-42"})
 
     assert retried["job_id"] == attached["job_id"]
     with pytest.raises(ConflictError):
-        db.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 43, "uuid": "job-43"})
+        db.workspace_store.attach_workspace_file_inventory_job(scan["scan_id"], {"id": 43, "uuid": "job-43"})
 
 
 def test_enqueue_failure_marks_scan_and_root_failed_and_allows_retry(db: CharactersRAGDB) -> None:
     root = _workspace_with_root(db)
-    scan = db.begin_workspace_file_inventory_scan(
+    scan = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-1",
         "root-1",
         root["version"],
@@ -149,11 +149,11 @@ def test_enqueue_failure_marks_scan_and_root_failed_and_allows_retry(db: Charact
         requested_by="user-1",
     )
 
-    failed = db.mark_workspace_file_inventory_enqueue_failed(
+    failed = db.workspace_store.mark_workspace_file_inventory_enqueue_failed(
         scan["scan_id"],
         [{"path_hint": "/Users/example/project/private.txt", "message": "Queue failed"}],
     )
-    retry = db.begin_workspace_file_inventory_scan(
+    retry = db.workspace_store.begin_workspace_file_inventory_scan(
         "ws-1",
         "root-1",
         root["version"],
@@ -163,7 +163,7 @@ def test_enqueue_failure_marks_scan_and_root_failed_and_allows_retry(db: Charact
 
     assert failed["state"] == "failed"
     assert "path_hint" not in json.loads(failed["diagnostics_json"])[0]
-    stored_root = db.get_workspace_primary_root("ws-1")
+    stored_root = db.workspace_store.get_workspace_primary_root("ws-1")
     assert stored_root is not None
     assert stored_root["file_inventory_state"] == "queued"
     assert retry["scan_id"] != scan["scan_id"]
@@ -173,20 +173,20 @@ def test_scan_completion_status_and_stale_projection(db: CharactersRAGDB) -> Non
     root = _workspace_with_root(db)
     scan = _begin_attached_scan(db, root_version=root["version"])
 
-    scanning = db.mark_workspace_file_inventory_scanning(scan["scan_id"])
+    scanning = db.workspace_store.mark_workspace_file_inventory_scanning(scan["scan_id"])
     assert scanning["state"] == "scanning"
-    stored_root = db.get_workspace_primary_root("ws-1")
+    stored_root = db.workspace_store.get_workspace_primary_root("ws-1")
     assert stored_root is not None
     assert stored_root["file_inventory_state"] == "scanning"
 
-    completed = db.complete_workspace_file_inventory_scan(
+    completed = db.workspace_store.complete_workspace_file_inventory_scan(
         scan["scan_id"],
         "current",
         {"files": "2", "directories": 1, "diagnostics": -1},
         [],
         root_snapshot_token="snapshot-1",
     )
-    status = db.get_workspace_file_inventory_status("ws-1")
+    status = db.workspace_store.get_workspace_file_inventory_status("ws-1")
 
     assert completed["state"] == "current"
     assert status["state"] == "current"
@@ -194,16 +194,16 @@ def test_scan_completion_status_and_stale_projection(db: CharactersRAGDB) -> Non
     assert set(status["counts"]) == set(INVENTORY_COUNT_KEYS)
     assert status["counts"]["files"] == 2
     assert status["counts"]["diagnostics"] == 0
-    current_root = db.get_workspace_primary_root("ws-1")
+    current_root = db.workspace_store.get_workspace_primary_root("ws-1")
     assert current_root is not None
-    db.update_workspace_project_root_state(
+    db.workspace_store.update_workspace_project_root_state(
         "ws-1",
         "root-1",
         {"git_state": "clean"},
         expected_version=current_root["version"],
     )
 
-    stale_status = db.get_workspace_file_inventory_status("ws-1")
+    stale_status = db.workspace_store.get_workspace_file_inventory_status("ws-1")
 
     assert stale_status["state"] == "stale"
     assert stale_status["durable_state"] == "current"
@@ -214,7 +214,7 @@ def test_scan_completion_status_and_stale_projection(db: CharactersRAGDB) -> Non
 def test_status_for_unscanned_root_is_not_started(db: CharactersRAGDB) -> None:
     _workspace_with_root(db)
 
-    status = db.get_workspace_file_inventory_status("ws-1")
+    status = db.workspace_store.get_workspace_file_inventory_status("ws-1")
 
     assert status["state"] == "not_started"
     assert status["scan_id"] is None
@@ -224,29 +224,29 @@ def test_status_for_unscanned_root_is_not_started(db: CharactersRAGDB) -> None:
 def test_root_version_mismatch_failure_keeps_previous_completed_scan_stale(db: CharactersRAGDB) -> None:
     root = _workspace_with_root(db)
     scan_1 = _begin_attached_scan(db, root_version=root["version"])
-    db.complete_workspace_file_inventory_scan(
+    db.workspace_store.complete_workspace_file_inventory_scan(
         scan_1["scan_id"],
         "current",
         {"files": 1},
         [],
         root_snapshot_token="snapshot-1",
     )
-    current_root = db.get_workspace_primary_root("ws-1")
+    current_root = db.workspace_store.get_workspace_primary_root("ws-1")
     assert current_root is not None
-    db.update_workspace_project_root_state(
+    db.workspace_store.update_workspace_project_root_state(
         "ws-1",
         "root-1",
         {"git_state": "clean"},
         expected_version=current_root["version"],
     )
-    changed_root = db.get_workspace_primary_root("ws-1")
+    changed_root = db.workspace_store.get_workspace_primary_root("ws-1")
     assert changed_root is not None
     scan_2 = _begin_attached_scan(
         db,
         root_version=changed_root["version"],
         policy_fingerprint="policy-b",
     )
-    db.complete_workspace_file_inventory_scan(
+    db.workspace_store.complete_workspace_file_inventory_scan(
         scan_2["scan_id"],
         "failed",
         {},
@@ -254,7 +254,7 @@ def test_root_version_mismatch_failure_keeps_previous_completed_scan_stale(db: C
         root_snapshot_token=None,
     )
 
-    status = db.get_workspace_file_inventory_status("ws-1")
+    status = db.workspace_store.get_workspace_file_inventory_status("ws-1")
 
     assert status["state"] == "stale"
     assert status["durable_state"] == "current"
@@ -265,8 +265,8 @@ def test_root_version_mismatch_failure_keeps_previous_completed_scan_stale(db: C
 def test_replace_items_tracks_full_and_partial_scan_coverage(db: CharactersRAGDB) -> None:
     root = _workspace_with_root(db)
     scan_1 = _begin_attached_scan(db, root_version=root["version"])
-    db.complete_workspace_file_inventory_scan(scan_1["scan_id"], "current", {}, [], root_snapshot_token="snapshot-1")
-    db.replace_workspace_file_inventory_items(
+    db.workspace_store.complete_workspace_file_inventory_scan(scan_1["scan_id"], "current", {}, [], root_snapshot_token="snapshot-1")
+    db.workspace_store.replace_workspace_file_inventory_items(
         "ws-1",
         "root-1",
         scan_1["scan_id"],
@@ -278,8 +278,8 @@ def test_replace_items_tracks_full_and_partial_scan_coverage(db: CharactersRAGDB
     )
 
     scan_2 = _begin_attached_scan(db, root_version=root["version"], policy_fingerprint="policy-b")
-    db.complete_workspace_file_inventory_scan(scan_2["scan_id"], "partial", {}, [], root_snapshot_token="snapshot-2")
-    db.replace_workspace_file_inventory_items(
+    db.workspace_store.complete_workspace_file_inventory_scan(scan_2["scan_id"], "partial", {}, [], root_snapshot_token="snapshot-2")
+    db.workspace_store.replace_workspace_file_inventory_items(
         "ws-1",
         "root-1",
         scan_2["scan_id"],
@@ -297,8 +297,8 @@ def test_replace_items_tracks_full_and_partial_scan_coverage(db: CharactersRAGDB
     ]
 
     scan_3 = _begin_attached_scan(db, root_version=root["version"], policy_fingerprint="policy-c")
-    db.complete_workspace_file_inventory_scan(scan_3["scan_id"], "current", {}, [], root_snapshot_token="snapshot-3")
-    db.replace_workspace_file_inventory_items(
+    db.workspace_store.complete_workspace_file_inventory_scan(scan_3["scan_id"], "current", {}, [], root_snapshot_token="snapshot-3")
+    db.workspace_store.replace_workspace_file_inventory_items(
         "ws-1",
         "root-1",
         scan_3["scan_id"],
@@ -319,8 +319,8 @@ def test_replace_items_tracks_full_and_partial_scan_coverage(db: CharactersRAGDB
 def test_item_listing_filters_ignored_paths_and_paginates_by_relative_path(db: CharactersRAGDB) -> None:
     root = _workspace_with_root(db)
     scan = _begin_attached_scan(db, root_version=root["version"])
-    db.complete_workspace_file_inventory_scan(scan["scan_id"], "current", {}, [], root_snapshot_token="snapshot-1")
-    db.replace_workspace_file_inventory_items(
+    db.workspace_store.complete_workspace_file_inventory_scan(scan["scan_id"], "current", {}, [], root_snapshot_token="snapshot-1")
+    db.workspace_store.replace_workspace_file_inventory_items(
         "ws-1",
         "root-1",
         scan["scan_id"],
@@ -333,9 +333,9 @@ def test_item_listing_filters_ignored_paths_and_paginates_by_relative_path(db: C
         scan_coverage_complete=True,
     )
 
-    page = db.list_workspace_file_inventory_items("ws-1", prefix="src/", limit=1)
-    next_page = db.list_workspace_file_inventory_items("ws-1", prefix="src/", cursor=page["next_cursor"], limit=5)
-    all_items = db.list_workspace_file_inventory_items("ws-1", include_ignored=True, limit=10)
+    page = db.workspace_store.list_workspace_file_inventory_items("ws-1", prefix="src/", limit=1)
+    next_page = db.workspace_store.list_workspace_file_inventory_items("ws-1", prefix="src/", cursor=page["next_cursor"], limit=5)
+    all_items = db.workspace_store.list_workspace_file_inventory_items("ws-1", include_ignored=True, limit=10)
 
     assert [item["relative_path"] for item in page["items"]] == ["src/a.py"]
     assert [item["relative_path"] for item in next_page["items"]] == ["src/c.py"]
@@ -353,14 +353,14 @@ def test_item_listing_rejects_invalid_cursor_as_input_error(db: CharactersRAGDB)
     _workspace_with_root(db)
 
     with pytest.raises(InputError):
-        db.list_workspace_file_inventory_items("ws-1", cursor="not-base64")
+        db.workspace_store.list_workspace_file_inventory_items("ws-1", cursor="not-base64")
 
 
 def test_root_replacement_and_workspace_hard_delete_clean_inventory_rows(db: CharactersRAGDB) -> None:
     root = _workspace_with_root(db)
     scan = _begin_attached_scan(db, root_version=root["version"])
-    db.complete_workspace_file_inventory_scan(scan["scan_id"], "current", {}, [], root_snapshot_token="snapshot-1")
-    db.replace_workspace_file_inventory_items(
+    db.workspace_store.complete_workspace_file_inventory_scan(scan["scan_id"], "current", {}, [], root_snapshot_token="snapshot-1")
+    db.workspace_store.replace_workspace_file_inventory_items(
         "ws-1",
         "root-1",
         scan["scan_id"],
@@ -368,16 +368,16 @@ def test_root_replacement_and_workspace_hard_delete_clean_inventory_rows(db: Cha
         scan_coverage_complete=True,
     )
 
-    db.upsert_workspace_primary_root("ws-1", {"root_id": "root-2", "backend": "host_local"})
+    db.workspace_store.upsert_workspace_primary_root("ws-1", {"root_id": "root-2", "backend": "host_local"})
 
     assert db.execute_query("SELECT COUNT(*) AS c FROM workspace_file_inventory_scans").fetchone()["c"] == 0
     assert db.execute_query("SELECT COUNT(*) AS c FROM workspace_file_inventory_items").fetchone()["c"] == 0
 
-    refreshed_root = db.get_workspace_primary_root("ws-1")
+    refreshed_root = db.workspace_store.get_workspace_primary_root("ws-1")
     assert refreshed_root is not None
     scan = _begin_attached_scan(db, root_id="root-2", root_version=refreshed_root["version"])
-    db.complete_workspace_file_inventory_scan(scan["scan_id"], "current", {}, [], root_snapshot_token="snapshot-2")
-    db.replace_workspace_file_inventory_items(
+    db.workspace_store.complete_workspace_file_inventory_scan(scan["scan_id"], "current", {}, [], root_snapshot_token="snapshot-2")
+    db.workspace_store.replace_workspace_file_inventory_items(
         "ws-1",
         "root-2",
         scan["scan_id"],
@@ -385,7 +385,7 @@ def test_root_replacement_and_workspace_hard_delete_clean_inventory_rows(db: Cha
         scan_coverage_complete=True,
     )
 
-    db.hard_delete_workspace("ws-1")
+    db.workspace_store.hard_delete_workspace("ws-1")
 
     assert db.execute_query("SELECT COUNT(*) AS c FROM workspace_file_inventory_scans").fetchone()["c"] == 0
     assert db.execute_query("SELECT COUNT(*) AS c FROM workspace_file_inventory_items").fetchone()["c"] == 0

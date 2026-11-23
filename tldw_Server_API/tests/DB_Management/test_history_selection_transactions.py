@@ -513,7 +513,7 @@ def test_regenerate_existing_input_replay_refuses_changed_proof_result_or_scope(
         cid, selection, reply, owner_client_id="alice", owner_key=OWNER_KEY
     )
     if tamper == "workspace_scope":
-        db.upsert_workspace("other", "Other")
+        db.workspace_store.upsert_workspace("other", "Other")
     with db.transaction() as conn:
         if tamper == "changed_proof":
             authority = json.loads(conn.execute(
@@ -609,7 +609,7 @@ def test_settlement_survives_settings_but_rejects_workspace_scope_change(history
     accepted = admit(db, cid, selected(db, cid))
     db.upsert_conversation_settings(cid, {"model": "changed"})
     settle(db, cid, accepted)
-    db.upsert_workspace("other", "Other")
+    db.workspace_store.upsert_workspace("other", "Other")
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET scope_type = 'workspace', workspace_id = 'other' WHERE id = ?", (cid,))
     with pytest.raises(HistorySelectionError, match="stale_scope"):
@@ -655,7 +655,7 @@ def test_history_sqlite_function_follows_real_connection_lifetime(history_db, tm
         snapshot(other, other_cid, conn=second_conn)
         assert len(snapshot(db, cid, conn=first_conn).nodes) == 3
         from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
-        assert len(MessageStore(db).get_conversation_history_snapshot(
+        assert len(MessageStore(db.ctx).get_conversation_history_snapshot(
             cid, owner_client_id="alice", owner_key=OWNER_KEY, conn=first_conn).nodes) == 3
     finally:
         cursor.close()
@@ -1028,7 +1028,7 @@ def test_native_admission_capture_refuses_changed_input_or_capture(admission_cap
     elif drift == "owner":
         reference["owner_key"] = "other owner"
     elif drift == "scope":
-        db.upsert_workspace("other", "Changed scope", initial_assistant_opt_out=True)
+        db.workspace_store.upsert_workspace("other", "Changed scope", initial_assistant_opt_out=True)
         current = db.get_conversation_by_id(cid)
         db.upsert_conversation_from_sync(
             conversation_id=cid, title=current["title"], sync_client_id="alice",

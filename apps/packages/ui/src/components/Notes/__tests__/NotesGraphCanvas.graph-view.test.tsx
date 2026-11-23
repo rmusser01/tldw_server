@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -326,6 +333,143 @@ describe("NotesGraphCanvas graph view", () => {
     expect(mockCyInstance.destroy).toHaveBeenCalled()
   })
 
+  it("labels tag nodes and explains the node shapes (NL-14)", async () => {
+    render(
+      <NotesGraphCanvas
+        graph={graph}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual", "wikilink"])}
+        provisionalOverlays={[]}
+        showProvisional={false}
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalled())
+    const config = mockCytoscapeFactory.mock.calls[0]?.[0]
+    const tagStyle = config.style.find(
+      (entry) => entry.selector === 'node[type="tag"]'
+    )
+    // Tag nodes were unlabelled squares; only the focused note had a name.
+    expect(tagStyle?.style.label).toBe("data(label)")
+
+    const legend = screen.getByTestId("notes-graph-node-legend")
+    expect(legend).toHaveAccessibleName("Node shapes")
+    expect(within(legend).getByText("Note")).toBeInTheDocument()
+    expect(within(legend).getByText("Tag")).toBeInTheDocument()
+    // This graph has no source nodes, so the legend does not list them.
+    expect(within(legend).queryByText("Source")).not.toBeInTheDocument()
+  })
+
+  it("labels links on hover or selection only, and hides them while panning, in a large graph (NL-11)", async () => {
+    const notes = Array.from({ length: 160 }, (_, index) => ({
+      ...graph.nodes[0],
+      id: `note:n${index}`,
+      label: `Note ${index}`
+    }))
+    const links = notes.slice(1).map((note, index) => ({
+      ...graph.edges[0],
+      id: `edge:${index}`,
+      source: "note:n0",
+      target: note.id
+    }))
+    render(
+      <NotesGraphCanvas
+        graph={{ ...graph, nodes: notes, edges: links }}
+        layout="concentric"
+        focusNoteId="n0"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual"])}
+        provisionalOverlays={[]}
+        showProvisional={false}
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalled())
+    const config = mockCytoscapeFactory.mock.calls[0]?.[0] as CytoscapeTestConfig & {
+      hideEdgesOnViewport?: boolean
+    }
+    const edgeStyle = config.style.find((entry) => entry.selector === "edge")
+    const shownLabel = config.style.find(
+      (entry) => entry.selector === "edge.graph-label-hovered, edge:selected"
+    )
+    expect(edgeStyle?.style.label).toBe("")
+    expect(shownLabel?.style.label).toBe("data(displayLabel)")
+    expect(config.hideEdgesOnViewport).toBe(true)
+  })
+
+  it("never hands Cytoscape an edge whose ends it does not draw (NL-11 review)", async () => {
+    const orphanOverlay = {
+      edge: {
+        ...overlays[0].edge,
+        id: "suggestion-edge:orphan",
+        suggestionId: "orphan",
+        source: "note:hidden",
+        target: "note:b"
+      },
+      node: null
+    }
+    render(
+      <NotesGraphCanvas
+        graph={{
+          ...graph,
+          edges: [
+            ...graph.edges,
+            { ...graph.edges[0], id: "edge:dangling", target: "note:gone" }
+          ]
+        }}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual", "wikilink"])}
+        provisionalOverlays={[...overlays, orphanOverlay]}
+        showProvisional
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalled())
+    const config = mockCytoscapeFactory.mock.calls[0]?.[0] as CytoscapeTestConfig
+    const nodeIds = new Set(
+      config.elements
+        .filter((element) => element.data.source === undefined)
+        .map((element) => String(element.data.id))
+    )
+    const edges = config.elements.filter((element) => element.data.source !== undefined)
+    expect(edges.length).toBeGreaterThan(0)
+    for (const edge of edges) {
+      expect(nodeIds.has(String(edge.data.source))).toBe(true)
+      expect(nodeIds.has(String(edge.data.target))).toBe(true)
+    }
+    expect(edges.map((edge) => edge.data.id)).toContain("suggestion-edge:s1")
+  })
+
+  it("keeps every link labelled in a small graph", async () => {
+    render(
+      <NotesGraphCanvas
+        graph={graph}
+        layout="dagre"
+        focusNoteId="a"
+        selectedNodeId={null}
+        visibleEdgeTypes={new Set(["manual", "wikilink"])}
+        provisionalOverlays={[]}
+        showProvisional={false}
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(mockCytoscapeFactory).toHaveBeenCalled())
+    const config = mockCytoscapeFactory.mock.calls[0]?.[0] as CytoscapeTestConfig & {
+      hideEdgesOnViewport?: boolean
+    }
+    const edgeStyle = config.style.find((entry) => entry.selector === "edge")
+    expect(edgeStyle?.style.label).toBe("data(displayLabel)")
+    expect(config.hideEdgesOnViewport).toBe(false)
+  })
+
   it("filters authoritative edges and renders provisional nodes and edges with non-color styling", async () => {
     render(
       <NotesGraphCanvas
@@ -620,7 +764,10 @@ describe("NotesGraphCanvas graph view", () => {
         ?.style["line-style"]
     ).toBe("dashed")
     expect(screen.getByTestId("notes-graph-edge-legend")).toHaveTextContent(
-      /Authoritative.*Similar content.*Suggestions/
+      /Saved links.*Similar content.*Suggestions/
+    )
+    expect(screen.getByTestId("notes-graph-edge-legend")).not.toHaveTextContent(
+      "Authoritative"
     )
   })
 
@@ -869,11 +1016,15 @@ describe("NotesGraphToolbar controls", () => {
   it("uses bounded radius, node-limit, layout, and edge-filter controls", () => {
     render(<NotesGraphToolbar {...toolbarProps} />)
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Graph radius" }), {
-      target: { value: "2" }
-    })
+    fireEvent.click(screen.getByRole("button", { name: "Graph settings" }))
     fireEvent.change(
-      screen.getByRole("spinbutton", { name: "Maximum graph nodes" }),
+      screen.getByRole("combobox", { name: "Distance from focus note" }),
+      {
+        target: { value: "2" }
+      }
+    )
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: "Most items shown in the graph" }),
       {
         target: { value: "280" }
       }
@@ -907,6 +1058,69 @@ describe("NotesGraphToolbar controls", () => {
     expect(toolbarProps.onLayoutChange).toHaveBeenCalledWith("grid")
     expect(toolbarProps.onToggleEdgeType).toHaveBeenCalledWith("manual")
     expect(toolbarProps.onToggleProvisional).toHaveBeenCalled()
+  })
+
+  it("keeps distance, item limit and layout in a Graph settings popover with plain labels (NL-14)", () => {
+    render(<NotesGraphToolbar {...toolbarProps} />)
+
+    // Radius, Max nodes and Layout no longer sit inline in the toolbar.
+    expect(
+      screen.queryByRole("combobox", { name: "Graph layout" })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText("Radius")).not.toBeInTheDocument()
+    expect(screen.queryByText("Max nodes")).not.toBeInTheDocument()
+
+    const settings = screen.getByRole("button", { name: "Graph settings" })
+    expect(settings).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(settings)
+    expect(settings).toHaveAttribute("aria-expanded", "true")
+
+    const panel = screen.getByRole("group", { name: "Graph settings" })
+    expect(settings).toHaveAttribute("aria-controls", panel.id)
+    expect(within(panel).getByText("Distance from focus")).toBeInTheDocument()
+    expect(within(panel).getByText("Most items shown")).toBeInTheDocument()
+    const distanceOptions = within(
+      within(panel).getByRole("combobox", { name: "Distance from focus note" })
+    ).getAllByRole("option")
+    expect(distanceOptions.map((option) => option.textContent)).toEqual([
+      "1 link away",
+      "2 links away"
+    ])
+    const layoutOptions = within(
+      within(panel).getByRole("combobox", { name: "Graph layout" })
+    ).getAllByRole("option")
+    expect(layoutOptions.map((option) => option.textContent)).toEqual([
+      "Tree",
+      "Circle",
+      "Grid",
+      "Rings"
+    ])
+
+    fireEvent.keyDown(panel, { key: "Escape" })
+    expect(settings).toHaveAttribute("aria-expanded", "false")
+    expect(
+      screen.queryByRole("group", { name: "Graph settings" })
+    ).not.toBeInTheDocument()
+    expect(settings).toHaveFocus()
+  })
+
+  it("closes Graph settings when focus moves out of it, not within it", () => {
+    render(<NotesGraphToolbar {...toolbarProps} />)
+    const settings = screen.getByRole("button", { name: "Graph settings" })
+    fireEvent.click(settings)
+    const panel = screen.getByRole("group", { name: "Graph settings" })
+    const layout = within(panel).getByRole("combobox", { name: "Graph layout" })
+    const distance = within(panel).getByRole("combobox", { name: "Distance from focus note" })
+
+    // Within the popover, and a blur with nowhere to go (a click on the panel), keep it open.
+    fireEvent.blur(layout, { relatedTarget: distance })
+    fireEvent.blur(layout, { relatedTarget: null })
+    expect(settings).toHaveAttribute("aria-expanded", "true")
+
+    // Tabbing on to the next toolbar control closes it.
+    fireEvent.blur(layout, { relatedTarget: screen.getByRole("button", { name: "Focused" }) })
+    expect(settings).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByRole("group", { name: "Graph settings" })).not.toBeInTheDocument()
   })
 
   it("uses the semantic foreground token for the selected scope", () => {

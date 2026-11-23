@@ -25,7 +25,7 @@ COPY apps/mcp-unified/src /app/apps/mcp-unified/src
 COPY packages/tldw_profile_core /app/packages/tldw_profile_core
 
 RUN pip install --upgrade pip && \
-    pip install --prefix=/install .
+    pip install --prefix=/install ".[TTS_kitten_tts]"
 
 
 FROM python:3.12-slim AS runtime
@@ -65,9 +65,10 @@ COPY --chown=appuser:appuser LICENSES /app/LICENSES
 COPY --chown=appuser:appuser THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt
 COPY Dockerfiles/entrypoints/tldw-app-first-run.sh /usr/local/bin/tldw-app-first-run
 
-# Create writable runtime DB directory without copying host runtime data.
+# Create writable runtime directories without copying host data.
 RUN mkdir -p /app/Databases && \
     chown appuser:appuser /app/Databases && \
+    install -d -o appuser -g appuser /app/cache/kitten_tts && \
     chmod +x /usr/local/bin/tldw-app-first-run
 USER appuser
 

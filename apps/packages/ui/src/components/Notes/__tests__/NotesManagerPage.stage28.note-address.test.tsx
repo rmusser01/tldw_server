@@ -7,9 +7,27 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import OptionNotes from "@/routes/option-notes"
+
+// The web build's Next shim keys each location by router.asPath (pathname +
+// search), so two visits to the same address share a key. Tests opt in.
+const routerKeys = vi.hoisted(() => ({ shim: false }))
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+  return {
+    ...actual,
+    useLocation: () => {
+      const location = actual.useLocation()
+      const shim = routerKeys.shim
+      return React.useMemo(
+        () => (shim ? { ...location, key: `${location.pathname}${location.search}` } : location),
+        [location, shim]
+      )
+    }
+  }
+})
 
 const {
   mockBgRequest,
@@ -140,6 +158,16 @@ const BrowserChrome = () => {
       <output data-testid="harness-address">{`${location.pathname}${location.search}`}</output>
       <button type="button" onClick={() => navigate(-1)}>Browser Back</button>
       <button type="button" onClick={() => navigate(1)}>Browser Forward</button>
+      <button type="button" onClick={() => navigate("/notes?new=1")}>Palette New note</button>
+      <button
+        type="button"
+        onClick={() => {
+          const params = new URLSearchParams(location.search)
+          params.set("note", "12")
+          navigate(`/notes?${params.toString()}`)
+        }}>
+        Open Beta via address
+      </button>
     </>
   )
 }
@@ -178,7 +206,7 @@ describe("Notes addresses (XP-05)", { timeout: 60_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
-    document.title = "tldw Assistant — Options"
+    document.title = "Options | tldw"
     canonicalBoundary.storage = {
       serverUrl: "https://notes.test",
       authMode: "multi-user",
@@ -284,9 +312,175 @@ describe("Notes addresses (XP-05)", { timeout: 60_000 }, () => {
     await waitFor(() => expect(address()).toBe("/notes"))
   })
 
+  it("starts a new note at /notes?new=1 instead of reopening the last note (XP-06)", async () => {
+    mockGetSetting.mockImplementation(async (setting: { key?: string }) => {
+      const key = String(setting?.key || "")
+      if (key.startsWith("tldw:notesRecentOpened:")) return [{ id: "12", title: "Beta note" }]
+      if (key === "tldw:lastNoteId") return "11"
+      return null
+    })
+
+    renderNotesRoute(["/chat", "/notes?new=1"])
+    await waitForNotesReady()
+
+    await waitFor(() => expect(address()).toBe("/notes"))
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Note title" })).toHaveFocus())
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    expect(editor()).toHaveValue("")
+    const openedNotes = mockBgRequest.mock.calls
+      .map(([request]) => String(request?.path || ""))
+      .filter((path) => /^\/api\/v1\/notes\/\d+$/.test(path))
+    expect(openedNotes).toEqual([])
+    // The request is consumed: Back returns to the chat page.
+    fireEvent.click(screen.getByRole("button", { name: "Browser Back" }))
+    await waitFor(() => expect(address()).toBe("/chat"))
+  })
+
+  it("starts a new note when the palette asks while a note is open (XP-06)", async () => {
+    renderNotesRoute(["/notes?note=11"])
+    await waitFor(() => expect(editor()).toHaveValue("Alpha body"))
+
+    fireEvent.click(screen.getByRole("button", { name: "Palette New note" }))
+
+    await waitFor(() => expect(editor()).toHaveValue(""))
+    await waitFor(() => expect(address()).toBe("/notes"))
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Note title" })).toHaveFocus())
+  })
+
   it("names the open note in the page title", async () => {
     renderNotesRoute(["/notes?note=11"])
 
     await waitFor(() => expect(document.title).toBe("Alpha note · Notes | tldw"))
+  })
+})
+
+describe.each([
+  ["router keys", false],
+  ["web shim keys (pathname + search)", true]
+])("New note requests (XP-06) with %s", { timeout: 60_000 }, (_label, shim) => {
+  beforeEach(() => {
+    routerKeys.shim = shim
+    vi.clearAllMocks()
+    localStorage.clear()
+    canonicalBoundary.storage = {
+      serverUrl: "https://notes.test",
+      authMode: "multi-user",
+      accessToken: token(7, 1),
+      tldwConfig: {
+        serverUrl: "https://notes.test",
+        authMode: "multi-user",
+        accessToken: token(7, 1),
+        refreshToken: "refresh-one"
+      }
+    }
+    canonicalBoundary.getConfig
+      .mockReset()
+      .mockImplementation(async () => canonicalBoundary.storage.tldwConfig)
+    mockConfirmDanger.mockResolvedValue(true)
+    mockGetSetting.mockResolvedValue(null)
+    mockClearSetting.mockResolvedValue(undefined)
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+      if (path.startsWith("/api/v1/notes/?")) {
+        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+      }
+      const detail = path.match(/^\/api\/v1\/notes\/(\d+)$/)
+      if (detail && method === "GET" && NOTES[detail[1]]) {
+        return {
+          id: Number(detail[1]),
+          ...NOTES[detail[1]],
+          metadata: { keywords: [] },
+          version: 1,
+          last_modified: "2026-10-19T10:00:00.000Z"
+        }
+      }
+      return {}
+    })
+  })
+  afterEach(() => {
+    routerKeys.shim = false
+  })
+
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+  const writes = () =>
+    mockBgRequest.mock.calls
+      .map(([request]) => request as { method?: string; path?: string })
+      .filter((request) => String(request?.method || "GET").toUpperCase() !== "GET")
+
+  it("starts a second new note during the same visit", async () => {
+    renderNotesRoute(["/notes?note=11"])
+    await waitFor(() => expect(editor()).toHaveValue("Alpha body"))
+
+    fireEvent.click(screen.getByRole("button", { name: "Palette New note" }))
+    await waitFor(() => expect(address()).toBe("/notes"))
+    await waitFor(() => expect(editor()).toHaveValue(""))
+
+    const title = screen.getByRole("textbox", { name: "Note title" })
+    await waitFor(() => expect(title).toHaveFocus())
+    act(() => editor().focus())
+    fireEvent.click(screen.getByRole("button", { name: "Palette New note" }))
+
+    // The second request starts another draft (its title takes focus) and leaves the address.
+    await waitFor(() => expect(title).toHaveFocus())
+    await waitFor(() => expect(address()).toBe("/notes"))
+    expect(editor()).toHaveValue("")
+  })
+
+  it("opens a note after New note instead of starting another draft", async () => {
+    renderNotesRoute(["/notes?note=11"])
+    await waitFor(() => expect(editor()).toHaveValue("Alpha body"))
+    fireEvent.click(screen.getByRole("button", { name: "Palette New note" }))
+    await waitFor(() => expect(address()).toBe("/notes"))
+    fireEvent.click(screen.getByRole("button", { name: "Palette New note" }))
+    await settle()
+    expect(address()).toBe("/notes")
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Beta via address" }))
+
+    await waitFor(() => expect(editor()).toHaveValue("Beta body"))
+    await settle()
+    expect(editor()).toHaveValue("Beta body")
+    expect(address()).toBe("/notes?note=12")
+  })
+
+  it("never carries a new-note request into the address of an opened note", async () => {
+    renderNotesRoute(["/notes?new=1&note=12"])
+
+    await waitFor(() => expect(editor()).toHaveValue("Beta body"))
+    await waitFor(() => expect(address()).toBe("/notes?note=12"))
+    await settle()
+    expect(editor()).toHaveValue("Beta body")
+  })
+
+  it("keeps the open note in the address when the user stays on unsaved changes", async () => {
+    const answerGet = mockBgRequest.getMockImplementation()!
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      if (String(request.method || "GET").toUpperCase() !== "GET" && String(request.path).startsWith("/api/v1/notes/11")) {
+        throw Object.assign(new Error("Service unavailable"), { status: 503 })
+      }
+      return answerGet(request)
+    })
+    renderNotesRoute(["/notes?note=11"])
+    await waitFor(() => expect(editor()).toHaveValue("Alpha body"))
+    await waitFor(() => expect(address()).toBe("/notes?note=11"))
+    fireEvent.change(editor(), { target: { value: "Alpha body, edited" } })
+
+    fireEvent.click(screen.getByRole("button", { name: "Palette New note" }))
+    // The save fails, so the page asks; the user stays on the note. The ask
+    // comes about 2 s after the click locally (the page's renders are slow in
+    // jsdom), past the 1 s default on slower CI runners.
+    fireEvent.click(await screen.findByRole("button", { name: "Stay on this note" }, { timeout: 5000 }))
+
+    await waitFor(() => expect(address()).toBe("/notes?note=11"))
+    await settle()
+    expect(editor()).toHaveValue("Alpha body, edited")
+    expect(address()).toBe("/notes?note=11")
+    expect(writes().every((request) => String(request.path).startsWith("/api/v1/notes/11"))).toBe(true)
   })
 })

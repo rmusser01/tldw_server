@@ -137,7 +137,7 @@ def test_postgres_source_review_schema_and_sync_triggers(
         assert sequence_rows[0]["plan_sequence"]  # nosec B101
         assert sequence_rows[0]["occurrence_sequence"]  # nosec B101
 
-        plan_id = db.create_source_review_plan(
+        plan_id = db.workspace_store.create_source_review_plan(
             title="PostgreSQL source review",
             starts_on="2026-07-09",
             timezone_name="UTC",
@@ -161,16 +161,16 @@ def test_postgres_source_review_schema_and_sync_triggers(
                 0
             ]["id"]
         )
-        plans, plan_total = db.list_source_review_plans()
-        due_rows, due_total = db.list_due_source_review_occurrences(now_utc="2026-07-10T00:00:00Z")
-        started = db.start_source_review_occurrence(occurrence_id)
-        resumed = db.start_source_review_occurrence(occurrence_id)
+        plans, plan_total = db.workspace_store.list_source_review_plans()
+        due_rows, due_total = db.workspace_store.list_due_source_review_occurrences(now_utc="2026-07-10T00:00:00Z")
+        started = db.workspace_store.start_source_review_occurrence(occurrence_id)
+        resumed = db.workspace_store.start_source_review_occurrence(occurrence_id)
 
         assert plan_total == 1 and plans[0]["id"] == plan_id  # nosec B101
         assert due_total == 1 and due_rows[0]["id"] == occurrence_id  # nosec B101
         assert started["status"] == "in_progress"  # nosec B101
         assert resumed["version"] == started["version"]  # nosec B101
-        assert db.soft_delete_source_review_plan(plan_id) is True  # nosec B101
+        assert db.workspace_store.soft_delete_source_review_plan(plan_id) is True  # nosec B101
 
         sync_rows = list(
             backend.execute(
@@ -206,7 +206,7 @@ def test_postgres_source_review_rls_isolates_two_principals(
     role_created = False
 
     try:
-        owner_plan_id = owner_db.create_source_review_plan(
+        owner_plan_id = owner_db.workspace_store.create_source_review_plan(
             title="Owner source review",
             starts_on="2026-07-09",
             timezone_name="UTC",
@@ -228,7 +228,7 @@ def test_postgres_source_review_rls_isolates_two_principals(
                 }
             ],
         )
-        other_plan_id = other_db.create_source_review_plan(
+        other_plan_id = other_db.workspace_store.create_source_review_plan(
             title="Other source review",
             starts_on="2026-07-09",
             timezone_name="UTC",

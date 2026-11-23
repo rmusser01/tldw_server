@@ -20,9 +20,9 @@ def db(tmp_path):
         db_path=str(tmp_path / "workspace_memberships.sqlite"),
         client_id="test-client",
     )
-    database.upsert_workspace("ws-1", "Workspace One")
-    database.upsert_workspace("ws-2", "Workspace Two")
-    database.upsert_workspace("ws-3", "Workspace Three")
+    database.workspace_store.upsert_workspace("ws-1", "Workspace One")
+    database.workspace_store.upsert_workspace("ws-2", "Workspace Two")
+    database.workspace_store.upsert_workspace("ws-3", "Workspace Three")
     return database
 
 
@@ -43,7 +43,7 @@ def _set_membership_updated_at(
 
 
 def test_add_workspace_resource_membership_creates_normalized_row(db):
-    row = db.add_workspace_resource_membership(
+    row = db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {
             "resource_type": " media ",
@@ -73,7 +73,7 @@ def test_add_workspace_resource_membership_creates_normalized_row(db):
 
 
 def test_duplicate_workspace_resource_membership_same_request_returns_existing(db):
-    first = db.add_workspace_resource_membership(
+    first = db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {
             "resource_type": "media",
@@ -87,7 +87,7 @@ def test_duplicate_workspace_resource_membership_same_request_returns_existing(d
         user_id="user-1",
     )
 
-    duplicate = db.add_workspace_resource_membership(
+    duplicate = db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {
             "resource_type": " media ",
@@ -115,7 +115,7 @@ def test_duplicate_workspace_resource_membership_same_request_returns_existing(d
     ],
 )
 def test_duplicate_workspace_resource_membership_conflict_raises(db, updates):
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {
             "resource_type": "media",
@@ -129,7 +129,7 @@ def test_duplicate_workspace_resource_membership_conflict_raises(db, updates):
     )
 
     with pytest.raises(ConflictError) as exc_info:
-        db.add_workspace_resource_membership(
+        db.workspace_store.add_workspace_resource_membership(
             "ws-1",
             {
                 "resource_type": "media",
@@ -150,7 +150,7 @@ def test_duplicate_workspace_resource_membership_conflict_raises(db, updates):
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
 def test_workspace_resource_membership_rejects_non_finite_json_values(db, field_name, value):
     with pytest.raises(InputError, match=f"{field_name} must be JSON serializable"):
-        db.add_workspace_resource_membership(
+        db.workspace_store.add_workspace_resource_membership(
             "ws-1",
             {
                 "resource_type": "media",
@@ -163,7 +163,7 @@ def test_workspace_resource_membership_rejects_non_finite_json_values(db, field_
 @pytest.mark.parametrize("field_name", ["provenance", "metadata"])
 def test_workspace_resource_membership_rejects_oversized_json_values(db, field_name):
     with pytest.raises(InputError, match=f"{field_name} exceeds"):
-        db.add_workspace_resource_membership(
+        db.workspace_store.add_workspace_resource_membership(
             "ws-1",
             {
                 "resource_type": "media",
@@ -174,13 +174,13 @@ def test_workspace_resource_membership_rejects_oversized_json_values(db, field_n
 
 
 def test_delete_workspace_resource_membership_soft_deletes_and_default_reads_hide(db):
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "media", "resource_id": "42", "role": "source"},
         user_id="user-1",
     )
 
-    deleted = db.delete_workspace_resource_membership(
+    deleted = db.workspace_store.delete_workspace_resource_membership(
         "ws-1",
         "media",
         "42",
@@ -191,10 +191,10 @@ def test_delete_workspace_resource_membership_soft_deletes_and_default_reads_hid
     assert deleted["deleted"] in (True, 1)
     assert deleted["updated_by_user_id"] == "user-2"
     assert deleted["version"] == 2
-    assert db.get_workspace_resource_membership("ws-1", "media", "42") is None
-    assert db.list_workspace_resource_memberships("ws-1") == []
+    assert db.workspace_store.get_workspace_resource_membership("ws-1", "media", "42") is None
+    assert db.workspace_store.list_workspace_resource_memberships("ws-1") == []
 
-    include_deleted = db.get_workspace_resource_membership(
+    include_deleted = db.workspace_store.get_workspace_resource_membership(
         "ws-1",
         "media",
         "42",
@@ -202,11 +202,11 @@ def test_delete_workspace_resource_membership_soft_deletes_and_default_reads_hid
     )
     assert include_deleted is not None
     assert include_deleted["deleted"] in (True, 1)
-    assert db.delete_workspace_resource_membership("ws-1", "media", "42") is None
+    assert db.workspace_store.delete_workspace_resource_membership("ws-1", "media", "42") is None
 
 
 def test_add_workspace_resource_membership_restores_deleted_row(db):
-    created = db.add_workspace_resource_membership(
+    created = db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {
             "resource_type": "media",
@@ -217,7 +217,7 @@ def test_add_workspace_resource_membership_restores_deleted_row(db):
         },
         user_id="user-1",
     )
-    deleted = db.delete_workspace_resource_membership(
+    deleted = db.workspace_store.delete_workspace_resource_membership(
         "ws-1",
         "media",
         "42",
@@ -225,7 +225,7 @@ def test_add_workspace_resource_membership_restores_deleted_row(db):
     )
     assert deleted is not None
 
-    restored = db.add_workspace_resource_membership(
+    restored = db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {
             "resource_type": "media",
@@ -252,19 +252,19 @@ def test_add_workspace_resource_membership_restores_deleted_row(db):
 
 
 def test_list_workspace_resource_memberships_order_is_deterministic(db):
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "workspace_source", "resource_id": "src-b"},
     )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "media", "resource_id": "99"},
     )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "media", "resource_id": "42"},
     )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "chat", "resource_id": "conv-1"},
     )
@@ -297,7 +297,7 @@ def test_list_workspace_resource_memberships_order_is_deterministic(db):
         "2026-06-07T11:00:00.000Z",
     )
 
-    rows = db.list_workspace_resource_memberships("ws-1")
+    rows = db.workspace_store.list_workspace_resource_memberships("ws-1")
 
     assert [(row["resource_type"], row["resource_id"]) for row in rows] == [
         ("media", "42"),
@@ -313,7 +313,7 @@ def test_list_workspace_resource_memberships_returns_limit_plus_one_for_paginati
         ("media", "99"),
         ("workspace_source", "src-b"),
     ):
-        db.add_workspace_resource_membership(
+        db.workspace_store.add_workspace_resource_membership(
             "ws-1",
             {"resource_type": resource_type, "resource_id": resource_id},
         )
@@ -325,7 +325,7 @@ def test_list_workspace_resource_memberships_returns_limit_plus_one_for_paginati
             "2026-06-07T12:00:00.000Z",
         )
 
-    rows = db.list_workspace_resource_memberships("ws-1", limit=2)
+    rows = db.workspace_store.list_workspace_resource_memberships("ws-1", limit=2)
 
     assert [(row["resource_type"], row["resource_id"]) for row in rows] == [
         ("media", "42"),
@@ -335,30 +335,30 @@ def test_list_workspace_resource_memberships_returns_limit_plus_one_for_paginati
 
 
 def test_list_resource_workspace_memberships_returns_all_active_workspaces(db):
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-2",
         {"resource_type": "media", "resource_id": "42", "role": "source"},
     )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "media", "resource_id": "42", "role": "source"},
     )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-3",
         {"resource_type": "media", "resource_id": "42", "role": "source"},
     )
-    db.delete_workspace_resource_membership("ws-3", "media", "42")
+    db.workspace_store.delete_workspace_resource_membership("ws-3", "media", "42")
     _set_membership_updated_at(db, "ws-1", "media", "42", "2026-06-07T12:00:00.000Z")
     _set_membership_updated_at(db, "ws-2", "media", "42", "2026-06-07T12:00:00.000Z")
 
-    rows = db.list_resource_workspace_memberships("media", "42")
+    rows = db.workspace_store.list_resource_workspace_memberships("media", "42")
 
     assert [row["workspace_id"] for row in rows] == ["ws-1", "ws-2"]
 
 
 def test_list_resource_workspace_memberships_returns_limit_plus_one_for_pagination(db):
     for workspace_id in ("ws-2", "ws-1", "ws-3"):
-        db.add_workspace_resource_membership(
+        db.workspace_store.add_workspace_resource_membership(
             workspace_id,
             {"resource_type": "media", "resource_id": "42", "role": "source"},
         )
@@ -370,31 +370,31 @@ def test_list_resource_workspace_memberships_returns_limit_plus_one_for_paginati
             "2026-06-07T12:00:00.000Z",
         )
 
-    rows = db.list_resource_workspace_memberships("media", "42", limit=2)
+    rows = db.workspace_store.list_resource_workspace_memberships("media", "42", limit=2)
 
     assert [row["workspace_id"] for row in rows] == ["ws-1", "ws-2", "ws-3"]
 
 
 def test_workspace_resource_membership_summary_counts_active_rows(db):
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "media", "resource_id": "42", "role": "source"},
     )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "chat", "resource_id": "chat-1", "role": "conversation"},
     )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "media", "resource_id": "99", "role": "source"},
     )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-2",
         {"resource_type": "media", "resource_id": "42", "role": "source"},
     )
-    db.delete_workspace_resource_membership("ws-1", "media", "99")
+    db.workspace_store.delete_workspace_resource_membership("ws-1", "media", "99")
 
-    summary = db.workspace_resource_membership_summary("ws-1")
+    summary = db.workspace_store.workspace_resource_membership_summary("ws-1")
 
     assert summary == {
         "total": 2,
@@ -404,17 +404,17 @@ def test_workspace_resource_membership_summary_counts_active_rows(db):
 
 
 def test_delete_workspace_preserves_membership_history(db):
-    created = db.add_workspace_resource_membership(
+    created = db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "media", "resource_id": "42", "role": "source"},
     )
-    workspace = db.get_workspace("ws-1")
+    workspace = db.workspace_store.get_workspace("ws-1")
     assert workspace is not None
 
-    assert db.delete_workspace("ws-1", expected_version=workspace["version"]) is True
+    assert db.workspace_store.delete_workspace("ws-1", expected_version=workspace["version"]) is True
 
-    assert db.get_workspace("ws-1") is None
-    preserved = db.get_workspace_resource_membership(
+    assert db.workspace_store.get_workspace("ws-1") is None
+    preserved = db.workspace_store.get_workspace_resource_membership(
         "ws-1",
         "media",
         "42",
@@ -426,15 +426,15 @@ def test_delete_workspace_preserves_membership_history(db):
 
 
 def test_hard_delete_workspace_removes_membership_rows(db):
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {"resource_type": "media", "resource_id": "42", "role": "source"},
     )
 
-    db.hard_delete_workspace("ws-1")
+    db.workspace_store.hard_delete_workspace("ws-1")
 
     assert (
-        db.get_workspace_resource_membership(
+        db.workspace_store.get_workspace_resource_membership(
             "ws-1",
             "media",
             "42",
@@ -463,7 +463,7 @@ def test_workspace_membership_backend_error_wraps_unrelated_errors(db, monkeypat
     )
 
     with pytest.raises(CharactersRAGDBError, match="pg down"):
-        db.add_workspace_resource_membership(
+        db.workspace_store.add_workspace_resource_membership(
             "ws-1",
             {"resource_type": "media", "resource_id": "42"},
         )
@@ -479,7 +479,7 @@ def test_workspace_membership_backend_constraint_error_maps_to_conflict(db, monk
     )
 
     with pytest.raises(ConflictError) as exc_info:
-        db.add_workspace_resource_membership(
+        db.workspace_store.add_workspace_resource_membership(
             "ws-1",
             {"resource_type": "media", "resource_id": "42"},
         )
@@ -551,7 +551,7 @@ def test_restore_deleted_membership_race_returns_already_restored_row(db, monkey
     monkeypatch.setattr(db, "transaction", lambda: _RowcountZeroTransaction(fake_conn))
     monkeypatch.setattr(db, "_get_workspace_resource_membership_with_conn", fake_getter)
 
-    restored = db.add_workspace_resource_membership(
+    restored = db.workspace_store.add_workspace_resource_membership(
         "ws-1",
         {
             "resource_type": "media",
@@ -584,7 +584,7 @@ def test_delete_membership_race_returns_none_for_already_deleted_row(db, monkeyp
     monkeypatch.setattr(db, "transaction", lambda: _RowcountZeroTransaction(fake_conn))
     monkeypatch.setattr(db, "_get_workspace_resource_membership_with_conn", fake_getter)
 
-    deleted = db.delete_workspace_resource_membership(
+    deleted = db.workspace_store.delete_workspace_resource_membership(
         "ws-1",
         "media",
         "42",
@@ -597,7 +597,7 @@ def test_delete_membership_race_returns_none_for_already_deleted_row(db, monkeyp
 
 
 def test_workspace_subresource_public_getters_return_existing_scoped_rows(db):
-    source = db.add_workspace_source(
+    source = db.workspace_store.add_workspace_source(
         "ws-1",
         {
             "id": "src-1",
@@ -606,7 +606,7 @@ def test_workspace_subresource_public_getters_return_existing_scoped_rows(db):
             "source_type": "video",
         },
     )
-    note = db.add_workspace_note(
+    note = db.workspace_store.add_workspace_note(
         "ws-1",
         {
             "title": "Workspace Note",
@@ -614,8 +614,8 @@ def test_workspace_subresource_public_getters_return_existing_scoped_rows(db):
         },
     )
 
-    assert db.get_workspace_source("ws-1", "src-1") == source
-    assert db.get_workspace_note("ws-1", note["id"]) == note
+    assert db.workspace_store.get_workspace_source("ws-1", "src-1") == source
+    assert db.workspace_store.get_workspace_note("ws-1", note["id"]) == note
 
 
 def test_get_conversation_for_workspace_membership_returns_workspace_conversation(db):
@@ -629,7 +629,7 @@ def test_get_conversation_for_workspace_membership_returns_workspace_conversatio
         }
     )
 
-    row = db.get_conversation_for_workspace_membership(conversation_id)
+    row = db.workspace_store.get_conversation_for_workspace_membership(conversation_id)
 
     assert row is not None
     assert row["id"] == conversation_id
@@ -659,7 +659,7 @@ def test_get_conversation_for_workspace_membership_uses_backend_active_deleted_v
     monkeypatch.setattr(db, "_workspace_active_deleted_value", lambda: "ACTIVE")
     monkeypatch.setattr(db, "execute_query", fake_execute)
 
-    assert db.get_conversation_for_workspace_membership("chat-1") is None
+    assert db.workspace_store.get_conversation_for_workspace_membership("chat-1") is None
 
     assert captured
     query, params = captured[0]
@@ -679,7 +679,7 @@ def test_malformed_workspace_membership_json_warning_redacts_payload(db, monkeyp
     )
     secret_payload = '{"api_key": "sk-secret", "path": "/tmp/private"'
 
-    loaded = db._load_workspace_membership_json_object(secret_payload, field_name="metadata_json")
+    loaded = db.workspace_store._load_workspace_membership_json_object(secret_payload, field_name="metadata_json")
 
     assert loaded == {}
     assert captured

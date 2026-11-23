@@ -101,7 +101,7 @@ it("keeps copy disabled and offers a retry when artwork cannot load", async () =
     />
   )
   expect(
-    await screen.findByText("Preview unavailable. Retry to view this Buddy.")
+    await screen.findByText("Preview unavailable. Retry to view this avatar.")
   ).toBeVisible()
   expect(screen.getByRole("button", { name: "Copy as draft" })).toBeDisabled()
   expect(screen.getByRole("button", { name: "Retry preview" })).toBeVisible()

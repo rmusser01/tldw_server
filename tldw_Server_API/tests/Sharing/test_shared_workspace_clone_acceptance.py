@@ -142,12 +142,12 @@ def clone_harness(request, monkeypatch: pytest.MonkeyPatch, tmp_path):
         str(tmp_path / "clone-target.db"),
         client_id="recipient-9",
     )
-    source.upsert_workspace(
+    source.workspace_store.upsert_workspace(
         _SOURCE_WORKSPACE_ID,
         "Evidence review",
         description="Review set",
     )
-    source.add_workspace_source(
+    source.workspace_store.add_workspace_source(
         _SOURCE_WORKSPACE_ID,
         {
             "id": "source-1",
@@ -156,11 +156,11 @@ def clone_harness(request, monkeypatch: pytest.MonkeyPatch, tmp_path):
             "position": 0,
         },
     )
-    source.add_workspace_note(
+    source.workspace_store.add_workspace_note(
         _SOURCE_WORKSPACE_ID,
         {"title": "Research note", "content": "Grounded observation"},
     )
-    source.add_workspace_artifact(
+    source.workspace_store.add_workspace_artifact(
         _SOURCE_WORKSPACE_ID,
         {
             "id": "artifact-1",
@@ -361,12 +361,12 @@ async def test_api_worker_publication_and_archived_replay_are_one_durable_flow(
     assert status.json()["result"]["readiness"]["vector_search"] == (
         "needs_indexing"
     )
-    assert clone_harness.target.get_workspace(operation["workspace_id"])["id"] == (
+    assert clone_harness.target.workspace_store.get_workspace(operation["workspace_id"])["id"] == (
         operation["workspace_id"]
     )
-    assert len(clone_harness.target.list_workspace_sources(operation["workspace_id"])) == 1
-    assert len(clone_harness.target.list_workspace_notes(operation["workspace_id"])) == 1
-    assert len(clone_harness.target.list_workspace_artifacts(operation["workspace_id"])) == 1
+    assert len(clone_harness.target.workspace_store.list_workspace_sources(operation["workspace_id"])) == 1
+    assert len(clone_harness.target.workspace_store.list_workspace_notes(operation["workspace_id"])) == 1
+    assert len(clone_harness.target.workspace_store.list_workspace_artifacts(operation["workspace_id"])) == 1
 
     _archive_job(clone_harness, operation["operation_id"])
     clone_harness.access.error = SharedWorkspaceNotFound()
@@ -417,7 +417,7 @@ async def test_hard_exit_reconciliation_keeps_target_hidden_until_publication(
     before = clone_harness.client.get(admitted["poll_href"])
     assert before.json()["status"] == "running"
     assert before.json()["progress"]["phase"] == "finalizing"
-    assert clone_harness.target.get_workspace(admitted["workspace_id"]) is None
+    assert clone_harness.target.workspace_store.get_workspace(admitted["workspace_id"]) is None
 
     summary = await reconcile_shared_workspace_clone_jobs(
         jobs=clone_harness.jobs,
@@ -428,7 +428,7 @@ async def test_hard_exit_reconciliation_keeps_target_hidden_until_publication(
 
     assert summary["published"] == 1
     assert after.json()["status"] == "succeeded"
-    assert clone_harness.target.get_workspace(admitted["workspace_id"])["id"] == (
+    assert clone_harness.target.workspace_store.get_workspace(admitted["workspace_id"])["id"] == (
         admitted["workspace_id"]
     )
 
@@ -451,7 +451,7 @@ async def test_revocation_before_execution_fails_without_leaving_a_target(
         "message": "Access to the shared workspace ended before the copy completed.",
         "cleanup_state": "complete",
     }
-    assert clone_harness.target.get_workspace(admitted["workspace_id"]) is None
+    assert clone_harness.target.workspace_store.get_workspace(admitted["workspace_id"]) is None
 
 
 @pytest.mark.asyncio
@@ -480,4 +480,4 @@ async def test_fatal_publication_failure_is_cleaned_and_bounded(
     )
     assert status.json()["error"]["cleanup_state"] == "complete"
     assert "private" not in str(status.json())
-    assert clone_harness.target.get_workspace(admitted["workspace_id"]) is None
+    assert clone_harness.target.workspace_store.get_workspace(admitted["workspace_id"]) is None

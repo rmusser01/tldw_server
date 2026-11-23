@@ -78,7 +78,7 @@ export const AboutApp = () => {
                 label: translateMessage(
                   t,
                   "settings:about.chromeVersion",
-                  "tldw Assistant Version"
+                  "tldw Version"
                 ),
                 children: data.chromeVersion
               },

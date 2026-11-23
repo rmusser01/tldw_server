@@ -391,12 +391,12 @@ def test_startup_projection_does_not_change_settings_or_resume_authority(
 ) -> None:
     """Source visibility cannot invent snapshot validity, fences, or greeting settings."""
     db = conversion_db
-    db.upsert_workspace("conversion-origin", "Origin")
+    db.workspace_store.upsert_workspace("conversion-origin", "Origin")
     cid = db.add_conversation({"title": "Converted"}, assistant_startup=AssistantStartup(
         source="workspace_default", workspace_id="conversion-origin", workspace_version=1,
     ))
     if hidden:
-        db.delete_workspace("conversion-origin", expected_version=1)
+        db.workspace_store.delete_workspace("conversion-origin", expected_version=1)
     row = db.get_conversation_by_id(cid)
     settings = {"greetingEnabled": False, "authorNote": "Kept"}
     state = {"behavior_snapshot": {"status": "missing"}, "resume_eligible": False,

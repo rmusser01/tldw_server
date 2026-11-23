@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import schema_sql, sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -18,7 +19,7 @@ def _assert_canonical_uuid4(value: str) -> None:
 def _build_v54_fixture(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, list[int]]:
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             for prior in range(4, 54):
                 db._run_sqlite_linear_migration_step(conn, from_version=prior, target_version=54, initial_version=4)
             assert db._get_db_version(conn) == 54
@@ -59,7 +60,7 @@ def _build_v54_fixture(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[s
         assert historical_v4.count(index) == 1
         historical_v4 = historical_v4.replace(index, "")
     with monkeypatch.context() as patch:
-        patch.setattr(CharactersRAGDB, "_FULL_SCHEMA_SQL_V4", historical_v4)
+        patch.setattr(schema_sql, "_FULL_SCHEMA_SQL_V4", historical_v4)  # read by ``sqlite_schema._apply_schema_v4``
         patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 54)
         patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
         db = CharactersRAGDB(str(db_path), client_id="migration-v55-fixture")

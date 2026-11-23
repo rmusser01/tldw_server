@@ -7,7 +7,8 @@ import { nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-p
 import { useStoreMessageOption } from "@/store/option"
 import { defaultEmbeddingModelForRag } from "~/services/tldw-server"
 import { getIsSimpleInternetSearch } from "@/services/search"
-import { formatPinnedResults } from "@/utils/rag-format"
+import { appendPinnedContext, clearSentNotePins, sendablePins } from "@/utils/note-pins"
+import { isUnpickedNoteCommand } from "../note-mentions"
 import { normalizeChatModelId } from "@/utils/chat-model-availability"
 import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
@@ -18,6 +19,7 @@ import {
 } from "../usage-metrics"
 import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
 import { executeSlashCommand } from "@/hooks/playground/useSlashCommands"
+import type { SlashCommandItem } from "@/types/slash-command"
 import type { ComposerDraftOwnership } from "@/components/Chat/composer/hooks/useComposerText"
 import {
   isChatSubmitSuccess,
@@ -101,6 +103,8 @@ export type UsePlaygroundSubmitDeps = {
   setLastSubmittedContext: (ctx: any) => void
   estimateTokensForText: (text: string) => number
   resolveSubmissionIntent: (message: string) => any
+  /** Runs `/new` and `/prompt` (the slash hook's `runStandaloneCommand`). */
+  runStandaloneCommand?: (command: SlashCommandItem, argument: string, setMessage: (value: string) => void) => void
   queueSubmission: (args: PlaygroundQueueSubmissionArgs) => unknown
   getSubmitDisabledReason?: () => string | null
   validateSelectedChatModelsAvailability: (models: string[]) => boolean
@@ -200,6 +204,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     setLastSubmittedContext,
     estimateTokensForText,
     resolveSubmissionIntent,
+    runStandaloneCommand,
     queueSubmission,
     getSubmitDisabledReason,
     validateSelectedChatModelsAvailability,
@@ -298,13 +303,14 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
   const buildPinnedMessage = React.useCallback(
     (message: string, options?: { ignorePinnedResults?: boolean }) => {
-      if (options?.ignorePinnedResults) return message
-      if (fileRetrievalEnabled) return message
-      if (!ragPinnedResults || ragPinnedResults.length === 0) return message
-      const pinnedText = formatPinnedResults(ragPinnedResults, "markdown")
-      return message ? `${message}\n\n${pinnedText}` : pinnedText
+      // Attached notes always go; other pins as before (note-mentions.ts).
+      return appendPinnedContext(message, ragPinnedResults, {
+        fileRetrievalEnabled,
+        ignoreOtherPins: options?.ignorePinnedResults,
+        t
+      })
     },
-    [fileRetrievalEnabled, ragPinnedResults]
+    [fileRetrievalEnabled, ragPinnedResults, t]
   )
 
   const submitForm = (options?: { ignorePinnedResults?: boolean }) => {
@@ -374,6 +380,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
             contextRevisionRef.current.key === ownSlashToggleKey))
       if (!isCurrent()) return
       const intent = resolveSubmissionIntent(value.message)
+      // An unpicked "/note" is not a message for the model (decision [4]).
+      if (isUnpickedNoteCommand(value.message)) {
+        form.setFieldError("message", t("playground:noteMentions.unpicked", "Pick a note, or remove /note to send this as a message."))
+        return
+      }
       if (intent.handled && /^\/web(?:\s|$)/i.test(value.message.trimStart())) {
         ownSlashToggleKey = contextKeyFor(!webSearch)
       } else if (
@@ -383,6 +394,12 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           webSearch,
           chatMode === "rag" ? "normal" : "rag"
         )
+      }
+      // `/new` and `/prompt` run on their own and send nothing; the runner
+      // clears this chat's saved draft so the command text is not left in it.
+      if (intent.slashCommand?.standalone) {
+        if (draftOwnership.isCurrent()) runStandaloneCommand?.(intent.slashCommand, intent.message, (value) => form.setFieldValue("message", value))
+        return
       }
       if (intent.handled && !intent.invalidImageCommand) {
         if (!draftOwnership.normalizeMessage(intent.message)) return
@@ -436,6 +453,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         return
       }
       const nextMessage = intent.message
+      // An attached note belongs to this message; its chip clears once it is sent or queued.
+      const sentPins = intent.isImageCommand ? [] : sendablePins(ragPinnedResults, { fileRetrievalEnabled, ignoreOtherPins: options?.ignorePinnedResults })
       const combinedMessage = intent.isImageCommand
         ? nextMessage
         : buildPinnedMessage(nextMessage, options)
@@ -562,6 +581,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         if (queuedItem && openUIRequestMode) {
           clearOpenUIRequestMode()
         }
+        if (queuedItem) clearSentNotePins(sentPins, useStoreMessageOption)
         return
       }
 
@@ -839,6 +859,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       if (openUIRequestMode && completionIsCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result))) {
         clearOpenUIRequestMode()
       }
+      // A failed send keeps the chip, so the note goes with the retry.
+      if (isChatSubmitSuccess(normalizeChatSubmitResult(result))) clearSentNotePins(sentPins, useStoreMessageOption)
       } finally {
         if (activeSubmissionRef.current === submission) {
           activeSubmissionRef.current = null

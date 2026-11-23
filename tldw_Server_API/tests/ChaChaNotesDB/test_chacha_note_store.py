@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
@@ -83,7 +84,7 @@ def db(tmp_path):
 
 @pytest.fixture()
 def store(db):
-    return NoteStore(db)
+    return NoteStore(db.ctx)
 
 
 def test_note_store_owns_delegated_methods_without_monolith_duplicates(db, monkeypatch):
@@ -284,7 +285,7 @@ def test_postgres_source_note_projection_requires_owner_scope():
             raise AssertionError("unscoped PostgreSQL projection must not query")
 
     with pytest.raises(InputError, match="owner_user_id"):
-        NoteStore(_PostgresDb()).get_source_note_projection("note-1", max_chars=20)
+        NoteStore(ChaChaContext(_PostgresDb())).get_source_note_projection("note-1", max_chars=20)
 
 
 def test_source_note_projection_marks_nul_text_invalid(store, db):
@@ -319,7 +320,7 @@ def test_source_note_projection_failure_is_fixed_and_redacted():
     sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
     try:
         with pytest.raises(CharactersRAGDBError) as exc_info:
-            NoteStore(_FailingDb()).get_source_note_projection(
+            NoteStore(ChaChaContext(_FailingDb())).get_source_note_projection(
                 "note-1",
                 max_chars=20,
             )
@@ -352,7 +353,7 @@ def test_source_note_projection_redacts_delayed_fetch_failure():
     sink_id = logger.add(messages.append, level="DEBUG", format="{message}")
     try:
         with pytest.raises(CharactersRAGDBError) as exc_info:
-            NoteStore(_FailingDb()).get_source_note_projection(
+            NoteStore(ChaChaContext(_FailingDb())).get_source_note_projection(
                 "note-1",
                 max_chars=20,
             )
@@ -663,6 +664,35 @@ class TestNoteStoreSoftDelete:
         assert active_id not in deleted_ids
 
 
+    def test_list_deleted_notes_filters_by_title_or_content(self, store):
+        """Trash search (NL-05): a case-insensitive substring of the title or content."""
+        trashed = {}
+        for title, content in [("Budget 2026", "numbers"), ("Groceries", "milk and BUDGET"), ("Travel", "plans")]:
+            note_id = store.add_note(title=title, content=content)
+            note = store.get_note_by_id(note_id)
+            assert store.soft_delete_note(note_id, expected_version=note["version"]) is True
+            trashed[title] = note_id
+        store.add_note(title="Budget active", content="not in trash")
+
+        matches = store.list_deleted_notes(text_query="budget")
+
+        assert {row["id"] for row in matches} == {trashed["Budget 2026"], trashed["Groceries"]}
+        assert store.count_deleted_notes(text_query="budget") == 2
+        assert store.count_deleted_notes(text_query="  ") == 3
+        assert store.count_deleted_notes() == 3
+
+    def test_list_deleted_notes_text_query_matches_like_wildcards_literally(self, store):
+        literal_id = store.add_note(title="100% done", content="x")
+        other_id = store.add_note(title="Year 2026", content="y_z")
+        for note_id in (literal_id, other_id):
+            note = store.get_note_by_id(note_id)
+            assert store.soft_delete_note(note_id, expected_version=note["version"]) is True
+
+        assert [row["id"] for row in store.list_deleted_notes(text_query="0%")] == [literal_id]
+        assert [row["id"] for row in store.list_deleted_notes(text_query="y_z")] == [other_id]
+        assert {row["id"] for row in store.list_deleted_notes(text_query="_")} == {other_id}
+
+
 class TestNoteStoreSearch:
     def test_search_notes(self, store):
         store.add_note(title="Searchable Item", content="Unique searchable content xyz123")
@@ -805,7 +835,7 @@ def test_postgres_note_insert_duplicate_reports_exact_note_conflict(db):
         def __getattr__(self, name):
             return getattr(db, name)
 
-    store = NoteStore(PostgresInsertFacade())
+    store = NoteStore(ChaChaContext(PostgresInsertFacade()))
     store.add_note("Original", "body", note_id="duplicate-id")
     with pytest.raises(ConflictError, match="Note with ID 'duplicate-id' already exists"):
         store.add_note("Replacement", "new body", note_id="duplicate-id")

@@ -297,7 +297,7 @@ export const ServerConnectionCard: React.FC<Props> = ({
     statusVariant === "missing"
       ? t(
           "option:connectionCard.headlineMissing",
-          "Connect tldw Assistant to your server"
+          "Connect tldw to your server"
         )
       : statusVariant === "loading"
         ? t(

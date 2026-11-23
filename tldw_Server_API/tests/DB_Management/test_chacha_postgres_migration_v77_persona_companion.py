@@ -15,6 +15,8 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -45,31 +47,34 @@ def test_postgres_companion_upgrade_finishes_fast_path_and_installs_rls(
     original_backend = db.backend
     monkeypatch.setattr(db, "_backend", backend)
     monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_args: nullcontext(conn))
-    monkeypatch.setattr(db, "_configure_notes_moodboard_studio_v61_postgres_transaction", lambda _conn: None)
-    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: state["version"] == 77)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, **_kwargs: state["version"])
-    monkeypatch.setattr(db, "_set_schema_version_postgres", lambda _conn, version: state.update(version=version))
-    monkeypatch.setattr(db, "_repair_conversation_assistant_identity", lambda _conn: None)
+    monkeypatch.setattr(postgres_schema, "_configure_notes_moodboard_studio_v61_postgres_transaction", lambda _ctx, _conn: None)
+    monkeypatch.setattr(
+        schema_bootstrap, "_postgres_schema_is_current", lambda _ctx, _conn: state.update(is_current_calls=state.get("is_current_calls", 0) + 1) or state["version"] == 77
+    )
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _conn, **_kwargs: state["version"])
+    monkeypatch.setattr(postgres_schema, "_set_schema_version_postgres", lambda _ctx, _conn, version: state.update(version=version))
+    monkeypatch.setattr(db, "repair_conversation_assistant_identity", lambda _conn: None)
     for version in range(72, 76):
         monkeypatch.setattr(
-            db, f"_migrate_from_v{version}_to_v{version + 1}_postgres",
-            lambda _conn, target=version + 1: state.update(version=target),
+            postgres_steps, f"_migrate_from_v{version}_to_v{version + 1}_postgres",
+            lambda _ctx, _conn, target=version + 1: state.update(version=target),
         )
 
-    def apply_sql(sql: str, migration_conn: object, *, expected_version: int) -> None:
+    def apply_sql(_ctx: object, sql: str, migration_conn: object, *, expected_version: int) -> None:
         assert migration_conn is conn
         assert state["version"] == 76
         state.update(version=expected_version, companion_sql=sql)
 
-    def install_rls(migration_conn: object) -> None:
+    def install_rls(_ctx: object, migration_conn: object) -> None:
         assert migration_conn is conn
         state["rls_version"] = state["version"]
 
-    monkeypatch.setattr(db, "_apply_postgres_migration_script", apply_sql)
-    monkeypatch.setattr(db, "_ensure_chacha_rls_postgres", install_rls)
+    monkeypatch.setattr(postgres_schema, "_apply_postgres_migration_script", apply_sql)
+    monkeypatch.setattr(postgres_schema, "_ensure_chacha_rls_postgres", install_rls)
     try:
         db._initialize_schema_postgres()
         assert state["version"] == 77
+        assert state["is_current_calls"] >= 1  # the patched current-schema probe was reached, not bypassed
         assert "CREATE TABLE IF NOT EXISTS persona_buddy_preferences" in state["companion_sql"]
         assert state["rls_version"] == 77
     finally:
@@ -81,7 +86,7 @@ def test_postgres_v77_migration_declares_companion_constraints(tmp_path) -> None
     """PostgreSQL v77 DDL keeps the SQLite companion constraints."""
     db = CharactersRAGDB(tmp_path / "persona_companion_v73_postgres.sqlite", "persona-companion-v73-postgres")
     try:
-        statements = db._convert_sqlite_schema_to_postgres_statements(
+        statements = postgres_schema._convert_sqlite_schema_to_postgres_statements(db.ctx,
             db._MIGRATION_SQL_V76_TO_V77_PERSONA_COMPANION_POSTGRES
         )
     finally:
@@ -245,13 +250,13 @@ def test_postgres_companion_rls_failure_rolls_back_schema_and_version(
             patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 72)
             patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 76)
             db = CharactersRAGDB(db_path=":memory:", client_id="rollback-owner", backend=backend)
-        install_rls = db._ensure_chacha_rls_postgres
+        install_rls = postgres_schema._ensure_chacha_rls_postgres
 
-        def interrupted(conn: object) -> None:
-            install_rls(conn)
+        def interrupted(ctx: object, conn: object) -> None:
+            install_rls(ctx, conn)
             raise RuntimeError("companion policy install interrupted")
 
-        monkeypatch.setattr(db, "_ensure_chacha_rls_postgres", interrupted)
+        monkeypatch.setattr(postgres_schema, "_ensure_chacha_rls_postgres", interrupted)
         with pytest.raises(RuntimeError, match="companion policy install interrupted"):
             db._initialize_schema_postgres()
         with backend.transaction() as conn:

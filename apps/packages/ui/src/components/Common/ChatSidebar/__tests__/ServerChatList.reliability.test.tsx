@@ -631,7 +631,8 @@ describe("retired Server history management", () => {
     fireEvent.click(screen.getByRole("button", { name: "Move to trash" }))
     expect(mocks.deleteChat).not.toHaveBeenCalled()
   })
-  it("rejects a held confirmation after imperative account loss", async () => {
+  // Only the permanent delete in Trash still asks first (XP-17, decision 8).
+  it("rejects a held permanent-delete confirmation after imperative account loss", async () => {
     let confirm!: (value: boolean) => void
     mocks.confirmDanger.mockImplementationOnce(
       () =>
@@ -639,6 +640,7 @@ describe("retired Server history management", () => {
           confirm = resolve
         })
     )
+    mocks.chatTypeFilter = "trash"
     render(<ServerChatList searchQuery="needle" />)
     fireEvent.click(screen.getByRole("button", { name: "delete" }))
     mocks.ownerCurrent = false
@@ -773,7 +775,9 @@ describe("acknowledged Server history device cache cleanup", () => {
           name: permanent ? "Delete permanently" : "Move to trash"
         })
       )
-      fireEvent.click(screen.getByRole("button", { name: "Confirm deletion" }))
+      // Move to trash happens at once; only a permanent delete asks first.
+      if (permanent)
+        fireEvent.click(screen.getByRole("button", { name: "Confirm deletion" }))
     } else fireEvent.click(screen.getByRole("button", { name: "delete" }))
     await waitFor(() => expect(mocks.deleteChat).toHaveBeenCalled())
   }
@@ -847,7 +851,9 @@ describe("acknowledged Server history device cache cleanup", () => {
     mocks.removeMirror.mockRejectedValue(new Error("IndexedDB unavailable"))
     await deleteFromList(true, false)
     await waitFor(() => expect(antdMessage.warning).toHaveBeenCalled())
-    expect(antdMessage.success).toHaveBeenCalledWith("Chats moved to trash.")
+    // The inline Undo offer reports the move, in place of a success toast.
+    expect(await screen.findByTestId("server-chat-undo")).toHaveTextContent(/to Trash\./)
+    expect(antdMessage.success).not.toHaveBeenCalled()
     expect(antdMessage.error).not.toHaveBeenCalled()
     expect(mocks.deleteChat).toHaveBeenCalledTimes(1)
   })

@@ -370,7 +370,7 @@ async def append_roleplay_resume_input(
     await limiter.check_message_send_rate(current_user.id)
     try:
         return await run_in_threadpool(
-            db.append_idempotent_user_message,
+            db.conversation_resume_store.append_idempotent_user_message,
             chat_id,
             body.model_dump(mode="json"),
             owner_client_id=str(current_user.id),
@@ -1173,7 +1173,7 @@ async def edit_message(
                 detail=f"Chat session {message['conversation_id']} not found",
             )
         with db.transaction() as conn:
-            resume_state = db.get_roleplay_resume_state(
+            resume_state = db.conversation_resume_store.get_roleplay_resume_state(
                 message["conversation_id"],
                 conn=conn,
                 lock_for_update=True,

@@ -25,7 +25,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def db(tmp_path):
     chacha = CharactersRAGDB(str(tmp_path / "study-pack-endpoints.db"), client_id="study-pack-endpoints-tests")
-    chacha.upsert_workspace("ws-1", "Workspace 1")
+    chacha.workspace_store.upsert_workspace("ws-1", "Workspace 1")
     try:
         yield chacha
     finally:
@@ -391,8 +391,8 @@ def test_admin_job_status_reads_completed_pack_from_owner_database(
 ):
     admin_db = CharactersRAGDB(str(tmp_path / "study-pack-admin.db"), client_id="study-pack-admin-tests")
     owner_db = CharactersRAGDB(str(tmp_path / "study-pack-owner.db"), client_id="study-pack-owner-tests")
-    admin_db.upsert_workspace("ws-1", "Workspace 1")
-    owner_db.upsert_workspace("ws-1", "Workspace 1")
+    admin_db.workspace_store.upsert_workspace("ws-1", "Workspace 1")
+    owner_db.workspace_store.upsert_workspace("ws-1", "Workspace 1")
 
     async def _override_user() -> User:
         return User(id=1, username="admin", email="admin@example.com", is_active=True, roles=["admin"], is_admin=True)

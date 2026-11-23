@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.Characters.test_character_functionality_db import sample_card_data
 
@@ -29,7 +31,7 @@ def _seed_historical_sqlite(db_path: Path, version: int, monkeypatch: pytest.Mon
 
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for prior in range(4, version):
                 steps[prior](conn)
@@ -61,7 +63,7 @@ def test_migration_v25_to_latest_creates_persona_tables(db_path: Path, monkeypat
             )
             character_before = dict(conn.execute("SELECT * FROM character_cards").fetchone())
             # Prove the exact persona-table introduction before the current-head upgrade.
-            seeded._migrate_from_v25_to_v26(conn)
+            sqlite_steps._migrate_from_v25_to_v26(seeded.ctx, conn)
             assert seeded._get_db_version(conn) == 26
             tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             assert {
@@ -159,7 +161,7 @@ def test_migration_v36_to_latest_adds_voice_command_persona_columns(db_path: Pat
             )
             persona_before = dict(conn.execute("SELECT * FROM persona_profiles").fetchone())
             voice_before = dict(conn.execute("SELECT * FROM voice_commands").fetchone())
-            seeded._migrate_from_v36_to_v37(conn)
+            sqlite_steps._migrate_from_v36_to_v37(seeded.ctx, conn)
             assert seeded._get_db_version(conn) == 37
             assert dict(conn.execute("SELECT * FROM voice_commands").fetchone()) == voice_before
     finally:

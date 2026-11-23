@@ -184,10 +184,12 @@ const renderPage = () => {
   )
 }
 
-const getUndoContent = () => {
-  const payload = mockMessageOpen.mock.calls[0]?.[0]
-  expect(payload).toBeTruthy()
-  return payload.content as React.ReactNode
+// XP-17 and AX-06 (#3101, decision 8): the delete happens at once, and Undo
+// is offered inline, in reading order, until the user dismisses it.
+const clickInlineUndo = async () => {
+  const offer = await screen.findByTestId("notes-undo")
+  await waitFor(() => expect(offer).toHaveTextContent('Moved "Undo note" to Trash.'))
+  fireEvent.click(screen.getByTestId("notes-undo-undo"))
 }
 
 describe("NotesManagerPage stage 32 delete undo", () => {
@@ -199,7 +201,7 @@ describe("NotesManagerPage stage 32 delete undo", () => {
     mockClearSetting.mockResolvedValue(undefined)
   })
 
-  it("restores deleted notes when Undo is pressed from toast action", async () => {
+  it("moves a note to Trash without asking and restores it from the inline Undo", async () => {
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
       const method = String(request.method || "GET").toUpperCase()
@@ -263,12 +265,7 @@ describe("NotesManagerPage stage 32 delete undo", () => {
     fireEvent.click(await screen.findByTestId("mock-select-note"))
     fireEvent.click(await screen.findByTestId("mock-delete-note"))
 
-    await waitFor(() => {
-      expect(mockMessageOpen).toHaveBeenCalledTimes(1)
-    })
-
-    const undoToast = render(<>{getUndoContent()}</>)
-    fireEvent.click(undoToast.getByTestId("notes-delete-undo-note-undo"))
+    await clickInlineUndo()
 
     await waitFor(() => {
       const restoreCalled = mockBgRequest.mock.calls.some(([request]) =>
@@ -279,6 +276,8 @@ describe("NotesManagerPage stage 32 delete undo", () => {
       expect(restoreCalled).toBe(true)
     })
     expect(mockMessageSuccess).toHaveBeenCalledWith("Note restored")
+    expect(mockConfirmDanger).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByTestId("notes-undo-undo")).not.toBeInTheDocument())
   })
 
   it("looks up deleted versions across paginated trash results", async () => {
@@ -358,12 +357,7 @@ describe("NotesManagerPage stage 32 delete undo", () => {
     fireEvent.click(await screen.findByTestId("mock-select-note"))
     fireEvent.click(await screen.findByTestId("mock-delete-note"))
 
-    await waitFor(() => {
-      expect(mockMessageOpen).toHaveBeenCalledTimes(1)
-    })
-
-    const undoToast = render(<>{getUndoContent()}</>)
-    fireEvent.click(undoToast.getByTestId("notes-delete-undo-note-undo"))
+    await clickInlineUndo()
 
     await waitFor(() => {
       const restoreCalled = mockBgRequest.mock.calls.some(([request]) =>
@@ -413,17 +407,14 @@ describe("NotesManagerPage stage 32 delete undo", () => {
     fireEvent.click(await screen.findByTestId("mock-select-note"))
     fireEvent.click(await screen.findByTestId("mock-delete-note"))
 
-    await waitFor(() => {
-      expect(mockMessageOpen).toHaveBeenCalledTimes(1)
-    })
-
-    const undoToast = render(<>{getUndoContent()}</>)
-    fireEvent.click(undoToast.getByTestId("notes-delete-undo-note-undo"))
+    await clickInlineUndo()
 
     await waitFor(() => {
       expect(mockMessageWarning).toHaveBeenCalledWith(
         "Undo unavailable. Open Trash to restore this note."
       )
     })
+    // The offer stays, so the user can dismiss it or go to Trash.
+    expect(screen.getByTestId("notes-undo-undo")).toBeInTheDocument()
   })
 })

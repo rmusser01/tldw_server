@@ -78,14 +78,14 @@ class WorkspaceMembershipService:
             request_metadata=request_metadata,
         )
         ref = self._validate_access(adapter, data["resource_id"], context)
-        existing = self.chacha_db.get_workspace_resource_membership(
+        existing = self.chacha_db.workspace_store.get_workspace_resource_membership(
             workspace_id,
             ref.resource_type,
             ref.resource_id,
             include_deleted=True,
         )
         restore_deleted = existing is not None and self._row_is_deleted(existing)
-        row = self.chacha_db.add_workspace_resource_membership(
+        row = self.chacha_db.workspace_store.add_workspace_resource_membership(
             workspace_id,
             {
                 "resource_type": ref.resource_type,
@@ -139,7 +139,7 @@ class WorkspaceMembershipService:
             request_metadata=request_metadata,
             validate=canonical_resource_type in {"prompt", "workflow", "watchlist"},
         )
-        row = self.chacha_db.get_workspace_resource_membership(
+        row = self.chacha_db.workspace_store.get_workspace_resource_membership(
             workspace_id,
             canonical_resource_type,
             canonical_resource_id,
@@ -182,7 +182,7 @@ class WorkspaceMembershipService:
             canonical_resource_type = self._get_adapter(resource_type).resource_type
         normalized_limit = self._normalize_limit(limit)
         normalized_cursor = self._workspace_cursor_tuple(cursor)
-        rows = self.chacha_db.list_workspace_resource_memberships(
+        rows = self.chacha_db.workspace_store.list_workspace_resource_memberships(
             workspace_id,
             resource_type=canonical_resource_type,
             role=role,
@@ -243,7 +243,7 @@ class WorkspaceMembershipService:
         )
         normalized_limit = self._normalize_limit(limit)
         normalized_cursor = self._resource_cursor_tuple(cursor)
-        rows = self.chacha_db.list_resource_workspace_memberships(
+        rows = self.chacha_db.workspace_store.list_resource_workspace_memberships(
             canonical_resource_type,
             canonical_resource_id,
             include_deleted=include_deleted,
@@ -332,7 +332,7 @@ class WorkspaceMembershipService:
                 )
             except WorkspaceMembershipServiceError:
                 canonical_resource_id = self._non_empty_string(resource_id, "resource_id")
-        row = self.chacha_db.delete_workspace_resource_membership(
+        row = self.chacha_db.workspace_store.delete_workspace_resource_membership(
             workspace_id,
             adapter.resource_type,
             canonical_resource_id,
@@ -360,7 +360,7 @@ class WorkspaceMembershipService:
     def workspace_membership_summary(self, workspace_id: str) -> dict[str, Any]:
         """Return compact active membership totals for Workspace context."""
         self._require_workspace(workspace_id)
-        summary = self.chacha_db.workspace_resource_membership_summary(workspace_id)
+        summary = self.chacha_db.workspace_store.workspace_resource_membership_summary(workspace_id)
         return {
             "total": int(summary.get("total") or 0),
             "by_resource_type": dict(summary.get("by_resource_type") or {}),
@@ -384,7 +384,7 @@ class WorkspaceMembershipService:
         errors: list[dict[str, str]] = []
 
         for candidate in self._workspace_backfill_candidates(workspace_id, errors):
-            before = self.chacha_db.get_workspace_resource_membership(
+            before = self.chacha_db.workspace_store.get_workspace_resource_membership(
                 workspace_id,
                 candidate["resource_type"],
                 candidate["resource_id"],
@@ -438,7 +438,7 @@ class WorkspaceMembershipService:
         }
 
     def _require_workspace(self, workspace_id: str) -> Mapping[str, Any]:
-        workspace = self.chacha_db.get_workspace(workspace_id)
+        workspace = self.chacha_db.workspace_store.get_workspace(workspace_id)
         if workspace is None:
             raise WorkspaceMembershipServiceError(
                 "workspace_not_found",
@@ -487,7 +487,7 @@ class WorkspaceMembershipService:
             "workspace_source",
             "",
             errors,
-            self.chacha_db.list_workspace_sources,
+            self.chacha_db.workspace_store.list_workspace_sources,
             workspace_id,
         ):
             source_id = self._backfill_row_id(source)
@@ -517,7 +517,7 @@ class WorkspaceMembershipService:
             "workspace_artifact",
             "",
             errors,
-            self.chacha_db.list_workspace_artifacts,
+            self.chacha_db.workspace_store.list_workspace_artifacts,
             workspace_id,
         ):
             artifact_id = self._backfill_row_id(artifact)
@@ -536,7 +536,7 @@ class WorkspaceMembershipService:
             "workspace_note",
             "",
             errors,
-            self.chacha_db.list_workspace_notes,
+            self.chacha_db.workspace_store.list_workspace_notes,
             workspace_id,
         ):
             note_id = self._backfill_row_id(note)
@@ -1020,7 +1020,7 @@ class WorkspaceMembershipService:
         *,
         user_id: str | None,
     ) -> None:
-        recorder = getattr(self.chacha_db, "record_workspace_activity_event", None)
+        recorder = getattr(getattr(self.chacha_db, "workspace_store", None), "record_workspace_activity_event", None)
         if not callable(recorder):
             return
         resource_type = str(row.get("resource_type") or "")

@@ -481,7 +481,7 @@ def test_reclamation_waits_for_confirmed_quota_release(native_fork_db: Character
 
 def test_gone_adopted_candidate_waits_for_claim_release_even_after_workspace_closure(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
-    db.upsert_workspace("workspace-one", "Workspace One")
+    db.workspace_store.upsert_workspace("workspace-one", "Workspace One")
     authorized = workspace_owner()
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     with db.transaction() as conn:
@@ -536,7 +536,7 @@ def test_gone_adopted_candidate_waits_for_claim_release_even_after_workspace_clo
 @pytest.mark.parametrize("workspace_state", ["open", "closed", "deleted", "staged"])
 def test_workspace_candidate_admission_requires_open_owned_scope(native_fork_db: CharactersRAGDB, workspace_state: str) -> None:
     db = native_fork_db
-    db.upsert_workspace("workspace-one", "Workspace One")
+    db.workspace_store.upsert_workspace("workspace-one", "Workspace One")
     authorized = workspace_owner()
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     with db.transaction() as conn:
@@ -577,7 +577,7 @@ def test_workspace_candidate_admission_requires_open_owned_scope(native_fork_db:
 
 def test_workspace_closure_blocks_prepared_transition(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
-    db.upsert_workspace("workspace-one", "Workspace One")
+    db.workspace_store.upsert_workspace("workspace-one", "Workspace One")
     authorized = workspace_owner()
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     with db.transaction() as conn:
@@ -613,7 +613,7 @@ def test_workspace_closure_blocks_prepared_transition(native_fork_db: Characters
 def test_unavailable_workspace_rejects_new_operation_without_reserving_key(native_fork_db: CharactersRAGDB, workspace_state: str) -> None:
     db = native_fork_db
     if workspace_state == "closed":
-        db.upsert_workspace("workspace-one", "Workspace One")
+        db.workspace_store.upsert_workspace("workspace-one", "Workspace One")
         with db.transaction() as conn:
             conn.execute(
                 "UPDATE workspaces SET native_chat_admission_closed = ? WHERE id = ?",
@@ -622,7 +622,7 @@ def test_unavailable_workspace_rejects_new_operation_without_reserving_key(nativ
     elif workspace_state == "foreign":
         other = CharactersRAGDB(db_path=db.db_path_str, client_id="bob", backend=db.backend)
         try:
-            other.upsert_workspace("workspace-one", "Bob's workspace")
+            other.workspace_store.upsert_workspace("workspace-one", "Bob's workspace")
         finally:
             other.close_connection()
     with db.transaction() as conn:
@@ -637,7 +637,7 @@ def test_unavailable_workspace_rejects_new_operation_without_reserving_key(nativ
 
 def test_closed_workspace_cannot_claim_another_attempt(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
-    db.upsert_workspace("workspace-one", "Workspace One")
+    db.workspace_store.upsert_workspace("workspace-one", "Workspace One")
     authorized = workspace_owner()
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     with db.transaction() as conn:
@@ -665,7 +665,7 @@ def test_closed_workspace_cannot_claim_another_attempt(native_fork_db: Character
 def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_database_config: object, monkeypatch: pytest.MonkeyPatch) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(db_path=":memory:", client_id="alice", backend=backend)
-    db.upsert_workspace("workspace-one", "Workspace One")
+    db.workspace_store.upsert_workspace("workspace-one", "Workspace One")
     authorized = workspace_owner()
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     with db.transaction() as conn:
@@ -679,7 +679,7 @@ def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_datab
     release_admission = threading.Event()
     delete_attempted = threading.Event()
     original_admission = db.native_forks.lock_open_workspace
-    original_delete_lock = db._lock_native_workspace_delete
+    original_delete_lock = db.workspace_store._lock_native_workspace_delete
 
     def pause_after_admission(owner: AuthorizedNativeOwner, *, conn: Any) -> None:
         original_admission(owner, conn=conn)
@@ -704,7 +704,7 @@ def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_datab
 
     def delete_workspace() -> bool:
         try:
-            return db.delete_workspace("workspace-one", expected_version=1)
+            return db.workspace_store.delete_workspace("workspace-one", expected_version=1)
         finally:
             db.close_connection()
 
@@ -715,11 +715,11 @@ def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_datab
             deletion = pool.submit(delete_workspace)
             assert delete_attempted.wait(timeout=10)
             assert not deletion.done()
-            assert not db.get_workspace("workspace-one")["native_chat_admission_closed"]
+            assert not db.workspace_store.get_workspace("workspace-one")["native_chat_admission_closed"]
             release_admission.set()
             admission.result(timeout=20)
             assert deletion.result(timeout=20)
-        assert db.get_workspace("workspace-one") is None
+        assert db.workspace_store.get_workspace("workspace-one") is None
     finally:
         release_admission.set()
         db.close_connection()

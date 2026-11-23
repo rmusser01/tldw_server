@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Chat.conversation_import import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, UniqueConstraintError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import conversation_store as conversation_store_module
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -157,8 +158,8 @@ def test_imported_branches_read_as_a_parent_graph_not_as_legacy_history(db: Char
 
 def test_import_advances_the_history_version_once_per_message(db: CharactersRAGDB) -> None:
     _import(db)
-    assert db.get_roleplay_resume_state(CHAT_ID)["history_version"] == 5
-    assert db.get_roleplay_resume_state(CHAT_ID)["message_count"] == 4
+    assert db.conversation_resume_store.get_roleplay_resume_state(CHAT_ID)["history_version"] == 5
+    assert db.conversation_resume_store.get_roleplay_resume_state(CHAT_ID)["message_count"] == 4
 
 
 def test_imported_text_is_searchable(db: CharactersRAGDB) -> None:
@@ -276,7 +277,7 @@ def test_other_database_errors_are_not_reported_as_id_conflicts(
 
 def test_default_state_matches_the_store(db: CharactersRAGDB) -> None:
     """An omitted state is fingerprinted as the default, so the two must not drift apart."""
-    assert DEFAULT_CONVERSATION_STATE == db._DEFAULT_CONVERSATION_STATE
+    assert DEFAULT_CONVERSATION_STATE == conversation_store_module._DEFAULT_CONVERSATION_STATE
     _import(db, conversation=_conversation(state=None))
     assert db.get_conversation_by_id(CHAT_ID)["state"] == DEFAULT_CONVERSATION_STATE
 

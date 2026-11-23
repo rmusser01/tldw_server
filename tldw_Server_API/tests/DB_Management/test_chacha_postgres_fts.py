@@ -35,7 +35,7 @@ def _make_postgres_db() -> CharactersRAGDB:
     db._backend.backend_type = BackendType.POSTGRESQL
     db._CHARACTER_CARD_JSON_FIELDS = []
     db.character_store = CharacterStore(db)
-    db.keyword_store = KeywordStore(db)
+    db.keyword_store = KeywordStore(db.ctx)
 
     class _TxConn:
         _connection = None
@@ -133,7 +133,7 @@ def test_search_character_cards_postgres_uses_tsquery(monkeypatch: pytest.Monkey
 
 def test_list_flashcards_postgres_translates_fts(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _make_postgres_db()
-    db._get_current_utc_timestamp_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
+    db.ctx.utc_now_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
     db.execute_query = MagicMock(return_value=_CursorStub([]))
 
     result = db.list_flashcards(q="alchemy", limit=10, offset=0)
@@ -165,7 +165,7 @@ def test_manage_link_postgres_uses_on_conflict():
 
     db = _make_postgres_db()
     db.client_id = "pg-test"
-    db._get_current_utc_timestamp_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
+    db.ctx.utc_now_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
 
     class _Cursor:
         def __init__(self, rowcount: int = 0):
@@ -188,7 +188,7 @@ def test_manage_link_postgres_uses_on_conflict():
     db.transaction = fake_transaction  # type: ignore[assignment]
 
     # The test checks the INSERT shape only; a stub connection cannot prove ownership.
-    assert db._manage_link(
+    assert db.manage_link(
         "flashcard_keywords", "card_id", 1, "keyword_id", 2, "link", owner_client_id=OwnerScope.NOT_APPLICABLE
     ) is True
 
@@ -202,7 +202,7 @@ def test_set_flashcard_tags_postgres_uses_on_conflict():
 
     db = _make_postgres_db()
     db.client_id = "pg-test"
-    db._get_current_utc_timestamp_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
+    db.ctx.utc_now_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
 
     class _Cursor:
         def __init__(self, *, rows: Optional[List[Any]] = None, rowcount: int = 0):
@@ -275,10 +275,10 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
     from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 
     db = _make_postgres_db()
-    store = NoteStore(db)
+    store = NoteStore(db.ctx)
     statements = []
 
-    def selected_owner(owner_client_id, alias=""):
+    def selected_owner(owner_client_id, alias="", *, table="?"):
         # Distinct bindings prove the returned predicate and parameters travel
         # together; production policy still selects the unchanged single owner.
         return f" AND {alias}.client_id = ?", (f"selected-{alias}",)
@@ -289,9 +289,9 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
             return SimpleNamespace(fetchall=lambda: [{"id": 7, "keyword": "Tag"}])
         return SimpleNamespace(fetchall=lambda: [{"id": "owned-note"}], fetchone=lambda: {"cnt": 1})
 
-    monkeypatch.setattr(db, "_selected_owner_filter", selected_owner)
+    monkeypatch.setattr(db.ctx, "owner_filter", selected_owner)
     monkeypatch.setattr(db, "execute_query", execute)
-    monkeypatch.setattr(db, "_map_table_for_backend", lambda name: name)
+    monkeypatch.setattr(db.ctx, "map_table", lambda name: name)
     if mode == "fallback":
         monkeypatch.setattr(
             "tldw_Server_API.app.core.DB_Management.chacha.note_store.FTSQueryTranslator.normalize_query",
@@ -319,16 +319,71 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
         assert 7 in params
 
 
+@pytest.mark.parametrize("mode", ["fts", "fallback", "keyword_fts", "keyword_only"])
+def test_postgres_notes_relevance_order_breaks_ties_by_id(monkeypatch, mode):
+    """Notes that tie on rank and date page in one stable order (NL-07 review)."""
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    db = _make_postgres_db()
+    store = NoteStore(db.ctx)
+    statements = []
+
+    def execute(query, params):
+        statements.append((query, params))
+        if query.startswith("SELECT id, keyword FROM keywords"):
+            return SimpleNamespace(fetchall=lambda: [{"id": 7, "keyword": "Tag"}])
+        return SimpleNamespace(fetchall=lambda: [{"id": "owned-note"}], fetchone=lambda: {"cnt": 1})
+
+    monkeypatch.setattr(db, "execute_query", execute)
+    monkeypatch.setattr(db.ctx, "map_table", lambda name: name)
+    if mode == "fallback":
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.DB_Management.chacha.note_store.FTSQueryTranslator.normalize_query",
+            lambda *args: "",
+        )
+    if mode in ("fts", "fallback"):
+        store.search_notes("needle", limit=3, offset=2)
+    else:
+        store.search_notes_with_keywords("needle" if mode.endswith("fts") else None, ["tag"], limit=3, offset=2)
+    flat = " ".join(statements[-1][0].split())
+    order_clause = flat[flat.rindex("ORDER BY") : flat.rindex("LIMIT")].strip()
+    assert order_clause.endswith("n.id ASC"), order_clause
+
+
+def test_postgres_note_snippets_strip_marker_characters_and_cap_the_source(monkeypatch):
+    """ts_headline reads at most 20k characters, with the marker characters removed first."""
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    db = _make_postgres_db()
+    store = NoteStore(db.ctx)
+    statements = []
+
+    def execute(query, params, **_kwargs):
+        statements.append((query, params))
+        return SimpleNamespace(fetchall=lambda: [{"id": "n1", "marked": "the \ue000needle\ue001 here"}])
+
+    monkeypatch.setattr(db, "execute_query", execute)
+
+    snippets = store.note_search_snippets("needle", ["n1"])
+
+    assert snippets == {"n1": [{"text": "the ", "match": False}, {"text": "needle", "match": True}, {"text": " here", "match": False}]}
+    query, params = statements[-1]
+    flat = " ".join(query.split())
+    assert "ts_headline('english', translate(LEFT(n.content, ?), ?, ''), to_tsquery('english', ?), ?)" in flat
+    assert params[0] == 20_000
+    assert params[1] == "\ue000\ue001"
+
+
 @pytest.mark.parametrize("counting", [False, True])
 def test_postgres_notes_all_tags_filter_uses_owned_active_keyword_ids(monkeypatch, counting):
     """NL-N1: with "all", a note needs every tag; tags resolve by identity to the owner's active keywords."""
     from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 
     db = _make_postgres_db()
-    store = NoteStore(db)
+    store = NoteStore(db.ctx)
     statements = []
 
-    def selected_owner(owner_client_id, alias=""):
+    def selected_owner(owner_client_id, alias="", *, table="?"):
         return f" AND {alias}.client_id = ?", (f"selected-{alias}",)
 
     def execute(query, params):
@@ -338,9 +393,9 @@ def test_postgres_notes_all_tags_filter_uses_owned_active_keyword_ids(monkeypatc
             return SimpleNamespace(fetchall=lambda: rows)
         return SimpleNamespace(fetchall=lambda: [], fetchone=lambda: {"cnt": 0})
 
-    monkeypatch.setattr(db, "_selected_owner_filter", selected_owner)
+    monkeypatch.setattr(db.ctx, "owner_filter", selected_owner)
     monkeypatch.setattr(db, "execute_query", execute)
-    monkeypatch.setattr(db, "_map_table_for_backend", lambda name: name)
+    monkeypatch.setattr(db.ctx, "map_table", lambda name: name)
     if counting:
         store.count_notes_matching_keywords(None, ["Rag", "baking", "rag"], match="all")
     else:
@@ -481,7 +536,7 @@ def test_postgres_note_keyword_queries_filter_both_endpoints(postgres_db, operat
             """
         )
         postgres_db.execute_query = lambda query, params, **kwargs: connection.execute(query, params)
-        store = NoteStore(postgres_db)
+        store = NoteStore(postgres_db.ctx)
         if operation == "single":
             assert [row["id"] for row in store.get_keywords_for_note("own")] == [1]
         elif operation == "foreign-note":
@@ -500,7 +555,7 @@ def test_postgres_question_search_preserves_owner_and_matches_literal_terms(monk
 
     db = _make_postgres_db()
     db.execute_query = MagicMock(return_value=_CursorStub([{"id": "owned-note"}]))
-    store = NoteStore(db)
+    store = NoteStore(db.ctx)
 
     assert store.search_notes("Vega? next review date", limit=3, match_any=True) == [{"id": "owned-note"}]
     sql, params = db.execute_query.call_args[0]

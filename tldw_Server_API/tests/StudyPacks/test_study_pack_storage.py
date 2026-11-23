@@ -6,7 +6,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 @pytest.fixture
 def db(tmp_path):
     chacha = CharactersRAGDB(str(tmp_path / "study-packs.db"), client_id="study-pack-tests")
-    chacha.upsert_workspace("ws-1", "Workspace 1")
+    chacha.workspace_store.upsert_workspace("ws-1", "Workspace 1")
     try:
         yield chacha
     finally:

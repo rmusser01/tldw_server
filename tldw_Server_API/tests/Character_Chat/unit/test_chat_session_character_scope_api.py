@@ -188,7 +188,7 @@ def test_list_chat_sessions_defaults_omitted_scope_to_global(tmp_path):
             "client_id": "user-1",
         }
     )
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
     _seed_chat(
         db,
         conversation_id="global-chat",
@@ -228,7 +228,7 @@ def test_get_chat_session_requires_exact_scope_match(tmp_path):
             "client_id": "user-1",
         }
     )
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
     db.add_conversation(
         {
             "id": "workspace-chat",

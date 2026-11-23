@@ -1000,8 +1000,9 @@ def test_chat_completion_revalidates_default_model(authenticated_client, mock_ch
         messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
     )
 
-    def _fake_validate(provider: str, model: Optional[str]):
-        if model == "bad-model":
+    def _fake_validate(provider: str, model: Optional[str], *, allowlist: bool = True):
+        # As the real check: an off-list model is refused only where the allowlist applies (TASK-15616).
+        if model == "bad-model" and allowlist:
             return {"error_code": "model_not_allowed", "message": "Model not allowed"}
         return None
 

@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+
 pytest.importorskip("psycopg")
 
 from psycopg import sql as psycopg_sql  # noqa: E402
@@ -15,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import (
     DatabaseBackendFactory,
 )
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Sync.v2.materializers.notes_task import (
@@ -197,7 +199,7 @@ def test_postgres_task_sources_bind_scope_lock_cas_and_page_by_primary_key() -> 
     transition_source = inspect.getsource(TaskStore._apply_sync_task_transition)
     page_source = inspect.getsource(TaskStore.page_tasks_for_sync_bootstrap)
     materializer_source = inspect.getsource(NotesTaskMaterializer.apply)
-    ddl = " ".join(CharactersRAGDB._note_task_v60_postgres_ddl())
+    ddl = " ".join(postgres_schema._note_task_v60_postgres_ddl())
 
     assert "WHERE owner_user_id = ? AND dataset_id = ? AND id = ?" in fetch_source
     assert "for_update=True" in transition_source

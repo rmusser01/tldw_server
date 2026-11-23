@@ -47,7 +47,7 @@ RATCHET = _ceilings.Ratchet(
 
 
 def _is_scoped(key: str) -> bool:
-    return key == _CHACHA_DB or (key.startswith(_CHACHA_DIR) and key.endswith(".py") and "/" not in key[len(_CHACHA_DIR):])
+    return key == _CHACHA_DB or (key.startswith(_CHACHA_DIR) and key.endswith(".py"))  # subpackages too (R16)
 
 
 def _trees(root: Path) -> dict[str, ast.Module]:
@@ -188,6 +188,12 @@ def test_non_owner_param_is_not_a_helper(tmp_path: Path) -> None:
 def test_module_outside_chacha_is_ignored(tmp_path: Path) -> None:
     src = 'class S:\n    def _f(self, owner_client_id):\n        if owner_client_id is None:\n            return "", ()\n' + _calls("_f", 1)
     assert measure(_seed(tmp_path / "app", {"core/DB_Management/other_store.py": src})) == {}
+
+
+def test_chacha_subpackage_is_scanned(tmp_path: Path) -> None:
+    key = "core/DB_Management/chacha/sub/x.py"
+    src = 'class S:\n    def _f(self, owner_client_id):\n        if owner_client_id is None:\n            return "", ()\n' + _calls("_f", 1)
+    assert measure(_seed(tmp_path / "app", {key: src})) == {key: {"calls": 1, "opt_outs": 0}}
 
 
 def test_opt_outs_are_counted(tmp_path: Path) -> None:

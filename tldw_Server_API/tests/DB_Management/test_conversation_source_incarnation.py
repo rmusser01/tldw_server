@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.tests.DB_Management.test_native_fork_transactions import native_fork_db as native_fork_db
 
 pytestmark = pytest.mark.integration
@@ -17,7 +18,7 @@ def incarnation(db, cid):
 
 def test_server_issues_identity_preserves_restore_and_retires_same_id(native_fork_db, monkeypatch):
     db = native_fork_db
-    monkeypatch.setattr(db, "_get_current_utc_timestamp_iso", lambda: "2026-10-12T12:00:00.000Z")
+    monkeypatch.setattr(db.ctx, "utc_now_iso", lambda: "2026-10-12T12:00:00.000Z")
     cid = db.add_conversation({"id": "original", "character_id": None, "source_incarnation_id": "copied-authority"})
     original = incarnation(db, cid)
     assert original and original != "copied-authority"
@@ -119,15 +120,16 @@ def test_interrupted_incarnation_migration_rolls_back_rows_schema_and_triggers(
         before = dict(old.execute_query("SELECT * FROM conversations WHERE id = ?", (cid,)).fetchone())
         old.close_connection()
     name = "_migrate_from_v84_to_v85_postgres" if backend_name == "postgres" else "_migrate_from_v80_to_v81"
-    migrate = getattr(CharactersRAGDB, name)
+    steps_module = postgres_steps if name.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, name)
 
-    def interrupted(self, conn):
-        migrate(self, conn)
+    def interrupted(ctx, conn):
+        migrate(ctx, conn)
         raise RuntimeError("incarnation migration interrupted")
 
     try:
         with monkeypatch.context() as patch:
-            patch.setattr(CharactersRAGDB, name, interrupted)
+            patch.setattr(steps_module, name, interrupted)
             with pytest.raises(Exception, match="incarnation migration interrupted"):
                 CharactersRAGDB(**kwargs)
         assert dict(old.execute_query("SELECT * FROM conversations WHERE id = ?", (cid,)).fetchone()) == before

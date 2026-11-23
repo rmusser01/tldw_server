@@ -6,6 +6,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
+import { ChatReplyAnnouncerProvider } from "../ChatReplyAnnouncer"
 import { IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE } from "@/utils/image-generation-chat"
 import { readFileSync } from "node:fs"
 import path from "node:path"
@@ -354,6 +355,56 @@ describe("PlaygroundMessage error recovery integration", () => {
     detachedPresentation.token = null
     remounted.rerender(<PlaygroundMessage {...baseProps} />)
     expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+  })
+
+  // AX-11: the transcript log reads the reply; its completion is announced
+  // once from the transcript's announcer, outside the log, not by a live
+  // region inside the message.
+  it("announces a finished reply once through the transcript announcer, outside the log (AX-11)", () => {
+    const Transcript = ({ streaming }: { streaming: boolean }) => (
+      <ChatReplyAnnouncerProvider>
+        <div role="log" aria-label="Chat messages">
+          <PlaygroundMessage {...baseProps} message="**Done** here" messageId="reply-1" isStreaming={streaming} />
+        </div>
+      </ChatReplyAnnouncerProvider>
+    )
+    const view = render(<Transcript streaming />)
+    const announcer = screen.getByTestId("chat-reply-announcer")
+    expect(announcer).toHaveAttribute("aria-live", "polite")
+    expect(announcer).toBeEmptyDOMElement()
+    view.rerender(<Transcript streaming={false} />)
+    const log = screen.getByRole("log", { name: "Chat messages" })
+    expect(log).not.toContainElement(announcer)
+    expect(announcer.textContent).toBe("Response complete")
+    // The reply's text is on the page once: in the log, not copied into the announcer.
+    expect(announcer).not.toHaveTextContent("Done")
+    expect(log.querySelectorAll("[aria-live]")).toHaveLength(0)
+    view.rerender(<Transcript streaming={false} />)
+    expect(announcer.textContent).toBe("Response complete")
+  })
+
+  // AX-11 review: the announcement is keyed on the turn and its variant, so a
+  // reconciled reply (same turn, new text) is not announced twice, while a
+  // regenerated variant is.
+  it("announces a turn once even when its text is reconciled, and again for a new variant (AX-11)", () => {
+    const Transcript = ({ streaming, message, variant }: { streaming: boolean; message: string; variant: number }) => (
+      <ChatReplyAnnouncerProvider>
+        <div role="log" aria-label="Chat messages">
+          <PlaygroundMessage {...baseProps} message={message} messageId="reply-1" activeVariantIndex={variant} isStreaming={streaming} />
+        </div>
+      </ChatReplyAnnouncerProvider>
+    )
+    const view = render(<Transcript streaming message="Draft" variant={0} />)
+    const announcer = screen.getByTestId("chat-reply-announcer")
+    view.rerender(<Transcript streaming={false} message="Draft" variant={0} />)
+    expect(announcer.textContent).toBe("Response complete")
+    view.rerender(<Transcript streaming={false} message="Draft, as saved" variant={0} />)
+    expect(announcer.textContent).toBe("Response complete")
+
+    view.rerender(<Transcript streaming message="" variant={1} />)
+    view.rerender(<Transcript streaming={false} message="Second take" variant={1} />)
+    expect(announcer.textContent).not.toBe("Response complete")
+    expect(announcer.textContent?.trim()).toBe("Response complete")
   })
 
   it("clears a previous response announcement when a detached request begins", () => {

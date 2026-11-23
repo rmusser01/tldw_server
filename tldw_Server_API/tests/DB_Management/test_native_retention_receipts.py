@@ -96,7 +96,7 @@ def seeded(db, *, workspace: bool = False, alias_change: str | None = None):
     """Seed a typed stored result through real DB transactions, not an actual publication."""
     authorized = workspace_owner() if workspace else owner()
     if workspace:
-        db.upsert_workspace("workspace-one", "Workspace One")
+        db.workspace_store.upsert_workspace("workspace-one", "Workspace One")
     source = db.add_conversation(
         {
             "title": "Receipt source",

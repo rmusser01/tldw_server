@@ -49,7 +49,7 @@ export const useTemporaryChatToggle = (
         notification.error({
           message: t(
             "sidepanel:errors.privateModeTitle",
-            "tldw Assistant can't save data"
+            "tldw can't save data"
           ),
           description: t(
             "sidepanel:errors.privateModeDescription",

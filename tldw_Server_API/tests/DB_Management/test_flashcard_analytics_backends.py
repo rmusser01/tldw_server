@@ -98,7 +98,7 @@ def test_saved_card_analytics_http_and_following_reads(analytics_db, populated):
 
 def test_analytics_preserves_visibility_and_deleted_filters(analytics_db):
     db = analytics_db
-    db.upsert_workspace("ws-rowan", "Workspace")
+    db.workspace_store.upsert_workspace("ws-rowan", "Workspace")
     global_deck, global_card = _saved_card(db)
     other_deck = db.add_deck("Citrine")
     workspace_deck = db.add_deck("Workspace deck", workspace_id="ws-rowan")

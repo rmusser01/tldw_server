@@ -40,7 +40,7 @@ def _reserve(
     description: str | None = "Cloned workspace",
     workspace_profile: str = "research",
 ) -> dict[str, object]:
-    return db.reserve_clone_target(
+    return db.workspace_store.reserve_clone_target(
         workspace_id=workspace_id,
         operation_id=operation_id,
         request_fingerprint=request_fingerprint,
@@ -51,7 +51,7 @@ def _reserve(
 
 
 def _seed_workspace_snapshot(db: CharactersRAGDB) -> None:
-    db.upsert_workspace("workspace-source", "Workspace v1")
+    db.workspace_store.upsert_workspace("workspace-source", "Workspace v1")
     with db.transaction() as connection:
         connection.execute(
             "INSERT INTO workspace_sources "
@@ -59,7 +59,7 @@ def _seed_workspace_snapshot(db: CharactersRAGDB) -> None:
             "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1)",
             ("source-1", "workspace-source", 101, "Source v1", "document", 0, True),
         )
-    db.add_workspace_resource_membership(
+    db.workspace_store.add_workspace_resource_membership(
         "workspace-source",
         {
             "resource_type": "media",
@@ -69,11 +69,11 @@ def _seed_workspace_snapshot(db: CharactersRAGDB) -> None:
         },
         user_id="user-1",
     )
-    db.add_workspace_note(
+    db.workspace_store.add_workspace_note(
         "workspace-source",
         {"title": "Note v1", "content": "Note content v1"},
     )
-    db.add_workspace_artifact(
+    db.workspace_store.add_workspace_artifact(
         "workspace-source",
         {
             "id": "artifact-1",
@@ -166,7 +166,7 @@ def test_postgres_workspace_clone_snapshot_is_repeatable_and_returns_connection(
     monkeypatch.setattr(backend, "execute", interleaved_execute)
 
     with scoped_context(user_id="user-1", org_ids=[12], team_ids=[77], is_admin=True):
-        snapshot = postgres_db.read_workspace_clone_snapshot("workspace-source")
+        snapshot = postgres_db.workspace_store.read_workspace_clone_snapshot("workspace-source")
 
     snapshot_connection = acquired_connections[0]
     assert snapshot_connection is not caller_connection
@@ -209,7 +209,7 @@ def test_postgres_workspace_clone_snapshot_rolls_back_and_returns_on_failure(
     monkeypatch.setattr(pool, "return_connection", tracked_return_connection)
 
     with pytest.raises(CloneSnapshotUnavailable):
-        postgres_db.read_workspace_clone_snapshot("missing-workspace")
+        postgres_db.workspace_store.read_workspace_clone_snapshot("missing-workspace")
 
     assert len(acquired_connections) == 1
     assert returned_connections == [(acquired_connections[0], "IDLE")]
@@ -230,7 +230,7 @@ def test_postgres_workspace_clone_graph_is_tenant_isolated(
     ident = backend.escape_identifier
     role_created = False
     try:
-        other_user_db.upsert_workspace("workspace-user-2", "User 2 Workspace")
+        other_user_db.workspace_store.upsert_workspace("workspace-user-2", "User 2 Workspace")
         with backend.transaction() as connection:
             backend.execute(
                 f"CREATE ROLE {ident(role_name)} NOLOGIN NOSUPERUSER NOBYPASSRLS",
@@ -269,18 +269,18 @@ def test_postgres_workspace_clone_graph_is_tenant_isolated(
             )
             connection.commit()
 
-        assert other_user_db.get_workspace("workspace-source") is None
-        assert {row["id"] for row in other_user_db.list_workspaces()} == {
+        assert other_user_db.workspace_store.get_workspace("workspace-source") is None
+        assert {row["id"] for row in other_user_db.workspace_store.list_workspaces()} == {
             "workspace-user-2"
         }
-        assert other_user_db.list_workspace_sources("workspace-source") == []
-        assert other_user_db.list_workspace_notes("workspace-source") == []
-        assert other_user_db.list_workspace_artifacts("workspace-source") == []
-        assert other_user_db.list_workspace_artifact_versions(
+        assert other_user_db.workspace_store.list_workspace_sources("workspace-source") == []
+        assert other_user_db.workspace_store.list_workspace_notes("workspace-source") == []
+        assert other_user_db.workspace_store.list_workspace_artifacts("workspace-source") == []
+        assert other_user_db.workspace_store.list_workspace_artifact_versions(
             "workspace-source",
             "artifact-1",
         ) == []
-        assert other_user_db.list_workspace_resource_memberships(
+        assert other_user_db.workspace_store.list_workspace_resource_memberships(
             "workspace-source"
         ) == []
         with scoped_context(
@@ -291,10 +291,10 @@ def test_postgres_workspace_clone_graph_is_tenant_isolated(
             session_role=role_name,
         ):
             with pytest.raises(CloneSnapshotUnavailable):
-                other_user_db.read_workspace_clone_snapshot("workspace-source")
+                other_user_db.workspace_store.read_workspace_clone_snapshot("workspace-source")
 
-        assert postgres_db.get_workspace("workspace-user-2") is None
-        assert {row["id"] for row in postgres_db.list_workspaces()} == {
+        assert postgres_db.workspace_store.get_workspace("workspace-user-2") is None
+        assert {row["id"] for row in postgres_db.workspace_store.list_workspaces()} == {
             "workspace-source"
         }
     finally:
@@ -421,7 +421,7 @@ def test_postgres_workspace_snapshot_setup_failure_stops_before_table_queries(
 
     with scoped_context(**scope_kwargs):
         with pytest.raises(CloneSnapshotUnavailable) as exc_info:
-            postgres_db.read_workspace_clone_snapshot("workspace-source")
+            postgres_db.workspace_store.read_workspace_clone_snapshot("workspace-source")
     assert str(exc_info.value) == "source_snapshot_unavailable"
 
     assert table_queries == []
@@ -439,7 +439,7 @@ def test_postgres_workspace_snapshot_setup_failure_stops_before_table_queries(
 def test_postgres_reserve_publish_replay_and_confirm_are_hidden_and_fenced(
     postgres_db: CharactersRAGDB,
 ) -> None:
-    postgres_db.upsert_workspace("workspace-ordinary", "Ordinary Workspace")
+    postgres_db.workspace_store.upsert_workspace("workspace-ordinary", "Ordinary Workspace")
 
     with pytest.raises(ConflictError):
         _reserve(postgres_db, workspace_id="workspace-ordinary")
@@ -450,13 +450,13 @@ def test_postgres_reserve_publish_replay_and_confirm_are_hidden_and_fenced(
     assert replayed == reserved
     assert bool(reserved["archived"]) is True
     assert reserved["system_operation_state"] == "staged"
-    assert postgres_db.get_workspace("workspace-target") is None
-    assert {row["id"] for row in postgres_db.list_workspaces()} == {"workspace-ordinary"}
+    assert postgres_db.workspace_store.get_workspace("workspace-target") is None
+    assert {row["id"] for row in postgres_db.workspace_store.list_workspaces()} == {"workspace-ordinary"}
 
     with pytest.raises(ConflictError):
         _reserve(postgres_db, operation_id="operation-2")
 
-    published = postgres_db.publish_clone_target(
+    published = postgres_db.workspace_store.publish_clone_target(
         workspace_id="workspace-target",
         operation_id="operation-1",
     )
@@ -465,10 +465,10 @@ def test_postgres_reserve_publish_replay_and_confirm_are_hidden_and_fenced(
     assert pending_replay == published
     assert bool(pending_replay["archived"]) is False
     assert pending_replay["system_operation_state"] == "publication_pending"
-    assert postgres_db.get_workspace("workspace-target") is None
-    assert {row["id"] for row in postgres_db.list_workspaces()} == {"workspace-ordinary"}
+    assert postgres_db.workspace_store.get_workspace("workspace-target") is None
+    assert {row["id"] for row in postgres_db.workspace_store.list_workspaces()} == {"workspace-ordinary"}
 
-    confirmed = postgres_db.confirm_clone_target_publication(
+    confirmed = postgres_db.workspace_store.confirm_clone_target_publication(
         workspace_id="workspace-target",
         operation_id="operation-1",
     )
@@ -477,8 +477,8 @@ def test_postgres_reserve_publish_replay_and_confirm_are_hidden_and_fenced(
     assert confirmed["system_operation_kind"] is None
     assert confirmed["system_operation_state"] is None
     assert confirmed["system_request_fingerprint"] is None
-    assert postgres_db.get_workspace("workspace-target") == confirmed
-    assert {row["id"] for row in postgres_db.list_workspaces()} == {
+    assert postgres_db.workspace_store.get_workspace("workspace-target") == confirmed
+    assert {row["id"] for row in postgres_db.workspace_store.list_workspaces()} == {
         "workspace-ordinary",
         "workspace-target",
     }
@@ -489,14 +489,14 @@ def test_postgres_reconciliation_and_discard_use_bounded_boolean_rowcounts(
 ) -> None:
     _reserve(postgres_db, workspace_id="workspace-a", operation_id="operation-a")
     _reserve(postgres_db, workspace_id="workspace-b", operation_id="operation-b")
-    postgres_db.publish_clone_target(workspace_id="workspace-b", operation_id="operation-b")
+    postgres_db.workspace_store.publish_clone_target(workspace_id="workspace-b", operation_id="operation-b")
     _reserve(postgres_db, workspace_id="workspace-c", operation_id="operation-c")
 
-    limited = postgres_db.list_clone_targets_for_reconciliation(
+    limited = postgres_db.workspace_store.list_clone_targets_for_reconciliation(
         operation_ids=["operation-b", "operation-a"],
         limit=1,
     )
-    correlated = postgres_db.list_clone_targets_for_reconciliation(
+    correlated = postgres_db.workspace_store.list_clone_targets_for_reconciliation(
         operation_ids=["operation-b", "operation-a"],
         limit=2,
     )
@@ -509,27 +509,27 @@ def test_postgres_reconciliation_and_discard_use_bounded_boolean_rowcounts(
         ("workspace-b", "publication_pending"),
     ]
 
-    assert postgres_db.discard_clone_target(
+    assert postgres_db.workspace_store.discard_clone_target(
         workspace_id="workspace-a",
         operation_id="operation-other",
     ) is False
-    assert postgres_db.discard_clone_target(
+    assert postgres_db.workspace_store.discard_clone_target(
         workspace_id="workspace-a",
         operation_id="operation-a",
     ) is True
-    assert postgres_db.discard_clone_target(
+    assert postgres_db.workspace_store.discard_clone_target(
         workspace_id="workspace-a",
         operation_id="operation-a",
     ) is False
-    assert postgres_db.list_clone_targets_for_reconciliation(
+    assert postgres_db.workspace_store.list_clone_targets_for_reconciliation(
         operation_ids=["operation-a"],
     ) == []
 
-    assert postgres_db.discard_clone_target(
+    assert postgres_db.workspace_store.discard_clone_target(
         workspace_id="workspace-b",
         operation_id="operation-b",
     ) is True
-    remaining = postgres_db.list_clone_targets_for_reconciliation(
+    remaining = postgres_db.workspace_store.list_clone_targets_for_reconciliation(
         operation_ids=["operation-b", "operation-c"],
     )
 

@@ -2727,7 +2727,7 @@ def test_inline_manual_folder_intent_survives_final_source_removal(
     folder = chacha_db.get_note_folder_by_path("Sources/Shared")
     assert folder is not None
     chacha_db.sync_note_folders(note_id, [])
-    chacha_db.sync_note_source_folders(note_id, 41, [folder["path"]])
+    chacha_db.workspace_store.sync_note_source_folders(note_id, 41, [folder["path"]])
 
     saved = client.patch(
         f"/api/v1/notes/{note_id}",
@@ -2747,7 +2747,7 @@ def test_inline_manual_folder_intent_survives_final_source_removal(
         ).fetchone()[0]
     assert manual_count == 1
 
-    chacha_db.sync_note_source_folders(note_id, 41, [])
+    chacha_db.workspace_store.sync_note_source_folders(note_id, 41, [])
 
     assert [row["path"] for row in chacha_db.get_note_folders_for_note(note_id)] == [
         "Sources",

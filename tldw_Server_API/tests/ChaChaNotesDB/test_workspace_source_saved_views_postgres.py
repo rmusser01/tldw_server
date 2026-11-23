@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import threading
 from collections.abc import Callable
 from dataclasses import replace
@@ -18,11 +17,13 @@ from tldw_Server_API.app.core.DB_Management.backends import base as backend_erro
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import ensure_chacha_rls
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     InputError,
 )
+from tldw_Server_API.tests.helpers import chacha_postgres_ladder as ladder
 
 pytestmark = pytest.mark.integration
 
@@ -48,7 +49,7 @@ def _create(
     schema_version: int = 1,
     state_json: str = '{"schema_version":1}',
 ) -> dict[str, Any]:
-    return db.create_workspace_source_saved_view(
+    return db.workspace_store.create_workspace_source_saved_view(
         owner,
         workspace_id,
         name=name,
@@ -125,8 +126,8 @@ def test_postgres_fresh_schema_named_unique_crud_order_and_owner_predicates(
     workspace_a = "ws-a"
     workspace_b = "ws-b"
     try:
-        db.upsert_workspace(workspace_a, "Workspace A")
-        owner_b.upsert_workspace(workspace_b, "Workspace B")
+        db.workspace_store.upsert_workspace(workspace_a, "Workspace A")
+        owner_b.workspace_store.upsert_workspace(workspace_b, "Workspace B")
         assert backend.table_exists("workspace_source_saved_views")
         constraint = list(
             backend.execute(
@@ -154,11 +155,11 @@ def test_postgres_fresh_schema_named_unique_crud_order_and_owner_predicates(
             ("2026-01-02T00:00:00.000Z", alpha["id"]),
             commit=True,
         )
-        assert [row["id"] for row in db.list_workspace_source_saved_views(OWNER_A, workspace_a)] == [
+        assert [row["id"] for row in db.workspace_store.list_workspace_source_saved_views(OWNER_A, workspace_a)] == [
             alpha["id"],
             zulu["id"],
         ]
-        updated = db.update_workspace_source_saved_view(
+        updated = db.workspace_store.update_workspace_source_saved_view(
             OWNER_A,
             workspace_a,
             zulu["id"],
@@ -169,14 +170,14 @@ def test_postgres_fresh_schema_named_unique_crud_order_and_owner_predicates(
         )
         assert updated["version"] == 2
         assert updated["state_json"] == "raw pg state"
-        assert db.get_workspace_source_saved_view(OWNER_A, workspace_a, zulu["id"]) == updated
+        assert db.workspace_store.get_workspace_source_saved_view(OWNER_A, workspace_a, zulu["id"]) == updated
 
         with pytest.raises(CharactersRAGDBError) as exc_info:
-            owner_b.get_workspace_source_saved_view(OWNER_B, workspace_a, zulu["id"])
+            owner_b.workspace_store.get_workspace_source_saved_view(OWNER_B, workspace_a, zulu["id"])
         assert exc_info.value.code == "source_view_not_found"
         assert exc_info.value.metadata == {}
-        db.delete_workspace_source_saved_view(OWNER_A, workspace_a, zulu["id"])
-        assert [row["id"] for row in db.list_workspace_source_saved_views(OWNER_A, workspace_a)] == [alpha["id"]]
+        db.workspace_store.delete_workspace_source_saved_view(OWNER_A, workspace_a, zulu["id"])
+        assert [row["id"] for row in db.workspace_store.list_workspace_source_saved_views(OWNER_A, workspace_a)] == [alpha["id"]]
     finally:
         db.close_all_connections()
         owner_b.close_all_connections()
@@ -189,17 +190,16 @@ def test_postgres_v53_to_v54_saved_view_checkpoint_creates_table_and_forced_poli
     # Replaying the whole initializer from v53 on a current catalog is not a
     # real predecessor: v56's WebClipper check expects the pre-v57 keys and
     # fails closed. Run the v53->v54 step itself on a catalog missing it.
-    initializer = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
-    step = initializer.index("if current_version < 54:")
-    assert initializer.index("_ensure_workspace_source_saved_view_schema_postgres(conn)", step) < initializer.index(
-        "_set_schema_version_postgres(conn, 54)", step
+    step = ladder.names(ladder.branch_calls(ladder.postgres_init_function(), 54))
+    assert step.index("_ensure_workspace_source_saved_view_schema_postgres") < step.index(
+        "_set_schema_version_postgres"
     )
 
     backend, seed = _database(pg_database_config)
     try:
         with backend.transaction() as conn:
             backend.execute("DROP TABLE workspace_source_saved_views", connection=conn)
-            seed._ensure_workspace_source_saved_view_schema_postgres(conn)
+            postgres_schema._ensure_workspace_source_saved_view_schema_postgres(seed.ctx, conn)
 
         assert backend.table_exists("workspace_source_saved_views")
         _assert_forced_active_workspace_policy(backend)
@@ -213,7 +213,7 @@ def test_postgres_concurrent_count_duplicate_and_rename_conflicts_have_safe_meta
 ) -> None:
     backend, db = _database(pg_database_config)
     workspace_id = "ws-concurrency"
-    db.upsert_workspace(workspace_id, "Concurrency")
+    db.workspace_store.upsert_workspace(workspace_id, "Concurrency")
 
     def run_two(workers: tuple[Callable[[], object], Callable[[], object]]) -> list[object]:
         barrier = threading.Barrier(2)
@@ -255,14 +255,14 @@ def test_postgres_concurrent_count_duplicate_and_rename_conflicts_have_safe_meta
         right = _create(db, workspace_id, name="Right")
         rename_results = run_two(
             (
-                lambda: db.update_workspace_source_saved_view(
+                lambda: db.workspace_store.update_workspace_source_saved_view(
                     OWNER_A,
                     workspace_id,
                     left["id"],
                     expected_version=1,
                     name="Target",
                 ),
-                lambda: db.update_workspace_source_saved_view(
+                lambda: db.workspace_store.update_workspace_source_saved_view(
                     OWNER_A,
                     workspace_id,
                     right["id"],
@@ -300,7 +300,7 @@ def test_postgres_concurrent_count_duplicate_and_rename_conflicts_have_safe_meta
         limit_conflict = next(result for result in limit_results if isinstance(result, CharactersRAGDBError))
         assert limit_conflict.code == "source_view_limit_reached"
         assert limit_conflict.metadata == {"limit": 100}
-        assert len(db.list_workspace_source_saved_views(OWNER_A, workspace_id)) == 100
+        assert len(db.workspace_store.list_workspace_source_saved_views(OWNER_A, workspace_id)) == 100
 
         with pytest.raises(CharactersRAGDBError) as duplicate_at_capacity:
             _create(db, workspace_id, name="STRASSE")
@@ -319,9 +319,9 @@ def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
 ) -> None:
     backend, db = _database(pg_database_config)
     workspace_id = f"ws-named-unique-{operation}"
-    db.upsert_workspace(workspace_id, "Named unique recovery")
+    db.workspace_store.upsert_workspace(workspace_id, "Named unique recovery")
     conflict = _create(db, workspace_id, name="Conflict")
-    conflict = db.update_workspace_source_saved_view(
+    conflict = db.workspace_store.update_workspace_source_saved_view(
         OWNER_A,
         workspace_id,
         conflict["id"],
@@ -330,8 +330,8 @@ def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
         schema_version=2,
     )
     candidate = _create(db, workspace_id, name="Candidate")
-    original_find = db._find_workspace_source_saved_view_name_with_conn
-    original_detect = db._is_workspace_source_saved_view_postgres_unique_error
+    original_find = db.workspace_store._find_workspace_source_saved_view_name_with_conn
+    original_detect = db.workspace_store._is_workspace_source_saved_view_postgres_unique_error
     find_connection_ids: list[int] = []
     detected_errors: list[type[BaseException]] = []
 
@@ -372,7 +372,7 @@ def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
                 if operation == "create":
                     _create(db, workspace_id, name="CONFLICT")
                 else:
-                    db.update_workspace_source_saved_view(
+                    db.workspace_store.update_workspace_source_saved_view(
                         OWNER_A,
                         workspace_id,
                         candidate["id"],
@@ -385,10 +385,10 @@ def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
         assert detected_errors == [backend_errors.SavedViewNameUniqueConstraintError]
         assert len(find_connection_ids) == 2
         assert find_connection_ids[0] != find_connection_ids[1]
-        unchanged = db.get_workspace_source_saved_view(OWNER_A, workspace_id, candidate["id"])
+        unchanged = db.workspace_store.get_workspace_source_saved_view(OWNER_A, workspace_id, candidate["id"])
         assert unchanged["name"] == "Candidate"
         assert unchanged["version"] == 1
-        workspace = db.get_workspace(workspace_id)
+        workspace = db.workspace_store.get_workspace(workspace_id)
         assert workspace is not None
         assert workspace["description"] is None
     finally:
@@ -404,7 +404,7 @@ def test_postgres_recovery_closes_idle_direct_connection_before_domain_error(
 ) -> None:
     backend, db = _database(pg_database_config)
     workspace_id = f"ws-recovery-cleanup-{outcome}"
-    db.upsert_workspace(workspace_id, "Recovery cleanup")
+    db.workspace_store.upsert_workspace(workspace_id, "Recovery cleanup")
     conflict = _create(db, workspace_id, name="Conflict")
     original_connect = backend.connect
     original_disconnect = backend.disconnect
@@ -428,7 +428,7 @@ def test_postgres_recovery_closes_idle_direct_connection_before_domain_error(
     try:
         for _ in range(3):
             with pytest.raises(CharactersRAGDBError) as exc_info:
-                db._raise_workspace_source_saved_view_duplicate_from_fresh_transaction(
+                db.workspace_store._raise_workspace_source_saved_view_duplicate_from_fresh_transaction(
                     OWNER_A,
                     workspace_id,
                     name_key,
@@ -459,9 +459,9 @@ def test_postgres_nested_duplicate_recovery_does_not_borrow_pool_capacity(
     )
     backend, db = _database(one_connection_config)
     workspace_id = "ws-pool-one-recovery"
-    db.upsert_workspace(workspace_id, "Pool one recovery")
+    db.workspace_store.upsert_workspace(workspace_id, "Pool one recovery")
     conflict = _create(db, workspace_id, name="Conflict")
-    original_find = db._find_workspace_source_saved_view_name_with_conn
+    original_find = db.workspace_store._find_workspace_source_saved_view_name_with_conn
     original_pool_get = backend.get_pool().get_connection
     original_disconnect = backend.disconnect
     find_calls = 0
@@ -516,7 +516,7 @@ def test_postgres_nested_duplicate_recovery_does_not_borrow_pool_capacity(
 
         assert pool_borrows == 0
         assert disconnect_states == [("IDLE", True)] * 2
-        workspace = db.get_workspace(workspace_id)
+        workspace = db.workspace_store.get_workspace(workspace_id)
         assert workspace is not None
         assert workspace["description"] is None
     finally:
@@ -541,7 +541,7 @@ def test_postgres_saved_view_text_validation_is_driver_independent(
     backend, db = _database(pg_database_config)
     workspace_id = f"ws-text-validation-{field}-{uuid4()}"
     try:
-        db.upsert_workspace(workspace_id, "Text validation")
+        db.workspace_store.upsert_workspace(workspace_id, "Text validation")
 
         with pytest.raises(InputError, match=field):
             _create(db, workspace_id, **{field: value})
@@ -556,8 +556,8 @@ def test_postgres_saved_view_integer_boundaries_are_driver_independent(
     backend, db = _database(pg_database_config)
     workspace_id = "ws-integer-validation"
     try:
-        db.upsert_workspace(workspace_id, "Integer validation")
-        created = db.create_workspace_source_saved_view(
+        db.workspace_store.upsert_workspace(workspace_id, "Integer validation")
+        created = db.workspace_store.create_workspace_source_saved_view(
             OWNER_A,
             workspace_id,
             name="Maximum schema",
@@ -569,7 +569,7 @@ def test_postgres_saved_view_integer_boundaries_are_driver_independent(
 
         for value in (True, 0, -1, 2_147_483_648, 1.5):
             with pytest.raises(InputError, match="schema_version"):
-                db.create_workspace_source_saved_view(
+                db.workspace_store.create_workspace_source_saved_view(
                     OWNER_A,
                     workspace_id,
                     name=f"Invalid schema {value!r}",
@@ -577,7 +577,7 @@ def test_postgres_saved_view_integer_boundaries_are_driver_independent(
                     state_json="{}",
                 )
             with pytest.raises(InputError, match="expected_version"):
-                db.update_workspace_source_saved_view(
+                db.workspace_store.update_workspace_source_saved_view(
                     OWNER_A,
                     workspace_id,
                     created["id"],
@@ -596,7 +596,7 @@ def test_postgres_update_rejects_maximum_stored_version_without_mutating_row(
     backend, db = _database(pg_database_config)
     workspace_id = "ws-maximum-saved-view-version"
     try:
-        db.upsert_workspace(workspace_id, "Maximum saved view version")
+        db.workspace_store.upsert_workspace(workspace_id, "Maximum saved view version")
         created = _create(db, workspace_id, name="Maximum version")
         db.execute_query(
             "UPDATE workspace_source_saved_views SET version = ? WHERE id = ?",
@@ -605,7 +605,7 @@ def test_postgres_update_rejects_maximum_stored_version_without_mutating_row(
         )
 
         with pytest.raises(CharactersRAGDBError) as stale_exc:
-            db.update_workspace_source_saved_view(
+            db.workspace_store.update_workspace_source_saved_view(
                 OWNER_A,
                 workspace_id,
                 created["id"],
@@ -619,7 +619,7 @@ def test_postgres_update_rejects_maximum_stored_version_without_mutating_row(
         }
 
         with pytest.raises(InputError, match="maximum"):
-            db.update_workspace_source_saved_view(
+            db.workspace_store.update_workspace_source_saved_view(
                 OWNER_A,
                 workspace_id,
                 created["id"],
@@ -627,7 +627,7 @@ def test_postgres_update_rejects_maximum_stored_version_without_mutating_row(
                 name="Overflowing change",
             )
 
-        current = db.get_workspace_source_saved_view(OWNER_A, workspace_id, created["id"])
+        current = db.workspace_store.get_workspace_source_saved_view(OWNER_A, workspace_id, created["id"])
         assert current["version"] == maximum
         assert current["name"] == "Maximum version"
     finally:
@@ -645,13 +645,13 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
 ) -> None:
     backend, db = _database(pg_database_config)
     workspace_id = f"ws-{operation}-{delete_first}"
-    db.upsert_workspace(workspace_id, "Workspace")
+    db.workspace_store.upsert_workspace(workspace_id, "Workspace")
     existing = _create(db, workspace_id)
     first_done = threading.Event()
     allow_commit = threading.Event()
     results: dict[str, object] = {}
     if delete_first:
-        original_finish = db._finish_native_workspace_delete
+        original_finish = db.workspace_store._finish_native_workspace_delete
 
         def pause_after_final_transition(conn: Any, workspace_id: str, **kwargs: Any) -> None:
             original_finish(conn, workspace_id, **kwargs)
@@ -667,7 +667,7 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
                 if operation == "create":
                     results["mutation"] = _create(db, workspace_id, name="Concurrent")
                 elif operation == "update":
-                    results["mutation"] = db.update_workspace_source_saved_view(
+                    results["mutation"] = db.workspace_store.update_workspace_source_saved_view(
                         OWNER_A,
                         workspace_id,
                         existing["id"],
@@ -675,7 +675,7 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
                         name="Concurrent",
                     )
                 else:
-                    results["mutation"] = db.delete_workspace_source_saved_view(
+                    results["mutation"] = db.workspace_store.delete_workspace_source_saved_view(
                         OWNER_A,
                         workspace_id,
                         existing["id"],
@@ -685,7 +685,7 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
                     if operation == "create":
                         results["mutation"] = _create(db, workspace_id, name="Concurrent")
                     elif operation == "update":
-                        results["mutation"] = db.update_workspace_source_saved_view(
+                        results["mutation"] = db.workspace_store.update_workspace_source_saved_view(
                             OWNER_A,
                             workspace_id,
                             existing["id"],
@@ -693,7 +693,7 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
                             name="Concurrent",
                         )
                     else:
-                        results["mutation"] = db.delete_workspace_source_saved_view(
+                        results["mutation"] = db.workspace_store.delete_workspace_source_saved_view(
                             OWNER_A,
                             workspace_id,
                             existing["id"],
@@ -709,16 +709,16 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
         try:
             if not delete_first:
                 assert first_done.wait(timeout=5)
-                workspace = db.get_workspace(workspace_id)
+                workspace = db.workspace_store.get_workspace(workspace_id)
                 assert workspace is not None
-                results["deleted"] = db.delete_workspace(
+                results["deleted"] = db.workspace_store.delete_workspace(
                     workspace_id,
                     expected_version=workspace["version"],
                 )
             else:
-                workspace = db.get_workspace(workspace_id)
+                workspace = db.workspace_store.get_workspace(workspace_id)
                 assert workspace is not None
-                results["deleted"] = db.delete_workspace(
+                results["deleted"] = db.workspace_store.delete_workspace(
                     workspace_id,
                     expected_version=workspace["version"],
                 )
@@ -760,8 +760,8 @@ def test_postgres_rls_isolates_two_principals_and_active_workspaces(
 ) -> None:
     backend, owner_db = _database(pg_database_config)
     other_db = CharactersRAGDB(db_path=":memory:", client_id=OWNER_B, backend=backend)
-    owner_db.upsert_workspace("ws-a", "Workspace A")
-    other_db.upsert_workspace("ws-b", "Workspace B")
+    owner_db.workspace_store.upsert_workspace("ws-a", "Workspace A")
+    other_db.workspace_store.upsert_workspace("ws-b", "Workspace B")
     owner_view = _create(owner_db, "ws-a")
     other_view = _create(other_db, "ws-b", owner=OWNER_B)
     ident = backend.escape_identifier
@@ -771,7 +771,7 @@ def test_postgres_rls_isolates_two_principals_and_active_workspaces(
         with pytest.raises(CharactersRAGDBError):
             _create(other_db, "ws-a", owner=OWNER_B, name="Probe")
         with pytest.raises(CharactersRAGDBError):
-            other_db.update_workspace_source_saved_view(
+            other_db.workspace_store.update_workspace_source_saved_view(
                 OWNER_B,
                 "ws-a",
                 owner_view["id"],
@@ -779,7 +779,7 @@ def test_postgres_rls_isolates_two_principals_and_active_workspaces(
                 name="Probe",
             )
         with pytest.raises(CharactersRAGDBError):
-            other_db.delete_workspace_source_saved_view(OWNER_B, "ws-a", owner_view["id"])
+            other_db.workspace_store.delete_workspace_source_saved_view(OWNER_B, "ws-a", owner_view["id"])
 
         with backend.transaction() as conn:
             backend.execute(f"CREATE ROLE {ident(role_name)} NOLOGIN", connection=conn)
@@ -894,7 +894,7 @@ def test_postgres_rls_isolates_two_principals_and_active_workspaces(
         assert selected == [{"id": allowed_id}]
         assert allowed_update.rowcount == 1
         assert allowed_delete.rowcount == 1
-        assert owner_db.get_workspace_source_saved_view(OWNER_A, "ws-a", owner_view["id"])["id"] == owner_view["id"]
+        assert owner_db.workspace_store.get_workspace_source_saved_view(OWNER_A, "ws-a", owner_view["id"])["id"] == owner_view["id"]
     finally:
         owner_db.close_connection()
         other_db.close_connection()

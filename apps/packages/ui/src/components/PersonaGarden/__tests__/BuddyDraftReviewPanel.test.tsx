@@ -89,7 +89,7 @@ const preview = (
   stage: "completed",
   schema_version: "codex.pet.v1",
   bundle_summary: {
-    pack_title: "Imported Buddy",
+    pack_title: "Imported avatar",
     assets: [
       {
         source_asset_id: "atlas",

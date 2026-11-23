@@ -26,7 +26,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     ConversationResumeStore,
 )
@@ -34,6 +34,8 @@ from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
     ConversationStore,
 )
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendConnectionWrapper,
     CharactersRAGDB,
@@ -186,8 +188,8 @@ def test_schema_head_allocates_exactly_v65_and_both_ladders_advance_once() -> No
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     assert db._sqlite_linear_migration_steps()[63].__name__ == "_migrate_from_v63_to_v64_sqlite"
     assert db._sqlite_linear_migration_steps()[64].__name__ == "_migrate_from_v64_to_v65"
-    assert hasattr(CharactersRAGDB, "_migrate_from_v63_to_v64_postgres")
-    assert hasattr(CharactersRAGDB, "_migrate_from_v64_to_v65_postgres")
+    assert callable(postgres_steps._migrate_from_v63_to_v64_postgres)
+    assert callable(postgres_steps._migrate_from_v64_to_v65_postgres)
 
 
 def test_sqlite_v64_to_v65_migrates_catalog_and_legacy_reads_missing(
@@ -275,7 +277,7 @@ def test_sqlite_v64_to_v65_migrates_catalog_and_legacy_reads_missing(
 
     migrated = CharactersRAGDB(db_path=str(db_path), client_id="legacy-owner")
     try:
-        snapshot = migrated.get_conversation_behavior_snapshot(conversation_id)
+        snapshot = migrated.conversation_resume_store.get_conversation_behavior_snapshot(conversation_id)
         assert snapshot == {
             "status": "missing",
             "schema_version": None,
@@ -285,7 +287,7 @@ def test_sqlite_v64_to_v65_migrates_catalog_and_legacy_reads_missing(
             "created_at": None,
             "payload": None,
         }
-        state = migrated.get_roleplay_resume_state(conversation_id)
+        state = migrated.conversation_resume_store.get_roleplay_resume_state(conversation_id)
         assert state["behavior_snapshot"] == snapshot
         assert state["settings_version"] == 1
         assert state["history_version"] == 1
@@ -295,7 +297,7 @@ def test_sqlite_v64_to_v65_migrates_catalog_and_legacy_reads_missing(
     # Current readers select post-v65 columns (e.g. required_projection_version),
     # so read the legacy row back after the upgrade to the current schema.
     migrated = CharactersRAGDB(db_path=str(db_path), client_id="legacy-owner")
-    snapshot = migrated.get_conversation_behavior_snapshot(conversation_id)
+    snapshot = migrated.conversation_resume_store.get_conversation_behavior_snapshot(conversation_id)
     assert snapshot == {
         "status": "missing",
         "schema_version": None,
@@ -305,7 +307,7 @@ def test_sqlite_v64_to_v65_migrates_catalog_and_legacy_reads_missing(
         "created_at": None,
         "payload": None,
     }
-    state = migrated.get_roleplay_resume_state(conversation_id)
+    state = migrated.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert state["behavior_snapshot"] == snapshot
     assert state["settings_version"] == 1
     assert state["history_version"] == 1
@@ -451,11 +453,11 @@ def test_sqlite_v65_checkpoint_failure_rolls_back_all_schema_changes(
     db_path = tmp_path / "character-behavior-rollback.sqlite"
     _create_v64_legacy_database(db_path, monkeypatch)
 
-    def _fail_checkpoint(_self: CharactersRAGDB, stage: str) -> None:
+    def _fail_checkpoint(_ctx: object, stage: str) -> None:
         assert stage == "schema-created"
         raise RuntimeError("injected v65 migration checkpoint failure")
 
-    monkeypatch.setattr(CharactersRAGDB, "_migration_v65_checkpoint", _fail_checkpoint)
+    monkeypatch.setattr(migration_support, "_migration_v65_checkpoint", _fail_checkpoint)
     with pytest.raises(CharactersRAGDBError, match="injected v65 migration checkpoint failure"):
         CharactersRAGDB(db_path=str(db_path), client_id="rollback-owner")
 
@@ -545,9 +547,9 @@ def test_snapshot_store_uses_canonical_authority_and_rejects_incoherent_values(
     snapshot = _snapshot()
 
     with db.transaction() as conn:
-        db.put_behavior_snapshot(conversation_id, snapshot, conn=conn)
+        db.conversation_resume_store.put_behavior_snapshot(conversation_id, snapshot, conn=conn)
 
-    stored = db.get_conversation_behavior_snapshot(conversation_id)
+    stored = db.conversation_resume_store.get_conversation_behavior_snapshot(conversation_id)
     assert stored["status"] == "valid"
     assert stored["schema_version"] == snapshot.schema_version
     assert stored["canonical_json"] == snapshot.canonical_bytes.decode("utf-8")
@@ -568,9 +570,9 @@ def test_snapshot_store_uses_canonical_authority_and_rejects_incoherent_values(
     assert second_conversation is not None
     with db.transaction() as conn:
         with pytest.raises(InputError, match="digest"):
-            db.put_behavior_snapshot(second_conversation, incoherent, conn=conn)
+            db.conversation_resume_store.put_behavior_snapshot(second_conversation, incoherent, conn=conn)
 
-    assert db.get_conversation_behavior_snapshot(second_conversation)["status"] == "missing"
+    assert db.conversation_resume_store.get_conversation_behavior_snapshot(second_conversation)["status"] == "missing"
     db.close_connection()
 
 
@@ -595,7 +597,7 @@ def test_snapshot_store_fails_closed_on_persisted_authority_tamper(
     )
     assert conversation_id is not None
     with db.transaction() as conn:
-        db.put_behavior_snapshot(conversation_id, _snapshot(), conn=conn)
+        db.conversation_resume_store.put_behavior_snapshot(conversation_id, _snapshot(), conn=conn)
     db.close_connection()
 
     with sqlite3.connect(db_path) as conn:
@@ -606,7 +608,7 @@ def test_snapshot_store_fails_closed_on_persisted_authority_tamper(
         )
 
     reopened = CharactersRAGDB(db_path=str(db_path), client_id="tamper-owner")
-    stored = reopened.get_conversation_behavior_snapshot(conversation_id)
+    stored = reopened.conversation_resume_store.get_conversation_behavior_snapshot(conversation_id)
     assert stored == {
         "status": "invalid",
         "schema_version": None,
@@ -639,7 +641,7 @@ def test_caller_owned_creation_transaction_rolls_back_conversation_snapshot_and_
                 },
                 conn=conn,
             ) == conversation_id
-            db.put_behavior_snapshot(conversation_id, snapshot, conn=conn)
+            db.conversation_resume_store.put_behavior_snapshot(conversation_id, snapshot, conn=conn)
             assert db.add_message(
                 {
                     "conversation_id": conversation_id,
@@ -674,18 +676,18 @@ def test_message_mutations_advance_history_once_and_rollback_with_caller_connect
         {"character_id": 1, "title": "Versioned history"}
     )
     assert conversation_id is not None
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 1
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 1
 
     root_id = db.add_message(
         {"conversation_id": conversation_id, "sender": "user", "content": "Root"}
     )
     assert root_id is not None
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 2
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 2
 
     root = db.get_message_by_id(root_id)
     assert root is not None
     assert db.update_message(root_id, {"content": "Edited root"}, root["version"])
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 3
 
     branch_id = db.add_message(
         {
@@ -696,7 +698,7 @@ def test_message_mutations_advance_history_once_and_rollback_with_caller_connect
         }
     )
     assert branch_id is not None
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 4
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 4
 
     branch = db.get_message_by_id(branch_id)
     assert branch is not None
@@ -705,15 +707,15 @@ def test_message_mutations_advance_history_once_and_rollback_with_caller_connect
         {"parent_message_id": None},
         branch["version"],
     )
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 5
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 5
 
     branch = db.get_message_by_id(branch_id)
     assert branch is not None
     assert db.soft_delete_message(branch_id, branch["version"])
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 6
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 6
 
     assert db.soft_delete_message(branch_id, branch["version"])
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 6
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 6
 
     with pytest.raises(RuntimeError, match="rollback message"):
         with db.transaction() as conn:
@@ -725,10 +727,10 @@ def test_message_mutations_advance_history_once_and_rollback_with_caller_connect
                 },
                 conn=conn,
             ) is not None
-            assert db.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 7
+            assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 7
             raise RuntimeError("rollback message")
 
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 6
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 6
     assert db.count_messages_for_conversation(conversation_id, include_deleted=True) == 2
 
     root = db.get_message_by_id(root_id)
@@ -741,26 +743,26 @@ def test_message_mutations_advance_history_once_and_rollback_with_caller_connect
                 root["version"],
                 conn=conn,
             )
-            assert db.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 7
+            assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 7
             raise RuntimeError("rollback edit")
 
     restored_root = db.get_message_by_id(root_id)
     assert restored_root is not None
     assert restored_root["content"] == "Edited root"
     assert restored_root["version"] == root["version"]
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 6
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 6
 
     with pytest.raises(RuntimeError, match="rollback delete"):
         with db.transaction() as conn:
             assert db.soft_delete_message(root_id, root["version"], conn=conn)
-            assert db.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 7
+            assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 7
             raise RuntimeError("rollback delete")
 
     restored_root = db.get_message_by_id(root_id)
     assert restored_root is not None
     assert restored_root["deleted"] == 0
     assert restored_root["version"] == root["version"]
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 6
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 6
     db.close_connection()
 
 
@@ -779,10 +781,10 @@ def test_prompt_visible_image_and_pin_mutations_advance_and_rollback_history_fen
         {"conversation_id": conversation_id, "sender": "user", "content": "See this"}
     )
     assert message_id is not None
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 2
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 2
 
     assert db.append_message_image(message_id, b"first-image", "image/png") == 0
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 3
 
     with pytest.raises(RuntimeError, match="rollback image"):
         with db.transaction() as conn:
@@ -792,20 +794,20 @@ def test_prompt_visible_image_and_pin_mutations_advance_and_rollback_history_fen
                 "image/png",
                 conn=conn,
             ) == 1
-            assert db.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 4
+            assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 4
             raise RuntimeError("rollback image")
 
     assert len(db.get_message_images(message_id)) == 1
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 3
 
     assert db.set_message_metadata_extra(
         message_id,
         {"pinned": True},
         conn=None,
     )
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 4
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 4
     assert db.set_message_metadata_extra(message_id, {"pinned": True})
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 4
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 4
 
     with pytest.raises(RuntimeError, match="rollback pin"):
         with db.transaction() as conn:
@@ -814,16 +816,16 @@ def test_prompt_visible_image_and_pin_mutations_advance_and_rollback_history_fen
                 {"pinned": False},
                 conn=conn,
             )
-            assert db.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 5
+            assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id, conn=conn)["history_version"] == 5
             raise RuntimeError("rollback pin")
 
     metadata = db.get_message_metadata(message_id)
     assert metadata is not None
     assert metadata["extra"]["pinned"] is True
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 4
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 4
 
     assert db.set_message_metadata_extra("missing-message", {"pinned": True}) is False
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 4
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 4
     db.close_connection()
 
 
@@ -893,7 +895,7 @@ def test_sync_append_advances_history_once_and_replay_does_not_advance(
         {"character_id": 1, "title": "Atomic Sync append"}
     )
     assert conversation_id is not None
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 1
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 1
 
     first = db.append_message_from_sync(
         stable_message_id="sync-atomic-append",
@@ -906,9 +908,9 @@ def test_sync_append_advances_history_once_and_replay_does_not_advance(
         payload_hash="sha256:sync-atomic-append",
     )
     assert first["created"] is True
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 2
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 2
     assert db.get_message_by_id(first["message_id"])["version"] == 3
-    assert db.get_conversation_behavior_snapshot(conversation_id)["status"] == "missing"
+    assert db.conversation_resume_store.get_conversation_behavior_snapshot(conversation_id)["status"] == "missing"
 
     replay = db.append_message_from_sync(
         stable_message_id="sync-atomic-append",
@@ -921,7 +923,7 @@ def test_sync_append_advances_history_once_and_replay_does_not_advance(
         payload_hash="sha256:sync-atomic-append",
     )
     assert replay["idempotent"] is True
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 2
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 2
     db.close_connection()
 
 
@@ -961,8 +963,8 @@ def test_sync_append_metadata_failure_rolls_back_message_and_history(
         )
 
     assert db.get_message_by_id("sync-rollback-append", include_deleted=True) is None
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 1
-    assert db.get_conversation_behavior_snapshot(conversation_id)["status"] == "missing"
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 1
+    assert db.conversation_resume_store.get_conversation_behavior_snapshot(conversation_id)["status"] == "missing"
     db.close_connection()
 
 
@@ -994,7 +996,7 @@ def test_sync_tombstone_advances_history_once_and_replay_does_not_advance(
         object_revision=2,
         object_hash="sha256:sync-atomic-tombstone",
     )
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 3
 
     assert db.tombstone_message_from_sync(
         stable_message_id="sync-atomic-tombstone",
@@ -1002,8 +1004,8 @@ def test_sync_tombstone_advances_history_once_and_replay_does_not_advance(
         object_revision=2,
         object_hash="sha256:sync-atomic-tombstone",
     )
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
-    assert db.get_conversation_behavior_snapshot(conversation_id)["status"] == "missing"
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+    assert db.conversation_resume_store.get_conversation_behavior_snapshot(conversation_id)["status"] == "missing"
     db.close_connection()
 
 
@@ -1065,7 +1067,7 @@ def test_sync_tombstone_failure_rolls_back_deletion_metadata_and_history(
     assert bool(message["deleted"]) is False
     assert message["version"] == 1
     assert db.get_message_metadata(message_id) == original_metadata
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 2
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 2
     db.close_connection()
 
 
@@ -1109,7 +1111,7 @@ def test_commit_false_image_append_retries_without_splitting_history_fence(
 
     assert conflicts == 1
     assert len(db.get_message_images(message_id)) == 1
-    assert db.get_roleplay_resume_state(conversation_id)["history_version"] == 3
+    assert db.conversation_resume_store.get_roleplay_resume_state(conversation_id)["history_version"] == 3
     db.close_connection()
 
 
@@ -1392,9 +1394,9 @@ def _postgres_store_db(
     db.client_id = "postgres-store-owner"
     db._owner_user_id = "postgres-store-owner"
     db.db_path_str = "postgresql://recording"
-    db.message_store = MessageStore(db)
+    db.message_store = MessageStore(db.ctx)
     db.conversation_resume_store = ConversationResumeStore(db)
-    db._ensure_message_metadata_table = lambda: None
+    db.ensure_message_metadata_table = lambda: None
     wrapper = BackendConnectionWrapper(db, object(), backend)
     return db, wrapper
 
@@ -1430,7 +1432,7 @@ def test_postgres_backend_wrapper_roundtrips_resume_store_contract() -> None:
 def test_postgres_settings_upsert_locks_conversation_before_replacing_json() -> None:
     backend = _PostgresStoreBackend()
     db, wrapper = _postgres_store_db(backend)
-    store = ConversationStore(db)
+    store = ConversationStore(db.ctx)
     start_index = len(backend.executed)
 
     assert store.upsert_conversation_settings(
@@ -1560,7 +1562,7 @@ def test_sqlite_settings_upsert_rolls_back_when_live_conversation_update_misses(
 def test_postgres_settings_upsert_rejects_stale_expected_version_atomically() -> None:
     backend = _PostgresStoreBackend()
     db, wrapper = _postgres_store_db(backend)
-    store = ConversationStore(db)
+    store = ConversationStore(db.ctx)
 
     assert store.upsert_conversation_settings(
         backend.conversation_id,
@@ -1618,7 +1620,7 @@ def test_resume_state_returns_authoritative_owned_conversation_identity(
     assert conversation_id == "coherent-resume-state"
 
     with db.transaction() as conn:
-        state = db.get_roleplay_resume_state(
+        state = db.conversation_resume_store.get_roleplay_resume_state(
             conversation_id,
             conn=conn,
             lock_for_update=True,
@@ -1653,7 +1655,7 @@ def test_resume_state_rejects_wrong_owner_and_deleted_conversation(
     assert conversation_id == "owned-resume-state"
 
     with pytest.raises(NotFoundError):
-        db.get_roleplay_resume_state(
+        db.conversation_resume_store.get_roleplay_resume_state(
             conversation_id,
             owner_client_id="different-owner",
         )
@@ -1662,7 +1664,7 @@ def test_resume_state_rejects_wrong_owner_and_deleted_conversation(
     assert conversation is not None
     assert db.soft_delete_conversation(conversation_id, conversation["version"])
     with pytest.raises(NotFoundError):
-        db.get_roleplay_resume_state(
+        db.conversation_resume_store.get_roleplay_resume_state(
             conversation_id,
             owner_client_id="resume-owner",
         )
@@ -1867,27 +1869,27 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
     migration_connection, coordinator_calls = _record_postgres_coordinator(monkeypatch, backend)
     version_reads: list[tuple[object, bool]] = []
 
-    def schema_version(connection: object, *, lock: bool = False) -> int:
+    def schema_version(_ctx: object, connection: object, *, lock: bool = False) -> int:
         version_reads.append((connection, lock))
         return 64
 
-    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: True)
-    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
-    monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
-    monkeypatch.setattr(db, "_ensure_study_pack_schema_postgres", lambda conn: None)
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", schema_version)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_notes_moodboard_studio_schema_postgres", lambda _ctx, conn: True)
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_progress_row", lambda _ctx, _conn, _phase: {"status": "complete"})
+    monkeypatch.setattr(postgres_schema, "_ensure_postgres_fts", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_ensure_study_pack_schema_postgres", lambda _ctx, conn: None)
     applied: list[str] = []
 
     class _ReachedV65(Exception):
         pass
 
-    def _record_migration(conn: object) -> None:
+    def _record_migration(_ctx: object, conn: object) -> None:
         applied.append("64-to-65")
         raise _ReachedV65
 
-    monkeypatch.setattr(db, "_migrate_from_v64_to_v65_postgres", _record_migration)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v64_to_v65_postgres", _record_migration)
     with pytest.raises(_ReachedV65):
         db._initialize_schema_postgres()
 
@@ -1926,7 +1928,7 @@ def test_postgres_v64_to_v65_preserves_legacy_conversation_and_notes_schema(
             ).scalar == 65
         assert backend.table_exists("note_graph_suggestion_operation_receipts")
         db._initialize_schema_postgres()
-        state = db.get_roleplay_resume_state(
+        state = db.conversation_resume_store.get_roleplay_resume_state(
             conversation_id,
             lock_for_update=lock_for_update,
             owner_client_id=owner_client_id,
@@ -1943,7 +1945,7 @@ def test_postgres_v65_migration_executes_exact_version_advance() -> None:
     db = _postgres_db(backend)
 
     with backend.transaction() as conn:
-        db._migrate_from_v64_to_v65_postgres(conn)
+        postgres_steps._migrate_from_v64_to_v65_postgres(db.ctx, conn)
 
     assert backend.schema_version == 65
     assert any("conversation_behavior_snapshots" in sql for sql in backend.committed_statements)
@@ -1962,7 +1964,7 @@ def test_postgres_v65_rejects_partial_preexisting_schema_and_preserves_v64(
 
     with pytest.raises(BackendDatabaseError, match="pre-existing PostgreSQL"):
         with backend.transaction() as conn:
-            db._migrate_from_v64_to_v65_postgres(conn)
+            postgres_steps._migrate_from_v64_to_v65_postgres(db.ctx, conn)
 
     assert backend.rolled_back is True
     assert backend.schema_version == 64
@@ -1978,21 +1980,21 @@ def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
     migration_connection, coordinator_calls = _record_postgres_coordinator(monkeypatch, backend)
     version_reads: list[tuple[object, bool]] = []
 
-    def schema_version(connection: object, *, lock: bool = False) -> int:
+    def schema_version(_ctx: object, connection: object, *, lock: bool = False) -> int:
         version_reads.append((connection, lock))
         return 64
 
-    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: True)
-    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", schema_version)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_notes_moodboard_studio_schema_postgres", lambda _ctx, conn: True)
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_progress_row", lambda _ctx, _conn, _phase: {"status": "complete"})
 
-    def _fail_checkpoint(_self: CharactersRAGDB, stage: str) -> None:
+    def _fail_checkpoint(_ctx: object, stage: str) -> None:
         assert stage == "schema-created"
         raise RuntimeError("injected postgres v65 checkpoint failure")
 
-    monkeypatch.setattr(CharactersRAGDB, "_migration_v65_checkpoint", _fail_checkpoint)
+    monkeypatch.setattr(migration_support, "_migration_v65_checkpoint", _fail_checkpoint)
     with pytest.raises(RuntimeError, match="injected postgres v65 checkpoint failure"):
         db._initialize_schema_postgres()
 

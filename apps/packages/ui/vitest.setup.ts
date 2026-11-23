@@ -228,13 +228,20 @@ afterAll(async () => {
 
 const evaluateMediaQuery = (query: string): boolean => {
   const width = window.innerWidth || 1024
+  const height = window.innerHeight || 768
   const minMatches = [...query.matchAll(/\(min-width:\s*(\d+)px\)/g)]
   const maxMatches = [...query.matchAll(/\(max-width:\s*(\d+)px\)/g)]
+  // Height queries too (the short-viewport composer uses max-height: 500px).
+  const minHeights = [...query.matchAll(/\(min-height:\s*(\d+)px\)/g)]
+  const maxHeights = [...query.matchAll(/\(max-height:\s*(\d+)px\)/g)]
 
   const meetsMin = minMatches.every((match) => width >= Number(match[1]))
   const meetsMax = maxMatches.every((match) => width <= Number(match[1]))
+  const meetsHeight =
+    minHeights.every((match) => height >= Number(match[1])) &&
+    maxHeights.every((match) => height <= Number(match[1]))
 
-  return meetsMin && meetsMax
+  return meetsMin && meetsMax && meetsHeight
 }
 
 Object.defineProperty(window, "matchMedia", {

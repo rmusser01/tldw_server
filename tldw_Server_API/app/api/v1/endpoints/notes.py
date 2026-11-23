@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, NoReturn, Optional, TypeVar
+from typing import Annotated, Any, Callable, Literal, NoReturn, Optional, TypeVar, cast, get_args
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -107,6 +107,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NoteListSortOrder,
     NoteProvenanceRestore,
     NoteResponse,
+    NoteSearchSortBy,
     NotesExportRequest,
     NotesExportResponse,
     NotesForKeywordResponse,
@@ -114,6 +115,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NotesImportRequest,
     NotesImportResponse,
     NotesListResponse,
+    NotesSearchResponse,
     NoteUpdate,
     TitleSuggestRequest,
     TitleSuggestResponse,
@@ -2045,13 +2047,14 @@ _NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT = 100
 _NOTES_KEYWORD_TOKEN_MAX_LENGTH = 100
 
 
-def _normalize_keyword_tokens(tokens: Optional[list[str]]) -> list[str]:
+def _normalize_keyword_tokens(tokens: Optional[list[str]], name: str = "tokens") -> list[str]:
+    """Trim and dedupe keyword tokens; ``name`` is the query list a 400 names."""
     if not tokens:
         return []
     if len(tokens) > _NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Too many keyword tokens; maximum raw tokens is {_NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT}.",
+            detail=f"Too many keyword tokens in {name}; maximum raw tokens is {_NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT}.",
         )
     seen: set[str] = set()
     out: list[str] = []
@@ -2072,7 +2075,7 @@ def _normalize_keyword_tokens(tokens: Optional[list[str]]) -> list[str]:
         if len(out) >= _NOTES_KEYWORD_TOKEN_MAX_COUNT:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Too many keyword tokens; maximum is {_NOTES_KEYWORD_TOKEN_MAX_COUNT}.",
+                detail=f"Too many keyword tokens in {name}; maximum is {_NOTES_KEYWORD_TOKEN_MAX_COUNT}.",
             )
         seen.add(key)
         out.append(text)
@@ -2618,6 +2621,19 @@ _LEGACY_ALIASES_DESCRIPTION = (
 )
 
 
+def _attach_search_snippets(db: CharactersRAGDB, query_term: str, notes_data: list[dict[str, Any]]) -> None:
+    """Attach each note's highlighted body excerpt for the query (NL-07); best effort."""
+    if not notes_data:
+        return
+    try:
+        snippets = db.note_store.note_search_snippets(query_term, [str(note.get("id")) for note in notes_data])
+    except _NOTES_NONCRITICAL_EXCEPTIONS as err:
+        logger.warning(f"Building notes search snippets failed: {err}")
+        return
+    for note in notes_data:
+        note["snippet"] = snippets.get(str(note.get("id")))
+
+
 def _notes_list_payload(
     notes_data: list[dict[str, Any]],
     *,
@@ -2720,6 +2736,14 @@ async def list_deleted_notes(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         limit: int = Query(100, ge=1, le=1000, description="Number of trashed notes to return"),
         offset: int = Query(0, ge=0, description="Offset for pagination"),
+        query: Optional[str] = Query(
+            None,
+            max_length=200,
+            description=(
+                "Only trashed notes whose title or content contains this text, ignoring case. "
+                "The total counts only matching notes."
+            ),
+        ),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
         legacy_aliases: Annotated[
             bool, Query(description=_LEGACY_ALIASES_DESCRIPTION)
@@ -2735,7 +2759,11 @@ async def list_deleted_notes(
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.list")),
 ):
-    """Returns only soft-deleted notes with the same list payload shape as `/notes/`."""
+    """Returns only soft-deleted notes with the same list payload shape as `/notes/`.
+
+    With ``query``, only trashed notes whose title or content contains that text
+    (case-insensitive; ``%`` and ``_`` match literally) are listed and counted.
+    """
     try:
         try:
             allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.list")
@@ -2746,11 +2774,12 @@ async def list_deleted_notes(
                                 detail="Rate limit exceeded for notes.list",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
 
+        text_query = (query or "").strip() or None
         logger.debug(
             f"User (DB client_id: {db.client_id}) listing deleted notes: limit={limit}, offset={offset}, "
-            f"sort_by={sort_by}, sort_order={sort_order}")
-        notes_data = db.list_deleted_notes(
-            limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order
+            f"sort_by={sort_by}, sort_order={sort_order}, filtered={text_query is not None}")
+        notes_data = db.note_store.list_deleted_notes(
+            limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order, text_query=text_query
         )
         _attach_folders_bulk(db, notes_data)
         if include_keywords:
@@ -2761,7 +2790,7 @@ async def list_deleted_notes(
 
         total = None
         try:
-            total = db.count_deleted_notes()
+            total = db.note_store.count_deleted_notes(text_query=text_query)
         except _NOTES_NONCRITICAL_EXCEPTIONS:
             total = None
 
@@ -2928,16 +2957,51 @@ async def create_note_folder(
         handle_db_errors(e, "note folder")
 
 
+# Search sorts (NL-07). Other values fall back to relevance and desc instead of
+# a 422: the endpoint once accepted and ignored any sort, and older clients
+# still send their own values.
+_NOTE_SEARCH_SORTS: frozenset[str] = frozenset(get_args(NoteSearchSortBy))
+_NOTE_SEARCH_SORT_ORDERS: frozenset[str] = frozenset(get_args(NoteListSortOrder))
+_NOTE_SEARCH_DEFAULT_SORT_ORDER: NoteListSortOrder = "desc"
+
+
+def _normalize_note_search_sort(
+    sort_by: Optional[str], sort_order: Optional[str]
+) -> tuple[Optional[NoteListSortBy], NoteListSortOrder]:
+    """Return the ``(sort_by, sort_order)`` a note search applies.
+
+    Known values match ignoring case. ``None`` for ``sort_by`` means relevance:
+    omitted, ``relevance`` or an unknown value. An unknown ``sort_order`` uses
+    desc. Unknown values are logged at debug level only, since a client that
+    sends one sends it on every request.
+    """
+    column = (sort_by or "").strip().lower()
+    direction = (sort_order or "").strip().lower()
+    if column and column not in _NOTE_SEARCH_SORTS:
+        logger.debug("Notes search: unknown sort_by {!r}, ordering by relevance", str(sort_by)[:64])
+    if direction and direction not in _NOTE_SEARCH_SORT_ORDERS:
+        logger.debug("Notes search: unknown sort_order {!r}, using desc", str(sort_order)[:64])
+    applied_sort_by = (
+        cast(NoteListSortBy, column) if column in _NOTE_SEARCH_SORTS and column != "relevance" else None
+    )
+    applied_sort_order = (
+        cast(NoteListSortOrder, direction)
+        if direction in _NOTE_SEARCH_SORT_ORDERS
+        else _NOTE_SEARCH_DEFAULT_SORT_ORDER
+    )
+    return applied_sort_by, applied_sort_order
+
+
 @router.get(
     "/search",
-    response_model=NotesListResponse,
+    response_model=NotesSearchResponse,
     summary="Search notes for the current user",
     tags=["notes"],
     dependencies=[Depends(require_expected_user)],
 )
 @router.get(
     "/search/",
-    response_model=NotesListResponse,
+    response_model=NotesSearchResponse,
     summary="Search notes for the current user",
     tags=["notes"],
     dependencies=[Depends(require_expected_user)],
@@ -2952,6 +3016,15 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
         limit: int = Query(10, ge=1, le=100, description="Number of results to return"),
         offset: int = Query(0, ge=0, description="Result offset for pagination"),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
+        include_snippets: Annotated[
+            bool,
+            Query(
+                description=(
+                    "If false, skip the match excerpts (`snippet` is null): for callers that need only ids "
+                    "and titles, such as selecting or exporting every match."
+                )
+            ),
+        ] = True,
         legacy_aliases: Annotated[
             bool, Query(description=_LEGACY_ALIASES_DESCRIPTION)
         ] = True,
@@ -2964,26 +3037,52 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 )
             ),
         ] = "all",
+        required_tokens: Annotated[
+            Optional[list[str]],
+            Query(
+                description=(
+                    "Keyword tokens a note must have, every one of them, whatever tokens_match says: the tags "
+                    "a view implies, such as the Inbox's 'captured'. Matched like tokens."
+                )
+            ),
+        ] = None,
         title_only: bool = Query(
             False,
             description=(
                 "If true, match the query against note titles only: a case-insensitive substring match with "
                 "titles that start with the query first, then the most recently modified. Used for [[wikilink]] "
-                "autocomplete across the whole library. Ignored when tokens are given."
+                "autocomplete across the whole library. Ignored when tokens or required_tokens are given."
             ),
         ),
-        sort_by: Optional[str] = Query(
-            None,
-            description="Accepted for client compatibility; search results are ordered by relevance and recency.",
-        ),
-        sort_order: Optional[str] = Query(
-            None,
-            description="Accepted for client compatibility; search results are ordered by relevance and recency.",
-        ),
+        sort_by: Annotated[
+            Optional[str],
+            Query(
+                description=(
+                    "Order of the whole result before paging: 'relevance', 'last_modified', 'created_at' or "
+                    "'title', ignoring case. Omitted, 'relevance' or any other value: best match first for a "
+                    "query (most recently modified for tags alone). Title sorts ignore case. Ignored by "
+                    "title_only searches."
+                ),
+            ),
+        ] = None,
+        sort_order: Annotated[
+            Optional[str],
+            Query(
+                description=(
+                    "Sort direction for a sort_by other than relevance: 'asc' or 'desc', ignoring case. "
+                    "Omitted or any other value: 'desc'."
+                ),
+            ),
+        ] = None,
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.search")),
 ):
+    """Search the current user's notes by text, keyword tokens, or both.
+
+    Each item carries ``snippet``: a short excerpt of the body around the text
+    match, as runs of plain text with ``match`` marking the matched terms.
+    """
     try:
         try:
             allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.search")
@@ -2994,26 +3093,33 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                                 detail="Rate limit exceeded for notes.search",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
         token_list = _normalize_keyword_tokens(tokens)
+        required_list = _normalize_keyword_tokens(required_tokens, "required_tokens")
         query_term = query.strip() if query else ""
-        if not query_term and not token_list:
+        if not query_term and not token_list and not required_list:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="query or tokens is required")
+        search_sort_by, search_sort_order = _normalize_note_search_sort(sort_by, sort_order)
         logger.debug(
-            f"User (DB client_id: {db.client_id}) searching notes: query='{query_term}', limit={limit}, offset={offset}, tokens={token_list}")
+            f"User (DB client_id: {db.client_id}) searching notes: query='{query_term}', limit={limit}, offset={offset}, "
+            f"tokens={token_list}, required_tokens={required_list}")
         total = None
-        if token_list:
+        if token_list or required_list:
             notes_data = db.search_notes_with_keywords(
                 search_term=query_term or None,
                 keyword_tokens=token_list,
                 limit=limit,
                 offset=offset,
                 match=tokens_match,
+                sort_by=search_sort_by,
+                sort_order=search_sort_order,
+                required_tokens=required_list,
             )
             try:
                 total = db.count_notes_matching_keywords(
                     search_term=query_term or None,
                     keyword_tokens=token_list,
                     match=tokens_match,
+                    required_tokens=required_list,
                 )
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)
@@ -3024,11 +3130,15 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)
         else:
-            notes_data = db.search_notes(search_term=query_term, limit=limit, offset=offset)
+            notes_data = db.search_notes(
+                search_term=query_term, limit=limit, offset=offset, sort_by=search_sort_by, sort_order=search_sort_order
+            )
             try:
                 total = db.count_notes_matching(query_term)
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)
+        if include_snippets and query_term and (token_list or required_list or not title_only):  # title_only matches titles alone
+            _attach_search_snippets(db, query_term, notes_data)
         _attach_folders_bulk(db, notes_data)
         # Attach keywords inline (optional)
         if include_keywords:

@@ -14,7 +14,8 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -87,21 +88,21 @@ def test_postgres_initializer_routes_schema_v63_through_v64(
     monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_args: _FakeTransaction())
 
     monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 64)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 63)
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: True)
-    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _conn, lock=False: 63)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_notes_moodboard_studio_schema_postgres", lambda _ctx, _conn: True)
+    monkeypatch.setattr(postgres_schema, "_postgres_v61_progress_row", lambda _ctx, _conn, _phase: {"status": "complete"})
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_configure_notes_moodboard_studio_v61_postgres_transaction",
-        lambda _conn: None,
+        lambda _ctx, _conn: None,
     )
 
-    def _reached_v64(_conn: object) -> None:
+    def _reached_v64(_ctx: object, _conn: object) -> None:
         raise RuntimeError("reached-v64")
 
-    monkeypatch.setattr(db, "_migrate_from_v63_to_v64_postgres", _reached_v64, raising=False)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v63_to_v64_postgres", _reached_v64)
 
     with pytest.raises(RuntimeError, match="^reached-v64$"):
         db._initialize_schema_postgres()
@@ -114,19 +115,19 @@ def test_postgres_v64_migration_versions_after_applying_ddl(
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     applied: list[tuple[str, int]] = []
     versions = iter((63, 64))
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn: next(versions))
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _conn: next(versions))
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_apply_postgres_migration_script",
-        lambda script, _conn, *, expected_version: applied.append((script, expected_version)),
+        lambda _ctx, script, _conn, *, expected_version: applied.append((script, expected_version)),
     )
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_configure_note_graph_suggestion_receipt_delete_trigger_postgres",
-        lambda _conn: None,
+        lambda _ctx, _conn: None,
     )
 
-    db._migrate_from_v63_to_v64_postgres(object())
+    postgres_steps._migrate_from_v63_to_v64_postgres(db.ctx, object())
 
     assert applied == [(CharactersRAGDB._MIGRATION_SQL_V63_TO_V64_POSTGRES, 64)]
 

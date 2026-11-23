@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import type { ModelSortMode } from "@/hooks/playground"
 import type { ComposerModelReadiness } from "./hooks/useComposerModelReadiness"
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens"
 
 // The search box, not the scope control's radio inputs, takes focus on open.
 const MODEL_SEARCH_INPUT = 'input:not([type="radio"]):not([type="checkbox"])'
@@ -341,7 +342,7 @@ export const ChatModelSelectorDropdown = React.memo(
             aria-expanded={modelDropdownOpen}
             data-tutorial-prompt-blocker
             data-testid="model-selector"
-            className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 text-xs transition-colors ${
+            className={`${COMPOSER_TOOLBAR_TOKENS.textControl} min-w-0 max-w-full cursor-pointer border border-transparent transition-colors ${
               statusWarning
                 ? "bg-warn/10 text-text hover:bg-warn/20"
                 : "bg-transparent text-text hover:bg-surface2"
@@ -371,7 +372,7 @@ export const ChatModelSelectorDropdown = React.memo(
           type="button"
           data-testid="model-readiness-switch"
           onClick={handleSwitchToTarget}
-          className="inline-flex min-h-[44px] min-w-0 max-w-full items-center rounded-lg border border-border px-2 text-xs text-text hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className={`${COMPOSER_TOOLBAR_TOKENS.textControl} min-w-0 max-w-full border border-border text-text hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`}
         >
           <span className="truncate">{switchTarget.label}</span>
         </button>

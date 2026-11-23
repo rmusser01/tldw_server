@@ -26,7 +26,7 @@ def _load_provenance_module():
 @pytest.fixture
 def db(tmp_path):
     chacha = CharactersRAGDB(str(tmp_path / "study-packs-provenance.db"), client_id="study-pack-provenance-tests")
-    chacha.upsert_workspace("ws-1", "Workspace 1")
+    chacha.workspace_store.upsert_workspace("ws-1", "Workspace 1")
     try:
         yield chacha
     finally:

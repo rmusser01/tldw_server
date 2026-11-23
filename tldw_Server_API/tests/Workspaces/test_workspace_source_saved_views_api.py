@@ -70,8 +70,8 @@ DEFAULT_STATE = {
 @pytest.fixture
 def db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
     database = CharactersRAGDB(db_path=str(tmp_path / "saved-views.db"), client_id="1")
-    database.upsert_workspace("ws-1", "Workspace One")
-    database.upsert_workspace("ws-2", "Workspace Two")
+    database.workspace_store.upsert_workspace("ws-1", "Workspace One")
+    database.workspace_store.upsert_workspace("ws-2", "Workspace Two")
     try:
         yield database
     finally:
@@ -113,7 +113,7 @@ def _post(client: TestClient, payload: dict[str, Any], workspace_id: str = "ws-1
 
 
 def _raw_state(db: CharactersRAGDB, workspace_id: str, view_id: str) -> str:
-    return db.get_workspace_source_saved_view("1", workspace_id, view_id)["state_json"]
+    return db.workspace_store.get_workspace_source_saved_view("1", workspace_id, view_id)["state_json"]
 
 
 def test_create_list_patch_delete_and_canonicalize(client: TestClient, db: CharactersRAGDB) -> None:
@@ -190,7 +190,7 @@ def test_routes_delegate_workspace_access_checks_to_transactional_crud(
     db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    existing = db.create_workspace_source_saved_view(
+    existing = db.workspace_store.create_workspace_source_saved_view(
         "1",
         "ws-1",
         name="Existing",
@@ -332,7 +332,7 @@ def test_strict_write_validation_returns_422(
     if method == "post":
         response = _post(client, payload)
     else:
-        existing = db.create_workspace_source_saved_view(
+        existing = db.workspace_store.create_workspace_source_saved_view(
             "1", "ws-1", name="Existing", schema_version=1, state_json="{}"
         )
         response = client.patch(
@@ -432,7 +432,7 @@ def test_cross_owner_patch_and_delete_are_404_and_leave_view_unchanged(
     db: CharactersRAGDB,
 ) -> None:
     created = _post(client, _create_payload(name="Owner one")).json()
-    original = db.get_workspace_source_saved_view("1", "ws-1", created["id"])
+    original = db.workspace_store.get_workspace_source_saved_view("1", "ws-1", created["id"])
     app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=2)
 
     patched = client.patch(
@@ -445,7 +445,7 @@ def test_cross_owner_patch_and_delete_are_404_and_leave_view_unchanged(
     assert patched.json() == {"detail": "Source view not found"}
     assert deleted.status_code == 404
     assert deleted.json() == {"detail": "Source view not found"}
-    unchanged = db.get_workspace_source_saved_view("1", "ws-1", created["id"])
+    unchanged = db.workspace_store.get_workspace_source_saved_view("1", "ws-1", created["id"])
     assert unchanged == original
 
 
@@ -472,7 +472,7 @@ def test_list_order_is_updated_desc_then_name_key_then_id(
 ) -> None:
     ids = {}
     for name in ("Zulu", "beta", "Alpha"):
-        row = db.create_workspace_source_saved_view(
+        row = db.workspace_store.create_workspace_source_saved_view(
             "1", "ws-1", name=name, schema_version=1, state_json="{}"
         )
         ids[name] = row["id"]
@@ -500,17 +500,17 @@ def test_invalid_rows_are_recoverable_and_unsupported_version_precedes_json_pars
     client: TestClient,
     db: CharactersRAGDB,
 ) -> None:
-    malformed = db.create_workspace_source_saved_view(
+    malformed = db.workspace_store.create_workspace_source_saved_view(
         "1", "ws-1", name="Malformed", schema_version=1, state_json="{not-json"
     )
-    invalid = db.create_workspace_source_saved_view(
+    invalid = db.workspace_store.create_workspace_source_saved_view(
         "1",
         "ws-1",
         name="Invalid",
         schema_version=1,
         state_json='{"file_size_min":true}',
     )
-    unsupported = db.create_workspace_source_saved_view(
+    unsupported = db.workspace_store.create_workspace_source_saved_view(
         "1", "ws-1", name="Unsupported", schema_version=2, state_json="{not-json"
     )
 
@@ -531,10 +531,10 @@ def test_huge_integer_json_is_invalid_without_failing_other_list_rows(
     client: TestClient,
     db: CharactersRAGDB,
 ) -> None:
-    valid = db.create_workspace_source_saved_view(
+    valid = db.workspace_store.create_workspace_source_saved_view(
         "1", "ws-1", name="Valid", schema_version=1, state_json="{}"
     )
-    huge_integer = db.create_workspace_source_saved_view(
+    huge_integer = db.workspace_store.create_workspace_source_saved_view(
         "1",
         "ws-1",
         name="Huge integer",
@@ -645,7 +645,7 @@ def test_invalid_view_reset_is_an_atomic_ordinary_patch(
     client: TestClient,
     db: CharactersRAGDB,
 ) -> None:
-    invalid = db.create_workspace_source_saved_view(
+    invalid = db.workspace_store.create_workspace_source_saved_view(
         "1", "ws-1", name="Reset me", schema_version=2, state_json="{}"
     )
 
@@ -662,6 +662,7 @@ def test_invalid_view_reset_is_an_atomic_ordinary_patch(
 
 
 class _OwnerRecordingDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
 

@@ -1642,11 +1642,11 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
           isViewMediaMode
             ? t("review:mediaEmpty.demoDescription", {
                 defaultValue:
-                  "This demo shows how tldw Assistant can display and inspect processed media. Connect your own server later to browse your own recordings and documents."
+                  "This demo shows how tldw can display and inspect processed media. Connect your own server later to browse your own recordings and documents."
               })
             : t("review:empty.demoDescription", {
                 defaultValue:
-                  "This demo shows how tldw Assistant can turn media and notes into structured reviews. Connect your own server later to analyze your own content."
+                  "This demo shows how tldw can turn media and notes into structured reviews. Connect your own server later to analyze your own content."
               })
         }
         examples={

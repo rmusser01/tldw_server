@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -29,7 +30,7 @@ def test_postgres_statement_conversion_includes_persona_persistence_tables(
     sql = char_rag_db._MIGRATION_SQL_V25_TO_V26
     assert isinstance(sql, str) and "persona_profiles" in sql
 
-    stmts = char_rag_db._convert_sqlite_schema_to_postgres_statements(sql)
+    stmts = postgres_schema._convert_sqlite_schema_to_postgres_statements(char_rag_db.ctx, sql)
     assert isinstance(stmts, list) and len(stmts) > 0
 
     full = "\n".join(stmts)
@@ -54,7 +55,7 @@ def test_postgres_statement_conversion_includes_persona_memory_namespace_migrati
     sql = char_rag_db._MIGRATION_SQL_V26_TO_V27
     assert isinstance(sql, str) and "persona_memory_entries" in sql
 
-    stmts = char_rag_db._convert_sqlite_schema_to_postgres_statements(sql)
+    stmts = postgres_schema._convert_sqlite_schema_to_postgres_statements(char_rag_db.ctx, sql)
     assert isinstance(stmts, list) and len(stmts) > 0
 
     full = "\n".join(stmts)
@@ -74,7 +75,7 @@ def test_postgres_statement_conversion_includes_persona_profile_state_context_de
     sql = char_rag_db._MIGRATION_SQL_V27_TO_V28
     assert isinstance(sql, str) and "persona_profiles" in sql
 
-    stmts = char_rag_db._convert_sqlite_schema_to_postgres_statements(sql)
+    stmts = postgres_schema._convert_sqlite_schema_to_postgres_statements(char_rag_db.ctx, sql)
     assert isinstance(stmts, list) and len(stmts) > 0
 
     full = "\n".join(stmts)
@@ -91,7 +92,7 @@ def test_postgres_statement_conversion_includes_moodboard_tables_migration(
     sql = char_rag_db._MIGRATION_SQL_V28_TO_V29
     assert isinstance(sql, str) and "moodboards" in sql
 
-    stmts = char_rag_db._convert_sqlite_schema_to_postgres_statements(sql)
+    stmts = postgres_schema._convert_sqlite_schema_to_postgres_statements(char_rag_db.ctx, sql)
     assert isinstance(stmts, list) and len(stmts) > 0
 
     full = "\n".join(stmts)
@@ -110,7 +111,7 @@ def test_postgres_statement_conversion_includes_persona_session_surface_migratio
     sql = char_rag_db._MIGRATION_SQL_V33_TO_V34
     assert isinstance(sql, str) and "persona_sessions" in sql
 
-    stmts = char_rag_db._convert_sqlite_schema_to_postgres_statements(sql)
+    stmts = postgres_schema._convert_sqlite_schema_to_postgres_statements(char_rag_db.ctx, sql)
     assert isinstance(stmts, list) and len(stmts) > 0
 
     full = "\n".join(stmts)
@@ -127,7 +128,7 @@ def test_postgres_statement_conversion_includes_persona_session_preferences_migr
     sql = char_rag_db._MIGRATION_SQL_V34_TO_V35
     assert isinstance(sql, str) and "persona_sessions" in sql
 
-    stmts = char_rag_db._convert_sqlite_schema_to_postgres_statements(sql)
+    stmts = postgres_schema._convert_sqlite_schema_to_postgres_statements(char_rag_db.ctx, sql)
     assert isinstance(stmts, list) and len(stmts) > 0
 
     full = "\n".join(stmts)
@@ -143,7 +144,7 @@ def test_postgres_statement_conversion_includes_persona_buddy_migration(
 
     assert char_rag_db._MIGRATION_SQL_V39_TO_V40_POSTGRES != char_rag_db._MIGRATION_SQL_V39_TO_V40
     sql = char_rag_db._MIGRATION_SQL_V39_TO_V40_POSTGRES
-    stmts = char_rag_db._convert_sqlite_schema_to_postgres_statements(sql)
+    stmts = postgres_schema._convert_sqlite_schema_to_postgres_statements(char_rag_db.ctx, sql)
 
     full = "\n".join(stmts)
     assert "CREATE TABLE IF NOT EXISTS persona_buddies" in full

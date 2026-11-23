@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (
     DatabaseBackendFactory,
     reset_managed_sqlite_backends,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -161,7 +162,7 @@ def test_quizzes_basic_flow():
 
 def test_quiz_workspace_id_persists_and_can_move_between_scopes():
     with _temp_chacha_db() as db:
-        db.upsert_workspace("ws-1", "Workspace One")
+        db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
         quiz_id = db.create_quiz(
             name="Scoped Quiz",
@@ -690,7 +691,7 @@ def test_quiz_schema_migration_v23_to_v24_supports_matching():
         migrator.db_path_str = db_path
         with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
-            migrator._migrate_from_v23_to_v24(conn)
+            sqlite_steps._migrate_from_v23_to_v24(migrator.ctx, conn)
             version_row = conn.execute(
                 "SELECT version FROM db_schema_version WHERE schema_name = ?",
                 (CharactersRAGDB._SCHEMA_NAME,),
@@ -805,7 +806,7 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
         migrator.db_path_str = db_path
         with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
-            migrator._migrate_from_v24_to_v25(conn)
+            sqlite_steps._migrate_from_v24_to_v25(migrator.ctx, conn)
             version_row = conn.execute(
                 "SELECT version FROM db_schema_version WHERE schema_name = ?",
                 (CharactersRAGDB._SCHEMA_NAME,),

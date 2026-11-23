@@ -102,22 +102,22 @@
     "message": "Tools & Attachments"
   },
   "playground_tools_description": {
-    "message": "Discover knowledge search, file uploads, and advanced tools"
+    "message": "Discover Search & Context, file uploads, and advanced tools"
   },
   "playground_tools_toolsButtonTitle": {
     "message": "Tools & Attachments"
   },
   "playground_tools_toolsButtonContent": {
-    "message": "Access knowledge search, upload files, configure MCP tools, and more advanced features here."
+    "message": "Open Search & Context, upload files, configure MCP tools, and more advanced features here."
   },
   "playground_tools_knowledgeTitle": {
-    "message": "Knowledge Search"
+    "message": "Search & Context"
   },
   "playground_tools_knowledgeContent": {
-    "message": "Enable knowledge search to let the AI reference your ingested documents, notes, and media. Great for research and fact-checking."
+    "message": "Search your documents, notes and media, and add what you find to the chat as context. Great for research and fact-checking."
   },
   "playground_tools_webSearchTitle": {
-    "message": "Web Search"
+    "message": "Web search"
   },
   "playground_tools_webSearchContent": {
     "message": "Toggle web search to let the AI search the internet for current information. Perfect for recent news or topics not in your knowledge base."

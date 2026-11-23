@@ -8,6 +8,8 @@ import dagre from "cytoscape-dagre"
 import React from "react"
 import { useTranslation } from "react-i18next"
 
+import NotesGraphLegend from "./NotesGraphLegend"
+import { NOTES_GRAPH_EDGE_LABEL_LIMIT } from "./notes-graph-view"
 import type { ProvisionalNotesGraphOverlay } from "./hooks/useNotesGraphSuggestions"
 import type { NotesGraphLayout } from "./hooks/useNotesGraphWorkspace"
 import {
@@ -190,6 +192,26 @@ const NotesGraphCanvas = React.forwardRef<
         })
       }
 
+      // Never hand Cytoscape an edge with a missing end: it throws, and the
+      // route error boundary replaces the page (NL-11 review).
+      const drawnNodeIds = new Set(
+        elements
+          .filter((element) => element.data.source === undefined)
+          .map((element) => String(element.data.id))
+      )
+      for (let index = elements.length - 1; index >= 0; index -= 1) {
+        const { source, target } = elements[index].data
+        if (
+          source !== undefined &&
+          (!drawnNodeIds.has(String(source)) || !drawnNodeIds.has(String(target)))
+        ) {
+          elements.splice(index, 1)
+        }
+      }
+      // A large graph (All notes holds up to 500 notes, NL-11) labels a link
+      // only on hover or selection, and skips links while panning or zooming.
+      const largeGraph =
+        elements.length - graph.nodes.length > NOTES_GRAPH_EDGE_LABEL_LIMIT
       cyRef.current?.destroy()
       const cy = cytoscape({
         container: containerRef.current,
@@ -218,10 +240,12 @@ const NotesGraphCanvas = React.forwardRef<
             style: { "background-color": tokens.primary }
           },
           {
+            // Tag names are short, so tags stay labelled (NL-14).
             selector: 'node[type="tag"]',
             style: {
               "background-color": tokens.accent,
-              shape: "round-rectangle"
+              shape: "round-rectangle",
+              label: "data(label)"
             }
           },
           {
@@ -249,12 +273,16 @@ const NotesGraphCanvas = React.forwardRef<
               "curve-style": "bezier",
               "target-arrow-shape": "none",
               "target-arrow-color": tokens.borderStrong,
-              label: "data(displayLabel)",
+              label: largeGraph ? "" : "data(displayLabel)",
               "font-size": "8px",
               color: tokens.textMuted,
               "text-background-color": tokens.surface,
               "text-background-opacity": 0.9
             }
+          },
+          {
+            selector: "edge.graph-label-hovered, edge:selected",
+            style: { label: "data(displayLabel)" }
           },
           {
             selector: "edge.semantic",
@@ -291,7 +319,8 @@ const NotesGraphCanvas = React.forwardRef<
         maxZoom: 2,
         wheelSensitivity: 0.2,
         boxSelectionEnabled: false,
-        autounselectify: false
+        autounselectify: false,
+        hideEdgesOnViewport: largeGraph
       })
 
       cy.on("tap", "node", (event) => {
@@ -307,6 +336,12 @@ const NotesGraphCanvas = React.forwardRef<
         event.target.addClass("graph-label-hovered")
       )
       cy.on("mouseout", "node", (event) =>
+        event.target.removeClass("graph-label-hovered")
+      )
+      cy.on("mouseover", "edge", (event) =>
+        event.target.addClass("graph-label-hovered")
+      )
+      cy.on("mouseout", "edge", (event) =>
         event.target.removeClass("graph-label-hovered")
       )
       syncNodeState(cy)
@@ -332,6 +367,11 @@ const NotesGraphCanvas = React.forwardRef<
       if (cy) syncNodeState(cy)
     }, [focusNoteId, selectedNodeId, syncNodeState])
 
+    const nodeTypes = React.useMemo(
+      () => new Set<string>(graph.nodes.map((node) => node.type)),
+      [graph.nodes]
+    )
+
     return (
       <div className="relative h-full min-w-0">
         <div
@@ -343,39 +383,7 @@ const NotesGraphCanvas = React.forwardRef<
             defaultValue: "Notes graph canvas"
           })}
         />
-        <ul
-          data-testid="notes-graph-edge-legend"
-          aria-label={t("notesSearch.graphEdgeLegend", {
-            defaultValue: "Relationship legend"
-          })}
-          className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] flex-wrap gap-x-3 gap-y-1 border border-border bg-elevated px-2 py-1 text-xs text-text shadow-sm motion-reduce:transition-none">
-          <li className="flex items-center gap-1.5">
-            <span
-              className="w-5 border-t-2 border-text-muted"
-              aria-hidden="true"
-            />
-            {t("notesSearch.graphLegendAuthoritative", {
-              defaultValue: "Authoritative"
-            })}
-          </li>
-          <li className="flex items-center gap-1.5">
-            <span
-              data-testid="notes-graph-semantic-legend-swatch"
-              className="w-5 border-t-2 border-dotted border-primary"
-              aria-hidden="true"
-            />
-            {t("notesSearch.graphSimilarContent", {
-              defaultValue: "Similar content"
-            })}
-          </li>
-          <li className="flex items-center gap-1.5">
-            <span
-              className="w-5 border-t-2 border-dashed border-warn"
-              aria-hidden="true"
-            />
-            {t("notesSearch.graphSuggestions", { defaultValue: "Suggestions" })}
-          </li>
-        </ul>
+        <NotesGraphLegend nodeTypes={nodeTypes} />
       </div>
     )
   }

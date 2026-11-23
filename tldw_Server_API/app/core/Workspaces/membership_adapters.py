@@ -87,7 +87,7 @@ class WorkspaceNoteMembershipAdapter:
 
     def validate_access(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         note_id = _parse_int_resource_id(resource_id, resource_type=self.resource_type)
-        row = context.chacha_db.get_workspace_note(context.workspace_id, note_id)
+        row = context.chacha_db.workspace_store.get_workspace_note(context.workspace_id, note_id)
         if not row or _is_deleted(row) or _row_workspace_mismatch(row, context.workspace_id):
             raise _resource_not_found(self.resource_type, str(note_id))
         return self._ref(row, note_id)
@@ -95,7 +95,7 @@ class WorkspaceNoteMembershipAdapter:
     def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         note_id = _parse_int_resource_id(resource_id, resource_type=self.resource_type)
         row = _call_with_optional_include_deleted(
-            context.chacha_db.get_workspace_note,
+            context.chacha_db.workspace_store.get_workspace_note,
             context.workspace_id,
             note_id,
             include_deleted=True,
@@ -126,7 +126,7 @@ class WorkspaceSourceMembershipAdapter:
 
     def validate_access(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         canonical_id = _require_resource_id(resource_id)
-        row = context.chacha_db.get_workspace_source(context.workspace_id, canonical_id)
+        row = context.chacha_db.workspace_store.get_workspace_source(context.workspace_id, canonical_id)
         if not row or _is_deleted(row) or _row_workspace_mismatch(row, context.workspace_id):
             raise _resource_not_found(self.resource_type, canonical_id)
         return self._ref(row, canonical_id)
@@ -134,7 +134,7 @@ class WorkspaceSourceMembershipAdapter:
     def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         canonical_id = _require_resource_id(resource_id)
         row = _call_with_optional_include_deleted(
-            context.chacha_db.get_workspace_source,
+            context.chacha_db.workspace_store.get_workspace_source,
             context.workspace_id,
             canonical_id,
             include_deleted=True,
@@ -168,7 +168,7 @@ class WorkspaceArtifactMembershipAdapter:
 
     def validate_access(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         canonical_id = _require_resource_id(resource_id)
-        row = context.chacha_db.get_workspace_artifact(context.workspace_id, canonical_id)
+        row = context.chacha_db.workspace_store.get_workspace_artifact(context.workspace_id, canonical_id)
         if not row or _is_deleted(row) or _row_workspace_mismatch(row, context.workspace_id):
             raise _resource_not_found(self.resource_type, canonical_id)
         return self._ref(row, canonical_id)
@@ -176,7 +176,7 @@ class WorkspaceArtifactMembershipAdapter:
     def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         canonical_id = _require_resource_id(resource_id)
         row = _call_with_optional_include_deleted(
-            context.chacha_db.get_workspace_artifact,
+            context.chacha_db.workspace_store.get_workspace_artifact,
             context.workspace_id,
             canonical_id,
             include_deleted=True,
@@ -285,7 +285,7 @@ class ChatMembershipAdapter:
 
     def validate_access(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         canonical_id = _require_resource_id(resource_id)
-        row = context.chacha_db.get_conversation_for_workspace_membership(canonical_id)
+        row = context.chacha_db.workspace_store.get_conversation_for_workspace_membership(canonical_id)
         if not row or _is_deleted(row):
             raise _resource_not_found(self.resource_type, canonical_id)
         return self._ref(row, canonical_id, context)
@@ -293,7 +293,7 @@ class ChatMembershipAdapter:
     def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         canonical_id = _require_resource_id(resource_id)
         row = _call_with_optional_include_deleted(
-            context.chacha_db.get_conversation_for_workspace_membership,
+            context.chacha_db.workspace_store.get_conversation_for_workspace_membership,
             canonical_id,
             include_deleted=True,
         )
@@ -566,7 +566,7 @@ class _RuntimeBindingSessionResolver:
         include_deleted: bool,
     ) -> Mapping[str, Any] | None:
         try:
-            row = context.chacha_db.get_workspace_runtime_binding(
+            row = context.chacha_db.workspace_store.get_workspace_runtime_binding(
                 context.workspace_id,
                 binding_id,
                 include_deleted=include_deleted,

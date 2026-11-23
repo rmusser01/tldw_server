@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -48,19 +49,19 @@ def test_postgres_initializer_routes_schema_v61_through_v62(
     monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_args: _FakeTransaction())
 
     monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 62)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 61)
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _conn, lock=False: 61)
+    monkeypatch.setattr(postgres_schema, "_verify_note_attachment_schema_postgres", lambda _ctx, _conn: None)
+    monkeypatch.setattr(postgres_schema, "_verify_note_task_schema_postgres", lambda _ctx, _conn: None)
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_configure_notes_moodboard_studio_v61_postgres_transaction",
-        lambda _conn: None,
+        lambda _ctx, _conn: None,
     )
 
-    def _reached_v62(_conn: object) -> None:
+    def _reached_v62(_ctx: object, _conn: object) -> None:
         raise _ReachedV62
 
-    monkeypatch.setattr(db, "_migrate_from_v61_to_v62_postgres", _reached_v62, raising=False)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v61_to_v62_postgres", _reached_v62)
 
     with pytest.raises(_ReachedV62):
         db._initialize_schema_postgres()
@@ -72,14 +73,14 @@ def test_postgres_v62_migration_versions_after_applying_ddl(
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     applied: list[tuple[str, int]] = []
     versions = iter((61, 62))
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn: next(versions))
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _conn: next(versions))
     monkeypatch.setattr(
-        db,
+        postgres_schema,
         "_apply_postgres_migration_script",
-        lambda script, _conn, *, expected_version: applied.append((script, expected_version)),
+        lambda _ctx, script, _conn, *, expected_version: applied.append((script, expected_version)),
     )
 
-    db._migrate_from_v61_to_v62_postgres(object())
+    postgres_steps._migrate_from_v61_to_v62_postgres(db.ctx, object())
 
     assert applied == [(CharactersRAGDB._MIGRATION_SQL_V61_TO_V62_POSTGRES, 62)]
 

@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -45,7 +48,7 @@ def _seed_historical_v44(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> Char
     """Build v44 without current compatibility repairs or later registry tables."""
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 44):
                 steps[version](conn)
@@ -206,10 +209,10 @@ def test_existing_database_migration_uses_linear_migration_registry(
 
     original_steps = CharactersRAGDB._sqlite_linear_migration_steps
 
-    def direct_v4_to_v5(db: CharactersRAGDB, conn: sqlite3.Connection) -> None:
+    def direct_v4_to_v5(ctx: ChaChaContext, conn: sqlite3.Connection) -> None:
         conn.execute(
             "UPDATE db_schema_version SET version = 5 WHERE schema_name = ?",
-            (db._SCHEMA_NAME,),
+            (ctx.schema_name,),
         )
 
     def registry_without_v4(
@@ -220,7 +223,7 @@ def test_existing_database_migration_uses_linear_migration_registry(
         return steps
 
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 5)
-    monkeypatch.setattr(CharactersRAGDB, "_migrate_from_v4_to_v5", direct_v4_to_v5)
+    monkeypatch.setattr(sqlite_steps, "_migrate_from_v4_to_v5", direct_v4_to_v5)
     monkeypatch.setattr(
         CharactersRAGDB,
         "_sqlite_linear_migration_steps",

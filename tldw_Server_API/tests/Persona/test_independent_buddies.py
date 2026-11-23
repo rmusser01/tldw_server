@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -144,7 +145,7 @@ def test_v66_migration_remains_registered_for_sqlite_and_postgres():
         CharactersRAGDB.__new__(CharactersRAGDB)._sqlite_linear_migration_steps()[65].__name__
         == "_migrate_from_v65_to_v66"
     )
-    assert hasattr(CharactersRAGDB, "_migrate_from_v65_to_v66_postgres")
+    assert callable(postgres_steps._migrate_from_v65_to_v66_postgres)
 
 
 def test_profile_deleted_schema_matches_postgres_boolean_query_contract(db):
@@ -296,7 +297,7 @@ def test_postgres_v65_upgrade_installs_buddy_storage_and_forced_tenant_policies(
 
 
 def test_conversation_target_resolves_workspace_scope_before_attachment(db):
-    db.upsert_workspace("ws", "Workspace")
+    db.workspace_store.upsert_workspace("ws", "Workspace")
     conversation = db.add_conversation(
         {
             "title": "Scoped chat",
@@ -460,7 +461,7 @@ def test_attachment_rechecks_target_and_rejects_stale_slot_updates(db):
 
 
 def test_workspace_attachment_does_not_survive_workspace_deletion(db):
-    workspace = db.upsert_workspace("workspace-one", "Owned workspace")
+    workspace = db.workspace_store.upsert_workspace("workspace-one", "Owned workspace")
     with _client(db) as client:
         buddy = _create(client)
         response = client.put(
@@ -473,7 +474,7 @@ def test_workspace_attachment_does_not_survive_workspace_deletion(db):
             },
         )
         assert response.status_code == 200, response.text
-        db.delete_workspace(workspace["id"], expected_version=workspace["version"])
+        db.workspace_store.delete_workspace(workspace["id"], expected_version=workspace["version"])
         assert client.get("/api/v1/buddies/attachment").json()["unavailable_reason"] == "target_unavailable"
 
 
@@ -491,7 +492,7 @@ def test_untrusted_creation_fields_are_bounded_and_rejected(db, payload):
 
 
 def test_workspace_attachment_rejects_other_owner_without_disclosing_title(db):
-    workspace = db.upsert_workspace("private-workspace", "Private research title")
+    workspace = db.workspace_store.upsert_workspace("private-workspace", "Private research title")
     with _client(db, user_id=2) as client:
         buddy = _create(client)
         payload = {
@@ -508,7 +509,7 @@ def test_workspace_attachment_rejects_other_owner_without_disclosing_title(db):
 
 
 def test_workspace_attachment_projects_only_owned_conversations_with_scope(db):
-    db.upsert_workspace("ws", "My workspace")
+    db.workspace_store.upsert_workspace("ws", "My workspace")
     owned_id = db.add_conversation(
         {
             "title": "Own scoped chat",
@@ -606,8 +607,8 @@ def test_failed_snapshot_publication_cleans_files_and_leaves_no_profile(db, monk
 def test_workspace_projection_drops_conversation_moved_after_listing(db, monkeypatch):
     from tldw_Server_API.app.core.Buddy.service import BuddyService
 
-    db.upsert_workspace("original", "Original")
-    db.upsert_workspace("new", "New")
+    db.workspace_store.upsert_workspace("original", "Original")
+    db.workspace_store.upsert_workspace("new", "New")
     conversation_id = db.add_conversation(
         {"title": "Moved", "client_id": "1", "scope_type": "workspace", "workspace_id": "original"}
     )
@@ -630,7 +631,7 @@ def test_workspace_projection_drops_conversation_moved_after_listing(db, monkeyp
 
 
 def test_workspace_activity_acks_exact_result_without_clearing_newer_result(db):
-    db.upsert_workspace("ws", "Workspace")
+    db.workspace_store.upsert_workspace("ws", "Workspace")
     character_id = db.add_character_card({"name": "User"})
     conversation_id = db.add_conversation(
         {

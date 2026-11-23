@@ -196,8 +196,8 @@ def test_late_override_after_structured_absence_cannot_mix_messages_credentials(
         class _GatedAbsentSnapshot:
             provider = captured.provider
 
-            def enforce(self, model: str | None) -> None:
-                captured.enforce(model)
+            def enforce(self, model: str | None, **kwargs: Any) -> None:
+                captured.enforce(model, **kwargs)
 
             def ensure_healthy(self) -> None:
                 captured.ensure_healthy()
@@ -300,8 +300,8 @@ def test_messages_policy_and_credentials_share_one_override_snapshot(
     class GatedSnapshot:
         provider = captured.provider
 
-        def enforce(self, selected_model: str | None) -> None:
-            captured.enforce(selected_model)
+        def enforce(self, selected_model: str | None, **kwargs: Any) -> None:
+            captured.enforce(selected_model, **kwargs)
             policy_enforced.set()
 
         def policy_error(self, selected_model: str | None):

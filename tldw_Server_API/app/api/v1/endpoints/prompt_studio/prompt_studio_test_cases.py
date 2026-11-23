@@ -63,6 +63,7 @@ from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     provider_auth_is_resolved,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_results import ADMIN_POLICY_CODES
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import StructuredPromptAssemblyError
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
@@ -99,7 +100,7 @@ def _credential_http_exception(exc: ByokResolutionError) -> HTTPException:
     return HTTPException(
         status_code=(
             status.HTTP_403_FORBIDDEN
-            if code in {"credential_scope_revoked", "model_not_allowed", "provider_disabled"}
+            if code in ADMIN_POLICY_CODES | {"credential_scope_revoked"}
             else status.HTTP_503_SERVICE_UNAVAILABLE
         ),
         detail={

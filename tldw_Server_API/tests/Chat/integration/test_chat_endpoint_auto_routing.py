@@ -361,7 +361,7 @@ def test_workspace_persona_generation_requires_current_scope_access(
     client, headers, provider_call = persona_chat_client
     monkeypatch.setattr(feature_flags, "is_persona_enabled", lambda: True)
     cid, _ = _create_persona_conversation(persona_chat_db, persona_id="workspace-persona")
-    persona_chat_db.upsert_workspace("ws", name="Private Workspace")
+    persona_chat_db.workspace_store.upsert_workspace("ws", name="Private Workspace")
     with persona_chat_db.transaction() as conn:
         conn.execute("UPDATE conversations SET scope_type = ?, workspace_id = ? WHERE id = ?", ("workspace", "ws", cid))
         if parent_state == "deleted":

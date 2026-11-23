@@ -45,7 +45,7 @@ The library is intended for applications that require local, structured storage 
 ## 2. Key Features
 
 *   **SQLite Backend:** Uses SQLite for a lightweight, file-based database (backend abstraction present for future drivers).
-*   **Schema Management:** Built-in schema and migrations (current version: 7). V5 adds Flashcards/Decks/Reviews; V6 adds `model_type` and `extra` to flashcards; V7 adds `reverse` flag to flashcards.
+*   **Schema Management:** Built-in schema and migrations (current versions: SQLite 85, PostgreSQL 91). The schema SQL lives in `core/DB_Management/chacha/schema_sql.py`, the schema helpers in `chacha/sqlite_schema.py` and `chacha/postgres_schema.py`, and the migration steps in `chacha/migrations/sqlite_steps.py` and `postgres_steps.py`, each driven by an explicit version registry (see Schema Versioning and Initialization).
 *   **Thread Safety:** Designed for use in multi-threaded applications using thread-local connections.
 *   **Optimistic Locking:** Implements a `version` field and `expected_version` checks for update and delete operations to prevent lost updates in concurrent environments.
 *   **Soft Deletes:** Records are marked as `deleted` rather than being physically removed, allowing for potential recovery or audit.
@@ -134,9 +134,24 @@ Associated FTS5 virtual tables (e.g., `character_cards_fts`) are used for full-t
 
 ### Schema Versioning and Initialization
 The database uses a schema version to manage evolution.
-*   Current schema version: **7**
-*   Initialization applies the base schema (V4) and then migrations to V5 (flashcards/decks/reviews), V6 (flashcard `model_type`/`extra`), and V7 (flashcard `reverse`).
+*   Current schema versions: **85** (SQLite, `CharactersRAGDB._CURRENT_SCHEMA_VERSION`) and **91** (PostgreSQL, `CharactersRAGDB._POSTGRES_SCHEMA_VERSION`). Both stay literal class attributes, read at call time.
+*   Initialization applies the base schema and then runs the migration steps up to the current version.
 *   A legacy repair path adds missing `entity_id` to `sync_log` if detected before reapplying schema.
+
+**Where the code lives.** `CharactersRAGDB` keeps thin entry points (`_initialize_schema`, `_initialize_schema_sqlite` with its per-path SQLite init lock, and the `_initialize_schema_postgres` forwarder) and the version attributes. The schema code moved into the `chacha/` package as module functions that take a `ChaChaContext` (`ctx`, built lazily as `db.ctx`) as their first argument:
+*   `chacha/schema_sql.py`: the schema and migration SQL constants (the class re-imports them, so `CharactersRAGDB._X` still works).
+*   `chacha/sqlite_schema.py` and `chacha/postgres_schema.py`: the schema helpers of each backend.
+*   `chacha/migrations/sqlite_steps.py` and `chacha/migrations/postgres_steps.py`: the migration steps, each `_migrate_from_v<N>_to_v<N+1>[_sqlite|_postgres](ctx, conn)`.
+*   `chacha/schema_bootstrap.py`: the bootstrap itself. `_initialize_schema_sqlite_legacy(ctx, *, target_version)` (the historical SQLite ladder, in one transaction), `_postgres_schema_is_current(ctx, conn)` and `_initialize_schema_postgres(ctx)`, plus `postgres_schema_migration`, which holds the PostgreSQL session advisory lock (30 s acquisition timeout) across the resumable migration commits. The bootstrap records its progress in the public `db.runtime_schema_version` (`None` until it has run).
+*   `chacha/context.py`: `ChaChaContext`, the curated, public view of the database (backend, owner, schema name and version, query helpers) that the modules above and the stores use instead of reaching into `CharactersRAGDB` privates.
+
+**Version registries.** `sqlite_steps.SQLITE_STEPS` maps each SQLite source version (4..84) to a step name, and `postgres_steps.POSTGRES_STEPS` maps each PostgreSQL source version 72..90 to one. Values are names, resolved on their module at call time, so a single module patch (`monkeypatch.setattr(sqlite_steps, "_migrate_from_v49_to_v50", fake)`) reaches both the registry and the direct calls of the legacy ladders. `CharactersRAGDB._sqlite_linear_migration_steps()` binds each step to `db.ctx` with `chacha.migrations.bind`, and the PostgreSQL initializer loops over `POSTGRES_STEPS` for the v72 to v91 steps. The legacy PostgreSQL ladder stays inline in `_initialize_schema_postgres`: the SQL scripts for v4 to v53, the v54 to v70 steps (functions in `postgres_steps`), the v71 stamp (only while the schema is below v71), and the v72 stamp (while it is still below v72, outside the v71 gate). It runs for a new database and one below v71; a v71 or later schema takes the registry loop instead.
+
+**Adding a migration.**
+1. Write `_migrate_from_v<N>_to_v<N+1>(ctx, conn)` in `sqlite_steps.py` (or `_migrate_from_v<N>_to_v<N+1>_postgres(ctx, conn)` in `postgres_steps.py`).
+2. Add the key `N` to `SQLITE_STEPS` (or `POSTGRES_STEPS`), after the last one.
+3. Raise `_CURRENT_SCHEMA_VERSION` (or `_POSTGRES_SCHEMA_VERSION`) to `N + 1` on `CharactersRAGDB`.
+4. Extend `FROZEN_SQLITE` (or `FROZEN_POSTGRES`) in `tests/DB_Management/test_chacha_structure_pins.py`. The pin test fails on any other change to a key, a name or the order, because a wrong entry silently corrupts upgrades.
 
 PostgreSQL cold initialization and upgrades wait up to 30 seconds to acquire the
 schema-bootstrap advisory lock. This coordination budget does not increase the

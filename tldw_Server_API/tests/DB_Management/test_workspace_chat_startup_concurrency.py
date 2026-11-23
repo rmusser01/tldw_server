@@ -213,8 +213,8 @@ def test_concurrent_owner_capacity_is_shared_across_workspaces(
 ) -> None:
     """A per-Workspace admission lock would let both different keys consume owner capacity one."""
     with creation_db.transaction():
-        creation_db.upsert_workspace("other", "Other Workspace")
-        creation_db.update_workspace("other", {"assistant_defaults_json": {
+        creation_db.workspace_store.upsert_workspace("other", "Other Workspace")
+        creation_db.workspace_store.update_workspace("other", {"assistant_defaults_json": {
             "assistant_kind": "persona", "assistant_id": "persona-b", "persona_memory_mode": "read_write",
         }}, 1)
     first, second, observer = _contend(
@@ -238,7 +238,7 @@ def test_postgres_mutation_between_preflight_and_selection_rejects_without_accep
     _warm_worker(observer)
     request = _request()
     with creation_db.transaction() as conn:
-        assert creation_db.get_workspace("ws", conn=conn)["version"] == 2
+        assert creation_db.workspace_store.get_workspace("ws", conn=conn)["version"] == 2
         assert creation_db.get_persona_profile("persona-a", user_id="user-1", conn=conn)["is_active"]
     ready, start = Event(), Event()
     pid: list[int] = []
@@ -271,7 +271,7 @@ def test_postgres_mutation_between_preflight_and_selection_rejects_without_accep
     assert _observe_rows(observer) == ([], [])
     with observer.transaction() as conn:
         if mutation == "clear":
-            row = observer.get_workspace("ws", conn=conn)
+            row = observer.workspace_store.get_workspace("ws", conn=conn)
             assert (row["version"], row["assistant_defaults_json"]) == (3, None)
         else:
             assert not observer.get_persona_profile("persona-a", user_id="user-1", conn=conn)["is_active"]
@@ -377,7 +377,7 @@ def test_spawned_processes_serialize_startup_acceptance(
     """Separate OS processes share key authority, owner capacity and Workspace quota."""
     if race == "owner-capacity":
         with creation_db.transaction():
-            creation_db.upsert_workspace("other", "Other Workspace")
+            creation_db.workspace_store.upsert_workspace("other", "Other Workspace")
     observer = db_factory()
     payload = _request().model_dump(exclude_unset=True)
     second_payload = (

@@ -70,8 +70,8 @@ class _JobManagerDouble:
 @pytest.fixture
 def workspace_status_db(tmp_path):
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    db.upsert_workspace("ws-status", "Source Status")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace("ws-status", "Source Status")
+    db.workspace_store.add_workspace_source(
         "ws-status",
         {
             "id": "src-ready",
@@ -82,7 +82,7 @@ def workspace_status_db(tmp_path):
             "selected": True,
         },
     )
-    db.add_workspace_source(
+    db.workspace_store.add_workspace_source(
         "ws-status",
         {
             "id": "src-indexing",
@@ -93,7 +93,7 @@ def workspace_status_db(tmp_path):
             "selected": True,
         },
     )
-    db.add_workspace_source(
+    db.workspace_store.add_workspace_source(
         "ws-status",
         {
             "id": "src-missing",
@@ -160,7 +160,7 @@ def test_workspace_sources_status_reports_readiness_and_missing_media(
     workspace_status_app,
     workspace_status_db,
 ):
-    workspace_status_db.update_workspace_source(
+    workspace_status_db.workspace_store.update_workspace_source(
         "ws-status",
         "src-ready",
         {"review_state": "reviewed"},
@@ -240,8 +240,8 @@ def test_workspace_source_status_treats_vector_ready_media_as_queryable_when_chu
     tmp_path,
 ):
     db = CharactersRAGDB(db_path=str(tmp_path / "stale-chunking.db"), client_id="user-1")
-    db.upsert_workspace("ws-stale", "Stale Chunking")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace("ws-stale", "Stale Chunking")
+    db.workspace_store.add_workspace_source(
         "ws-stale",
         {
             "id": "src-stale",
@@ -285,7 +285,7 @@ def test_workspace_capabilities_fail_closed_without_queryable_sources(
     monkeypatch,
 ):
     db = CharactersRAGDB(db_path=str(tmp_path / "empty-chacha.db"), client_id="user-1")
-    db.upsert_workspace("ws-empty", "Empty Workspace")
+    db.workspace_store.upsert_workspace("ws-empty", "Empty Workspace")
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _empty_service_capabilities,
@@ -328,8 +328,8 @@ def test_workspace_capabilities_allow_grounded_questions_for_partial_text_source
         db_path=str(tmp_path / "partial-capabilities.db"),
         client_id="user-1",
     )
-    db.upsert_workspace("ws-partial", "Partial Workspace")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace("ws-partial", "Partial Workspace")
+    db.workspace_store.add_workspace_source(
         "ws-partial",
         {
             "id": "src-partial",
@@ -398,7 +398,7 @@ def test_workspace_capabilities_accept_project_workspace_profile(
     monkeypatch,
 ):
     db = CharactersRAGDB(db_path=str(tmp_path / "project-chacha.db"), client_id="user-1")
-    db.upsert_workspace("ws-project", "Project Workspace", workspace_profile="project")
+    db.workspace_store.upsert_workspace("ws-project", "Project Workspace", workspace_profile="project")
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Workspaces.service_capabilities.collect_workspace_service_capabilities",
         _empty_service_capabilities,
@@ -426,8 +426,8 @@ def test_workspace_capabilities_include_attached_primary_root(
     monkeypatch,
 ):
     db = CharactersRAGDB(db_path=str(tmp_path / "project-root-chacha.db"), client_id="user-1")
-    db.upsert_workspace("ws-project-root", "Project Workspace")
-    db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace("ws-project-root", "Project Workspace")
+    db.workspace_store.upsert_workspace_primary_root(
         "ws-project-root",
         {
             "root_id": "root-1",
@@ -594,8 +594,8 @@ def test_workspace_sources_status_uses_active_media_ingest_job_progress(
     tmp_path,
 ):
     db = CharactersRAGDB(db_path=str(tmp_path / "jobs-chacha.db"), client_id="user-1")
-    db.upsert_workspace("ws-jobs", "Jobs Workspace")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace("ws-jobs", "Jobs Workspace")
+    db.workspace_store.add_workspace_source(
         "ws-jobs",
         {
             "id": "src-running",
@@ -642,8 +642,8 @@ def test_workspace_sources_status_exposes_workspace_job_failure_reason_code(
     tmp_path: Path,
 ) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "failed-workspace-job.db"), client_id="user-1")
-    db.upsert_workspace("ws-failed-job", "Failed Workspace Job")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace("ws-failed-job", "Failed Workspace Job")
+    db.workspace_store.add_workspace_source(
         "ws-failed-job",
         {
             "id": "src-missing-media",
@@ -700,8 +700,8 @@ def test_workspace_sources_status_prefers_extracted_media_over_workspace_lifecyc
     tmp_path,
 ):
     db = CharactersRAGDB(db_path=str(tmp_path / "workspace-job-chacha.db"), client_id="user-1")
-    db.upsert_workspace("ws-workspace-job", "Workspace Job")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace("ws-workspace-job", "Workspace Job")
+    db.workspace_store.add_workspace_source(
         "ws-workspace-job",
         {
             "id": "src-extracted",
@@ -789,8 +789,8 @@ def test_workspace_sources_status_uses_lightweight_media_status_without_content_
             raise RuntimeError("full media content should not be loaded for status")
 
     db = CharactersRAGDB(db_path=str(tmp_path / "lightweight-status.db"), client_id="user-1")
-    db.upsert_workspace("ws-lightweight", "Lightweight Status")
-    db.add_workspace_source(
+    db.workspace_store.upsert_workspace("ws-lightweight", "Lightweight Status")
+    db.workspace_store.add_workspace_source(
         "ws-lightweight",
         {
             "id": "src-lightweight",
@@ -879,8 +879,8 @@ def test_synced_text_without_chunks_remains_text_searchable(
         )
         media_id = created["media_id"]
         before = media_db.get_media_by_id(media_id)
-        workspace_status_db.upsert_workspace("ws-synced", "Synced source")
-        workspace_status_db.add_workspace_source(
+        workspace_status_db.workspace_store.upsert_workspace("ws-synced", "Synced source")
+        workspace_status_db.workspace_store.add_workspace_source(
             "ws-synced",
             {
                 "id": "src-synced",

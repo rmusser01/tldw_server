@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendDatabaseError,
     BackendType,
@@ -299,7 +300,7 @@ def test_flashcard_template_schema_postgres_registers_sync_log_trigger(monkeypat
             property(lambda self: backend),
         )
 
-        db._ensure_flashcard_template_schema_postgres(conn=object())
+        postgres_schema._ensure_flashcard_template_schema_postgres(db.ctx, conn=object())
 
         assert any("flashcard_templates_sync_log_fn" in query for query in executed)
         assert any("DROP TRIGGER IF EXISTS flashcard_templates_sync_log" in query for query in executed)

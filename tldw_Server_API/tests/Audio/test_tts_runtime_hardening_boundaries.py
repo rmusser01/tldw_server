@@ -58,7 +58,7 @@ from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 
 class _NoOverrideSnapshot:
-    def enforce(self, _model: str | None) -> None:
+    def enforce(self, _model: str | None, **_kwargs: object) -> None:
         return None
 
     def ensure_healthy(self) -> None:

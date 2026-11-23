@@ -171,7 +171,7 @@ def test_share_link_write_preserves_valid_roleplay_authority(tmp_path):
     db = CharactersRAGDB(db_path=str(tmp_path / "roleplay-share.db"), client_id="1")
     client = _build_app(db, user_id=1)
     conversation_id = _seed_roleplay_conversation(db)
-    before = db.get_roleplay_resume_state(conversation_id)
+    before = db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = client.post(
         f"/api/v1/chat/conversations/{conversation_id}/share-links",
@@ -179,7 +179,7 @@ def test_share_link_write_preserves_valid_roleplay_authority(tmp_path):
     )
 
     assert response.status_code == 200, response.text
-    after = db.get_roleplay_resume_state(conversation_id)
+    after = db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"] + 1
     assert after["history_version"] == before["history_version"]
     assert after["settings"]["roleplayResumeV1"] == before["settings"][
@@ -194,7 +194,7 @@ def test_share_link_rejects_public_projection_overflow_atomically(tmp_path):
     db = CharactersRAGDB(db_path=str(tmp_path / "roleplay-share-limit.db"), client_id="1")
     client = _build_app(db, user_id=1)
     conversation_id = _seed_roleplay_conversation(db)
-    state = db.get_roleplay_resume_state(conversation_id)
+    state = db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     settings = dict(state["settings"])
     internal = {
         key: settings[key]
@@ -217,7 +217,7 @@ def test_share_link_rejects_public_projection_overflow_atomically(tmp_path):
         bounded_settings,
         expected_settings_version=state["settings_version"],
     )
-    before = db.get_roleplay_resume_state(conversation_id)
+    before = db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
 
     response = client.post(
         f"/api/v1/chat/conversations/{conversation_id}/share-links",
@@ -225,7 +225,7 @@ def test_share_link_rejects_public_projection_overflow_atomically(tmp_path):
     )
 
     assert response.status_code == 413, response.text
-    after = db.get_roleplay_resume_state(conversation_id)
+    after = db.conversation_resume_store.get_roleplay_resume_state(conversation_id)
     assert after["settings_version"] == before["settings_version"]
     assert after["history_version"] == before["history_version"]
     assert after["settings"] == before["settings"]
@@ -252,6 +252,7 @@ def test_share_link_resolve_rejects_undecodable_signature_with_400(tmp_path):
 
 def test_share_link_settings_write_uses_version_cas_and_surfaces_conflict():
     class _ConflictingDB:
+        conversation_resume_store = property(lambda self: self)
         def __init__(self) -> None:
             self.expected_settings_version: int | None = None
 
@@ -315,6 +316,7 @@ def test_share_link_settings_write_uses_version_cas_and_surfaces_conflict():
 
 def test_share_link_settings_write_expects_absent_row_on_first_write():
     class _EmptyDB:
+        conversation_resume_store = property(lambda self: self)
         def __init__(self) -> None:
             self.expected_settings_version: int | None = None
 
@@ -388,6 +390,7 @@ def test_share_link_writer_uses_transactional_conversation_identity(monkeypatch)
     }
 
     class _RacingDB:
+        conversation_resume_store = property(lambda self: self)
         client_id = "1"
 
         def __init__(self) -> None:
@@ -454,7 +457,7 @@ def test_share_link_create_requires_exact_scope_match(tmp_path):
     db_path = tmp_path / "chacha.db"
     db = CharactersRAGDB(db_path=str(db_path), client_id="1")
     client = _build_app(db, user_id=1)
-    db.upsert_workspace("ws-1", "Workspace One")
+    db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     char_id = db.add_character_card(
         {

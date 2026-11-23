@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { SidepanelChatTab } from "@/store/sidepanel-chat-tabs"
+import { ConversationMenuContext } from "./ConversationMenuButton"
 
 export type ConversationStatus =
   | "in_progress"
@@ -44,7 +45,10 @@ export type ConversationContextMenuProps = {
   onAddToFolder: (tabId: string) => void
   onExportJSON: (tabId: string) => void
   onExportMarkdown: (tabId: string) => void
-  /** Delete the tab's server chat; offered only for a tab bound to one. */
+  /**
+   * Move the tab's server chat to Trash; offered only for a tab bound to one.
+   * It runs at once, with no dialog: the caller offers Undo (XP-17).
+   */
   onDelete: (tabId: string) => DialogAction
   /** Close the tab. A tab with no server chat offers this instead of Delete. */
   onCloseTab: (tabId: string) => DialogAction
@@ -76,8 +80,7 @@ export const ConversationContextMenu: React.FC<
   const renameRequestRef = React.useRef(0)
   const renameInputRef = React.useRef<InputRef>(null)
   const [renaming, setRenaming] = React.useState(false)
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
-  const [deleting, setDeleting] = React.useState(false)
+  const deletingRef = React.useRef(false)
   const deletesServerChat = Boolean(tab.serverChatId)
 
   const openRenameDialog = () => {
@@ -126,13 +129,14 @@ export const ConversationContextMenu: React.FC<
     }
   }
 
-  const handleDeleteConfirm = async () => {
-    if (deleting) return
-    setDeleting(true)
+  // Soft deletes do not ask first (XP-17; #3101 decision 8).
+  const handleDelete = async () => {
+    if (deletingRef.current) return
+    deletingRef.current = true
     try {
-      if ((await onDelete(tab.id)) !== false) setDeleteConfirmOpen(false)
+      await onDelete(tab.id)
     } finally {
-      setDeleting(false)
+      deletingRef.current = false
     }
   }
 
@@ -227,9 +231,12 @@ export const ConversationContextMenu: React.FC<
       ? {
           key: "delete",
           icon: <Trash2 className="size-3" />,
-          label: t("common:delete", "Delete"),
+          // Instant, with Undo, so it says where the chat goes (XP-17).
+          label: t("sidepanel:contextMenu.moveToTrash", "Move to Trash"),
           danger: true,
-          onClick: () => setDeleteConfirmOpen(true)
+          onClick: () => {
+            void handleDelete()
+          }
         }
       : {
           // Nothing is deleted: the chat has no server copy to remove.
@@ -240,8 +247,20 @@ export const ConversationContextMenu: React.FC<
         }
   ]
 
+  // The tab's visible "⋯" button (ConversationMenuButton) opens this same menu.
+  const menuButton = React.useMemo(
+    () => ({
+      items: menuItems,
+      label: t("sidepanel:contextMenu.openMenu", {
+        defaultValue: "Chat actions: {{title}}",
+        title: tab.label
+      })
+    }),
+    [menuItems, t, tab.label]
+  )
+
   return (
-    <>
+    <ConversationMenuContext.Provider value={menuButton}>
       <Dropdown
         menu={{ items: menuItems }}
         trigger={["contextMenu"]}
@@ -275,26 +294,7 @@ export const ConversationContextMenu: React.FC<
         />
       </Modal>
 
-      {/* Delete Confirmation Modal */}
-      <Modal
-        open={deleteConfirmOpen}
-        title={t("sidepanel:contextMenu.deleteTitle", "Delete conversation")}
-        onOk={() => void handleDeleteConfirm()}
-        onCancel={() => setDeleteConfirmOpen(false)}
-        okText={t("sidepanel:contextMenu.moveToTrash", "Move to Trash")}
-        cancelText={t("common:cancel", "Cancel")}
-        okButtonProps={{ danger: true, loading: deleting }}
-        destroyOnHidden
-      >
-        <p>
-          {t("sidepanel:contextMenu.moveToTrashConfirm", {
-            defaultValue:
-              "\"{{title}}\" moves to Trash and its tab closes. You can undo this right away, or restore it later from Trash in the full chat page.",
-            title: tab.label
-          })}
-        </p>
-      </Modal>
-    </>
+    </ConversationMenuContext.Provider>
   )
 }
 

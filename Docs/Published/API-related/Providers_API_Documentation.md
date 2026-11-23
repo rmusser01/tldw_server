@@ -6,11 +6,11 @@
  - Base prefix: `/api/v1`
 
 ## Auth + Rate Limits
-- These endpoints follow the server’s standard AuthNZ settings and typically require authentication.
+- `GET /llm/health`, `GET /llm/providers`, `GET /llm/providers/{provider_name}`, `GET /llm/models` and `GET /llm/models/metadata` are public. A request without credentials, or with credentials the server refuses, gets the server's listing; a signed-in user's request also lists the providers that user's own stored key serves (see "Your own provider key" below). Every listing answer carries `Vary: Authorization, X-API-KEY, Cookie`, and a signed-in user's carries `Cache-Control: private, no-store`.
 - Headers:
   - Single-user: `X-API-KEY: <key>`
   - Multi-user: `Authorization: Bearer <JWT>`
-- Standard limits apply; these endpoints are lightweight and primarily used by UIs/ops. Deployments can choose to relax access via gateway configuration, but the default app configuration applies global security to API routes.
+- Standard limits apply; these endpoints are lightweight and primarily used by UIs/ops. Deployments that want these routes private can restrict them at a gateway.
 
 ## Endpoints
 
@@ -140,6 +140,23 @@ llama.cpp capability example:
   - environment: `LLAMA_CPP_THINKING_BUDGET_PARAM`
   - config: `Local-API.llama_cpp_thinking_budget_param`
 - `reserved_extra_body_keys` is the list UIs should treat as first-class/reserved when editing raw `extra_body`.
+
+#### Your own provider key
+- A signed-in user's request lists each commercial provider the user's own stored key serves on that key, also
+  when the server has no key for it. "Serves" is the test chat uses for the user's own key: BYOK is on, the
+  provider is on the BYOK allowlist, the user has an active key for it, and the server sends that provider's calls
+  to its vendor's host (not a custom OpenAI-compatible slot, a local server, or a base URL the operator points
+  elsewhere). Such an entry has `is_configured: true` and readiness from that key, and its `models` and
+  `models_info` are the provider's model list fetched with that key. A list the provider returns is cached for 5
+  minutes per key; an unreachable list or a server error is retried after 20 seconds, and a rejected key on every
+  listing. When the provider rejects the key, the entry is unavailable, with `readiness_reason_code: "auth_failed"`.
+- The admin provider override still applies: a provider with `is_enabled: false`, and a model on `denied_models`,
+  are offered to no user. A model off `allowed_models` is listed for a user whose own key serves the provider,
+  because `allowed_models` is what the server's key offers; chat runs it on that key, while shared-workspace chat,
+  the persona voice preflight, embeddings and text-to-speech still check `allowed_models` on every key.
+- A listing never contains a key and never shows another user's keys or models. A team or org shared key does not
+  change it. A request without credentials, and a user with no such key, get the server's listing.
+- The same applies to `/llm/providers/{provider_name}`, `/llm/models` and `/llm/models/metadata`.
 
 ### 3) GET /api/v1/llm/providers/{provider_name}
 - Summary: Details for a single provider.

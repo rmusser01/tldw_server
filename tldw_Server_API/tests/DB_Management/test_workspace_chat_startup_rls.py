@@ -15,7 +15,7 @@ def test_forced_owner_rls_all_operations_and_orphans(pg_restricted_backend) -> N
     db = CharactersRAGDB(":memory:", client_id="alice", backend=pg_restricted_backend)
     try:
         assert db.backend.table_exists("workspace_chat_startup_receipts")
-        db.upsert_workspace("live-workspace", "Workspace")
+        db.workspace_store.upsert_workspace("live-workspace", "Workspace")
         cid = db.add_conversation({"scope_type": "workspace", "workspace_id": "live-workspace"})
         with db.transaction() as conn:
             flags = conn.execute(

@@ -37,7 +37,7 @@ def get_workspace_access_checker(
 
     def owns_workspace(workspace_id: str) -> bool:
         try:
-            return database.get_workspace(workspace_id) is not None
+            return database.workspace_store.get_workspace(workspace_id) is not None
         except (KeyError, ValueError):
             return False
 

@@ -357,7 +357,7 @@
     "message": "Image attachments disabled"
   },
   "attachments_imageDisabledBody": {
-    "message": "Disable Knowledge Search to attach images."
+    "message": "Images can't be attached while answers come from Search & Context. Type /search to turn that off."
   },
   "attachments_tabs": {
     "message": "Web Pages"
@@ -366,13 +366,13 @@
     "message": "Uploaded Files"
   },
   "attachments_enableKnowledgeSearch": {
-    "message": "Enable Knowledge Search"
+    "message": "Include in Search & Context"
   },
   "attachments_enableKnowledgeSearchTooltip": {
     "message": "When enabled, attached files and pinned results will be searched for relevant context"
   },
   "attachments_manageContext": {
-    "message": "Manage in Knowledge Panel"
+    "message": "Manage in Search & Context"
   },
   "attachments_processingBlocked": {
     "message": "Blocked"
@@ -531,7 +531,7 @@
     "message": "Extract text from image (OCR)"
   },
   "fileRetrievalEnabled": {
-    "message": "Enable Knowledge Search for Documents"
+    "message": "Include documents in Search & Context"
   },
   "speech_title": {
     "message": "Speech Playground"
@@ -783,7 +783,7 @@
     "message": "+Tools"
   },
   "composer_manageContextHint": {
-    "message": "Manage Knowledge Search in the Context tab."
+    "message": "Manage Search & Context sources in its Context tab."
   },
   "composer_queuedBanner_title": {
     "message": "Queued from existing drafts"
@@ -1056,7 +1056,7 @@
     "message": "Create a default assistant character"
   },
   "composer_persistence_serverCharacterHintBody": {
-    "message": "Create a simple assistant persona (name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server."
+    "message": "Create a simple character (a name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server."
   },
   "composer_persistence_serverInlineTitle": {
     "message": "Saved on your server"
@@ -2108,6 +2108,18 @@
   "composer_slashModelDesc": {
     "message": "Choose the model for this chat"
   },
+  "composer_slashNew": {
+    "message": "New chat"
+  },
+  "composer_slashNewDesc": {
+    "message": "Start a new saved chat"
+  },
+  "composer_slashPrompt": {
+    "message": "Use a prompt"
+  },
+  "composer_slashPromptDesc": {
+    "message": "Pick a saved prompt for this chat"
+  },
   "imageBackend_menuLabel": {
     "message": "Default image provider"
   },
@@ -2649,7 +2661,7 @@
     "message": "Hands-free conversation with audio responses"
   },
   "empty_featureSearch": {
-    "message": "Knowledge Search"
+    "message": "Search & Context"
   },
   "empty_featureSearchHint": {
     "message": "Search your ingested media and notes"
@@ -2688,7 +2700,7 @@
     "message": "Attach files"
   },
   "tour_toolsContent": {
-    "message": "Attach images or documents to include them in your message. Manage context from Knowledge Search → Context."
+    "message": "Attach images or documents to include them in your message. Manage context from Search & Context → Context."
   },
   "tour_voiceTitle": {
     "message": "Voice Chat"
@@ -2889,22 +2901,19 @@
     "message": "Clear knowledge"
   },
   "cockpit_contextMediaCountOne": {
-    "message": "1 media scope"
+    "message": "1 media item"
   },
   "cockpit_contextMediaCountMany": {
-    "message": "{{count}} media scopes"
+    "message": "{{count}} media items"
   },
   "cockpit_clearMediaScopes": {
-    "message": "Clear media scopes"
+    "message": "Clear media items"
   },
   "cockpit_webSearch": {
     "message": "Web search"
   },
   "cockpit_webSearchOn": {
     "message": "Web search on"
-  },
-  "cockpit_webSearchOff": {
-    "message": "Web search off"
   },
   "cockpit_openSearchContext": {
     "message": "Open Search & Context"
@@ -3231,7 +3240,7 @@
     "message": "Media"
   },
   "cockpit_mediaScopeLabel": {
-    "message": "Media scope {{id}}"
+    "message": "Media item {{id}}"
   },
   "cockpit_nextReply": {
     "message": "Used on next reply"
@@ -3242,17 +3251,8 @@
   "cockpit_turnRunning": {
     "message": "Turn running"
   },
-  "cockpit_turnIdle": {
-    "message": "Turn idle"
-  },
-  "cockpit_providerRoute": {
-    "message": "Provider route"
-  },
   "cockpit_stop": {
     "message": "Stop"
-  },
-  "cockpit_scopedSettings": {
-    "message": "Scoped settings"
   },
   "cockpit_settingsDefault": {
     "message": "Default settings for this provider:model."
@@ -3462,7 +3462,7 @@
     "message": "Use no prior messages"
   },
   "historySelection_expand": {
-    "message": "Expand in full page"
+    "message": "Open in full page"
   },
   "historySelection_instructions": {
     "message": "Tick the messages the AI should see, in the order it should see them. Arrow keys move between messages; Alt + arrow keys reorder them."
@@ -4860,6 +4860,15 @@
   "composer_toolsLabel": {
     "message": "Tools"
   },
+  "composer_shortOptions": {
+    "message": "Composer options"
+  },
+  "composer_shortOptionsWarning": {
+    "message": "Some hidden options need attention."
+  },
+  "composer_shortOptionsActive": {
+    "message": "Some hidden options are in use."
+  },
   "composer_shortcutHint": {
     "message": "/ commands · @ mentions"
   },
@@ -4877,6 +4886,9 @@
   },
   "cockpit_addSources": {
     "message": "Add sources"
+  },
+  "cockpit_addSourcesFromSearchContext": {
+    "message": "Add sources from Search & Context"
   },
   "cockpit_conversation": {
     "message": "Conversation"
@@ -4916,5 +4928,110 @@
   },
   "regions_artifactsShort": {
     "message": "Artifacts"
+  },
+  "header_branchedFrom": {
+    "message": "Branched from"
+  },
+  "header_backToParentChat": {
+    "message": "Back to parent chat: {{title}}"
+  },
+  "historySelection_branchTitle": {
+    "message": "{{title}} — branch at message {{number}}"
+  },
+  "historySelection_branchTitleUntitled": {
+    "message": "Branch at message {{number}}"
+  },
+  "historySelection_branchCreated": {
+    "message": "Branch created"
+  },
+  "historySelection_branchCreatedFrom": {
+    "message": "This chat continues from \"{{title}}\". The original chat is unchanged."
+  },
+  "historySelection_backToParent": {
+    "message": "Back to parent"
+  },
+  "historySelection_backToParentFailed": {
+    "message": "Couldn't open the original chat"
+  },
+  "historySelection_backToParentFailedDetail": {
+    "message": "Open it from the chat list instead."
+  },
+  "historySelection_alternativeReplies": {
+    "message": "This chat has alternative replies. Only the newest is shown; review the history to choose which ones the AI sees."
+  },
+  "focusBar_openChatList": {
+    "message": "Open chat list"
+  },
+  "historySelection_backToParentStale": {
+    "message": "That branch is no longer open"
+  },
+  "historySelection_backToParentStaleDetail": {
+    "message": "Open the original chat from the chat list."
+  },
+  "answerNote_untitled": {
+    "message": "Chat answer, {{date}}"
+  },
+  "answerNote_fromChat": {
+    "message": "Saved from a chat on {{date}}."
+  },
+  "answerNote_fromChatModel": {
+    "message": "Saved from a chat ({{model}}) on {{date}}."
+  },
+  "answerNote_fromTemporaryChat": {
+    "message": "Saved from a temporary chat on {{date}}."
+  },
+  "answerNote_fromTemporaryChatModel": {
+    "message": "Saved from a temporary chat ({{model}}) on {{date}}."
+  },
+  "composer_slashNote": {
+    "message": "Attach a note"
+  },
+  "composer_slashNoteDesc": {
+    "message": "Search your notes and attach one to this message"
+  },
+  "noteMentions_label": {
+    "message": "Notes"
+  },
+  "noteMentions_count": {
+    "message": "{{count}} notes"
+  },
+  "noteMentions_count_one": {
+    "message": "{{count}} note"
+  },
+  "noteMentions_count_other": {
+    "message": "{{count}} notes"
+  },
+  "noteMentions_searching": {
+    "message": "Searching notes…"
+  },
+  "noteMentions_error": {
+    "message": "Couldn't search your notes."
+  },
+  "noteMentions_empty": {
+    "message": "No notes found"
+  },
+  "noteMentions_untitled": {
+    "message": "Untitled note"
+  },
+  "noteMentions_attached": {
+    "message": "Attached notes"
+  },
+  "noteMentions_open": {
+    "message": "Open this note"
+  },
+  "noteMentions_remove": {
+    "message": "Remove note {{title}}"
+  },
+  "noteMentions_shortened": {
+    "message": "[Note shortened]"
+  },
+  "noteMentions_attachedNoteLabel": {
+    "message": "Attached note: {{title}}"
+  },
+  "noteMentions_unpicked": {
+    "message": "Pick a note, or remove /note to send this as a message."
+  },
+  "tools_images": {
+    "message": "Images"
   }
 }

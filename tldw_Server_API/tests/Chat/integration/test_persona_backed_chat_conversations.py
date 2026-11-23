@@ -1286,7 +1286,7 @@ def inherited_workspace_chat(
             "character_card_id": source["id"], "mode": "session_scoped",
             "system_prompt": f"You are {persona_id}.", "is_active": True,
         })
-    workspace = persona_chat_db.upsert_workspace("ws-resume", "Saved assistant")
+    workspace = persona_chat_db.workspace_store.upsert_workspace("ws-resume", "Saved assistant")
     defaults_body = {
         "version": workspace["version"],
         "assistant_defaults": {
@@ -1297,11 +1297,11 @@ def inherited_workspace_chat(
     if persona_memory_mode == "read_write":
         unconfirmed = client.patch("/api/v1/workspaces/ws-resume", json=defaults_body, headers=headers)
         assert unconfirmed.status_code == 422, unconfirmed.text
-        assert persona_chat_db.get_workspace("ws-resume") == workspace
+        assert persona_chat_db.workspace_store.get_workspace("ws-resume") == workspace
         defaults_body["confirm_read_write_assistant_default"] = True
     saved = client.patch("/api/v1/workspaces/ws-resume", json=defaults_body, headers=headers)
     assert saved.status_code == 200, saved.text
-    workspace = persona_chat_db.get_workspace("ws-resume")
+    workspace = persona_chat_db.workspace_store.get_workspace("ws-resume")
     assert workspace["assistant_defaults_json"] == defaults_body["assistant_defaults"]
     startup = start_workspace_chat(
         persona_chat_db, owner_id="1",
@@ -1342,7 +1342,7 @@ def inherited_workspace_chat(
     })
     assert edited.status_code == 200, edited.text
     assert edited.json()["version"] == workspace["version"] + 1
-    assert persona_chat_db.get_workspace("ws-resume")["assistant_defaults_json"]["assistant_id"] == "workspace-replacement"
+    assert persona_chat_db.workspace_store.get_workspace("ws-resume")["assistant_defaults_json"]["assistant_id"] == "workspace-replacement"
     return conversation_id, binding, origin, initial
 
 

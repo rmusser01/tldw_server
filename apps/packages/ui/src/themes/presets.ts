@@ -38,7 +38,9 @@ const defaultTheme: ThemeDefinition = {
       borderStrong: "207 200 186",
       text: "31 35 40",
       textMuted: "91 100 114",
-      textSubtle: "95 104 119",
+      // One light secondary text tier: subtle was a near-copy of muted
+      // (95 104 119), so it now takes muted's value (#3101, decision 9).
+      textSubtle: "91 100 114",
       focus: "13 134 119",
       ...defaultLightShadows(),
     },

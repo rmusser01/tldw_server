@@ -1245,7 +1245,7 @@ async def ensure_canonical_workspace_bridge(
     canonical_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> ACPWorkspaceResponse:
     """Find or create an ACP execution workspace linked to a canonical workspace."""
-    canonical_workspace = await _run_sync(lambda: canonical_db.get_workspace(payload.canonical_workspace_id))
+    canonical_workspace = await _run_sync(lambda: canonical_db.workspace_store.get_workspace(payload.canonical_workspace_id))
     if not canonical_workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
 

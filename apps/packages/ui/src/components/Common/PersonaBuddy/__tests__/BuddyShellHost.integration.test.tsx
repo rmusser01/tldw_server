@@ -309,7 +309,7 @@ describe("BuddyShellHost real companion integration", () => {
 
   it("selects an authored Space reaction after real focus suspension is active", async () => {
     renderRealHost()
-    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Avatar for Persona One" })
     fireEvent.focus(buddy)
     fireEvent.keyDown(buddy, { key: " " })
 
@@ -324,7 +324,7 @@ describe("BuddyShellHost real companion integration", () => {
   it("selects the authored static PNG reaction through the real engine in reduced motion", async () => {
     mocks.reducedMotion = true
     renderRealHost()
-    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Avatar for Persona One" })
     fireEvent.focus(buddy)
     fireEvent.keyDown(buddy, { key: " " })
 
@@ -342,7 +342,7 @@ describe("BuddyShellHost real companion integration", () => {
 
   it("runs the completed-drag reaction only after the real engine leaves drag suspension", async () => {
     renderRealHost()
-    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Avatar for Persona One" })
     fireEvent.pointerDown(buddy, {
       button: 0,
       pointerId: 31,
@@ -370,7 +370,7 @@ describe("BuddyShellHost real companion integration", () => {
 
   it("drops a completed drag when the real controller is replaced by another Persona", async () => {
     const view = renderControllableRealHost()
-    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Avatar for Persona One" })
     await waitFor(() => {
       expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
         "data-visual-state",
@@ -411,7 +411,7 @@ describe("BuddyShellHost real companion integration", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("button", {
-        name: "Buddy for Persona Two"
+        name: "Avatar for Persona Two"
       })).toBeInTheDocument()
       expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
         "data-visual-state",
@@ -427,7 +427,7 @@ describe("BuddyShellHost real companion integration", () => {
     mocks.visualPack = buildPack(true)
     vi.spyOn(Math, "random").mockReturnValue(0.75)
     renderRealHost()
-    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Avatar for Persona One" })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, {
       button: 0,
@@ -462,7 +462,7 @@ describe("BuddyShellHost real companion integration", () => {
     mocks.visualPack = buildPack(true)
     vi.spyOn(Math, "random").mockReturnValue(0.75)
     renderRealHost()
-    const buddy = await screen.findByRole("button", { name: "Buddy for Persona One" })
+    const buddy = await screen.findByRole("button", { name: "Avatar for Persona One" })
     vi.useFakeTimers()
     fireEvent.pointerDown(buddy, {
       button: 0,

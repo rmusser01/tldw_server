@@ -1110,6 +1110,18 @@ export interface ChatCompletionRequest {
   research_context?: ChatResearchContext
 }
 
+/**
+ * Paging and payload options for GET /notes/search/. `legacy_aliases: false`
+ * omits the deprecated `notes`/`results` copies of `items`.
+ */
+export type NoteSearchParams = {
+  limit?: number
+  offset?: number
+  legacy_aliases?: boolean
+  /** False skips the highlighted excerpts (Wave 6, NL-07). */
+  include_snippets?: boolean
+}
+
 export type ScopedRequestOptions = {
   idempotencyKey?: string
   signal?: AbortSignal
@@ -1296,6 +1308,8 @@ export interface ServerChatMessage {
   version?: number
   metadata_extra?: Record<string, unknown>
   pinned?: boolean
+  /** Present (true) when the server says the message has an image attached. */
+  has_image?: boolean
 }
 
 export type ChatSettingsResponse = {
@@ -4083,6 +4097,7 @@ export class TldwApiClientBase {
       limit?: number
       offset?: number
       include_keywords?: boolean
+      legacy_aliases?: boolean
     },
     options?: { signal?: AbortSignal }
   ): Promise<any> {
@@ -4095,7 +4110,8 @@ export class TldwApiClientBase {
     const query = this.buildQuery({
       limit,
       offset,
-      include_keywords: params?.include_keywords
+      include_keywords: params?.include_keywords,
+      legacy_aliases: params?.legacy_aliases
     } as Record<string, any>)
     return await bgRequest<any>({
       path: `/api/v1/notes/${query}`,
@@ -4106,7 +4122,7 @@ export class TldwApiClientBase {
 
   async searchNotes(
     query: string,
-    params?: { limit?: number; offset?: number },
+    params?: NoteSearchParams,
     options?: ScopedRequestOptions,
   ): Promise<any> {
     return collectionsMethods.searchNotes.call(this, query, params, options)

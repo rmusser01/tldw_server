@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -75,7 +76,7 @@ def test_sqlite_v52_to_v53_preserves_existing_group_column_and_is_rerunnable(tmp
             target_version=53,
             initial_version=52,
         )
-        db._migrate_from_v52_to_v53(conn)
+        sqlite_steps._migrate_from_v52_to_v53(db.ctx, conn)
         columns = {row["name"] for row in conn.execute("PRAGMA table_info('quiz_questions')")}
         stored_version = conn.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
@@ -111,20 +112,20 @@ def test_postgres_initializer_routes_historical_v52_through_v53_script(
     applied_scripts: list[tuple[str, int | None]] = []
     schema_version_reads: list[tuple[object, bool]] = []
 
-    def _schema_version(_conn: object, *, lock: bool = False) -> int:
+    def _schema_version(_ctx: object, _conn: object, *, lock: bool = False) -> int:
         schema_version_reads.append((_conn, lock))
         return 52
 
-    monkeypatch.setattr(db, "_get_schema_version_postgres", _schema_version)
-    monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", _schema_version)
+    monkeypatch.setattr(postgres_schema, "_ensure_postgres_fts", lambda _ctx, conn: None)
 
-    def _record_script(script: str, conn, expected_version=None):
+    def _record_script(_ctx, script: str, conn, expected_version=None):
         assert conn is migration_transaction.connection
         applied_scripts.append((script, expected_version))
         if expected_version == 53:
             raise _ReachedV53Error
 
-    monkeypatch.setattr(db, "_apply_postgres_migration_script", _record_script)
+    monkeypatch.setattr(postgres_schema, "_apply_postgres_migration_script", _record_script)
 
     with pytest.raises(_ReachedV53Error):
         db._initialize_schema_postgres()

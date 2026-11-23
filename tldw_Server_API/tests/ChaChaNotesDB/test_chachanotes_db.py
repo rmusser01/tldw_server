@@ -13,6 +13,7 @@ import os  # For :memory: check
 # Third-Party Imports
 #
 # Local Imports
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -256,7 +257,7 @@ class TestMessageMetadata:
     def test_migration_v12_to_v13_creates_table(self, db_path, client_id, monkeypatch):
         def initialize_historical(db):
             with db.transaction() as conn:
-                db._apply_schema_v4(conn)
+                sqlite_schema._apply_schema_v4(db.ctx, conn)
                 steps = db._sqlite_linear_migration_steps()
                 for prior in range(4, 12):
                     steps[prior](conn)
@@ -1023,13 +1024,13 @@ class TestNotes:
         assert note_id is not None
 
         db_instance.sync_note_folders(note_id, ["manual"])
-        db_instance.sync_note_source_folders(note_id, source_id=11, folder_paths=["docs", "docs/api"])
-        db_instance.sync_note_source_folders(note_id, source_id=22, folder_paths=["guides"])
+        db_instance.workspace_store.sync_note_source_folders(note_id, source_id=11, folder_paths=["docs", "docs/api"])
+        db_instance.workspace_store.sync_note_source_folders(note_id, source_id=22, folder_paths=["guides"])
 
         initial_paths = [row["path"] for row in db_instance.get_note_folders_for_note(note_id)]
         assert initial_paths == ["docs", "docs/api", "guides", "manual"]
 
-        db_instance.sync_note_source_folders(
+        db_instance.workspace_store.sync_note_source_folders(
             note_id,
             source_id=11,
             folder_paths=["docs", "docs/reference"],
@@ -1042,8 +1043,8 @@ class TestNotes:
         note_id = db_instance.add_note("Case Foldered Note", "Body")
         assert note_id is not None
 
-        db_instance.sync_note_source_folders(note_id, source_id=11, folder_paths=["Docs/API"])
-        db_instance.sync_note_source_folders(note_id, source_id=11, folder_paths=["docs/reference"])
+        db_instance.workspace_store.sync_note_source_folders(note_id, source_id=11, folder_paths=["Docs/API"])
+        db_instance.workspace_store.sync_note_source_folders(note_id, source_id=11, folder_paths=["docs/reference"])
 
         updated_paths = [row["path"] for row in db_instance.get_note_folders_for_note(note_id)]
         assert updated_paths == ["Docs", "Docs/reference"]
@@ -1131,7 +1132,7 @@ class TestKeywordsAndCollections:
         def _map_table(name: str) -> str:
             return "mapped_keywords" if name == "keywords" else name
 
-        monkeypatch.setattr(db_instance, "_map_table_for_backend", _map_table)
+        monkeypatch.setattr(db_instance.ctx, "map_table", _map_table)
         assert db_instance.soft_delete_keyword(1, expected_version=1) is True
         row = conn.execute("SELECT deleted, version FROM mapped_keywords WHERE id = 1").fetchone()
         deleted_val = row["deleted"] if isinstance(row, dict) else row[0]
@@ -1448,7 +1449,6 @@ class TestTransactions:
 
         conn = _RecordingConnection()
         db = CharactersRAGDB.__new__(CharactersRAGDB)
-        db._ensure_sqlite_backend = lambda: None
         db.get_connection = lambda: conn
 
         with TransactionContextManager(db):

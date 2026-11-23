@@ -7,12 +7,14 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+
 pytest.importorskip("psycopg")
 
 from psycopg import sql as psycopg_sql  # noqa: E402
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -122,8 +124,8 @@ def test_activity_sql_binds_scope_parent_and_cursor_id_ordering() -> None:
     get_source = inspect.getsource(TaskStore.get_sync_task_activity)
     page_source = inspect.getsource(TaskStore.page_sync_task_activity)
     parent_source = inspect.getsource(TaskStore._require_sync_activity_parents)
-    indexes = " ".join(CharactersRAGDB._note_task_v60_postgres_indexes())
-    policy = CharactersRAGDB._note_task_v60_policy_predicates()["task_events"]
+    indexes = " ".join(postgres_schema._note_task_v60_postgres_indexes())
+    policy = postgres_schema._note_task_v60_policy_predicates()["task_events"]
 
     assert "e.owner_user_id = ? AND e.dataset_id = ? AND e.id = ?" in get_source
     assert "t.id = e.task_id AND t.note_id = e.note_id" in get_source

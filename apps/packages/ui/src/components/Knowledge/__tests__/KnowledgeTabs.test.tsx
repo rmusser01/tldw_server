@@ -26,7 +26,7 @@ describe("KnowledgeTabs keyboard navigation", () => {
     render(<TabsHarness />)
 
     const tablist = screen.getByRole("tablist", {
-      name: "Knowledge panel sections"
+      name: "Search & Context sections"
     })
 
     fireEvent.keyDown(tablist, { key: "2" })

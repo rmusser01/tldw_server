@@ -16,6 +16,7 @@ from tldw_Server_API.app.api.v1.endpoints import notes
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError, FTSQuery
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_sql
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
     ClosedChaChaOperationError,
     chacha_operation,
@@ -47,7 +48,7 @@ def _seed(db, populated):
 @pytest.fixture(params=[False, True], ids=["empty", "populated"])
 def pg_bootstrap(request, pg_database_config, tmp_path, monkeypatch):
     """Official isolated PostgreSQL database; never a running application DB."""
-    monkeypatch.setattr(CharactersRAGDB, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
+    monkeypatch.setattr(schema_sql, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(tmp_path / "bootstrap.db", client_id="1", backend=backend)
     try:
@@ -227,7 +228,7 @@ def test_startup_repair_preserves_distinct_schema_and_outer_operation_checkouts(
         outer_raw = outer_state.conn
         with db.backend.transaction() as schema_raw:
             assert schema_raw is not outer_raw
-            db._repair_conversation_assistant_identity(BackendConnectionWrapper(db, schema_raw, db.backend))
+            db.repair_conversation_assistant_identity(BackendConnectionWrapper(db, schema_raw, db.backend))
             assert current_connection_state(db) is outer_state
             assert outer_state.conn is outer_raw
             assert schema_raw.info.transaction_status.name == "INTRANS"
@@ -315,23 +316,31 @@ def test_failed_bootstrap_can_retry_on_the_same_backend(
 
 
 def test_cold_worker_waits_for_schema_owner_beyond_ddl_lock_budget(
-    pg_database_config: DatabaseConfig, tmp_path: Path,
+    pg_database_config: DatabaseConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A delayed schema owner must not prevent another worker's first Notes use."""
     owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
     waiter_backend = DatabaseBackendFactory.create_backend(pg_database_config)
 
     class ObservedBootstrap(CharactersRAGDB):
-        """Observe effective migration deadlines before delegating unchanged DDL."""
+        """Marks the cold worker's DB so only its schema write is observed."""
 
-        def _apply_schema_v4_postgres(self, conn: object) -> None:
-            """The acquisition budget must not leak into the first schema write."""
-            assert self.backend.execute(
+    observed_settings: list[object] = []
+    original_apply_v4 = postgres_schema._apply_schema_v4_postgres
+
+    def observe_apply_v4(ctx: object, conn: object) -> None:
+        """The acquisition budget must not leak into the first schema write."""
+        if isinstance(ctx.db, ObservedBootstrap):  # type: ignore[attr-defined]
+            settings = ctx.backend.execute(  # type: ignore[attr-defined]
                 "SELECT current_setting('lock_timeout') AS lock_timeout, "
                 "current_setting('statement_timeout') AS statement_timeout",
                 connection=conn,
-            ).rows[0] == {"lock_timeout": "5s", "statement_timeout": "30s"}
-            super()._apply_schema_v4_postgres(conn)
+            ).rows[0]
+            assert settings == {"lock_timeout": "5s", "statement_timeout": "30s"}
+            observed_settings.append(settings)
+        original_apply_v4(ctx, conn)
+
+    monkeypatch.setattr(postgres_schema, "_apply_schema_v4_postgres", observe_apply_v4)
 
     def create_owner_note() -> str:
         """Initialize a cold worker and round-trip an owner-bound note."""
@@ -357,6 +366,7 @@ def test_cold_worker_waits_for_schema_owner_beyond_ddl_lock_budget(
                     time.sleep(0.01)
                 owner_backend.execute("SELECT pg_sleep(5.5)", connection=owner_connection)
             assert waiter.result(timeout=30) == "Waiter can persist content"
+        assert observed_settings, "the cold worker's schema write was never observed"
     finally:
         for backend in (owner_backend, waiter_backend):
             backend.get_pool().close_all()

@@ -276,9 +276,10 @@ describe("NotesManagerPage stage 16 bulk actions", () => {
     await waitFor(() => {
       expect(screen.getByTestId("notes-list-bulk-selected")).toHaveTextContent("n1|n2|n3")
     })
-    const bar = screen.getByTestId("notes-bulk-actions-bar")
-    expect(bar).toHaveAttribute("role", "status")
-    expect(bar).toHaveAttribute("aria-live", "polite")
+    // The count is announced; the bar's buttons are not inside the live region (NL-05).
+    const count = screen.getByTestId("notes-bulk-selected-count")
+    expect(count).toHaveAttribute("role", "status")
+    expect(count).toHaveAttribute("aria-live", "polite")
 
     fireEvent.click(screen.getByTestId("notes-bulk-clear-selection"))
     await waitFor(() => {
@@ -309,9 +310,9 @@ describe("NotesManagerPage stage 16 bulk actions", () => {
       )
       expect(deleteCalls.length).toBe(2)
     })
-    expect(mockConfirmDanger).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Delete selected notes?" })
-    )
+    // XP-17 (decision 8): bulk Move to Trash happens at once and offers Undo.
+    expect(mockConfirmDanger).not.toHaveBeenCalled()
+    expect(await screen.findByTestId("notes-undo")).toHaveTextContent("Moved 2 notes to Trash.")
   })
 
   it("dispatches bulk add-tags patches and offers Undo instead of a danger confirm", async () => {

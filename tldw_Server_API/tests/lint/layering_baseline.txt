@@ -68,7 +68,7 @@ core.DB_Management -> core.CodeGraph: 1
 core.DB_Management -> core.Collections: 1
 core.DB_Management -> core.Evaluations: 3  # bump: Evaluations_DB reads RunStatus and the recipe-run models that moved from api.v1.schemas into core.Evaluations; core.DB_Management -> api.v1.schemas falls by the same 2 (TASK-13950.15)
 core.DB_Management -> core.Explainer: 1
-core.DB_Management -> core.Flashcards: 4
+core.DB_Management -> core.Flashcards: 7  # bump: +1 import statement: chacha.postgres_schema imports scheduler_settings_to_json from core.Flashcards.scheduler_sm2 (moved body); ChaChaNotes_DB still imports it (TASK-13950.22 T7); was 6: +2 import statements: chacha.context imports sanitize_flashcard_text_for_search (static member build_flashcard_search_shadow_fields) and chacha.sqlite_schema imports scheduler_settings_to_json (moved body); ChaChaNotes_DB keeps all 4 of its own (TASK-13950.22 T6)
 core.DB_Management -> core.Ingestion_Media_Processing: 9
 core.DB_Management -> core.Jobs: 3
 core.DB_Management -> core.Monitoring: 1
@@ -80,7 +80,7 @@ core.DB_Management -> core.Prompt_Management: 7
 core.DB_Management -> core.RAG: 6
 core.DB_Management -> core.RPG: 6
 core.DB_Management -> core.Sharing: 5
-core.DB_Management -> core.Sync_Contracts: 29  # bump: Sync contracts moved out of core.Sync so DB_Management no longer imports the Sync package; not DB-loading, pinned by test_db_management_logic_imports (TASK-13950.16)
+core.DB_Management -> core.Sync_Contracts: 37  # bump: +3 import statements, all in chacha.postgres_schema and all from core.Sync_Contracts.notes_moodboard_studio_contract (moved bodies; ChaChaNotes_DB still imports its own): the SYNC_ENVELOPE_MAX_BYTES/NotesMoodboardStudioContractError/notes_moodboard_note_object_hash/notes_moodboard_object_hash/notes_studio_document_object_hash/parse_notes_moodboard_note_v1/parse_notes_moodboard_v1/parse_notes_studio_document_v1/placement_object_id/studio_result_hash group, canonical_json_bytes (as canonical_moodboard_studio_json_bytes) and legacy_source_diagnostic (as moodboard_studio_legacy_source_diagnostic) (TASK-13950.22 T7); was 34: net +3 = +6 new statements, -3 dropped from ChaChaNotes_DB. New: chacha.sqlite_schema x3 (notes_moodboard_studio_contract: the SYNC_ENVELOPE_MAX_BYTES/parse_* group, canonical_json_bytes, legacy_source_diagnostic) and chacha.migrations.support x3 (models.validate_notes_note_upsert_payload, the notes_link validators, notes_moodboard_studio_contract.canonical_json_bytes). Dropped as unused after the move: ChaChaNotes_DB's models, notes_link and notes_task_contract statements; chacha.context is unchanged at 2 (TASK-13950.22 T6); was 31: chacha.context needs canonical_json_bytes and the moodboard-studio canonical JSON helper (TASK-13950.22 T4); was 29: Sync contracts moved out of core.Sync so DB_Management no longer imports the Sync package; not DB-loading, pinned by test_db_management_logic_imports (TASK-13950.16)
 core.DB_Management -> core.VN_Assets: 1
 core.DB_Management -> core.Visual_Identities: 1
 core.DB_Management -> core.Watchlists: 2

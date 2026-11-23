@@ -8,6 +8,7 @@ import type { NoteListItem } from '@/components/Notes/notes-manager-types'
 import type {
   ExportFormat,
   ExportProgressState,
+  NotesPageFetchOptions,
 } from '../notes-manager-types'
 import {
   extractKeywords,
@@ -95,7 +96,8 @@ export interface UseNotesExportDeps {
     toks: string[],
     page: number,
     pageSize: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: NotesPageFetchOptions
   ) => Promise<{ items: any[]; total: number }>
   /** From editor hook */
   originalMetadata?: Record<string, unknown> | null
@@ -178,7 +180,8 @@ export function useNotesExport(deps: UseNotesExportDeps) {
     const fetchPage = async (offset: number): Promise<ExportPage> => {
       if (isFiltered) {
         const page = offset / EXPORT_PAGE_SIZE + 1
-        const result = await fetchFilteredNotesRaw(q, toks, page, EXPORT_PAGE_SIZE, signal)
+        // An export reads notes, not match excerpts.
+        const result = await fetchFilteredNotesRaw(q, toks, page, EXPORT_PAGE_SIZE, signal, { includeSnippets: false })
         return { items: result.items, total: readReportedTotal(result) }
       }
       const { bgRequest } = await import('@/services/background-proxy')

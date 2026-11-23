@@ -15,7 +15,8 @@ charactersragdb_surface_baseline.json, each a ceiling ``{"count": int, "reason":
     literal tuple or list counts once per element.
   * private_member_reaches: in every module under core/DB_Management/chacha/, an
     attribute ``_x`` (single leading underscore, not a dunder) read, written or deleted
-    on the db object, where the db object is ``self._db`` or a name ``db``; plus
+    on the db object, where the db object is a name ``db`` or ``ctx`` or any attribute
+    named ``db``, ``_db``, ``ctx`` or ``_ctx`` (R14: ``self._ctx.db._x`` must not hide a reach); plus
     ``getattr``/``setattr``/``hasattr``/``delattr`` on the db object with a literal ``"_x"``;
     plus, in a store class whose ``__getattr__`` forwards to ``self._db``, every
     ``self._x`` the class does not define itself (a ``def``, a class attribute or a
@@ -29,8 +30,8 @@ import alias or ``ChaChaNotes_DB.CharactersRAGDB``; assignment, ``del``, ``setat
 mentions either name are walked.
 
 Known limits: a class-body alias (``get_all = list_all``) is not counted as a method, and
-the private-reach matcher keys on the names ``db`` and ``self._db``, so an alias with any
-other name (``d = self._db; d._x``) is not counted.
+the private-reach matcher keys on those names, so an alias with any
+other name (``d = self._ctx.db; d._x``) is not counted.
 
 Growth fails: move the method into its chacha/ store and call the store, or use the
 db's public API instead of a private member. If growth is unavoidable, raise the count
@@ -136,8 +137,31 @@ def _store_of(call: ast.Call, wrappers: dict[str, str]) -> str:
     return wrappers.get(name, name)
 
 
+def _bound_names(statement: ast.stmt, loops: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
+    """The attribute name(s) ``statement`` binds onto the class; a loop variable gives its elements."""
+    if isinstance(statement, ast.Assign):
+        return tuple(t.attr for t in statement.targets if isinstance(t, ast.Attribute) and _is_class(t.value))
+    if isinstance(statement, ast.AnnAssign):
+        return (statement.target.attr,)  # type: ignore[union-attr]  # _bound_value checked its shape
+    name = statement.value.args[1]  # type: ignore[attr-defined]  # a setattr(C, name, v) Expr
+    if isinstance(name, ast.Constant) and isinstance(name.value, str):
+        return (name.value,)
+    if isinstance(name, ast.Name) and name.id in loops:
+        return loops[name.id]
+    raise ValueError(f"{DB_MODULE}:{statement.lineno}: cannot name the attribute this binding sets")
+
+
+def delegated_names(tree: ast.Module) -> dict[str, str]:
+    """Every delegated attribute name -> the store attribute it forwards to. Fails closed like ``_bindings``."""
+    return _scan(tree)[2]
+
+
 def _bindings(tree: ast.Module) -> tuple[Counter[str], int]:
     """(delegated bindings per store, other bindings) onto the class from module code. Fails closed."""
+    return _scan(tree)[:2]
+
+
+def _scan(tree: ast.Module) -> tuple[Counter[str], int, dict[str, str]]:
     wrappers = {
         fn.name: _store_of(s.value, {})
         for fn in tree.body
@@ -148,9 +172,10 @@ def _bindings(tree: ast.Module) -> tuple[Counter[str], int]:
     delegates = {DELEGATE, *wrappers}
     counted: set[int] = set()
     delegated: Counter[str] = Counter()
+    names: dict[str, str] = {}
     other = 0
 
-    def visit(statements: list[ast.stmt], times: int | None) -> None:
+    def visit(statements: list[ast.stmt], times: int | None, loops: dict[str, tuple[str, ...]]) -> None:
         nonlocal other
         for statement in statements:
             if isinstance(statement, (ast.FunctionDef, ast.ClassDef)) and statement.name in {*delegates, CLASS}:
@@ -160,7 +185,9 @@ def _bindings(tree: ast.Module) -> tuple[Counter[str], int]:
                 if times is None:
                     raise ValueError(f"{DB_MODULE}:{statement.lineno}: cannot size the loop around this binding")
                 if _is_call_to(value, delegates):
-                    delegated[_store_of(value, wrappers)] += times
+                    store = _store_of(value, wrappers)
+                    delegated[store] += times
+                    names.update(dict.fromkeys(_bound_names(statement, loops), store))
                 else:
                     other += times
                 counted.add(id(value))
@@ -169,26 +196,40 @@ def _bindings(tree: ast.Module) -> tuple[Counter[str], int]:
                 size = None
                 if isinstance(items, (ast.Tuple, ast.List)) and all(isinstance(e, ast.Constant) for e in items.elts):
                     size = len(items.elts)
-                visit(statement.body, None if size is None or times is None else times * size)
-                visit(statement.orelse, times)
+                inner = loops
+                if size is not None and isinstance(statement.target, ast.Name):
+                    inner = {**loops, statement.target.id: tuple(e.value for e in items.elts)}
+                visit(statement.body, None if size is None or times is None else times * size, inner)
+                visit(statement.orelse, times, loops)
             else:
                 for block in _blocks(statement):
-                    visit(block, times)
+                    visit(block, times, loops)
 
-    visit(tree.body, 1)
+    visit(tree.body, 1, {})
     defining = [fn for fn in tree.body if isinstance(fn, ast.FunctionDef) and fn.name in delegates]
     definitions = {id(node) for fn in defining for node in ast.walk(fn)}
     for node in ast.walk(tree):
         if _is_call_to(node, delegates) and id(node) not in counted | definitions:
             raise ValueError(f"{DB_MODULE}:{node.lineno}: cannot attribute this {DELEGATE} call to a {CLASS} binding")
-    return delegated, other
+    return delegated, other, names
+
+
+DB_NAMES = frozenset({"db", "ctx"})
+DB_ATTRS = frozenset({"db", "_db", "ctx", "_ctx"})
+# The stores that take the ChaChaContext reach no private DB member at all (R14).
+ZERO_REACH_STORES = (
+    "core/DB_Management/chacha/conversation_store.py",
+    "core/DB_Management/chacha/message_store.py",
+    "core/DB_Management/chacha/note_store.py",
+    "core/DB_Management/chacha/keyword_store.py",
+)
 
 
 def _is_db(node: ast.AST) -> bool:
-    """``db`` or ``self._db``: how chacha/ code names the CharactersRAGDB it wraps."""
+    """How chacha/ code names the CharactersRAGDB it wraps, or the context in front of it (R14)."""
     if isinstance(node, ast.Name):
-        return node.id == "db"
-    return isinstance(node, ast.Attribute) and node.attr == "_db" and _is_self(node.value)
+        return node.id in DB_NAMES
+    return isinstance(node, ast.Attribute) and node.attr in DB_ATTRS
 
 
 def _is_self(node: ast.AST) -> bool:
@@ -417,6 +458,20 @@ def test_a_new_delegate_registration_fails(tmp_path: Path) -> None:
     assert '"delegated_methods": {"count": 4, "reason": "<why' in problem
 
 
+def test_delegated_names_lists_each_bound_name() -> None:
+    assert delegated_names(ast.parse(_DB)) == {
+        "add_note": "note_store",
+        "get_note": "note_store",
+        "count_notes": "note_store",
+    }
+
+
+def test_delegated_names_fails_closed_on_an_unnameable_binding() -> None:
+    unnamed = _DB + 'setattr(CharactersRAGDB, make_name(), _delegate_store_method("note_store", "x"))\n'
+    with pytest.raises(ValueError, match="cannot name"):
+        delegated_names(ast.parse(unnamed))
+
+
 @pytest.mark.parametrize(
     "registration",
     [
@@ -450,6 +505,12 @@ def test_a_new_method_fails_but_a_typing_stub_does_not(tmp_path: Path) -> None:
     assert problem.startswith("methods: count 6 > ceiling 5"), problem
 
 
+def test_a_class_body_import_is_not_a_method(tmp_path: Path) -> None:
+    imported = _DB.replace("    _shared = 1\n", "    _shared = 1\n    from m import X\n")
+    assert imported != _DB
+    assert _measure_seeded(tmp_path, db=imported) == _SEEDED
+
+
 @pytest.mark.parametrize(
     "reach",
     ["self._db._new()", "db._new", 'hasattr(self._db, "_new")', "self._db._new = 1"],
@@ -460,6 +521,29 @@ def test_a_new_private_reach_fails(tmp_path: Path, reach: str) -> None:
     (problem,) = _ceilings.violations(SURFACE, _measure_seeded(tmp_path, store=store), _baseline(_SEEDED))
 
     assert problem.startswith("private_member_reaches: count 5 > ceiling 4"), problem
+
+
+@pytest.mark.parametrize(
+    "reach", ["self._ctx.db._x", "ctx.db._x", "self._ctx._db", "self.db._x", "ctx._x"]
+)
+def test_a_reach_through_a_context_or_db_attribute_counts(tmp_path: Path, reach: str) -> None:
+    store = _STORE.replace("        return db._backend", f"        {reach}\n        return db._backend")
+
+    assert _measure_seeded(tmp_path, store=store)["private_member_reaches"] == {"count": 5}
+
+
+@pytest.mark.parametrize("call", ["self._ctx.db.public()", "self._ctx.map_table('t')"])
+def test_a_public_call_through_the_context_adds_nothing(tmp_path: Path, call: str) -> None:
+    store = _STORE.replace("        return db._backend", f"        {call}\n        return db._backend")
+
+    assert _measure_seeded(tmp_path, store=store)["private_member_reaches"] == {"count": 4}
+
+
+def test_an_alias_of_the_db_is_a_known_limit(tmp_path: Path) -> None:
+    """M4: an alias under another name is not counted, as the module docstring says."""
+    store = _STORE.replace("        return db._backend", "        d = self._ctx.db\n        d._x\n        return db._backend")
+
+    assert _measure_seeded(tmp_path, store=store)["private_member_reaches"] == {"count": 4}
 
 
 def test_a_reach_through_a_forwarding_getattr_fails(tmp_path: Path) -> None:
@@ -522,6 +606,34 @@ def test_charactersragdb_surface_does_not_grow() -> None:
 
     assert not problems, "\n".join(problems)
     _ceilings.warn_if_tightenable(SURFACE, measure(), baseline)
+
+
+def test_zero_reach_stores_stay_at_zero() -> None:
+    reaches = sources(REPO_ROOT)["private_member_reaches"]
+
+    found = {key: n for key, n in reaches.items() if key.startswith(ZERO_REACH_STORES)}
+
+    assert not found, f"these stores must reach no private DB member; use the ChaChaContext: {found}"
+
+
+def test_the_context_reaches_only_pinned_db_members() -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.context import PINNED_DB_PRIVATES
+
+    tree = ast.parse((REPO_ROOT / "tldw_Server_API/app/core/DB_Management/chacha/context.py").read_text(encoding="utf-8"))
+    reached = {
+        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute) and _private(node.attr) and _is_db(node.value)
+    }
+    reached |= {
+        node.args[1].value
+        for node in ast.walk(tree)
+        if _reaches_privately(node) and isinstance(node, ast.Call)
+    }
+
+    assert reached == set(PINNED_DB_PRIVATES)
+    # R29: the three class attributes tests patch, and the one step-runner call-through. ``_runtime_schema_version`` is public now.
+    assert set(PINNED_DB_PRIVATES) == {
+        "_CURRENT_SCHEMA_VERSION", "_SCHEMA_NAME", "_POSTGRES_SCHEMA_VERSION", "_run_sqlite_linear_migration_step",
+    }
 
 
 def test_raised_surface_ceilings_carry_a_new_reason() -> None:

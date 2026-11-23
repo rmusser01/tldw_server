@@ -81,7 +81,7 @@ describe("VisualBuddySetupChoiceCard", () => {
     expect(screen.getByRole("button", { name: /use default/i })).toBeEnabled()
     expect(screen.getByRole("button", { name: /import pack/i })).toBeEnabled()
     expect(screen.getByRole("button", { name: /start blank/i })).toBeEnabled()
-    expect(screen.getByText(/no visual buddy is active/i)).toBeInTheDocument()
+    expect(screen.getByText(/no avatar is active/i)).toBeInTheDocument()
     expect(mocks.translate).toHaveBeenCalledWith(
       "sidepanel:personaGarden.visuals.metadata.productionStatus.art_ready",
       expect.objectContaining({ defaultValue: "Art Ready" })
@@ -225,14 +225,14 @@ describe("VisualBuddySetupChoiceCard", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /open buddy builder/i }))
+    fireEvent.click(screen.getByRole("button", { name: /open avatar builder/i }))
 
     expect(onOpenVisuals).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole("button", { name: /use default/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /import pack/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /start blank/i })).not.toBeInTheDocument()
     expect(screen.getByTestId("visual-buddy-setup-choice-card")).not.toHaveTextContent(
-      /no visual buddy is active|starter catalog unavailable|no bundled defaults available/i
+      /no avatar is active|starter catalog unavailable|no bundled defaults available/i
     )
   })
 
@@ -247,6 +247,6 @@ describe("VisualBuddySetupChoiceCard", () => {
       />
     )
 
-    expect(screen.getByRole("button", { name: /open buddy builder/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /open avatar builder/i })).toBeDisabled()
   })
 })

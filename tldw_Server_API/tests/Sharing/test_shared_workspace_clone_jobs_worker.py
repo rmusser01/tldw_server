@@ -272,7 +272,7 @@ def _runtime(
     close_threads: list[tuple[int, int]] = []
     source_chacha.close_connection.side_effect = lambda: close_threads.append((7, threading.get_ident()))
     target_chacha.close_connection.side_effect = lambda: close_threads.append((9, threading.get_ident()))
-    target_chacha.list_clone_targets_for_reconciliation.side_effect = lambda *, operation_ids, limit: [
+    target_chacha.workspace_store.list_clone_targets_for_reconciliation.side_effect = lambda *, operation_ids, limit: [
         {
             "id": target_workspace_id(operation_ids[0]),
             "system_operation_id": operation_ids[0],

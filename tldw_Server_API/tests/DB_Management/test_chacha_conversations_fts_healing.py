@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
 
 pytestmark = pytest.mark.unit
 
@@ -137,7 +138,7 @@ def test_v31_to_v32_migration_succeeds_on_legacy_sqlite_db_with_stale_conversati
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
 
-        db._migrate_from_v31_to_v32(conn)
+        sqlite_steps._migrate_from_v31_to_v32(db.ctx, conn)
 
         assistant_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info('conversations')")
@@ -182,7 +183,7 @@ def test_recent_persona_schema_backfill_succeeds_on_legacy_sqlite_db_with_stale_
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
 
-        db._ensure_recent_persona_schema_sqlite(conn)
+        sqlite_schema._ensure_recent_persona_schema_sqlite(db.ctx, conn)
 
         profile_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info('persona_profiles')")

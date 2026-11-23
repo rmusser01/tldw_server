@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
 )
@@ -171,7 +172,7 @@ def test_folder_link_tombstone_suppresses_effective_membership_without_deleting_
     if provenance in {"manual", "mixed"}:
         db.sync_note_folders(note_id, [folder["path"]])
     if provenance in {"source", "mixed"}:
-        db.sync_note_source_folders(note_id, 41, [folder["path"]])
+        db.workspace_store.sync_note_source_folders(note_id, 41, [folder["path"]])
 
     payload = {"note_id": note_id, "folder_sync_id": folder["sync_id"]}
     object_id = organization_link_id(
@@ -314,7 +315,7 @@ def test_postgres_note_folder_schema_enforces_case_insensitive_paths() -> None:
     db_instance._backend = backend
     db_instance._uses_shared_content_backend = False
 
-    db_instance._ensure_note_folder_schema_postgres(object())
+    postgres_schema._ensure_note_folder_schema_postgres(db_instance.ctx, object())
 
     assert any(
         "UNIQUE INDEX" in statement
@@ -347,7 +348,7 @@ def test_postgres_note_folder_schema_deduplicates_paths_before_unique_index() ->
     db_instance._backend = backend
     db_instance._uses_shared_content_backend = False
 
-    db_instance._ensure_note_folder_schema_postgres(object())
+    postgres_schema._ensure_note_folder_schema_postgres(db_instance.ctx, object())
 
     lower_unique_index = next(
         index
@@ -380,21 +381,21 @@ def test_effective_sync_union_emits_only_visible_source_transitions(
         folder_sync_id=folder["sync_id"],
         present=True,
     ) == "upsert"
-    db.sync_note_source_folders(note_id, 11, [folder["path"]])
+    db.workspace_store.sync_note_source_folders(note_id, 11, [folder["path"]])
     assert store.source_folder_transition(
         note_id=note_id,
         source_id=22,
         folder_sync_id=folder["sync_id"],
         present=True,
     ) is None
-    db.sync_note_source_folders(note_id, 22, [folder["path"]])
+    db.workspace_store.sync_note_source_folders(note_id, 22, [folder["path"]])
     assert store.source_folder_transition(
         note_id=note_id,
         source_id=11,
         folder_sync_id=folder["sync_id"],
         present=False,
     ) is None
-    db.sync_note_source_folders(note_id, 11, [])
+    db.workspace_store.sync_note_source_folders(note_id, 11, [])
     assert store.source_folder_transition(
         note_id=note_id,
         source_id=22,
@@ -550,8 +551,8 @@ def test_source_folder_transition_guard_rejects_interleaved_noop_removals(
     note_id = str(uuid.uuid4())
     db.add_note(title="Interleaved sources", content="Body", note_id=note_id)
     folder = db.create_note_folder_path("Interleaved/Sources")
-    db.sync_note_source_folders(note_id, 71, [folder["path"]])
-    db.sync_note_source_folders(note_id, 72, [folder["path"]])
+    db.workspace_store.sync_note_source_folders(note_id, 71, [folder["path"]])
+    db.workspace_store.sync_note_source_folders(note_id, 72, [folder["path"]])
 
     remove_71 = store.source_folder_transition_plan(
         note_id=note_id,
@@ -610,8 +611,8 @@ def test_source_folder_transition_guard_accepts_provenance_only_post_state_retry
     note_id = str(uuid.uuid4())
     db.add_note(title="Provenance retry", content="Body", note_id=note_id)
     folder = db.create_note_folder_path("Retry/Provenance")
-    db.sync_note_source_folders(note_id, 81, [folder["path"]])
-    db.sync_note_source_folders(note_id, 82, [folder["path"]])
+    db.workspace_store.sync_note_source_folders(note_id, 81, [folder["path"]])
+    db.workspace_store.sync_note_source_folders(note_id, 82, [folder["path"]])
     transition = store.source_folder_transition_plan(
         note_id=note_id,
         source_id=81,

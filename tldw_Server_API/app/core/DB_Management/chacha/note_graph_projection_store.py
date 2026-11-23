@@ -597,6 +597,61 @@ class NoteGraphProjectionStore:
                 results.add((str(row["source_note_id"]), str(row["target_note_id"])))
         return tuple(WikilinkProjectionEdge(*edge) for edge in sorted(results))
 
+    def note_ids_with_note_links(
+        self,
+        note_ids: tuple[str, ...] | list[str],
+    ) -> set[str]:
+        """Return the given live notes that have a live manual or projected note relationship.
+
+        The complement of ``list_orphan_note_ids`` for a bounded set: a manual
+        link or a [[link]], either way, with another live note. Tags, sources
+        and semantic similarity do not count.
+        """
+
+        normalized = tuple(dict.fromkeys(str(note_id) for note_id in note_ids))
+        if not normalized:
+            return set()
+        if len(normalized) > 1_000:
+            raise ValueError("note graph projection query is limited to 1000 note IDs")
+        live = False if self._postgres else 0
+        owner = " AND other.client_id = ?" if self._postgres else ""
+        derived_owner = " AND derived.owner_user_id = ?" + owner if self._postgres else ""
+        linked: set[str] = set()
+        for offset in range(0, len(normalized), 400):
+            batch = normalized[offset : offset + 400]
+            placeholders = ",".join("?" for _ in batch)
+            query = (
+                f"SELECT note.id AS note_id FROM notes note WHERE note.id IN ({placeholders}) "  # nosec B608
+                f"AND note.deleted = ?{' AND note.client_id = ?' if self._postgres else ''} AND ("
+                "EXISTS (SELECT 1 FROM note_edges manual JOIN notes other ON other.id = manual.to_note_id "
+                f"WHERE manual.deleted = ? AND other.deleted = ? AND manual.from_note_id = note.id "
+                f"AND manual.user_id = ?{owner}) "
+                "OR EXISTS (SELECT 1 FROM note_edges manual JOIN notes other ON other.id = manual.from_note_id "
+                f"WHERE manual.deleted = ? AND other.deleted = ? AND manual.to_note_id = note.id "
+                f"AND manual.user_id = ?{owner}) "
+                "OR EXISTS (SELECT 1 FROM note_wikilink_edges derived "
+                "JOIN notes other ON other.id = derived.target_note_id "
+                f"WHERE other.deleted = ? AND derived.source_note_id = note.id{derived_owner}) "
+                "OR EXISTS (SELECT 1 FROM note_wikilink_edges derived "
+                "JOIN notes other ON other.id = derived.source_note_id "
+                f"WHERE other.deleted = ? AND derived.target_note_id = note.id{derived_owner}))"
+            )
+            params: list[object] = [*batch, live]
+            if self._postgres:
+                params.append(self._db.client_id)
+            for _ in range(2):
+                params.extend((live, live, self._db.client_id))
+                if self._postgres:
+                    params.append(self._db.client_id)
+            for _ in range(2):
+                params.append(live)
+                if self._postgres:
+                    params.extend((self._db.client_id, self._db.client_id))
+            linked.update(
+                str(row["note_id"]) for row in self._db.execute_query(query, tuple(params)).fetchall()
+            )
+        return linked
+
     def list_orphan_note_ids(
         self,
         *,

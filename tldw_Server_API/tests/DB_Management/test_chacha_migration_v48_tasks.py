@@ -2,6 +2,8 @@ import sqlite3
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -13,7 +15,7 @@ def test_sqlite_migration_adds_task_tables(tmp_path, monkeypatch: pytest.MonkeyP
 
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 47):
                 steps[version](conn)
@@ -37,7 +39,7 @@ def test_sqlite_migration_adds_task_tables(tmp_path, monkeypatch: pytest.MonkeyP
                 (note_id, "Retained task note", "Original content", "bootstrap"),
             )
             note_before = dict(conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone())
-            seed._migrate_from_v47_to_v48(conn)
+            sqlite_steps._migrate_from_v47_to_v48(seed.ctx, conn)
             assert seed._get_db_version(conn) == 48
             assert {
                 "note_tasks", "task_events", "task_event_read_state", "task_note_projections",

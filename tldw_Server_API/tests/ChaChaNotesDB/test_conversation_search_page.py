@@ -214,8 +214,8 @@ def test_search_conversations_page_deleted_filters(tmp_path) -> None:
 
 def test_search_conversations_page_respects_workspace_scope(tmp_path) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "conversation_search_scope.sqlite"), client_id="user-1")
-    db.upsert_workspace("ws-a", "Workspace A")
-    db.upsert_workspace("ws-b", "Workspace B")
+    db.workspace_store.upsert_workspace("ws-a", "Workspace A")
+    db.workspace_store.upsert_workspace("ws-b", "Workspace B")
 
     global_id = _create_persona_conversation(db, "global-conv", title="Quota global")
     ws_a_id = db.add_conversation(

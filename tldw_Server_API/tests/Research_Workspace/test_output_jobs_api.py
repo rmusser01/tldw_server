@@ -30,6 +30,7 @@ pytestmark = pytest.mark.integration
 
 
 class FakeWorkspaceDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self, *, fail_delete: bool = False) -> None:
         self.fail_delete = fail_delete
         self.sources = [
@@ -209,7 +210,7 @@ def test_submit_output_preserves_job_create_error_when_rollback_cleanup_fails() 
 
 def test_status_returns_job_progress_plus_artifact() -> None:
     workspace_db = FakeWorkspaceDB()
-    artifact = workspace_db.add_workspace_artifact(
+    artifact = workspace_db.workspace_store.add_workspace_artifact(
         "ws-1",
         {
             "id": "infographic-abc",
@@ -256,7 +257,7 @@ def test_status_returns_job_progress_plus_artifact() -> None:
 
 def test_status_prefers_artifact_error_when_worker_error_is_generic() -> None:
     workspace_db = FakeWorkspaceDB()
-    artifact = workspace_db.add_workspace_artifact(
+    artifact = workspace_db.workspace_store.add_workspace_artifact(
         "ws-1",
         {
             "id": "video_overview-abc",

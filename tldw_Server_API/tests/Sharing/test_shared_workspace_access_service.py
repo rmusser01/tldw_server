@@ -73,6 +73,7 @@ class _UsersRepo:
 
 
 class _OwnerDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(
         self,
         events: list[str],

@@ -17,8 +17,8 @@ pytestmark = pytest.mark.unit
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.Chat.streaming_utils import StreamingResponseHandler
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
 class DummyRequestData:
@@ -31,16 +31,13 @@ class DummyRequestData:
 
 
 class DummyChatDB:
-    _normalize_nullable_text = staticmethod(CharactersRAGDB._normalize_nullable_text)
-    _ALLOWED_CONVERSATION_ASSISTANT_KINDS = CharactersRAGDB._ALLOWED_CONVERSATION_ASSISTANT_KINDS
-    _ALLOWED_PERSONA_MEMORY_MODES = CharactersRAGDB._ALLOWED_PERSONA_MEMORY_MODES
 
     def __init__(self, records: List[Dict[str, Any]]):
         """Keep the real identity normalizer without opening a database for history tests."""
         self._records = records
         self.client_id = "client"
         self.owner_user_id = "client"
-        self.conversation_store = ConversationStore(self)
+        self.conversation_store = ConversationStore(ChaChaContext(self))
 
     def get_messages_for_conversation(self, conversation_id: str, limit: int, offset: int, order: str, *, strict_images: bool = False):
         assert conversation_id == "conv"

@@ -200,7 +200,7 @@ class WorkspaceEligibilityService:
                 active_workspace_id=None,
             )
 
-        workspace = self.chacha_db.get_workspace(active_workspace_id)
+        workspace = self.chacha_db.workspace_store.get_workspace(active_workspace_id)
         if workspace is None:
             return self._deny(
                 request,
@@ -239,7 +239,7 @@ class WorkspaceEligibilityService:
             )
         resource_id = self._canonical_resource_id(resource_type, request.resource_id)
 
-        membership_row = self.chacha_db.get_workspace_resource_membership(
+        membership_row = self.chacha_db.workspace_store.get_workspace_resource_membership(
             active_workspace_id,
             resource_type,
             resource_id,
@@ -293,7 +293,7 @@ class WorkspaceEligibilityService:
         )
 
     def _list_resource_workspace_memberships(self, resource_type: str, resource_id: str) -> list[Mapping[str, Any]]:
-        rows = self.chacha_db.list_resource_workspace_memberships(
+        rows = self.chacha_db.workspace_store.list_resource_workspace_memberships(
             resource_type,
             resource_id,
             include_deleted=False,

@@ -55,8 +55,8 @@ def startup_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Sim
         "id": "persona-a", "user_id": "1", "name": "First Persona", "character_card_id": character_id,
         "mode": "session_scoped", "is_active": True,
     })
-    workspace = db.upsert_workspace("ws", "Workspace")
-    db.update_workspace("ws", {"assistant_defaults_json": {
+    workspace = db.workspace_store.upsert_workspace("ws", "Workspace")
+    db.workspace_store.update_workspace("ws", {"assistant_defaults_json": {
         "assistant_kind": "persona", "assistant_id": "persona-a", "persona_memory_mode": "read_only",
     }}, workspace["version"])
     limiter = SimpleNamespace(check_rate_limit=AsyncMock(), check_chat_limit=AsyncMock())
@@ -100,7 +100,7 @@ def test_creation_records_omission_null_and_explicit_choices(
     assert origin == {
         "schema_version": 1, "source": source,
         "workspace_id": "ws" if source == "workspace_default" else None,
-        "workspace_version": startup_api.db.get_workspace("ws")["version"] if source == "workspace_default" else None,
+        "workspace_version": startup_api.db.workspace_store.get_workspace("ws")["version"] if source == "workspace_default" else None,
     }
     assert response.json()["assistant_startup"] == origin
 
@@ -138,15 +138,15 @@ def test_chat_session_builders_project_stored_startup(
 ) -> None:
     """Every chat builder checks historical origin, including both restore branches."""
     db = startup_api.db
-    db.upsert_workspace("private-session-origin", "Origin")
+    db.workspace_store.upsert_workspace("private-session-origin", "Origin")
     cid = db.add_conversation(
         {"title": "Moved to global", "client_id": "1"},
         assistant_startup=AssistantStartup(source=source, workspace_id="private-session-origin", workspace_version=1),
     )
     if visibility == "archived":
-        db.update_workspace("private-session-origin", {"archived": True}, 1)
+        db.workspace_store.update_workspace("private-session-origin", {"archived": True}, 1)
     elif visibility == "deleted":
-        db.delete_workspace("private-session-origin", expected_version=1)
+        db.workspace_store.delete_workspace("private-session-origin", expected_version=1)
     elif visibility == "staged":
         with db.transaction() as conn:
             conn.execute("UPDATE workspaces SET system_operation_state = 'staged' WHERE id = ?", ("private-session-origin",))
@@ -183,7 +183,7 @@ def test_chat_list_startup_cache_expires_after_request(
 ) -> None:
     """List caches only this response's distinct origins and rechecks access next time."""
     db = startup_api.db
-    db.upsert_workspace("list-origin", "Origin")
+    db.workspace_store.upsert_workspace("list-origin", "Origin")
     for title in ("First", "Second"):
         db.add_conversation({"title": title}, assistant_startup=AssistantStartup(
             source="system_fallback", workspace_id="list-origin", workspace_version=1,
@@ -201,7 +201,7 @@ def test_chat_list_startup_cache_expires_after_request(
     assert first.status_code == 200, first.text
     assert [item["assistant_startup"]["source"] for item in first.json()["chats"]] == ["system_fallback"] * 2
     assert reads == ["list-origin"]
-    db.delete_workspace("list-origin", expected_version=1)
+    db.workspace_store.delete_workspace("list-origin", expected_version=1)
     reads.clear()
     second = startup_api.client.get("/api/v1/chats/")
     assert second.status_code == 200, second.text
@@ -253,9 +253,9 @@ def test_global_creation_remains_unknown(startup_api: SimpleNamespace) -> None:
 @pytest.mark.parametrize("cleared", [False, True])
 def test_unset_and_cleared_defaults_record_examined_fallback(startup_api: SimpleNamespace, cleared: bool) -> None:
     """A Workspace setting opt-out is not a request-level explicit None."""
-    workspace = startup_api.db.upsert_workspace("empty", "Empty")
+    workspace = startup_api.db.workspace_store.upsert_workspace("empty", "Empty")
     if cleared:
-        workspace = startup_api.db.update_workspace("empty", {"assistant_defaults_json": None}, workspace["version"])
+        workspace = startup_api.db.workspace_store.update_workspace("empty", {"assistant_defaults_json": None}, workspace["version"])
     response = startup_api.client.post("/api/v1/chats/", json={"scope_type": "workspace", "workspace_id": "empty"})
     assert response.status_code == 201, response.text
     row = startup_api.db.get_conversation_by_id(response.json()["id"])
@@ -278,8 +278,8 @@ def test_default_changed_during_quota_check_is_not_reused_from_preflight(
 
     def change_default(*args: Any) -> None:
         """Interleave a real settings write after the old preflight boundary."""
-        workspace = db.get_workspace("ws")
-        db.update_workspace("ws", {"assistant_defaults_json": {
+        workspace = db.workspace_store.get_workspace("ws")
+        db.workspace_store.update_workspace("ws", {"assistant_defaults_json": {
             "assistant_kind": "persona", "assistant_id": "persona-b", "persona_memory_mode": "read_write",
         }}, workspace["version"])
 
@@ -296,7 +296,7 @@ def test_default_changed_during_quota_check_is_not_reused_from_preflight(
     else:
         assert row["title"].startswith("Second Persona Chat (")
     origin = decode_assistant_startup(row["assistant_startup_json"])
-    assert (origin.source, origin.workspace_id, origin.workspace_version) == ("workspace_default", "ws", db.get_workspace("ws")["version"])
+    assert (origin.source, origin.workspace_id, origin.workspace_version) == ("workspace_default", "ws", db.workspace_store.get_workspace("ws")["version"])
 
 
 @pytest.mark.parametrize("character", [False, True])
@@ -328,7 +328,7 @@ def test_character_creation_cannot_bypass_workspace_visibility(
     if visibility == "missing":
         workspace_id = "missing"
     elif visibility == "deleted":
-        db.delete_workspace("ws", expected_version=db.get_workspace("ws")["version"])
+        db.workspace_store.delete_workspace("ws", expected_version=db.workspace_store.get_workspace("ws")["version"])
     else:
         with db.transaction() as conn:
             conn.execute("UPDATE workspaces SET system_operation_state = 'staged' WHERE id = ?", ("ws",))
@@ -379,7 +379,7 @@ def test_archived_and_active_workspaces_keep_legacy_creation(
     """Archiving does not introduce a new admission rule for any supported identity."""
     db = startup_api.db
     if archived:
-        db.update_workspace("ws", {"archived": True}, db.get_workspace("ws")["version"])
+        db.workspace_store.update_workspace("ws", {"archived": True}, db.workspace_store.get_workspace("ws")["version"])
     choice = {"character_id": startup_api.character_id, "assistant_id": None} if character else {}
     response = startup_api.client.post("/api/v1/chats/", json={"scope_type": "workspace", "workspace_id": "ws", **choice})
     assert response.status_code == 201, response.text
@@ -485,9 +485,9 @@ def test_unvalidated_lineage_creates_no_artifacts(
 def test_confirmed_read_write_default_is_inherited(startup_api: SimpleNamespace) -> None:
     """Creation uses the saved confirmed mode, not the request model's default."""
     db = startup_api.db
-    db.update_workspace("ws", {"assistant_defaults_json": {
+    db.workspace_store.update_workspace("ws", {"assistant_defaults_json": {
         "assistant_kind": "persona", "assistant_id": "persona-a", "persona_memory_mode": "read_write",
-    }}, db.get_workspace("ws")["version"])
+    }}, db.workspace_store.get_workspace("ws")["version"])
     response = startup_api.client.post("/api/v1/chats/", json={"scope_type": "workspace", "workspace_id": "ws"})
     assert response.status_code == 201, response.text
     row = db.get_conversation_by_id(response.json()["id"])
@@ -518,7 +518,7 @@ def test_character_origin_preserves_factory_behavior_and_lineage(startup_api: Si
     assert (row["root_id"], row["parent_conversation_id"], row["forked_from_message_id"]) == (
         (parent, parent, message) if fork else (cid, None, None)
     )
-    resume = db.get_roleplay_resume_state(cid)
+    resume = db.conversation_resume_store.get_roleplay_resume_state(cid)
     participants = resume["behavior_snapshot"]["payload"]["participants"]
     assert [p["source"]["id"] for p in participants] == [str(startup_api.character_id), str(secondary)]
     assert participants[0]["greeting"]["content"] == "Hello."
@@ -546,7 +546,7 @@ def test_unrepresentable_origin_is_mapped_without_echoing_private_workspace_id(s
     """A legacy long Workspace ID remains readable but cannot become an unsafe origin."""
     db = startup_api.db
     workspace_id = "PRIVATE-" + "x" * 1024
-    db.upsert_workspace(workspace_id, "Legacy Workspace")
+    db.workspace_store.upsert_workspace(workspace_id, "Legacy Workspace")
     before = _creation_counts(db)
     response = startup_api.client.post("/api/v1/chats/", json={"scope_type": "workspace", "workspace_id": workspace_id})
     assert response.status_code == 400, response.text

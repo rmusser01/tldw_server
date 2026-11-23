@@ -49,7 +49,7 @@ def input_request(db, cid):
     return {
         "message_id": "resume-chosen",
         "content": "Original proposal?\n  Keep spaces.  ",
-        "expected": roleplay_resume_fence(db.get_roleplay_resume_state(cid)),
+        "expected": roleplay_resume_fence(db.conversation_resume_store.get_roleplay_resume_state(cid)),
     }
 
 
@@ -92,7 +92,7 @@ def test_authenticated_resume_prior_fence_never_silently_branches(resume_api, mu
             }
         )
     else:
-        db.upsert_conversation_settings(cid, db.get_roleplay_resume_state(cid)["settings"])
+        db.upsert_conversation_settings(cid, db.conversation_resume_store.get_roleplay_resume_state(cid)["settings"])
     before = db.count_messages_for_conversation(cid)
     response = post_input(client, cid, headers, body)
     assert response.status_code == 409, response.text
@@ -133,13 +133,13 @@ def test_append_quota_is_atomic_and_identical_replay_does_not_spend_it_again(res
     next_body = {
         **body,
         "message_id": "quota-refused",
-        "expected": roleplay_resume_fence(db.get_roleplay_resume_state(cid)),
+        "expected": roleplay_resume_fence(db.conversation_resume_store.get_roleplay_resume_state(cid)),
     }
-    before = db.get_roleplay_resume_state(cid)["history_version"]
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"]
     refused = post_input(client, cid, headers, next_body)
     assert refused.status_code == 403, refused.text
     assert db.get_message_by_id("quota-refused") is None
-    assert db.get_roleplay_resume_state(cid)["history_version"] == before
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid)["history_version"] == before
     assert db.count_messages_for_conversation(cid) == 3
 
 
@@ -181,7 +181,7 @@ def test_resume_completion_fence_rejects_before_live_sources_or_dispatch(resume_
     if mutation == "ancestor-edit":
         db.update_message("resume-ancestor", {"content": "Another tab"}, 1)
     elif mutation == "settings":
-        db.upsert_conversation_settings(cid, db.get_roleplay_resume_state(cid)["settings"])
+        db.upsert_conversation_settings(cid, db.conversation_resume_store.get_roleplay_resume_state(cid)["settings"])
     elif mutation == "input-id":
         contract["input_message_id"] = "resume-ancestor"
     elif mutation == "input-version":
@@ -292,7 +292,7 @@ def test_concurrent_writer_retains_generated_content_without_wrong_save(resume_a
                         }
                     )
                 elif mutation == "settings":
-                    other.upsert_conversation_settings(cid, other.get_roleplay_resume_state(cid)["settings"])
+                    other.upsert_conversation_settings(cid, other.conversation_resume_store.get_roleplay_resume_state(cid)["settings"])
                 elif mutation == "input-delete":
                     other.soft_delete_message("resume-chosen", expected_version=1)
                 else:
@@ -832,11 +832,11 @@ def test_protected_resume_generation_enforces_llm_quota(resume_api, monkeypatch,
 
     client, db, cid, headers = resume_api
     body = generation_request(client, db, cid, headers)
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     provider = Mock(return_value="Unexpected provider work")
-    persist = Mock(wraps=db.commit_roleplay_resume_generation)
+    persist = Mock(wraps=db.conversation_resume_store.commit_roleplay_resume_generation)
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
-    monkeypatch.setattr(db, "commit_roleplay_resume_generation", persist)
+    monkeypatch.setattr(db.conversation_resume_store, "commit_roleplay_resume_generation", persist)
 
     async def limit(_uid: object, key: str) -> int | None:
         """Expose only the configured synthetic cap."""
@@ -856,7 +856,7 @@ def test_protected_resume_generation_enforces_llm_quota(resume_api, monkeypatch,
     assert int(response.headers["Retry-After"]) >= 1
     provider.assert_not_called()
     persist.assert_not_called()
-    assert db.get_roleplay_resume_state(cid) == before
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid) == before
 
 
 def test_protected_resume_generation_admits_an_over_limit_user_on_their_own_key(resume_api, monkeypatch) -> None:
@@ -925,10 +925,10 @@ def test_completed_resume_replay_ignores_new_llm_quota(resume_api, monkeypatch, 
     assert completed.status_code == 200, completed.text
     limits[quota_key] = 1
     reads.clear()
-    before = db.get_roleplay_resume_state(cid)
+    before = db.conversation_resume_store.get_roleplay_resume_state(cid)
     replay = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
     assert replay.status_code == 200, replay.text
     assert replay.json() == completed.json()
     assert reads == []
     assert provider.call_count == 1
-    assert db.get_roleplay_resume_state(cid) == before
+    assert db.conversation_resume_store.get_roleplay_resume_state(cid) == before

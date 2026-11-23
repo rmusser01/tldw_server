@@ -332,7 +332,7 @@ def test_native_completion_capture_qualifies_service_backed_sync_ownership(
     query = "?include_native_completion=true"
     body = dict(CHAT_BODY)
     if workspace:
-        chacha_db.upsert_workspace("completion-workspace", "Completion workspace")
+        chacha_db.workspace_store.upsert_workspace("completion-workspace", "Completion workspace")
         body.update(scope_type="workspace", workspace_id="completion-workspace")
         query += "&scope_type=workspace&workspace_id=completion-workspace"
     created = _create_chat(client, body)
@@ -1376,7 +1376,7 @@ def test_workspace_client_id_create_stays_direct(
     chacha_db: CharactersRAGDB,
 ) -> None:
     """Workspace chats are not part of the personal dataset, with or without a client id."""
-    chacha_db.upsert_workspace("workspace-1", "Workspace")
+    chacha_db.workspace_store.upsert_workspace("workspace-1", "Workspace")
     body = {"id": CHAT_ID, "title": "Workspace chat", "scope_type": "workspace", "workspace_id": "workspace-1"}
 
     created = client.post("/api/v1/chats/", json=body)

@@ -1,5 +1,5 @@
 import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ControlRow } from "../ControlRow"
@@ -277,9 +277,6 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }))
 
 const defaultProps = () => ({
-  draftReady: true,
-  handoffSourceKey: "owned-source-chat",
-  captureHandoffGuard: () => () => true,
   selectedSystemPrompt: undefined,
   setSelectedSystemPrompt: vi.fn(),
   setSelectedQuickPrompt: vi.fn(),
@@ -313,67 +310,13 @@ describe("ControlRow role-play handoff behavior", () => {
     expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(null)
   })
 
-  it("uses the resolved extension URL when tabs.create is unavailable", () => {
-    render(<ControlRow {...defaultProps()} />)
-
-    const openFullApp = screen.getByTestId("chat-open-full-app")
-
-    expect(openFullApp).toHaveAccessibleDescription(
-      "Opens the character route in the extension full page. Use Copy draft & page references to carry a bounded copy; history and chat settings are not included."
-    )
-
-    fireEvent.click(openFullApp)
-
-    expect(mocks.runtimeGetURL).toHaveBeenCalledWith(
-      "/options.html#/chat?mode=character&characterId=char-review"
-    )
-    expect(window.open).toHaveBeenCalledWith(
-      "chrome-extension://review/options.html#/chat?mode=character&characterId=char-review",
-      "_blank"
-    )
-    expect(mocks.tabsCreate).not.toHaveBeenCalled()
+  it("offers the one Open in full page action for a character chat too", () => {
+    const open = vi.fn(async () => true)
+    render(<ControlRow {...defaultProps()} fullPage={{ label: "Open in full page", description: "Opens this chat in a new tab.", pending: false, disabled: false, disabledReason: null, webUi: null, target: "extension", open }} />)
+    fireEvent.click(screen.getByRole("button", { name: "Open in full page" }))
+    expect(open).toHaveBeenCalledOnce()
+    expect(screen.queryByTestId("chat-continue-in-webui")).toBeNull()
   })
-
-  it("uses tabs.create when the extension tab API is available", () => {
-    ;(browser as unknown as MutableBrowser).tabs.create = mocks.tabsCreate
-    render(<ControlRow {...defaultProps()} />)
-
-    fireEvent.click(screen.getByTestId("chat-open-full-app"))
-
-    expect(mocks.tabsCreate).toHaveBeenCalledWith({
-      url: "chrome-extension://review/options.html#/chat?mode=character&characterId=char-review"
-    })
-    expect(window.open).not.toHaveBeenCalled()
-  })
-})
-
-import { HistorySelectionContext, historySelectionExpansionPath, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection"
-it("uses the WebUI document handoff with H1 present outside the packaged extension", async () => {
-  mocks.runtimeId = undefined
-  const webui = vi.fn().mockResolvedValue(undefined)
-  const prepareExpansionPath = vi.fn()
-  render(<HistorySelectionContext.Provider value={{ prepareExpansionPath } as unknown as import("@/hooks/chat/useHistorySelection").HistorySelectionController}>
-    <ControlRow {...defaultProps()} onOpenChatInWebUi={webui} />
-  </HistorySelectionContext.Provider>)
-  fireEvent.click(screen.getByTestId("chat-open-full-app"))
-  await waitFor(() => expect(webui).toHaveBeenCalledTimes(1))
-  expect(prepareExpansionPath).not.toHaveBeenCalled()
-  mocks.runtimeId = "review-extension"
-})
-
-it("keeps H1 full-page expansion distinct from the explicit WebUI draft handoff", async () => {
-  const reference = { profile_id: "p", client_session_id: "a", owner_key: "owner", conversation_id: "chat" }
-  const webui = vi.fn()
-  ;(browser as unknown as MutableBrowser).tabs.create = mocks.tabsCreate
-  render(<HistorySelectionContext.Provider value={{ reference, owner: { kind: "local" }, prepareExpansionPath: async () => historySelectionExpansionPath({ reference, owner: { kind: "local" } as any }) } as any}>
-    <ControlRow {...defaultProps()} onOpenChatInWebUi={webui} />
-  </HistorySelectionContext.Provider>)
-  fireEvent.click(screen.getByTestId("chat-open-full-app"))
-  await waitFor(() => expect(mocks.tabsCreate.mock.calls.at(-1)?.[0].url).toContain("historySelection="))
-  const url = mocks.tabsCreate.mock.calls.at(-1)![0].url
-  expect(url.startsWith("chrome-extension://review/options.html#/chat?")).toBe(true)
-  expect(parseHistorySelectionHandoff(url)).toEqual({ ...reference, owner_kind: "local" })
-  expect(webui).not.toHaveBeenCalled()
 })
 
 // Native UAT372 recorded floating hint paragraphs intercepting the model picker.
@@ -389,9 +332,15 @@ describe("ControlRow first-use guidance", () => {
     expect(
       screen.getAllByRole("button", { name: "Dismiss" })
     ).toHaveLength(1)
-    expect(screen.getByRole("status")).toHaveTextContent("Search your knowledge")
-    expect(screen.queryByText("More tools available")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Open Search & Context to find snippets")
+    expect(screen.queryByText(/are under More tools\./)).not.toBeInTheDocument()
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  })
+
+  // XS-15: the hint card is optional, so it renders in the dock's scrolling region.
+  it("puts the hint card in the dock's optional region when there is one", () => {
+    render(<form><div data-sidepanel-dock-optional data-testid="optional-region" /><ControlRow {...defaultProps()} /></form>)
+    expect(within(screen.getByTestId("optional-region")).getByRole("status")).toHaveTextContent("Open Search & Context to find snippets")
   })
 
   it("dismisses by keyboard without sending the form and returns focus to the feature", async () => {
@@ -404,14 +353,14 @@ describe("ControlRow first-use guidance", () => {
     await user.keyboard("{Enter}")
     expect(submit).not.toHaveBeenCalled()
     await waitFor(() => expect(
-      screen.getByRole("button", { name: "Open knowledge search" })
+      screen.getByRole("button", { name: "Search & Context" })
     ).toHaveFocus())
-    expect(screen.queryByText("Search your knowledge")).not.toBeInTheDocument()
-    expect(screen.getByText("More tools available")).toBeVisible()
+    expect(screen.queryByText(/Open Search & Context to find snippets/)).not.toBeInTheDocument()
+    expect(screen.getByText(/are under More tools\./)).toBeVisible()
     screen.getByRole("button", { name: "Dismiss" }).focus()
     await user.keyboard(" ")
     await waitFor(() => expect(
-      screen.getByRole("button", { name: "More tools" })
+      screen.getByRole("button", { name: "Tools" })
     ).toHaveFocus())
     expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument()
     expect(submit).not.toHaveBeenCalled()
@@ -424,8 +373,8 @@ describe("ControlRow first-use guidance", () => {
     await user.click(screen.getAllByRole("button", { name: "Dismiss" })[0])
     first.unmount()
     const second = render(<ControlRow {...defaultProps()} />)
-    expect(screen.queryByText("Search your knowledge")).not.toBeInTheDocument()
-    expect(screen.getByText("More tools available")).toBeVisible()
+    expect(screen.queryByText(/Open Search & Context to find snippets/)).not.toBeInTheDocument()
+    expect(screen.getByText(/are under More tools\./)).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Dismiss" }))
     second.unmount()
     render(<ControlRow {...defaultProps()} />)
@@ -437,98 +386,33 @@ describe("ControlRow first-use guidance", () => {
     const user = userEvent.setup()
     const props = defaultProps()
     const view = render(<ControlRow {...props} isConnected={false} />)
-    expect(screen.queryByText("Search your knowledge")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Open Search & Context to find snippets/)).not.toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Dismiss" }))
     expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument()
     view.rerender(<ControlRow {...props} isConnected />)
-    expect(screen.getByText("Search your knowledge")).toBeVisible()
-    expect(screen.queryByText("More tools available")).not.toBeInTheDocument()
+    expect(screen.getByText(/Open Search & Context to find snippets/)).toBeVisible()
+    expect(screen.queryByText(/are under More tools\./)).not.toBeInTheDocument()
   })
 
   it("preserves More tools Escape and trigger focus while a hint is visible", async () => {
     render(<ControlRow {...defaultProps()} />)
-    const more = screen.getByRole("button", { name: "More tools" })
+    const more = screen.getByRole("button", { name: "Tools" })
     fireEvent.click(more)
     expect(more).toHaveAttribute("aria-expanded", "true")
-    fireEvent.keyDown(screen.getByTestId("chat-open-full-app"), { key: "Escape" })
+    fireEvent.keyDown(screen.getByTestId("chat-quick-ingest"), { key: "Escape" })
     expect(more).toHaveAttribute("aria-expanded", "false")
     await waitFor(() => expect(more).toHaveFocus())
-    expect(screen.getByText("Search your knowledge")).toBeVisible()
+    expect(screen.getByText(/Open Search & Context to find snippets/)).toBeVisible()
   })
 })
 
-it("does not steal More focus after a retired WebUI open settles", async () => {
-  mocks.runtimeId = undefined
-  let finish!: () => void
-  let current = true
-  const props = { ...defaultProps(), captureHandoffGuard: () => () => current, onOpenChatInWebUi: vi.fn(() => new Promise<void>(resolve => { finish = resolve })) }
-  const view = render(<ControlRow {...props} />)
-  fireEvent.click(screen.getByTestId("chat-open-full-app"))
-  current = false
-  view.rerender(<><ControlRow {...props} handoffSourceKey="new-source" /><button>Other task</button></>)
-  const other = screen.getByRole("button", { name: "Other task" })
-  other.focus()
-  await act(async () => { finish(); await new Promise(resolve => requestAnimationFrame(resolve)) })
-  expect(other).toHaveFocus()
-  mocks.runtimeId = "review-extension"
-})
-
-
-it("does not finish a superseded WebUI opening while the next opening is pending", async () => {
-  mocks.runtimeId = undefined
-  const finishes: Array<() => void> = []
-  const onOpen = vi.fn(() => new Promise<void>(resolve => { finishes.push(resolve) }))
-  render(<><ControlRow {...defaultProps()} onOpenChatInWebUi={onOpen} /><button>Other task</button></>)
-  const more = screen.getByRole("button", { name: "More tools" })
+it("closes More and returns focus to it when Open in full page is chosen", async () => {
+  const open = vi.fn(async () => true)
+  render(<ControlRow {...defaultProps()} fullPage={{ label: "Open in full page", description: "Opens this chat in a new tab.", pending: false, disabled: false, disabledReason: null, webUi: null, target: "extension", open }} />)
+  const more = screen.getByRole("button", { name: "Tools" })
   fireEvent.click(more)
   fireEvent.click(screen.getByTestId("chat-open-full-app"))
-  fireEvent.click(screen.getByTestId("chat-open-full-app"))
-  const other = screen.getByRole("button", { name: "Other task" })
-  other.focus()
-  await act(async () => { finishes[0](); await new Promise(resolve => requestAnimationFrame(resolve)) })
-  expect(more).toHaveAttribute("aria-expanded", "true")
-  expect(other).toHaveFocus()
-  await act(async () => { finishes[1](); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(open).toHaveBeenCalledOnce()
   expect(more).toHaveAttribute("aria-expanded", "false")
-  expect(more).toHaveFocus()
-  mocks.runtimeId = "review-extension"
-})
-
-
-it("leaves More and focus alone when another entry point retires the Form opening", async () => {
-  mocks.runtimeId = undefined
-  let finish!: (current: boolean) => void
-  const onOpen = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
-  render(<><ControlRow {...defaultProps()} onOpenChatInWebUi={onOpen} /><button>Other task</button></>)
-  const more = screen.getByRole("button", { name: "More tools" })
-  fireEvent.click(more)
-  fireEvent.click(screen.getByTestId("chat-open-full-app"))
-  const other = screen.getByRole("button", { name: "Other task" })
-  other.focus()
-  await act(async () => { finish(false); await new Promise(resolve => requestAnimationFrame(resolve)) })
-  expect(more).toHaveAttribute("aria-expanded", "true")
-  expect(other).toHaveFocus()
-  mocks.runtimeId = "review-extension"
-})
-
-
-it("finishes WebUI focus before a later task can take focus", async () => {
-  mocks.runtimeId = undefined
-  const frames: FrameRequestCallback[] = []
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length })
-  try {
-    let finish!: () => void
-    const onOpen = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
-    render(<><ControlRow {...defaultProps()} onOpenChatInWebUi={onOpen} /><button>Other task</button></>)
-    fireEvent.click(screen.getByRole("button", { name: "More tools" }))
-    fireEvent.click(screen.getByTestId("chat-open-full-app"))
-    await act(async () => { finish() })
-    const other = screen.getByRole("button", { name: "Other task" })
-    other.focus()
-    act(() => { frames.forEach(callback => callback(0)) })
-    expect(other).toHaveFocus()
-  } finally {
-    vi.unstubAllGlobals()
-    mocks.runtimeId = "review-extension"
-  }
+  await waitFor(() => expect(more).toHaveFocus())
 })

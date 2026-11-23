@@ -13,6 +13,8 @@ import pytest
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceAssistantDefaults
+from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 
@@ -41,13 +43,13 @@ def workspace_with_stored_assistant_defaults() -> Callable[..., dict[str, Any]]:
         stored_value: Any,
     ) -> dict[str, Any]:
         """Return a normally loaded workspace after bypassing storage write validation."""
-        workspace = db.upsert_workspace("ws-stored-defaults", "Stored defaults")
+        workspace = db.workspace_store.upsert_workspace("ws-stored-defaults", "Stored defaults")
         with db.transaction() as conn:
             conn.execute(
                 "UPDATE workspaces SET assistant_defaults_json = ? WHERE id = ?",
                 (stored_value, workspace["id"]),
             )
-        loaded = db.get_workspace(workspace["id"])
+        loaded = db.workspace_store.get_workspace(workspace["id"])
         assert loaded is not None
         return loaded
 
@@ -104,7 +106,7 @@ def test_v48_sqlite_migration_adds_workspace_assistant_defaults_column(tmp_path:
         conn.commit()
         assert "assistant_defaults_json" not in _workspace_columns(db_path)
 
-        migration._migrate_from_v48_to_v49(conn)
+        sqlite_steps._migrate_from_v48_to_v49(migration.ctx, conn)
 
         assert "assistant_defaults_json" in _workspace_columns(db_path)
         assert migration._get_db_version(conn) == 49
@@ -148,12 +150,12 @@ def test_historical_v4_sqlite_full_upgrade_preserves_data_and_adds_workspace_def
         note = migrated.get_note_by_id("legacy-note")
         assert note["title"] == "Historical research"
         assert note["content"] == "Keep this research"
-        created = migrated.upsert_workspace("ws-upgraded", "Upgraded research")
+        created = migrated.workspace_store.upsert_workspace("ws-upgraded", "Upgraded research")
         defaults = {"assistant_kind": "persona", "assistant_id": "persona-1"}
-        migrated.update_workspace(
+        migrated.workspace_store.update_workspace(
             created["id"], {"assistant_defaults_json": defaults}, expected_version=created["version"]
         )
-        assert migrated.get_workspace(created["id"])["assistant_defaults_json"] == defaults
+        assert migrated.workspace_store.get_workspace(created["id"])["assistant_defaults_json"] == defaults
     finally:
         migrated.close_connection()
 
@@ -165,7 +167,7 @@ def test_historical_v48_sqlite_full_upgrade_preserves_workspace_defaults(
     db_path = tmp_path / "historical-v48.db"
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
-            db._apply_schema_v4(conn)
+            sqlite_schema._apply_schema_v4(db.ctx, conn)
             steps = db._sqlite_linear_migration_steps()
             for version in range(4, 48):
                 steps[version](conn)
@@ -189,7 +191,7 @@ def test_historical_v48_sqlite_full_upgrade_preserves_workspace_defaults(
                 ("retained-workspace", "Historical workspace", seed.client_id),
             )
             before = dict(conn.execute("SELECT * FROM workspaces").fetchone())
-            seed._migrate_from_v48_to_v49(conn)
+            sqlite_steps._migrate_from_v48_to_v49(seed.ctx, conn)
             assert seed._get_db_version(conn) == 49
             after = dict(conn.execute("SELECT * FROM workspaces").fetchone())
             assert after == {**before, "assistant_defaults_json": None}
@@ -209,7 +211,7 @@ def test_historical_v48_sqlite_full_upgrade_preserves_workspace_defaults(
 
 def test_workspace_assistant_defaults_round_trip_and_increment_version(chacha_db: CharactersRAGDB) -> None:
     """Persist only reference defaults and increment the workspace version."""
-    created = chacha_db.upsert_workspace("ws-1", "Research")
+    created = chacha_db.workspace_store.upsert_workspace("ws-1", "Research")
     assert created["assistant_defaults_json"] is None
     assert created["_assistant_defaults_invalid"] is False
 
@@ -218,7 +220,7 @@ def test_workspace_assistant_defaults_round_trip_and_increment_version(chacha_db
         "assistant_id": "persona-1",
         "persona_memory_mode": "read_only",
     }
-    updated = chacha_db.update_workspace(
+    updated = chacha_db.workspace_store.update_workspace(
         "ws-1",
         {"assistant_defaults_json": assistant_defaults},
         expected_version=created["version"],
@@ -229,7 +231,7 @@ def test_workspace_assistant_defaults_round_trip_and_increment_version(chacha_db
     assert "persona_name" not in updated["assistant_defaults_json"]
     assert "source_persona" not in updated["assistant_defaults_json"]
 
-    reloaded = chacha_db.get_workspace("ws-1")
+    reloaded = chacha_db.workspace_store.get_workspace("ws-1")
     assert reloaded is not None
     assert reloaded["assistant_defaults_json"] == assistant_defaults
     assert reloaded["_assistant_defaults_invalid"] is False
@@ -258,7 +260,7 @@ def test_workspace_get_and_list_preserve_malformed_storage_diagnostic(
 ) -> None:
     """Distinguish persisted non-objects from SQL NULL without returning the raw payload."""
     workspace = workspace_with_stored_assistant_defaults(chacha_db, stored_value)
-    listed = chacha_db.list_workspaces()
+    listed = chacha_db.workspace_store.list_workspaces()
 
     assert workspace["assistant_defaults_json"] is None
     assert workspace["_assistant_defaults_invalid"] is True
@@ -282,7 +284,7 @@ def test_workspace_malformed_defaults_repair_or_clear_recomputes_diagnostic(
     """Repair or clear corrupt storage, ignoring a stale private flag supplied in an update."""
     workspace = workspace_with_stored_assistant_defaults(chacha_db, "{bad-json")
     assert workspace["_assistant_defaults_invalid"] is True
-    updated = chacha_db.update_workspace(
+    updated = chacha_db.workspace_store.update_workspace(
         workspace["id"],
         {"assistant_defaults_json": replacement, "_assistant_defaults_invalid": True},
         expected_version=workspace["version"],
@@ -291,8 +293,8 @@ def test_workspace_malformed_defaults_repair_or_clear_recomputes_diagnostic(
     assert updated["assistant_defaults_json"] == replacement
     assert updated["_assistant_defaults_invalid"] is False
     chacha_db.close_connection()
-    assert chacha_db.get_workspace(workspace["id"]) == updated
-    assert chacha_db.list_workspaces() == [updated]
+    assert chacha_db.workspace_store.get_workspace(workspace["id"]) == updated
+    assert chacha_db.workspace_store.list_workspaces() == [updated]
     raw = dict(chacha_db.execute_query("SELECT * FROM workspaces WHERE id = ?", (workspace["id"],)).fetchone())
     assert "_assistant_defaults_invalid" not in raw
     if replacement is None:
@@ -306,7 +308,7 @@ def test_workspace_unrelated_update_preserves_malformed_diagnostic(
 ) -> None:
     """Editing an unrelated setting must neither clear corruption nor persist its private flag."""
     workspace = workspace_with_stored_assistant_defaults(chacha_db, "{bad-json")
-    updated = chacha_db.update_workspace(workspace["id"], {"name": "Renamed"}, expected_version=workspace["version"])
+    updated = chacha_db.workspace_store.update_workspace(workspace["id"], {"name": "Renamed"}, expected_version=workspace["version"])
     assert updated["_assistant_defaults_invalid"] is True
     assert updated["assistant_defaults_json"] is None
     assert (
@@ -331,7 +333,7 @@ def test_workspace_storage_projects_unset_or_invalid_without_private_payload(
     from tldw_Server_API.app.api.v1.endpoints import workspaces
 
     workspace = workspace_with_stored_assistant_defaults(chacha_db, stored_value)
-    loaded = chacha_db.get_workspace(workspace["id"])
+    loaded = chacha_db.workspace_store.get_workspace(workspace["id"])
     assert loaded is not None
     payload = workspaces._ws_to_response(loaded, db=chacha_db, current_user=SimpleNamespace(id="user-1")).model_dump()
 
@@ -392,18 +394,18 @@ def test_workspace_mapping_without_defaults_is_unset() -> None:
 
 def test_workspace_update_rejects_private_diagnostic_only_payload(chacha_db: CharactersRAGDB) -> None:
     """A computed diagnostic is not a writable workspace field."""
-    workspace = chacha_db.upsert_workspace("ws-1", "Research")
+    workspace = chacha_db.workspace_store.upsert_workspace("ws-1", "Research")
     with pytest.raises(InputError, match="No recognized workspace fields to update"):
-        chacha_db.update_workspace(
+        chacha_db.workspace_store.update_workspace(
             workspace["id"], {"_assistant_defaults_invalid": True}, expected_version=workspace["version"]
         )
 
 
 def test_workspace_assistant_defaults_update_rejects_invalid_json_string(chacha_db: CharactersRAGDB) -> None:
-    created = chacha_db.upsert_workspace("ws-1", "Research")
+    created = chacha_db.workspace_store.upsert_workspace("ws-1", "Research")
 
     with pytest.raises(InputError, match="assistant_defaults_json must be valid JSON"):
-        chacha_db.update_workspace(
+        chacha_db.workspace_store.update_workspace(
             "ws-1",
             {"assistant_defaults_json": "{bad-json"},
             expected_version=created["version"],
@@ -411,10 +413,10 @@ def test_workspace_assistant_defaults_update_rejects_invalid_json_string(chacha_
 
 
 def test_workspace_update_rejects_unknown_only_payload(chacha_db: CharactersRAGDB) -> None:
-    created = chacha_db.upsert_workspace("ws-1", "Research")
+    created = chacha_db.workspace_store.upsert_workspace("ws-1", "Research")
 
     with pytest.raises(InputError, match="No recognized workspace fields to update"):
-        chacha_db.update_workspace(
+        chacha_db.workspace_store.update_workspace(
             "ws-1",
             {"assistant_defaults": {"assistant_kind": "persona", "assistant_id": "persona-1"}},
             expected_version=created["version"],

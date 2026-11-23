@@ -497,6 +497,26 @@ export const buildSidepanelChatHandoffRoute = (
   return query ? `${path}?${query}${hash}` : `${path}${hash}`
 }
 
+/**
+ * True when a page address carries a side-panel copy (`?handoff=<id>`), in
+ * its query or in a hash route's query (`/options.html#/chat?handoff=<id>`).
+ * The chat page then opens a new chat for it instead of the last session
+ * (XP-09).
+ */
+export const hasSidepanelChatHandoffInHref = (href: string): boolean => {
+  try {
+    const url = new URL(href)
+    const hashQueryStart = url.hash.indexOf("?")
+    const hashQuery =
+      hashQueryStart < 0 ? "" : url.hash.slice(hashQueryStart + 1).split("#")[0]
+    return [url.searchParams, new URLSearchParams(hashQuery)].some(
+      (params) => (params.get("handoff") ?? "").trim().length > 0
+    )
+  } catch {
+    return false
+  }
+}
+
 export const buildSidepanelHandoffMessageForModel = (
   visibleDraft: string,
   pageContext?: SidepanelChatHandoffPageContext

@@ -15,6 +15,9 @@ from uuid import UUID
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
+from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import support as migration_support
 from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import (
     MoodboardSyncStore,
 )
@@ -287,12 +290,12 @@ def _legacy_diagram_manifest() -> dict[str, object]:
 
 def _relevant_catalog(db: CharactersRAGDB) -> dict[str, object]:
     with db.transaction() as conn:
-        return db._notes_moodboard_studio_catalog_snapshot_sqlite(conn)
+        return sqlite_schema._notes_moodboard_studio_catalog_snapshot_sqlite(db.ctx, conn)
 
 
 def test_sqlite_schema_authority_is_v63_and_version_update_is_last() -> None:
     assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 63
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v62_to_v63_sqlite)
+    source = inspect.getsource(sqlite_steps._migrate_from_v62_to_v63_sqlite)
     for operation in (
         "_create_notes_moodboard_studio_schema_v61_sqlite",
         "_copy_notes_moodboard_studio_graph_v61_sqlite",
@@ -489,7 +492,7 @@ def test_v61_legacy_studio_mismatches_become_bounded_binding_blockers(
         assert row["source_diagnostic_code"] == "legacy_studio_payload_invalid"  # nosec B101
         assert len(row["source_diagnostic_hash"]) == 71  # nosec B101
         with pytest.raises(ConflictError, match="canonical readiness proof"):
-            db.bind_local_studio_graph_to_dataset(
+            db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
                 owner_user_id=OWNER,
                 target_dataset_id=DATASET_A,
             )
@@ -558,12 +561,12 @@ def test_v61_legacy_studio_never_rebinds_historical_state_to_a_later_note_head(
         assert studio["source_diagnostic_code"] is not None  # nosec B101
         assert studio["companion_content_hash"] == legacy["companion_content_hash"]  # nosec B101
         provenance = studio["accepted_provenance_json"]
-        assert provenance["accepted_at"] == db._legacy_sync_timestamp_v61(  # nosec B101
+        assert provenance["accepted_at"] == migration_support._legacy_sync_timestamp_v61(  # nosec B101
             legacy["last_modified"]
         )
         current = db.get_note_by_id(note_id)
         assert current is not None  # nosec B101
-        current_hash = db._legacy_note_hash_v61(current)
+        current_hash = migration_support._legacy_note_hash_v61(db.ctx, current)
         retained_binding_hash = (
             studio["note_hash"]
             if edited_note == "parent"
@@ -571,7 +574,7 @@ def test_v61_legacy_studio_never_rebinds_historical_state_to_a_later_note_head(
         )
         assert retained_binding_hash != current_hash  # nosec B101
         with pytest.raises(ConflictError, match="canonical readiness proof"):
-            db.bind_local_studio_graph_to_dataset(
+            db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
                 owner_user_id=OWNER,
                 target_dataset_id=DATASET_A,
             )
@@ -613,7 +616,7 @@ def test_v61_smart_rule_portable_collection_ids_must_resolve_uniquely_per_owner(
         assert board is not None  # nosec B101
         assert board["source_diagnostic_code"] == "legacy_moodboard_rule_invalid"  # nosec B101
         with pytest.raises(ConflictError, match="canonical readiness proof"):
-            db.bind_local_moodboard_graph_to_dataset(
+            db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
                 owner_user_id=OWNER,
                 target_dataset_id=DATASET_A,
             )
@@ -735,7 +738,7 @@ def test_v61_legacy_diagnostic_is_bounded_and_privacy_safe(tmp_path: Path) -> No
         assert str(row["source_diagnostic_hash"]).startswith("sha256:")  # nosec B101
         assert secret not in str(row)  # nosec B101
         with pytest.raises(ConflictError, match="readiness proof"):
-            db.bind_local_moodboard_graph_to_dataset(
+            db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
                 owner_user_id=OWNER,
                 target_dataset_id=DATASET_A,
             )
@@ -756,16 +759,11 @@ def test_v61_injected_failure_rolls_back_complete_v61_catalog_data_and_version(
     _prepare_v62_product_database(db_path)
     before = _database_dump(db_path)
 
-    def fail_at_stage(self: CharactersRAGDB, current_stage: str) -> None:
+    def fail_at_stage(current_stage: str) -> None:
         if current_stage == stage:
             raise SchemaError(f"injected v61 {stage} failure")
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_notes_moodboard_studio_v61_migration_checkpoint",
-        fail_at_stage,
-        raising=False,
-    )
+    monkeypatch.setattr(sqlite_schema, "_notes_moodboard_studio_v61_migration_checkpoint", fail_at_stage)
     with pytest.raises(CharactersRAGDBError, match=f"injected v61 {stage} failure"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
@@ -788,21 +786,17 @@ def test_v61_rejects_post_copy_data_loss_or_corruption_and_restores_exact_v61(
     db_path = tmp_path / "copy-proof-corruption.sqlite"
     _prepare_v62_product_database(db_path)
     before = _database_dump(db_path)
-    original_copy = CharactersRAGDB._copy_notes_moodboard_studio_graph_v61_sqlite
+    original_copy = sqlite_schema._copy_notes_moodboard_studio_graph_v61_sqlite
 
     def copy_then_corrupt(
-        self: CharactersRAGDB,
+        ctx: object,
         conn: sqlite3.Connection,
     ) -> object:
-        proof = original_copy(self, conn)
+        proof = original_copy(ctx, conn)
         conn.execute(corrupt_copy)
         return proof
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_copy_notes_moodboard_studio_graph_v61_sqlite",
-        copy_then_corrupt,
-    )
+    monkeypatch.setattr(sqlite_schema, "_copy_notes_moodboard_studio_graph_v61_sqlite", copy_then_corrupt)
 
     with pytest.raises(CharactersRAGDBError, match="copy verification"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
@@ -854,10 +848,10 @@ def test_v61_streaming_proof_is_batch_independent_and_never_materializes_rows() 
     first = _Connection()
     second = _Connection()
     try:
-        proof_one = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+        proof_one = sqlite_schema._notes_moodboard_studio_v61_streaming_query_proof_sqlite(db.ctx,
             first, "SELECT payload FROM product", page_size=1
         )
-        proof_three = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+        proof_three = sqlite_schema._notes_moodboard_studio_v61_streaming_query_proof_sqlite(db.ctx,
             second, "SELECT payload FROM product", page_size=3
         )
         cursor = first.execute("SELECT payload FROM product")
@@ -910,15 +904,15 @@ def test_v61_copy_streams_all_large_product_selects_with_fetchmany(
     _prepare_v60_product_database(db_path, board_count=3)
     original_connect = sqlite3.connect
     streamed_queries: list[str] = []
-    original_streaming_rows = CharactersRAGDB._notes_moodboard_studio_v61_streaming_rows_sqlite
+    original_streaming_rows = sqlite_schema._notes_moodboard_studio_v61_streaming_rows_sqlite
     tracking = False
 
-    def tracked_streaming_rows(self, conn, query, params=(), *, page_size=None):
+    def tracked_streaming_rows(ctx, conn, query, params=(), *, page_size=None):
         nonlocal tracking
         previous = tracking
         tracking = True
         try:
-            yield from original_streaming_rows(self, conn, query, params, page_size=page_size)
+            yield from original_streaming_rows(ctx, conn, query, params, page_size=page_size)
         finally:
             tracking = previous
 
@@ -964,11 +958,7 @@ def test_v61_copy_streams_all_large_product_selects_with_fetchmany(
         kwargs["factory"] = _Connection
         return original_connect(*args, **kwargs)
 
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_notes_moodboard_studio_v61_streaming_rows_sqlite",
-        tracked_streaming_rows,
-    )
+    monkeypatch.setattr(sqlite_schema, "_notes_moodboard_studio_v61_streaming_rows_sqlite", tracked_streaming_rows)
     monkeypatch.setattr(sqlite3, "connect", tracked_connect)
     db = CharactersRAGDB(str(db_path), client_id=OWNER)
     db.close_all_connections()
@@ -1201,16 +1191,16 @@ def test_empty_moodboard_and_studio_graph_binding_is_transactional_and_immutable
 ) -> None:
     db = CharactersRAGDB(str(tmp_path / "empty-bind.sqlite"), client_id=OWNER)
     try:
-        assert db.bind_local_moodboard_graph_to_dataset(
+        assert db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
             owner_user_id=OWNER, target_dataset_id=DATASET_A
         ) == {"moodboards": 0, "moodboard_notes": 0}
-        assert db.bind_local_studio_graph_to_dataset(
+        assert db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
             owner_user_id=OWNER, target_dataset_id=DATASET_A
         ) == {"note_studio_documents": 0}
         assert db.resolve_moodboard_compatibility_dataset_id(owner_user_id=OWNER) == DATASET_A  # nosec B101
         assert db.resolve_studio_compatibility_dataset_id(owner_user_id=OWNER) == DATASET_A  # nosec B101
         with pytest.raises(ConflictError, match="immutable"):
-            db.bind_local_studio_graph_to_dataset(
+            db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
                 owner_user_id=OWNER, target_dataset_id=DATASET_B
             )
     finally:
@@ -1223,27 +1213,27 @@ def test_bootstrap_pages_require_the_exact_bound_nonlocal_graph_scope(tmp_path: 
         board_id = db.add_moodboard("Local board")
         assert board_id is not None  # nosec B101
         with pytest.raises(InputError, match="non-sentinel"):
-            db.page_moodboards_for_sync_bootstrap(
+            db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
                 owner_user_id=OWNER,
                 dataset_id=LOCAL_UNBOUND,
             )
         with pytest.raises(ConflictError, match="not bound"):
-            db.page_moodboards_for_sync_bootstrap(
+            db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
                 owner_user_id=OWNER,
                 dataset_id=DATASET_A,
             )
 
-        db.bind_local_moodboard_graph_to_dataset(
+        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         )
-        rows = db.page_moodboards_for_sync_bootstrap(
+        rows = db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
             owner_user_id=OWNER,
             dataset_id=DATASET_A,
         )
         assert [row["id"] for row in rows] == [board_id]  # nosec B101
         with pytest.raises(ConflictError, match="not bound"):
-            db.page_moodboards_for_sync_bootstrap(
+            db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
                 owner_user_id=OWNER,
                 dataset_id=DATASET_B,
             )
@@ -1286,11 +1276,11 @@ def test_bootstrap_pages_validate_only_each_returned_page_with_bounded_queries(
             board_ids.append(board_id)
             note_ids.append(str(note_id))
             studio_ids.append(str(studio_id))
-        db.bind_local_moodboard_graph_to_dataset(
+        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         )
-        db.bind_local_studio_graph_to_dataset(
+        db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         )
@@ -1313,7 +1303,7 @@ def test_bootstrap_pages_validate_only_each_returned_page_with_bounded_queries(
         after_sync_id: str | None = None
         while True:
             queries.clear()
-            page = db.page_moodboards_for_sync_bootstrap(
+            page = db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
                 owner_user_id=OWNER,
                 dataset_id=DATASET_A,
                 after_sync_id=after_sync_id,
@@ -1331,7 +1321,7 @@ def test_bootstrap_pages_validate_only_each_returned_page_with_bounded_queries(
         after_note: str | None = None
         while True:
             queries.clear()
-            page = db.page_moodboard_placements_for_sync_bootstrap(
+            page = db.moodboard_sync_store.page_moodboard_placements_for_sync_bootstrap(
                 owner_user_id=OWNER,
                 dataset_id=DATASET_A,
                 after_moodboard_sync_id=after_board,
@@ -1350,7 +1340,7 @@ def test_bootstrap_pages_validate_only_each_returned_page_with_bounded_queries(
         after_studio: str | None = None
         while True:
             queries.clear()
-            page = db.page_studio_documents_for_sync_bootstrap(
+            page = db.moodboard_sync_store.page_studio_documents_for_sync_bootstrap(
                 owner_user_id=OWNER,
                 dataset_id=DATASET_A,
                 after_note_id=after_studio,
@@ -1373,7 +1363,7 @@ def test_bootstrap_defers_later_page_tamper_until_that_page_is_read(
     try:
         for index in range(4):
             assert db.add_moodboard(f"Board {index}") is not None  # nosec B101
-        db.bind_local_moodboard_graph_to_dataset(
+        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         )
@@ -1389,14 +1379,14 @@ def test_bootstrap_defers_later_page_tamper_until_that_page_is_read(
                 "UPDATE moodboards SET canonical_hash=? WHERE id=?",
                 ("sha256:" + "0" * 64, rows[-1]["id"]),
             )
-        first = db.page_moodboards_for_sync_bootstrap(
+        first = db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
             owner_user_id=OWNER,
             dataset_id=DATASET_A,
             limit=2,
         )
         assert len(first) == 2  # nosec B101
         with pytest.raises(ConflictError, match="canonical readiness proof"):
-            db.page_moodboards_for_sync_bootstrap(
+            db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
                 owner_user_id=OWNER,
                 dataset_id=DATASET_A,
                 after_sync_id=str(first[-1]["sync_id"]),
@@ -1414,7 +1404,7 @@ def test_placement_bootstrap_rejects_missing_note_on_returned_page(tmp_path: Pat
         note_id = db.add_note("Placement", "Content")
         assert board_id is not None and note_id is not None  # nosec B101
         db.link_note_to_moodboard(board_id, note_id)
-        db.bind_local_moodboard_graph_to_dataset(
+        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         )
@@ -1423,7 +1413,7 @@ def test_placement_bootstrap_rejects_missing_note_on_returned_page(tmp_path: Pat
             raw.execute("DELETE FROM notes WHERE id=?", (note_id,))
 
         with pytest.raises(ConflictError, match="canonical readiness proof"):
-            db.page_moodboard_placements_for_sync_bootstrap(
+            db.moodboard_sync_store.page_moodboard_placements_for_sync_bootstrap(
                 owner_user_id=OWNER,
                 dataset_id=DATASET_A,
             )
@@ -1438,7 +1428,7 @@ def test_same_dataset_moodboard_replay_reproves_bound_canonical_state(
     try:
         board_id = db.add_moodboard("Replay board")
         assert board_id is not None  # nosec B101
-        db.bind_local_moodboard_graph_to_dataset(
+        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         )
@@ -1448,7 +1438,7 @@ def test_same_dataset_moodboard_replay_reproves_bound_canonical_state(
         )
 
         with pytest.raises(ConflictError, match="canonical readiness proof"):
-            db.bind_local_moodboard_graph_to_dataset(
+            db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
                 owner_user_id=OWNER,
                 target_dataset_id=DATASET_A,
             )
@@ -1479,7 +1469,7 @@ def test_bound_moodboard_replay_and_bootstrap_reprove_collection_scope(
     try:
         board_id = db.add_moodboard("Bound collection board")
         assert board_id is not None  # nosec B101
-        db.bind_local_moodboard_graph_to_dataset(
+        db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         )
@@ -1533,25 +1523,25 @@ def test_bound_moodboard_replay_and_bootstrap_reprove_collection_scope(
         )
 
         if allowed:
-            assert db.bind_local_moodboard_graph_to_dataset(  # nosec B101
+            assert db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(  # nosec B101
                 owner_user_id=OWNER,
                 target_dataset_id=DATASET_A,
             ) == {"moodboards": 1, "moodboard_notes": 0}
             assert [  # nosec B101
                 row["id"]
-                for row in db.page_moodboards_for_sync_bootstrap(
+                for row in db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
                     owner_user_id=OWNER,
                     dataset_id=DATASET_A,
                 )
             ] == [board_id]
         else:
             with pytest.raises(ConflictError, match="canonical readiness proof"):
-                db.bind_local_moodboard_graph_to_dataset(
+                db.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
                     owner_user_id=OWNER,
                     target_dataset_id=DATASET_A,
                 )
             with pytest.raises(ConflictError, match="canonical readiness proof"):
-                db.page_moodboards_for_sync_bootstrap(
+                db.moodboard_sync_store.page_moodboards_for_sync_bootstrap(
                     owner_user_id=OWNER,
                     dataset_id=DATASET_A,
                 )
@@ -1573,7 +1563,7 @@ def test_same_dataset_studio_replay_reproves_bound_canonical_state(
             handwriting_mode="accented",
             render_version=1,
         )
-        db.bind_local_studio_graph_to_dataset(
+        db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         )
@@ -1583,7 +1573,7 @@ def test_same_dataset_studio_replay_reproves_bound_canonical_state(
         )
 
         with pytest.raises(ConflictError, match="canonical readiness proof"):
-            db.bind_local_studio_graph_to_dataset(
+            db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
                 owner_user_id=OWNER,
                 target_dataset_id=DATASET_A,
             )
@@ -1652,7 +1642,7 @@ def test_studio_binder_rejects_hash_consistent_current_head_tampering(
         )
 
         with pytest.raises(ConflictError, match="canonical readiness proof"):
-            db.bind_local_studio_graph_to_dataset(
+            db.moodboard_sync_store.bind_local_studio_graph_to_dataset(
                 owner_user_id=OWNER,
                 target_dataset_id=DATASET_A,
             )
@@ -1722,15 +1712,15 @@ def test_studio_accepted_state_survives_parent_edit_and_source_tombstone(
         assert {key: stale[key] for key in retained} == retained  # nosec B101
 
         expected = {"note_studio_documents": 1}
-        assert db.bind_local_studio_graph_to_dataset(  # nosec B101
+        assert db.moodboard_sync_store.bind_local_studio_graph_to_dataset(  # nosec B101
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         ) == expected
-        assert db.bind_local_studio_graph_to_dataset(  # nosec B101
+        assert db.moodboard_sync_store.bind_local_studio_graph_to_dataset(  # nosec B101
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         ) == expected
-        bootstrap = db.page_studio_documents_for_sync_bootstrap(
+        bootstrap = db.moodboard_sync_store.page_studio_documents_for_sync_bootstrap(
             owner_user_id=OWNER,
             dataset_id=DATASET_A,
         )
@@ -1765,11 +1755,11 @@ def test_deleted_parent_studio_tombstone_binds_bootstraps_and_restores_in_place(
         )
         assert db.soft_delete_note(note_id, expected_version=1)  # nosec B101
 
-        assert db.bind_local_studio_graph_to_dataset(  # nosec B101
+        assert db.moodboard_sync_store.bind_local_studio_graph_to_dataset(  # nosec B101
             owner_user_id=OWNER,
             target_dataset_id=DATASET_A,
         ) == {"note_studio_documents": 1}
-        tombstone = db.page_studio_documents_for_sync_bootstrap(
+        tombstone = db.moodboard_sync_store.page_studio_documents_for_sync_bootstrap(
             owner_user_id=OWNER,
             dataset_id=DATASET_A,
         )[0]
@@ -1778,7 +1768,7 @@ def test_deleted_parent_studio_tombstone_binds_bootstraps_and_restores_in_place(
         assert json.loads(tombstone["accepted_provenance_json"]) == before["accepted_provenance_json"]  # nosec B101
 
         assert db.restore_note(note_id, expected_version=2)  # nosec B101
-        restored = db.page_studio_documents_for_sync_bootstrap(
+        restored = db.moodboard_sync_store.page_studio_documents_for_sync_bootstrap(
             owner_user_id=OWNER,
             dataset_id=DATASET_A,
         )[0]
@@ -1807,7 +1797,7 @@ def test_interleaved_first_enrollment_has_one_dataset_winner_without_partial_sco
             barrier.wait(timeout=10)
             return (
                 "ok",
-                contender.bind_local_moodboard_graph_to_dataset(
+                contender.moodboard_sync_store.bind_local_moodboard_graph_to_dataset(
                     owner_user_id=OWNER,
                     target_dataset_id=target,
                 ),
@@ -1854,7 +1844,7 @@ def test_current_v63_studio_helper_verifies_drift_instead_of_repairing(
     with pytest.raises(CharactersRAGDBError, match="Studio.*catalog drifted"):
         CharactersRAGDB(str(db_path), client_id=OWNER)
 
-    source = inspect.getsource(CharactersRAGDB._ensure_note_studio_schema_sqlite)
+    source = inspect.getsource(sqlite_schema._ensure_note_studio_schema_sqlite)
     assert "CREATE TABLE IF NOT EXISTS note_studio_documents" not in source
     assert "_verify_notes_moodboard_studio_schema_sqlite" in source
 
@@ -1894,8 +1884,8 @@ def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns
     db._uses_shared_content_backend = False
     db._local = threading.local()
     db.client_id = OWNER
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, *, lock=False: 60)
-    db._ensure_note_studio_schema_postgres(object())
+    monkeypatch.setattr(postgres_schema, "_get_schema_version_postgres", lambda _ctx, _conn, *, lock=False: 60)
+    postgres_schema._ensure_note_studio_schema_postgres(db.ctx, object())
     assert any("CREATE TABLE IF NOT EXISTS note_studio_documents" in sql for sql in statements)  # nosec B101
     assert all("owner_user_id" not in sql and "dataset_id" not in sql for sql in statements)  # nosec B101
 
@@ -1921,7 +1911,7 @@ def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns
     )
 
     assert db.get_moodboard_by_id(1) is None  # nosec B101
-    assert NoteStore(db).get_note_studio_document(STUDIO_NOTE_ID) is None  # nosec B101
+    assert NoteStore(db.ctx).get_note_studio_document(STUDIO_NOTE_ID) is None  # nosec B101
     assert TaskStore(db).resolve_task_compatibility_dataset_id(
         owner_user_id=OWNER
     ) == DATASET_A
@@ -1941,7 +1931,7 @@ def test_moodboard_missing_generated_id_rolls_back_native_insert(
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", schema_version)
     db = CharactersRAGDB(str(tmp_path / "missing-moodboard-id.sqlite"), client_id=OWNER)
     try:
-        assert db._supports_notes_moodboard_studio_v61() is (schema_version >= 61)
+        assert db.supports_notes_moodboard_studio_v61() is (schema_version >= 61)
         existing_id = db.add_moodboard(name="Keep board")
         assert isinstance(existing_id, int)
         before = [dict(row) for row in db.execute_query("SELECT * FROM moodboards ORDER BY id").fetchall()]

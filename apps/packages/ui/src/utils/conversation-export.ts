@@ -1,51 +1,20 @@
 /**
  * Conversation Export Utilities
- * Export conversations to JSON or Markdown format
+ * Export a conversation saved on this device to JSON or Markdown, in the shared
+ * transcript format (utils/chat-transcript.ts). A chat saved on the server is
+ * exported from the server instead (services/chat-transcript-export.ts).
  */
 
 import { db } from "@/db/dexie/schema"
 import type { Message } from "@/db/dexie/types"
+import {
+  downloadTranscript,
+  type ChatTranscript,
+  type TranscriptMessage
+} from "@/utils/chat-transcript"
 
-export interface ExportedConversation {
-  id: string
-  title: string
-  createdAt: string
-  updatedAt?: string
-  model?: string
-  messages: ExportedMessage[]
-}
-
-export interface ExportedMessage {
-  role: "user" | "assistant" | "system"
-  content: string
-  timestamp?: string
-  model?: string
-}
-
-/**
- * Trigger a file download in the browser
- */
-function downloadFile(content: string, filename: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-}
-
-/**
- * Sanitize filename for download
- */
-function sanitizeFilename(name: string): string {
-  return name
-    .replace(/[/\\?%*:|"<>]/g, "-")
-    .replace(/\s+/g, "_")
-    .substring(0, 100)
-}
+export type ExportedConversation = ChatTranscript
+export type ExportedMessage = TranscriptMessage
 
 /**
  * Get conversation data from IndexedDB
@@ -65,14 +34,24 @@ async function getConversationData(
       .equals(historyId)
       .toArray()
 
-    const exportedMessages: ExportedMessage[] = messages.map((msg: Message) => ({
-      role: msg.role as "user" | "assistant" | "system",
-      content: msg.content,
-      timestamp: msg.createdAt
-        ? new Date(msg.createdAt).toISOString()
-        : undefined,
-      model: msg.name
-    }))
+    // Every saved message, alternatives included, in stable creation order;
+    // ids and parents let the Markdown export follow the newest path.
+    const exportedMessages: ExportedMessage[] = messages
+      .map((msg: Message, index) => ({ msg, index }))
+      .sort((left, right) =>
+        (left.msg.createdAt ?? 0) - (right.msg.createdAt ?? 0) || left.index - right.index)
+      .map(({ msg }) => {
+        const role = msg.role as "user" | "assistant" | "system"
+        const model = role === "assistant" ? msg.modelId || msg.modelName || msg.name : undefined
+        return {
+          id: msg.id,
+          parentId: msg.parent_message_id ?? null,
+          role,
+          content: msg.content,
+          timestamp: msg.createdAt ? new Date(msg.createdAt).toISOString() : undefined,
+          ...(model ? { model } : {})
+        }
+      })
 
     return {
       id: historyId,
@@ -97,10 +76,7 @@ export async function exportToJSON(historyId: string): Promise<boolean> {
   if (!data) {
     return false
   }
-
-  const json = JSON.stringify(data, null, 2)
-  const filename = `${sanitizeFilename(data.title)}_${Date.now()}.json`
-  downloadFile(json, filename, "application/json")
+  downloadTranscript(data, "json")
   return true
 }
 
@@ -112,43 +88,7 @@ export async function exportToMarkdown(historyId: string): Promise<boolean> {
   if (!data) {
     return false
   }
-
-  const lines: string[] = []
-
-  // Header
-  lines.push(`# ${data.title}`)
-  lines.push("")
-  lines.push(`**Date:** ${new Date(data.createdAt).toLocaleDateString()}`)
-  if (data.model) {
-    lines.push(`**Model:** ${data.model}`)
-  }
-  lines.push("")
-  lines.push("---")
-  lines.push("")
-
-  // Messages
-  for (const msg of data.messages) {
-    const roleLabel =
-      msg.role === "user"
-        ? "You"
-        : msg.role === "assistant"
-          ? "Assistant"
-          : "System"
-
-    lines.push(`## ${roleLabel}`)
-    if (msg.timestamp) {
-      lines.push(
-        `*${new Date(msg.timestamp).toLocaleString()}*`
-      )
-    }
-    lines.push("")
-    lines.push(msg.content)
-    lines.push("")
-  }
-
-  const markdown = lines.join("\n")
-  const filename = `${sanitizeFilename(data.title)}_${Date.now()}.md`
-  downloadFile(markdown, filename, "text/markdown")
+  downloadTranscript(data, "markdown")
   return true
 }
 
