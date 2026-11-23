@@ -1015,6 +1015,8 @@ def test_check_flags_a_moved_name_held_in_a_string(tmp_path: Path, capsys: pytes
         'name = f"_a{suffix}"\n',
         'name = f"_a"\n',
         'setattr(db, "_a", fake)\n',
+        'delattr(db, "_a")\n',
+        'return hasattr(db, "_a")\n',
     ):
         (root / TEST).write_text(f"def t(db, suffix, fake):\n    {body}")
         assert split.main(["check", manifest, str(root / FN_B), "--root", str(root)]) == 1, body
