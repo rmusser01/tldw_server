@@ -36,7 +36,7 @@ export default async function runLocalChatImport(page, file) {
     .filter({ hasText: /Imported data successfully|Import error/ })
     .last();
   const message = await notice.innerText();
-  assert.match(message, /Imported data successfully/, 'Normal chat restore must commit atomically');
+  assert.match(message, /Imported data successfully/, `Normal chat restore must commit atomically; got: ${message}`);
   assert.doesNotMatch(message, /Import error|SubTransaction|not included in parent transaction/);
   // Cancel only the scheduled page refresh; the acknowledged import is committed.
   await notice

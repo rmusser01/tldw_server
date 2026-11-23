@@ -23,6 +23,7 @@ Settings > Data > Import Data fails for every chat backup with 'Import error: Ta
 - [x] #6 The shared memory-dexie harness enforces Dexie 4's parent-scope rule (missing table, rw child of r parent) with a self-test, and every harness-consuming suite still passes
 - [x] #7 Every operation run inside runChatPersistenceTransaction is traced; each reachable nested-transaction gap is fixed failing-test first and confirmed against real Dexie
 - [x] #8 The import rollback test fails if chats and tokens were not covered by the enclosing transaction
+- [x] #9 The local-chat import e2e spec runs in a required CI job and fails there if the searchTokens fix is reverted
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -42,6 +43,8 @@ Import rollback test now fails in importPromptsV2 (a prompt without an id) after
 e2e/CI: local-chat-import.spec.ts runs nowhere. It is matched only by the chromium project; CI uses that project only with explicit file + --grep filters (login.spec.ts, chat-cockpit.real-server.spec.ts), and all other jobs select tier-1..5/journeys/ux-regression projects or named files. Owner options (not done): append it to the frontend-required.yml step that runs e2e/manual-api-key-persistence.spec.ts (one workflow line), or move it under e2e/workflows/tier-1-critical/ (no workflow edit; runs in frontend-e2e-tiers critical).
 Verification round 2: 99 suites, 3447 tests green (harness consumers, every persistence-module test, all db/dexie tests, new tests); no scope error in any log. eslint lint:ui clean.
 DoD: Bandit not applicable (TypeScript-only change, no Python touched). No documentation describes these transaction lists, so no docs change. Known skip: e2e spec not wired into CI (needs a workflow edit; owner decision, options above).
+Owner approved wiring the e2e spec into CI (2026-11-23). Chose moving it to e2e/workflows/tier-1-critical/ (frontend-e2e-tiers 'E2E Critical (Tier 1 + Journeys)', a required check) over adding it to the frontend-required API-key step. Both pass locally under their job's conditions: (a) Playwright-started next dev, no backend, advanced mode, 4/4 with manual-api-key-persistence (import test 3.4-4.7s, step wall +0.2s/+4.0s warm); (b) bun run build:dev + bun run start, single-user backend, the critical job's env, --project=tier-1 --retries=0, 806-881ms over 3 runs. (b) adds less time, runs against the production build, runs with --retries=0, and needs no workflow edit. Its gate e2e_changed includes tldw_frontend_changed (apps/packages/ui/**).
+Teeth: with the db.searchTokens line removed from libs/export-import.ts and the app rebuilt, the moved spec fails: 'AssertionError: Normal chat restore must commit atomically; got: Import error / Table searchTokens not included in parent transaction.' The helper now puts the notification text in that assertion message so the CI log shows the cause. The fix was restored and git status was clean. After the move, the chromium project no longer selects the spec and tier-1 does. Frontend e2e guard and UAT catalog tests: 10 files, 216 tests green.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
