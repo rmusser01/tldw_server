@@ -43,8 +43,8 @@ def _add_conversation(db, *, owner="1", character_id=None, workspace=None, delet
 def scoped_conversations(quota_db):
     first = quota_db.add_character_card({"name": "Citrine"})
     second = quota_db.add_character_card({"name": "Rowan"})
-    quota_db.upsert_workspace("ws-first", "First")
-    quota_db.upsert_workspace("ws-second", "Second")
+    quota_db.workspace_store.upsert_workspace("ws-first", "First")
+    quota_db.workspace_store.upsert_workspace("ws-second", "Second")
     _add_conversation(quota_db, character_id=first)
     _add_conversation(quota_db, character_id=second)
     _add_conversation(quota_db)
@@ -121,7 +121,7 @@ def quota_client(quota_db, monkeypatch):
 @pytest.mark.parametrize("with_character", [False, True], ids=["ordinary", "character"])
 def test_create_chat_uses_real_quota_and_rejects_at_limit(quota_db, quota_client, workspace, with_character):
     character = quota_db.add_character_card({"name": "Quota character", "first_message": "Hello"})
-    quota_db.upsert_workspace("ws-quota", "Quota workspace")
+    quota_db.workspace_store.upsert_workspace("ws-quota", "Quota workspace")
     _add_conversation(quota_db, character_id=character, workspace=workspace)
     _add_conversation(quota_db, character_id=character, workspace=workspace, deleted=True)
     # Neither another owner nor another scope may consume this quota.

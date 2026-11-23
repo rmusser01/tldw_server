@@ -52,7 +52,7 @@ def _seed(db):
         },
         [],
     )
-    workspace = db.upsert_workspace("fixture-workspace", "Fixture workspace")["id"]
+    workspace = db.workspace_store.upsert_workspace("fixture-workspace", "Fixture workspace")["id"]
     conversation = db.add_conversation(
         {"title": "Fixture conversation", "scope_type": "workspace", "workspace_id": workspace}
     )
@@ -177,8 +177,8 @@ def _read(f, operation):
         "attachment": lambda: f.repo.attachment("default"),
         "latest_results": lambda: f.repo.latest_results("default", ["missing-conversation"]),
         "persona": lambda: db.get_persona_profile(f.persona, user_id="1"),
-        "workspace": lambda: db.get_workspace(f.workspace),
-        "workspace_including_deleted": lambda: db.get_workspace(f.workspace, include_deleted=True),
+        "workspace": lambda: db.workspace_store.get_workspace(f.workspace),
+        "workspace_including_deleted": lambda: db.workspace_store.get_workspace(f.workspace, include_deleted=True),
         "conversation": lambda: db.get_conversation_by_id(f.conversation),
         "conversations": lambda: db.get_conversations_for_user("1", scope_type="workspace", workspace_id=f.workspace),
     }

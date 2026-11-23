@@ -1024,13 +1024,13 @@ class TestNotes:
         assert note_id is not None
 
         db_instance.sync_note_folders(note_id, ["manual"])
-        db_instance.sync_note_source_folders(note_id, source_id=11, folder_paths=["docs", "docs/api"])
-        db_instance.sync_note_source_folders(note_id, source_id=22, folder_paths=["guides"])
+        db_instance.workspace_store.sync_note_source_folders(note_id, source_id=11, folder_paths=["docs", "docs/api"])
+        db_instance.workspace_store.sync_note_source_folders(note_id, source_id=22, folder_paths=["guides"])
 
         initial_paths = [row["path"] for row in db_instance.get_note_folders_for_note(note_id)]
         assert initial_paths == ["docs", "docs/api", "guides", "manual"]
 
-        db_instance.sync_note_source_folders(
+        db_instance.workspace_store.sync_note_source_folders(
             note_id,
             source_id=11,
             folder_paths=["docs", "docs/reference"],
@@ -1043,8 +1043,8 @@ class TestNotes:
         note_id = db_instance.add_note("Case Foldered Note", "Body")
         assert note_id is not None
 
-        db_instance.sync_note_source_folders(note_id, source_id=11, folder_paths=["Docs/API"])
-        db_instance.sync_note_source_folders(note_id, source_id=11, folder_paths=["docs/reference"])
+        db_instance.workspace_store.sync_note_source_folders(note_id, source_id=11, folder_paths=["Docs/API"])
+        db_instance.workspace_store.sync_note_source_folders(note_id, source_id=11, folder_paths=["docs/reference"])
 
         updated_paths = [row["path"] for row in db_instance.get_note_folders_for_note(note_id)]
         assert updated_paths == ["Docs", "Docs/reference"]

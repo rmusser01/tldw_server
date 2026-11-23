@@ -344,10 +344,10 @@ def test_workspace_residual_guard_includes_receipt_chat_with_changed_writer(
         monkeypatch.setattr(creation_db, "soft_delete_conversation", lambda *args: True)
     with pytest.raises(ConflictError, match="workspace_delete_incomplete"):
         if hard:
-            creation_db.hard_delete_workspace("ws")
+            creation_db.workspace_store.hard_delete_workspace("ws")
         else:
-            creation_db.delete_workspace("ws", expected_version=2)
-    workspace = creation_db.get_workspace("ws", include_deleted=True)
+            creation_db.workspace_store.delete_workspace("ws", expected_version=2)
+    workspace = creation_db.workspace_store.get_workspace("ws", include_deleted=True)
     assert not workspace["deleted"] and workspace["native_chat_admission_closed"]
     with creation_db.transaction():
         assert not creation_db.get_conversation_by_id(cid)["deleted"]
@@ -452,7 +452,7 @@ def test_receipt_sync_reentry_gates_destination_not_origin(creation_db: Characte
         object_revision=2, object_hash="h", assistant_kind="persona",
         assistant_id="persona-a", persona_memory_mode="read_only", scope_type="global",
     )
-    creation_db.upsert_workspace("destination", "Destination")
+    creation_db.workspace_store.upsert_workspace("destination", "Destination")
     with creation_db.transaction() as conn:
         conn.execute("UPDATE workspaces SET native_chat_admission_closed = ? WHERE id = ?", (True, "destination"))
     with pytest.raises(ConflictError, match="workspace"):

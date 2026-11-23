@@ -70,7 +70,7 @@ def db(tmp_path):
         client_id="conversation-store-user",
     )
     instance.add_character_card({"name": "Conversation Store Character"})
-    instance.upsert_workspace("ws-store", "Conversation Store Workspace")
+    instance.workspace_store.upsert_workspace("ws-store", "Conversation Store Workspace")
     return instance
 
 

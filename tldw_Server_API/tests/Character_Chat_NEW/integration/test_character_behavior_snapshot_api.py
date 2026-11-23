@@ -1559,7 +1559,7 @@ def test_startup_visibility_preserves_snapshot_resume_restore_and_greeting(
 ) -> None:
     """List redaction and both restore branches preserve frozen Character behavior."""
     db = character_db
-    db.upsert_workspace("snapshot-private-origin", "Origin")
+    db.workspace_store.upsert_workspace("snapshot-private-origin", "Origin")
     character_id = db.add_character_card({"name": "Startup history", "first_message": "Welcome back."})
     cid = create_character_conversation(
         db, conversation_data={"character_id": character_id, "title": "Independent history", "client_id": str(db.client_id)},
@@ -1577,7 +1577,7 @@ def test_startup_visibility_preserves_snapshot_resume_restore_and_greeting(
         "schema_version": 1, "source": "system_fallback", "workspace_id": "snapshot-private-origin", "workspace_version": 1,
     }
     assert before.json()["resume_eligible"] is True
-    db.delete_workspace("snapshot-private-origin", expected_version=1)
+    db.workspace_store.delete_workspace("snapshot-private-origin", expected_version=1)
     listed = test_client.get("/api/v1/chats/", headers=auth_headers)
     assert listed.status_code == 200, listed.text
     item = next(item for item in listed.json()["chats"] if item["id"] == cid)

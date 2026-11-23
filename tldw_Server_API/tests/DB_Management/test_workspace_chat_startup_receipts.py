@@ -29,7 +29,7 @@ def test_receipt_count_includes_invalidated_and_deleted_targets(db_factory: Call
     """Tombstones permanently consume owner capacity, independently of writer attribution."""
     db = db_factory()
     store = _store(db)
-    db.upsert_workspace("ws", "Workspace")
+    db.workspace_store.upsert_workspace("ws", "Workspace")
     cid = db.add_conversation({"scope_type": "workspace", "workspace_id": "ws"})
     with db.transaction() as conn:
         store.lock_owner("user-1", conn=conn)
@@ -112,7 +112,7 @@ def test_workspace_lock_returns_closure_and_system_state(db_factory: Callable[[]
     """Strict lookup can classify closure without leaking another tenant's Workspace."""
     db = db_factory()
     store = _store(db)
-    db.upsert_workspace("ws", "Workspace")
+    db.workspace_store.upsert_workspace("ws", "Workspace")
     with db.transaction() as conn:
         conn.execute("UPDATE workspaces SET native_chat_admission_closed = ? WHERE id = ?", (True, "ws"))
         row = store.lock_receipt_workspace("ws", conn=conn)
@@ -158,7 +158,7 @@ def test_invalidation_noop_permanence_and_rollback(db_factory: Callable[[], Char
     """No-op preserves receipt, actual change invalidates once, rollback restores both."""
     db = db_factory()
     store = _store(db)
-    db.upsert_workspace("ws", "Workspace")
+    db.workspace_store.upsert_workspace("ws", "Workspace")
     cid = db.add_conversation({"scope_type": "workspace", "workspace_id": "ws"})
     module = importlib.import_module("tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store")
     with db.transaction() as conn:
@@ -257,8 +257,8 @@ def test_postgres_other_owner_lock_is_independent(db_factory: Callable[[], Chara
     other = CharactersRAGDB(
         first.db_path_str, client_id="user-2", backend=DatabaseBackendFactory.create_backend(first.backend.config)
     )
-    first.upsert_workspace("ws-1", "First owner")
-    other.upsert_workspace("ws-2", "Other owner")
+    first.workspace_store.upsert_workspace("ws-1", "First owner")
+    other.workspace_store.upsert_workspace("ws-2", "Other owner")
     first_cid = first.add_conversation({"scope_type": "workspace", "workspace_id": "ws-1"})
     other_cid = other.add_conversation({"scope_type": "workspace", "workspace_id": "ws-2"})
 

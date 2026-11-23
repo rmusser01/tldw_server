@@ -91,9 +91,9 @@ def promote_acp_completion_artifacts(
     decision = _promotion_decision(final_status, review_decision)
     target_workspace_id = _target_workspace_id(workspace)
     existing_by_id: dict[str, dict[str, Any]] = {}
-    if target_workspace_id and note_db.get_workspace(target_workspace_id):
+    if target_workspace_id and note_db.workspace_store.get_workspace(target_workspace_id):
         existing_by_id = {
-            str(item["id"]): item for item in note_db.list_workspace_artifacts(target_workspace_id) if item.get("id")
+            str(item["id"]): item for item in note_db.workspace_store.list_workspace_artifacts(target_workspace_id) if item.get("id")
         }
 
     for index, raw_artifact in enumerate(completion_signal.artifacts):
@@ -137,7 +137,7 @@ def promote_acp_completion_artifacts(
 
             existing = existing_by_id.get(artifact_id)
             if existing:
-                updated = note_db.update_workspace_artifact(
+                updated = note_db.workspace_store.update_workspace_artifact(
                     str(target_workspace_id),
                     artifact_id,
                     _update_payload(payload),
@@ -146,7 +146,7 @@ def promote_acp_completion_artifacts(
                 existing_by_id[artifact_id] = updated
                 result.updated_artifact_ids.append(artifact_id)
             else:
-                created = note_db.add_workspace_artifact(str(target_workspace_id), payload)
+                created = note_db.workspace_store.add_workspace_artifact(str(target_workspace_id), payload)
                 existing_by_id[artifact_id] = created
                 result.created_artifact_ids.append(artifact_id)
         except (RuntimeError, TypeError, ValueError, sqlite3.Error):
@@ -230,7 +230,7 @@ def _validate_artifact_payload(
         return "invalid_artifact_format"
     if not target_workspace_id:
         return "missing_workspace"
-    if note_db.get_workspace(target_workspace_id) is None:
+    if note_db.workspace_store.get_workspace(target_workspace_id) is None:
         return "workspace_not_found"
     title = str(artifact.get("title") or "").strip()
     if not title:

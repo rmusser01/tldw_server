@@ -22,7 +22,7 @@ pytestmark = pytest.mark.integration
 def message_api(tmp_path, monkeypatch, request):
     options = {"backend": request.getfixturevalue("pg_restricted_backend")} if request.param == "postgres" else {}
     db = CharactersRAGDB(str(tmp_path / "messages.db"), client_id="1", owner_user_id="1", **options)
-    db.upsert_workspace("workspace-a", "Research")
+    db.workspace_store.upsert_workspace("workspace-a", "Research")
     chat = db.add_conversation({"title": "Research", "scope_type": "workspace", "workspace_id": "workspace-a"})
     app = FastAPI()
     app.add_middleware(ChaChaOperationMiddleware)

@@ -453,7 +453,7 @@ def _create_source_review_plan(
     title: str = "TCP review",
     schedule: list[dict[str, object]] | None = None,
 ) -> int:
-    return db.create_source_review_plan(
+    return db.workspace_store.create_source_review_plan(
         title=title,
         starts_on="2026-07-09",
         timezone_name="America/Los_Angeles",
@@ -491,7 +491,7 @@ def test_create_source_review_plan_persists_bundle_and_occurrences_atomically(
 
     plan_id = _create_source_review_plan(source_review_db, schedule=schedule)
 
-    plans, total = source_review_db.list_source_review_plans()
+    plans, total = source_review_db.workspace_store.list_source_review_plans()
     occurrences = _occurrence_rows(source_review_db, plan_id)
     assert total == 1  # nosec B101
     assert plans[0]["source_bundle_json"] == _source_bundle()  # nosec B101
@@ -522,8 +522,8 @@ def test_source_review_plan_projections_include_occurrence_summaries(
         ],
     )
 
-    plan = source_review_db.get_source_review_plan(plan_id)
-    listed, total = source_review_db.list_source_review_plans()
+    plan = source_review_db.workspace_store.get_source_review_plan(plan_id)
+    listed, total = source_review_db.workspace_store.list_source_review_plans()
 
     assert plan is not None  # nosec B101
     assert total == 1  # nosec B101
@@ -583,8 +583,8 @@ def test_source_review_plan_and_due_lists_have_stable_pagination_order(
         for title, activity in (("First", "reread"), ("Second", "quiz"), ("Third", "cloze"))
     ]
 
-    plans, plan_total = source_review_db.list_source_review_plans(limit=2, offset=1)
-    due_rows, due_total = source_review_db.list_due_source_review_occurrences(
+    plans, plan_total = source_review_db.workspace_store.list_source_review_plans(limit=2, offset=1)
+    due_rows, due_total = source_review_db.workspace_store.list_due_source_review_occurrences(
         now_utc="2026-07-09T12:00:00Z",
         limit=2,
         offset=1,
@@ -670,10 +670,10 @@ def test_due_source_review_occurrences_filter_status_time_and_deleted_rows(
         ],
     )
     occurrence_ids = [int(row["id"]) for row in _occurrence_rows(source_review_db, plan_id)]
-    source_review_db.start_source_review_occurrence(occurrence_ids[1])
-    source_review_db.start_source_review_occurrence(occurrence_ids[2])
-    source_review_db.complete_source_review_occurrence(occurrence_ids[2])
-    source_review_db.skip_source_review_occurrence(occurrence_ids[3])
+    source_review_db.workspace_store.start_source_review_occurrence(occurrence_ids[1])
+    source_review_db.workspace_store.start_source_review_occurrence(occurrence_ids[2])
+    source_review_db.workspace_store.complete_source_review_occurrence(occurrence_ids[2])
+    source_review_db.workspace_store.skip_source_review_occurrence(occurrence_ids[3])
     source_review_db.execute_query(
         "UPDATE source_review_occurrences SET deleted = 1 WHERE id = ?",
         (occurrence_ids[5],),
@@ -690,7 +690,7 @@ def test_due_source_review_occurrences_filter_status_time_and_deleted_rows(
         commit=True,
     )
 
-    rows, total = source_review_db.list_due_source_review_occurrences(now_utc="2026-07-09T12:00:00Z")
+    rows, total = source_review_db.workspace_store.list_due_source_review_occurrences(now_utc="2026-07-09T12:00:00Z")
 
     assert total == 2  # nosec B101
     assert [row["id"] for row in rows] == occurrence_ids[:2]  # nosec B101
@@ -715,8 +715,8 @@ def test_start_source_review_occurrence_is_idempotent_and_stores_thin_metadata(
     occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
     source_review_db.client_id = "source-review-action-client"
 
-    started = source_review_db.start_source_review_occurrence(occurrence_id)
-    resumed = source_review_db.start_source_review_occurrence(occurrence_id)
+    started = source_review_db.workspace_store.start_source_review_occurrence(occurrence_id)
+    resumed = source_review_db.workspace_store.start_source_review_occurrence(occurrence_id)
     stored = _occurrence_rows(source_review_db, plan_id)[0]
 
     expected_keys = {
@@ -761,7 +761,7 @@ def test_start_source_review_occurrence_rolls_back_status_and_launch_on_update_f
     )
 
     with pytest.raises(CharactersRAGDBError, match="start source review occurrence"):
-        source_review_db.start_source_review_occurrence(occurrence_id)
+        source_review_db.workspace_store.start_source_review_occurrence(occurrence_id)
 
     stored = _occurrence_rows(source_review_db, plan_id)[0]
     update_sync_count = source_review_db.execute_query(
@@ -796,10 +796,10 @@ def test_complete_source_review_occurrence_updates_metadata_and_completion_sourc
     )
     plan_id = _create_source_review_plan(source_review_db)
     occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
-    source_review_db.start_source_review_occurrence(occurrence_id)
+    source_review_db.workspace_store.start_source_review_occurrence(occurrence_id)
     source_review_db.client_id = "source-review-completion-client"
 
-    completed = source_review_db.complete_source_review_occurrence(
+    completed = source_review_db.workspace_store.complete_source_review_occurrence(
         occurrence_id,
         completion_source="quiz_attempt",
     )
@@ -830,7 +830,7 @@ def test_skip_source_review_occurrence_updates_timestamp_client_and_version(
     occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
     source_review_db.client_id = "source-review-skip-client"
 
-    skipped = source_review_db.skip_source_review_occurrence(occurrence_id)
+    skipped = source_review_db.workspace_store.skip_source_review_occurrence(occurrence_id)
 
     assert skipped["status"] == "skipped"  # nosec B101
     assert skipped["created_at"] == created_at  # nosec B101
@@ -843,11 +843,11 @@ def _occurrence_in_status(db: CharactersRAGDB, status: str) -> tuple[int, int]:
     plan_id = _create_source_review_plan(db)
     occurrence_id = int(_occurrence_rows(db, plan_id)[0]["id"])
     if status in {"in_progress", "completed"}:
-        db.start_source_review_occurrence(occurrence_id)
+        db.workspace_store.start_source_review_occurrence(occurrence_id)
     if status == "completed":
-        db.complete_source_review_occurrence(occurrence_id)
+        db.workspace_store.complete_source_review_occurrence(occurrence_id)
     elif status == "skipped":
-        db.skip_source_review_occurrence(occurrence_id)
+        db.workspace_store.skip_source_review_occurrence(occurrence_id)
     return plan_id, occurrence_id
 
 
@@ -908,7 +908,7 @@ def test_deleted_source_review_occurrence_actions_act_not_found(
 ) -> None:
     plan_id = _create_source_review_plan(source_review_db)
     occurrence_id = int(_occurrence_rows(source_review_db, plan_id)[0]["id"])
-    assert source_review_db.soft_delete_source_review_plan(plan_id) is True  # nosec B101
+    assert source_review_db.workspace_store.soft_delete_source_review_plan(plan_id) is True  # nosec B101
 
     with pytest.raises(NotFoundError, match="not found"):
         getattr(source_review_db, f"{action}_source_review_occurrence")(occurrence_id)
@@ -930,7 +930,7 @@ def test_source_review_start_wraps_invalid_stored_launch_metadata(
     )
 
     with pytest.raises(CharactersRAGDBError, match="launch metadata"):
-        source_review_db.start_source_review_occurrence(occurrence_id)
+        source_review_db.workspace_store.start_source_review_occurrence(occurrence_id)
 
     assert _occurrence_rows(source_review_db, plan_id)[0]["status"] == "pending"  # nosec B101
 
@@ -952,7 +952,7 @@ def test_source_review_delete_rolls_back_plan_when_occurrence_delete_fails(
     )
 
     with pytest.raises(CharactersRAGDBError, match="delete source review plan"):
-        source_review_db.soft_delete_source_review_plan(plan_id)
+        source_review_db.workspace_store.soft_delete_source_review_plan(plan_id)
 
     plan = source_review_db.execute_query(
         "SELECT deleted, version FROM source_review_plans WHERE id = ?",
@@ -986,7 +986,7 @@ def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
     )
     source_review_db.client_id = "source-review-delete-client"
 
-    assert source_review_db.soft_delete_source_review_plan(plan_id) is True  # nosec B101
+    assert source_review_db.workspace_store.soft_delete_source_review_plan(plan_id) is True  # nosec B101
     versions_after_first_delete = [
         dict(
             source_review_db.execute_query(
@@ -1016,7 +1016,7 @@ def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
         """
     ).fetchall()
 
-    assert source_review_db.soft_delete_source_review_plan(plan_id) is False  # nosec B101
+    assert source_review_db.workspace_store.soft_delete_source_review_plan(plan_id) is False  # nosec B101
     versions_after_second_delete = [
         dict(
             source_review_db.execute_query(
@@ -1045,8 +1045,8 @@ def test_source_review_delete_is_idempotent_and_syncs_each_row_once(
          ORDER BY change_id
         """
     ).fetchall()
-    plans, total = source_review_db.list_source_review_plans()
-    due, due_total = source_review_db.list_due_source_review_occurrences(now_utc="2030-01-01T00:00:00Z")
+    plans, total = source_review_db.workspace_store.list_source_review_plans()
+    due, due_total = source_review_db.workspace_store.list_due_source_review_occurrences(now_utc="2030-01-01T00:00:00Z")
 
     assert versions_after_first_delete == [  # nosec B101
         {
@@ -1084,4 +1084,4 @@ def test_source_review_delete_missing_plan_uses_not_found_convention(
     source_review_db: CharactersRAGDB,
 ) -> None:
     with pytest.raises(NotFoundError, match="not found"):
-        source_review_db.soft_delete_source_review_plan(999_999)
+        source_review_db.workspace_store.soft_delete_source_review_plan(999_999)

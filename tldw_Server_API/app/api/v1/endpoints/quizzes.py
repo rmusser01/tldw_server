@@ -91,7 +91,7 @@ _V2_OSCE_IMPORT_ERROR = "Failed to import OSCE quiz"
 def _ensure_workspace_exists(db: CharactersRAGDB, workspace_id: Optional[str]) -> None:
     if workspace_id is None:
         return
-    if db.get_workspace(workspace_id) is None:
+    if db.workspace_store.get_workspace(workspace_id) is None:
         raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
 
 

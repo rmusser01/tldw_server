@@ -750,7 +750,7 @@ def test_a_workspace_chat_is_a_push_conflict_that_blocks_nothing(
 ) -> None:
     """Workspace chats stay out of Sync on the server; a device's tombstone cannot delete one."""
     _copy_outside_sync(chacha_db, "chat.conversation", "workspace-chat")
-    chacha_db.upsert_workspace("ws-1", "Workspace")
+    chacha_db.workspace_store.upsert_workspace("ws-1", "Workspace")
     with chacha_db.transaction() as conn:
         conn.execute(
             "UPDATE conversations SET scope_type = ?, workspace_id = ? WHERE id = ?",

@@ -134,7 +134,7 @@ async def test_invalid_admission_installs_no_claim(native_fork_db, tmp_path, mon
         _expire(db)
     else:
         if fault == "wrong_scope":
-            db.upsert_workspace("other", "Other owned workspace")
+            db.workspace_store.upsert_workspace("other", "Other owned workspace")
         with db.transaction() as conn:
             if fault == "deleted_child":
                 conn.execute("UPDATE conversations SET deleted = ? WHERE id = ?", (True, cid))

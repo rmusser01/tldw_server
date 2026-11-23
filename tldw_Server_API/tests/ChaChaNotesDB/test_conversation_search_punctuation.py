@@ -79,8 +79,8 @@ def test_punctuation_is_a_literal_search_when_fts_rejects_it(db: CharactersRAGDB
 def test_punctuation_fallback_keeps_count_ranking_pagination_and_scope(db: CharactersRAGDB, order_by: str) -> None:
     """Keep counts, score normalization, pages and workspace ownership after fallback."""
     marker = "ALICE-CEDAR-SIDEPANEL-742"
-    db.upsert_workspace("ws-a", "A")
-    db.upsert_workspace("ws-b", "B")
+    db.workspace_store.upsert_workspace("ws-a", "A")
+    db.workspace_store.upsert_workspace("ws-b", "B")
     _add(db, "own-a", marker, workspace="ws-a")
     _add(db, "own-b", f"{marker} extended title", workspace="ws-a")
     _add(db, "foreign", marker, owner="bob", workspace="ws-a")
@@ -192,8 +192,8 @@ def test_postgres_punctuation_preserves_scoped_search(pg_database_config: Databa
     database = CharactersRAGDB(db_path=":memory:", client_id="alice", backend=backend)
     try:
         marker = "ALICE-CEDAR-SIDEPANEL-742"
-        database.upsert_workspace("ws-a", "A")
-        database.upsert_workspace("ws-b", "B")
+        database.workspace_store.upsert_workspace("ws-a", "A")
+        database.workspace_store.upsert_workspace("ws-b", "B")
         _add(database, "own", marker, workspace="ws-a")
         _add(database, "foreign", marker, owner="bob", workspace="ws-a")
         _add(database, "other-workspace", marker, workspace="ws-b")

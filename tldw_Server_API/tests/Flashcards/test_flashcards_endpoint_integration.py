@@ -281,7 +281,7 @@ def test_deck_workspace_id_contract_and_scope_filters(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    flashcards_db.upsert_workspace("ws-1", "Workspace One")
+    flashcards_db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     create_response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -1105,7 +1105,7 @@ def test_flashcard_visibility_endpoints_respect_default_general_only_and_explici
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    flashcards_db.upsert_workspace("ws-1", "Workspace One")
+    flashcards_db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     workspace_deck_response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -1297,7 +1297,7 @@ def test_flashcard_analytics_summary_endpoint_respects_workspace_visibility(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    flashcards_db.upsert_workspace("ws-1", "Workspace One")
+    flashcards_db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     general_deck_response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -4938,7 +4938,7 @@ def test_import_json_reuses_workspace_owned_deck_by_name(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    flashcards_db.upsert_workspace("ws-1", "Workspace One")
+    flashcards_db.workspace_store.upsert_workspace("ws-1", "Workspace One")
     workspace_deck_id = flashcards_db.add_deck("Workspace Deck", workspace_id="ws-1")
 
     payload = [
@@ -5470,7 +5470,7 @@ def test_flashcard_tag_suggestions_global_visibility_across_general_and_workspac
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    flashcards_db.upsert_workspace("ws-tags-global", "Workspace Tags Global")
+    flashcards_db.workspace_store.upsert_workspace("ws-tags-global", "Workspace Tags Global")
 
     general_deck = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",

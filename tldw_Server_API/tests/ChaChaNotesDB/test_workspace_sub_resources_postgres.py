@@ -19,7 +19,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
     db = CharactersRAGDB(db_path=":memory:", client_id="workspace-source-pg-test", backend=backend)
 
     try:
-        db.upsert_workspace("ws-pg", "Postgres Workspace")
+        db.workspace_store.upsert_workspace("ws-pg", "Postgres Workspace")
         db.close_connection()
         with backend.transaction() as conn:
             backend.execute("DROP TABLE workspace_sources", connection=conn)
@@ -127,7 +127,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
         assert cleaned["reviewed_at"] is None
         assert cleaned["reviewed_by_user_id"] is None
 
-        updated = db.update_workspace_source_review_states(
+        updated = db.workspace_store.update_workspace_source_review_states(
             "ws-pg",
             ["src-a", "src-a", "src-b"],
             "reviewed",
@@ -138,7 +138,7 @@ def test_postgres_workspace_source_review_schema_backfill_and_batch_transition(
         assert all(row["review_state"] == "reviewed" for row in updated)
         assert all(row["reviewed_by_user_id"] == "reviewer-pg" for row in updated)
         assert all(row["version"] == 2 for row in updated)
-        unrelated = db.get_workspace_source("ws-pg", "src-c")
+        unrelated = db.workspace_store.get_workspace_source("ws-pg", "src-c")
         assert unrelated["review_state"] == "needs_review"
         assert unrelated["version"] == 1
     finally:

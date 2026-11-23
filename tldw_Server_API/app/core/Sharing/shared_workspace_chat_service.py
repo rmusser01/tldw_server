@@ -773,7 +773,7 @@ class SharedWorkspaceChatService:
 
     def _load_source_rows(self) -> list[dict[str, Any]]:
         try:
-            rows = self.owner_chacha_db.list_workspace_sources(self.workspace_id)
+            rows = self.owner_chacha_db.workspace_store.list_workspace_sources(self.workspace_id)
         except Exception:  # noqa: BLE001 - owner storage failures must not disclose details.
             raise _SharedWorkspaceDataUnavailable() from None
         if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):

@@ -132,7 +132,7 @@ def test_native_completion_capability_uses_original_chat_scope(history_api, monk
     client, db, cid, headers = history_api
     query = "?include_native_completion=true"
     if scope_type == "workspace":
-        db.upsert_workspace("completion-workspace", "Completion workspace")
+        db.workspace_store.upsert_workspace("completion-workspace", "Completion workspace")
         created = client.post(
             "/api/v1/chats/",
             headers=headers,
@@ -639,7 +639,7 @@ def test_native_owner_namespace_uses_transport_account_and_base_path():
 def test_versioned_workspace_scope_and_stale_selection_do_not_update_defaults(history_api, send_scoped):
     """Verified id-only and explicit Workspace turns preserve history admission guards."""
     client, db, _, headers = history_api
-    db.upsert_workspace("scope-workspace", "Scope Workspace")
+    db.workspace_store.upsert_workspace("scope-workspace", "Scope Workspace")
     cid = db.add_conversation({"character_id": None, "scope_type": "workspace", "workspace_id": "scope-workspace",
                                "client_id": "1", "title": "Neutral workspace"})
     query = "?scope_type=workspace&workspace_id=scope-workspace"
@@ -910,8 +910,8 @@ def test_native_fork_context_and_scoped_settings_expected_owner(history_api):
 
 def test_limited_native_copy_explicit_plain_identity_and_child_chain_reopen(history_api):
     client, db, _, headers = history_api
-    workspace = db.upsert_workspace("fork-workspace", "Fork workspace")
-    db.update_workspace("fork-workspace", {"assistant_defaults_json": {
+    workspace = db.workspace_store.upsert_workspace("fork-workspace", "Fork workspace")
+    db.workspace_store.update_workspace("fork-workspace", {"assistant_defaults_json": {
         "assistant_kind": "persona", "assistant_id": "would-be-required", "persona_memory_mode": "read_only"
     }}, expected_version=workspace["version"])
     created = client.post("/api/v1/chats/", headers=headers, json={
@@ -1105,7 +1105,7 @@ def test_plain_message_save_preserves_owned_graph_and_raw_acknowledgement(
         if character:
             payload["character_id"] = db.add_character_card({"name": "Mira"})
         if workspace:
-            db.upsert_workspace("save-workspace", "Save workspace")
+            db.workspace_store.upsert_workspace("save-workspace", "Save workspace")
             scope = {"scope_type": "workspace", "workspace_id": "save-workspace"}
             payload.update(scope)
         created = client.post(

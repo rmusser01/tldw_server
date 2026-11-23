@@ -229,7 +229,7 @@ def test_paging_and_totals_stay_correct(db: CharactersRAGDB, order_by: str) -> N
 
 def test_conversation_filters_still_apply_to_content_matches(db: CharactersRAGDB) -> None:
     """A workspace chat that mentions the term stays out of the global list."""
-    db.upsert_workspace("ws-a", "A")
+    db.workspace_store.upsert_workspace("ws-a", "A")
     _add_chat(db, "global", "Weekly sync")
     _say(db, "global", "zebrafinch in the global chat")
     _add_chat(db, "scoped", "Weekly sync", workspace="ws-a")

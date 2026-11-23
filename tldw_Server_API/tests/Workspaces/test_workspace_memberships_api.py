@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 
 
 class FakeMembershipDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self) -> None:
         self.workspaces: dict[str, dict[str, object]] = {
             "workspace-1": {"id": "workspace-1", "archived": False},

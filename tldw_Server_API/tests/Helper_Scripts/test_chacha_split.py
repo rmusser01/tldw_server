@@ -900,6 +900,27 @@ def test_select_matches_research_groups_on_a_seed(tmp_path: Path, capsys: pytest
     assert group("init") == ["_initialize_schema_sqlite_legacy"]  # the closure leaves ``_used_by_a_store`` (a store reaches it)
 
 
+DOMAIN_DB = '''
+class CharactersRAGDB:
+    def get_workspace(self): ...
+    def get_workspace(self): ...
+    def create_source_review_plan(self): ...
+    def _verify_workspace_migration_delete_eligibility(self): ...
+    def _ensure_workspace_table(self): ...
+    def add_flashcard_to_workspace(self): ...
+    def add_note(self): ...
+'''
+
+
+def test_select_workspace_takes_the_first_matching_domain_and_the_false_positives(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _seed(tmp_path, {}, db=DOMAIN_DB)
+    assert split.main(["select", "workspace", "--root", str(root)]) == 0
+    out = capsys.readouterr()
+    # a schema-bucket name stays out, but a listed false positive is "other"; "flashcard" is matched before "workspace"
+    assert ast.literal_eval(out.out) == ["get_workspace", "create_source_review_plan", "_verify_workspace_migration_delete_eligibility"]
+    assert "3 names, 4 defs" in out.err
+
+
 def test_constants_fail_closed_on_a_name_that_is_not_a_constant(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _constants_tree(tmp_path, ["_NOPE"])
     assert _constants(root) == 1
@@ -1015,6 +1036,8 @@ def test_check_flags_a_moved_name_held_in_a_string(tmp_path: Path, capsys: pytes
         'name = f"_a{suffix}"\n',
         'name = f"_a"\n',
         'setattr(db, "_a", fake)\n',
+        'delattr(db, "_a")\n',
+        'return hasattr(db, "_a")\n',
     ):
         (root / TEST).write_text(f"def t(db, suffix, fake):\n    {body}")
         assert split.main(["check", manifest, str(root / FN_B), "--root", str(root)]) == 1, body

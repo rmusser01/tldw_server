@@ -174,7 +174,7 @@ class SharedWorkspaceAccessService:
             owner_db = await self._owner_chacha_loader(owner_user_id)
             if owner_db is None:
                 raise SharedWorkspaceUnavailable()
-            workspace = owner_db.get_workspace(workspace_id)
+            workspace = owner_db.workspace_store.get_workspace(workspace_id)
         except SharedWorkspaceUnavailable:
             raise
         except Exception as exc:

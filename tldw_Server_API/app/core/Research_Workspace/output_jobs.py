@@ -159,7 +159,7 @@ def build_research_workspace_output_source_context(
     ]
     source_by_id = {
         str(source.get("id") or "").strip(): source
-        for source in workspace_db.list_workspace_sources(workspace_id)
+        for source in workspace_db.workspace_store.list_workspace_sources(workspace_id)
     }
     context_char_limit = min(max(int(max_chars), 1), _SOURCE_CONTEXT_TOTAL_CHAR_LIMIT)
     remaining_chars = context_char_limit
@@ -1000,7 +1000,7 @@ def submit_research_workspace_output_job(
     """Create a pending workspace artifact and enqueue its generation job."""
     _validate_workspace_sources(workspace_db, workspace_id, request.source_ids)
     artifact_id = f"{request.artifact_type}-{uuid.uuid4().hex}"
-    workspace_db.add_workspace_artifact(
+    workspace_db.workspace_store.add_workspace_artifact(
         workspace_id,
         _pending_artifact_payload(
             artifact_id=artifact_id,
@@ -1028,7 +1028,7 @@ def submit_research_workspace_output_job(
         )
     except Exception as exc:
         try:
-            workspace_db.delete_workspace_artifact(workspace_id, artifact_id)
+            workspace_db.workspace_store.delete_workspace_artifact(workspace_id, artifact_id)
         except Exception as cleanup_exc:
             logger.warning(
                 "Failed to delete pending Research Workspace output artifact {} for workspace {} "
@@ -1077,7 +1077,7 @@ def get_research_workspace_output_job_status(
     if not artifact_id or artifact_type not in _OUTPUT_ARTIFACT_TYPES:
         raise ResearchWorkspaceOutputJobError("job_payload_invalid", status_code=500)
 
-    artifact_row = workspace_db.get_workspace_artifact(workspace_id, artifact_id)
+    artifact_row = workspace_db.workspace_store.get_workspace_artifact(workspace_id, artifact_id)
     artifact = WorkspaceArtifactResponse.model_validate(artifact_row) if artifact_row else None
     job_error = _job_error(job)
     artifact_error = _artifact_error(artifact)
@@ -1101,7 +1101,7 @@ def _validate_workspace_sources(
     source_ids: list[str],
 ) -> None:
     """Verify that all requested source ids belong to the workspace."""
-    existing_ids = {str(source.get("id") or "").strip() for source in workspace_db.list_workspace_sources(workspace_id)}
+    existing_ids = {str(source.get("id") or "").strip() for source in workspace_db.workspace_store.list_workspace_sources(workspace_id)}
     if not existing_ids or any(source_id not in existing_ids for source_id in source_ids):
         raise ResearchWorkspaceOutputJobError("workspace_sources_not_found", status_code=404)
 
@@ -1338,7 +1338,7 @@ def _update_workspace_output_artifact(
     updates: dict[str, Any],
 ) -> dict[str, Any]:
     """Update a workspace output artifact with optimistic version checks."""
-    existing = workspace_db.get_workspace_artifact(workspace_id, artifact_id)
+    existing = workspace_db.workspace_store.get_workspace_artifact(workspace_id, artifact_id)
     if existing is None:
         raise ResearchWorkspaceOutputJobError("workspace_artifact_not_found", status_code=404)
     try:
@@ -1348,7 +1348,7 @@ def _update_workspace_output_artifact(
     if expected_version < 1:
         raise ResearchWorkspaceOutputJobError("workspace_artifact_version_invalid", status_code=409)
     try:
-        return workspace_db.update_workspace_artifact(
+        return workspace_db.workspace_store.update_workspace_artifact(
             workspace_id,
             artifact_id,
             updates,

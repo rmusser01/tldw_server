@@ -439,9 +439,9 @@ async def recipient_security_harness(
         mark_media_as_processed(media_db, media_id)
         media_ids[source_id] = media_id
 
-    owner_db.upsert_workspace(WORKSPACE_ID, "Shared security review")
+    owner_db.workspace_store.upsert_workspace(WORKSPACE_ID, "Shared security review")
     for index in (1, 2):
-        owner_db.add_workspace_source(
+        owner_db.workspace_store.add_workspace_source(
             WORKSPACE_ID,
             {
                 "id": f"source-{index}",
@@ -462,7 +462,7 @@ async def recipient_security_harness(
             "client_id": str(OWNER_ID),
         }
     )
-    member_db.upsert_workspace("recipient-local", RECIPIENT_LOCAL_SENTINEL)
+    member_db.workspace_store.upsert_workspace("recipient-local", RECIPIENT_LOCAL_SENTINEL)
 
     owner_db_calls: list[int] = []
     recipient_db_calls: list[int] = []
@@ -961,7 +961,7 @@ async def test_authority_and_frozen_scope_changes_fail_before_persistence(
             )
             harness.sharing_db.commit()
         elif mutation == "source":
-            harness.owner_db.delete_workspace_source(WORKSPACE_ID, "source-2")
+            harness.owner_db.workspace_store.delete_workspace_source(WORKSPACE_ID, "source-2")
         else:
             harness.mutate_media_hash("source-2")
 

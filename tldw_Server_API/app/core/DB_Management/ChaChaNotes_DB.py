@@ -1705,6 +1705,7 @@ class CharactersRAGDB:
         )
         from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
         from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceChatStartupStore
+        from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
 
         ctx = self.ctx  # one context, built before the stores that share it
         self.character_store = CharacterStore(self)
@@ -1725,6 +1726,7 @@ class CharactersRAGDB:
         self.note_semantic_store = NoteSemanticStore(self)
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(ctx)
+        self.workspace_store = WorkspaceStore(ctx)
         self.persona_state_store = PersonaStateStore(self)
         from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_store import PersonaTranscriptStore
         self.persona_transcript_store = PersonaTranscriptStore(self)

@@ -19,9 +19,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 def test_workspace_activity_events_are_timestamped_newest_first_and_safe(tmp_path) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="test-client")
     try:
-        db.upsert_workspace("workspace-1", "Activity Workspace")
+        db.workspace_store.upsert_workspace("workspace-1", "Activity Workspace")
 
-        db.record_workspace_activity_event(
+        db.workspace_store.record_workspace_activity_event(
             "workspace-1",
             {
                 "event_type": "membership.linked",
@@ -37,7 +37,7 @@ def test_workspace_activity_events_are_timestamped_newest_first_and_safe(tmp_pat
             },
             user_id="user-1",
         )
-        db.record_workspace_activity_event(
+        db.workspace_store.record_workspace_activity_event(
             "workspace-1",
             {
                 "event_type": "runtime_binding.upserted",
@@ -50,7 +50,7 @@ def test_workspace_activity_events_are_timestamped_newest_first_and_safe(tmp_pat
             user_id="user-1",
         )
 
-        rows = db.list_workspace_activity_events("workspace-1", limit=10)
+        rows = db.workspace_store.list_workspace_activity_events("workspace-1", limit=10)
 
         assert [row["event_type"] for row in rows] == [
             "runtime_binding.upserted",
@@ -65,13 +65,14 @@ def test_workspace_activity_events_are_timestamped_newest_first_and_safe(tmp_pat
         assert "sk-secret" not in repr(rows)
         assert [
             row["event_type"]
-            for row in db.list_workspace_activity_events("workspace-1", limit=10, category="runtime_binding")
+            for row in db.workspace_store.list_workspace_activity_events("workspace-1", limit=10, category="runtime_binding")
         ] == ["runtime_binding.upserted"]
     finally:
         db.close_connection()
 
 
 class FakeWorkspaceIndexDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self) -> None:
         self.workspaces: dict[str, dict[str, object]] = {
             "workspace-1": {
@@ -409,8 +410,8 @@ def test_workspace_index_runtime_summary_counts_beyond_binding_preview() -> None
 def test_workspace_index_api_returns_deleted_warning_for_soft_deleted_workspace(tmp_path) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="test-client")
     try:
-        workspace = db.upsert_workspace("workspace-deleted", "Deleted Workspace")
-        db.record_workspace_activity_event(
+        workspace = db.workspace_store.upsert_workspace("workspace-deleted", "Deleted Workspace")
+        db.workspace_store.record_workspace_activity_event(
             "workspace-deleted",
             {
                 "event_type": "workspace.deleted",
@@ -419,7 +420,7 @@ def test_workspace_index_api_returns_deleted_warning_for_soft_deleted_workspace(
             },
             user_id="user-1",
         )
-        db.delete_workspace("workspace-deleted", expected_version=workspace["version"])
+        db.workspace_store.delete_workspace("workspace-deleted", expected_version=workspace["version"])
         app = FastAPI()
         app.include_router(workspaces_endpoint.router, prefix="/api/v1/workspaces")
 

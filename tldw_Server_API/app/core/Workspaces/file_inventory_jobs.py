@@ -118,7 +118,7 @@ def enqueue_workspace_file_inventory_scan_job(
         Jobs rows.
     """
     manager = job_manager or JobManager()
-    scan = db.begin_workspace_file_inventory_scan(
+    scan = db.workspace_store.begin_workspace_file_inventory_scan(
         workspace_id,
         root_id,
         root_version,
@@ -144,7 +144,7 @@ def enqueue_workspace_file_inventory_scan_job(
             idempotency_key=f"workspace-file-inventory-scan:{scan['scan_id']}",
         )
     except Exception as exc:
-        db.mark_workspace_file_inventory_enqueue_failed(
+        db.workspace_store.mark_workspace_file_inventory_enqueue_failed(
             str(scan["scan_id"]),
             [
                 {
@@ -156,8 +156,8 @@ def enqueue_workspace_file_inventory_scan_job(
         raise WorkspaceFileInventoryEnqueueError() from exc
 
     job = _reload_job(manager, created_job)
-    attached_scan = db.attach_workspace_file_inventory_job(str(scan["scan_id"]), job)
-    status = db.get_workspace_file_inventory_status(workspace_id, policy_fingerprint=policy_fingerprint)
+    attached_scan = db.workspace_store.attach_workspace_file_inventory_job(str(scan["scan_id"]), job)
+    status = db.workspace_store.get_workspace_file_inventory_status(workspace_id, policy_fingerprint=policy_fingerprint)
     return {"scan": attached_scan, "job": job, "status": status}
 
 

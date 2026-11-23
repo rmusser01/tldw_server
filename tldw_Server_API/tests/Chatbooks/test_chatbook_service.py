@@ -110,7 +110,7 @@ def test_conversation_pipeline_omits_and_distrusts_local_startup(service: Chatbo
     db = CharactersRAGDB(tmp_path / "startup-transport.db", client_id="test_user")
     service.db = db
     try:
-        db.upsert_workspace("chatbook-private-origin-marker", "Private origin")
+        db.workspace_store.upsert_workspace("chatbook-private-origin-marker", "Private origin")
         character_id = db.add_character_card({"name": "Transport", "system_prompt": "Help."})
         source_id = db.add_conversation(
             {"title": "Transport source", "character_id": character_id},

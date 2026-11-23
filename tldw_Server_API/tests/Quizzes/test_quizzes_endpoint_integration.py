@@ -523,7 +523,7 @@ def test_quiz_workspace_id_contract_and_scope_filters(
     client_with_quizzes_db: TestClient,
     quizzes_db: CharactersRAGDB,
 ):
-    quizzes_db.upsert_workspace("ws-1", "Workspace One")
+    quizzes_db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     create_response = client_with_quizzes_db.post(
         "/api/v1/quizzes",
@@ -2137,7 +2137,7 @@ def test_generate_quiz_from_quiz_attempt_question_sources(
 ):
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
     question_source_id = f"{attempt_id}:{question_ids[0]}"
-    quizzes_db.upsert_workspace("ws-1", "Workspace One")
+    quizzes_db.workspace_store.upsert_workspace("ws-1", "Workspace One")
 
     async def fake_generate_llm(*, prompt: str, model: str | None = None, **_kwargs):
         assert "Which structure filters blood?" in prompt

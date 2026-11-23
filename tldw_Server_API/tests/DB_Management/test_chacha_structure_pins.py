@@ -137,6 +137,7 @@ def test_context_module_privates_are_pinned() -> None:
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.support",
         "tldw_Server_API.app.core.DB_Management.chacha.postgres_schema",
         "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap",
+        "tldw_Server_API.app.core.DB_Management.chacha.workspace_store",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.sqlite_steps",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.postgres_steps",
     ],
@@ -450,3 +451,23 @@ def test_postgres_init_repairs_legacy_markers_in_order() -> None:
     assert _calls(history, "_set_schema_version_postgres", 67)  # nosec B101
     assert _calls(stamp, "_set_schema_version_postgres", 72)  # nosec B101
     assert bridge.lineno < history.lineno < stamp.lineno  # nosec B101
+
+
+def test_facade_forwards_moving_names_at_call_time() -> None:
+    """PR I1: ``db.workspace_store.<m>`` reads ``db.<m>`` when called, so an instance patch of the DB stays live."""
+    from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
+
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db.workspace_store = WorkspaceStore(db.ctx)
+    patched = object()
+    db.get_workspace = patched  # type: ignore[method-assign]
+    assert db.workspace_store.get_workspace is patched  # nosec B101
+
+
+def test_facade_rejects_other_names() -> None:
+    from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
+
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db.workspace_store = WorkspaceStore(db.ctx)
+    with pytest.raises(AttributeError):
+        db.workspace_store.add_note  # noqa: B018

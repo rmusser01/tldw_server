@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import WORKSP
 
 
 class FakeEligibilityDB:
+    workspace_store = property(lambda self: self)  # PR I1: the fake serves its own workspace methods
     def __init__(self) -> None:
         self.workspaces: dict[str, dict[str, object]] = {
             "workspace-1": {"id": "workspace-1", "archived": False},

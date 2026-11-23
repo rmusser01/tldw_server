@@ -586,7 +586,7 @@ def test_workspace_closure_blocks_commit_or_receipt_disclosure(native_fork_db, c
 
     db = native_fork_db
     authorized = workspace_owner()
-    db.upsert_workspace(authorized.scope.workspace_id, "Owned workspace")
+    db.workspace_store.upsert_workspace(authorized.scope.workspace_id, "Owned workspace")
     source = db.add_conversation(
         {
             "title": "Workspace source",

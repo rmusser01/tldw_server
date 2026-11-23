@@ -554,7 +554,7 @@ async def test_saved_lore_preview_matches_native_historical_placeholders(frozen_
 @pytest.mark.asyncio
 async def test_saved_lore_preview_rechecks_locked_scope_after_sync_move(frozen_chat, monkeypatch):
     """The initial global-route read must not authorize later workspace lore."""
-    frozen_chat.db.upsert_workspace(
+    frozen_chat.db.workspace_store.upsert_workspace(
         "preview-scope-workspace", "Preview scope workspace", initial_assistant_opt_out=True
     )
     original = frozen_chat.db.get_conversation_history_snapshot

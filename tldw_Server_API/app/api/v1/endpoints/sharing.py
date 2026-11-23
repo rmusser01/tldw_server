@@ -428,7 +428,7 @@ async def _verify_workspace_ownership(workspace_id: str, user: User) -> None:
         from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
 
         db = await get_chacha_db_for_user_id(user.id)
-        ws = db.get_workspace(workspace_id)
+        ws = db.workspace_store.get_workspace(workspace_id)
         if ws is None:
             raise HTTPException(
                 status_code=404,
@@ -542,7 +542,7 @@ async def _load_recipient_workspace_sources(context: Any) -> list[dict[str, Any]
 
     try:
         owner_db = await get_chacha_db_for_owner(context.owner_user_id)
-        sources = owner_db.list_workspace_sources(context.workspace_id)
+        sources = owner_db.workspace_store.list_workspace_sources(context.workspace_id)
         return [dict(source) for source in sources]
     except Exception as exc:
         raise _recipient_http_error(503, "shared_workspace_unavailable") from exc
@@ -1797,7 +1797,7 @@ async def shared_with_me(
                 db = owner_dbs.get(item.owner_user_id)
                 if db:
                     try:
-                        ws = db.get_workspace(item.workspace_id)
+                        ws = db.workspace_store.get_workspace(item.workspace_id)
                         if ws:
                             item.workspace_name = ws.get("name")
                     except Exception:

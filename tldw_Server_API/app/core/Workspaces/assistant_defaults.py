@@ -53,7 +53,7 @@ def project_assistant_startup(
     if workspace_visibility_cache is not None and origin in workspace_visibility_cache:
         visible = workspace_visibility_cache[origin]
     else:
-        workspace = db.get_workspace(origin)
+        workspace = db.workspace_store.get_workspace(origin)
         visible = workspace is not None and not workspace.get("deleted")
         if workspace_visibility_cache is not None:
             workspace_visibility_cache[origin] = visible
@@ -173,7 +173,7 @@ def require_workspace_for_chat_creation(
     keeps the availability read locked through the subsequent selection.
     """
     connection_kwargs = {"conn": conn, "for_update": True} if conn is not None else {}
-    workspace = db.get_workspace(workspace_id, **connection_kwargs)
+    workspace = db.workspace_store.get_workspace(workspace_id, **connection_kwargs)
     if workspace is None or workspace.get("deleted"):
         raise HTTPException(status_code=404, detail="Workspace not found")
     return workspace

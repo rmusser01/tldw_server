@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.Workspaces.operations import (
 @pytest.fixture
 def db(tmp_path):
     database = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
-    database.upsert_workspace("ws-ops", "Operation Workspace")
+    database.workspace_store.upsert_workspace("ws-ops", "Operation Workspace")
     return database
 
 
@@ -27,7 +27,7 @@ def test_workspace_operation_create_is_idempotent_and_conflicts_on_changed_reque
             "raw_host_path": "/Users/alice/private/project",
         }
     )
-    operation = db.create_workspace_operation(
+    operation = db.workspace_store.create_workspace_operation(
         workspace_id="ws-ops",
         user_id="user-1",
         command="provision_sandbox_root",
@@ -41,7 +41,7 @@ def test_workspace_operation_create_is_idempotent_and_conflicts_on_changed_reque
         },
     )
 
-    retry = db.create_workspace_operation(
+    retry = db.workspace_store.create_workspace_operation(
         workspace_id="ws-ops",
         user_id="user-1",
         command="provision_sandbox_root",
@@ -52,8 +52,8 @@ def test_workspace_operation_create_is_idempotent_and_conflicts_on_changed_reque
 
     assert retry["id"] == operation["id"]
     assert retry["status"] == "running"
-    assert db.get_workspace_operation("ws-ops", operation["id"])["id"] == operation["id"]
-    assert db.get_workspace_operation_by_idempotency(
+    assert db.workspace_store.get_workspace_operation("ws-ops", operation["id"])["id"] == operation["id"]
+    assert db.workspace_store.get_workspace_operation_by_idempotency(
         workspace_id="ws-ops",
         user_id="user-1",
         command="provision_sandbox_root",
@@ -64,7 +64,7 @@ def test_workspace_operation_create_is_idempotent_and_conflicts_on_changed_reque
     assert operation_poll_href("ws-ops", operation["id"]).endswith(f"/ws-ops/operations/{operation['id']}")
 
     with pytest.raises(ConflictError):
-        db.create_workspace_operation(
+        db.workspace_store.create_workspace_operation(
             workspace_id="ws-ops",
             user_id="user-1",
             command="provision_sandbox_root",
@@ -76,7 +76,7 @@ def test_workspace_operation_create_is_idempotent_and_conflicts_on_changed_reque
 def test_workspace_operation_expired_idempotency_key_creates_fresh_operation(db):
     fingerprint = fingerprint_workspace_command({"requested_runtime": "docker"})
     expired = datetime.now(timezone.utc) - timedelta(minutes=1)
-    first = db.create_workspace_operation(
+    first = db.workspace_store.create_workspace_operation(
         workspace_id="ws-ops",
         user_id="user-1",
         command="provision_sandbox_root",
@@ -86,7 +86,7 @@ def test_workspace_operation_expired_idempotency_key_creates_fresh_operation(db)
         expires_at=expired,
     )
 
-    fresh = db.create_workspace_operation(
+    fresh = db.workspace_store.create_workspace_operation(
         workspace_id="ws-ops",
         user_id="user-1",
         command="provision_sandbox_root",
@@ -96,7 +96,7 @@ def test_workspace_operation_expired_idempotency_key_creates_fresh_operation(db)
     )
 
     assert fresh["id"] != first["id"]
-    assert db.get_workspace_operation("ws-ops", first["id"]) is None
+    assert db.workspace_store.get_workspace_operation("ws-ops", first["id"]) is None
     assert fresh["status"] == "queued"
 
 
@@ -123,7 +123,7 @@ def test_workspace_operation_response_redacts_secret_shaped_diagnostic_values():
 
 
 def test_workspace_operation_cleanup_preserves_attached_root(db):
-    db.upsert_workspace_primary_root(
+    db.workspace_store.upsert_workspace_primary_root(
         "ws-ops",
         {
             "root_id": "primary",
@@ -133,7 +133,7 @@ def test_workspace_operation_cleanup_preserves_attached_root(db):
         },
     )
     expired = datetime.now(timezone.utc) - timedelta(minutes=1)
-    operation = db.create_workspace_operation(
+    operation = db.workspace_store.create_workspace_operation(
         workspace_id="ws-ops",
         user_id="user-1",
         command="provision_sandbox_root",
@@ -144,13 +144,13 @@ def test_workspace_operation_cleanup_preserves_attached_root(db):
         expires_at=expired,
     )
 
-    assert db.cleanup_expired_workspace_operations(now=datetime.now(timezone.utc)) == 1
-    assert db.get_workspace_operation("ws-ops", operation["id"]) is None
-    assert db.get_workspace_primary_root("ws-ops")["sandbox_volume_id"] == "volume-1"
+    assert db.workspace_store.cleanup_expired_workspace_operations(now=datetime.now(timezone.utc)) == 1
+    assert db.workspace_store.get_workspace_operation("ws-ops", operation["id"]) is None
+    assert db.workspace_store.get_workspace_primary_root("ws-ops")["sandbox_volume_id"] == "volume-1"
 
 
 def test_list_active_workspace_operations_filters_terminal_and_expired(db):
-    active = db.create_workspace_operation(
+    active = db.workspace_store.create_workspace_operation(
         workspace_id="ws-ops",
         user_id="user-1",
         command="provision_sandbox_root",
@@ -158,7 +158,7 @@ def test_list_active_workspace_operations_filters_terminal_and_expired(db):
         request_fingerprint=fingerprint_workspace_command({"requested_runtime": "docker"}),
         status="running",
     )
-    db.create_workspace_operation(
+    db.workspace_store.create_workspace_operation(
         workspace_id="ws-ops",
         user_id="user-1",
         command="provision_sandbox_root",
@@ -166,7 +166,7 @@ def test_list_active_workspace_operations_filters_terminal_and_expired(db):
         request_fingerprint=fingerprint_workspace_command({"requested_runtime": "docker", "done": True}),
         status="succeeded",
     )
-    db.create_workspace_operation(
+    db.workspace_store.create_workspace_operation(
         workspace_id="ws-ops",
         user_id="user-1",
         command="provision_sandbox_root",
@@ -176,6 +176,6 @@ def test_list_active_workspace_operations_filters_terminal_and_expired(db):
         expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
     )
 
-    operations = db.list_active_workspace_operations("ws-ops")
+    operations = db.workspace_store.list_active_workspace_operations("ws-ops")
 
     assert [operation["id"] for operation in operations] == [active["id"]]
