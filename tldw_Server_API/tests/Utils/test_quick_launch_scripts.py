@@ -1,12 +1,37 @@
 """Contract tests for no-Docker quick-launch scripts."""
 
 import ast
+import json
+import shlex
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+TEST_API_KEY = "quick-launch-test-key-1234567890"
+LOGGED_ENV_NAMES = (
+    "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE",
+    "TLDW_INTERNAL_API_ORIGIN",
+    "NEXT_PUBLIC_API_URL",
+    "AUTH_MODE",
+    "SINGLE_USER_API_KEY",
+    "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH",
+)
+FAKE_BUN_SOURCE = """
+import json, os, pathlib, sys
+names = {names!r}
+args = sys.argv[1:]
+record = {{"args": args, "cwd": os.getcwd(), "env": {{n: os.environ.get(n) for n in names}}}}
+with open(os.environ["FAKE_BUN_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps(record) + "\\n")
+if args[:1] == ["run"] and args[1].startswith("build:"):
+    pathlib.Path(".next").mkdir(exist_ok=True)
+    pathlib.Path(".next/BUILD_ID").write_text("fake-build", encoding="utf-8")
+"""
 
 
 def _require(condition: bool, message: str) -> None:
@@ -332,3 +357,204 @@ def test_quick_launch_scripts_do_not_print_api_keys_by_default(path: str) -> Non
     )
     for fragment in forbidden_fragments:
         _require(fragment not in text, f"{path} should not include {fragment}")
+
+
+class ShellLauncherSandbox:
+    """A copy of quick-launch.sh with a fake bun, venv and env file around it."""
+
+    def __init__(self, root: Path) -> None:
+        """Lay out the launcher, a stub WebUI dir, a fake venv and a fake bun."""
+        self.root = root
+        self.log = root / "bun-calls.jsonl"
+        shutil.copy2(REPO_ROOT / "quick-launch.sh", root / "quick-launch.sh")
+        (root / "apps" / "tldw-frontend").mkdir(parents=True)
+        self.env_file = root / "test.env"
+        self.env_file.write_text(
+            f'AUTH_MODE=single_user\nSINGLE_USER_API_KEY="{TEST_API_KEY}"\n',
+            encoding="utf-8",
+        )
+        bin_dir = root / "fake-bin"
+        venv_bin = root / "venv" / "bin"
+        bin_dir.mkdir()
+        venv_bin.mkdir(parents=True)
+        fake_bun = root / "fake_bun.py"
+        fake_bun.write_text(FAKE_BUN_SOURCE.format(names=LOGGED_ENV_NAMES), encoding="utf-8")
+        self._write_wrapper(bin_dir / "bun", f"{shlex.quote(sys.executable)} {shlex.quote(str(fake_bun))}")
+        self._write_wrapper(venv_bin / "python", shlex.quote(sys.executable))
+        self.base_env = {
+            "PATH": f"{bin_dir}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+            "HOME": str(root),
+            "GIT_CEILING_DIRECTORIES": str(root.parent),
+            "TLDW_VENV_DIR": str(root / "venv"),
+            "TLDW_ENV_FILE": str(self.env_file),
+            "TLDW_API_PORT": "8027",
+            "TLDW_WEBUI_PORT": "8097",
+            "FAKE_BUN_LOG": str(self.log),
+        }
+
+    @staticmethod
+    def _write_wrapper(path: Path, command: str) -> None:
+        """Write an executable shell wrapper that forwards its arguments."""
+        path.write_text(f'#!/bin/sh\nexec {command} "$@"\n', encoding="utf-8")
+        path.chmod(0o755)
+
+    def launch(self, **extra_env: str) -> list[dict]:
+        """Run `quick-launch.sh webui` and return the bun calls it made."""
+        self.log.unlink(missing_ok=True)
+        result = subprocess.run(  # nosec B603 - fixed local test script
+            ["bash", str(self.root / "quick-launch.sh"), "webui"],
+            cwd=self.root,
+            env={**self.base_env, **extra_env},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        _require(result.returncode == 0, f"launcher failed: {result.stdout}\n{result.stderr}")
+        if not self.log.exists():
+            return []
+        return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
+
+    def git(self, *args: str) -> None:
+        """Run git in the sandbox so the launcher sees a source revision."""
+        subprocess.run(  # nosec B603 B607 - fixed git arguments in a temp dir
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+            cwd=self.root,
+            env=self.base_env,
+            capture_output=True,
+            check=True,
+        )
+
+
+@pytest.fixture
+def shell_sandbox(tmp_path: Path) -> ShellLauncherSandbox:
+    """Provide an isolated quick-launch.sh sandbox (POSIX shells only)."""
+    if shutil.which("bash") is None or sys.platform.startswith("win"):
+        pytest.skip("quick-launch.sh behaviour tests need a POSIX bash")
+    return ShellLauncherSandbox(tmp_path)
+
+
+def _call_args(calls: list[dict]) -> list[list[str]]:
+    """Return only the argument lists of recorded bun calls."""
+    return [call["args"] for call in calls]
+
+
+def test_shell_launcher_builds_once_then_serves_production_webui(shell_sandbox) -> None:
+    """Default launch builds the quickstart WebUI once and serves it with next start."""
+    first = shell_sandbox.launch()
+
+    _require(
+        _call_args(first) == [
+            ["run", "build:prod"],
+            ["run", "start", "--", "-p", "8097", "-H", "127.0.0.1"],
+        ],
+        f"first launch should build then start the production WebUI: {first}",
+    )
+    build_env, start_env = first[0]["env"], first[1]["env"]
+    _require(
+        build_env["TLDW_INTERNAL_API_ORIGIN"] == "http://127.0.0.1:8027",
+        "the build should bake the backend origin into the quickstart proxy",
+    )
+    _require(build_env["SINGLE_USER_API_KEY"] is None, "the API key must stay out of the build")
+    _require(
+        start_env == {
+            "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE": "quickstart",
+            "TLDW_INTERNAL_API_ORIGIN": "http://127.0.0.1:8027",
+            "NEXT_PUBLIC_API_URL": None,
+            "AUTH_MODE": "single_user",
+            "SINGLE_USER_API_KEY": TEST_API_KEY,
+            "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH": "1",
+        },
+        f"the WebUI server should get the Docker-quickstart runtime auth env: {start_env}",
+    )
+
+    second = shell_sandbox.launch()
+    _require(
+        _call_args(second) == [["run", "start", "--", "-p", "8097", "-H", "127.0.0.1"]],
+        f"second launch should reuse the build: {second}",
+    )
+
+
+def test_shell_launcher_rebuilds_when_api_origin_or_revision_changes(shell_sandbox) -> None:
+    """A new backend port or a new git revision invalidates the WebUI build."""
+    shell_sandbox.git("init", "-q")
+    shell_sandbox.git("commit", "-q", "--allow-empty", "-m", "one")
+    shell_sandbox.launch()
+
+    moved = shell_sandbox.launch(TLDW_API_PORT="8028")
+    _require(
+        _call_args(moved)[0] == ["run", "build:prod"]
+        and moved[0]["env"]["TLDW_INTERNAL_API_ORIGIN"] == "http://127.0.0.1:8028",
+        f"changing the API port should rebuild against the new origin: {moved}",
+    )
+
+    shell_sandbox.git("commit", "-q", "--allow-empty", "-m", "two")
+    updated = shell_sandbox.launch(TLDW_API_PORT="8028")
+    _require(
+        _call_args(updated)[0] == ["run", "build:prod"],
+        f"a new source revision should rebuild the WebUI: {updated}",
+    )
+
+
+def test_shell_launcher_dev_server_is_opt_in(shell_sandbox) -> None:
+    """TLDW_WEBUI_DEV=1 keeps the old hot-reloading next dev path, without a build."""
+    calls = shell_sandbox.launch(TLDW_WEBUI_DEV="1")
+
+    _require(
+        _call_args(calls) == [["run", "dev", "--", "-p", "8097"]],
+        f"dev opt-in should run next dev only: {calls}",
+    )
+    _require(
+        calls[0]["env"]["NEXT_PUBLIC_API_URL"] == "http://127.0.0.1:8027",
+        "the dev server should keep pointing the browser at the API directly",
+    )
+
+
+def test_shell_launcher_honours_next_public_api_url_override(shell_sandbox) -> None:
+    """A user-set NEXT_PUBLIC_API_URL keeps advanced networking in a production build."""
+    calls = shell_sandbox.launch(NEXT_PUBLIC_API_URL="http://192.0.2.10:8000")
+
+    _require(
+        _call_args(calls) == [
+            ["run", "build:dev"],
+            ["run", "start", "--", "-p", "8097", "-H", "0.0.0.0"],
+        ],
+        f"an API URL override should build the advanced profile: {calls}",
+    )
+    start_env = calls[1]["env"]
+    _require(
+        start_env["NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE"] == "advanced"
+        and start_env["NEXT_PUBLIC_API_URL"] == "http://192.0.2.10:8000",
+        f"the browser should call the overridden API URL directly: {start_env}",
+    )
+    _require(
+        start_env["SINGLE_USER_API_KEY"] is None,
+        "advanced networking has no runtime auth bridge, so the key stays out",
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "quick-launch.sh",
+        "quick-launch.ps1",
+    ],
+)
+def test_quick_launch_scripts_share_production_webui_contract(path: str) -> None:
+    """Both launchers keep the same production-build, rebuild-key and dev opt-in logic."""
+    text = _read(path)
+
+    for expected in (
+        "TLDW_WEBUI_DEV",
+        "build:prod",
+        "build:dev",
+        '"start"' if path.endswith(".ps1") else "run start",
+        "quick-launch-build-key",
+        "BUILD_ID",
+        "rev-parse",
+        "TLDW_INTERNAL_API_ORIGIN",
+        "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH",
+        "dotenv_values",
+        "first launch takes a few minutes",
+    ):
+        _require(expected in text, f"{path} should include {expected}")

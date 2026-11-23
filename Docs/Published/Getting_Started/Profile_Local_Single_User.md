@@ -34,6 +34,8 @@ No-`make` shortcut scripts from the repository root:
 
 On macOS, you can also double-click `quick-launch.command` from Finder. These shortcuts create or update `.venv`, run the `local-single` setup wizard when the API is started, and default to `all`: API at `http://127.0.0.1:8000` plus WebUI at `http://127.0.0.1:8080`. Use `api` for backend-only startup or `webui` when the API is already running.
 
+The WebUI is served from a production build, as in the Docker quickstart. The first launch builds it, which takes a few minutes; later launches reuse that build until the git revision or the API address changes (delete `apps/tldw-frontend/.next` to force a rebuild). The browser signs in with the local single-user key without a manual step. Set `TLDW_WEBUI_DEV=1` to run the hot-reloading Next.js dev server instead when you are working on the WebUI; it uses several GB of RAM.
+
 PowerShell / manual no-`make` equivalent:
 
 ```powershell

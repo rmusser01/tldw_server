@@ -119,7 +119,12 @@ function Show-Usage {
     Write-Host "  TLDW_API_PORT        Backend port (default: TLDW_PORT or 8000)"
     Write-Host "  TLDW_PORT            Legacy backend port override"
     Write-Host "  TLDW_WEBUI_PORT      WebUI port (default: 8080)"
-    Write-Host "  NEXT_PUBLIC_API_URL  Override WebUI API URL"
+    Write-Host "  NEXT_PUBLIC_API_URL  Override WebUI API URL (browser calls this URL directly)"
+    Write-Host "  TLDW_WEBUI_DEV       Set to 1 to run the hot-reloading Next.js dev server instead of"
+    Write-Host "                       the production build (for WebUI development; uses several GB of RAM)"
+    Write-Host ""
+    Write-Host "The WebUI is built once and rebuilt only when the git revision or API address"
+    Write-Host "changes. Delete apps/tldw-frontend/.next to force a rebuild."
 }
 
 function Test-Bun {
@@ -196,19 +201,108 @@ function run_api {
     )
 }
 
+# Print one value from the env file the way the backend reads it (python-dotenv).
+function Get-QuickLaunchEnvFileValue {
+    param([string]$Key)
+
+    if (-not (Test-Path $VenvPython)) {
+        return ""
+    }
+    $Value = & $VenvPython -c "import sys; from dotenv import dotenv_values; print(dotenv_values(sys.argv[1]).get(sys.argv[2]) or '')" $EnvFile $Key
+    if ($LASTEXITCODE -ne 0) {
+        return ""
+    }
+    return "$Value".Trim()
+}
+
+function Get-QuickLaunchGitRevision {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        return "no-git"
+    }
+    # Windows PowerShell turns redirected native stderr into errors; do not stop on them here.
+    $ErrorActionPreference = "Continue"
+    $Revision = & git rev-parse --verify --quiet HEAD 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $Revision) {
+        return "no-git"
+    }
+    return "$Revision".Trim()
+}
+
+# `next build` takes minutes and several GB of RAM on a laptop, so build only when needed.
+# The key names what a build bakes in (networking profile, API address, source revision).
+# It is written into .next after a successful build; `next build` empties .next first,
+# so a failed build leaves no key and the next launch builds again.
+# ponytail: without git (zip download) the revision is "no-git"; delete .next after updating.
+function Invoke-QuickLaunchWebUIBuild {
+    param(
+        [string]$BuildScript,
+        [string]$ApiUrl
+    )
+
+    $KeyFile = Join-Path $WebUIDir ".next/quick-launch-build-key"
+    $BuildKey = "$BuildScript $ApiUrl $(Get-QuickLaunchGitRevision)"
+
+    if ((Test-Path (Join-Path $WebUIDir ".next/BUILD_ID")) -and (Test-Path $KeyFile) -and ("$(Get-Content -Raw $KeyFile)".Trim() -eq $BuildKey)) {
+        Write-Host "[quick-launch] Reusing the existing WebUI build."
+        return
+    }
+
+    Write-Host "[quick-launch] Building the WebUI; the first launch takes a few minutes..."
+    Push-Location $WebUIDir
+    try {
+        Invoke-CheckedNative -FilePath "bun" -Arguments @("run", $BuildScript)
+    } finally {
+        Pop-Location
+    }
+    Set-Content -Path $KeyFile -Value $BuildKey
+}
+
 function run_webui {
     Test-Bun
     Test-WebUIDirectory
 
-    $env:NEXT_PUBLIC_API_URL = Resolve-QuickLaunchApiUrl
+    $HasApiUrlOverride = [bool]$env:NEXT_PUBLIC_API_URL
+    $ApiUrl = Resolve-QuickLaunchApiUrl
+
+    if ($env:TLDW_WEBUI_DEV -eq "1") {
+        # Developer opt-in: hot reload, but `next dev` holds several GB of RAM.
+        $env:NEXT_PUBLIC_API_URL = $ApiUrl
+        Write-Host ""
+        Write-Host "[quick-launch] Starting WebUI dev server (TLDW_WEBUI_DEV=1) at http://127.0.0.1:$WebUIPort"
+        Write-Host "[quick-launch] Using API URL: $($env:NEXT_PUBLIC_API_URL)"
+        Write-Host ""
+        Set-Location $WebUIDir
+        Invoke-CheckedNative -FilePath "bun" -Arguments @("run", "dev", "--", "-p", "$WebUIPort")
+        return
+    }
+
+    if ($HasApiUrlOverride) {
+        # Advanced networking: the browser calls NEXT_PUBLIC_API_URL directly. build:dev is
+        # still an optimized `next build`; only its networking profile differs from build:prod.
+        $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+        Invoke-QuickLaunchWebUIBuild -BuildScript "build:dev" -ApiUrl $ApiUrl
+        $WebUIHost = "0.0.0.0"
+        Write-Host "[quick-launch] Using API URL: $ApiUrl"
+    } else {
+        # Quickstart networking, as in the Docker WebUI: the browser talks only to the WebUI,
+        # which proxies /api and /health to the backend origin baked in at build time.
+        $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+        $env:TLDW_INTERNAL_API_ORIGIN = $ApiUrl
+        Invoke-QuickLaunchWebUIBuild -BuildScript "build:prod" -ApiUrl $ApiUrl
+        # The WebUI server (never the browser bundle) turns SINGLE_USER_API_KEY into a cookie
+        # session for loopback browsers, so nobody pastes a key. Loopback-only for that reason.
+        if (-not $env:AUTH_MODE) { $env:AUTH_MODE = Get-QuickLaunchEnvFileValue -Key "AUTH_MODE" }
+        if (-not $env:SINGLE_USER_API_KEY) { $env:SINGLE_USER_API_KEY = Get-QuickLaunchEnvFileValue -Key "SINGLE_USER_API_KEY" }
+        if (-not $env:TLDW_WEBUI_EXPOSE_RUNTIME_AUTH) { $env:TLDW_WEBUI_EXPOSE_RUNTIME_AUTH = "1" }
+        $WebUIHost = "127.0.0.1"
+        Write-Host "[quick-launch] WebUI proxies API requests to: $ApiUrl"
+    }
 
     Write-Host ""
     Write-Host "[quick-launch] Starting WebUI at http://127.0.0.1:$WebUIPort"
-    Write-Host "[quick-launch] Using API URL: $($env:NEXT_PUBLIC_API_URL)"
     Write-Host ""
-
     Set-Location $WebUIDir
-    Invoke-CheckedNative -FilePath "bun" -Arguments @("run", "dev", "--", "-p", "$WebUIPort")
+    Invoke-CheckedNative -FilePath "bun" -Arguments @("run", "start", "--", "-p", "$WebUIPort", "-H", $WebUIHost)
 }
 
 function run_all {
