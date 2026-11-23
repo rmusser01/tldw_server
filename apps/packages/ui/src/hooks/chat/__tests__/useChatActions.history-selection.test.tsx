@@ -7322,7 +7322,7 @@ it("8B plain saved-question Retry refused by a model setting explains it in plai
   expect(outcome).toMatchObject({status: "failed", errorMessage: "native_history_setting_unsupported:topK"})
   expect(h1.wire).not.toHaveBeenCalled()
   const description = String(options.notification.error.mock.calls.at(-1)?.[0]?.description)
-  expect(description).toContain("topK can't be used when retrying a saved question")
+  expect(description).toContain("The topK setting can't be used when retrying a saved question")
   expect(description).not.toMatch(/character/i)
 })
 
