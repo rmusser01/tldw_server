@@ -5959,3 +5959,97 @@ it("binds Auto native character Sidepanel sends to the current exact catalog pro
     catalog.mockRestore()
   }
 })
+
+// D7 P5 (8A): the side panel's Edit and send in a plain server chat whose server
+// settles turns goes out on /chat/completions, like the full page.
+describe("side-panel Edit and send in a server-settled chat (D7 P5)", () => {
+  const editableChat = () => {
+    h1.native = false
+    mocks.storeState.serverChatCharacterId = null
+    mocks.storeState.serverChatAssistantKind = null
+    mocks.storeState.messages = [
+      { id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+      { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }
+    ]
+    h1.capture.mockImplementation(async (_id, request) => ({
+      ...captureFor(request.view),
+      native_completion_v1: { policy: "selected_history_v1", supported: true, storage_context_digest: "storage" }
+    }))
+    h1.controller.followResult.mockImplementation(
+      async (_origin: unknown, _id: unknown, current?: () => boolean) => current?.() !== false
+    )
+    return structuredClone(mocks.storeState.messages)
+  }
+  const editAndSend = async () => {
+    const hook = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await hook.result.current.editMessage(0, "Edited question", true, true, () => true)
+    })
+    return outcome
+  }
+
+  it("asks the server to save the edited question and its reply", async () => {
+    const original = editableChat()
+    h1.wire.mockImplementation(async function* (request, options) {
+      options?.onDispatch?.()
+      yield { tldw_history_admission_v1: nativeAdmission(request) }
+      yield { choices: [{ delta: { content: "Edited answer" } }] }
+      yield { tldw_message_id: "edited-answer", tldw_conversation_id: nativeChatId, tldw_user_message_id: "native-input" }
+    })
+
+    expect(await editAndSend()).toEqual({ status: "submitted" })
+    const options = mocks.pageAssistModel.mock.calls.at(-1)![0]
+    expect(options).toMatchObject({ saveToDb: true, conversationId: nativeChatId })
+    expect(options).not.toHaveProperty("clientManagedHistory")
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.wire.mock.calls[0][0]).toMatchObject({
+      save_to_db: true,
+      conversation_id: nativeChatId,
+      tldw_history_branch: true,
+      tldw_history_edit_v1: { version: 1, message_id: "u-old", message_revision: "r1" },
+      tldw_history_selection_v1: { cursor: { kind: "before_message", message_id: "u-old" }, messages: [] }
+    })
+    expect(h1.wire.mock.calls[0][0].messages.at(-1)).toEqual({ role: "user", content: "Edited question" })
+    // The client neither appends the edited question nor touches the mounted originals.
+    expect(h1.append).not.toHaveBeenCalled()
+    expect(mocks.storeState.messages).toEqual(original)
+    expect(h1.controller.followResult).toHaveBeenCalledWith(
+      expect.objectContaining({ view_session_id: "origin" }),
+      "edited-answer",
+      expect.any(Function)
+    )
+  })
+
+  it("reads the server's wrapped 409 edit refusal as refused and keeps the edited text", async () => {
+    const original = editableChat()
+    h1.wire.mockImplementation(async function* (request, options) {
+      yield* []
+      options?.onDispatch?.()
+      // TldwChat wraps this as the cause of "Stream completion failed".
+      throw Object.assign(new Error("HTTP 409"), {
+        status: 409,
+        details: { detail: {
+          status: "stale_selection",
+          code: "history_edit_target_changed",
+          conversation_id: nativeChatId,
+          message_id: "u-old",
+          message_revision: "r1",
+          selection_digest: request.tldw_history_selection_v1.selection_digest
+        } }
+      })
+    })
+
+    expect(await editAndSend()).toMatchObject({ status: "failed", errorMessage: "native_history_edit_target_changed" })
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.wire.mock.calls[0][0]).toMatchObject({ save_to_db: true, tldw_history_edit_v1: { message_id: "u-old" } })
+    expect(h1.append).not.toHaveBeenCalled()
+    expect(h1.recover).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ action: "edit_resend", input_text: "Edited question", result_text: "", state: "refused" })
+    )
+    expect(mocks.storeState.messages).toEqual(original)
+    expect(h1.controller.followResult).not.toHaveBeenCalled()
+  })
+})
