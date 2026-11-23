@@ -1,7 +1,7 @@
 ---
 id: TASK-15629
 title: Release pdf.js page render data when PDF pages are painted or unmount
-status: In Progress
+status: Done
 labels:
 - webui
 - performance
@@ -32,12 +32,15 @@ Real pdf.js 4.8.69 check (throwaway Node script with node-canvas, scratchpad onl
 Tests: red 7 failed (cleanup never called), green 8 passed for PdfPage.release.test.tsx + PagesTab.test.tsx; neighbours PdfDocument.memory, DocumentViewerAlerts.design-system, DocumentWorkspacePageAlerts.design-system, usePdfSearch: 42/42 passed. eslint (lint:ui config) clean; targeted tsc on PdfPage.tsx + PagesTab.tsx clean.
 Remaining memory (pdf.js alone in Playwright's Chromium headless shell, 300-page 176 MB scanned PDF opened from a blob: URL, renderer RSS after forced GC and a 20 s settle): without release, load 288 MB, then 1,689 and 1,688 MB after passes 1 and 2. With release: pass 1 adds a one-time ~456 MB (742-839 MB), pass 2 adds nothing (840 MB). Neither a worker-isolate GC nor PDFDocumentProxy.cleanup() frees that step. doc.destroy() plus worker.terminate() frees ~180 MB (the worker's copy of the file) and leaves 560 MB against a 110 MB blank page, so the step is Chromium's working-set high-water mark from decoding and drawing large images, not referenced data. No further fix belongs in this task. While a document is open, the worker holds one copy of the file; the Pages sidebar's own <Document> adds a second worker and a second copy.
 PR: https://github.com/rmusser01/tldw_server/pull/3579
+Review follow-ups (2026-11-23): added tests that PdfPage still clears its spinner and shows the page note after paint, and that ReleasingPage passes onLoadSuccess/onRenderSuccess through. With the passthrough removed, exactly those 2 tests fail (Unable to find 'Note page 1'; onRenderSuccess not called with the proxy). Renamed the shared-proxy test to what it pins (cleanup per consumer unmount/paint; pdf.js deferral is not exercised with a mocked proxy) and dropped its mount-count assertions, which could not fail. The JSDoc now says a later render() cancels a deferred release and that an unmount mid-render releases up to ~5 s later through pdf.js's timer. Green: 6 files, 44 tests. eslint clean.
+Live re-measurement by the coordinator on this branch (production WebUI, headless Chrome): the 300-page scan settles at ~1.12-1.14 GB after repeated scroll passes (base 3.3-3.6 GB), no errors, search works; the 1,500-page text PDF is unchanged (~0.74-0.80 GB). Independent review: ready to merge, no Critical or Important findings.
+Possible follow-up, deliberately not done here because open PR #3534 edits PdfDocument.tsx: key the single-page fallback PdfPage by currentPage. On a pageNumber change react-pdf briefly redraws the OLD page after the wrapper's cleanup, so that page's release then relies on pdf.js's cancel path (force-abort or the 5 s delayed cleanup).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PDF pages now release pdf.js's per-page render data (operator list and decoded images) through the public PDFPageProxy.cleanup() once their canvas is painted, and on unmount or page switch. ReleasingPage in PdfPage.tsx does this for every viewer mode and for the Pages sidebar thumbnails. Real pdf.js 4.8.69 in Chromium: reading a 300-page scan grows the renderer by a one-time ~456 MB instead of ~4.7 MB per page (+1,400 MB), with no growth on later passes.
+PDF pages now release pdf.js's per-page render data (operator list and decoded images) through the public PDFPageProxy.cleanup() once their canvas is painted, and on unmount or page switch. ReleasingPage in PdfPage.tsx does this for every viewer mode and for the Pages sidebar thumbnails. Live on the production WebUI, a 300-page scan settles at ~1.12-1.14 GB after repeated passes instead of 3.3-3.6 GB. In plain pdf.js in Chromium the remaining step (~456 MB) is a one-time renderer high-water mark, not referenced data. PR #3579.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

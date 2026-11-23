@@ -17,7 +17,10 @@ type LoadedPage = Parameters<NonNullable<PageProps["onLoadSuccess"]>>[0]
  * viewed stayed decoded until the document closed, ~10 MB per scanned page.
  * That next draw discards the data anyway, so release it as soon as the canvas
  * is painted, and on unmount for a render cancelled mid-paint. cleanup() is
- * public pdf.js API and defers itself while any render of the page is running.
+ * public pdf.js API and defers itself while any render of the page is running;
+ * a later render() of the page cancels that deferred release. On unmount
+ * mid-render the release therefore lands up to ~5 s later, through pdf.js's own
+ * delayed-cleanup timer once the cancelled render or its operator list settles.
  */
 export const ReleasingPage: React.FC<PageProps> = ({ onLoadSuccess, onRenderSuccess, ...props }) => {
   const loadedPageRef = useRef<LoadedPage | null>(null)

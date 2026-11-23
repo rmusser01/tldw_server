@@ -1,7 +1,7 @@
 import React from 'react'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { PdfPage } from '../PdfViewer/PdfPage'
+import { PdfPage, ReleasingPage } from '../PdfViewer/PdfPage'
 
 // A react-pdf <Page> stand-in with the callback order of the real one: the
 // page proxy loads on mount, and the canvas paints later (when the test says
@@ -23,7 +23,9 @@ const paintAll = () =>
     for (const paint of pdf.pendingPaints.splice(0)) paint()
   })
 
-vi.mock('../PageNoteButton', () => ({ PageNoteButton: () => null }))
+vi.mock('../PageNoteButton', () => ({
+  PageNoteButton: ({ pageNumber }: { pageNumber: number }) => <button>Note page {pageNumber}</button>
+}))
 vi.mock('react-pdf', async () => {
   const React = await import('react')
   return {
@@ -93,6 +95,26 @@ it('releases the page render data once its canvas is painted', () => {
   expect(screen.getByLabelText('Page 1')).toBeInTheDocument()
 })
 
+it('still clears the page spinner and shows the page note once the page is painted', () => {
+  render(<PdfPage pageNumber={1} scale={1} />)
+  expect(screen.queryByText('Note page 1')).toBeNull()
+
+  paintAll()
+
+  expect(screen.getByText('Note page 1')).toBeInTheDocument()
+})
+
+it('passes the loaded and painted page on to the caller callbacks', () => {
+  const onLoadSuccess = vi.fn()
+  const onRenderSuccess = vi.fn()
+  render(<ReleasingPage pageNumber={1} onLoadSuccess={onLoadSuccess} onRenderSuccess={onRenderSuccess} />)
+  expect(onLoadSuccess).toHaveBeenCalledWith(proxy(1))
+
+  paintAll()
+
+  expect(onRenderSuccess).toHaveBeenCalledWith(proxy(1))
+})
+
 it('releases the page render data when the page unmounts before its render finishes', () => {
   const view = render(<PdfPage pageNumber={1} scale={1} />)
 
@@ -128,19 +150,19 @@ it('releases the previous page when the single-page fallback switches to another
   expect(screen.getByLabelText('Page 2')).toBeInTheDocument()
 })
 
-it('keeps a second consumer of the same page proxy mounted when the first one unmounts', () => {
+// pdf.js itself defers cleanup() while another render of the proxy runs; that
+// is not exercised here (the proxy is mocked).
+it('releases a page proxy shared by two consumers when one unmounts and again when the other paints', () => {
   const view = render(
     <>
       <PdfPage key="viewer" pageNumber={1} scale={1} />
       <PdfPage key="thumbnail" pageNumber={1} scale={0.25} hidePageNote />
     </>
   )
-  expect(pdf.mounts).toBe(2)
 
   view.rerender(<PdfPage key="thumbnail" pageNumber={1} scale={0.25} hidePageNote />)
 
   expect(proxy(1).cleanup).toHaveBeenCalledTimes(1)
-  expect(pdf.mounts).toBe(2)
   expect(screen.getByLabelText('Page 1')).toBeInTheDocument()
   paintAll()
   expect(proxy(1).cleanup).toHaveBeenCalledTimes(2)
