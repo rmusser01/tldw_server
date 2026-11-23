@@ -1,10 +1,10 @@
 # Calendar PR #3019 Qodo Remediation
 
-**Goal:** Address all original and follow-up Qodo findings, verify the rebased Calendar module, and merge PR #3019 only when its required gates are satisfied.
+**Goal:** Address review findings, verify the rebased Calendar module, and qualify PR #3019 without merging it or enabling auto-merge.
 **Architecture:** Retain the SQLite repository, existing calendar permission model, read-only CalDAV adapter, bounded Jobs polling, and thin frontend. Share credential resolution and offload blocking provider operations. Preserve recurrence masters and exception identities rather than collapsing a series into one row.
 **Tech Stack:** FastAPI, SQLite, HTTPX, AnyIO, icalendar, python-dateutil, pytest, Next.js, Vitest.
 **Spec:** `Docs/superpowers/specs/2026-06-05-calendar-module-prd-design.md`.
-**Tracking:** TASK-13356; https://github.com/rmusser01/tldw_server/pull/3019.
+**Tracking:** TASK-15631 (formerly TASK-13356); https://github.com/rmusser01/tldw_server/pull/3019.
 
 ## Global Constraints
 

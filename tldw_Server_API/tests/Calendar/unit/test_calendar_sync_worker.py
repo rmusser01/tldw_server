@@ -33,6 +33,84 @@ from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["queue", "recover", "scheduled"])
+async def test_calendar_jobs_io_uses_validated_owner_scope_and_restores_caller(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager,
+    monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    """Jobs RLS must see the persisted Calendar owner, not inherited caller scope."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+    from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
+
+    fixture = _create_sync_fixture(calendar_db, owner_user_id=2)
+    arguments = {
+        "db": calendar_db, "job_manager": jobs_manager, "actor_user_id": 2, "tenant_id": "default",
+        "binding_id": fixture.binding_id, "reason": "manual",
+        "window_start": "2026-06-01T00:00:00+00:00", "window_end": "2026-07-01T00:00:00+00:00",
+    }
+    if operation == "recover":
+        worker.queue_calendar_binding_sync(**arguments)
+    observed: list[tuple[bool, str | None, str | None]] = []
+
+    def guarded(original):
+        @wraps(original)
+        def call(*args, **kwargs):
+            scope = (JobManager._RLS_IS_ADMIN.get(), JobManager._RLS_DOMAIN_ALLOWLIST.get(),
+                     JobManager._RLS_OWNER_USER_ID.get())
+            observed.append(scope)
+            assert scope == (False, "calendar", "2")
+            return original(*args, **kwargs)
+        return call
+
+    for name in ("list_jobs", "admit_idempotent_operation", "replay_idempotent_operation",
+                 "get_job_or_archived_by_uuid"):
+        monkeypatch.setattr(jobs_manager, name, guarded(getattr(jobs_manager, name)))
+    with JobManager.scoped_rls_context(is_admin=True, domain_allowlist="unrelated", owner_user_id="77"):
+        if operation == "queue":
+            result = worker.queue_calendar_binding_sync(**arguments)
+        elif operation == "recover":
+            admission = calendar_db.get_sync_admission(fixture.binding_id)
+            result = worker.recover_calendar_sync_admission(db=calendar_db, job_manager=jobs_manager, admission=admission)
+        else:
+            queued = await queue_due_calendar_sync_jobs(
+                db=calendar_db, job_manager=jobs_manager,
+                now=datetime(2026, 6, 5, tzinfo=timezone.utc),
+            )
+            assert len(queued) == 1
+            result = queued[0]
+        assert result is not None and result.binding_id == fixture.binding_id
+        assert (JobManager._RLS_IS_ADMIN.get(), JobManager._RLS_DOMAIN_ALLOWLIST.get(),
+                JobManager._RLS_OWNER_USER_ID.get()) == (True, "unrelated", "77")
+    assert observed and set(observed) == {(False, "calendar", "2")}
+
+
+@pytest.mark.asyncio
+async def test_calendar_worker_polling_uses_trusted_service_scope_and_restores_caller(
+    jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the internal consumer polls across owners, restricted to Calendar Jobs."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+
+    observed = []
+
+    class SDK:
+        def __init__(self, manager, config):
+            assert manager is jobs_manager and config.domain == "calendar"
+
+        async def run(self, **_kwargs):
+            observed.append((JobManager._RLS_IS_ADMIN.get(), JobManager._RLS_DOMAIN_ALLOWLIST.get(),
+                             JobManager._RLS_OWNER_USER_ID.get()))
+
+    monkeypatch.setattr(worker, "JobManager", lambda: jobs_manager)
+    monkeypatch.setattr(worker, "WorkerSDK", SDK)
+    with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="unrelated", owner_user_id="77"):
+        await worker.run_calendar_sync_worker()
+        assert (JobManager._RLS_IS_ADMIN.get(), JobManager._RLS_DOMAIN_ALLOWLIST.get(),
+                JobManager._RLS_OWNER_USER_ID.get()) == (False, "unrelated", "77")
+    assert observed == [(True, "calendar", None)]
+
+
 @pytest.mark.parametrize("minutes,finished_at,expected", [
     (10_000_000_000, "2026-06-05T17:00:00+00:00", "9999-12-31T23:59:59.999999+00:00"),
     (2**63 - 1, "2026-06-05T17:00:00+00:00", "9999-12-31T23:59:59.999999+00:00"),

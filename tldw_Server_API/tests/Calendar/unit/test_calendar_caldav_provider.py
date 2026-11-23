@@ -357,6 +357,46 @@ def test_provider_rejects_oversized_buffered_response() -> None:
         )
 
 
+@pytest.mark.parametrize("encoding", ["gzip", "deflate"])
+@pytest.mark.parametrize("exceeds_limit", [False, True])
+def test_default_transport_decodes_compressed_response_once_and_bounds_decoded_bytes(
+    monkeypatch: pytest.MonkeyPatch, encoding: str, exceeds_limit: bool,
+) -> None:
+    """Real HTTPX decoding must preserve the response without admitting a zip bomb."""
+    import gzip
+    import zlib
+
+    decoded = b"<calendar>" + b"event-data " * 400 + b"</calendar>"
+    compressed = gzip.compress(decoded) if encoding == "gzip" else zlib.compress(decoded)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            207, request=request, stream=httpx.ByteStream(compressed),
+            headers={"Content-Encoding": encoding, "Content-Length": str(len(compressed)),
+                     "Content-Type": "application/xml", "ETag": '"calendar-version"'},
+        )
+
+    monkeypatch.setattr(
+        caldav_module, "create_client",
+        lambda **kwargs: httpx.Client(transport=httpx.MockTransport(handle), **kwargs),
+    )
+    monkeypatch.setattr(
+        caldav_module, "evaluate_url_policy",
+        lambda *args, **kwargs: SimpleNamespace(allowed=True, resolved_ips=("93.184.216.34",)),
+    )
+    provider = CalDavProvider(max_response_bytes=128 if exceeds_limit else len(decoded))
+    if exceeds_limit:
+        with pytest.raises(CalendarValidationError, match="byte limit"):
+            provider._request("REPORT", "https://calendar.example.test/", username="user", password="secret")  # nosec B106 -- Synthetic MockTransport-only credentials.
+    else:
+        response = provider._request("REPORT", "https://calendar.example.test/", username="user", password="secret")  # nosec B106 -- Synthetic MockTransport-only credentials.
+        assert response.content == decoded
+        assert "Content-Encoding" not in response.headers
+        assert response.headers["Content-Length"] == str(len(decoded))
+        assert response.headers["Content-Type"] == "application/xml"
+        assert response.headers["ETag"] == '"calendar-version"'
+
+
 @pytest.mark.parametrize("content_length", [None, "1000"])
 def test_default_transport_bounds_stream_before_buffering(
     monkeypatch: pytest.MonkeyPatch, content_length: str | None

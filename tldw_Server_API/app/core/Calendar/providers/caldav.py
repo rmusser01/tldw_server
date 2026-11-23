@@ -364,9 +364,13 @@ class CalDavProvider:
                     if len(content_buffer) + len(chunk) > self.max_response_bytes:
                         raise CalendarValidationError("CalDAV response exceeds byte limit")
                     content_buffer.extend(chunk)
+                # iter_bytes() already decoded the transport representation.
+                decoded_headers = response.headers.copy()
+                decoded_headers.pop("Content-Encoding", None)
+                decoded_headers.pop("Content-Length", None)
                 return httpx.Response(
                     response.status_code,
-                    headers=response.headers,
+                    headers=decoded_headers,
                     content=bytes(content_buffer),
                     request=httpx.Request(method, safe_url),
                 )

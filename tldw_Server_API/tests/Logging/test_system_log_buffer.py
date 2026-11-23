@@ -694,6 +694,7 @@ def test_log_file_lock_uses_runtime_timeout_from_env(
     log_buffer, lock_path = request.getfixturevalue("fallback_log_lock")
     initialize = log_buffer._init_log_file_settings
     first_initialization = True
+    aged_locks: list[float] = []
 
     def initialize_settings() -> None:
         nonlocal first_initialization
@@ -701,11 +702,18 @@ def test_log_file_lock_uses_runtime_timeout_from_env(
         if first_initialization and age_lock_during_settings_init and lock_path.exists():
             aged = time.time() - 2
             os.utime(lock_path, (aged, aged))
+            aged_locks.append(aged)
         first_initialization = False
 
     monkeypatch.setattr(log_buffer, "_init_log_file_settings", initialize_settings)
 
+    if age_lock_during_settings_init:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text("stale", encoding="utf-8")
     with log_buffer._log_file_lock():
+        assert bool(aged_locks) == age_lock_during_settings_init
+        if aged_locks:
+            assert lock_path.stat().st_mtime > aged_locks[0]
         started = time.monotonic()
         with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
             with log_buffer._log_file_lock():

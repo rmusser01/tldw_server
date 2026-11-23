@@ -279,20 +279,41 @@ class TestEvaluationStorageInvariants:
     def test_list_pagination_invariant(self, evaluation_manager, num_evaluations, limit):
         """Pagination must return correct number of results."""
         import asyncio
+        from time import perf_counter
+
+        started = perf_counter()
+        phases = {"store_s": [], "list_s": None}
 
         async def _run():
             # Create evaluations
             for i in range(num_evaluations):
-                await evaluation_manager.store_evaluation(
-                    evaluation_type="test",
-                    input_data={"index": i},
-                    results={"score": i / (num_evaluations + 1)}
-                )
+                store_started = perf_counter()
+                try:
+                    await evaluation_manager.store_evaluation(
+                        evaluation_type="test",
+                        input_data={"index": i},
+                        results={"score": i / (num_evaluations + 1)}
+                    )
+                finally:
+                    phases["store_s"].append(perf_counter() - store_started)
 
             # Test pagination
-            return await evaluation_manager.list_evaluations(limit=limit)
+            list_started = perf_counter()
+            try:
+                return await evaluation_manager.list_evaluations(limit=limit)
+            finally:
+                phases["list_s"] = perf_counter() - list_started
 
-        results = asyncio.run(_run())
+        try:
+            results = asyncio.run(_run())
+        finally:
+            # Pytest retains these scalar timings when Hypothesis reports a deadline.
+            print("[evaluation-pagination] " + json.dumps({
+                "num_evaluations": num_evaluations,
+                "limit": limit,
+                "runner_s": perf_counter() - started,
+                **phases,
+            }))
 
         # Handle both list and dict response formats
         if isinstance(results, dict) and "items" in results:

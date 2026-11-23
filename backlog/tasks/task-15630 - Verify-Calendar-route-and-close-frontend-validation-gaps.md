@@ -1,5 +1,5 @@
 ---
-id: TASK-13344
+id: TASK-15630
 title: Verify Calendar route and close frontend validation gaps
 status: Done
 created_date: 2026-09-25 19:21
@@ -32,6 +32,8 @@ Continue Calendar module verification from June in an isolated checkout. Cover C
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the missing shared Next Calendar route was the cause of the compile failure. The extension route and registry already existed. The Calendar API is intentionally opt-in (default_stable=False); a default server returns 404 until calendar is added to [API-Routes] enable. The browser rendered the Calendar shell at desktop and mobile sizes; authenticated item workflows and real CalDAV/Fastmail provider smoke were not performed. The browser profile has an existing API URL override to 127.0.0.1:8000, so it was not repointed to the disposable backend. Bandit not applicable: this follow-up changes only TSX and Markdown. ESLint frontend config ignores shared package files; Prettier check and Vitest covered them.
+
+2026-11-23: Calendar-owned TASK-13344 renumbered to TASK-15630 after approved dev integration exposed an ID collision. Upstream records remain unchanged (ADR-084). Historical references retain their original IDs. PR3019 remains unmerged; auto-merge is off.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

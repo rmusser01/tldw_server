@@ -394,6 +394,7 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
         "ensure_admin_webhook_canonical_tables_pg",
         "ensure_sharing_tables_pg",
         "ensure_notification_permissions_pg",
+        "ensure_calendar_permissions_pg",
         "ensure_generated_files_table_pg",
         "ensure_tool_catalogs_tables_pg",
         "ensure_privilege_snapshots_table_pg",
@@ -530,6 +531,11 @@ async def test_pg_calendar_permissions_readiness_failure_blocks_startup(
     names = (
         "ensure_user_timestamp_timezones_pg",
         "ensure_authnz_core_tables_pg",
+        "ensure_authnz_lockout_tables_pg",
+        "ensure_authnz_token_blacklist_pg",
+        "ensure_resource_daily_ledger_pg",
+        "ensure_org_stt_settings_pg",
+        "ensure_admin_monitoring_tables_pg",
         "ensure_storage_quota_overrides_backfill_pg",
         "ensure_admin_webhook_canonical_tables_pg",
         "ensure_sharing_tables_pg",
@@ -545,11 +551,14 @@ async def test_pg_calendar_permissions_readiness_failure_blocks_startup(
     )
     ensures = dict.fromkeys(names, _success)
     ensures["ensure_calendar_permissions_pg"] = _calendar_failure
-    _install_module(monkeypatch, "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra", **ensures)
+    _install_module(
+        monkeypatch, "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
+        PGUsageSchemaError=PGUsageSchemaError, **ensures,
+    )
     startup_auth = _import_startup_auth()
 
     with pytest.raises(startup_auth.AuthStartupError, match="AUTHNZ_CALENDAR_PERMISSIONS_NOT_READY"):
-        await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
+        await startup_auth._ensure_pg_extras(_owner_pg_pool())
 
 
 @pytest.mark.unit

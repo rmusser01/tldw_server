@@ -949,6 +949,7 @@ jobs:
               tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
           - name: auth-integration-postgres-profiles
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_pg_migrations_calendar_permissions.py
               tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
               tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
           - name: auth-integration-prompts-providers
@@ -2706,6 +2707,7 @@ jobs:
               tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
           - name: auth-integration-postgres-profiles
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_pg_migrations_calendar_permissions.py
               tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
               tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
           - name: auth-integration-prompts-providers
@@ -4272,6 +4274,7 @@ jobs:
               tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
           - name: auth-integration-postgres-profiles
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_pg_migrations_calendar_permissions.py
               tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
               tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
           - name: auth-integration-prompts-providers
@@ -5444,7 +5447,7 @@ jobs:
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          python Helper_Scripts/ci/native_pytest.py -q --disable-warnings -p pytest_asyncio.plugin \
             -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -5458,7 +5461,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          TLDW_DISABLE_LEGACY_MEDIA=1 python Helper_Scripts/ci/native_pytest.py -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
             tldw_Server_API/tests/MediaIngestion_NEW \
@@ -5742,6 +5745,7 @@ jobs:
               tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
           - name: auth-integration-postgres-profiles
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_pg_migrations_calendar_permissions.py
               tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
               tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
           - name: auth-integration-prompts-providers
@@ -6909,7 +6913,7 @@ jobs:
           fi
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          python Helper_Scripts/ci/native_pytest.py -q --disable-warnings -p pytest_asyncio.plugin \
             "${EXTRA_PYTEST_ARGS[@]}" \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -6923,7 +6927,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          TLDW_DISABLE_LEGACY_MEDIA=1 python Helper_Scripts/ci/native_pytest.py -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
             tldw_Server_API/tests/MediaIngestion_NEW \
@@ -7203,6 +7207,7 @@ jobs:
               tldw_Server_API/tests/AuthNZ/integration/test_[b-o]*.py
           - name: auth-integration-postgres-profiles
             paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_pg_migrations_calendar_permissions.py
               tldw_Server_API/tests/AuthNZ/integration/test_postgres*.py
               tldw_Server_API/tests/AuthNZ/integration/test_profile*.py
           - name: auth-integration-prompts-providers
@@ -8375,7 +8380,7 @@ jobs:
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          python Helper_Scripts/ci/native_pytest.py -q --disable-warnings -p pytest_asyncio.plugin \
             -p pytest_timeout -o timeout_method=${{ runner.os == 'Windows' && 'thread' || 'signal' }} \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -8389,7 +8394,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          TLDW_DISABLE_LEGACY_MEDIA=1 python Helper_Scripts/ci/native_pytest.py -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
             tldw_Server_API/tests/MediaIngestion_NEW \

@@ -536,8 +536,13 @@ class TestStreamableHttpTransport:
     ) -> None:
         """Distinguish OS refusal from a connect still pending at the deadline."""
         import errno
+        from time import monotonic
+
+        started = monotonic()
+        connect_entries: list[float] = []
 
         async def connect_tcp(*args: Any, **kwargs: Any) -> None:
+            connect_entries.append(monotonic() - started)
             if refuse_connect:
                 raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
             await asyncio.Future()
@@ -554,7 +559,23 @@ class TestStreamableHttpTransport:
                 await transport.connect()
         finally:
             await transport.close()
-        assert excinfo.value.reason_code == reason_code
+        # Report types/codes only, never exception messages or request credentials.
+        cause: BaseException | None = excinfo.value
+        chain: list[dict[str, Any]] = []
+        while cause is not None and len(chain) < 8:
+            error_number = getattr(cause, "errno", None)
+            windows_error = getattr(cause, "winerror", None)
+            chain.append({
+                "type": f"{type(cause).__module__}.{type(cause).__qualname__}",
+                "errno": error_number if isinstance(error_number, int) else None,
+                "winerror": windows_error if isinstance(windows_error, int) else None,
+            })
+            cause = cause.__cause__
+        assert excinfo.value.reason_code == reason_code, {
+            "connect_entries_s": connect_entries,
+            "connect_and_close_s": monotonic() - started,
+            "cause_chain": chain,
+        }
         assert isinstance(excinfo.value.__cause__, cause_type)
 
     def test_constructor_rejects_mismatched_definition(self) -> None:

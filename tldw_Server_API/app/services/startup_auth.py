@@ -133,6 +133,7 @@ async def _validate_pg_serving_schema(db_pool: DatabasePool) -> bool:
         validate_postgres_startup_timestamps,
     )
     from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import postgres_sharing_schema_issues
+    from tldw_Server_API.app.core.DB_Management.calendar_permission_schema import postgres_calendar_permissions_ready
 
     readiness_error = "AUTHNZ_CORE_SCHEMA_NOT_READY"
     try:
@@ -146,6 +147,9 @@ async def _validate_pg_serving_schema(db_pool: DatabasePool) -> bool:
             ):
                 readiness_error = failure_reason
                 await validator(conn)
+            readiness_error = "AUTHNZ_CALENDAR_PERMISSIONS_NOT_READY"
+            if not await postgres_calendar_permissions_ready(conn):
+                raise AuthStartupError(readiness_error)
         # This validator acquires its own connection; release ours even for a one-slot pool.
         readiness_error = "AUTHNZ_PG_SHARING_SCHEMA_NOT_READY"
         if await postgres_sharing_schema_issues(db_pool):

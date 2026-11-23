@@ -106,26 +106,29 @@ def queue_calendar_binding_sync(
 
     # A terminal release races safely with other callers: deletion is conditional
     # on immutable admission identity, and the next unique insert elects a winner.
-    while True:
-        admission = db.get_sync_admission(binding.id)
-        if admission is None:
-            legacy = _active_job_for_binding(job_manager=job_manager, owner_user_id=str(actor_user_id), binding_id=binding.id)
-            identity = uuid4().hex
-            payload = build_calendar_sync_payload(
-                binding_id=binding.id, window_start=window_start, window_end=window_end, reason=reason,
-            )
-            admission = db.reserve_sync_admission(
-                binding_id=binding.id, admission_id=identity, tenant_id=tenant_id, owner_user_id=actor_user_id,
-                idempotency_key=str(legacy.get("idempotency_key") or f"calendar:sync:admission:{identity}") if legacy
-                else f"calendar:sync:admission:{identity}", payload=payload, legacy_job=legacy,
-            )
-        if admission.tenant_id != tenant_id or admission.owner_user_id != int(actor_user_id):
-            raise CalendarPermissionDenied("Calendar sync admission is outside the current user scope")
-        job = _job_for_admission(job_manager, admission)
-        if job is not None and job.get("status") in _TERMINAL_JOB_STATUSES:
-            db.release_sync_admission(admission.admission_id)
-            continue
-        return _dispatch_sync_admission(db, job_manager, admission, job)
+    with JobManager.scoped_rls_context(
+        is_admin=False, domain_allowlist=CALENDAR_SYNC_DOMAIN, owner_user_id=str(actor_user_id),
+    ):
+        while True:
+            admission = db.get_sync_admission(binding.id)
+            if admission is None:
+                legacy = _active_job_for_binding(job_manager=job_manager, owner_user_id=str(actor_user_id), binding_id=binding.id)
+                identity = uuid4().hex
+                payload = build_calendar_sync_payload(
+                    binding_id=binding.id, window_start=window_start, window_end=window_end, reason=reason,
+                )
+                admission = db.reserve_sync_admission(
+                    binding_id=binding.id, admission_id=identity, tenant_id=tenant_id, owner_user_id=actor_user_id,
+                    idempotency_key=str(legacy.get("idempotency_key") or f"calendar:sync:admission:{identity}") if legacy
+                    else f"calendar:sync:admission:{identity}", payload=payload, legacy_job=legacy,
+                )
+            if admission.tenant_id != tenant_id or admission.owner_user_id != int(actor_user_id):
+                raise CalendarPermissionDenied("Calendar sync admission is outside the current user scope")
+            job = _job_for_admission(job_manager, admission)
+            if job is not None and job.get("status") in _TERMINAL_JOB_STATUSES:
+                db.release_sync_admission(admission.admission_id)
+                continue
+            return _dispatch_sync_admission(db, job_manager, admission, job)
 
 
 def recover_calendar_sync_admission(
@@ -140,7 +143,10 @@ def recover_calendar_sync_admission(
     _assert_account_scope(account, actor_user_id=admission.owner_user_id, tenant_id=admission.tenant_id)
     if not binding.sync_enabled or binding.disabled_at:
         raise CalendarValidationError("External calendar binding is not enabled for sync")
-    return _dispatch_sync_admission(db, job_manager, admission, _job_for_admission(job_manager, admission))
+    with JobManager.scoped_rls_context(
+        is_admin=False, domain_allowlist=CALENDAR_SYNC_DOMAIN, owner_user_id=str(admission.owner_user_id),
+    ):
+        return _dispatch_sync_admission(db, job_manager, admission, _job_for_admission(job_manager, admission))
 
 
 def _admission_command(admission: CalendarSyncAdmissionRow) -> IdempotentOperationCommand:
@@ -386,7 +392,9 @@ async def run_calendar_sync_worker(stop_event: asyncio.Event | None = None) -> N
 
     logger.info("Calendar sync Jobs worker starting: queue={} worker_id={}", cfg.queue, worker_id)
     try:
-        await sdk.run(handler=handle_calendar_sync_job)
+        # Only this trusted consumer crosses owners; request admission stays owner-scoped.
+        with job_manager.scoped_rls_context(is_admin=True, domain_allowlist=CALENDAR_SYNC_DOMAIN, owner_user_id=None):
+            await sdk.run(handler=handle_calendar_sync_job)
     finally:
         if stop_waiter is not None:
             stop_waiter.cancel()
