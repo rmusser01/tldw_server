@@ -386,8 +386,14 @@ def test_module_patch_reaches_registry_and_direct_calls(monkeypatch: pytest.Monk
     """One patch point per migration (R12): the module attribute serves the class's step map and a resolved registry name."""
     sqlite_steps, _ = _registries()
     calls: list[object] = []
-    monkeypatch.setattr(sqlite_steps, "_migrate_from_v49_to_v50", lambda ctx, conn: calls.append(conn))
+
+    def patched_step(ctx: object, conn: object) -> None:
+        calls.append(conn)
+
+    monkeypatch.setattr(sqlite_steps, "_migrate_from_v49_to_v50", patched_step)
     sentinel = object()
-    CharactersRAGDB.__new__(CharactersRAGDB)._sqlite_linear_migration_steps()[49](sentinel)
+    class_step = CharactersRAGDB.__new__(CharactersRAGDB)._sqlite_linear_migration_steps()[49]
+    assert class_step.__wrapped__ is patched_step  # nosec B101
+    class_step(sentinel)
     getattr(sqlite_steps, sqlite_steps.SQLITE_STEPS[49])(None, sentinel)
     assert calls == [sentinel, sentinel]  # nosec B101
