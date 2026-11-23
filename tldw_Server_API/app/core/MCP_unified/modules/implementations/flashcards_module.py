@@ -482,7 +482,7 @@ class FlashcardsModule(BaseModule):
         db = self._open_db(context)
         try:
             workspace_id = self._workspace_id_from_context(context)
-            decks = db.list_decks(
+            decks = db.flashcard_store.list_decks(
                 limit=limit,
                 offset=offset,
                 include_deleted=include_deleted,
@@ -509,7 +509,7 @@ class FlashcardsModule(BaseModule):
         db = self._open_db(context)
         try:
             workspace_id = self._workspace_id_from_context(context)
-            deck = db.get_deck(deck_id)
+            deck = db.flashcard_store.get_deck(deck_id)
             self._assert_deck_workspace(deck, workspace_id)
             if not deck:
                 raise ValueError(f"Deck not found: {deck_id}")
@@ -527,12 +527,12 @@ class FlashcardsModule(BaseModule):
         db = self._open_db(context)
         try:
             workspace_id = self._workspace_id_from_context(context)
-            deck_id = db.add_deck(
+            deck_id = db.flashcard_store.add_deck(
                 name=args.get("name"),
                 description=args.get("description"),
                 workspace_id=workspace_id,
             )
-            deck = db.get_deck(deck_id)
+            deck = db.flashcard_store.get_deck(deck_id)
             return {"deck_id": deck_id, "success": True, "deck": deck}
         finally:
             try:
@@ -549,7 +549,7 @@ class FlashcardsModule(BaseModule):
         db = self._open_db(context)
         try:
             workspace_id = self._workspace_id_from_context(context)
-            cards = db.list_flashcards(
+            cards = db.flashcard_store.list_flashcards(
                 deck_id=args.get("deck_id"),
                 workspace_id=workspace_id,
                 include_workspace_items=True,
@@ -561,7 +561,7 @@ class FlashcardsModule(BaseModule):
                 offset=int(args.get("offset", 0)),
                 order_by=args.get("order_by", "due_at"),
             )
-            count = db.count_flashcards(
+            count = db.flashcard_store.count_flashcards(
                 deck_id=args.get("deck_id"),
                 workspace_id=workspace_id,
                 include_workspace_items=True,
@@ -593,7 +593,7 @@ class FlashcardsModule(BaseModule):
         db = self._open_db(context)
         try:
             workspace_id = self._workspace_id_from_context(context)
-            card = db.get_flashcard(card_uuid)
+            card = db.flashcard_store.get_flashcard(card_uuid)
             self._assert_card_workspace(card, workspace_id)
             if not card:
                 raise ValueError(f"Card not found: {card_uuid}")
@@ -614,7 +614,7 @@ class FlashcardsModule(BaseModule):
             model_type = args.get("model_type", "basic")
             is_cloze = model_type == "cloze"
             deck_id = args.get("deck_id")
-            deck = db.get_deck(deck_id)
+            deck = db.flashcard_store.get_deck(deck_id)
             if deck is None:
                 raise ValueError(f"Deck not found: {deck_id}")
             self._assert_deck_workspace(deck, workspace_id)
@@ -632,8 +632,8 @@ class FlashcardsModule(BaseModule):
             if tags:
                 import json
                 card_data["tags_json"] = json.dumps(tags)
-            card_uuid = db.add_flashcard(card_data)
-            card = db.get_flashcard(card_uuid)
+            card_uuid = db.flashcard_store.add_flashcard(card_data)
+            card = db.flashcard_store.get_flashcard(card_uuid)
             return {"card_uuid": card_uuid, "success": True, "card": card}
         finally:
             try:
@@ -654,7 +654,7 @@ class FlashcardsModule(BaseModule):
                 model_type = card_args.get("model_type", "basic")
                 is_cloze = model_type == "cloze"
                 deck_id = card_args.get("deck_id")
-                deck = db.get_deck(deck_id)
+                deck = db.flashcard_store.get_deck(deck_id)
                 if deck is None:
                     raise ValueError(f"Deck not found: {deck_id}")
                 self._assert_deck_workspace(deck, workspace_id)
@@ -674,7 +674,7 @@ class FlashcardsModule(BaseModule):
                     card_data["tags_json"] = json.dumps(tags)
                 cards_data.append(card_data)
 
-            card_uuids = db.add_flashcards_bulk(cards_data)
+            card_uuids = db.flashcard_store.add_flashcards_bulk(cards_data)
             return {
                 "card_uuids": card_uuids,
                 "count": len(card_uuids),
@@ -698,11 +698,11 @@ class FlashcardsModule(BaseModule):
             tags = args.get("tags")
             workspace_id = self._workspace_id_from_context(context)
 
-            card = db.get_flashcard(card_uuid)
+            card = db.flashcard_store.get_flashcard(card_uuid)
             self._assert_card_workspace(card, workspace_id)
 
             if "deck_id" in updates and workspace_id is not None:
-                destination_deck = db.get_deck(updates["deck_id"])
+                destination_deck = db.flashcard_store.get_deck(updates["deck_id"])
                 if destination_deck is None:
                     raise ValueError(f"Deck not found: {updates['deck_id']}")
                 self._assert_deck_workspace(destination_deck, workspace_id)
@@ -713,7 +713,7 @@ class FlashcardsModule(BaseModule):
                 updates["is_cloze"] = model_type == "cloze"
                 updates["reverse"] = model_type == "basic_reverse"
 
-            success = db.update_flashcard(
+            success = db.flashcard_store.update_flashcard(
                 card_uuid=card_uuid,
                 updates=updates,
                 expected_version=expected_version,
@@ -740,9 +740,9 @@ class FlashcardsModule(BaseModule):
             expected_version = args.get("expected_version")
             workspace_id = self._workspace_id_from_context(context)
 
-            card = db.get_flashcard(card_uuid)
+            card = db.flashcard_store.get_flashcard(card_uuid)
             self._assert_card_workspace(card, workspace_id)
-            success = db.soft_delete_flashcard(card_uuid, expected_version)
+            success = db.flashcard_store.soft_delete_flashcard(card_uuid, expected_version)
             if not success:
                 raise ValueError(f"Card not found or version conflict: {card_uuid}")
             return {"card_uuid": card_uuid, "action": "soft_deleted", "success": True}
@@ -767,9 +767,9 @@ class FlashcardsModule(BaseModule):
             answer_time_ms = args.get("answer_time_ms")
             workspace_id = self._workspace_id_from_context(context)
 
-            card = db.get_flashcard(card_uuid)
+            card = db.flashcard_store.get_flashcard(card_uuid)
             self._assert_card_workspace(card, workspace_id)
-            result = db.review_flashcard(
+            result = db.flashcard_store.review_flashcard(
                 card_uuid=card_uuid,
                 rating=rating,
                 answer_time_ms=answer_time_ms,
@@ -793,10 +793,10 @@ class FlashcardsModule(BaseModule):
             tags = args.get("tags", [])
             workspace_id = self._workspace_id_from_context(context)
 
-            card = db.get_flashcard(card_uuid)
+            card = db.flashcard_store.get_flashcard(card_uuid)
             self._assert_card_workspace(card, workspace_id)
             norm_tags = dedupe_keywords(tags)[:50]
-            success = db.set_flashcard_tags(card_uuid, norm_tags)
+            success = db.flashcard_store.set_flashcard_tags(card_uuid, norm_tags)
             if not success:
                 raise ValueError(f"Card not found: {card_uuid}")
             return {"card_uuid": card_uuid, "tags": norm_tags, "success": True}
@@ -814,9 +814,9 @@ class FlashcardsModule(BaseModule):
         try:
             card_uuid = args.get("card_uuid")
             workspace_id = self._workspace_id_from_context(context)
-            card = db.get_flashcard(card_uuid)
+            card = db.flashcard_store.get_flashcard(card_uuid)
             self._assert_card_workspace(card, workspace_id)
-            keywords = db.get_keywords_for_flashcard(card_uuid)
+            keywords = db.flashcard_store.get_keywords_for_flashcard(card_uuid)
             tags = [str(kw["keyword"]) for kw in keywords if kw.get("keyword")]
             return {"card_uuid": card_uuid, "tags": tags}
         finally:
@@ -844,7 +844,7 @@ class FlashcardsModule(BaseModule):
 
             if fmt == "apkg":
                 from ....Flashcards.apkg_exporter import export_apkg_from_rows
-                items = db.list_flashcards(
+                items = db.flashcard_store.list_flashcards(
                     deck_id=deck_id,
                     workspace_id=workspace_id,
                     include_workspace_items=True,
@@ -880,7 +880,7 @@ class FlashcardsModule(BaseModule):
                 }
 
             delimiter = "\t" if fmt == "tsv" else ","
-            csv_bytes = db.export_flashcards_csv(
+            csv_bytes = db.flashcard_store.export_flashcards_csv(
                 deck_id=deck_id,
                 workspace_id=workspace_id,
                 include_workspace_items=True,

@@ -123,13 +123,13 @@ def test_keyword_collection_names_match_in_either_case(db) -> None:
 
 
 def test_flashcard_tag_filters_match_in_either_case(db) -> None:
-    card = db.add_flashcard({"front": "Q", "back": "A"})
-    db.set_flashcard_tags(card, ["Foo"])
+    card = db.flashcard_store.add_flashcard({"front": "Q", "back": "A"})
+    db.flashcard_store.set_flashcard_tags(card, ["Foo"])
 
-    assert [row["uuid"] for row in db.list_flashcards(tag="foo")] == [card]
-    assert db.count_flashcards(tag="FOO") == 1
-    db.review_flashcard(card, 4, review_mode="due", review_deck_id=None, review_tag_filter="foo")
-    assert db.get_latest_flashcard_review(card) is not None
+    assert [row["uuid"] for row in db.flashcard_store.list_flashcards(tag="foo")] == [card]
+    assert db.flashcard_store.count_flashcards(tag="FOO") == 1
+    db.flashcard_store.review_flashcard(card, 4, review_mode="due", review_deck_id=None, review_tag_filter="foo")
+    assert db.flashcard_store.get_latest_flashcard_review(card) is not None
 
 
 # --- the call sites ---------------------------------------------------------------
@@ -232,7 +232,7 @@ async def test_mcp_flashcard_tags_keep_display_casing(db, monkeypatch) -> None:
     monkeypatch.setattr(module, "_open_db", lambda _context: db)
     monkeypatch.setattr(db, "close_all_connections", lambda: None)
     context = SimpleNamespace(metadata={})
-    card = db.add_flashcard({"front": "Q", "back": "A"})
+    card = db.flashcard_store.add_flashcard({"front": "Q", "back": "A"})
 
     result = await module.execute_tool(
         "flashcards.tags.set", {"card_uuid": card, "tags": ["Foo", "foo", "Straße", "STRASSE"]}, context=context

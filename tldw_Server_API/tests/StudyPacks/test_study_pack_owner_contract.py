@@ -20,9 +20,9 @@ from tldw_Server_API.tests.StudyPacks.test_study_pack_response_timestamps import
 def _seed(db, *, membership=True, source_id=None):
     with chacha_operation(independent=True):
         note = source_id or db.add_note(title="Private pack source", content="Synthetic owner-only citation")
-        deck = db.add_deck(f"Private pack deck {db.client_id}")
-        card = db.add_flashcard({"deck_id": deck, "front": "Private question", "back": "Private answer"})
-        pack = db.create_study_pack(
+        deck = db.flashcard_store.add_deck(f"Private pack deck {db.client_id}")
+        card = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Private question", "back": "Private answer"})
+        pack = db.flashcard_store.create_study_pack(
             title="Private pack",
             workspace_id=None,
             deck_id=deck,
@@ -30,8 +30,8 @@ def _seed(db, *, membership=True, source_id=None):
             generation_options_json={"deck_mode": "new"},
         )
         if membership:
-            db.add_study_pack_cards(pack, [card])
-        db.add_flashcard_citations(
+            db.flashcard_store.add_study_pack_cards(pack, [card])
+        db.flashcard_store.add_flashcard_citations(
             card, [{"source_type": "note", "source_id": note, "citation_text": "Synthetic owner-only citation"}]
         )
         return {"note": note, "deck": deck, "card": card, "pack": pack}
@@ -130,12 +130,12 @@ def test_sqlite_same_file_keeps_study_pack_sync_device_access(tmp_path):
     second = CharactersRAGDB(path, client_id="device-b")
     try:
         ids = _seed(first, source_id="synthetic-device-source")
-        assert second.get_study_pack(ids["pack"])["client_id"] == "device-a"
-        assert second.list_study_pack_cards(ids["pack"])[0]["flashcard_uuid"] == ids["card"]
-        assert second.list_flashcard_citations(ids["card"])[0]["client_id"] == "device-a"
-        assert second.get_study_pack_for_flashcard(ids["card"])["id"] == ids["pack"]
+        assert second.flashcard_store.get_study_pack(ids["pack"])["client_id"] == "device-a"
+        assert second.flashcard_store.list_study_pack_cards(ids["pack"])[0]["flashcard_uuid"] == ids["card"]
+        assert second.flashcard_store.list_flashcard_citations(ids["card"])[0]["client_id"] == "device-a"
+        assert second.flashcard_store.get_study_pack_for_flashcard(ids["card"])["id"] == ids["pack"]
         assert (
-            second.replace_flashcard_citations_and_source_reference_summary(
+            second.flashcard_store.replace_flashcard_citations_and_source_reference_summary(
                 ids["card"],
                 [{"source_type": "note", "source_id": "device-source"}],
                 source_ref_type="note",
@@ -143,9 +143,9 @@ def test_sqlite_same_file_keeps_study_pack_sync_device_access(tmp_path):
             )
             == 1
         )
-        assert first.get_flashcard(ids["card"])["client_id"] == "device-b"
-        assert second.soft_delete_study_pack(ids["pack"], expected_version=1)
-        assert first.get_study_pack(ids["pack"]) is None
+        assert first.flashcard_store.get_flashcard(ids["card"])["client_id"] == "device-b"
+        assert second.flashcard_store.soft_delete_study_pack(ids["pack"], expected_version=1)
+        assert first.flashcard_store.get_study_pack(ids["pack"]) is None
     finally:
         first.close_all_connections()
         second.close_all_connections()
@@ -172,10 +172,10 @@ def test_foreign_study_pack_provenance_mutation_cannot_change_owner_rows(pack_ow
     def snapshot():
         with chacha_operation(independent=True):
             return (
-                owner.get_study_pack(ids["pack"]),
-                owner.get_flashcard(ids["card"]),
-                owner.list_study_pack_cards(ids["pack"], include_deleted=True),
-                owner.list_flashcard_citations(ids["card"], include_deleted=True),
+                owner.flashcard_store.get_study_pack(ids["pack"]),
+                owner.flashcard_store.get_flashcard(ids["card"]),
+                owner.flashcard_store.list_study_pack_cards(ids["pack"], include_deleted=True),
+                owner.flashcard_store.list_flashcard_citations(ids["card"], include_deleted=True),
             )
 
     before = snapshot()
@@ -183,21 +183,21 @@ def test_foreign_study_pack_provenance_mutation_cannot_change_owner_rows(pack_ow
     with chacha_operation(independent=True):
         try:
             if operation == "delete-pack":
-                foreign.soft_delete_study_pack(ids["pack"], expected_version=1)
+                foreign.flashcard_store.soft_delete_study_pack(ids["pack"], expected_version=1)
             elif operation == "supersede-pack":
-                foreign.supersede_study_pack(ids["pack"], superseded_by_pack_id=other["pack"], expected_version=1)
+                foreign.flashcard_store.supersede_study_pack(ids["pack"], superseded_by_pack_id=other["pack"], expected_version=1)
             elif operation == "add-membership":
-                foreign.add_study_pack_cards(ids["pack"], [other["card"]])
+                foreign.flashcard_store.add_study_pack_cards(ids["pack"], [other["card"]])
             elif operation == "add-citation":
-                foreign.add_flashcard_citations(ids["card"], [citation])
+                foreign.flashcard_store.add_flashcard_citations(ids["card"], [citation])
             elif operation == "replace-citations":
-                foreign.replace_flashcard_citations(ids["card"], [citation])
+                foreign.flashcard_store.replace_flashcard_citations(ids["card"], [citation])
             elif operation == "replace-and-summary":
-                foreign.replace_flashcard_citations_and_source_reference_summary(
+                foreign.flashcard_store.replace_flashcard_citations_and_source_reference_summary(
                     ids["card"], [citation], source_ref_type="note", source_ref_id=other["note"]
                 )
             else:
-                foreign.set_flashcard_source_reference_summary(
+                foreign.flashcard_store.set_flashcard_source_reference_summary(
                     ids["card"], source_ref_type="note", source_ref_id=other["note"]
                 )
         except (CharactersRAGDBError, InputError) as exc:
@@ -216,7 +216,7 @@ def test_postgres_study_pack_cannot_reference_foreign_parent(pack_owners, parent
     with chacha_operation(independent=True):
         try:
             if parent == "deck":
-                foreign.create_study_pack(
+                foreign.flashcard_store.create_study_pack(
                     title="Foreign destination",
                     workspace_id=None,
                     deck_id=ids["deck"],
@@ -224,11 +224,11 @@ def test_postgres_study_pack_cannot_reference_foreign_parent(pack_owners, parent
                     generation_options_json={},
                 )
             elif parent == "card":
-                foreign.add_study_pack_cards(other["pack"], [ids["card"]])
+                foreign.flashcard_store.add_study_pack_cards(other["pack"], [ids["card"]])
             elif parent == "replacement-pack":
-                foreign.supersede_study_pack(other["pack"], superseded_by_pack_id=ids["pack"], expected_version=1)
+                foreign.flashcard_store.supersede_study_pack(other["pack"], superseded_by_pack_id=ids["pack"], expected_version=1)
             else:
-                foreign.create_study_pack(
+                foreign.flashcard_store.create_study_pack(
                     title="Foreign successor",
                     workspace_id=None,
                     deck_id=other["deck"],
@@ -243,8 +243,8 @@ def test_postgres_study_pack_cannot_reference_foreign_parent(pack_owners, parent
     if kind == "postgres":
         assert rejected
     with chacha_operation(independent=True):
-        assert owner.get_study_pack(ids["pack"])["client_id"] == "2"
-        assert owner.get_flashcard(ids["card"])["client_id"] == "2"
+        assert owner.flashcard_store.get_study_pack(ids["pack"])["client_id"] == "2"
+        assert owner.flashcard_store.get_flashcard(ids["card"])["client_id"] == "2"
 
 
 def test_owned_pack_lifecycle_preserves_workspace_versions_and_empty_inputs(pack_api):
@@ -252,38 +252,38 @@ def test_owned_pack_lifecycle_preserves_workspace_versions_and_empty_inputs(pack
     ids = _seed(db)
     with chacha_operation(independent=True):
         db.workspace_store.upsert_workspace("owned-workspace", "Owned workspace")
-        deck = db.add_deck("Owned workspace destination", workspace_id="owned-workspace")
-        replacement = db.create_study_pack(
+        deck = db.flashcard_store.add_deck("Owned workspace destination", workspace_id="owned-workspace")
+        replacement = db.flashcard_store.create_study_pack(
             title="Owned successor",
             workspace_id="owned-workspace",
             deck_id=deck,
             source_bundle_json={"items": []},
             generation_options_json={"deck_mode": "new"},
         )
-        assert db.get_study_pack(replacement)["workspace_id"] == "owned-workspace"
-        assert db.add_study_pack_cards(ids["pack"], []) == 0
-        assert db.add_flashcard_citations(ids["card"], []) == 0
-        assert db.add_study_pack_cards(ids["pack"], [ids["card"], ids["card"]]) == 0
-        assert db.replace_flashcard_citations(ids["card"], []) == 0
-        assert db.list_flashcard_citations(ids["card"]) == []
-        assert db.list_flashcard_citations(ids["card"], include_deleted=True)
+        assert db.flashcard_store.get_study_pack(replacement)["workspace_id"] == "owned-workspace"
+        assert db.flashcard_store.add_study_pack_cards(ids["pack"], []) == 0
+        assert db.flashcard_store.add_flashcard_citations(ids["card"], []) == 0
+        assert db.flashcard_store.add_study_pack_cards(ids["pack"], [ids["card"], ids["card"]]) == 0
+        assert db.flashcard_store.replace_flashcard_citations(ids["card"], []) == 0
+        assert db.flashcard_store.list_flashcard_citations(ids["card"]) == []
+        assert db.flashcard_store.list_flashcard_citations(ids["card"], include_deleted=True)
         citation = {"source_type": "note", "source_id": ids["note"], "citation_text": "Owned replacement"}
         assert (
-            db.replace_flashcard_citations_and_source_reference_summary(
+            db.flashcard_store.replace_flashcard_citations_and_source_reference_summary(
                 ids["card"], [citation], source_ref_type="note", source_ref_id=ids["note"]
             )
             == 1
         )
-        assert db.set_flashcard_source_reference_summary(ids["card"], source_ref_type=None, source_ref_id=None)
+        assert db.flashcard_store.set_flashcard_source_reference_summary(ids["card"], source_ref_type=None, source_ref_id=None)
         with pytest.raises(ConflictError):
-            db.supersede_study_pack(ids["pack"], superseded_by_pack_id=replacement, expected_version=99)
-        assert db.supersede_study_pack(ids["pack"], superseded_by_pack_id=replacement, expected_version=1)
-        assert db.get_study_pack(ids["pack"])["version"] == 2
+            db.flashcard_store.supersede_study_pack(ids["pack"], superseded_by_pack_id=replacement, expected_version=99)
+        assert db.flashcard_store.supersede_study_pack(ids["pack"], superseded_by_pack_id=replacement, expected_version=1)
+        assert db.flashcard_store.get_study_pack(ids["pack"])["version"] == 2
         with pytest.raises(ConflictError):
-            db.soft_delete_study_pack(ids["pack"], expected_version=1)
-        assert db.soft_delete_study_pack(ids["pack"], expected_version=2)
-        assert db.soft_delete_study_pack(ids["pack"], expected_version=2)
-        assert db.get_study_pack(ids["pack"]) is None
+            db.flashcard_store.soft_delete_study_pack(ids["pack"], expected_version=1)
+        assert db.flashcard_store.soft_delete_study_pack(ids["pack"], expected_version=2)
+        assert db.flashcard_store.soft_delete_study_pack(ids["pack"], expected_version=2)
+        assert db.flashcard_store.get_study_pack(ids["pack"]) is None
     assert client.get(f"/api/v1/flashcards/study-packs/{ids['pack']}").status_code == 404
     assert client.get("/api/v1/flashcards/study-packs/9999999").status_code == 404
 
@@ -293,28 +293,28 @@ def test_membership_denial_preserves_prior_caller_work_and_rolls_back_all_writes
     ids = _seed(db, membership=False)
     other = _seed(foreign)
     with chacha_operation(independent=True):
-        before_card = db.get_flashcard(ids["card"])
-        before_cites = db.list_flashcard_citations(ids["card"], include_deleted=True)
+        before_card = db.flashcard_store.get_flashcard(ids["card"])
+        before_cites = db.flashcard_store.list_flashcard_citations(ids["card"], include_deleted=True)
         before_sync = db.execute_query("SELECT COUNT(*) AS total FROM sync_log", read_only=True).fetchone()["total"]
         with pytest.raises(RuntimeError, match="caller rollback"):
             with db.transaction():
-                marker = db.add_deck("Prior caller work")
+                marker = db.flashcard_store.add_deck("Prior caller work")
                 if kind == "postgres":
                     # PG owner validation precedes every membership insert. SQLite
                     # has no owner predicates and retains its outer rollback policy.
                     with pytest.raises(ConflictError):
-                        db.add_study_pack_cards(ids["pack"], [ids["card"], other["card"]])
-                assert db.get_deck(marker) is not None
-                assert db.list_study_pack_cards(ids["pack"]) == []
-                db.add_study_pack_cards(ids["pack"], [ids["card"]])
-                db.replace_flashcard_citations_and_source_reference_summary(
+                        db.flashcard_store.add_study_pack_cards(ids["pack"], [ids["card"], other["card"]])
+                assert db.flashcard_store.get_deck(marker) is not None
+                assert db.flashcard_store.list_study_pack_cards(ids["pack"]) == []
+                db.flashcard_store.add_study_pack_cards(ids["pack"], [ids["card"]])
+                db.flashcard_store.replace_flashcard_citations_and_source_reference_summary(
                     ids["card"], [], source_ref_type=None, source_ref_id=None
                 )
                 raise RuntimeError("caller rollback")
-        assert db.get_deck_by_name("Prior caller work") is None
-        assert db.list_study_pack_cards(ids["pack"]) == []
-        assert db.get_flashcard(ids["card"]) == before_card
-        assert db.list_flashcard_citations(ids["card"], include_deleted=True) == before_cites
+        assert db.flashcard_store.get_deck_by_name("Prior caller work") is None
+        assert db.flashcard_store.list_study_pack_cards(ids["pack"]) == []
+        assert db.flashcard_store.get_flashcard(ids["card"]) == before_card
+        assert db.flashcard_store.list_flashcard_citations(ids["card"], include_deleted=True) == before_cites
         assert (
             db.execute_query("SELECT COUNT(*) AS total FROM sync_log", read_only=True).fetchone()["total"]
             == before_sync
@@ -333,11 +333,11 @@ def test_membership_write_failure_propagates_to_existing_caller_rollback(pack_ap
     with chacha_operation(independent=True):
         before_sync = db.execute_query("SELECT COUNT(*) AS total FROM sync_log", read_only=True).fetchone()["total"]
         with pytest.raises(RuntimeError, match="injected write failure"), db.transaction():
-            db.add_deck("Rolled back caller marker")
+            db.flashcard_store.add_deck("Rolled back caller marker")
             monkeypatch.setattr(db, "execute_many", fail_after_write)
-            db.add_study_pack_cards(ids["pack"], [ids["card"]])
-        assert db.get_deck_by_name("Rolled back caller marker") is None
-        assert db.list_study_pack_cards(ids["pack"]) == []
+            db.flashcard_store.add_study_pack_cards(ids["pack"], [ids["card"]])
+        assert db.flashcard_store.get_deck_by_name("Rolled back caller marker") is None
+        assert db.flashcard_store.list_study_pack_cards(ids["pack"]) == []
         assert (
             db.execute_query("SELECT COUNT(*) AS total FROM sync_log", read_only=True).fetchone()["total"]
             == before_sync
@@ -362,11 +362,11 @@ def test_replacing_owned_citations_preserves_foreign_historical_rows(pack_api, a
         )
         replacement = [{"source_type": "note", "source_id": ids["note"], "citation_text": "Replacement"}]
         if atomic:
-            db.replace_flashcard_citations_and_source_reference_summary(
+            db.flashcard_store.replace_flashcard_citations_and_source_reference_summary(
                 ids["card"], replacement, source_ref_type="note", source_ref_id=ids["note"]
             )
         else:
-            db.replace_flashcard_citations(ids["card"], replacement)
+            db.flashcard_store.replace_flashcard_citations(ids["card"], replacement)
         after = dict(
             db.execute_query(
                 "SELECT * FROM flashcard_citations WHERE source_id = ?", ("other-owner-source",), read_only=True
@@ -376,7 +376,7 @@ def test_replacing_owned_citations_preserves_foreign_historical_rows(pack_api, a
             assert after == before
         else:
             assert after["deleted"] and after["client_id"] == "2" and after["version"] == 2
-        assert [row["citation_text"] for row in db.list_flashcard_citations(ids["card"])] == ["Replacement"]
+        assert [row["citation_text"] for row in db.flashcard_store.list_flashcard_citations(ids["card"])] == ["Replacement"]
 
 
 def test_later_owned_membership_survives_earlier_foreign_history(pack_api):
@@ -391,13 +391,13 @@ def test_later_owned_membership_survives_earlier_foreign_history(pack_api):
                 "INSERT INTO study_pack_cards(study_pack_id, flashcard_uuid, created_at, last_modified, deleted, client_id, version) VALUES(?, ?, ?, ?, ?, ?, ?)",
                 (other_ids["pack"], ids["card"], now, now, False, "3", 1),
             )
-            second_card = db.add_flashcard({"deck_id": ids["deck"], "front": "Second", "back": "Second answer"})
+            second_card = db.flashcard_store.add_flashcard({"deck_id": ids["deck"], "front": "Second", "back": "Second answer"})
             ordered_cards = sorted([ids["card"], second_card], reverse=True)
-            db.add_study_pack_cards(ids["pack"], ordered_cards)
+            db.flashcard_store.add_study_pack_cards(ids["pack"], ordered_cards)
         with chacha_operation(independent=True):
-            assert [row["flashcard_uuid"] for row in db.list_study_pack_cards(ids["pack"])] == ordered_cards
+            assert [row["flashcard_uuid"] for row in db.flashcard_store.list_study_pack_cards(ids["pack"])] == ordered_cards
             expected_pack = ids["pack"] if kind == "postgres" else other_ids["pack"]
-            assert db.get_study_pack_for_flashcard(ids["card"])["id"] == expected_pack
+            assert db.flashcard_store.get_study_pack_for_flashcard(ids["card"])["id"] == expected_pack
         response = client.get(f"/api/v1/flashcards/{ids['card']}/assistant")
         assert response.status_code == 200
         assert response.json()["study_pack"]["id"] == expected_pack
@@ -414,19 +414,19 @@ def test_membership_parent_validation_keeps_backend_deletion_contract(pack_api, 
         if parent == "missing-pack":
             pack = 9999999
         elif parent == "deleted-pack":
-            db.soft_delete_study_pack(pack, expected_version=1)
+            db.flashcard_store.soft_delete_study_pack(pack, expected_version=1)
         elif parent == "missing-card":
             card = "missing-card"
         else:
-            db.soft_delete_flashcard(card, expected_version=1)
+            db.flashcard_store.soft_delete_flashcard(card, expected_version=1)
         if kind == "postgres":
             with pytest.raises(ConflictError):
-                db.add_study_pack_cards(pack, [card])
+                db.flashcard_store.add_study_pack_cards(pack, [card])
         elif parent.startswith("missing"):
             with pytest.raises(CharactersRAGDBError):
-                db.add_study_pack_cards(pack, [card])
+                db.flashcard_store.add_study_pack_cards(pack, [card])
         else:
-            assert db.add_study_pack_cards(pack, [card]) == 1
+            assert db.flashcard_store.add_study_pack_cards(pack, [card]) == 1
 
 
 def test_foreign_tombstones_are_hidden_even_when_deleted_rows_requested(pack_owners):
@@ -436,10 +436,10 @@ def test_foreign_tombstones_are_hidden_even_when_deleted_rows_requested(pack_own
         conn.execute("UPDATE study_pack_cards SET deleted=? WHERE study_pack_id=?", (True, ids["pack"]))
         conn.execute("UPDATE flashcard_citations SET deleted=? WHERE flashcard_uuid=?", (True, ids["card"]))
     with chacha_operation(independent=True):
-        assert db.list_study_pack_cards(ids["pack"], include_deleted=True)
-        assert db.list_flashcard_citations(ids["card"], include_deleted=True)
-        assert foreign.list_study_pack_cards(ids["pack"], include_deleted=True) == []
-        assert foreign.list_flashcard_citations(ids["card"], include_deleted=True) == []
+        assert db.flashcard_store.list_study_pack_cards(ids["pack"], include_deleted=True)
+        assert db.flashcard_store.list_flashcard_citations(ids["card"], include_deleted=True)
+        assert foreign.flashcard_store.list_study_pack_cards(ids["pack"], include_deleted=True) == []
+        assert foreign.flashcard_store.list_flashcard_citations(ids["card"], include_deleted=True) == []
 
 
 def test_restricted_role_study_pack_access_is_owner_scoped(pack_owners):
@@ -447,7 +447,7 @@ def test_restricted_role_study_pack_access_is_owner_scoped(pack_owners):
     ids = _seed(db)
     other = _seed(foreign)
     if kind == "sqlite":
-        assert foreign.get_study_pack(ids["pack"])["client_id"] == "3"
+        assert foreign.flashcard_store.get_study_pack(ids["pack"])["client_id"] == "3"
         return
     backend = db.backend
     role = backend.escape_identifier(f"uat222_reader_{uuid4().hex[:12]}")
@@ -467,11 +467,11 @@ def test_restricted_role_study_pack_access_is_owner_scoped(pack_owners):
             conn.execute("SELECT set_config('app.current_user_id', ?, true)", ("3",))
             flags = conn.execute("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
             assert not flags["rolsuper"] and not flags["rolbypassrls"]
-            assert foreign.get_study_pack(ids["pack"]) is None
-            assert foreign.list_study_pack_cards(ids["pack"]) == []
-            assert foreign.list_flashcard_citations(ids["card"]) == []
-            assert foreign.get_study_pack_for_flashcard(ids["card"]) is None
-            assert foreign.get_study_pack(other["pack"])["client_id"] == "3"
+            assert foreign.flashcard_store.get_study_pack(ids["pack"]) is None
+            assert foreign.flashcard_store.list_study_pack_cards(ids["pack"]) == []
+            assert foreign.flashcard_store.list_flashcard_citations(ids["card"]) == []
+            assert foreign.flashcard_store.get_study_pack_for_flashcard(ids["card"]) is None
+            assert foreign.flashcard_store.get_study_pack(other["pack"])["client_id"] == "3"
     finally:
         if created:
             with backend.transaction() as conn:

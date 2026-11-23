@@ -99,6 +99,7 @@ class _FailingJobManager:
 
 
 class _FailingFlashcardDeckDB:
+    flashcard_store = property(lambda self: self)  # the fake defines the flashcard methods itself
     def __init__(self) -> None:
         self.deleted_deck_ids: list[int] = []
 
@@ -126,7 +127,7 @@ def _create_snapshot(
     anchor_id: int = 101,
     refreshed_from_snapshot_id: int | None = None,
 ) -> int:
-    return db.create_suggestion_snapshot(
+    return db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type=anchor_type,
@@ -344,8 +345,8 @@ def test_snapshot_live_evidence_marks_deleted_deck_source_unavailable(
     client: TestClient,
     db: CharactersRAGDB,
 ):
-    deck_id = db.add_deck("Deleted Evidence Deck", "desc")
-    snapshot_id = db.create_suggestion_snapshot(
+    deck_id = db.flashcard_store.add_deck("Deleted Evidence Deck", "desc")
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="flashcards",
         activity_type="flashcard_review_session",
         anchor_type="flashcard_review_session",
@@ -363,7 +364,7 @@ def test_snapshot_live_evidence_marks_deleted_deck_source_unavailable(
             ],
         },
     )
-    db.soft_delete_deck_by_id(deck_id)
+    db.flashcard_store.soft_delete_deck_by_id(deck_id)
 
     response = client.get(f"/api/v1/study-suggestions/snapshots/{snapshot_id}")
 
@@ -380,8 +381,8 @@ def test_snapshot_live_evidence_db_failure_marks_source_unavailable(
     db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    deck_id = db.add_deck("Evidence Lookup Failure Deck", "desc")
-    snapshot_id = db.create_suggestion_snapshot(
+    deck_id = db.flashcard_store.add_deck("Evidence Lookup Failure Deck", "desc")
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="flashcards",
         activity_type="flashcard_review_session",
         anchor_type="flashcard_review_session",
@@ -504,8 +505,8 @@ def test_review_session_end_completes_session_and_enqueues_suggestions(
     jobs_db_path: Path,
 ):
     _endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, jobs_mod, _actions_mod = _load_modules()
-    deck_id = db.add_deck("Session Deck", "desc")
-    session = db.get_or_create_flashcard_review_session(
+    deck_id = db.flashcard_store.add_deck("Session Deck", "desc")
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -535,21 +536,21 @@ def test_review_sessions_list_route_returns_db_sessions_with_filters(
     client: TestClient,
     db: CharactersRAGDB,
 ):
-    deck_id = db.add_deck("Review Route Deck", "desc")
-    active_session = db.get_or_create_flashcard_review_session(
+    deck_id = db.flashcard_store.add_deck("Review Route Deck", "desc")
+    active_session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
         scope_key=f"due:deck:{deck_id}",
     )
-    completed_session = db.get_or_create_flashcard_review_session(
+    completed_session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter="renal",
         scope_key=f"due:deck:{deck_id}:tag:renal",
     )
-    db.mark_flashcard_review_session_completed(int(completed_session["id"]))
-    db.update_deck(deck_id, name="Renamed Review Route Deck")
+    db.flashcard_store.mark_flashcard_review_session_completed(int(completed_session["id"]))
+    db.flashcard_store.update_deck(deck_id, name="Renamed Review Route Deck")
 
     response = client.get(
         "/api/v1/flashcards/review-sessions",
@@ -574,7 +575,7 @@ def test_snapshot_actions_open_existing_generation_link_when_fingerprint_matches
     _endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
     ancestor_quiz_id = db.create_quiz(name="Ancestor Quiz", source_bundle_json=[])
     unrelated_quiz_id = db.create_quiz(name="Unrelated Quiz", source_bundle_json=[])
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -607,14 +608,14 @@ def test_snapshot_actions_open_existing_generation_link_when_fingerprint_matches
         action_kind="follow_up_quiz",
         generator_version="v1",
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
         target_id=str(ancestor_quiz_id),
         selection_fingerprint=fingerprint,
     )
-    unrelated_snapshot_id = db.create_suggestion_snapshot(
+    unrelated_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -639,7 +640,7 @@ def test_snapshot_actions_open_existing_generation_link_when_fingerprint_matches
             ]
         },
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=unrelated_snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -671,7 +672,7 @@ def test_snapshot_actions_use_selected_topic_edits_and_manual_labels_for_generat
     monkeypatch: pytest.MonkeyPatch,
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -747,7 +748,7 @@ def test_snapshot_actions_respect_explicit_empty_selection_without_falling_back_
     monkeypatch: pytest.MonkeyPatch,
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -807,7 +808,7 @@ def test_snapshot_actions_force_regenerate_bypasses_duplicate_open_behavior(
     monkeypatch: pytest.MonkeyPatch,
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -823,7 +824,7 @@ def test_snapshot_actions_force_regenerate_bypasses_duplicate_open_behavior(
         action_kind="follow_up_quiz",
         generator_version="v1",
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -857,7 +858,7 @@ def test_snapshot_actions_force_regenerate_bypasses_duplicate_open_behavior(
     assert response.status_code == 200  # nosec B101
     assert response.json()["disposition"] == "generated"  # nosec B101
     assert response.json()["target_id"] == "quiz-99"  # nosec B101
-    created_link = db.find_suggestion_generation_link(
+    created_link = db.flashcard_store.find_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -874,7 +875,7 @@ def test_flashcard_follow_up_force_regenerate_creates_real_deck_and_link(
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
     attempt_id = _create_quiz_attempt(db)
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -910,9 +911,9 @@ def test_flashcard_follow_up_force_regenerate_creates_real_deck_and_link(
     assert response.status_code == 200  # nosec B101
     assert response.json()["disposition"] == "generated"  # nosec B101
     deck_id = int(response.json()["target_id"])
-    deck = db.get_deck(deck_id)
+    deck = db.flashcard_store.get_deck(deck_id)
     assert deck is not None  # nosec B101
-    cards = db.list_flashcards(deck_id=deck_id)
+    cards = db.flashcard_store.list_flashcards(deck_id=deck_id)
     assert len(cards) == 2  # nosec B101
 
     fingerprint = actions_mod.build_selection_fingerprint(
@@ -923,7 +924,7 @@ def test_flashcard_follow_up_force_regenerate_creates_real_deck_and_link(
         action_kind="follow_up_flashcards",
         generator_version="v1",
     )
-    linked = db.find_suggestion_generation_link(
+    linked = db.flashcard_store.find_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="flashcards",
         target_type="deck",
@@ -940,7 +941,7 @@ def test_flashcard_follow_up_finalization_failure_soft_deletes_generated_deck(
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, _actions_mod = _load_modules()
     attempt_id = _create_quiz_attempt(db)
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -973,7 +974,7 @@ def test_flashcard_follow_up_finalization_failure_soft_deletes_generated_deck(
 
     generated_decks = [
         deck
-        for deck in db.list_decks(include_deleted=True)
+        for deck in db.flashcard_store.list_decks(include_deleted=True)
         if str(deck.get("name") or "").startswith(f"Study Suggestions {snapshot_id}")
     ]
     assert len(generated_decks) == 1  # nosec B101
@@ -989,7 +990,7 @@ def test_action_failure_logs_cleanup_and_reservation_release_failures(
     logger = _LoggerStub()
     monkeypatch.setattr(endpoints_mod, "logger", logger)
     attempt_id = _create_quiz_attempt(db)
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1040,8 +1041,8 @@ def test_flashcard_session_snapshot_can_generate_follow_up_quiz(
     monkeypatch: pytest.MonkeyPatch,
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, _actions_mod = _load_modules()
-    deck_id = db.add_deck("Session Deck", "desc")
-    db.add_flashcard(
+    deck_id = db.flashcard_store.add_deck("Session Deck", "desc")
+    db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Kidney",
@@ -1049,14 +1050,14 @@ def test_flashcard_session_snapshot_can_generate_follow_up_quiz(
             "tags_json": '["renal basics"]',
         }
     )
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
         scope_key=f"due:deck:{deck_id}",
     )
-    db.mark_flashcard_review_session_completed(int(session["id"]))
-    snapshot_id = db.create_suggestion_snapshot(
+    db.flashcard_store.mark_flashcard_review_session_completed(int(session["id"]))
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="flashcards",
         activity_type="flashcard_review_session",
         anchor_type="flashcard_review_session",
@@ -1121,7 +1122,7 @@ def test_snapshot_actions_return_conflict_when_matching_generation_is_already_re
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
     attempt_id = _create_quiz_attempt(db)
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1137,7 +1138,7 @@ def test_snapshot_actions_return_conflict_when_matching_generation_is_already_re
         action_kind="follow_up_quiz",
         generator_version="v1",
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -1172,7 +1173,7 @@ def test_snapshot_actions_use_snapshot_semantics_for_fingerprint_and_edit_labels
     monkeypatch: pytest.MonkeyPatch,
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, _actions_mod = _load_modules()
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1257,7 +1258,7 @@ def test_snapshot_actions_reopen_existing_links_written_before_normalization_ver
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
     existing_quiz_id = db.create_quiz(name="Existing Quiz", source_bundle_json=[])
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1280,7 +1281,7 @@ def test_snapshot_actions_reopen_existing_links_written_before_normalization_ver
         f"snapshot_id={snapshot_id}|target_service=quiz|target_type=quiz|"
         "topics=renal:kidney-functions|action_kind=follow_up_quiz|generator_version=v1"
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -1332,10 +1333,10 @@ def test_snapshot_actions_prefer_live_legacy_links_when_stale_current_fingerprin
     monkeypatch: pytest.MonkeyPatch,
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
-    live_deck_id = db.add_deck("Live Deck", "desc")
-    stale_deck_id = db.add_deck("Stale Deck", "desc")
-    db.soft_delete_deck_by_id(stale_deck_id)
-    snapshot_id = db.create_suggestion_snapshot(
+    live_deck_id = db.flashcard_store.add_deck("Live Deck", "desc")
+    stale_deck_id = db.flashcard_store.add_deck("Stale Deck", "desc")
+    db.flashcard_store.soft_delete_deck_by_id(stale_deck_id)
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="flashcards",
         activity_type="flashcard_review_session",
         anchor_type="flashcard_review_session",
@@ -1373,14 +1374,14 @@ def test_snapshot_actions_prefer_live_legacy_links_when_stale_current_fingerprin
         normalization_version="norm-v2",
         include_normalization_version=False,
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="flashcards",
         target_type="deck",
         target_id=str(stale_deck_id),
         selection_fingerprint=current_fingerprint,
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="flashcards",
         target_type="deck",
@@ -1422,10 +1423,10 @@ def test_snapshot_actions_reserve_conflict_rechecks_live_legacy_links_before_ope
     monkeypatch: pytest.MonkeyPatch,
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
-    live_deck_id = db.add_deck("Live Deck", "desc")
-    stale_deck_id = db.add_deck("Stale Deck", "desc")
-    db.soft_delete_deck_by_id(stale_deck_id)
-    snapshot_id = db.create_suggestion_snapshot(
+    live_deck_id = db.flashcard_store.add_deck("Live Deck", "desc")
+    stale_deck_id = db.flashcard_store.add_deck("Stale Deck", "desc")
+    db.flashcard_store.soft_delete_deck_by_id(stale_deck_id)
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="flashcards",
         activity_type="flashcard_review_session",
         anchor_type="flashcard_review_session",
@@ -1463,14 +1464,14 @@ def test_snapshot_actions_reserve_conflict_rechecks_live_legacy_links_before_ope
         normalization_version="norm-v2",
         include_normalization_version=False,
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="flashcards",
         target_type="deck",
         target_id=str(stale_deck_id),
         selection_fingerprint=current_fingerprint,
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="flashcards",
         target_type="deck",
@@ -1518,7 +1519,7 @@ def test_snapshot_actions_reopen_refreshed_ancestor_link_without_writing_child_a
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
     ancestor_quiz_id = db.create_quiz(name="Ancestor Quiz", source_bundle_json=[])
     unrelated_quiz_id = db.create_quiz(name="Unrelated Quiz", source_bundle_json=[])
-    original_snapshot_id = db.create_suggestion_snapshot(
+    original_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1546,14 +1547,14 @@ def test_snapshot_actions_reopen_refreshed_ancestor_link_without_writing_child_a
         generator_version="v1",
         normalization_version="norm-v2",
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=original_snapshot_id,
         target_service="quiz",
         target_type="quiz",
         target_id=str(ancestor_quiz_id),
         selection_fingerprint=fingerprint,
     )
-    unrelated_snapshot_id = db.create_suggestion_snapshot(
+    unrelated_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1572,14 +1573,14 @@ def test_snapshot_actions_reopen_refreshed_ancestor_link_without_writing_child_a
             ]
         },
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=unrelated_snapshot_id,
         target_service="quiz",
         target_type="quiz",
         target_id=str(unrelated_quiz_id),
         selection_fingerprint=fingerprint,
     )
-    child_snapshot_id = db.create_suggestion_snapshot(
+    child_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1654,7 +1655,7 @@ def test_snapshot_actions_reopen_refreshed_ancestor_links_written_before_normali
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
     ancestor_quiz_id = db.create_quiz(name="Ancestor Quiz", source_bundle_json=[])
-    original_snapshot_id = db.create_suggestion_snapshot(
+    original_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1677,14 +1678,14 @@ def test_snapshot_actions_reopen_refreshed_ancestor_links_written_before_normali
         f"snapshot_id={original_snapshot_id}|target_service=quiz|target_type=quiz|"
         "topics=renal:kidney-functions|action_kind=follow_up_quiz|generator_version=v1"
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=original_snapshot_id,
         target_service="quiz",
         target_type="quiz",
         target_id=str(ancestor_quiz_id),
         selection_fingerprint=legacy_fingerprint,
     )
-    child_snapshot_id = db.create_suggestion_snapshot(
+    child_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1749,8 +1750,8 @@ def test_snapshot_actions_ignore_deleted_targets_when_reopening_existing_links(
     monkeypatch: pytest.MonkeyPatch,
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
-    deck_id = db.add_deck("Session Deck", "desc")
-    snapshot_id = db.create_suggestion_snapshot(
+    deck_id = db.flashcard_store.add_deck("Session Deck", "desc")
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="flashcards",
         activity_type="flashcard_review_session",
         anchor_type="flashcard_review_session",
@@ -1776,14 +1777,14 @@ def test_snapshot_actions_ignore_deleted_targets_when_reopening_existing_links(
         action_kind="follow_up_flashcards",
         generator_version="v1",
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="flashcards",
         target_type="deck",
         target_id=str(deck_id),
         selection_fingerprint=fingerprint,
     )
-    db.soft_delete_deck_by_id(deck_id)
+    db.flashcard_store.soft_delete_deck_by_id(deck_id)
 
     monkeypatch.setattr(endpoints_mod, "build_selection_fingerprint", lambda **_: fingerprint)
 
@@ -1829,8 +1830,8 @@ def test_snapshot_actions_ignore_deleted_ancestor_targets_in_refreshed_lineage_l
     monkeypatch: pytest.MonkeyPatch,
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
-    deleted_deck_id = db.add_deck("Deleted Ancestor Deck", "desc")
-    original_snapshot_id = db.create_suggestion_snapshot(
+    deleted_deck_id = db.flashcard_store.add_deck("Deleted Ancestor Deck", "desc")
+    original_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="flashcards",
         activity_type="flashcard_review_session",
         anchor_type="flashcard_review_session",
@@ -1858,15 +1859,15 @@ def test_snapshot_actions_ignore_deleted_ancestor_targets_in_refreshed_lineage_l
         generator_version="v1",
         normalization_version="norm-v2",
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=original_snapshot_id,
         target_service="flashcards",
         target_type="deck",
         target_id=str(deleted_deck_id),
         selection_fingerprint=fingerprint,
     )
-    db.soft_delete_deck_by_id(deleted_deck_id)
-    child_snapshot_id = db.create_suggestion_snapshot(
+    db.flashcard_store.soft_delete_deck_by_id(deleted_deck_id)
+    child_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="flashcards",
         activity_type="flashcard_review_session",
         anchor_type="flashcard_review_session",
@@ -1923,7 +1924,7 @@ def test_snapshot_actions_generate_new_output_for_refreshed_ancestor_requests_wi
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
     ancestor_quiz_id = db.create_quiz(name="Ancestor Quiz", source_bundle_json=[])
-    original_snapshot_id = db.create_suggestion_snapshot(
+    original_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -1951,14 +1952,14 @@ def test_snapshot_actions_generate_new_output_for_refreshed_ancestor_requests_wi
         generator_version="v1",
         normalization_version="norm-v2",
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=original_snapshot_id,
         target_service="quiz",
         target_type="quiz",
         target_id=str(ancestor_quiz_id),
         selection_fingerprint=fingerprint,
     )
-    child_snapshot_id = db.create_suggestion_snapshot(
+    child_snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -2025,7 +2026,7 @@ def test_snapshot_actions_force_regenerate_replaces_active_direct_link(
 ):
     endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, actions_mod = _load_modules()
     existing_quiz_id = db.create_quiz(name="Existing Quiz", source_bundle_json=[])
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -2051,7 +2052,7 @@ def test_snapshot_actions_force_regenerate_replaces_active_direct_link(
         action_kind="follow_up_quiz",
         generator_version="v1",
     )
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",

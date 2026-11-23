@@ -49,15 +49,15 @@ def pack_api(request, tmp_path):
 
 def _seed_pack(db):
     with chacha_operation(independent=True):
-        deck = db.add_deck("Synthetic pack deck")
-        pack = db.create_study_pack(
+        deck = db.flashcard_store.add_deck("Synthetic pack deck")
+        pack = db.flashcard_store.create_study_pack(
             title="Synthetic study pack",
             workspace_id=None,
             deck_id=deck,
             source_bundle_json={"items": [{"source_type": "note", "source_id": "synthetic-note"}]},
             generation_options_json={"deck_mode": "new"},
         )
-        return db.get_study_pack(pack)
+        return db.flashcard_store.get_study_pack(pack)
 
 
 def _complete_job(jobs, result, *, owner="2"):
@@ -91,7 +91,7 @@ def test_http_read_preserves_completed_pack_and_serializes_timestamps(pack_api, 
     )
     response = client.get(url)
     with chacha_operation(independent=True):
-        assert db.get_study_pack(before["id"]) == before
+        assert db.flashcard_store.get_study_pack(before["id"]) == before
     assert jobs.get_job(int(job["id"])) == job
     assert response.status_code == 200
     body = response.json()

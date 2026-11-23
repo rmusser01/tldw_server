@@ -128,7 +128,7 @@ async def test_handle_study_pack_job_rolls_back_late_persistence_failures(
         fake_generate_validated_cards,
     )
 
-    original_add_study_pack_cards = db.add_study_pack_cards
+    original_add_study_pack_cards = db.flashcard_store.add_study_pack_cards
 
     def fail_membership_insert(study_pack_id: int, flashcard_uuids: list[str]) -> int:
         original_add_study_pack_cards(study_pack_id, flashcard_uuids)
@@ -139,7 +139,7 @@ async def test_handle_study_pack_job_rolls_back_late_persistence_failures(
     with pytest.raises(CharactersRAGDBError, match="membership write failed"):
         await worker_mod.handle_study_pack_job(_fake_job())
 
-    deck_names = [deck["name"] for deck in db.list_decks(include_workspace_items=True)]
+    deck_names = [deck["name"] for deck in db.flashcard_store.list_decks(include_workspace_items=True)]
     study_packs = db.execute_query("SELECT COUNT(*) AS count FROM study_packs WHERE deleted = 0").fetchone()
 
     assert "TCP Fundamentals" not in deck_names  # nosec B101
@@ -151,8 +151,8 @@ async def test_handle_study_pack_job_regeneration_supersedes_only_after_successf
     monkeypatch: pytest.MonkeyPatch,
 ):
     types_mod, generation_mod, worker_mod = _load_modules()
-    original_deck_id = db.add_deck("TCP Fundamentals Original", workspace_id="ws-1")
-    original_pack_id = db.create_study_pack(
+    original_deck_id = db.flashcard_store.add_deck("TCP Fundamentals Original", workspace_id="ws-1")
+    original_pack_id = db.flashcard_store.create_study_pack(
         title="TCP Fundamentals Original",
         workspace_id="ws-1",
         deck_id=original_deck_id,

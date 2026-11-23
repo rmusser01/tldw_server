@@ -44,13 +44,13 @@ def test_suggestions_worker_preserves_owner_and_authenticated_cache_reuse(
     media = MediaDatabase(tmp_path / "media.db", client_id="2", backend=backend) if media_first else None
     seed = db_module.CharactersRAGDB(tmp_path / "2" / "ChaChaNotes.db", client_id="2", backend=backend)
     with chacha_operation(independent=True):
-        deck = seed.add_deck("Canonical owner's review")
-        card = seed.add_flashcard({"deck_id": deck, "front": "UTC boundary?", "back": "Midnight UTC."})
-        session = seed.get_or_create_flashcard_review_session(
+        deck = seed.flashcard_store.add_deck("Canonical owner's review")
+        card = seed.flashcard_store.add_flashcard({"deck_id": deck, "front": "UTC boundary?", "back": "Midnight UTC."})
+        session = seed.flashcard_store.get_or_create_flashcard_review_session(
             deck_id=deck, review_mode="due", tag_filter=None, scope_key=f"due:{deck}"
         )
-        seed.review_flashcard(card, rating=3, review_session_id=session["id"])
-        seed.mark_flashcard_review_session_completed(session["id"])
+        seed.flashcard_store.review_flashcard(card, rating=3, review_session_id=session["id"])
+        seed.flashcard_store.mark_flashcard_review_session_completed(session["id"])
     seed.close_connection()
 
     async def drain():
@@ -81,8 +81,8 @@ def test_suggestions_worker_preserves_owner_and_authenticated_cache_reuse(
         cached = cache[str(tmp_path / "2")]
         later_owner = await deps.get_chacha_db_for_owner(2)
         with chacha_operation(independent=True):
-            snapshot = later_owner.get_suggestion_snapshot(result["snapshot_id"])
-            canonical_snapshot = seed.get_suggestion_snapshot(result["snapshot_id"])
+            snapshot = later_owner.flashcard_store.get_suggestion_snapshot(result["snapshot_id"])
+            canonical_snapshot = seed.flashcard_store.get_suggestion_snapshot(result["snapshot_id"])
         assert cached.client_id == "2"
         assert later_owner is cached
         assert snapshot["client_id"] == "2"

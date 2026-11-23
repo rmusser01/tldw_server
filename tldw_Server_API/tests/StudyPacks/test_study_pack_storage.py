@@ -14,7 +14,7 @@ def db(tmp_path):
 
 
 def _create_card(db: CharactersRAGDB, *, deck_id: int, front: str) -> str:
-    return db.add_flashcard(
+    return db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": front,
@@ -25,9 +25,9 @@ def _create_card(db: CharactersRAGDB, *, deck_id: int, front: str) -> str:
 
 
 def test_study_pack_workspace_id_persists_alongside_destination_deck(db: CharactersRAGDB):
-    deck_id = db.add_deck("Networking Deck", workspace_id="ws-1")
+    deck_id = db.flashcard_store.add_deck("Networking Deck", workspace_id="ws-1")
 
-    pack_id = db.create_study_pack(
+    pack_id = db.flashcard_store.create_study_pack(
         title="Networking",
         workspace_id="ws-1",
         deck_id=deck_id,
@@ -35,7 +35,7 @@ def test_study_pack_workspace_id_persists_alongside_destination_deck(db: Charact
         generation_options_json={"deck_mode": "new"},
     )
 
-    pack = db.get_study_pack(pack_id)
+    pack = db.flashcard_store.get_study_pack(pack_id)
 
     assert pack["workspace_id"] == "ws-1"  # nosec B101
     assert pack["deck_id"] == deck_id  # nosec B101
@@ -43,10 +43,10 @@ def test_study_pack_workspace_id_persists_alongside_destination_deck(db: Charact
 
 
 def test_create_study_pack_rejects_whitespace_only_source_id(db: CharactersRAGDB):
-    deck_id = db.add_deck("Invalid Source Deck", workspace_id="ws-1")
+    deck_id = db.flashcard_store.add_deck("Invalid Source Deck", workspace_id="ws-1")
 
     with pytest.raises(InputError, match="source_id"):
-        db.create_study_pack(
+        db.flashcard_store.create_study_pack(
             title="Invalid Source Pack",
             workspace_id="ws-1",
             deck_id=deck_id,
@@ -56,38 +56,38 @@ def test_create_study_pack_rejects_whitespace_only_source_id(db: CharactersRAGDB
 
 
 def test_study_pack_card_membership_survives_manual_deck_changes(db: CharactersRAGDB):
-    original_deck_id = db.add_deck("Original Deck")
-    moved_deck_id = db.add_deck("Moved Deck")
+    original_deck_id = db.flashcard_store.add_deck("Original Deck")
+    moved_deck_id = db.flashcard_store.add_deck("Moved Deck")
     first_card_uuid = _create_card(db, deck_id=original_deck_id, front="TCP handshake")
     second_card_uuid = _create_card(db, deck_id=original_deck_id, front="CIDR notation")
 
-    pack_id = db.create_study_pack(
+    pack_id = db.flashcard_store.create_study_pack(
         title="Networking",
         workspace_id="ws-1",
         deck_id=original_deck_id,
         source_bundle_json={"items": [{"source_type": "note", "source_id": "n1"}]},
         generation_options_json={"deck_mode": "new"},
     )
-    db.add_study_pack_cards(pack_id, [first_card_uuid, second_card_uuid])
+    db.flashcard_store.add_study_pack_cards(pack_id, [first_card_uuid, second_card_uuid])
 
-    assert [row["flashcard_uuid"] for row in db.list_study_pack_cards(pack_id)] == [  # nosec B101
+    assert [row["flashcard_uuid"] for row in db.flashcard_store.list_study_pack_cards(pack_id)] == [  # nosec B101
         first_card_uuid,
         second_card_uuid,
     ]
 
-    assert db.update_flashcard(first_card_uuid, {"deck_id": moved_deck_id}, expected_version=1) is True  # nosec B101
-    assert db.update_flashcard(second_card_uuid, {"deck_id": moved_deck_id}, expected_version=1) is True  # nosec B101
+    assert db.flashcard_store.update_flashcard(first_card_uuid, {"deck_id": moved_deck_id}, expected_version=1) is True  # nosec B101
+    assert db.flashcard_store.update_flashcard(second_card_uuid, {"deck_id": moved_deck_id}, expected_version=1) is True  # nosec B101
 
-    rows = db.list_study_pack_cards(pack_id)
+    rows = db.flashcard_store.list_study_pack_cards(pack_id)
 
     assert [row["flashcard_uuid"] for row in rows] == [first_card_uuid, second_card_uuid]  # nosec B101
 
 
 def test_add_study_pack_cards_returns_actual_insert_count_when_duplicates_are_ignored(db: CharactersRAGDB):
-    deck_id = db.add_deck("Distributed Systems Deck")
+    deck_id = db.flashcard_store.add_deck("Distributed Systems Deck")
     first_card_uuid = _create_card(db, deck_id=deck_id, front="Consensus")
     second_card_uuid = _create_card(db, deck_id=deck_id, front="Raft")
-    pack_id = db.create_study_pack(
+    pack_id = db.flashcard_store.create_study_pack(
         title="Distributed Systems",
         workspace_id="ws-1",
         deck_id=deck_id,
@@ -95,21 +95,21 @@ def test_add_study_pack_cards_returns_actual_insert_count_when_duplicates_are_ig
         generation_options_json={"deck_mode": "new"},
     )
 
-    inserted = db.add_study_pack_cards(pack_id, [first_card_uuid, first_card_uuid, second_card_uuid])
+    inserted = db.flashcard_store.add_study_pack_cards(pack_id, [first_card_uuid, first_card_uuid, second_card_uuid])
 
     assert inserted == 2  # nosec B101
-    assert [row["flashcard_uuid"] for row in db.list_study_pack_cards(pack_id)] == [  # nosec B101
+    assert [row["flashcard_uuid"] for row in db.flashcard_store.list_study_pack_cards(pack_id)] == [  # nosec B101
         first_card_uuid,
         second_card_uuid,
     ]
 
 
 def test_add_flashcard_citations_rejects_negative_ordinals(db: CharactersRAGDB):
-    deck_id = db.add_deck("Computer Architecture Deck")
+    deck_id = db.flashcard_store.add_deck("Computer Architecture Deck")
     card_uuid = _create_card(db, deck_id=deck_id, front="What is a cache line?")
 
     with pytest.raises(InputError, match="ordinal"):
-        db.add_flashcard_citations(
+        db.flashcard_store.add_flashcard_citations(
             card_uuid,
             [
                 {
@@ -124,11 +124,11 @@ def test_add_flashcard_citations_rejects_negative_ordinals(db: CharactersRAGDB):
 
 
 def test_add_flashcard_citations_rejects_non_numeric_ordinals(db: CharactersRAGDB):
-    deck_id = db.add_deck("Operating Systems Input Deck")
+    deck_id = db.flashcard_store.add_deck("Operating Systems Input Deck")
     card_uuid = _create_card(db, deck_id=deck_id, front="What is thrashing?")
 
     with pytest.raises(InputError, match="ordinal"):
-        db.add_flashcard_citations(
+        db.flashcard_store.add_flashcard_citations(
             card_uuid,
             [
                 {
@@ -143,11 +143,11 @@ def test_add_flashcard_citations_rejects_non_numeric_ordinals(db: CharactersRAGD
 
 
 def test_add_flashcard_citations_rejects_blank_source_id(db: CharactersRAGDB):
-    deck_id = db.add_deck("Compilers Deck")
+    deck_id = db.flashcard_store.add_deck("Compilers Deck")
     card_uuid = _create_card(db, deck_id=deck_id, front="What is a parse tree?")
 
     with pytest.raises(InputError, match="source_id"):
-        db.add_flashcard_citations(
+        db.flashcard_store.add_flashcard_citations(
             card_uuid,
             [
                 {
@@ -162,10 +162,10 @@ def test_add_flashcard_citations_rejects_blank_source_id(db: CharactersRAGDB):
 
 
 def test_flashcard_citations_preserve_storage_metadata(db: CharactersRAGDB):
-    deck_id = db.add_deck("Operating Systems Deck")
+    deck_id = db.flashcard_store.add_deck("Operating Systems Deck")
     card_uuid = _create_card(db, deck_id=deck_id, front="What is paging?")
 
-    db.add_flashcard_citations(
+    db.flashcard_store.add_flashcard_citations(
         card_uuid,
         [
             {
@@ -185,7 +185,7 @@ def test_flashcard_citations_preserve_storage_metadata(db: CharactersRAGDB):
         ],
     )
 
-    citations = db.list_flashcard_citations(card_uuid)
+    citations = db.flashcard_store.list_flashcard_citations(card_uuid)
 
     assert [citation["ordinal"] for citation in citations] == [0, 1]  # nosec B101
     assert citations[0]["client_id"] == "study-pack-tests"  # nosec B101
@@ -194,8 +194,8 @@ def test_flashcard_citations_preserve_storage_metadata(db: CharactersRAGDB):
 
 
 def test_soft_delete_study_pack_enforces_version_and_writes_delete_metadata(db: CharactersRAGDB):
-    deck_id = db.add_deck("Security Deck", workspace_id="ws-1")
-    pack_id = db.create_study_pack(
+    deck_id = db.flashcard_store.add_deck("Security Deck", workspace_id="ws-1")
+    pack_id = db.flashcard_store.create_study_pack(
         title="Security",
         workspace_id="ws-1",
         deck_id=deck_id,
@@ -204,10 +204,10 @@ def test_soft_delete_study_pack_enforces_version_and_writes_delete_metadata(db: 
     )
 
     with pytest.raises(ConflictError, match="Version mismatch deleting study pack"):
-        db.soft_delete_study_pack(pack_id, expected_version=99)
+        db.flashcard_store.soft_delete_study_pack(pack_id, expected_version=99)
 
-    assert db.soft_delete_study_pack(pack_id, expected_version=1) is True  # nosec B101
-    assert db.get_study_pack(pack_id) is None  # nosec B101
+    assert db.flashcard_store.soft_delete_study_pack(pack_id, expected_version=1) is True  # nosec B101
+    assert db.flashcard_store.get_study_pack(pack_id) is None  # nosec B101
 
     row = db.execute_query(
         """
@@ -237,15 +237,15 @@ def test_soft_delete_study_pack_enforces_version_and_writes_delete_metadata(db: 
 
 
 def test_supersede_study_pack_enforces_version_and_writes_update_metadata(db: CharactersRAGDB):
-    deck_id = db.add_deck("Databases Deck", workspace_id="ws-1")
-    original_pack_id = db.create_study_pack(
+    deck_id = db.flashcard_store.add_deck("Databases Deck", workspace_id="ws-1")
+    original_pack_id = db.flashcard_store.create_study_pack(
         title="Databases v1",
         workspace_id="ws-1",
         deck_id=deck_id,
         source_bundle_json={"items": [{"source_type": "note", "source_id": "db-1"}]},
         generation_options_json={"deck_mode": "new"},
     )
-    replacement_pack_id = db.create_study_pack(
+    replacement_pack_id = db.flashcard_store.create_study_pack(
         title="Databases v2",
         workspace_id="ws-1",
         deck_id=deck_id,
@@ -254,9 +254,9 @@ def test_supersede_study_pack_enforces_version_and_writes_update_metadata(db: Ch
     )
 
     with pytest.raises(ConflictError, match="Version mismatch updating study pack"):
-        db.supersede_study_pack(original_pack_id, superseded_by_pack_id=replacement_pack_id, expected_version=99)
+        db.flashcard_store.supersede_study_pack(original_pack_id, superseded_by_pack_id=replacement_pack_id, expected_version=99)
 
-    assert db.supersede_study_pack(original_pack_id, superseded_by_pack_id=replacement_pack_id, expected_version=1) is True  # nosec B101
+    assert db.flashcard_store.supersede_study_pack(original_pack_id, superseded_by_pack_id=replacement_pack_id, expected_version=1) is True  # nosec B101
 
     row = db.execute_query(
         """
@@ -288,8 +288,8 @@ def test_supersede_study_pack_enforces_version_and_writes_update_metadata(db: Ch
 
 
 def test_supersede_study_pack_rejects_self_supersede(db: CharactersRAGDB):
-    deck_id = db.add_deck("Networking Self-Supersede Deck", workspace_id="ws-1")
-    pack_id = db.create_study_pack(
+    deck_id = db.flashcard_store.add_deck("Networking Self-Supersede Deck", workspace_id="ws-1")
+    pack_id = db.flashcard_store.create_study_pack(
         title="Networking Pack",
         workspace_id="ws-1",
         deck_id=deck_id,
@@ -298,12 +298,12 @@ def test_supersede_study_pack_rejects_self_supersede(db: CharactersRAGDB):
     )
 
     with pytest.raises(InputError, match="self-supersede"):
-        db.supersede_study_pack(pack_id, superseded_by_pack_id=pack_id, expected_version=1)
+        db.flashcard_store.supersede_study_pack(pack_id, superseded_by_pack_id=pack_id, expected_version=1)
 
 
 def test_supersede_study_pack_rejects_nonexistent_replacement_pack(db: CharactersRAGDB):
-    deck_id = db.add_deck("Replacement Validation Deck", workspace_id="ws-1")
-    pack_id = db.create_study_pack(
+    deck_id = db.flashcard_store.add_deck("Replacement Validation Deck", workspace_id="ws-1")
+    pack_id = db.flashcard_store.create_study_pack(
         title="Original Pack",
         workspace_id="ws-1",
         deck_id=deck_id,
@@ -312,26 +312,26 @@ def test_supersede_study_pack_rejects_nonexistent_replacement_pack(db: Character
     )
 
     with pytest.raises(ConflictError, match="replacement"):
-        db.supersede_study_pack(pack_id, superseded_by_pack_id=999_999, expected_version=1)
+        db.flashcard_store.supersede_study_pack(pack_id, superseded_by_pack_id=999_999, expected_version=1)
 
 
 def test_supersede_study_pack_rejects_deleted_replacement_pack(db: CharactersRAGDB):
-    deck_id = db.add_deck("Deleted Replacement Deck", workspace_id="ws-1")
-    pack_id = db.create_study_pack(
+    deck_id = db.flashcard_store.add_deck("Deleted Replacement Deck", workspace_id="ws-1")
+    pack_id = db.flashcard_store.create_study_pack(
         title="Original Pack",
         workspace_id="ws-1",
         deck_id=deck_id,
         source_bundle_json={"items": [{"source_type": "note", "source_id": "replace-2"}]},
         generation_options_json={"deck_mode": "new"},
     )
-    replacement_pack_id = db.create_study_pack(
+    replacement_pack_id = db.flashcard_store.create_study_pack(
         title="Replacement Pack",
         workspace_id="ws-1",
         deck_id=deck_id,
         source_bundle_json={"items": [{"source_type": "note", "source_id": "replace-3"}]},
         generation_options_json={"deck_mode": "new"},
     )
-    assert db.soft_delete_study_pack(replacement_pack_id, expected_version=1) is True  # nosec B101
+    assert db.flashcard_store.soft_delete_study_pack(replacement_pack_id, expected_version=1) is True  # nosec B101
 
     with pytest.raises(ConflictError, match="replacement"):
-        db.supersede_study_pack(pack_id, superseded_by_pack_id=replacement_pack_id, expected_version=1)
+        db.flashcard_store.supersede_study_pack(pack_id, superseded_by_pack_id=replacement_pack_id, expected_version=1)

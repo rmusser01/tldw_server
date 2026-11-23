@@ -7270,7 +7270,7 @@ async def save_chat_knowledge(
                 key=key,
             )
             if payload.make_flashcard:
-                flashcard_id = db.add_flashcard(
+                flashcard_id = db.flashcard_store.add_flashcard(
                     {
                         "front": flashcard_front,
                         "back": flashcard_back,
@@ -7305,7 +7305,7 @@ async def save_chat_knowledge(
                             logger.warning(f"Keyword attach failed for '{tag}' on note {note_id}: {kw_err}")
 
                 if payload.make_flashcard:
-                    flashcard_id = db.add_flashcard(
+                    flashcard_id = db.flashcard_store.add_flashcard(
                         {
                             "front": flashcard_front,
                             "back": flashcard_back,

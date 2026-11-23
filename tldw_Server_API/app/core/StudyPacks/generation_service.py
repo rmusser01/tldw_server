@@ -286,7 +286,7 @@ class StudyPackGenerationService:
             deck_name = self._next_destination_deck_name(request.title)
             try:
                 with self.note_db.transaction():
-                    deck_id = self.note_db.add_deck(
+                    deck_id = self.note_db.flashcard_store.add_deck(
                         deck_name,
                         workspace_id=request.workspace_id,
                         scheduler_type="sm2_plus",
@@ -299,8 +299,8 @@ class StudyPackGenerationService:
                         }
                         for card_payload in card_template_payloads
                     ]
-                    card_uuids = self.note_db.add_flashcards_bulk(card_payloads)
-                    pack_id = self.note_db.create_study_pack(
+                    card_uuids = self.note_db.flashcard_store.add_flashcards_bulk(card_payloads)
+                    pack_id = self.note_db.flashcard_store.create_study_pack(
                         title=request.title,
                         workspace_id=request.workspace_id,
                         deck_id=deck_id,
@@ -312,7 +312,7 @@ class StudyPackGenerationService:
                             "repair_attempted": generated.repair_attempted,
                         },
                     )
-                    inserted_memberships = self.note_db.add_study_pack_cards(pack_id, card_uuids)
+                    inserted_memberships = self.note_db.flashcard_store.add_study_pack_cards(pack_id, card_uuids)
                     if inserted_memberships != len(card_uuids):
                         raise CharactersRAGDBError(
                             f"Expected {len(card_uuids)} study-pack membership rows, inserted {inserted_memberships}"
@@ -325,7 +325,7 @@ class StudyPackGenerationService:
                         )
 
                     if regenerate_from_pack_id is not None:
-                        self.note_db.supersede_study_pack(
+                        self.note_db.flashcard_store.supersede_study_pack(
                             regenerate_from_pack_id,
                             superseded_by_pack_id=pack_id,
                             expected_version=expected_supersede_version,
@@ -357,7 +357,7 @@ class StudyPackGenerationService:
             return int(explicit_version)
         if pack_id is None:
             return None
-        original_pack = self.note_db.get_study_pack(pack_id)
+        original_pack = self.note_db.flashcard_store.get_study_pack(pack_id)
         if not original_pack:
             return None
         version = original_pack.get("version")
@@ -365,7 +365,7 @@ class StudyPackGenerationService:
 
     def _next_destination_deck_name(self, base_name: str) -> str:
         cleaned_base_name = _clean_text(base_name) or "Study Pack"
-        existing_names = None if callable(getattr(self.note_db, "get_deck_by_name", None)) else self._existing_deck_names()
+        existing_names = None if callable(getattr(getattr(self.note_db, "flashcard_store", None), "get_deck_by_name", None)) else self._existing_deck_names()
         if not self._deck_name_exists(cleaned_base_name, existing_names=existing_names):
             return cleaned_base_name
 
@@ -379,7 +379,7 @@ class StudyPackGenerationService:
     def _existing_deck_names(self) -> set[str]:
         """Fetch deck names once for stores without an exact name lookup API."""
 
-        list_decks = getattr(self.note_db, "list_decks", None)
+        list_decks = getattr(getattr(self.note_db, "flashcard_store", None), "list_decks", None)
         if not callable(list_decks):
             return set()
         try:
@@ -398,7 +398,7 @@ class StudyPackGenerationService:
         if existing_names is not None:
             return deck_name in existing_names
 
-        get_deck_by_name = getattr(self.note_db, "get_deck_by_name", None)
+        get_deck_by_name = getattr(getattr(self.note_db, "flashcard_store", None), "get_deck_by_name", None)
         if callable(get_deck_by_name):
             try:
                 return bool(get_deck_by_name(deck_name, include_deleted=True))

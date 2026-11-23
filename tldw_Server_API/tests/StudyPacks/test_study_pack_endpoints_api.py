@@ -69,8 +69,8 @@ def _complete_job(jm: JobManager, job_id: int) -> dict[str, object]:
 
 
 def _seed_pack(db: CharactersRAGDB, *, title: str = "Networks 101") -> tuple[int, int]:
-    deck_id = db.add_deck(f"{title} Deck", workspace_id="ws-1")
-    pack_id = db.create_study_pack(
+    deck_id = db.flashcard_store.add_deck(f"{title} Deck", workspace_id="ws-1")
+    pack_id = db.flashcard_store.create_study_pack(
         title=title,
         workspace_id="ws-1",
         deck_id=deck_id,
@@ -202,8 +202,8 @@ def test_regenerate_study_pack_returns_400_when_job_payload_is_too_large(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setenv("JOBS_MAX_JSON_BYTES", "64")
-    deck_id = db.add_deck("Oversized Deck", workspace_id="ws-1")
-    pack_id = db.create_study_pack(
+    deck_id = db.flashcard_store.add_deck("Oversized Deck", workspace_id="ws-1")
+    pack_id = db.flashcard_store.create_study_pack(
         title="Oversized",
         workspace_id="ws-1",
         deck_id=deck_id,

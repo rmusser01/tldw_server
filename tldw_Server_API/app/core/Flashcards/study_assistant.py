@@ -140,7 +140,7 @@ def build_flashcard_assistant_context(
     max_field_chars: int = DEFAULT_MAX_FIELD_CHARS,
 ) -> dict[str, Any]:
     """Build server-side assistant context for a single flashcard."""
-    flashcard = db.get_flashcard(flashcard_uuid)
+    flashcard = db.flashcard_store.get_flashcard(flashcard_uuid)
     if not flashcard:
         raise ConflictError("Flashcard not found", entity="flashcards", identifier=flashcard_uuid)  # noqa: TRY003
 

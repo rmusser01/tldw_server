@@ -56,8 +56,8 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleN
         db = CharactersRAGDB(str(tmp_path / f"study-{owner}.db"), client_id="study-prompts-test")
         state.databases[owner] = db
         state.prompts[owner] = PromptsDatabase(tmp_path / f"prompts-{owner}.db", "study-prompts-test")
-        deck = db.add_deck("Biology")
-        card = db.add_flashcard({"deck_id": deck, "front": "What is a nephron?", "back": "Kidney functional unit."})
+        deck = db.flashcard_store.add_deck("Biology")
+        card = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "What is a nephron?", "back": "Kidney functional unit."})
         quiz = db.create_quiz(name="Biology")
         question = db.create_question(
             quiz_id=quiz,

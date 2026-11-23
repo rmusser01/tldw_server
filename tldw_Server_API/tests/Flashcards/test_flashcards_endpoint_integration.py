@@ -244,7 +244,7 @@ def test_upload_flashcard_asset_returns_markdown_snippet_and_content(
     assert payload["width"] == 1
     assert payload["height"] == 1
 
-    stored = flashcards_db.get_flashcard_asset(payload["asset_uuid"])
+    stored = flashcards_db.flashcard_store.get_flashcard_asset(payload["asset_uuid"])
     assert stored is not None
     assert stored["card_uuid"] is None
 
@@ -634,12 +634,12 @@ def test_create_deck_undelete_preserves_review_prompt_side(
     assert create_response.status_code == 200
     deck_id = create_response.json()["id"]
 
-    flashcards_db.soft_delete_deck_by_id(deck_id)
+    flashcards_db.flashcard_store.soft_delete_deck_by_id(deck_id)
 
-    resurrected_id = flashcards_db.add_deck("Restorable Deck")
+    resurrected_id = flashcards_db.flashcard_store.add_deck("Restorable Deck")
     assert resurrected_id == deck_id
 
-    resurrected = flashcards_db.get_deck(deck_id)
+    resurrected = flashcards_db.flashcard_store.get_deck(deck_id)
     assert resurrected is not None
     assert resurrected["deleted"] == 0
     assert resurrected["review_prompt_side"] == "back"
@@ -660,7 +660,7 @@ def test_create_deck_undelete_preserves_orientation_unless_explicit_front_overri
 
     assert create_response.status_code == 200
     deck_id = create_response.json()["id"]
-    flashcards_db.soft_delete_deck_by_id(deck_id)
+    flashcards_db.flashcard_store.soft_delete_deck_by_id(deck_id)
 
     omitted_response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -670,7 +670,7 @@ def test_create_deck_undelete_preserves_orientation_unless_explicit_front_overri
     assert omitted_response.status_code == 200
     assert omitted_response.json()["review_prompt_side"] == "back"
 
-    flashcards_db.soft_delete_deck_by_id(deck_id)
+    flashcards_db.flashcard_store.soft_delete_deck_by_id(deck_id)
 
     explicit_front_response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -699,7 +699,7 @@ def test_create_deck_undelete_preserves_visibility_unless_explicit_override(
 
     assert create_response.status_code == 200
     deck_id = create_response.json()["id"]
-    flashcards_db.soft_delete_deck_by_id(deck_id)
+    flashcards_db.flashcard_store.soft_delete_deck_by_id(deck_id)
 
     omitted_response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -709,7 +709,7 @@ def test_create_deck_undelete_preserves_visibility_unless_explicit_override(
     assert omitted_response.status_code == 200
     assert omitted_response.json()["visibility"] == "team"
 
-    flashcards_db.soft_delete_deck_by_id(deck_id)
+    flashcards_db.flashcard_store.soft_delete_deck_by_id(deck_id)
 
     explicit_public_response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -958,16 +958,16 @@ def test_delete_deck_rejects_stale_version_after_concurrent_update(
     )
     assert create_response.status_code == 200
     created = create_response.json()
-    stale_deck = dict(flashcards_db.get_deck(created["id"]))
+    stale_deck = dict(flashcards_db.flashcard_store.get_deck(created["id"]))
 
-    updated = flashcards_db.update_deck(
+    updated = flashcards_db.flashcard_store.update_deck(
         created["id"],
         description="Concurrent update",
         expected_version=created["version"],
     )
     assert updated is True
 
-    original_get_deck = flashcards_db.get_deck
+    original_get_deck = flashcards_db.flashcard_store.get_deck
 
     def _stale_get_deck(deck_id: int):
         if int(deck_id) == int(created["id"]):
@@ -1516,7 +1516,7 @@ def test_create_flashcard_attaches_uploaded_asset_and_rejects_missing_refs(
     )
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
-    asset = flashcards_db.get_flashcard_asset(asset_uuid)
+    asset = flashcards_db.flashcard_store.get_flashcard_asset(asset_uuid)
     assert asset is not None
     assert asset["card_uuid"] == card_uuid
 
@@ -2618,8 +2618,8 @@ def test_list_review_sessions_returns_sessions(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    deck_id = flashcards_db.add_deck("Session Deck")
-    session = flashcards_db.get_or_create_flashcard_review_session(
+    deck_id = flashcards_db.flashcard_store.add_deck("Session Deck")
+    session = flashcards_db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -2644,8 +2644,8 @@ def test_list_review_sessions_defaults_null_cards_reviewed_to_zero(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    deck_id = flashcards_db.add_deck("Legacy Session Deck")
-    session = flashcards_db.get_or_create_flashcard_review_session(
+    deck_id = flashcards_db.flashcard_store.add_deck("Legacy Session Deck")
+    session = flashcards_db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -2709,8 +2709,8 @@ def test_end_review_session_marks_session_completed(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    deck_id = flashcards_db.add_deck("End Session Deck")
-    session = flashcards_db.get_or_create_flashcard_review_session(
+    deck_id = flashcards_db.flashcard_store.add_deck("End Session Deck")
+    session = flashcards_db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -2733,8 +2733,8 @@ def test_end_review_session_defaults_null_cards_reviewed_to_zero(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    deck_id = flashcards_db.add_deck("Legacy End Session Deck")
-    session = flashcards_db.get_or_create_flashcard_review_session(
+    deck_id = flashcards_db.flashcard_store.add_deck("Legacy End Session Deck")
+    session = flashcards_db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -2870,9 +2870,9 @@ def test_review_next_prefers_due_learning_before_due_review_and_new_cards(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
 ):
-    deck_id = flashcards_db.add_deck("Review ordering")
+    deck_id = flashcards_db.flashcard_store.add_deck("Review ordering")
 
-    review_due_uuid = flashcards_db.add_flashcard(
+    review_due_uuid = flashcards_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Review due",
@@ -2885,7 +2885,7 @@ def test_review_next_prefers_due_learning_before_due_review_and_new_cards(
             "due_at": "2026-03-12T09:00:00Z",
         }
     )
-    learning_due_uuid = flashcards_db.add_flashcard(
+    learning_due_uuid = flashcards_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Learning due",
@@ -2899,7 +2899,7 @@ def test_review_next_prefers_due_learning_before_due_review_and_new_cards(
             "due_at": "2026-03-12T09:59:00Z",
         }
     )
-    new_uuid = flashcards_db.add_flashcard(
+    new_uuid = flashcards_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Brand new",
@@ -2980,7 +2980,7 @@ def test_fsrs_review_bootstraps_scheduler_state_and_returns_scheduler_type(
     assert created_deck.status_code == 200
     deck_id = created_deck.json()["id"]
 
-    card_uuid = flashcards_db.add_flashcard(
+    card_uuid = flashcards_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Existing review card",
@@ -3005,7 +3005,7 @@ def test_fsrs_review_bootstraps_scheduler_state_and_returns_scheduler_type(
     assert payload["scheduler_type"] == "fsrs"
     assert payload["next_intervals"]["good"]
 
-    persisted = flashcards_db.get_flashcard(card_uuid)
+    persisted = flashcards_db.flashcard_store.get_flashcard(card_uuid)
     assert persisted is not None
     assert persisted["scheduler_state_json"] != "{}"
 
@@ -3022,8 +3022,8 @@ def test_fsrs_review_returns_400_for_invalid_deck_settings(
     flashcards_db: CharactersRAGDB,
     monkeypatch,
 ):
-    deck_id = flashcards_db.add_deck("Broken FSRS Deck", scheduler_type="fsrs")
-    card_uuid = flashcards_db.add_flashcard(
+    deck_id = flashcards_db.flashcard_store.add_deck("Broken FSRS Deck", scheduler_type="fsrs")
+    card_uuid = flashcards_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Broken review card",
@@ -3060,8 +3060,8 @@ def test_review_flashcard_returns_400_for_input_error(
     flashcards_db: CharactersRAGDB,
     monkeypatch,
 ):
-    deck_id = flashcards_db.add_deck("Broken review deck")
-    card_uuid = flashcards_db.add_flashcard(
+    deck_id = flashcards_db.flashcard_store.add_deck("Broken review deck")
+    card_uuid = flashcards_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Broken review card",
@@ -3089,8 +3089,8 @@ def test_review_flashcard_returns_500_for_db_error(
     flashcards_db: CharactersRAGDB,
     monkeypatch,
 ):
-    deck_id = flashcards_db.add_deck("Broken backend review deck")
-    card_uuid = flashcards_db.add_flashcard(
+    deck_id = flashcards_db.flashcard_store.add_deck("Broken backend review deck")
+    card_uuid = flashcards_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Broken backend review card",
@@ -3118,8 +3118,8 @@ def test_review_flashcard_returns_404_for_conflict_error(
     flashcards_db: CharactersRAGDB,
     monkeypatch,
 ):
-    deck_id = flashcards_db.add_deck("Conflict review deck")
-    card_uuid = flashcards_db.add_flashcard(
+    deck_id = flashcards_db.flashcard_store.add_deck("Conflict review deck")
+    card_uuid = flashcards_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Conflict review card",
@@ -3927,7 +3927,7 @@ def test_reset_scheduling_resets_card_to_new_defaults(
             """,
             ('{"stability": 12.5, "difficulty": 4.2, "retrievability": 0.86}', card_uuid),
         )
-    assert flashcards_db.get_flashcard(card_uuid)["scheduler_state_json"] != "{}"
+    assert flashcards_db.flashcard_store.get_flashcard(card_uuid)["scheduler_state_json"] != "{}"
 
     current = client_with_flashcards_db.get(f"/api/v1/flashcards/id/{card_uuid}", headers=AUTH_HEADERS)
     assert current.status_code == 200
@@ -3947,7 +3947,7 @@ def test_reset_scheduling_resets_card_to_new_defaults(
     assert payload["lapses"] == 0
     assert payload["last_reviewed_at"] is None
     assert payload["due_at"] is not None
-    persisted = flashcards_db.get_flashcard(card_uuid)
+    persisted = flashcards_db.flashcard_store.get_flashcard(card_uuid)
     assert persisted is not None
     assert persisted["scheduler_state_json"] == "{}"
 
@@ -4939,7 +4939,7 @@ def test_import_json_reuses_workspace_owned_deck_by_name(
     flashcards_db: CharactersRAGDB,
 ):
     flashcards_db.workspace_store.upsert_workspace("ws-1", "Workspace One")
-    workspace_deck_id = flashcards_db.add_deck("Workspace Deck", workspace_id="ws-1")
+    workspace_deck_id = flashcards_db.flashcard_store.add_deck("Workspace Deck", workspace_id="ws-1")
 
     payload = [
         {"deck": "Workspace Deck", "front": "Front", "back": "Back"},
@@ -4961,7 +4961,7 @@ def test_import_json_reuses_workspace_owned_deck_by_name(
     assert len(cards) == 1
     assert cards[0]["deck_id"] == workspace_deck_id
 
-    decks = flashcards_db.list_decks(limit=100, offset=0, include_workspace_items=True)
+    decks = flashcards_db.flashcard_store.list_decks(limit=100, offset=0, include_workspace_items=True)
     same_name_decks = [deck for deck in decks if deck["name"] == "Workspace Deck"]
     assert len(same_name_decks) == 1
     assert same_name_decks[0]["id"] == workspace_deck_id
@@ -5270,8 +5270,8 @@ def test_import_apkg_creates_managed_assets_from_media_and_preserves_notes(
     assert len(front_asset_uuids) == 1
     assert len(notes_asset_uuids) == 1
 
-    front_asset = flashcards_db.get_flashcard_asset(front_asset_uuids[0])
-    notes_asset = flashcards_db.get_flashcard_asset(notes_asset_uuids[0])
+    front_asset = flashcards_db.flashcard_store.get_flashcard_asset(front_asset_uuids[0])
+    notes_asset = flashcards_db.flashcard_store.get_flashcard_asset(notes_asset_uuids[0])
     assert front_asset is not None
     assert notes_asset is not None
     assert front_asset["card_uuid"] == card["uuid"]
