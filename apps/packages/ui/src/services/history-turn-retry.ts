@@ -7,7 +7,13 @@ import { captureHistorySnapshot } from "@/services/chat-history-selection"
 import { isHistoryTurnLive, type HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
-import { savedQuestionChatKind, type SavedQuestionInstructions } from "@/hooks/chat/saved-question-retry"
+import { useStoreMessageOption } from "@/store/option"
+import {
+  plainSavedQuestionClientManaged,
+  SAVED_QUESTION_CLIENT_MANAGED,
+  savedQuestionChatKindOf,
+  type SavedQuestionInstructions
+} from "@/utils/saved-question-retry"
 
 export type HistoryRecoveryRetryContext = {
   model: string
@@ -187,8 +193,11 @@ export const reviewServerSavedQuestion = async (
   if (current.status !== "ready" || !current.settingsQualified || owner?.kind !== "native" ||
       !view || view.cursor.kind !== "after_message") throw new Error("history_selection_not_ready")
   // A plain chat's Retry carries its current System/Prompt instructions (decision 22).
-  const kind = savedQuestionChatKind(owner.conversation_id)
+  const kind = savedQuestionChatKindOf(useStoreMessageOption.getState(), owner.conversation_id)
   if (kind === "persona") throw new Error("native_history_persona_unsupported")
+  // A plain chat whose history stays client-settled (Sync v2, older server, saved
+  // system/error/reasoning rows) keeps its client-managed Retry instead.
+  if (kind === "plain" && plainSavedQuestionClientManaged(current.capture)) throw new Error(SAVED_QUESTION_CLIENT_MANAGED)
   const fence = controller.fence()
   const isCurrent = () => fence() && context.isCurrent() && owner.validate_lease()
   if (!isCurrent() || !kind) throw new Error("history_selection_changed")
@@ -201,6 +210,7 @@ export const reviewServerSavedQuestion = async (
       !content || content.id !== question.id || content.images.length || !content.message.trim() ||
       captured.snapshot.nodes.some(node => node.role === "assistant" && node.parent_id === question.id))
     throw new Error("history_retry_input_changed")
+  if (kind === "plain" && plainSavedQuestionClientManaged(captured)) throw new Error(SAVED_QUESTION_CLIENT_MANAGED)
   return {id: question.id, revision: question.revision, text: content.message, model: context.model, isCurrent,
     ...(kind === "plain" ? {instructions: [...context.systemPrompts]} : {}),
     instructionsSupported: captured.native_completion_v1?.existing_input_system_messages_supported === true}

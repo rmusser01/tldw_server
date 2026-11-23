@@ -12,6 +12,7 @@
  * before anything is sent and keeps the question.
  */
 import {
+  act,
   createFakeTldwServer,
   deferred,
   FAKE_MODEL,
@@ -50,16 +51,23 @@ const lastReply = () =>
   screen.getAllByTestId("chat-message").filter((row) => row.getAttribute("data-role") === "assistant").at(-1)!
 
 /**
- * Send `text`, Stop before any reply text arrives, and wait until the turn
- * ends. The held first reply is released by the returned callback.
+ * Send `text`, Stop before any reply text arrives (whitespace counts as none,
+ * as in CM-02), and wait until the turn ends. The held first reply is
+ * released by the returned callback.
  */
-const stopBeforeFirstToken = async (view: PlaygroundView, text: string) => {
+const stopBeforeFirstToken = async (view: PlaygroundView, text: string, initialText = "") => {
   const held = deferred()
-  view.server.planCompletion({ chunks: ["never sent"], pauseAfterChunks: 0, resume: held.promise })
+  view.server.planCompletion({
+    chunks: [...(initialText ? [initialText] : []), "never sent"],
+    pauseAfterChunks: initialText ? 1 : 0,
+    resume: held.promise
+  })
   await view.user.click(view.composer)
   await view.user.type(view.composer, text)
   await view.user.keyboard("{Enter}")
   await waitFor(() => expect(view.server.completionRequests()).toHaveLength(1), HARNESS_WAIT)
+  if (initialText)
+    await waitFor(() => expect(transcript().some((row) => row.text.includes(initialText))).toBe(true), HARNESS_WAIT)
   await view.user.click(screen.getByRole("button", { name: "Stop Streaming" }))
   await waitForChatIdle()
   return held.resolve
@@ -97,9 +105,11 @@ describe("Playground saved-question Retry in a plain server chat (8B)", { timeou
   })
 
   it.each([
-    { label: "a fresh chat", saved: false },
-    { label: "a saved server chat", saved: true }
-  ])("CM-02 with server-settled turns: Stop before any text in $label, then Retry answers the saved question once", async ({ saved }) => {
+    { label: "a fresh chat", saved: false, initialText: "" },
+    { label: "a saved server chat", saved: true, initialText: "" },
+    { label: "a fresh chat after whitespace-only output", saved: false, initialText: " \n\t" },
+    { label: "a saved server chat after blank-line output", saved: true, initialText: "\n\n" }
+  ])("CM-02 with server-settled turns: Stop before any text in $label, then Retry answers the saved question once", async ({ saved, initialText }) => {
     const server = createFakeTldwServer({ nativeCompletion: true })
     const view = await openChat(server, saved)
     const earlier = saved
@@ -108,7 +118,7 @@ describe("Playground saved-question Retry in a plain server chat (8B)", { timeou
           { role: "assistant", text: "Saved answer" }
         ]
       : []
-    const release = await stopBeforeFirstToken(view, "Stop me early")
+    const release = await stopBeforeFirstToken(view, "Stop me early", initialText)
     try {
       const chatId = String(useStoreMessageOption.getState().serverChatId)
       // The server holds the question once and no reply.
@@ -141,6 +151,20 @@ describe("Playground saved-question Retry in a plain server chat (8B)", { timeou
           ]),
         HARNESS_WAIT
       )
+    } finally {
+      release()
+    }
+  })
+
+  it("a chat whose turns the client settles keeps only the card's Review retry after a Stop", async () => {
+    const server = createFakeTldwServer()
+    const view = await openChat(server, false)
+    const release = await stopBeforeFirstToken(view, "Client-managed question")
+    try {
+      await waitFor(() => expect(transcript()).toEqual([{ role: "user", text: "Client-managed question" }]), HARNESS_WAIT)
+      const card = (await screen.findByText("Stopped before a reply", {}, HARNESS_WAIT)).closest("[role='status']") as HTMLElement
+      expect(within(card).getByRole("button", { name: "Review retry" })).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Review saved question" })).toBeNull()
     } finally {
       release()
     }
@@ -221,6 +245,31 @@ describe("Playground saved-question Retry in a plain server chat (8B)", { timeou
     }
   })
 
+  it("carries a selected Prompt in place of the default instruction", async () => {
+    const server = createFakeTldwServer({ nativeCompletion: true })
+    const view = await openChat(server, false)
+    await setSystemPromptForNonRagOption("Default instruction.")
+    await getHarnessDb().prompts.add({ id: "pirate", title: "Pirate", system_prompt: "Answer like a pirate.", content: "" } as never)
+    act(() => useStoreMessageOption.getState().setSelectedSystemPrompt("pirate"))
+    const release = await stopBeforeFirstToken(view, "Where is the treasure?")
+    try {
+      // The first send already used the selected Prompt, not the default instruction.
+      expect(server.completionRequests()[0].body!.messages.filter((row: { role: string }) => row.role === "system"))
+        .toEqual([{ role: "system", content: "Answer like a pirate." }])
+      server.planCompletion({ reply: "Arr, buried." })
+      await view.user.click(await screen.findByRole("button", { name: "Review saved question" }, HARNESS_WAIT))
+      const review = await screen.findByRole("group", { name: "Saved question review" }, HARNESS_WAIT)
+      expect(within(review).getByRole("list", { name: "Current System/Prompt instructions" })).toHaveTextContent("Answer like a pirate.")
+      expect(within(review).queryByText("Default instruction.")).toBeNull()
+      await view.user.click(within(review).getByRole("button", { name: "Retry saved question" }))
+      await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+      await waitForChatIdle()
+      expect(server.completionRequests()[1].body!.messages).toEqual([{ role: "system", content: "Answer like a pirate." }])
+    } finally {
+      release()
+    }
+  })
+
   it("an older server refuses the Retry before sending while an instruction is active, and keeps the question", async () => {
     const server = createFakeTldwServer({ nativeCompletion: true, existingInputInstructions: false })
     const view = await openChat(server, false)
@@ -231,7 +280,7 @@ describe("Playground saved-question Retry in a plain server chat (8B)", { timeou
       const review = await screen.findByRole("group", { name: "Saved question review" }, HARNESS_WAIT)
       expect(within(review).getByText("Answer like a pirate.")).toBeVisible()
       expect(within(review).getByRole("alert")).toHaveTextContent(
-        "This server can't keep your System/Prompt instructions on a retry"
+        "This server can't keep System/Prompt instructions on a retry"
       )
       expect(within(review).getByRole("button", { name: "Retry saved question" })).toBeDisabled()
       expect(server.completionRequests()).toHaveLength(1)

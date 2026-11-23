@@ -16,7 +16,7 @@ import {
 } from "@/hooks/chat/chat-action-utils";
 import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
-import { isPlainSavedQuestion } from "./chat/saved-question-retry";
+import { isPlainSavedQuestion } from "@/utils/saved-question-retry";
 import { useSidepanelReplyActions } from "./chat/sidepanel-reply-actions";
 import { continueChatMode } from "./chat-modes/continueChatMode";
 import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep";

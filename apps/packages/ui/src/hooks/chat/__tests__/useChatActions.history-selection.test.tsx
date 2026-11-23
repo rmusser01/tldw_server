@@ -7311,6 +7311,21 @@ it.each([
   expect(addChatMessageMock).not.toHaveBeenCalled()
 })
 
+it("8B plain saved-question Retry refused by a model setting explains it in plain-chat words", async () => {
+  installPlainSavedQuestion({supported: true, existing_input_system_messages_supported: true})
+  const options = ordinaryOptions()
+  options.currentChatModelSettings = {...options.currentChatModelSettings, topK: 40} as typeof options.currentChatModelSettings
+  const {result} = renderHook(() => useChatActions(options as any))
+  let outcome: unknown
+  await act(async () => { outcome = await result.current.onSubmit({message: "saved question", image: "",
+    historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true, instructions: []}} as any) })
+  expect(outcome).toMatchObject({status: "failed", errorMessage: "native_history_setting_unsupported:topK"})
+  expect(h1.wire).not.toHaveBeenCalled()
+  const description = String(options.notification.error.mock.calls.at(-1)?.[0]?.description)
+  expect(description).toContain("topK can't be used when retrying a saved question")
+  expect(description).not.toMatch(/character/i)
+})
+
 it("8B plain saved-question Retry refuses a character review and a plain review in a character chat", async () => {
   installPlainSavedQuestion({supported: true, existing_input_system_messages_supported: true})
   const plain = renderHook(() => useChatActions(ordinaryOptions() as any))

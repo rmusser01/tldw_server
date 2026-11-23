@@ -59,7 +59,7 @@ import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryCon
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import { isSavedReplyActionRefusal, rememberSavedReplyRefusal } from "./saved-reply-actions"
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
-import { existingInputCurrentMessages, type SavedQuestionInstructions } from "./saved-question-retry"
+import { existingInputCurrentMessages, PlainSavedQuestionRefusal, type SavedQuestionInstructions } from "@/utils/saved-question-retry"
 
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
 
@@ -248,9 +248,12 @@ export const sendNativeHistoryCharacter = async (
   try {
     resolved = validateNativeCharacterConfiguration(configuration)
   } catch (error) {
-    if (!(error instanceof Error) || error.message !== "native_history_explicit_model_provider_required") throw error
+    // A plain Retry refused by these settings checks gets plain-chat copy, not character copy.
+    const refuse = (cause: unknown) => existing?.instructions && cause instanceof Error
+      ? new PlainSavedQuestionRefusal(cause.message, { cause }) : cause
+    if (!(error instanceof Error) || error.message !== "native_history_explicit_model_provider_required") throw refuse(error)
     const model = parseProviderQualifiedModelSelection(params.model).modelId.replace(/^tldw:/, "").trim()
-    if (!model || isAutoModelId(model)) throw error
+    if (!model || isAutoModelId(model)) throw refuse(error)
     const catalog = await tldwModels.getModels(true, { requireFresh: true })
     signal.throwIfAborted()
     if (!params.originIsCurrent() || !actorSceneSend.isCurrent() || !draftIsCurrent() ||
@@ -261,7 +264,7 @@ export const sendNativeHistoryCharacter = async (
       return binding.modelId === model ? binding.provider : undefined
     }))
     const provider = providers.size === 1 ? providers.values().next().value : undefined
-    if (!provider) throw error
+    if (!provider) throw refuse(error)
     resolved = validateNativeCharacterConfiguration({ ...configuration, settings: { ...capturedSettings, apiProvider: provider } })
   }
   const { model, provider, settings } = resolved

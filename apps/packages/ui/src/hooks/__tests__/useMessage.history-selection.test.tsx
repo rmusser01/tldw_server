@@ -5895,6 +5895,28 @@ it.each([
   expect(h1.append).not.toHaveBeenCalled()
 })
 
+it("8B sidepanel plain saved-question Retry refused by a model setting reports that setting", async () => {
+  const settings = (await import("@/store/model")).useStoreChatModelSettings.getState() as unknown as Record<string, unknown>
+  h1.native = false
+  mocks.storeState.serverChatCharacterId = null
+  mocks.storeState.serverChatAssistantKind = null
+  const current = h1.controller.getCurrent()
+  current.settingsQualified = true
+  current.view = {...current.view, cursor: {kind: "after_message", message_id: "u-old"}}
+  try {
+    settings.topK = 40
+    const {result} = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => { outcome = await result.current.onSubmit({message: "old question", image: "",
+      historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true, instructions: [], instructionsSupported: true}} as any) })
+    // The review shows this code as plain-chat copy (HistorySelectionReview).
+    expect(outcome).toMatchObject({status: "failed", errorMessage: "native_history_setting_unsupported:topK"})
+    expect(h1.wire).not.toHaveBeenCalled()
+  } finally {
+    delete settings.topK
+  }
+})
+
 it("binds Auto native character Sidepanel sends to the current exact catalog provider", async () => {
   const catalog = vi.spyOn(tldwModels, "getModels").mockResolvedValue([
     { id: "gemma3:1b", name: "gemma3:1b", provider: "ollama", type: "chat" }

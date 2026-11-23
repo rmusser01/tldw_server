@@ -1,7 +1,7 @@
 import { getStructuredApiErrorDetail } from "@/services/tldw/api-error";
 import type { ChatModelSettings } from '@/store/model';
 import type { ToolChoice } from '@/store/option';
-import { INSTRUCTIONS_UNSUPPORTED } from './saved-question-retry';
+import { PlainSavedQuestionRefusal, plainSavedQuestionRefusalMessage } from '@/utils/saved-question-retry';
 import {
   isAutoModelId,
   parseProviderQualifiedModelSelection,
@@ -149,12 +149,10 @@ export const nativeCharacterPreflightMessage = (
     error.cause.message.startsWith("roleplay_resume_")
   )
     return nativeCharacterPreflightMessage(error.cause, t)
-  // A plain saved-question Retry the server can't give its instructions (8B).
-  if (code === INSTRUCTIONS_UNSUPPORTED)
-    return t(
-      "playground:historySelection.savedQuestionInstructionsUnsupported",
-      "This server can't keep your System/Prompt instructions on a retry. Turn them off in the chat settings and review the saved question again, or update the server. Your question is kept."
-    )
+  // A plain saved-question Retry refused before dispatch gets plain-chat copy (8B).
+  if (error instanceof PlainSavedQuestionRefusal) return plainSavedQuestionRefusalMessage(code, t);
+  const plainRefusal = plainSavedQuestionRefusalMessage(code, t);
+  if (plainRefusal && code.startsWith("native_history_existing_input_")) return plainRefusal;
   if (code === "roleplay_resume_server_unsupported")
     return t(
       "playground:composer.roleplayResumeUnsupported",
