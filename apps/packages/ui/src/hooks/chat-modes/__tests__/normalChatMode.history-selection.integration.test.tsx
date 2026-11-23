@@ -7007,6 +7007,146 @@ it.each(["unsupported", "changed", "uncertain"])(
     }
   }
 )
+// D7 P5: on a server that settles turns, the edit goes out on /chat/completions,
+// and TldwChat wraps the server's 409 as the cause of "Stream completion failed".
+it("server-settled protected Edit keeps the edited text when the wrapped completion refuses the edit", async () => {
+  const graph = [
+    { id: "original-user", revision: "u1", parent_id: null, role: "user", settled: true, preview: "Original" },
+    { id: "original-answer", revision: "a1", parent_id: "original-user", role: "assistant", settled: true, preview: "Original answer" }
+  ]
+  vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
+    const view = { ...request.view, owner_key: "server-owner" }
+    const state = {
+      version: 1 as const,
+      owner_key: "server-owner",
+      conversation_id: newServerId,
+      nodes: graph,
+      fences: { conversation: "1", history: "1", settings: "1" },
+      source_digest: "source",
+      storage_context_digest: "storage",
+      interpretation_status: { kind: "parent_graph_v1" as const }
+    }
+    const { resolveHistorySelection } = await import("@/utils/history-selection")
+    const result = resolveHistorySelection(state, view, request.purpose, "")
+    if (result.status !== "ready") throw new Error(result.code)
+    return {
+      status: "captured",
+      view,
+      snapshot: state,
+      rows: result.rows,
+      purpose: request.purpose,
+      storage_context_digest: "storage",
+      ...(request.purpose === "send"
+        ? { native_completion_v1: { policy: "selected_history_v1", supported: true, storage_context_digest: "storage" } }
+        : {}),
+      selected_content: result.rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        message: graph.find((item) => item.id === row.id)!.preview,
+        images: []
+      }))
+    } as never
+  })
+  const append = vi.spyOn(tldwClient, "addChatMessage")
+  vi.mocked(tldwChat.streamMessage).mockImplementation(async function* (_messages, options) {
+    yield* []
+    options.onDispatch?.()
+    const selection = options.preparedRequest!.tldw_history_selection_v1!
+    throw new Error("Stream completion failed", {
+      cause: Object.assign(new Error("target changed"), {
+        status: 409,
+        details: {
+          detail: {
+            status: "stale_selection",
+            code: "history_edit_target_changed",
+            conversation_id: selection.conversation_id,
+            message_id: "original-user",
+            message_revision: "u1",
+            selection_digest: selection.selection_digest
+          }
+        }
+      })
+    })
+  })
+  const mounted = renderHook(() => useHistorySelection())
+  const native: NativeHistoryOwnerV1 = {
+    kind: "native",
+    conversation_id: newServerId,
+    request_scope: snapshot().requestScope,
+    validate_lease: () => true
+  }
+  await act(async () => {
+    expect(await mounted.result.current.open(native)).toBe(true)
+  })
+  const origin = mounted.result.current.getCurrent()
+  const source = mounted.result.current.fence()
+  const setMessages = vi.fn(),
+    setHistory = vi.fn()
+  const params: Parameters<typeof normalChatMode>[6] = {
+    selectedModel: "test",
+    selectedSystemPrompt: "",
+    useOCR: false,
+    currentChatModelSettings: {},
+    toolChoice: "none",
+    servicePromptSnapshot: snapshot(),
+    historyId: null,
+    serverChatId: newServerId,
+    historySelection: {
+      controller: mounted.result.current,
+      originIsCurrent: source,
+      editResend: {
+        owner_key: origin.view!.owner_key,
+        conversation_id: origin.view!.conversation_id,
+        message_id: "original-user",
+        message_revision: "u1",
+        isCurrent: () => true,
+        isOriginCurrent: source
+      }
+    },
+    setHistoryId: () => {},
+    setMessages,
+    setHistory,
+    setIsProcessing: vi.fn(),
+    setStreaming: vi.fn(),
+    setAbortController: vi.fn(),
+    saveMessageOnSuccess,
+    saveMessageOnError
+  }
+  try {
+    let error: unknown
+    await act(async () => {
+      error = await normalChatMode(
+        "  Edited\nExact proposal.  ",
+        "",
+        false,
+        [],
+        [],
+        new AbortController().signal,
+        params
+      ).catch((value) => value)
+    })
+    expect(error).toMatchObject({ status: "failed", errorMessage: "native_history_edit_target_changed" })
+    // The server was asked to settle the edit; the client appended nothing.
+    expect(append).not.toHaveBeenCalled()
+    expect(tldwChat.streamMessage).toHaveBeenCalledOnce()
+    expect(vi.mocked(tldwChat.streamMessage).mock.calls[0][1]?.preparedRequest).toMatchObject({
+      save_to_db: true,
+      tldw_history_branch: true,
+      tldw_history_edit_v1: { version: 1, message_id: "original-user", message_revision: "u1" }
+    })
+    const kept = await loadHistoryTurnRecoveries(origin.bookmarkScope!, origin.view!)
+    expect(kept[0]?.turn).toMatchObject({
+      state: "refused",
+      input_text: "  Edited\nExact proposal.  ",
+      result_text: ""
+    })
+    expect(setMessages).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(graph.map((row) => row.preview)).toEqual(["Original", "Original answer"])
+  } finally {
+    mounted.unmount()
+  }
+})
 it.each(["navigation", "selection"])("a no-output provider failure does not move a newer %s", async boundary => {
   const mounted = renderHook(() => useHistorySelection())
   vi.mocked(tldwChat.streamMessage).mockImplementationOnce(async function* () {
