@@ -260,6 +260,9 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
 ) -> None:
     class _FakeTime:
         def __init__(self, *samples: float) -> None:
+            self.load(*samples)
+
+        def load(self, *samples: float) -> None:
             self._samples = iter(samples)
 
         def monotonic(self) -> float:
@@ -315,10 +318,8 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
         "aggregate_fingerprint": empty_fingerprint,
     }
 
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.chacha.postgres_schema.time",
-        _FakeTime(0.0, 26.0),
-    )
+    fake_time = _FakeTime(0.0, 26.0)
+    monkeypatch.setattr(postgres_schema, "time", fake_time)
     first = postgres_schema._postgres_v61_fingerprint_phase_page(db.ctx,
         None,
         source_phase="note_studio_documents",
@@ -334,10 +335,7 @@ def test_postgres_v61_fingerprint_phases_stop_at_deadline_and_resume_exactly(
         "copied_count": first["count"],
         "aggregate_fingerprint": first["fingerprint"],
     }
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.chacha.postgres_schema.time",
-        _FakeTime(100.0, 100.0),
-    )
+    fake_time.load(100.0, 100.0)
     resumed = postgres_schema._postgres_v61_fingerprint_phase_page(db.ctx,
         None,
         source_phase="note_studio_documents",
