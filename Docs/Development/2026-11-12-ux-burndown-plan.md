@@ -202,10 +202,11 @@ are the decision numbers.
 - NO-03, NL-06, NL-10 and the G08 Notes side: after #3226 (Notes structured
   editing) lands or is rebased.
 - Finishing P5 (CM-03 (a), CM-04 model info) and CM-14: they change the send
-  files that #3071/#3159 rewrite; needs the owner's call on those PRs.
+  files that #3071/#3159 rewrite. **Unblocked 2026-11-23:** the owner parked
+  those PRs [21], so these are Wave 8's first lanes.
 - XP-18 tab pins: D7 P7.
-- #3182: the Sync outbox (backend, L), after the owner approves the
-  migration.
+- #3182: the Sync outbox (backend, L). The migration is approved [20]; it is
+  sequenced after #3226.
 
 ## Owner decisions
 
@@ -247,7 +248,9 @@ question below ("go with your recommendations"):
 20. #3182: the outbox migration is approved. The current save behaviour stays
     until it lands.
 21. #3071/#3159: the recommendation was to leave this to the owner, so it
-    stays open. Finishing P5 and CM-14 still waits on it.
+    stayed open until 2026-11-23, when the owner parked both PRs. They stay
+    open but no longer hold anything up, so finishing P5 and CM-14 goes ahead
+    on dev. If they come back, they rebase onto that work.
 
 The original questions:
 
@@ -594,5 +597,5 @@ review fixes went on top. The lanes were then merged into
 |---|---|
 | 5 | Landed (#3461, 2026-11-13) |
 | 6 | Landed (#3526, 2026-11-22) |
-| 7 | Integrated, PR pending |
-| 8 | Blocked |
+| 7 | Landed (#3559, 2026-11-22) |
+| 8 | In progress: P5 and CM-14; the rest blocked |
