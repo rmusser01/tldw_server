@@ -1507,9 +1507,10 @@ const captureNormalHistoryTurn = async (
       )
       // Keep the admitted question selected so a deliberate no-output retry can reuse it.
       // The stopped server-settled turn's saved question is shown too, so it can be
-      // reviewed and retried (8B).
+      // reviewed and retried (8B). Follow from the mounted view: an Edit's own view is a
+      // later revision that is never mounted.
       if (turn.admission && !content && (!data.outcome || stoppedServerTurn) && !turn.existingSelection) {
-        const following = controller.followResult(view, turn.admission.input_message_id)
+        const following = controller.followResult(originView, turn.admission.input_message_id)
         // A Stop ends at once; following the question may wait on a slow read (CM-02).
         if (data.stoppedBeforeReply || stoppedServerTurn)
           void Promise.resolve(following).catch(() =>
