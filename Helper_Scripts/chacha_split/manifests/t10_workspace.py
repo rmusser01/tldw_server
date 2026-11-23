@@ -1,5 +1,9 @@
 # TASK-13950.22 PR I1 (Task 10): the workspace domain's callers go through ``db.workspace_store``; the bodies move in PR I2 (Task 11),
-# which reuses this manifest and extends it with the fail-closed list. Names come from ``split.py select workspace``.
+# which reuses this manifest and extends it with the fail-closed list. Names come from ``split.py select workspace``, plus the
+# three private helpers only this group calls. Resolutions (Appendix A.3):
+#   - class constants only the group reads become module constants of workspace_store.py (``class_constants``);
+#   - ``_connection_state`` becomes the context member ``connection_state`` (a pinned reach, offset in the PR);
+#   - helpers shared with other domains become public DB methods (``renames``).
 MANIFEST = {
     "task": "T10",
     "mode": "store",
@@ -25,6 +29,7 @@ MANIFEST = {
         "_workspace_row_to_dict",
         "_get_workspace_internal",
         "_get_workspace_internal_with_conn",
+        "_clone_reservation_matches",
         "_clone_target_conflict",
         "reserve_clone_target",
         "_transition_clone_target",
@@ -134,6 +139,7 @@ MANIFEST = {
         "delete_workspace_source",
         "update_workspace_source_selection",
         "reorder_workspace_sources",
+        "_normalize_runtime_binding_limit",
         "_normalize_workspace_runtime_binding_actor",
         "_workspace_runtime_binding_is_constraint_error",
         "_workspace_runtime_binding_write_error",
@@ -149,6 +155,7 @@ MANIFEST = {
         "list_workspace_runtime_bindings",
         "workspace_runtime_binding_summary",
         "archive_workspace_runtime_binding",
+        "_normalize_membership_limit",
         "_normalize_workspace_membership_required_string",
         "_normalize_workspace_membership_optional_string",
         "_normalize_workspace_membership_json_object",
@@ -204,8 +211,27 @@ MANIFEST = {
         "soft_delete_source_review_plan",
     ],
     "shims": [],
-    "constants": [],
-    "rewrites": {},
-    "renames": {},
+    "class_constants": [
+        "_WORKSPACE_ACTIVITY_MAX_METADATA_BYTES",
+        "_WORKSPACE_CLONE_OPERATION_KIND",
+        "_WORKSPACE_CLONE_RECONCILIATION_MAX",
+        "_WORKSPACE_ACTIVITY_SECRET_KEY_RE",
+        "_WORKSPACE_ACTIVITY_SECRET_VALUE_RE",
+        "_WORKSPACE_ACTIVITY_PATH_KEY_RE",
+        "_ALLOWED_WORKSPACE_ARTIFACT_REVIEW_STATES",
+        "_ALLOWED_WORKSPACE_SOURCE_REVIEW_STATES",
+        "_ALLOWED_WORKSPACE_SOURCE_CREATE_REVIEW_STATES",
+        "_WORKSPACE_ARTIFACT_JSON_FIELDS",
+    ],
+    "constants": ["_WORKSPACE_PROFILES", "_WORKSPACE_PROJECT_ROOT_BACKENDS"],
+    "rewrites": {"_connection_state": "ctx.connection_state"},
+    "renames": {
+        "_coerce_mapping_row": "coerce_mapping_row",
+        "_ensure_json_string_from_mixed": "ensure_json_string_from_mixed",
+        "_expand_note_folder_paths": "expand_note_folder_paths",
+        "_ensure_note_exists_for_folder_sync": "ensure_note_exists_for_folder_sync",
+        "_ensure_note_folder_path_locked": "ensure_note_folder_path_locked",
+        "_note_folder_path_key": "note_folder_path_key",
+    },
     "structural": [],
 }

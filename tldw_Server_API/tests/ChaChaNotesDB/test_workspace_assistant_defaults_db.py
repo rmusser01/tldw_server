@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceAssistantDefaults
 from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
 from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 
@@ -377,7 +378,7 @@ def test_workspace_mapping_row_computes_diagnostic_from_storage(
 ) -> None:
     """Normalize Mapping rows without mutating inputs or trusting an incoming diagnostic flag."""
     row = {"id": "ws-mapping", "assistant_defaults_json": stored_value, "_assistant_defaults_invalid": not invalid}
-    normalized = CharactersRAGDB._workspace_row_to_dict(MappingProxyType(row))
+    normalized = WorkspaceStore._workspace_row_to_dict(MappingProxyType(row))
     assert normalized["assistant_defaults_json"] == expected_defaults
     assert normalized["_assistant_defaults_invalid"] is invalid
     assert row["assistant_defaults_json"] is stored_value
@@ -386,7 +387,7 @@ def test_workspace_mapping_row_computes_diagnostic_from_storage(
 
 def test_workspace_mapping_without_defaults_is_unset() -> None:
     """Treat a missing storage column as unset and discard any stale corruption diagnostic."""
-    normalized = CharactersRAGDB._workspace_row_to_dict({"id": "ws-old", "_assistant_defaults_invalid": True})
+    normalized = WorkspaceStore._workspace_row_to_dict({"id": "ws-old", "_assistant_defaults_invalid": True})
     assert normalized == {
         "id": "ws-old", "_assistant_defaults_invalid": False, "assistant_defaults_explicit_none": False,
     }

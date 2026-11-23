@@ -266,8 +266,8 @@ def test_source_review_list_and_due_limits_are_capped_at_100(
         seen["due"] = limit
         return [], 0
 
-    monkeypatch.setattr(source_review_api_db, "list_source_review_plans", list_plans)
-    monkeypatch.setattr(source_review_api_db, "list_due_source_review_occurrences", list_due)
+    monkeypatch.setattr(source_review_api_db.workspace_store, "list_source_review_plans", list_plans)
+    monkeypatch.setattr(source_review_api_db.workspace_store, "list_due_source_review_occurrences", list_due)
 
     assert client_with_flashcards_db.get(BASE_PATH, params={"limit": 999}).status_code == 200  # nosec B101
     assert client_with_flashcards_db.get(f"{BASE_PATH}/due", params={"limit": 999}).status_code == 200  # nosec B101

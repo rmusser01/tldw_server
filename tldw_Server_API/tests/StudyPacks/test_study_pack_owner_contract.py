@@ -7,6 +7,7 @@ import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import flashcards as endpoint
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.DB_Management.chacha.flashcard_chapter_queries import list_flashcard_chapter_rows
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -477,3 +478,72 @@ def test_restricted_role_study_pack_access_is_owner_scoped(pack_owners):
             with backend.transaction() as conn:
                 backend.execute(f"DROP OWNED BY {role}", connection=conn)
                 backend.execute(f"DROP ROLE {role}", connection=conn)
+
+
+_REVISION = "a" * 64
+
+
+def _chapter_locator(title):
+    return {"study_pack_chapter": {
+        "section_index": 0, "section_revision": _REVISION, "title": title, "source_title": "Book",
+    }}
+
+
+def _seed_chapter_cards(db):
+    """A deck whose two cards cite a chapter; returns the deck id and card uuids."""
+    ids = _seed(db)
+    with chacha_operation(independent=True):
+        cards = [
+            db.add_flashcard({"deck_id": ids["deck"], "front": f"Chapter question {number}", "back": "Answer"})
+            for number in (1, 2)
+        ]
+        for card in cards:
+            db.add_flashcard_citations(
+                card, [{"source_type": "media", "source_id": "7", "locator": _chapter_locator("Chapter 1")}]
+            )
+    return ids["deck"], cards
+
+
+@pytest.mark.integration
+def test_chapter_rows_come_only_from_the_selected_owners_deck(pack_owners):
+    owner, foreign, _jobs, _client, kind = pack_owners
+    deck, cards = _seed_chapter_cards(owner)
+    with chacha_operation(independent=True):
+        own_rows = list_flashcard_chapter_rows(owner, deck)
+        foreign_rows = list_flashcard_chapter_rows(foreign, deck)
+    assert {row["uuid"] for row in own_rows if row["locator"]} == set(cards)
+    assert foreign_rows == []
+
+
+@pytest.mark.integration
+def test_chapter_rows_skip_another_owners_citation_on_an_owned_card(pack_owners):
+    owner, foreign, _jobs, _client, kind = pack_owners
+    if kind != "postgres":
+        pytest.skip("SQLite files are one owner; client_id scoping applies to the shared PostgreSQL store")
+    deck, cards = _seed_chapter_cards(owner)
+    with chacha_operation(independent=True), foreign.transaction() as conn:
+        now = foreign._get_current_utc_timestamp_iso()
+        conn.execute(
+            "INSERT INTO flashcard_citations(flashcard_uuid, source_type, source_id, citation_text, locator, ordinal, "
+            "created_at, last_modified, deleted, client_id, version) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (cards[0], "media", "7", "Foreign", '{"study_pack_chapter": "foreign"}', 9, now, now, False, "3", 1),
+        )
+    with chacha_operation(independent=True):
+        rows = list_flashcard_chapter_rows(owner, deck)
+    assert [row["uuid"] for row in rows if row["locator"]] == cards
+    assert not any("foreign" in (row["locator"] or "") for row in rows)
+
+
+@pytest.mark.integration
+def test_browse_deck_cards_http_serves_the_owner_and_hides_the_deck_from_others(pack_owners):
+    owner, foreign, _jobs, client, _kind = pack_owners
+    deck, cards = _seed_chapter_cards(owner)
+    path = f"/api/v1/flashcards/study-packs/decks/{deck}/cards"
+    own = client.get(path)
+    assert own.status_code == 200, own.text
+    assert {item["uuid"] for item in own.json()["items"]} >= set(cards)
+    assert [(chapter["title"], chapter["card_count"]) for chapter in own.json()["chapters"]] == [("Chapter 1", 2)]
+    _actor(client, foreign, 3)
+    response = client.get(path, params={"chapter_id": f"7:0:{_REVISION}"})
+    assert response.status_code == 404, response.text
+    assert "Chapter question" not in response.text

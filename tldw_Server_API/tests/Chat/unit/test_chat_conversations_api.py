@@ -117,7 +117,7 @@ def test_conversation_list_origin_cache_does_not_outlive_request(
             source="workspace_default", workspace_id="private-read-origin", workspace_version=1,
         ),
     )
-    real_lookup = ctx.db.get_workspace
+    real_lookup = ctx.db.workspace_store.get_workspace
     reads: list[str] = []
 
     def counted_lookup(workspace_id: str, **kwargs: Any) -> dict[str, Any] | None:
@@ -125,7 +125,7 @@ def test_conversation_list_origin_cache_does_not_outlive_request(
         reads.append(workspace_id)
         return real_lookup(workspace_id, **kwargs)
 
-    monkeypatch.setattr(ctx.db, "get_workspace", counted_lookup)
+    monkeypatch.setattr(ctx.db.workspace_store, "get_workspace", counted_lookup)
     first = ctx.client.get("/api/v1/chat/conversations")
     assert first.status_code == 200, first.text
     assert [item["assistant_startup"]["source"] for item in first.json()["items"]] == ["workspace_default", "workspace_default"]
@@ -150,7 +150,7 @@ def test_conversation_origin_lookup_failure_propagates(
         """Fail only the historical Workspace visibility lookup."""
         raise CharactersRAGDBError("Workspace storage unavailable")
 
-    monkeypatch.setattr(ctx.db, "get_workspace", unavailable)
+    monkeypatch.setattr(ctx.db.workspace_store, "get_workspace", unavailable)
     path = f"/api/v1/chat/conversations/{ctx.cid}"
     if surface == "list":
         response = ctx.client.get("/api/v1/chat/conversations")

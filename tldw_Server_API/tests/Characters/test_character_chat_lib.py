@@ -256,7 +256,7 @@ def test_library_startup_visibility_failure_retains_wrapper_error_boundary(
         """Fail only the visibility boundary after real conversation loading."""
         raise CharactersRAGDBError("Workspace storage unavailable")
 
-    monkeypatch.setattr(db, "get_workspace", unavailable)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", unavailable)
     if surface == "metadata":
         assert get_conversation_metadata(db, cid) is None
     elif surface == "list":
@@ -280,7 +280,7 @@ def test_library_startup_cache_is_per_call_and_preserves_client_filter(
         db.add_conversation({"title": title, "character_id": char_id}, assistant_startup=AssistantStartup(
             source="system_fallback", workspace_id="library-cache-origin", workspace_version=1,
         ))
-    lookup = db.get_workspace
+    lookup = db.workspace_store.get_workspace
     reads: list[str] = []
 
     def counted_lookup(workspace_id: str, **kwargs: Any) -> dict[str, Any] | None:
@@ -294,7 +294,7 @@ def test_library_startup_cache_is_per_call_and_preserves_client_filter(
             return list_character_conversations(db, char_id, client_id=client_id)
         return search_conversations_by_title_query(db, "Cache", character_id=char_id, client_id=client_id)
 
-    monkeypatch.setattr(db, "get_workspace", counted_lookup)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", counted_lookup)
     assert read("other-user") == []
     assert reads == []
     assert [row["assistant_startup"]["source"] for row in read(db.client_id)] == ["system_fallback"] * 2

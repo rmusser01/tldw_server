@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBack
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
 from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -181,7 +182,7 @@ def test_redacted_category_does_not_keep_driver_or_rollback_payload(category, ro
     assert ChaChaContext(None).is_unique_violation(error) is (
         category in {"unique", "saved-view-name", "other-unique", "private-unique"}
     )
-    assert CharactersRAGDB._is_workspace_source_saved_view_postgres_unique_error(error) is (
+    assert WorkspaceStore._is_workspace_source_saved_view_postgres_unique_error(error) is (
         category == "saved-view-name"
     )
     if category == "saved-view-name":
@@ -224,5 +225,5 @@ def test_saved_view_named_unique_legacy_classifier_remains_precise(sqlstate, con
     wrapped = DatabaseError("legacy wrapper")
     wrapped.__cause__ = driver_error
 
-    assert CharactersRAGDB._is_workspace_source_saved_view_postgres_unique_error(driver_error) is expected
-    assert CharactersRAGDB._is_workspace_source_saved_view_postgres_unique_error(wrapped) is expected
+    assert WorkspaceStore._is_workspace_source_saved_view_postgres_unique_error(driver_error) is expected
+    assert WorkspaceStore._is_workspace_source_saved_view_postgres_unique_error(wrapped) is expected
