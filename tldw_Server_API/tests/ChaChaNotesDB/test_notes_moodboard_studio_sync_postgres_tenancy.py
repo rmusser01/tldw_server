@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -212,7 +213,7 @@ def _seed_local_unbound_moodboard_studio_graph(
 
 
 def test_postgres_v63_migration_contract_is_bounded_and_version_last() -> None:
-    source = inspect.getsource(CharactersRAGDB._migrate_from_v62_to_v63_postgres)
+    source = inspect.getsource(postgres_steps._migrate_from_v62_to_v63_postgres)
     fingerprint_source = inspect.getsource(
         postgres_schema._postgres_v61_fingerprint_phase_page
     )
@@ -1810,7 +1811,7 @@ def test_postgres_v61_placement_order_is_board_global_across_resumed_pages(
         )
         with pytest.raises(RuntimeError, match="placement-page interruption"):
             with db.transaction() as conn:
-                db._migrate_from_v62_to_v63_postgres(conn)
+                postgres_steps._migrate_from_v62_to_v63_postgres(db.ctx, conn)
         assert failed
         with backend.transaction() as conn:
             version = db._get_schema_version_postgres(conn)
@@ -1829,7 +1830,7 @@ def test_postgres_v61_placement_order_is_board_global_across_resumed_pages(
             lambda _label: None,
         )
         with db.transaction() as conn:
-            db._migrate_from_v62_to_v63_postgres(conn)
+            postgres_steps._migrate_from_v62_to_v63_postgres(db.ctx, conn)
 
         with backend.transaction() as conn:
             placements = backend.execute(
@@ -2017,7 +2018,7 @@ def test_postgres_v61_upgrade_matches_sqlite_rule_and_studio_conversion(
             )
 
         with db.transaction() as conn:
-            db._migrate_from_v62_to_v63_postgres(conn)
+            postgres_steps._migrate_from_v62_to_v63_postgres(db.ctx, conn)
 
         with backend.transaction() as conn:
             boards = backend.execute(
@@ -2112,7 +2113,7 @@ def test_postgres_v61_large_upgrade_resumes_after_every_durable_boundary(
         for _attempt in range(100):
             try:
                 with db.transaction() as conn:
-                    db._migrate_from_v62_to_v63_postgres(conn)
+                    postgres_steps._migrate_from_v62_to_v63_postgres(db.ctx, conn)
             except InjectedFailure:
                 pass
             with backend.transaction() as conn:
@@ -2235,7 +2236,7 @@ def test_postgres_v61_aggregate_rejects_valid_looking_target_tampering(
         )
         with pytest.raises(CopyFinished):
             with db.transaction() as conn:
-                db._migrate_from_v62_to_v63_postgres(conn)
+                postgres_steps._migrate_from_v62_to_v63_postgres(db.ctx, conn)
 
         with backend.transaction() as conn:
             backend.execute(
@@ -2250,7 +2251,7 @@ def test_postgres_v61_aggregate_rejects_valid_looking_target_tampering(
         )
         with pytest.raises(SchemaError, match="aggregate verification failed"):
             with db.transaction() as conn:
-                db._migrate_from_v62_to_v63_postgres(conn)
+                postgres_steps._migrate_from_v62_to_v63_postgres(db.ctx, conn)
 
         with backend.transaction() as conn:
             assert db._get_schema_version_postgres(conn) == 62
@@ -2289,7 +2290,7 @@ def test_postgres_v61_source_prediction_rejects_consistently_wrong_conversion(
         )
         with pytest.raises(PredictionFinished):
             with db.transaction() as conn:
-                db._migrate_from_v62_to_v63_postgres(conn)
+                postgres_steps._migrate_from_v62_to_v63_postgres(db.ctx, conn)
 
         original_expected_row = postgres_schema._postgres_v61_expected_row
 
@@ -2311,7 +2312,7 @@ def test_postgres_v61_source_prediction_rejects_consistently_wrong_conversion(
         )
         with pytest.raises(SchemaError, match="aggregate verification failed"):
             with db.transaction() as conn:
-                db._migrate_from_v62_to_v63_postgres(conn)
+                postgres_steps._migrate_from_v62_to_v63_postgres(db.ctx, conn)
         with backend.transaction() as conn:
             assert db._get_schema_version_postgres(conn) == 62
             predictions = backend.execute(

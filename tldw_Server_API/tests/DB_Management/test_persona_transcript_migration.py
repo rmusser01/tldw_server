@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.chacha import persona_transcript_store as transcript_storage
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, SchemaError
 
 pytestmark = pytest.mark.integration
@@ -52,14 +53,14 @@ def test_postgres_upgrade_failure_rolls_back_table_rls_and_marker(pg_restricted_
         session = old.create_persona_session({"user_id": "1", "persona_id": persona})
         before = old.get_persona_session(session, user_id="1")
         old.close_connection()
-    migrate = CharactersRAGDB._migrate_from_v89_to_v90_postgres
+    migrate = postgres_steps._migrate_from_v89_to_v90_postgres
 
-    def interrupted(self, conn):
-        migrate(self, conn)
+    def interrupted(ctx, conn):
+        migrate(ctx, conn)
         raise SchemaError("Injected after transcript DDL/RLS and marker update")
 
     with monkeypatch.context() as fault:
-        fault.setattr(CharactersRAGDB, "_migrate_from_v89_to_v90_postgres", interrupted)
+        fault.setattr(postgres_steps, "_migrate_from_v89_to_v90_postgres", interrupted)
         with pytest.raises(CharactersRAGDBError, match="Injected") as failed:
             CharactersRAGDB(tmp_path / "next.db", client_id="1", owner_user_id="1", backend=backend)
     assert isinstance(failed.value.__cause__, SchemaError)  # nosec B101

@@ -15,6 +15,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, QueryResult
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap, sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -126,7 +127,7 @@ def test_postgres_v4_conversion_namespaces_keyword_indexes() -> None:
 
 def test_postgres_v59_accepts_effective_current_schema_owner_role() -> None:
     migration_source = inspect.getsource(
-        CharactersRAGDB._migrate_from_v58_to_v59_postgres
+        postgres_steps._migrate_from_v58_to_v59_postgres
     )
     verification_source = inspect.getsource(
         postgres_schema._verify_note_attachment_schema_postgres
@@ -831,7 +832,7 @@ def test_postgres_v59_does_not_require_post_migration_workspace_tables() -> None
     backend = _PostgresV59BeforePostMigrationTablesBackend()
     db = _postgres_db(backend)
 
-    db._migrate_from_v58_to_v59_postgres(object())
+    postgres_steps._migrate_from_v58_to_v59_postgres(db.ctx, object())
 
     statements = [statement for statement, _ in backend.calls]
     assert any(
@@ -844,8 +845,8 @@ def test_postgres_v59_migration_uses_verified_lock_rls_and_version_order() -> No
     backend = _PostgresMigrationBackend()
     db = _postgres_db(backend)
 
-    assert hasattr(db, "_migrate_from_v58_to_v59_postgres")
-    db._migrate_from_v58_to_v59_postgres(object())
+    assert callable(postgres_steps._migrate_from_v58_to_v59_postgres)
+    postgres_steps._migrate_from_v58_to_v59_postgres(db.ctx, object())
 
     statements = [statement for statement, _ in backend.calls]
     lock_index = next(i for i, sql in enumerate(statements) if sql.startswith("LOCK TABLE"))
@@ -894,7 +895,7 @@ def test_postgres_v59_rejects_unverified_owner_before_ddl_or_force_relaxation() 
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="schema-owner|schema owner"):
-        db._migrate_from_v58_to_v59_postgres(object())
+        postgres_steps._migrate_from_v58_to_v59_postgres(db.ctx, object())
 
     statements = [statement for statement, _ in backend.calls]
     assert not any("NO FORCE ROW LEVEL SECURITY" in statement for statement in statements)
@@ -907,7 +908,7 @@ def test_postgres_v59_rejects_preexisting_registry_before_version_advance() -> N
     db = _postgres_db(backend)
 
     with pytest.raises(SchemaError, match="note_attachments|registry|collision"):
-        db._migrate_from_v58_to_v59_postgres(object())
+        postgres_steps._migrate_from_v58_to_v59_postgres(db.ctx, object())
 
     assert not any(
         "INSERT INTO db_schema_version" in statement for statement, _ in backend.calls
@@ -1167,10 +1168,10 @@ def test_postgres_initializer_rolls_back_failed_v59_migration(
     db._uses_shared_content_backend = False
     db._CURRENT_SCHEMA_VERSION = 59
 
-    def fail(_conn: Any) -> None:
+    def fail(_ctx: Any, _conn: Any) -> None:
         raise SchemaError("injected v59 failure")
 
-    monkeypatch.setattr(db, "_migrate_from_v58_to_v59_postgres", fail, raising=False)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v58_to_v59_postgres", fail)
     with pytest.raises(SchemaError, match="injected"):
         db._initialize_schema_postgres()
     assert backend.rolled_back is True

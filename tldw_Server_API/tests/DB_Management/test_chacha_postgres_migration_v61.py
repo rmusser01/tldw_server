@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -83,11 +84,11 @@ def test_postgres_initializer_routes_schema_v60_through_v61(
         lambda _ctx, _conn: None,
     )
 
-    def _reached_v61(_conn: object) -> None:
+    def _reached_v61(_ctx: object, _conn: object) -> None:
         migration_calls.append(_conn)
         raise _ReachedV61
 
-    monkeypatch.setattr(db, "_migrate_from_v60_to_v61_postgres", _reached_v61, raising=False)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v60_to_v61_postgres", _reached_v61)
 
     with pytest.raises(_ReachedV61):
         db._initialize_schema_postgres()
@@ -117,7 +118,7 @@ def test_postgres_v61_migration_uses_only_reviewed_policy_block_and_versions_las
         lambda _ctx, script, _conn, *, expected_version: applied.append((script, expected_version)),
     )
 
-    db._migrate_from_v60_to_v61_postgres(object())
+    postgres_steps._migrate_from_v60_to_v61_postgres(db.ctx, object())
 
     assert len(applied) == 1
     script, expected_version = applied[0]
@@ -841,7 +842,7 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
         stopped_connections = []
         stopped_process_ids = []
 
-        def stop_before_v61(conn: Any) -> None:
+        def stop_before_v61(_ctx: Any, conn: Any) -> None:
             assert db._get_schema_version_postgres(conn) == 60
             stopped_connections.append(conn)
             stopped_process_ids.append(conn.info.backend_pid)
@@ -852,7 +853,7 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
             raise _ReachedHistoricalV60
 
         with monkeypatch.context() as patch:
-            patch.setattr(db, "_migrate_from_v60_to_v61_postgres", stop_before_v61)
+            patch.setattr(postgres_steps, "_migrate_from_v60_to_v61_postgres", stop_before_v61)
             with pytest.raises(_ReachedHistoricalV60):
                 db._initialize_schema_postgres()
         assert len(stopped_connections) == 1
@@ -883,7 +884,7 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
         with schema_bootstrap.postgres_schema_migration(
             backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT
         ) as conn:
-            db._migrate_from_v60_to_v61_postgres(conn)
+            postgres_steps._migrate_from_v60_to_v61_postgres(db.ctx, conn)
         assert (
             backend.execute("SELECT * FROM conversations WHERE id = %s", (conversation_id,)).rows == conversation_before
         )

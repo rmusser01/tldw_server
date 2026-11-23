@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceAssistantDefaults
 from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 
@@ -105,7 +106,7 @@ def test_v48_sqlite_migration_adds_workspace_assistant_defaults_column(tmp_path:
         conn.commit()
         assert "assistant_defaults_json" not in _workspace_columns(db_path)
 
-        migration._migrate_from_v48_to_v49(conn)
+        sqlite_steps._migrate_from_v48_to_v49(migration.ctx, conn)
 
         assert "assistant_defaults_json" in _workspace_columns(db_path)
         assert migration._get_db_version(conn) == 49
@@ -190,7 +191,7 @@ def test_historical_v48_sqlite_full_upgrade_preserves_workspace_defaults(
                 ("retained-workspace", "Historical workspace", seed.client_id),
             )
             before = dict(conn.execute("SELECT * FROM workspaces").fetchone())
-            seed._migrate_from_v48_to_v49(conn)
+            sqlite_steps._migrate_from_v48_to_v49(seed.ctx, conn)
             assert seed._get_db_version(conn) == 49
             after = dict(conn.execute("SELECT * FROM workspaces").fetchone())
             assert after == {**before, "assistant_defaults_json": None}

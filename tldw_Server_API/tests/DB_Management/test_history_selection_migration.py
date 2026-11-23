@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -105,14 +106,15 @@ def test_migration_failure_rolls_back_schema_and_version(backend_name, request, 
         old = CharactersRAGDB(**kwargs)
         old.close_connection()
     method_name = "_migrate_from_v74_to_v75_postgres" if backend_name == "postgres" else "_migrate_from_v70_to_v71"
-    migrate = getattr(CharactersRAGDB, method_name)
+    steps_module = postgres_steps if method_name.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, method_name)
 
-    def failing_migration(self, conn):
-        migrate(self, conn)
+    def failing_migration(ctx, conn):
+        migrate(ctx, conn)
         raise RuntimeError("migration interrupted after DDL")
 
     with monkeypatch.context() as patch:
-        patch.setattr(CharactersRAGDB, method_name, failing_migration)
+        patch.setattr(steps_module, method_name, failing_migration)
         with pytest.raises((RuntimeError, CharactersRAGDBError)):
             CharactersRAGDB(**kwargs)
     assert (
@@ -263,16 +265,17 @@ def test_failed_upgrade_restores_colliding_history_marker(
         )
     old.close_connection()
     method = "_migrate_from_v74_to_v75_postgres" if backend_name == "postgres" else "_migrate_from_v70_to_v71"
-    migrate = getattr(CharactersRAGDB, method)
+    steps_module = postgres_steps if method.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, method)
 
-    def fail_after_history(self: CharactersRAGDB, conn: Any) -> None:
+    def fail_after_history(ctx, conn) -> None:
         """Inject interruption after real Persona and history DDL has executed."""
-        migrate(self, conn)
+        migrate(ctx, conn)
         raise RuntimeError("history lineage migration interrupted")
 
     try:
         with monkeypatch.context() as failing:
-            failing.setattr(CharactersRAGDB, method, fail_after_history)
+            failing.setattr(steps_module, method, fail_after_history)
             with pytest.raises(Exception, match="history lineage migration interrupted"):
                 CharactersRAGDB(**kwargs)
         assert old.execute_query(

@@ -3,6 +3,7 @@ import sqlite3
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -63,7 +64,7 @@ def test_sqlite_migration_v9_to_v10_backfills_and_indexes(tmp_path, monkeypatch)
             )
             conversation_before = dict(conn.execute("SELECT * FROM conversations WHERE id = 'conv-1'").fetchone())
             note_before = dict(conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone())
-            seed._migrate_from_v9_to_v10(conn)
+            sqlite_steps._migrate_from_v9_to_v10(seed.ctx, conn)
             assert seed._get_db_version(conn) == 10
             assert dict(conn.execute("SELECT * FROM conversations WHERE id = 'conv-1'").fetchone()) == {
                 **conversation_before, "state": "in-progress", "topic_label": None,

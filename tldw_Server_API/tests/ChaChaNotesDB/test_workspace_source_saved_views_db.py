@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -682,7 +683,7 @@ def test_real_v53_sqlite_database_migrates_additively_to_v54(
             original_table_sql = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_sources'"
             ).fetchone()["sql"]
-            seed._migrate_from_v53_to_v54(conn)
+            sqlite_steps._migrate_from_v53_to_v54(seed.ctx, conn)
             assert seed._get_db_version(conn) == 54
             assert "workspace_source_saved_views" in seed._sqlite_table_names(conn)
             assert conn.execute(

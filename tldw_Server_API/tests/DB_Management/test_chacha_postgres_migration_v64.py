@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -98,10 +99,10 @@ def test_postgres_initializer_routes_schema_v63_through_v64(
         lambda _ctx, _conn: None,
     )
 
-    def _reached_v64(_conn: object) -> None:
+    def _reached_v64(_ctx: object, _conn: object) -> None:
         raise RuntimeError("reached-v64")
 
-    monkeypatch.setattr(db, "_migrate_from_v63_to_v64_postgres", _reached_v64, raising=False)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v63_to_v64_postgres", _reached_v64)
 
     with pytest.raises(RuntimeError, match="^reached-v64$"):
         db._initialize_schema_postgres()
@@ -126,7 +127,7 @@ def test_postgres_v64_migration_versions_after_applying_ddl(
         lambda _ctx, _conn: None,
     )
 
-    db._migrate_from_v63_to_v64_postgres(object())
+    postgres_steps._migrate_from_v63_to_v64_postgres(db.ctx, object())
 
     assert applied == [(CharactersRAGDB._MIGRATION_SQL_V63_TO_V64_POSTGRES, 64)]
 

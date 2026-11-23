@@ -2,6 +2,8 @@ import sqlite3
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -36,18 +38,15 @@ def test_sqlite_linear_migration_registry_covers_current_schema() -> None:
 def test_sqlite_linear_migration_registry_covers_v50_when_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def _migrate_from_v49_to_v50(_self: CharactersRAGDB, _conn: sqlite3.Connection) -> None:
+    def _migrate_from_v49_to_v50(_ctx: object, _conn: sqlite3.Connection) -> None:
         return None
 
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 50)
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_migrate_from_v49_to_v50",
-        _migrate_from_v49_to_v50,
-        raising=False,
-    )
+    monkeypatch.setattr(sqlite_steps, "_migrate_from_v49_to_v50", _migrate_from_v49_to_v50)
 
     assert _missing_sqlite_migration_steps() == []  # nosec B101
+    steps = CharactersRAGDB.__new__(CharactersRAGDB)._sqlite_linear_migration_steps()
+    assert steps[49].__wrapped__ is _migrate_from_v49_to_v50  # nosec B101  # the registry resolved the patched module attribute
 
 
 def test_sqlite_legacy_reopen_uses_registry_for_v50(
@@ -61,22 +60,21 @@ def test_sqlite_legacy_reopen_uses_registry_for_v50(
 
     _downgrade_schema_version_to_v38(str(db_path))
 
-    def _migrate_from_v49_to_v50(self: CharactersRAGDB, conn: sqlite3.Connection) -> None:
+    reached: list[str] = []
+
+    def _migrate_from_v49_to_v50(ctx: ChaChaContext, conn: sqlite3.Connection) -> None:
+        reached.append(ctx.schema_name)
         conn.execute(
             "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (50, self._SCHEMA_NAME),
+            (50, ctx.schema_name),
         )
 
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 50)
-    monkeypatch.setattr(
-        CharactersRAGDB,
-        "_migrate_from_v49_to_v50",
-        _migrate_from_v49_to_v50,
-        raising=False,
-    )
+    monkeypatch.setattr(sqlite_steps, "_migrate_from_v49_to_v50", _migrate_from_v49_to_v50)
 
     migrated_db = CharactersRAGDB(db_path=str(db_path), client_id="migration-v50-reopen")
     migrated_db.close_connection()
+    assert reached == ["rag_char_chat_schema"]  # nosec B101  # the reopen ran the patched registry step
 
     with sqlite3.connect(db_path) as conn:
         version = conn.execute(
@@ -99,7 +97,7 @@ def test_sqlite_migration_v38_to_v39_historical_step_is_additive(tmp_path) -> No
 
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
-        historical_step._migrate_from_v38_to_v39(conn)
+        sqlite_steps._migrate_from_v38_to_v39(historical_step.ctx, conn)
         version = conn.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
             ("rag_char_chat_schema",),

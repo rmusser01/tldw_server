@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import schema_sql
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -321,7 +322,7 @@ def test_sqlite_v82_rolls_back_partial_ddl_and_preserves_v81(
         + "\nTHIS IS AN INJECTED MIGRATION FAILURE;"
     )
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 82)
-    monkeypatch.setattr(CharactersRAGDB, "_MIGRATION_SQL_V81_TO_V82", injected_sql)
+    monkeypatch.setattr(schema_sql, "_MIGRATION_SQL_V81_TO_V82", injected_sql)
 
     with pytest.raises(CharactersRAGDBError):
         _initialize(db_path)

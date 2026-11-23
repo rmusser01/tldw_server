@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Chat.assistant_startup import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -123,16 +124,17 @@ def test_failed_provenance_migration_rolls_back_column_and_preserves_old_row(
     method = (
         "_migrate_from_v73_to_v74_postgres" if legacy.backend_type.value == "postgresql" else "_migrate_from_v69_to_v70"
     )
-    migrate = getattr(CharactersRAGDB, method)
+    steps_module = postgres_steps if method.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, method)
     legacy.close_all_connections()
 
-    def fail_after_ddl(self: CharactersRAGDB, conn: Any) -> None:
+    def fail_after_ddl(ctx, conn) -> None:
         """Fail only after the real registered migration has executed."""
-        migrate(self, conn)
+        migrate(ctx, conn)
         raise CharactersRAGDBError("injected startup migration failure")
 
     with monkeypatch.context() as failing:
-        failing.setattr(CharactersRAGDB, method, fail_after_ddl)
+        failing.setattr(steps_module, method, fail_after_ddl)
         with pytest.raises(CharactersRAGDBError, match="injected startup migration failure"):
             db_factory()
     with monkeypatch.context() as historical:

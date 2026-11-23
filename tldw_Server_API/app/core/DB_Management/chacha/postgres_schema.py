@@ -34,7 +34,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     _SAFE_IDENTIFIER_RE,
     BackendConnectionWrapper,
-    CharactersRAGDB,
     SchemaError,
 )
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
@@ -451,7 +450,7 @@ def _postgres_v61_progress_fingerprint(
     count = 0
     for row in rows:
         encoded = json.dumps(
-            CharactersRAGDB._note_task_v60_json_safe(dict(row)),
+            chacha_context.ChaChaContext.note_task_v60_json_safe(dict(row)),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

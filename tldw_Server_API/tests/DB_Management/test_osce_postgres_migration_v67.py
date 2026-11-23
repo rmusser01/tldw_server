@@ -9,6 +9,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -120,11 +121,11 @@ def test_postgres_initializer_routes_schema_v66_through_v67(
         lambda _ctx, _conn: None,
     )
 
-    def _reached_v67(conn: object) -> None:
+    def _reached_v67(_ctx: object, conn: object) -> None:
         migration_calls.append(conn)
         raise RuntimeError("reached-v67")
 
-    monkeypatch.setattr(db, "_migrate_from_v66_to_v67_postgres", _reached_v67, raising=False)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v66_to_v67_postgres", _reached_v67)
 
     with pytest.raises(RuntimeError, match="^reached-v67$"):
         db._initialize_schema_postgres()

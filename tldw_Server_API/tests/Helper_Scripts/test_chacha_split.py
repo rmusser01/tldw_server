@@ -6,7 +6,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-
 from Helper_Scripts.chacha_split import split
 
 pytestmark = pytest.mark.unit
@@ -451,6 +450,19 @@ def test_patches_watches_module_names_the_moved_bodies_import(tmp_path: Path, ca
     hits = [line for line in out.splitlines() if line.startswith(TEST)]
     assert len(hits) == 3 and all("time" in line for line in hits), out
     assert "both sides" in out  # the DB module still reads ``time``
+
+
+def test_patches_watches_a_module_name_the_move_left_unused_in_the_db_module(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _store_tree(tmp_path)
+    assert _store(root) == 0
+    db_path = root / DB
+    text = db_path.read_text().replace("return time.time()", "return 1")  # the class no longer reads ``time`` ...
+    assert "import time\n" in text and "time." not in text
+    db_path.write_text(text.replace("import time\n", ""))  # ... so the F401 step dropped the import
+    (root / TEST).parent.mkdir(parents=True, exist_ok=True)
+    (root / TEST).write_text("from x import ChaChaNotes_DB\ndef t(monkeypatch):\n    monkeypatch.setattr(ChaChaNotes_DB, 'time', f)\n")
+    assert split.main(["patches", str(root / MANIFEST_PATH), "--root", str(root)]) == 1
+    assert "time" in capsys.readouterr().out
 
 
 def test_patches_watches_constants_the_moved_bodies_read(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -935,3 +947,44 @@ def test_a_body_using_super_fails_closed_naming_the_def(tmp_path: Path, capsys: 
     root = _fn_tree(tmp_path, db=db, a=["_sup"])
     assert _functions(root) == 1
     assert "_sup: " in capsys.readouterr().out and not (root / MOD_A).exists()
+
+
+SNAPSHOT_DB = '''
+class CharactersRAGDB:
+    def _sqlite_linear_migration_steps(self):
+        steps = {4: self._migrate_from_v4_to_v5}
+        for version, method_name in ((5, "_migrate_from_v5_to_v6_sqlite"),):
+            steps[version] = getattr(self, method_name)
+        steps[6] = bind_migration(migrate_sqlite_transcripts, schema_name=self._SCHEMA_NAME)
+        return steps
+
+    def _initialize_schema_postgres(self):
+        if True:
+            if current_version in (72, 73):
+                if target_version >= 73 and current_version < 73:
+                    self._migrate_from_v72_to_v73_postgres(conn)
+                if target_version >= 74 and current_version < 74:
+                    self._migrate_from_v73_to_v74_persona_postgres(conn)
+            if target_version >= 71 and current_version < 71:
+                stamp(conn, 71)
+            if target_version >= 73 and current_version < 73:
+                self._migrate_from_v72_to_v73_postgres(conn)
+                self._runtime_schema_version = 73
+            if target_version >= 74 and current_version < 74:
+                self._migrate_from_v73_to_v74_persona_postgres(conn)
+'''
+
+
+def test_registry_snapshot_reads_each_registry_form_by_ast(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _seed(tmp_path, db=SNAPSHOT_DB)
+    assert split.main(["registry-snapshot", "--root", str(root)]) == 0
+    ns: dict = {}
+    exec(capsys.readouterr().out, ns)  # noqa: S102  # the tool's own literal output, in a test
+    assert ns["FROZEN_SQLITE"] == [(4, "_migrate_from_v4_to_v5"), (5, "_migrate_from_v5_to_v6_sqlite"), (6, "migrate_sqlite_transcripts")]
+    assert ns["FROZEN_POSTGRES"] == [(72, "_migrate_from_v72_to_v73_postgres"), (73, "_migrate_from_v73_to_v74_persona_postgres")]
+
+
+def test_registry_snapshot_fails_when_the_two_postgres_chains_differ(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = _seed(tmp_path, db=SNAPSHOT_DB.replace("self._migrate_from_v73_to_v74_persona_postgres(conn)\n            if target", "self._migrate_from_v73_to_v74_other_postgres(conn)\n            if target", 1))
+    assert split.main(["registry-snapshot", "--root", str(root)]) == 1
+    assert "differ" in capsys.readouterr().out

@@ -6,6 +6,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.integration
@@ -139,16 +140,17 @@ def test_new_constraint_rejects_impossible_survivor(historical_keywords, invalid
 def test_failed_upgrade_rolls_back_column_and_version(historical_keywords, monkeypatch):
     f = historical_keywords
     name = "_migrate_from_v69_to_v70_postgres" if f.backend is not None else "_migrate_from_v67_to_v68"
-    original = getattr(CharactersRAGDB, name)
+    steps_module = postgres_steps if name.endswith("_postgres") else sqlite_steps
+    original = getattr(steps_module, name)
     reached = []
 
-    def fail_after_migration(db, conn):
-        original(db, conn)
+    def fail_after_migration(ctx, conn):
+        original(ctx, conn)
         reached.append(True)
         raise RuntimeError("Controlled keyword migration failure")
 
     with monkeypatch.context() as patch:
-        patch.setattr(CharactersRAGDB, name, fail_after_migration)
+        patch.setattr(steps_module, name, fail_after_migration)
         with pytest.raises(Exception, match="Controlled keyword migration failure"):
             f.reopen()
     assert reached == [True]

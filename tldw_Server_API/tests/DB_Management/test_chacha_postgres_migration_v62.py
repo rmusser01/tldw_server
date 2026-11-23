@@ -8,6 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema, schema_bootstrap
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -57,10 +58,10 @@ def test_postgres_initializer_routes_schema_v61_through_v62(
         lambda _ctx, _conn: None,
     )
 
-    def _reached_v62(_conn: object) -> None:
+    def _reached_v62(_ctx: object, _conn: object) -> None:
         raise _ReachedV62
 
-    monkeypatch.setattr(db, "_migrate_from_v61_to_v62_postgres", _reached_v62, raising=False)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v61_to_v62_postgres", _reached_v62)
 
     with pytest.raises(_ReachedV62):
         db._initialize_schema_postgres()
@@ -79,7 +80,7 @@ def test_postgres_v62_migration_versions_after_applying_ddl(
         lambda _ctx, script, _conn, *, expected_version: applied.append((script, expected_version)),
     )
 
-    db._migrate_from_v61_to_v62_postgres(object())
+    postgres_steps._migrate_from_v61_to_v62_postgres(db.ctx, object())
 
     assert applied == [(CharactersRAGDB._MIGRATION_SQL_V61_TO_V62_POSTGRES, 62)]
 

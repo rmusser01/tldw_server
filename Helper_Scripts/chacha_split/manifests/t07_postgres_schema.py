@@ -1,5 +1,6 @@
 # TASK-13950.22 PR F: PostgreSQL schema helpers move to chacha/postgres_schema.py. Regenerate the names with `split.py select postgres-schema` (the three leaf shims are added by hand), then run `split.py functions` on this file.
 # Hand edits before apply (t07_schema_sql_extra.py lists them): ChaChaContext.normalize_postgres_catalog_expression and the structural class forwarder. The tool writes a moved body's static context member as `chacha_context.ChaChaContext.<m>` with a module import, because a top-level `from ...context import ChaChaContext` cycles (the context imports ChaChaNotes_DB).
+# PR G hand edit (Task 7 review): `_postgres_v61_progress_fingerprint` now reads `chacha_context.ChaChaContext.note_task_v60_json_safe` instead of `CharactersRAGDB._note_task_v60_json_safe`, so postgres_schema no longer imports CharactersRAGDB.
 # Post-apply step (ruff's isort order, ruling 2 of the Task 7 brief): `ruff check --select I --fix` on ChaChaNotes_DB.py, chacha/postgres_schema.py and every edited .py file; then `ruff check --select F401 --fix` on ChaChaNotes_DB.py for the imports it no longer uses.
 MANIFEST = {
     "task": "T7",

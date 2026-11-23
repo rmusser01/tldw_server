@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.chacha import schema_sql
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, SchemaError
 
 pytestmark = pytest.mark.unit
@@ -111,7 +112,7 @@ def test_sqlite_v62_failure_rolls_back_partial_ddl_and_retry_succeeds(
 
     try:
         monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 62)
-        monkeypatch.setattr(CharactersRAGDB, "_MIGRATION_SQL_V61_TO_V62", injected_sql)
+        monkeypatch.setattr(schema_sql, "_MIGRATION_SQL_V61_TO_V62", injected_sql)
 
         with pytest.raises(SchemaError, match="Workspace clone lifecycle v62 SQLite migration failed"):
             db._initialize_schema_sqlite()
@@ -135,7 +136,7 @@ def test_sqlite_v62_failure_rolls_back_partial_ddl_and_retry_succeeds(
         }.intersection(columns_after_failure)
         assert "idx_workspaces_system_operation" not in indexes_after_failure
 
-        monkeypatch.setattr(CharactersRAGDB, "_MIGRATION_SQL_V61_TO_V62", original_sql)
+        monkeypatch.setattr(schema_sql, "_MIGRATION_SQL_V61_TO_V62", original_sql)
         db._initialize_schema_sqlite()
 
         version_after_retry = conn.execute(

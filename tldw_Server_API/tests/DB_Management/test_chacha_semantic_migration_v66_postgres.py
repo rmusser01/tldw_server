@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import postgres_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
@@ -162,10 +163,10 @@ def test_postgres_initializer_routes_schema_v86_through_v87(
         target_version=87,
     )
 
-    def _reached_v87(_conn: object) -> None:
+    def _reached_v87(_ctx: object, _conn: object) -> None:
         raise RuntimeError("reached-v87")
 
-    monkeypatch.setattr(db, "_migrate_from_v86_to_v87_postgres", _reached_v87)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v86_to_v87_postgres", _reached_v87)
 
     with pytest.raises(RuntimeError, match="^reached-v87$"):
         db._initialize_schema_postgres()
@@ -180,10 +181,10 @@ def test_postgres_initializer_honors_target_v86_without_dispatching_v87(
         target_version=86,
     )
 
-    def _unexpected_v87(_conn: object) -> None:
+    def _unexpected_v87(_ctx: object, _conn: object) -> None:
         pytest.fail("v87 migration dispatched for a v86 target")
 
-    monkeypatch.setattr(db, "_migrate_from_v86_to_v87_postgres", _unexpected_v87)
+    monkeypatch.setattr(postgres_steps, "_migrate_from_v86_to_v87_postgres", _unexpected_v87)
 
     db._initialize_schema_postgres()
 
@@ -343,7 +344,7 @@ def test_postgres_v87_migration_failure_rolls_back_table_and_version(
 
         with pytest.raises(BackendDatabaseError):
             with backend.transaction() as conn:
-                db._migrate_from_v86_to_v87_postgres(conn)
+                postgres_steps._migrate_from_v86_to_v87_postgres(db.ctx, conn)
 
         assert int(
             backend.execute(

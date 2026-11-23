@@ -12,6 +12,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha import sqlite_schema
+from tldw_Server_API.app.core.DB_Management.chacha.migrations import postgres_steps, sqlite_steps
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError
 
 pytestmark = pytest.mark.integration
@@ -250,16 +251,17 @@ def test_failed_upgrade_rolls_back_column_and_backfill(
     method = (
         "_migrate_from_v72_to_v73_postgres" if legacy.backend_type.value == "postgresql" else "_migrate_from_v68_to_v69"
     )
-    migrate = getattr(CharactersRAGDB, method)
+    steps_module = postgres_steps if method.endswith("_postgres") else sqlite_steps
+    migrate = getattr(steps_module, method)
     legacy.close_all_connections()
 
-    def fail_after_backfill(self: CharactersRAGDB, conn: Any) -> None:
+    def fail_after_backfill(ctx, conn) -> None:
         """Inject a transaction failure only after the real migration executed."""
-        migrate(self, conn)
+        migrate(ctx, conn)
         raise CharactersRAGDBError("injected upgrade failure")
 
     with monkeypatch.context() as failing:
-        failing.setattr(CharactersRAGDB, method, fail_after_backfill)
+        failing.setattr(steps_module, method, fail_after_backfill)
         with pytest.raises(CharactersRAGDBError, match="injected upgrade failure"):
             db_factory()
     with monkeypatch.context() as historical:

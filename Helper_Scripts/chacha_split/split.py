@@ -11,6 +11,7 @@
     PYTHONPATH=. $PY -m Helper_Scripts.chacha_split.split tests MANIFEST...
     PYTHONPATH=. $PY -m Helper_Scripts.chacha_split.split select schema-sql
     PYTHONPATH=. $PY -m Helper_Scripts.chacha_split.split constants MANIFEST...
+    PYTHONPATH=. $PY -m Helper_Scripts.chacha_split.split registry-snapshot
 
 ``callers`` rewrites, under tldw_Server_API/app and tldw_Server_API/tests, ``<recv>.<name>`` to
 ``<recv>.<ATTR>.<name>`` and ``getattr/hasattr(<recv>, "<name>", ...)`` to a probe of ``<recv>.<ATTR>``.
@@ -956,6 +957,7 @@ def moved_free_names(root: Path, manifest: dict) -> set[str]:
     t_tree = ast.parse(target.read_text(encoding="utf-8"))
     defs = _defs(t_tree.body if manifest["mode"] == "functions" else _class_node(t_tree, manifest["store_class"]).body)
     db_names = set(module_names(ast.parse((root / manifest["source"]).read_text(encoding="utf-8"))))
+    db_names |= set(module_names(t_tree))  # a name the move left unused in ChaChaNotes_DB (ruff F401 dropped its import) is still patched there
     found: set[str] = set()
     for name in manifest["names"]:
         if name in defs:
@@ -1762,18 +1764,23 @@ def _callsite_edits(text: str, tree: ast.Module, env: FnEnv, in_db: bool, moved_
     used: set[str] = set()
     problems: list[str] = []
 
-    def walk(node: ast.AST, in_class: bool) -> None:
+    structural = set(env.manifest.get("structural", []))
+
+    def walk(node: ast.AST, in_class: bool, hand_edited: bool = False) -> None:
         if id(node) in moved_defs:
             return
         if isinstance(node, ast.ClassDef):
             in_class = in_db and node.name == CLASS
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and in_class and node.name in structural:
+            hand_edited = True  # a declared structural def is rewritten by hand, so its non-call references are not a problem
         if isinstance(node, ast.Attribute) and node.attr in env.index:
             call = calls.get(id(node))
             try:
                 source = ast.get_source_segment(text, node.value) or ""
                 hit = fn_callsite(node, env, in_class=in_class, is_call=call is not None, source=source, in_test=in_test)
             except FnProblem as exc:
-                problems.append(str(exc))
+                if not hand_edited:
+                    problems.append(str(exc))
                 hit = None
             if hit is not None:
                 new, ctx_text = hit
@@ -1786,7 +1793,7 @@ def _callsite_edits(text: str, tree: ast.Module, env: FnEnv, in_db: bool, moved_
                     else:
                         edits.append((node.end_lineno, paren + 1, node.end_lineno, paren + 1, _ctx_argument(ctx_text, raw, node.end_lineno, paren, call)))  # type: ignore[arg-type]
         for child in ast.iter_child_nodes(node):
-            walk(child, in_class)
+            walk(child, in_class, hand_edited)
 
     walk(tree, False)
     return edits, used, problems
@@ -1867,7 +1874,8 @@ def run_functions(root: Path, manifest_paths: list[Path]) -> int:
             problems += [f"{name}: {p}" for p in probs]
     # 2. everything else in the source (rules 9-10), edited on the original text
     moved_ids = {id(defs[n]) for n in names}
-    outer, used, outer_problems = _callsite_edits(text, tree, env, True, moved_ids)
+    structural_all = {"structural": [n for m in manifests for n in m["structural"]]}
+    outer, used, outer_problems = _callsite_edits(text, tree, env._replace(manifest={**env.manifest, **structural_all}), True, moved_ids)
     problems += [f"in {CLASS}: {p}" for p in outer_problems]
     shim_names = [n for m in manifests for n in m["shims"]]
     for name in shim_names:
@@ -2139,6 +2147,72 @@ def _verify_constants(root: Path, manifest: dict, base_tree: ast.Module, head_tr
     return identical
 
 
+# --- ``registry-snapshot`` (TASK-13950.22 PR G, R3, R12) --------------------------------------------------------------
+
+SQLITE_STEPS_DEF = "_sqlite_linear_migration_steps"
+POSTGRES_INIT_DEF = "_initialize_schema_postgres"
+_POSTGRES_STEP_TEST = re.compile(r"target_version >= (\d+) and current_version < (\d+)")
+
+
+def _self_attr(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "self":
+        return node.attr
+    return None
+
+
+def sqlite_snapshot(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[int, str]]:
+    """Source version -> step name: keys from the dict literal, the loop tuple and the ``steps[N] = bind_migration(f, ...)`` assignment."""
+    found: dict[int, str] = {}
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values, strict=True):
+                if isinstance(key, ast.Constant) and isinstance(key.value, int) and (name := _self_attr(value)):
+                    found[key.value] = name
+        elif isinstance(node, ast.For) and isinstance(node.iter, ast.Tuple):
+            for pair in node.iter.elts:
+                if isinstance(pair, ast.Tuple) and len(pair.elts) == 2 and all(isinstance(e, ast.Constant) for e in pair.elts):
+                    found[pair.elts[0].value] = pair.elts[1].value  # type: ignore[attr-defined]
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Subscript):
+            target, value = node.targets[0], node.value
+            if isinstance(target.value, ast.Name) and target.value.id == "steps" and isinstance(target.slice, ast.Constant) and isinstance(value, ast.Call) and value.args and isinstance(value.args[0], ast.Name):
+                found[target.slice.value] = value.args[0].id
+    return sorted(found.items())
+
+
+def postgres_snapshot(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """The 73..91 if-chains of ``_initialize_schema_postgres``, fast path then full path, as source version -> step name."""
+    chains: list[list[tuple[int, str]]] = []
+    for node in sorted((n for n in ast.walk(fn) if isinstance(n, ast.If)), key=lambda n: n.lineno):
+        if not (m := _POSTGRES_STEP_TEST.fullmatch(ast.unparse(node.test))) or m.group(1) != m.group(2) or int(m.group(1)) < 73:
+            continue  # the v71/v72 stamps are not steps
+        calls = [_self_attr(c.func) for c in ast.walk(ast.Module(node.body, [])) if isinstance(c, ast.Call) and (_self_attr(c.func) or "").startswith("_migrate")]
+        if len(calls) != 1:
+            raise SystemExit(f"v{m.group(1)} chain: expected one _migrate call, found {calls}")
+        version = int(m.group(1)) - 1
+        if version == 72:
+            chains.append([])
+        chains[-1].append((version, calls[0]))  # type: ignore[arg-type]
+    if len(chains) != 2:
+        raise SystemExit(f"expected a fast-path and a full-path chain, found {len(chains)}")
+    return chains[0], chains[1]
+
+
+def run_registry_snapshot(root: Path) -> int:
+    cls = _class_node(_parse(root / DB_MODULE)[1], CLASS)
+    defs = _all_class_defs(cls)
+    sqlite = sqlite_snapshot(defs[SQLITE_STEPS_DEF])
+    fast, full = postgres_snapshot(defs[POSTGRES_INIT_DEF])
+    if fast != full:
+        print("the fast-path and full-path chains differ")
+        return 1
+    for label, rows in (("FROZEN_SQLITE", sqlite), ("FROZEN_POSTGRES", full)):
+        print(f"{label} = [")
+        for version, name in rows:
+            print(f"    ({version}, {name!r}),")
+        print("]")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -2156,11 +2230,12 @@ def main(argv: list[str] | None = None) -> int:
     manifest_cmds = [patches_cmd, verify_cmd]
     select_cmd = sub.add_parser("select", help="print the names a group moves (schema-sql, sqlite-schema, ...)")
     select_cmd.add_argument("group")
+    snapshot_cmd = sub.add_parser("registry-snapshot", help="print the frozen SQLite and PostgreSQL migration registries of a tree, by AST")
     for label, text in (("constants", "move a manifest's constants into its module"), ("store", "move a manifest's defs into its store"), ("functions", "move a manifest's defs into module functions"), ("check", "list references a manifest leaves"), ("tests", "list test files naming a manifest's names")):
         manifest_cmds.append(sub.add_parser(label, help=text))
     for cmd in manifest_cmds:
         cmd.add_argument("manifests", nargs="*" if cmd is patches_cmd else "+", type=Path)
-    for cmd in (callers, rewire_cmd, select_cmd, *manifest_cmds):
+    for cmd in (callers, rewire_cmd, select_cmd, snapshot_cmd, *manifest_cmds):
         cmd.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     args = parser.parse_args(argv)
     root = args.root.resolve()
@@ -2171,6 +2246,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.manifests and not names:
             parser.error("patches needs --names or a manifest")
         return run_manifest_patches(root, args.manifests, names) if args.manifests else run_patches(root, names)
+    if args.cmd == "registry-snapshot":
+        return run_registry_snapshot(root)
     if args.cmd == "select":
         return run_select(root, args.group)
     if args.cmd == "constants":
