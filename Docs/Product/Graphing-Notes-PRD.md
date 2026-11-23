@@ -234,6 +234,14 @@ Sane defaults (configurable):
 - `NOTES_GRAPH_MAX_DEGREE=40`
 - `NOTES_GRAPH_DEFAULT_RADIUS=1`
 - Per-type soft caps within max_nodes: note≤250, tag≤75, source≤50 (subject to tuning). These are ceilings within the global `max_nodes`.
+- `NOTES_GRAPH_ALL_NOTES_NOTE_CAP=500` (NL-11, 2026-11): the largest library, in active notes, that a graph with no `center_note_id` shows.
+
+Graphs with no focus note (All notes, or a `tag`/`source` filter), NL-11:
+- They may hold every note under the All-notes cap, so their node budget is the cap plus room for tags and sources (500 + 75 + 50 = 625 by default) and their edge budget is 4 links per node (2,500). The note soft cap of 250 does not apply to them.
+- A seedless request is refused when the library is over the cap (unless `allow_heavy`), or when its `max_nodes` is below the library size; the error says which.
+- A `tag` or `source` filter shows exactly the notes with that tag or source: the seeds are not expanded, so untagged neighbours never appear or push tagged notes out. Links among the seeds, and tag and source nodes, are kept.
+- An operator who sets `NOTES_GRAPH_MAX_NODES` or `NOTES_GRAPH_MAX_EDGES` below these budgets keeps that limit: the budgets shrink to it, and the All-notes cap shrinks to `NOTES_GRAPH_MAX_NODES`, which `all_notes_note_cap` reports.
+- `all_notes_note_cap` is the cap an All-notes request would honour. It is not clamped to the reporting response's own `max_nodes`.
 
 Enforcement model:
 - Expansion uses BFS layers from `center_note_id` (or a filtered seed set), enforcing `max_degree` per node at expansion time, with deterministic ordering.
@@ -260,6 +268,7 @@ Config keys (env → config.txt → defaults):
 - `NOTES_GRAPH_MAX_NODES=300`
 - `NOTES_GRAPH_MAX_EDGES=1200`
 - `NOTES_GRAPH_MAX_DEGREE=40`
+- `NOTES_GRAPH_ALL_NOTES_NOTE_CAP=500` (the knob for graphs with no focus note; see section 10)
 - `NOTES_GRAPH_DEFAULT_RADIUS=1`
 - `NOTES_GRAPH_POPULAR_TAG_CUTOFF=0.15` (ignore tags used by >15% of notes for tag edges)
 - `NOTES_GRAPH_CLIQUE_MIN_SHARED_TAGS=2` (used only if clique mode is added later)

@@ -13,6 +13,7 @@ import {
 } from "@/services/sidepanel-chat-handoff"
 
 import { decodeSidepanelChatWebUiHandoff, isEncodedSidepanelChatWebUiHandoff } from "@/services/tldw/sidepanel-chat-webui-handoff"
+import { withoutConsumedParams } from "@/hooks/chat/server-chat-route"
 
 const literalOptionKeys = [
   "selectedModel",
@@ -231,7 +232,9 @@ export function useSidepanelChatHandoffImport({
       for (const pointer of ["characterId", "character_id", "chatId", "chat_id", "serverChatId", "server_chat_id"]) params.delete(pointer)
       const remaining = params.toString()
       if (remaining === original) return value
-      if (field === "search") return remaining ? `?${remaining}` : ""
+      // The Playground consumes historySelection with replaceState, which the
+      // router doesn't see; don't write a consumed one back (XP-09 review).
+      if (field === "search") return withoutConsumedParams(remaining ? `?${remaining}` : "", window.location.href)
       const fragment = hashPath + (remaining ? `${queryIndex >= 0 ? "?" : ""}${remaining}` : "")
       return fragment ? `#${fragment}` : ""
     }

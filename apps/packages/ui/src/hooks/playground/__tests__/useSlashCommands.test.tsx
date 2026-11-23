@@ -220,6 +220,15 @@ describe("playground useSlashCommands: /new, /prompt and server commands", () =>
     }
   })
 
+  it("opens the note picker with /note by leaving \"/note \" for it to search (decision [4])", () => {
+    const { result } = renderHook(() => useSlashCommands({ ...baseParams, currentMessage: "/no" }))
+    const command = result.current.filteredSlashCommands.find((item) => item.command === "note")
+    expect(command).toMatchObject({ label: "Attach a note", insertText: "/note " })
+    const setField = vi.fn()
+    result.current.handleSlashCommandSelect(command!, setField, { current: null })
+    expect(setField).toHaveBeenCalledWith("message", "/note ")
+  })
+
   it("clears the chat's saved draft before a standalone command runs, then places the text after it", () => {
     const calls: string[] = []
     const { result } = renderHook(() =>
@@ -266,7 +275,7 @@ describe("playground useSlashCommands: /new, /prompt and server commands", () =>
     // Server commands follow the local ones, so the highlighted row stays put.
     await waitFor(() =>
       expect(result.current.filteredSlashCommands.map((item) => item.command)).toEqual([
-        "search", "web", "vision", "generate-image", "model", "new", "prompt", "time", "weather"
+        "search", "web", "vision", "generate-image", "model", "new", "prompt", "note", "time", "weather"
       ])
     )
     const time = result.current.filteredSlashCommands.find((item) => item.command === "time")!
@@ -297,7 +306,7 @@ describe("playground useSlashCommands: /new, /prompt and server commands", () =>
     await waitFor(() => expect(commandIo.listChatCommands).toHaveBeenCalled())
     await act(async () => {})
     expect(result.current.filteredSlashCommands.map((item) => item.command)).toEqual([
-      "search", "web", "vision", "generate-image", "model", "new", "prompt"
+      "search", "web", "vision", "generate-image", "model", "new", "prompt", "note"
     ])
   })
 

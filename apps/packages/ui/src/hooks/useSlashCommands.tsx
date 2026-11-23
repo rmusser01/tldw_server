@@ -78,7 +78,7 @@ export const useSlashCommands = ({
         keywords: ["rag", "context", "knowledge", "search"]
       },
       web: {
-        label: t("common:commandPalette.toggleWebSearch", "Toggle Web Search"),
+        label: t("common:commandPalette.toggleWebSearch", "Toggle web search"),
         description: t(
           "common:commandPalette.toggleWebDesc",
           "Search the internet"

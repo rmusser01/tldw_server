@@ -105,8 +105,9 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     expect(useStoreMessageOption.getState().webSearch).toBe(false)
   })
 
-  // CC-11: '@' mentions are browser tabs, which only the extension can read.
-  it("does not promise @ mentions in the web app's composer", async () => {
+  // CC-11 and decision [4]: on the web '@' attaches notes, so without Notes
+  // on the server the hint must not promise it.
+  it("does not promise @ mentions when the server has no Notes", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })
 

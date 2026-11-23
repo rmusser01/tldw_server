@@ -17,6 +17,7 @@ import {
 } from "@tanstack/react-query"
 import * as React from "react"
 
+import { NOTES_GRAPH_LIBRARY_REQUEST } from "../notes-graph-view"
 import { normalizeGraphNoteId } from "../notes-manager-utils"
 import { useNotesSemanticIndex } from "./useNotesSemanticIndex"
 
@@ -56,6 +57,8 @@ type NavigationState = {
   inputIdentity: string
   focusNoteId: string | null
   scope: "focused" | "all"
+  /** A tag that narrows the All-notes graph; null in the focused scope. */
+  tag: string | null
 }
 
 type GraphInfiniteData = InfiniteData<NotesGraphResponse, string | undefined>
@@ -190,7 +193,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     () => ({
       inputIdentity,
       focusNoteId: options.initialFocusNoteId,
-      scope: "focused"
+      scope: "focused",
+      tag: null
     }),
     [inputIdentity, options.initialFocusNoteId]
   )
@@ -217,9 +221,17 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     effectiveNavigation.scope === "focused"
       ? effectiveNavigation.focusNoteId ?? undefined
       : undefined
-  const radius = options.radius ?? 1
-  const maxNodes = options.maxNodes ?? 120
-  const maxEdges = options.maxEdges ?? 480
+  const libraryScope = effectiveNavigation.scope === "all"
+  const tagFilter = libraryScope ? effectiveNavigation.tag : null
+  // Every note is a seed in a library graph, so a second ring adds nothing and
+  // the server's radius-2 caps would refuse a library over 200 notes.
+  const radius = libraryScope ? 1 : options.radius ?? 1
+  const maxNodes = libraryScope
+    ? NOTES_GRAPH_LIBRARY_REQUEST.maxNodes
+    : options.maxNodes ?? 120
+  const maxEdges = libraryScope
+    ? NOTES_GRAPH_LIBRARY_REQUEST.maxEdges
+    : options.maxEdges ?? 480
   const semanticEnabled = visibleEdgeTypes.has("semantic")
   const semanticQueryEnabled = semanticEnabled && Boolean(centerNoteId)
   const requestedEdgeTypes = React.useMemo<NotesGraphEdgeType[]>(
@@ -233,7 +245,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     authorityScope &&
       options.enabled &&
       options.isOnline &&
-      (effectiveNavigation.scope === "all" || centerNoteId)
+      (libraryScope || centerNoteId)
   )
   const enabled = canRequest && !isAuthorityDenied
 
@@ -252,7 +264,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         semanticQueryEnabled,
         requestedEdgeTypes,
         semanticQueryEnabled ? semanticThreshold : null,
-        semanticQueryEnabled ? semanticTopK : null
+        semanticQueryEnabled ? semanticTopK : null,
+        tagFilter
       ] as const,
     [
       authorityScope,
@@ -266,7 +279,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       requestedEdgeTypes,
       semanticQueryEnabled,
       semanticThreshold,
-      semanticTopK
+      semanticTopK,
+      tagFilter
     ]
   )
   const queryIdentity = JSON.stringify(queryKey)
@@ -282,12 +296,16 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
           centerNoteId,
           datasetId: options.datasetId,
           radius,
+          tag: tagFilter ?? undefined,
+          // "Linked notes only" reads the server's link status (NL-11 review).
+          includeLinkStatus: true,
           edgeTypes: includeSemantic ? requestedEdgeTypes : ORDINARY_EDGE_TYPES,
           maxNodes,
           maxEdges,
           cursor: pageParam,
           semanticThreshold: includeSemantic ? semanticThreshold : undefined,
-          semanticTopK: includeSemantic ? semanticTopK : undefined
+          semanticTopK: includeSemantic ? semanticTopK : undefined,
+          signal
         })
       } catch (error) {
         if (isPermissionError(error) && !signal.aborted) {
@@ -329,7 +347,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       requestedEdgeTypes,
       semanticQueryEnabled,
       semanticThreshold,
-      semanticTopK
+      semanticTopK,
+      tagFilter
     ]
   )
   const graphQuery = useInfiniteQuery<
@@ -378,6 +397,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     effectiveNavigation.scope,
     effectiveNavigation.focusNoteId,
     centerNoteId ?? null,
+    tagFilter,
     radius,
     maxNodes,
     maxEdges
@@ -475,10 +495,9 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     if (!graph) {
       return { activeNoteCount: 0, effectiveNoteCap: 0, eligible: false }
     }
-    const effectiveNoteCap = Math.min(
-      graph.all_notes_note_cap,
-      graph.limits.max_nodes
-    )
+    // An All-notes request has its own node budget, so the focused graph's
+    // max_nodes does not bound it; the server's cap is the one limit (NL-11).
+    const effectiveNoteCap = graph.all_notes_note_cap
     return {
       activeNoteCount: graph.active_note_count,
       effectiveNoteCap,
@@ -486,6 +505,15 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         graph.all_notes_eligible && graph.active_note_count <= effectiveNoteCap
     }
   }, [graph])
+
+  // While a graph loads there is no response to read eligibility from, so
+  // keep the last one for this authority (NL-11 review).
+  const lastEligibilityRef = React.useRef({ authorityScope, eligible: false })
+  if (graph) lastEligibilityRef.current = { authorityScope, eligible: allNotes.eligible }
+  const eligibleNow = graph
+    ? allNotes.eligible
+    : lastEligibilityRef.current.authorityScope === authorityScope &&
+      lastEligibilityRef.current.eligible
 
   const searchResults = React.useMemo(() => {
     const needle = search.trim().toLocaleLowerCase()
@@ -568,7 +596,12 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
 
   const focus = React.useCallback(
     (noteId: string) => {
-      setNavigation({ inputIdentity, focusNoteId: noteId, scope: "focused" })
+      setNavigation({
+        inputIdentity,
+        focusNoteId: noteId,
+        scope: "focused",
+        tag: null
+      })
     },
     [inputIdentity]
   )
@@ -581,10 +614,35 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         current.inputIdentity === inputIdentity
           ? current.focusNoteId
           : options.initialFocusNoteId,
-      scope: "all"
+      scope: "all",
+      tag: null
     }))
     return true
   }, [allNotes.eligible, inputIdentity, options.initialFocusNoteId])
+
+  /**
+   * Narrows the library graph to one tag, which works however large the
+   * library is. Clearing it returns to All notes when the library is under
+   * the cap, otherwise to the focus note.
+   */
+  const filterByTag = React.useCallback(
+    (tag: string | null) => {
+      const nextTag = tag?.trim() || null
+      setNavigation((current) => {
+        const focusNoteId =
+          current.inputIdentity === inputIdentity
+            ? current.focusNoteId
+            : options.initialFocusNoteId
+        return {
+          inputIdentity,
+          focusNoteId,
+          scope: nextTag || eligibleNow ? "all" : "focused",
+          tag: nextTag
+        }
+      })
+    },
+    [eligibleNow, inputIdentity, options.initialFocusNoteId]
+  )
 
   const toggleEdgeType = React.useCallback((edgeType: NotesGraphEdgeType) => {
     setVisibleEdgeTypes((current) => {
@@ -683,6 +741,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     graphQuery,
     focusNoteId: effectiveNavigation.focusNoteId,
     scope: effectiveNavigation.scope,
+    tagFilter,
+    filterByTag,
     layout,
     setLayout,
     search,

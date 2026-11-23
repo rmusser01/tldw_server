@@ -200,7 +200,8 @@ test.describe("Server chat pins", () => {
         )
       }
 
-      await page.goto(optionsUrl, { waitUntil: "domcontentloaded" })
+      // The chat list shows only on the chat route (XP-11).
+      await page.goto(`${optionsUrl}#/chat`, { waitUntil: "domcontentloaded" })
       await waitForConnectionStore(page, "server-pin:options-store")
       await forceConnected(
         page,

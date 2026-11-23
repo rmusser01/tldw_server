@@ -1130,7 +1130,12 @@ class CharactersRAGDB:
         def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int: ...
 
         def count_notes_matching_keywords(
-            self, search_term: str | None, keyword_tokens: list[str], match: str = "all"
+            self,
+            search_term: str | None,
+            keyword_tokens: list[str],
+            match: str = "all",
+            *,
+            required_tokens: list[str] | None = None,
         ) -> int: ...
 
         def get_conversation_by_id(
@@ -1255,6 +1260,7 @@ class CharactersRAGDB:
             *,
             sort_by: str | None = None,
             sort_order: str | None = None,
+            required_tokens: list[str] | None = None,
         ) -> list[dict[str, Any]]: ...
 
         def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None: ...

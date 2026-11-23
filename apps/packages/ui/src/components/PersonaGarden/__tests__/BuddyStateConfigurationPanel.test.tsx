@@ -56,13 +56,13 @@ const manifest: PersonaVisualManifest = {
     [movingLeft]: {
       label: "Moving left",
       kind: "live_variant",
-      description: "Buddy is being moved left.",
+      description: "Avatar is being moved left.",
       tags: ["drag", "left"]
     },
     [movingRight]: {
       label: "Moving right",
       kind: "live_variant",
-      description: "Buddy is being moved right.",
+      description: "Avatar is being moved right.",
       tags: ["drag", "right"]
     },
     [customState]: {

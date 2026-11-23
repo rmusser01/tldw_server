@@ -30,9 +30,9 @@ export const SETTINGS_INDEX: SettingDefinition[] = [
   {
     id: "setting-persona-buddy-shell",
     labelKey: "settings:uiCustomization.personaBuddyShell.label",
-    defaultLabel: "Enable persona buddy shell",
+    defaultLabel: "Enable persona avatar",
     defaultDescription:
-      "Show the floating buddy shell on supported persona-aware surfaces",
+      "Show the floating avatar on supported persona-aware surfaces",
     route: "/settings/ui",
     section: "UI",
     keywords: ["persona", "buddy", "shell", "floating", "clippy", "assistant"],

@@ -150,14 +150,14 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
     >
       <button
         type="button"
-        aria-label="Close Buddy controls"
+        aria-label="Close avatar controls"
         onClick={onClose}
         className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         <X aria-hidden="true" className="h-4 w-4" />
       </button>
       <div className="text-xs uppercase tracking-[0.18em] text-text-muted">
-        {t("personaBuddy.title", "Persona Buddy")}
+        {t("personaBuddy.title", "Persona avatar")}
       </div>
       <div className="mt-2 text-sm font-semibold text-text">
         {buddySummary.persona_name}
@@ -181,7 +181,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
       ) : null}
       <div className="mt-3 space-y-3 border-t border-border pt-3 text-xs">
         <fieldset>
-          <legend className="font-medium text-text">Buddy behavior</legend>
+          <legend className="font-medium text-text">Avatar behavior</legend>
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
             {(["off", "expressive", "roaming"] as PersonaAmbientMode[]).map((mode) => (
               <label key={mode} className="inline-flex items-center gap-1 text-text-muted">
@@ -313,14 +313,14 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
           ) : null}
 
           <label className="block text-xs font-medium text-text">
-            Message your Buddy
+            Message your avatar
             <textarea
               data-testid="persona-buddy-text-input"
               value={draft}
               onChange={handleDraftChange}
               rows={3}
               className="w-full resize-none rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-text"
-              placeholder="Message your buddy"
+              placeholder="Message your avatar"
             />
           </label>
           {sendError ? (
@@ -351,7 +351,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
           className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text hover:bg-surface2"
         >
           <Palette aria-hidden="true" className="h-3.5 w-3.5" />
-          <span>{t("personaBuddy.openVisuals", "Choose/Change Buddy")}</span>
+          <span>{t("personaBuddy.openVisuals", "Choose/Change avatar")}</span>
         </Link>
       ) : null}
     </div>

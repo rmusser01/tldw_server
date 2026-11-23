@@ -167,6 +167,8 @@ type MessageActionsBarProps = {
   canSaveToWorkspaceNotes?: boolean
   onSaveToWorkspaceNotes?: () => void
   canSaveToNotes: boolean
+  /** Why Save to Notes can't be offered here; shows the item disabled with it (XP-01). */
+  saveToNotesUnavailableReason?: string | null
   canSaveToFlashcards: boolean
   canGenerateDocument: boolean
   onGenerateDocument: () => void
@@ -235,6 +237,7 @@ export function MessageActionsBar({
   canSaveToWorkspaceNotes = false,
   onSaveToWorkspaceNotes,
   canSaveToNotes,
+  saveToNotesUnavailableReason = null,
   canSaveToFlashcards,
   canGenerateDocument,
   onGenerateDocument,
@@ -430,6 +433,16 @@ export function MessageActionsBar({
           disabled={savingKnowledge !== null}
         />
       )
+    } else if (isBot && saveToNotesUnavailableReason) {
+      reuse.push(
+        <OverflowMenuItem
+          key="save-note"
+          icon={<StickyNote className="w-3.5 h-3.5" />}
+          label={t("saveToNotes", "Save to Notes")}
+          disabled
+          disabledReason={saveToNotesUnavailableReason}
+        />
+      )
     }
     if (isBot && canSaveToFlashcards) {
       reuse.push(
@@ -539,7 +552,7 @@ export function MessageActionsBar({
   }, [
     canReply, onReply, isBot, onNewBranch, temporaryChat,
     hideContinue, isLastMessage, onContinue, onRunSteeredContinue,
-    canSaveToWorkspaceNotes, onSaveToWorkspaceNotes, canSaveToNotes,
+    canSaveToWorkspaceNotes, onSaveToWorkspaceNotes, canSaveToNotes, saveToNotesUnavailableReason,
     messageSteeringMode, onMessageSteeringModeChange,
     messageSteeringForceNarrate, onMessageSteeringForceNarrateChange,
     onClearMessageSteering,

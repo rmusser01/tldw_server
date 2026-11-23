@@ -7,6 +7,8 @@ export type RagPinnedResult = {
   type?: string
   mediaId?: number
   contextOrigin?: "media-library"
+  /** The snippet was cut to fit (an attached note, note-pins.ts). */
+  truncated?: boolean
 }
 
 export type RagCopyFormat = "markdown" | "text"

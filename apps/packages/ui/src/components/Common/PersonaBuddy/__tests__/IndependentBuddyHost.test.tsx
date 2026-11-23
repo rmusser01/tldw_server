@@ -77,7 +77,7 @@ vi.mock("../BuddyManagementModal", () => ({
     <div>
       Manage {profiles.map((p) => p.name).join(",")}
       {hasMoreProfiles ? (
-        <button onClick={onLoadMoreProfiles}>More Buddies</button>
+        <button onClick={onLoadMoreProfiles}>More avatars</button>
       ) : null}
       <button onClick={onApplied}>Refresh collections</button>
     </div>
@@ -190,10 +190,10 @@ it("distinguishes long same-titled workspace choices before selecting their stab
   ).toBe(true)
 })
 it("exposes an initial failure and retries the collections", async () => {
-  mocks.listBuddies.mockRejectedValueOnce(new Error("Cannot load Buddies"))
+  mocks.listBuddies.mockRejectedValueOnce(new Error("Cannot load avatars"))
   useBuddyManagementStore.getState().show()
   render(<IndependentBuddySession />)
-  await screen.findByText("Cannot load Buddies")
+  await screen.findByText("Cannot load avatars")
   fireEvent.click(screen.getByRole("button", { name: "Retry" }))
   await screen.findByText("Manage Duck")
 })
@@ -233,7 +233,7 @@ it("retains conversation drafts when the attached artwork changes", async () => 
     target: { title: "Research" }
   })
   fireEvent.click(
-    screen.getByRole("button", { name: "Manage Buddy & Persona" })
+    screen.getByRole("button", { name: "Manage avatar" })
   )
   fireEvent.click(
     await screen.findByRole("button", { name: "Refresh collections" })
@@ -278,7 +278,7 @@ it("keeps fetched profile pages through periodic refresh", async () => {
   })
   useBuddyManagementStore.getState().show()
   render(<IndependentBuddySession />)
-  fireEvent.click(await screen.findByRole("button", { name: "More Buddies" }))
+  fireEvent.click(await screen.findByRole("button", { name: "More avatars" }))
   await waitFor(() =>
     expect(mocks.listBuddies).toHaveBeenCalledWith({ limit: 100, offset: 100 }, { suppressBackendUnavailableEvent: true })
   )
@@ -293,7 +293,7 @@ it("uses the sidepanel bucket for pointer and keyboard movement", async () => {
   vi.stubGlobal("PointerEvent", MouseEvent)
   render(<IndependentBuddySession root="sidepanel" />)
   const move = await screen.findByRole("button", {
-    name: "Move Buddy with arrow keys"
+    name: "Move avatar with arrow keys"
   })
   fireEvent.keyDown(move, { key: "ArrowRight" })
   expect(
@@ -341,7 +341,7 @@ it("detaching removes the attachment without invoking turn cancellation", async 
   fireEvent.click(
     await screen.findByRole("button", { name: "Open Duck — Research" })
   )
-  fireEvent.click(screen.getByRole("button", { name: "Detach Buddy" }))
+  fireEvent.click(screen.getByRole("button", { name: "Detach avatar" }))
   await waitFor(() => expect(mocks.detachBuddy).toHaveBeenCalledWith(1))
 })
 
@@ -373,7 +373,7 @@ it("offers repair and suppresses the legacy shell when the attached profile cann
   render(<IndependentBuddySession />)
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "Buddy attachment needs attention"
+      name: "Avatar attachment needs attention"
     })
   )
   await screen.findByText("Attached artwork is unavailable")
@@ -457,7 +457,7 @@ it("keeps later workspace conversation choices and drafts through refresh and ar
     target: { title: "Research" }
   })
   fireEvent.click(
-    screen.getByRole("button", { name: "Manage Buddy & Persona" })
+    screen.getByRole("button", { name: "Manage avatar" })
   )
   fireEvent.click(
     await screen.findByRole("button", { name: "Refresh collections" })
@@ -676,7 +676,7 @@ it("slows Buddy polling while nothing changes and speeds up again after a change
 
 it("backs off Buddy reads that keep failing the same way (XP-16)", async () => {
   // Buddies disabled or forbidden: every read fails with the same error.
-  mocks.listBuddies.mockRejectedValue(new Error("Buddies are disabled"))
+  mocks.listBuddies.mockRejectedValue(new Error("Avatars are disabled"))
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
   render(<IndependentBuddySession />)
   await waitFor(() => expect(mocks.getBuddyAttachment).toHaveBeenCalledTimes(1))

@@ -73,7 +73,7 @@ const StarterChoice = ({
         <Button disabled={!ready} onClick={onSelect}>
           {selected
             ? t("buddyManagement.selected", { defaultValue: "Selected" })
-            : t("buddyManagement.useBuddy", { defaultValue: "Use this Buddy" })}
+            : t("buddyManagement.useBuddy", { defaultValue: "Use this avatar" })}
         </Button>
       </div>
     </div>
@@ -329,7 +329,7 @@ export const BuddyManagementModal = ({
       setNotice(
         [
           artworkSaved &&
-            label("artworkSaved", "Buddy artwork saved to Your Buddies."),
+            label("artworkSaved", "Avatar artwork saved to Your avatars."),
           defaultSaved &&
             label(
               "previousDefaultSaved",
@@ -338,7 +338,7 @@ export const BuddyManagementModal = ({
           attachmentSaved &&
             label(
               "previousAttachmentSaved",
-              "The previous Buddy attachment was saved."
+              "The previous avatar attachment was saved."
             ),
           failure &&
             label("earlierApplyFailed", "The earlier Apply could not finish."),
@@ -407,11 +407,11 @@ export const BuddyManagementModal = ({
     } catch (e) {
       if (stopForRetarget(e)) return
       const savedMessage = attachmentSaved
-        ? label("attachmentSaved", "Buddy attachment saved. Refresh failed: ")
+        ? label("attachmentSaved", "Avatar attachment saved. Refresh failed: ")
         : defaultSaved
           ? label(
               "defaultSaved",
-              "Workspace default saved. Buddy attachment was not confirmed: "
+              "Workspace default saved. Avatar attachment was not confirmed: "
             )
           : ""
       setError(
@@ -434,7 +434,7 @@ export const BuddyManagementModal = ({
   return (
     <Modal
       open
-      title={label("title", "Buddy & Persona Management")}
+      title={label("title", "Avatar settings")}
       width={760}
       style={{ maxWidth: "calc(100vw - 24px)", top: 24 }}
       styles={{
@@ -481,7 +481,7 @@ export const BuddyManagementModal = ({
         <p className="text-sm text-text-muted">
           {label(
             "intro",
-            "Choose a Buddy and where it belongs. Artwork is independent of the conversation’s Persona."
+            "Choose an avatar and where it belongs. The avatar’s artwork doesn’t change the conversation’s Persona."
           )}
         </p>
         {onConversationSettings &&
@@ -500,7 +500,7 @@ export const BuddyManagementModal = ({
                 stagedChanges
                   ? label(
                       "finishSelection",
-                      "Apply or cancel your Buddy changes before editing conversation settings."
+                      "Apply or cancel your avatar changes before editing conversation settings."
                     )
                   : undefined
               }
@@ -538,7 +538,7 @@ export const BuddyManagementModal = ({
           <p role="status">{label("loading", "Loading available choices…")}</p>
         ) : null}
         <label className="block text-sm">
-          {label("searchBuddies", "Find a Buddy")}
+          {label("searchBuddies", "Find an avatar")}
           <input
             type="search"
             className={fieldClass}
@@ -546,9 +546,9 @@ export const BuddyManagementModal = ({
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <section aria-label={label("yourBuddies", "Your Buddies")}>
+        <section aria-label={label("yourBuddies", "Your avatars")}>
           <h3 className="mb-2 text-base font-semibold">
-            {label("yourBuddies", "Your Buddies")}
+            {label("yourBuddies", "Your avatars")}
           </h3>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {availableProfiles
@@ -588,13 +588,13 @@ export const BuddyManagementModal = ({
               loading={loadingMoreProfiles}
               onClick={onLoadMoreProfiles}
             >
-              {label("loadMoreBuddies", "Load more Buddies")}
+              {label("loadMoreBuddies", "Load more avatars")}
             </Button>
           ) : null}
         </section>
         <details open={!availableProfiles.length}>
           <summary className="cursor-pointer text-base font-semibold">
-            {label("gallery", "Choose a ready-made Buddy")}
+            {label("gallery", "Choose a ready-made avatar")}
           </summary>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             {starters
@@ -694,7 +694,7 @@ export const BuddyManagementModal = ({
                 <p role="status" className="text-sm text-text-muted">
                   {label(
                     "noConversations",
-                    "Start a conversation in Console, then return here to attach your Buddy. Workspace attachments can be selected before conversations exist."
+                    "Start a conversation in Console, then return here to attach your avatar. Workspace attachments can be selected before conversations exist."
                   )}
                 </p>
               ) : null}

@@ -15,7 +15,7 @@
     "message": "Explore Review in demo mode"
   },
   "empty_demoDescription": {
-    "message": "This demo shows how tldw Assistant can turn media and notes into structured reviews. Connect your own server later to analyze your own content."
+    "message": "This demo shows how tldw can turn media and notes into structured reviews. Connect your own server later to analyze your own content."
   },
   "empty_demoExample1": {
     "message": "See how selected media and notes appear in the review workspace."
@@ -579,7 +579,7 @@
     "message": "Explore Media in demo mode"
   },
   "mediaEmpty_demoDescription": {
-    "message": "This demo shows how tldw Assistant can display and inspect processed media. Connect your own server later to browse your own recordings and documents."
+    "message": "This demo shows how tldw can display and inspect processed media. Connect your own server later to browse your own recordings and documents."
   },
   "mediaEmpty_demoExample1": {
     "message": "See how processed media items appear in the Media viewer."
