@@ -1879,7 +1879,10 @@ def test_existing_input_carries_system_only_instructions(history_api, monkeypatc
     [{"role": "assistant", "content": "not a current turn"}],
     [{"role": "tool", "content": "not a current turn", "tool_call_id": "call-1"}],
     [{"role": "system", "content": "instruction"}, {"role": "user", "content": "another question"}],
+    # Refused by the message model union (a system message's content is a str),
+    # before the existing-input validator runs.
     [{"role": "system", "content": [{"type": "text", "text": "list-shaped instruction"}]}],
+    # The only case here that exercises the validator's non-blank instruction check.
     [{"role": "system", "content": "  \n\t "}],
 ])
 def test_existing_input_rejects_current_turns_beside_instructions(history_api, monkeypatch, current):
@@ -1898,6 +1901,9 @@ def test_existing_input_rejects_current_turns_beside_instructions(history_api, m
     assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - Refusal admits and settles nothing.
 
 
+# "block" is refused by the stub's own 403 and "redact" by the existing check on
+# the question; only "rewrite-instruction" exercises the post-moderation check
+# that the instructions' text is unchanged.
 @pytest.mark.parametrize("policy", ["pass", "redact", "block", "rewrite-instruction"])
 def test_existing_input_with_instructions_moderates_the_saved_question(history_api, monkeypatch, policy):
     import json
