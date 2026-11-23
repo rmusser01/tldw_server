@@ -13,8 +13,9 @@
 import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { useStoreMessageOption } from "@/store/option"
 import { PlaygroundChat } from "../PlaygroundChat"
 
 const harness = vi.hoisted(() => {
@@ -43,7 +44,8 @@ const clientMocks = vi.hoisted(() => ({
   initialize: vi.fn(async () => undefined),
   listChatResearchRuns: vi.fn(),
   getProvidersStatus: vi.fn(async () => ({})),
-  getResearchBundle: vi.fn(async () => ({}))
+  getResearchBundle: vi.fn(async () => ({})),
+  resolveVisualIdentityBinding: vi.fn(async () => null)
 }))
 
 const audioStatusMock = vi.hoisted(() =>
@@ -147,9 +149,9 @@ const buildMessages = (count: number) =>
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
 
 let queryClient: QueryClient
-const tree = () => (
+const tree = (props: React.ComponentProps<typeof PlaygroundChat> = {}) => (
   <QueryClientProvider client={queryClient}>
-    <PlaygroundChat />
+    <PlaygroundChat {...props} />
   </QueryClientProvider>
 )
 const totalRowRenders = () => Array.from(harness.rowRenders.values()).reduce((sum, count) => sum + count, 0)
@@ -293,6 +295,128 @@ describe("PlaygroundChat row memoization (TASK-15623)", () => {
     expect(harness.latest.onSubmit).toHaveBeenCalledWith({ image: "", message: "", isContinue: true })
     for (const action of Object.values(first)) expect(action).not.toHaveBeenCalled()
   })
+
+  it("swipe prev and next move the rendered row's variant in each direction", () => {
+    harness.state.messages[3] = {
+      ...harness.state.messages[3],
+      variants: ["v0", "v1", "v2"].map((text) => ({ message: text })),
+      activeVariantIndex: 1
+    }
+    const { rerender } = render(tree())
+    const props = harness.rowProps.get("m3")!
+    rerender(tree())
+
+    props.onSwipePrev()
+    props.onSwipeNext()
+
+    const swiped = harness.state.setMessages.mock.calls.map(([update]: [(rows: any[]) => any[]]) =>
+      update(harness.state.messages)[3]
+    )
+    expect(swiped.map((row: any) => [row.message, row.activeVariantIndex])).toEqual([["v0", 0], ["v2", 2]])
+  })
+
+  it("steered continue forwards the mode to the latest submit", () => {
+    harness.state.selectedAssistant = { kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } }
+    const { rerender } = render(tree())
+    const props = harness.rowProps.get("m3")!
+    const first = harness.latest
+    rerender(tree())
+
+    props.onRunSteeredContinue("impersonate_user")
+
+    expect(first.onSubmit).not.toHaveBeenCalled()
+    expect(harness.latest.onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isContinue: true,
+        messageSteeringOverride: { mode: "impersonate_user", forceNarrate: false },
+        continueOutputTarget: "composer_input"
+      })
+    )
+  })
+
+  it("regenerate image forwards the payload to the latest regeneration", () => {
+    const { rerender } = render(tree())
+    const props = harness.rowProps.get("m3")!
+    const first = harness.latest
+    rerender(tree())
+    const request = { prompt: "a lighthouse", backend: "flux" }
+
+    props.onRegenerateImage({ messageId: "m3", imageIndex: 0, imageUrl: "blob:image", request })
+
+    expect(first.onSubmit).not.toHaveBeenCalled()
+    expect(harness.latest.onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "a lighthouse",
+        imageBackendOverride: "flux",
+        isRegenerate: true,
+        regenerateFromMessage: expect.objectContaining({ id: "m3" }),
+        imageGenerationRequest: request
+      })
+    )
+  })
+
+  it("the dynamic-UI action forwards its argument to the page's handler and returns its promise", () => {
+    const onDynamicUIAction = vi.fn(async () => undefined)
+    render(tree({ onDynamicUIAction }))
+    const payload = { renderer: "openui", actionType: "submit" }
+
+    const outcome = harness.rowProps.get("m3")!.onDynamicUIAction(payload)
+
+    expect(onDynamicUIAction).toHaveBeenCalledWith(payload)
+    expect(outcome).toBe(onDynamicUIAction.mock.results[0].value)
+  })
+
+  it("without a page handler the dynamic-UI action submits through the default OpenUI bridge", async () => {
+    const { rerender } = render(tree())
+    const props = harness.rowProps.get("m3")!
+    rerender(tree())
+
+    await props.onDynamicUIAction({
+      renderer: "openui",
+      actionType: "submit",
+      sourceMessageId: "m3",
+      actionId: "pick",
+      values: { choice: "north" }
+    })
+
+    expect(harness.latest.onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dynamicUIRequest: expect.objectContaining({ sourceMessageId: "m3", actionId: "pick" })
+      })
+    )
+  })
+})
+
+// TASK-13570: a row's Stop must be the focus-handoff Stop, with the click event
+// forwarded; the raw request abort never returns focus to the composer.
+describe("PlaygroundChat row Stop focus handoff (TASK-15623)", () => {
+  afterEach(() => {
+    useStoreMessageOption.setState({ isLoading: false, streaming: false, isProcessing: false })
+  })
+
+  it("stops the reply and returns focus to the composer once the Stop button goes away", async () => {
+    const frames: FrameRequestCallback[] = []
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback))
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible")
+    const composerFocus = vi.fn()
+    window.addEventListener("tldw:focus-composer", composerFocus)
+    useStoreMessageOption.setState({ isLoading: true, streaming: true, isProcessing: true })
+    render(tree())
+    const stopButton = document.createElement("button")
+    document.body.appendChild(stopButton)
+    stopButton.focus()
+
+    harness.rowProps.get("m5")!.onStopStreaming({ currentTarget: stopButton })
+
+    expect(harness.latest.stopStreamingRequest).toHaveBeenCalledTimes(1)
+    stopButton.remove()
+    await act(async () => {
+      useStoreMessageOption.setState({ isLoading: false, streaming: false, isProcessing: false })
+    })
+    frames.splice(0).forEach((frame) => frame(0))
+    window.removeEventListener("tldw:focus-composer", composerFocus)
+    expect(composerFocus).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("PlaygroundChat linked research poll (TASK-15623)", () => {
@@ -344,5 +468,33 @@ describe("PlaygroundChat linked research poll (TASK-15623)", () => {
     clientMocks.listChatResearchRuns.mockImplementation(async () => ({ runs: [completedRun()] }))
     await refetch()
     expect(interval()).toBe(30_000)
+  })
+
+  it("does not count an error again after the poll is switched off and back on", async () => {
+    const { rerender } = render(tree())
+    await waitForFirstFetch()
+    clientMocks.listChatResearchRuns.mockImplementation(async () => {
+      throw new Error("research unavailable")
+    })
+    await refetch()
+    await refetch()
+    const interval = () =>
+      harness.researchQueryOptions!.refetchInterval(queryClient.getQueryCache().find({ queryKey: RESEARCH_KEY }))
+    expect(interval()).toBe(30_000)
+
+    // A temporary chat switches the poll off; the same query keeps its error.
+    harness.state.temporaryChat = true
+    rerender(tree())
+    await act(settle)
+    // Switching back on refetches; that one new failure is the first counted.
+    harness.state.temporaryChat = false
+    rerender(tree())
+    await act(settle)
+    expect(clientMocks.listChatResearchRuns).toHaveBeenCalledTimes(4)
+    expect(interval()).toBe(30_000)
+    await refetch()
+    expect(interval()).toBe(30_000)
+    await refetch()
+    expect(interval()).toBe(60_000)
   })
 })

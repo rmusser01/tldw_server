@@ -361,6 +361,13 @@ export const PlaygroundChat = ({
     refetchInterval: (query) => {
       const { data, status, errorUpdatedAt } = query.state
       const failures = linkedResearchFailures.current
+      if (!linkedResearchRunsEnabled) {
+        // Switched off: reset, and treat the error the query keeps as seen so
+        // switching back on does not count it again.
+        failures.errorUpdatedAt = errorUpdatedAt
+        failures.count = 0
+        return false
+      }
       if (status === "success") {
         failures.count = 0
       } else if (status === "error" && errorUpdatedAt !== failures.errorUpdatedAt) {
@@ -384,11 +391,6 @@ export const PlaygroundChat = ({
     previousMessageCount.current = messages.length
   }, [messages.length, serverChatId, stableHistoryId])
 
-  React.useEffect(() => {
-    if (!linkedResearchRunsEnabled) {
-      linkedResearchFailures.current = { errorUpdatedAt: 0, count: 0 }
-    }
-  }, [linkedResearchRunsEnabled])
   const blocks = React.useMemo(() => buildBlocks(messages), [messages])
   const messageBlocks = React.useMemo(() => {
     const indices = new Map<number, number>()
@@ -1209,8 +1211,9 @@ export const PlaygroundChat = ({
 
   // Stable row callbacks, ported from the side panel's TASK-13521 pattern
   // (Sidepanel/Chat/body.tsx). These actions are re-created every render, so
-  // rows get wrappers that keep one identity and call the LATEST action at
-  // call time with the same arguments, returning its result. Otherwise
+  // rows get wrappers that keep one identity and call the latest committed
+  // render's action at call time with the same arguments, returning its
+  // result. Otherwise
   // PlaygroundMessage's strict memo never holds and every re-render here
   // re-renders every row.
   const rowActions = {
@@ -1227,7 +1230,11 @@ export const PlaygroundChat = ({
     dynamicUIAction: resolvedDynamicUIAction
   }
   const latestRowActions = React.useRef(rowActions)
-  latestRowActions.current = rowActions
+  // Updated when a render commits, before any event can run, so a click never
+  // reaches the actions of a render that did not commit.
+  React.useLayoutEffect(() => {
+    latestRowActions.current = rowActions
+  })
   const rowCallbacks = React.useMemo(() => ({
     regenerate: (...args: Parameters<typeof regenerateLastMessage>) =>
       latestRowActions.current.regenerateLastMessage(...args),

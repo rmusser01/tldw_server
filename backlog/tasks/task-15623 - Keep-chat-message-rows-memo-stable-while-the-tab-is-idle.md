@@ -1,7 +1,7 @@
 ---
 id: TASK-15623
 title: Keep /chat message rows memo-stable while the tab is idle
-status: In Progress
+status: Done
 labels:
 - webui
 - performance
@@ -31,12 +31,13 @@ Root cause verified: renderBlock passed fresh closures and per-render hook actio
 Verification: new PlaygroundChat.row-memo.test.tsx (8 tests) red 6/8 before the fix (rows re-rendered, handlers changed identity, first-render actions called, identical research refetch re-rendered PlaygroundChat 6 vs 4 renders, no audioStatus prop) and green after; Message.memoization.test.tsx audio tests red 2/2 before the Message change, green after. PlaygroundChat.research-status backoff test now feeds refetchInterval the query state as TanStack does. Neighbour run: 78 files / 1892 tests (all PlaygroundChat*, Message*/message*, VirtualChatTimeline.edit-retention, the three dfa4dcc014 test files, every test importing PlaygroundChat, Message or useTldwAudioStatus) green; 42 files / 458 tests (Playground.*, VirtualChatTimeline.*, source guards reading PlaygroundChat.tsx/Message.tsx) green; bun run test:playground:a11y 10 files / 63 tests green. eslint on changed files: 0 errors. Narrow tsc over the changed files: no errors in them.
 DoD: no documentation describes this internal render behavior, so none changed; Bandit N/A (TypeScript only); no known skips or blockers.
 PR: https://github.com/rmusser01/tldw_server/pull/3576 (base dev).
+Review round 1 (verdict: with fixes, no Critical). Important 1: row-memo now covers the Stop focus handoff (busy store, focused Stop button as currentTarget; the button goes away, the store goes idle and the composer gets focus). It fails at expect(composerFocus).toHaveBeenCalledTimes(1) if rows get the raw stopStreamingRequest or the event is dropped (both mutations run and reverted). Routing cases were added for swipe prev/next, steered continue (mode), image regeneration (payload) and the dynamic-UI action (argument and promise; default OpenUI bridge submit). Minor 1: latestRowActions is assigned in a useLayoutEffect, so a click reaches the latest committed render's actions; the ref starts with the first render's actions and nothing reads it during render. Minor 2: refetchInterval resets while the poll is off and marks the query's current error as seen, which replaces the reset effect. New probe (one success, two errors, temporary chat on then off, which refetches; then two more errors) red before at the second post-toggle error (expected 60000 to be 30000), green after. Minor 3: the dynamic-UI guard pins dynamicUIAction: resolvedDynamicUIAction, onDynamicUIAction={rowCallbacks.dynamicUIAction} and the compare-cluster onDynamicUIAction={resolvedDynamicUIAction}. Re-run: the 7 requested files 54/54; test:playground:a11y 63/63; neighbour set 78 files 1899/1899; Playground.* and guards 42 files 458/458; eslint 0 errors; narrow tsc no errors in changed files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PlaygroundChat rows now receive stable, ref-backed handlers (TASK-13521 pattern) and one memoized audio status, so a PlaygroundChat re-render with unchanged messages re-renders no rows; the linked-research poll counts failures in refetchInterval from query.state instead of reading dataUpdatedAt/errorUpdatedAt in render, so an unchanged poll no longer re-renders PlaygroundChat; PlaygroundMessage takes an optional audioStatus and keeps its own useTldwAudioStatus disabled when given one.
+PlaygroundChat rows now get stable handlers backed by the latest committed render's actions (TASK-13521 pattern, ref updated in a layout effect) and one memoized audio status, so re-rendering PlaygroundChat with unchanged messages re-renders no rows. The linked-research poll counts failures from query.state inside refetchInterval instead of reading dataUpdatedAt/errorUpdatedAt in render, so an unchanged poll no longer re-renders PlaygroundChat; switching the poll off resets the count without counting the kept error again. PlaygroundMessage takes an optional audioStatus and keeps its own useTldwAudioStatus disabled when given one. Tests cover the row memo, every row action's routing, the Stop focus handoff, the delete confirmation's .current, the poll and the audio fallback.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
