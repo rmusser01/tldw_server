@@ -41,12 +41,12 @@ Each generated passage carries the media ID, section plan revision, and section 
 
 ### Guardrails
 
-- Tab naming and create-entry routing:  
-  `apps/packages/ui/src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx`
-- Shared drawer width token usage:  
-  `apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.cloze-help.test.tsx`  
-  `apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardEditDrawer.scheduling-metadata.test.tsx`  
-  `apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx`
+- Tab naming and create-entry routing:
+  - `apps/packages/ui/src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx`
+- Shared drawer width token usage:
+  - `apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.cloze-help.test.tsx`
+  - `apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardEditDrawer.scheduling-metadata.test.tsx`
+  - `apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx`
 
 ## H8 Layout Guardrails (Aesthetic + Minimalist)
 
