@@ -1,7 +1,7 @@
 ---
 id: TASK-15624
 title: 'PDF search: stop index rebuild loop, build lazily, reset on document change'
-status: In Progress
+status: Done
 labels:
 - webui
 - performance
@@ -15,20 +15,22 @@ usePdfSearch rebuilt its index in an unbounded loop after a failed build (isInde
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing build is attempted once, retried only when search is reopened
-- [ ] #2 No getPage calls until search opens
-- [ ] #3 Index resets on document change and a stale in-flight build cannot overwrite it
+- [x] #1 A failing build is attempted once, retried only when search is reopened
+- [x] #2 No getPage calls until search opens
+- [x] #3 Index resets on document change and a stale in-flight build cannot overwrite it
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR assessment: bug fix inside one hook, no architectural decision; ADR not required (checked Docs/ADR/README.md scope).
+Round 2: ref assigned without re-render noticed via pdf-text-layer-rendered; tab switch hides the previous proxy until the ref changes; entry cleared on proxy change. Pre-fix loop count 51 (mock capped at 50).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+usePdfSearch builds lazily on searchOpen, keyed to the document proxy, records failures and retries only on reopen.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
