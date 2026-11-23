@@ -33,3 +33,9 @@ The actual completion still checks scope, owner, Sync enrollment, selected conte
 ## Follow-up
 
 TASK13573 consumes the original capability and primary operation in the shared normal pipeline, handles error-before-partial receipt ordering, and prevents recovery from guessing missing saves. Sync settlement, detached runs and receipt lookup remain distinct protocol work.
+
+## Amendment: instructions on an existing-input Retry (2026-11-23)
+
+Owner decision 22 (Wave 8 of #3101) amends B02's existing-input contract (Docs/Design/2026-10-15-b02-native-character-retry.md). A completion with `tldw_history_server_existing_input_v1` may now carry system-only current messages: the active System/Prompt instructions of a plain-chat Retry. User, assistant and tool messages are still refused with 422. The provider sees the instructions first, then the saved selection with the question once. No system row is saved, and input moderation still checks the saved question.
+
+The query `include_existing_input_system_messages_support=true` adds `existing_input_system_messages_supported: true` to `native_completion_v1`. It is opt-in like `reasoning_history_supported`, so strict older clients keep the exact earlier response. A client with an active instruction that does not see the flag refuses the Retry before dispatch and keeps the question. It never drops the instruction or falls back to a new send.
