@@ -53,6 +53,7 @@ import {
   type ToolChoice
 } from "~/store/option"
 import {
+  generateID,
   getPromptById,
   saveHistory,
   formatSelectedHistory
@@ -1595,6 +1596,59 @@ const captureNormalHistoryTurn = async (
   return turn
 }
 
+const resolveTurnImage = (image: string) =>
+  image.length > 0
+    ? (image.startsWith("data:") ? createImageDataUrl(image) : null) ??
+      `data:image/jpeg;base64,${image.includes(",") ? image.split(",")[1] : image}`
+    : ""
+
+/**
+ * CM-14: an ordinary send shows its question on Enter, before its history turn
+ * awaits a chat create or load. The pipeline later rebuilds the list with the
+ * same id. Until it does, the row is this turn's to withdraw, by its id.
+ */
+const showQuestionEarly = <TParams extends ChatModeParamsBase & HistoryChatModeParams>(
+  mode: ChatModeDefinition<TParams>,
+  message: string,
+  image: string,
+  isRegenerate: boolean,
+  params: TParams
+) => {
+  const selection = params.historySelection
+  if (!selection || isRegenerate || selection.regenerate || selection.editResend ||
+    selection.editAndSend || selection.retryAdmission || !message.trim() ||
+    mode.setupMessages || !mode.buildUserMessage)
+    return undefined
+  const question: Message = {
+    isBot: false,
+    role: "user",
+    name: "You",
+    message,
+    sources: [],
+    images: image ? [image] : [],
+    createdAt: Date.now(),
+    id: params.userMessageId ?? generateID()
+  }
+  const { setMessages } = params
+  // A retired view's setter drops the row, and an existing row keeps its owner.
+  let added = false
+  setMessages(rows => {
+    if (rows.some(row => row.id === question.id)) return rows
+    added = true
+    return [...rows, question]
+  })
+  return {
+    id: question.id!,
+    // Only a row this turn added goes. A row the pipeline drew under this id is the pipeline's.
+    withdraw: () => {
+      if (!added) return
+      added = false
+      setMessages(rows =>
+        rows.includes(question) ? rows.filter(row => row.id !== question.id) : rows)
+    }
+  }
+}
+
 /** Reuse the accepted H1 bind and operation-lived settlement for each real mode. */
 export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase & HistoryChatModeParams>(
   mode: ChatModeDefinition<TParams>,
@@ -1610,12 +1664,14 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
     : signal
   let createdTurn: HistorySendTurn | undefined
   let stopWatchingPreparationIds: (() => void) | undefined
+  let earlyQuestion: ReturnType<typeof showQuestionEarly> | undefined
   const settlement = params.historySelection
     ? beginChatTurnSettlement(signal)
     : undefined
   try {
     if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted || executionSignal.aborted)
       return chatSubmitFailed("Request cancelled")
+    const resolvedImage = resolveTurnImage(image)
     if (params.historySelection) {
       if (isRegenerate && !params.historySelection.regenerate) throw new Error("unsupported_history_action")
       const originalOwner = params.historySelection.controller.getCurrent().owner
@@ -1624,6 +1680,8 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       if (params.uploadedFiles?.length && mode.id === "normal")
         throw new Error("unsupported_history_message_assets")
       if (!servicePromptSnapshot) throw new Error("history_scope_unavailable")
+      earlyQuestion = showQuestionEarly(mode, message, resolvedImage, isRegenerate, params)
+      if (earlyQuestion) params = { ...params, userMessageId: earlyQuestion.id }
       const historyTurn = await captureNormalHistoryTurn(
         { ...params, historyPreparation: preparation },
         message,
@@ -1701,11 +1759,6 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       }
       history = (regenerate ? selected.slice(0, -1) : selected) as ChatHistory
     }
-    const resolvedImage =
-      image.length > 0
-        ? (image.startsWith("data:") ? createImageDataUrl(image) : null) ??
-          `data:image/jpeg;base64,${image.includes(",") ? image.split(",")[1] : image}`
-        : ""
 
     const result = await runChatPipeline(
       mode,
@@ -1730,6 +1783,8 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
           : undefined
       }
     )
+    // A turn that ended before the pipeline drew its rows leaves no question behind.
+    if (result.status !== "submitted") earlyQuestion?.withdraw()
     const historyTurn = params.historyTurn
     if (result.status === "submitted" && historyTurn?.resultId) {
       const followed = await historyTurn.followResult(historyTurn.resultId)
@@ -1739,6 +1794,9 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       await historyTurn.keep?.()
     }
     return result
+  } catch (error) {
+    earlyQuestion?.withdraw()
+    throw error
   } finally {
     stopWatchingPreparationIds?.()
     createdTurn?.release?.()
