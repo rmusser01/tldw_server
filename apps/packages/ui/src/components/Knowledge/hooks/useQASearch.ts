@@ -71,9 +71,15 @@ export type UseQASearchReturn = {
   timedOut: boolean
   hasAttemptedSearch: boolean
   queryError: string | null
+  /** An answer is being generated for the shown sources (CC-10). */
+  answerLoading: boolean
+  answerError: string | null
 
   // Actions
+  /** Retrieve sources only; the answer is generated on request (CC-10). */
   runQASearch: (opts?: { applyFirst?: boolean }) => Promise<void>
+  /** Generate an answer for the last search, keeping its sources on screen. */
+  generateAnswer: () => Promise<void>
 
   // Result actions
   copyAnswer: () => Promise<void>
@@ -91,6 +97,34 @@ type UseQASearchOptions = {
   pinnedResults: RagPinnedResult[]
   onPin: (item: RagResult) => void
 }
+
+/**
+ * Settings that shape the written answer rather than the retrieval. "Generate
+ * answer" reads these when it is clicked, so a model picked after the search
+ * is used; the query and retrieval settings stay as searched (CC-10 review).
+ */
+const ANSWER_SETTING_KEYS = [
+  "strict_extractive",
+  "generation_model",
+  "generation_provider",
+  "generation_prompt",
+  "max_generation_tokens",
+  "enable_abstention",
+  "abstention_behavior",
+  "enable_multi_turn_synthesis",
+  "synthesis_time_budget_sec",
+  "synthesis_draft_tokens",
+  "synthesis_refine_tokens",
+  "enable_citations",
+  "citation_style",
+  "include_page_numbers",
+  "enable_chunk_citations"
+] as const satisfies ReadonlyArray<keyof RagSettings>
+
+const pickAnswerSettings = (settings: RagSettings): Partial<RagSettings> =>
+  Object.fromEntries(
+    ANSWER_SETTING_KEYS.map((key) => [key, settings[key]])
+  ) as Partial<RagSettings>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null
@@ -259,6 +293,15 @@ export function useQASearch({
   const [timedOut, setTimedOut] = React.useState(false)
   const [hasAttemptedSearch, setHasAttemptedSearch] = React.useState(false)
   const [queryError, setQueryError] = React.useState<string | null>(null)
+  const [answerLoading, setAnswerLoading] = React.useState(false)
+  const [answerError, setAnswerError] = React.useState<string | null>(null)
+  // The query and retrieval settings behind the shown sources, so Generate
+  // answer answers the same search even after the user edits the box.
+  const lastSearchRef = React.useRef<{
+    query: string
+    settings: RagSettings
+  } | null>(null)
+  const searchRunRef = React.useRef(0)
 
   const runQASearch = React.useCallback(
     async (opts?: { applyFirst?: boolean }) => {
@@ -279,32 +322,84 @@ export function useQASearch({
         setHasAttemptedSearch(true)
       }
 
+      const runId = ++searchRunRef.current
       setLoading(true)
       setTimedOut(false)
       setResponse(null)
+      setAnswerLoading(false)
+      setAnswerError(null)
+      lastSearchRef.current = { query: queryText, settings: draftSettings }
 
       try {
         await tldwClient.initialize()
+        // Sources first: the answer is opt-in (CC-10, decision [2]), whatever
+        // the shared Knowledge settings default to.
         const { query, options, timeoutMs } = buildRagSearchRequest({
           ...draftSettings,
-          query: queryText
+          query: queryText,
+          enable_generation: false
         })
         const rawResponse = await tldwClient.ragSearch(query, {
           ...options,
           timeoutMs
         })
+        if (runId !== searchRunRef.current) return
         const normalized = normalizeQAResponse(rawResponse, queryText)
         setResponse(normalized)
         setTimedOut(false)
       } catch (e) {
+        if (runId !== searchRunRef.current) return
         setResponse(null)
         setTimedOut(isTimeoutError(e))
       } finally {
-        setLoading(false)
+        if (runId === searchRunRef.current) setLoading(false)
       }
     },
     [applySettings, draftSettings, hasAttemptedSearch, resolvedQuery, t]
   )
+
+  const generateAnswer = React.useCallback(async () => {
+    const lastSearch = lastSearchRef.current
+    if (!lastSearch) return
+    const runId = searchRunRef.current
+    setAnswerLoading(true)
+    setAnswerError(null)
+    try {
+      await tldwClient.initialize()
+      const { query, options, timeoutMs } = buildRagSearchRequest({
+        ...lastSearch.settings,
+        ...pickAnswerSettings(draftSettings),
+        query: lastSearch.query,
+        enable_generation: true
+      })
+      const rawResponse = await tldwClient.ragSearch(query, {
+        ...options,
+        timeoutMs
+      })
+      if (runId !== searchRunRef.current) return
+      const normalized = normalizeQAResponse(rawResponse, lastSearch.query)
+      // The answer was written from this response's sources, so show those.
+      setResponse(normalized)
+      if (!normalized.generatedAnswer) {
+        setAnswerError(
+          t(
+            "sidepanel:qaSearch.noAnswerGenerated",
+            "No answer was generated from these sources."
+          ) as string
+        )
+      }
+    } catch {
+      if (runId !== searchRunRef.current) return
+      setAnswerError(
+        t(
+          "sidepanel:qaSearch.generateAnswerFailed",
+          "Couldn't generate an answer. Try again, or check the model in Settings."
+        ) as string
+      )
+    } finally {
+      if (runId === searchRunRef.current) setAnswerLoading(false)
+    }
+  }, [draftSettings, t])
 
   const copyAnswer = React.useCallback(async () => {
     if (!response?.generatedAnswer) return
@@ -362,7 +457,10 @@ export function useQASearch({
     timedOut,
     hasAttemptedSearch,
     queryError,
+    answerLoading,
+    answerError,
     runQASearch,
+    generateAnswer,
     copyAnswer,
     insertAnswer,
     insertChunk,

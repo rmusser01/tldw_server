@@ -447,12 +447,13 @@ describe("history-first sidebar navigation", () => {
         <>
           <ChatSidebar />
           <button onClick={() => navigate("/settings")}>Change page</button>
+          <button onClick={() => navigate("/chat")}>Back to chat</button>
         </>
       );
     };
     render(
       <I18nextProvider i18n={translations}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/chat"]}>
           <Harness />
         </MemoryRouter>
       </I18nextProvider>,
@@ -461,10 +462,16 @@ describe("history-first sidebar navigation", () => {
       expect(recentToggle()).toHaveAttribute("aria-expanded", "false"),
     );
     fireEvent.click(screen.getByRole("button", { name: "Change page" }));
-    expect(screen.getByRole("button", { name: "Navigation" })).toHaveAttribute(
+    // Off /chat the navigation section is the whole menu, named "Menu".
+    expect(screen.getByRole("button", { name: "Menu" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
+    // XP-11: the chat list stays on /chat; the saved choice comes back with it.
+    expect(
+      screen.queryByRole("button", { name: "Recent conversations" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(recentToggle()).toHaveAttribute("aria-expanded", "false");
     expect(preferenceWrites()).toEqual([]);
   });
@@ -504,7 +511,7 @@ describe("history-first sidebar navigation", () => {
     };
     render(
       <I18nextProvider i18n={translations}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/chat"]}>
           <Harness />
         </MemoryRouter>
       </I18nextProvider>,
@@ -531,7 +538,7 @@ describe("history-first sidebar navigation", () => {
     };
     render(
       <I18nextProvider i18n={translations}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/chat"]}>
           <Harness />
         </MemoryRouter>
       </I18nextProvider>,
@@ -545,7 +552,7 @@ describe("history-first sidebar navigation", () => {
     expect(screen.queryByTestId("server-chat-list")).toBeNull();
   });
 
-  it.each(["new control", "close and reopen", "route replacement"])(
+  it.each(["new control", "close and reopen", "route replacement", "leaving the chat route"])(
     "cancels delayed Find focus after %s",
     async (changed) => {
       let resolve!: (value: unknown) => void;
@@ -562,7 +569,8 @@ describe("history-first sidebar navigation", () => {
               collapsed={collapsed}
               onToggleCollapse={() => setCollapsed((value) => !value)}
             />
-            <button onClick={() => navigate("/settings")}>Replace route</button>
+            <button onClick={() => navigate("/chat?chat=other")}>Replace route</button>
+            <button onClick={() => navigate("/settings")}>Leave chat</button>
           </>
         );
       };
@@ -586,13 +594,20 @@ describe("history-first sidebar navigation", () => {
           screen.getByRole("button", { name: "Collapse sidebar" }),
         );
         fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
-      } else {
+      } else if (changed === "route replacement") {
         fireEvent.click(screen.getByRole("button", { name: "Replace route" }));
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Leave chat" }));
       }
       await act(async () => {
         resolve("local");
       });
-      expect(findInput()).not.toHaveFocus();
+      // XP-11: leaving /chat takes the chat list and its search away.
+      if (changed === "leaving the chat route")
+        expect(
+          screen.queryByRole("textbox", { name: "Find conversations" }),
+        ).toBeNull();
+      else expect(findInput()).not.toHaveFocus();
       if (changed === "new control")
         expect(screen.getByRole("button", { name: "New Chat" })).toHaveFocus();
     },

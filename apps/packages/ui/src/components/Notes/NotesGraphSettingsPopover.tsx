@@ -22,6 +22,8 @@ type NotesGraphSettingsPopoverProps = {
   maxNodes: number
   maxNodeCap: number
   layout: NotesGraphLayout
+  /** All notes or a tag filter: distance and item limit do not apply (NL-11 review). */
+  libraryScope?: boolean
   onRadiusChange: (radius: 1 | 2) => void
   onMaxNodesChange: (maxNodes: number) => void
   onLayoutChange: (layout: NotesGraphLayout) => void
@@ -38,6 +40,7 @@ const NotesGraphSettingsPopover: React.FC<NotesGraphSettingsPopoverProps> = ({
   maxNodes,
   maxNodeCap,
   layout,
+  libraryScope = false,
   onRadiusChange,
   onMaxNodesChange,
   onLayoutChange
@@ -91,6 +94,16 @@ const NotesGraphSettingsPopover: React.FC<NotesGraphSettingsPopoverProps> = ({
           role="group"
           aria-label={title}
           className="absolute left-0 top-12 z-20 flex w-[240px] flex-col gap-3 border border-border bg-elevated p-3 shadow-lg">
+          {libraryScope ? (
+            <p
+              className="text-xs text-text-muted"
+              data-testid="notes-graph-settings-library-hint">
+              {t("option:notesSearch.graphSettingsLibraryHint", {
+                defaultValue:
+                  "All notes and tag filters show every matching note, so distance and item limit apply only to a focused graph."
+              })}
+            </p>
+          ) : null}
           <label className={fieldClassName}>
             {t("option:notesSearch.graphRadiusLabel", {
               defaultValue: "Distance from focus"
@@ -101,6 +114,7 @@ const NotesGraphSettingsPopover: React.FC<NotesGraphSettingsPopoverProps> = ({
                 defaultValue: "Distance from focus note"
               })}
               value={radius}
+              disabled={libraryScope}
               onChange={(event) => onRadiusChange(Number(event.target.value) as 1 | 2)}>
               <option value={1}>
                 {t("option:notesSearch.graphRadiusOption.one", {
@@ -127,6 +141,7 @@ const NotesGraphSettingsPopover: React.FC<NotesGraphSettingsPopoverProps> = ({
               min={20}
               max={maxNodeCap}
               value={maxNodes}
+              disabled={libraryScope}
               onChange={(event) => onMaxNodesChange(Number(event.target.value))}
             />
           </label>

@@ -456,6 +456,8 @@ describe("NotesManagerPage stage 39 organization model", () => {
     expect(screen.getByRole("button", { name: "Tags help" })).toBeInTheDocument()
   })
 
+  // NL-12 (decision 16): the Inbox view is the one way to list captured
+  // notes; the "Captured" chip that sent the same request is gone.
   it("offers a captured view backed by the reserved captured tag", async () => {
     renderPage()
 
@@ -463,7 +465,8 @@ describe("NotesManagerPage stage 39 organization model", () => {
       expect(screen.getByTestId("notes-list-panel-mock")).toHaveTextContent("2")
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Captured" }))
+    expect(screen.queryByRole("button", { name: "Captured" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("notes-view-mode-inbox"))
 
     await waitFor(() => {
       const searchPaths = mockBgRequest.mock.calls
@@ -476,7 +479,7 @@ describe("NotesManagerPage stage 39 organization model", () => {
     await waitFor(() => {
       expect(screen.getByTestId("notes-list-panel-mock")).toHaveTextContent("1")
       expect(screen.getByTestId("notes-active-filter-summary-details")).toHaveTextContent(
-        "Tags: captured"
+        "View: Inbox"
       )
     })
   })

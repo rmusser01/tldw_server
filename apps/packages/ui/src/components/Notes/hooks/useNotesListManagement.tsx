@@ -38,6 +38,7 @@ import {
 import { normalizeNoteSearchSnippet } from '../NoteSearchSnippet'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 import { isSameNotesListRowsKind } from '../notes-list-cache'
+import { buildNotesTagSearchParams, tagMatchToggleApplies } from '../notes-tag-match'
 import {
   SELECT_ALL_MATCHING_CAP,
   useNotesMatchingSelection,
@@ -271,11 +272,14 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     [notebookOptions, selectedNotebookId]
   )
 
-  const effectiveKeywordTokens = React.useMemo(() => {
-    const effectiveNotebookKeywordTokens =
+  const effectiveNotebookKeywordTokens = React.useMemo(
+    () =>
       authorityScope === undefined
         ? notebookKeywordTokens
-        : selectedNotebook?.keywords ?? []
+        : selectedNotebook?.keywords ?? [],
+    [authorityScope, notebookKeywordTokens, selectedNotebook]
+  )
+  const effectiveKeywordTokens = React.useMemo(() => {
     const merged = [
       ...(listViewMode === 'inbox' ? [CAPTURED_NOTE_KEYWORD] : []),
       ...keywordTokens,
@@ -289,7 +293,21 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       deduped.push(normalized)
     }
     return deduped
-  }, [authorityScope, keywordTokens, listViewMode, notebookKeywordTokens, selectedNotebook])
+  }, [effectiveNotebookKeywordTokens, keywordTokens, listViewMode])
+  // The view's tag and a saved filter's tags always all match, whatever the
+  // any/all toggle says (NL-12, decision 19); the toggle is for picked tags.
+  const requiredKeywordTokens = React.useMemo(
+    () =>
+      [
+        ...(listViewMode === 'inbox' ? [CAPTURED_NOTE_KEYWORD] : []),
+        ...effectiveNotebookKeywordTokens
+      ]
+        .map((token) => String(token || '').trim().toLowerCase())
+        .filter(Boolean),
+    [effectiveNotebookKeywordTokens, listViewMode]
+  )
+  /** The toggle applies to the tags the reader picked, so it shows for two or more. */
+  const tagMatchApplies = tagMatchToggleApplies(keywordTokens)
 
   const clearSearchQueryTimeout = React.useCallback(() => {
     if (searchQueryTimeoutRef.current != null) {
@@ -325,15 +343,20 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     params.set('include_keywords', 'true')
     params.set('sort_by', NOTE_SORT_API_PARAMS[fetchSort].sortBy)
     params.set('sort_order', NOTE_SORT_API_PARAMS[fetchSort].sortOrder)
-    let tokenCount = 0
-    toks.forEach((tok) => {
-      const v = tok.trim()
-      if (v.length > 0) {
-        params.append('tokens', v)
-        tokenCount += 1
-      }
+    // Picked tags come from the reader's own picks, so a tag that is also
+    // required (Inbox, a saved filter) still counts as picked (NL-12 review).
+    const searchTokens = toks.map((tok) => tok.trim().toLowerCase())
+    const pickedInList = keywordTokens
+      .map((tok) => String(tok || '').trim().toLowerCase())
+      .filter((tok) => searchTokens.includes(tok))
+    buildNotesTagSearchParams(params, {
+      picked: [
+        ...pickedInList,
+        ...searchTokens.filter((tok) => !requiredKeywordTokens.includes(tok) && !pickedInList.includes(tok))
+      ],
+      required: searchTokens.filter((tok) => requiredKeywordTokens.includes(tok)),
+      match: tagMatch
     })
-    if (tokenCount > 1) params.set('tokens_match', tagMatch)
     // `items` is all the list reads; skip the duplicate arrays (NS-04).
     params.set('legacy_aliases', 'false')
     // Gathering ids (select all, export) needs no match excerpts.
@@ -373,7 +396,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     }
 
     return { items: sortNoteRows(items, fetchSort), total: totalVal }
-  }, [authorityOwner, isCurrentAuthority, searchSortOption, sortOption, tagMatch])
+  }, [authorityOwner, isCurrentAuthority, keywordTokens, requiredKeywordTokens, searchSortOption, sortOption, tagMatch])
 
   /**
    * One page of the current list: Trash, a search or tag filter, or the whole
@@ -1019,9 +1042,17 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     if (typeof window === 'undefined') return
 
     const defaultName = buildNotebookDefaultName(normalizedKeywords)
+    // A saved filter always matches all of its tags (decision 19); say so
+    // when the reader is looking at "any" (NL-12 review).
+    const savingUnderAny = tagMatch === 'any' && tagMatchApplies
     const rawName = await promptModal({
       title: 'Save filter',
-      label: 'Save the current tag filters as a reusable preset.',
+      label: savingUnderAny
+        ? t('option:notesSearch.notebookSaveAllTagsNotice', {
+            defaultValue: 'This filter will show notes that have all of these tags: {{tags}}.',
+            tags: normalizedKeywords.join(', ')
+          })
+        : 'Save the current tag filters as a reusable preset.',
       defaultValue: defaultName,
       placeholder: 'Filter name',
       okText: 'Save',
@@ -1100,7 +1131,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         }
       }
     }
-  }, [authorityOwner, isCurrentAuthority, isOnline, keywordTokens, message, notebookOptions, setKeywordTokens, setNotebookOptions, setSelectedNotebookId, upsertNotebookOnServer])
+  }, [authorityOwner, isCurrentAuthority, isOnline, keywordTokens, message, notebookOptions, setKeywordTokens, setNotebookOptions, setSelectedNotebookId, t, tagMatch, tagMatchApplies, upsertNotebookOnServer])
 
   const removeSelectedNotebook = React.useCallback(async () => {
     const requestOwner = authorityOwner
@@ -1413,6 +1444,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     effectiveKeywordTokens,
     tagMatch,
     setTagMatch,
+    tagMatchApplies,
     rawNotes, filteredCount,
     orderedVisibleNoteIds,
     bulkSelectedIdSet, selectedBulkNotes,

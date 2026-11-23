@@ -114,7 +114,7 @@
     "message": "Opening sidebar to save clip..."
   },
   "contextSaveToClipperDeliveryFailed": {
-    "message": "Could not open the sidebar to save this clip. Check that the tldw Assistant sidebar is allowed on this site and try again."
+    "message": "Could not open the sidebar to save this clip. Check that the tldw sidebar is allowed on this site and try again."
   },
   "contextSaveToClipperRestrictedPage": {
     "message": "This page is restricted, so the clipper cannot capture it."
@@ -135,13 +135,13 @@
     "message": "Opening sidebar to save selection to companion..."
   },
   "contextSaveToCompanionDeliveryFailed": {
-    "message": "Could not open the sidebar to save this selection. Check that the tldw Assistant sidebar is allowed on this site and try again."
+    "message": "Could not open the sidebar to save this selection. Check that the tldw sidebar is allowed on this site and try again."
   },
   "contextSaveToNotesOpeningSidebar": {
     "message": "Opening sidebar to save note..."
   },
   "contextSaveToNotesDeliveryFailed": {
-    "message": "Could not open the sidebar to save this note. Check that the tldw Assistant sidebar is allowed on this site and try again."
+    "message": "Could not open the sidebar to save this note. Check that the tldw sidebar is allowed on this site and try again."
   },
   "contextCopilotPopup": {
     "message": "AI Popup"
@@ -153,7 +153,7 @@
     "message": "No active tab found for contextual action."
   },
   "contextCopilotPopupDeliveryFailed": {
-    "message": "Could not open the contextual popup. Check that tldw Assistant is allowed on this site and try again."
+    "message": "Could not open the contextual popup. Check that tldw is allowed on this site and try again."
   },
   "hfSendPageRejected": {
     "message": "[tldw] Page send request rejected by tldw_server"
@@ -171,25 +171,25 @@
     "message": "[tldw] Something went wrong while sending this page to tldw_server. Check that your tldw_server and the extension are running, then try again."
   },
   "hfPullInProgress": {
-    "message": "[tldw Assistant] A model pull request is already in progress. Please wait for it to finish before starting another one."
+    "message": "[tldw] A model pull request is already in progress. Please wait for it to finish before starting another one."
   },
   "hfPullConfirm": {
-    "message": "[tldw Assistant] Do you want to send a request to your tldw_server to pull the \"$1\" model? This is independent of the huggingface.co website. Your server will start pulling the model after you confirm."
+    "message": "[tldw] Do you want to send a request to your tldw_server to pull the \"$1\" model? This is independent of the huggingface.co website. Your server will start pulling the model after you confirm."
   },
   "hfPullSending": {
-    "message": "[tldw Assistant] Sending a request to your tldw_server to pull \"$1\". Check the extension icon or your tldw_server logs for progress."
+    "message": "[tldw] Sending a request to your tldw_server to pull \"$1\". Check the extension icon or your tldw_server logs for progress."
   },
   "hfPullErrorWithDetail": {
-    "message": "[tldw Assistant] Failed to send a pull request for \"$1\": $2. Check Settings → tldw server and try again."
+    "message": "[tldw] Failed to send a pull request for \"$1\": $2. Check Settings → tldw server and try again."
   },
   "hfPullError": {
-    "message": "[tldw Assistant] Failed to send a pull request for \"$1\". Check Settings → tldw server and try again."
+    "message": "[tldw] Failed to send a pull request for \"$1\". Check Settings → tldw server and try again."
   },
   "hfPullSuccess": {
-    "message": "[tldw Assistant] Request sent to your tldw_server to pull \"$1\". Monitor the extension icon or tldw_server logs for status."
+    "message": "[tldw] Request sent to your tldw_server to pull \"$1\". Monitor the extension icon or tldw_server logs for status."
   },
   "hfPullException": {
-    "message": "[tldw Assistant] Something went wrong while sending a pull request for \"$1\" to your tldw_server. Check that your tldw_server and the extension are running, then try again."
+    "message": "[tldw] Something went wrong while sending a pull request for \"$1\" to your tldw_server. Check that your tldw_server and the extension are running, then try again."
   },
   "footerHelp": {
     "message": "Once connected, you can revisit these settings anytime from the extension menu.",
@@ -644,7 +644,7 @@
     "description": "Command palette toggle label to show or hide the sidepanel."
   },
   "commandPalette_toggleSidebarDesc": {
-    "message": "Show or hide the chat sidebar",
+    "message": "Show or hide the sidebar",
     "description": "Command palette description text explaining the sidebar visibility toggle."
   },
   "commandPalette_placeholder": {
@@ -3156,7 +3156,7 @@
     "message": "Create a default assistant character"
   },
   "playground_composer_persistence_serverCharacterHintBody": {
-    "message": "Create a simple assistant persona (name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server."
+    "message": "Create a simple character (a name and a short description are enough). Once it exists, the extension can reuse it when saving chats to your server."
   },
   "playground_composer_persistence_serverInlineTitle": {
     "message": "Saved on your server"

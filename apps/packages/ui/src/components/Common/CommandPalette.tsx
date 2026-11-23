@@ -511,7 +511,7 @@ export function CommandPalette({
               id: "action-toggle-web",
               label: t(
                 "common:commandPalette.toggleWebSearch",
-                "Toggle Web Search"
+                "Toggle web search"
               ),
               description: t(
                 "common:commandPalette.toggleWebDesc",
@@ -569,7 +569,7 @@ export function CommandPalette({
               label: t("common:commandPalette.toggleSidebar", "Toggle Sidebar"),
               description: t(
                 "common:commandPalette.toggleSidebarDesc",
-                "Show or hide the chat sidebar"
+                "Show or hide the sidebar"
               ),
               icon: <Eye className="size-4" />,
               shortcut: toCommandShortcut(configuredShortcuts.toggleSidebar),
@@ -662,7 +662,7 @@ export function CommandPalette({
   const allCommands = useMemo(() => {
     const buddyCommand: CommandItem = {
       id: "buddy-persona-management",
-      label: t("sidepanel:buddyManagement.title", "Buddy & Persona Management"),
+      label: t("sidepanel:buddyManagement.title", "Avatar settings"),
       icon: <MessageSquare size={18} />,
       category: "action",
       keywords: ["buddy", "persona", "companion", "workspace"],

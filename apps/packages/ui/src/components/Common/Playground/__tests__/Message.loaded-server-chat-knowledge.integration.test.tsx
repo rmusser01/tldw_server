@@ -33,6 +33,8 @@ import { SidePanelBody } from "@/components/Sidepanel/Chat/body"
 import { FeedbackButtons } from "@/components/Sidepanel/Chat/FeedbackButtons"
 
 const saveChatKnowledgeMock = vi.hoisted(() => vi.fn(async () => undefined))
+const createNoteMock = vi.hoisted(() => vi.fn(async (_content: string, _metadata: unknown): Promise<{ id: number }> => ({ id: 41 })))
+const capabilityState = vi.hoisted(() => ({ hasNotes: true }))
 const messageApiMock = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
@@ -45,7 +47,8 @@ const chatState = vi.hoisted(() => ({
   processing: false,
   deleteMessage: vi.fn(async (_index: number) => true),
   stopStreamingRequest: vi.fn(),
-  toggleMessagePinned: vi.fn()
+  toggleMessagePinned: vi.fn(),
+  temporary: false
 }))
 const actionPresentation = vi.hoisted(() => ({ mode: "pro", realPopover: false, userBubble: false }))
 const researchState = vi.hoisted(() => ({ runs: [] as unknown[] }))
@@ -103,7 +106,7 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
     capabilities: {
       hasChatKnowledgeSave: true,
-      hasNotes: true,
+      hasNotes: capabilityState.hasNotes,
       hasFlashcards: true,
       hasFeedbackExplicit: true,
       hasFeedbackImplicit: false
@@ -146,7 +149,8 @@ vi.mock("@/hooks/useTldwAudioStatus", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
-    saveChatKnowledge: saveChatKnowledgeMock
+    saveChatKnowledge: saveChatKnowledgeMock,
+    createNote: createNoteMock
   }
 }))
 
@@ -290,7 +294,7 @@ const loadedChatHookState = () => ({
   stopStreamingRequest: chatState.stopStreamingRequest,
   ttsEnabled: false,
   actionInfo: null,
-  temporaryChat: false,
+  temporaryChat: chatState.temporary,
   historyId: "history-7",
   serverChatId: SERVER_CHAT_ID,
   serverChatCharacterId: null,
@@ -435,6 +439,72 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
   })
 })
 
+
+// XP-01 (#3101), decision [5]: a temporary chat's answer can be saved to
+// Notes. The server can't link it to a saved message, so it becomes a plain
+// note with a short provenance line and the "from-chat" tag.
+describe.each(surfaces)("$surface Save to Notes in a temporary chat (XP-01)", { timeout: 20_000 }, ({ renderChat }) => {
+  beforeEach(() => {
+    chatState.messages = formatSelectedHistory(loadedServerChatCapture()).messages
+    chatState.temporary = true
+    saveChatKnowledgeMock.mockClear()
+    createNoteMock.mockClear()
+    messageApiMock.success.mockClear()
+    messageApiMock.error.mockClear()
+  })
+  afterEach(() => {
+    chatState.temporary = false
+  })
+
+  it("offers Save to Notes and saves the answer as a tagged note", async () => {
+    renderChat()
+    const assistant = messageCard("assistant")
+    openMoreActions(assistant)
+    expect(within(assistant).queryByRole("menuitem", { name: "Save to Flashcards" })).toBeNull()
+    fireEvent.click(within(assistant).getByRole("menuitem", { name: "Save to Notes" }))
+
+    await waitFor(() => expect(createNoteMock).toHaveBeenCalledOnce())
+    const [content, metadata] = createNoteMock.mock.calls[0] as unknown as [string, { title: string; keywords: string[] }]
+    expect(content.startsWith(ANSWER)).toBe(true)
+    expect(content).toContain("Saved from a temporary chat")
+    expect(metadata.keywords).toEqual(["from-chat"])
+    expect(metadata.title).toBe("How do I undo a rebase?")
+    expect(saveChatKnowledgeMock).not.toHaveBeenCalled()
+    // The toast offers the new note (review fix): its id is what createNote returned.
+    await waitFor(() => expect(messageApiMock.success).toHaveBeenCalledOnce())
+    const toast = (messageApiMock.success.mock.calls[0] as unknown as [{ content: React.ReactNode }])[0]
+    const rendered = render(<>{toast.content}</>)
+    expect(within(rendered.container).getByText(/Saved to Notes/)).toBeInTheDocument()
+    expect(within(rendered.container).getByRole("link", { name: "Open note" })).toHaveAttribute("href", "/notes?note=41")
+  })
+
+  it("says why a save failed and keeps the answer", async () => {
+    createNoteMock.mockRejectedValueOnce(new Error("Notes storage is full"))
+    renderChat()
+    const assistant = messageCard("assistant")
+    openMoreActions(assistant)
+    fireEvent.click(within(assistant).getByRole("menuitem", { name: "Save to Notes" }))
+    await waitFor(() => expect(messageApiMock.error).toHaveBeenCalledWith("Notes storage is full"))
+    expect(messageApiMock.success).not.toHaveBeenCalled()
+    expect(assistant).toHaveTextContent(ANSWER)
+  })
+
+  it("shows Save to Notes disabled, with the reason, when the server has no Notes", () => {
+    capabilityState.hasNotes = false
+    try {
+      renderChat()
+      const assistant = messageCard("assistant")
+      openMoreActions(assistant)
+      const item = within(assistant).getByRole("menuitem", { name: "Save to Notes" })
+      expect(item).toHaveAttribute("aria-disabled", "true")
+      expect(within(assistant).getByText("Notes isn't available on this server.")).toBeInTheDocument()
+      fireEvent.click(item)
+      expect(createNoteMock).not.toHaveBeenCalled()
+    } finally {
+      capabilityState.hasNotes = true
+    }
+  })
+})
 
 describe("message Copy feedback (G17)", () => {
   const props: React.ComponentProps<typeof PlaygroundMessage> = {

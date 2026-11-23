@@ -197,6 +197,8 @@ export type NotesGraphNode = {
   degree: number | null
   tag_count: number | null
   primary_source_id: string | null
+  /** Sent with includeLinkStatus: a manual link or [[link]] with another live note, anywhere. */
+  has_note_links?: boolean
 }
 
 export type NotesGraphEdge = {
@@ -236,6 +238,12 @@ export type FetchNotesGraphInput = {
   centerNoteId?: string
   datasetId?: string
   radius?: 1 | 2
+  /** Seeds a graph with no focus note from the notes with this tag (NL-11). */
+  tag?: string
+  /** Asks for each note's has_note_links; older servers ignore it. */
+  includeLinkStatus?: boolean
+  /** Cancels the request when its query is superseded (NL-11 review). */
+  signal?: AbortSignal
   edgeTypes?: NotesGraphEdgeType[]
   maxNodes?: number
   maxEdges?: number
@@ -637,7 +645,8 @@ const graphNodeSchema = z.strictObject({
   deleted: z.boolean().nullable(),
   degree: z.number().int().min(0).nullable(),
   tag_count: z.number().int().min(0).nullable(),
-  primary_source_id: idSchema.nullable()
+  primary_source_id: idSchema.nullable(),
+  has_note_links: z.boolean().optional()
 })
 
 const semanticExcerptSchema = z
@@ -810,6 +819,8 @@ const graphInputSchema = z
       .union([z.literal(1), z.literal(2)])
       .optional()
       .default(1),
+    tag: z.string().trim().min(1).max(255).optional(),
+    includeLinkStatus: z.boolean().optional(),
     edgeTypes: z.array(edgeTypeSchema).optional().default([]),
     maxNodes: z.number().int().min(1).optional().default(120),
     maxEdges: z.number().int().min(0).optional().default(480),
@@ -860,12 +871,14 @@ const normalizeGraph = (value: unknown): NotesGraphResponse => {
 export const fetchNotesGraph = async (
   input: FetchNotesGraphInput
 ): Promise<NotesGraphResponse> => {
-  const parsed = parseInput(graphInputSchema, input)
+  const { signal, ...graphInput } = input
+  const parsed = parseInput(graphInputSchema, graphInput)
   const payload = await request<unknown>({
     path: queryPath("/api/v1/notes/graph", [
       ["center_note_id", parsed.centerNoteId],
       ["dataset_id", parsed.datasetId],
       ["radius", parsed.radius],
+      ["tag", parsed.tag],
       [
         "edge_types",
         parsed.edgeTypes.length ? parsed.edgeTypes.join(",") : undefined
@@ -875,9 +888,11 @@ export const fetchNotesGraph = async (
       ["semantic_top_k", parsed.semanticTopK],
       ["semantic_threshold", parsed.semanticThreshold],
       ["max_degree", parsed.maxDegree],
-      ["cursor", parsed.cursor]
+      ["cursor", parsed.cursor],
+      ["include_link_status", parsed.includeLinkStatus ? "true" : undefined]
     ]),
-    method: "GET"
+    method: "GET",
+    ...(signal ? { abortSignal: signal } : {})
   })
   return normalizeGraph(payload)
 }

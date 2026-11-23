@@ -129,7 +129,7 @@ export const normalizePersonaLiveSessionSummary = (
   return {
     sessionId: toRequiredString(item.session_id, ""),
     personaId: toRequiredString(item.persona_id, ""),
-    personaName: toRequiredString(item.persona_name, "Persona Buddy"),
+    personaName: toRequiredString(item.persona_name, "Persona"),
     lifecycle: normalizeLifecycle(item.lifecycle),
     status: toStringOrNull(item.status),
     isFocused: item.is_focused === true,

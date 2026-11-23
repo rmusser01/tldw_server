@@ -248,7 +248,7 @@ async function startBuddyFixture(upgraded: boolean) {
 }
 
 async function openBuddyOptions(controls: Locator) {
-  const summary = controls.getByText("Buddy options", { exact: true })
+  const summary = controls.getByText("Avatar options", { exact: true })
   if ((await summary.locator("..").getAttribute("open")) === null)
     await summary.click()
 }
@@ -275,11 +275,11 @@ async function exerciseBuddy(
     expect(box?.y).toBe(POSITION.y)
   }
   await page
-    .getByRole("button", { name: "Buddy & Persona", exact: true })
+    .getByRole("button", { name: "Avatar", exact: true })
     .first()
     .click()
   const management = page.getByRole("dialog", {
-    name: "Buddy & Persona Management"
+    name: "Avatar settings"
   })
   await expect(
     management.getByRole("button", { name: "Use Fixture Buddy" })
@@ -322,7 +322,7 @@ async function exerciseBuddy(
   })
   await controls.getByRole("button", { name: "Close", exact: true }).click()
   await page
-    .getByRole("button", { name: "Buddy & Persona", exact: true })
+    .getByRole("button", { name: "Avatar", exact: true })
     .first()
     .click()
   await management
@@ -342,7 +342,7 @@ async function exerciseBuddy(
     upgraded ? "research_assistant" : ""
   )
   await page
-    .getByRole("button", { name: "Buddy & Persona", exact: true })
+    .getByRole("button", { name: "Avatar", exact: true })
     .first()
     .click()
   await management

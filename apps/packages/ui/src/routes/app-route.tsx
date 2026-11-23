@@ -48,7 +48,7 @@ const ROUTE_FALLBACKS: Record<
   { label: string; description: string }
 > = {
   options: {
-    label: "Loading tldw Assistant...",
+    label: "Loading tldw...",
     description: "Setting up your workspace"
   },
   sidepanel: {

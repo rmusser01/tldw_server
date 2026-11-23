@@ -366,7 +366,7 @@ describe("sidepanel chat handoff import", () => {
     serviceMocks.consumeSidepanelChatHandoff.mockResolvedValue(buildPackage())
   })
 
-  afterEach(() => { accountAbort.abort(); vi.useRealTimers() })
+  afterEach(() => { accountAbort.abort(); vi.useRealTimers(); window.history.replaceState({}, "", "/") })
 
   // Actual receiver/simple form/router; package storage and the destination's
   // verified owner predicate are declared boundaries, not source-owner proof.
@@ -385,6 +385,21 @@ describe("sidepanel chat handoff import", () => {
     await waitFor(() => expect(displayed.importedContext).toBe(importedPageContext))
     expect(screen.getByLabelText("Composer")).toHaveValue(text)
     await waitFor(() => expect(serviceMocks.consumeSidepanelChatHandoff).toHaveBeenCalledOnce())
+  })
+
+  // XP-09 review: "Open in full page" sends historySelection with the copy; the
+  // Playground consumes it with replaceState, out of the router's sight, and
+  // clearing the copy must not write it back.
+  it.each(["Insert", "Cancel"] as const)("does not bring back a consumed history link after %s", async choice => {
+    window.history.replaceState({}, "", "/options.html#/chat?handoff=handoff-1")
+    try {
+      renderWithRoute(<HookHarness />, "/chat?historySelection=REF&handoff=handoff-1")
+      fireEvent.click(await screen.findByRole("button", { name: choice }))
+      await waitFor(() => expect(screen.getByTestId("location-search")).not.toHaveTextContent("handoff="))
+      expect(screen.getByTestId("location-search")).not.toHaveTextContent("historySelection")
+    } finally {
+      window.history.replaceState({}, "", "/")
+    }
   })
 
   it("adds context-only page references while preserving the destination draft and reporting the actual import", async () => {
@@ -1008,6 +1023,8 @@ describe("sidepanel chat handoff import", () => {
     const search = new URLSearchParams({ handoff: "handoff-1", mode: choice === "Cancel" ? "vision" : "character", characterId: "old-card", chatId: "old-chat", serverChatId: "old-server-chat", keep: "query", historySelection: qualifiedHistory })
     const hash = new URLSearchParams({ mode: choice === "Insert" ? "vision" : " CHARACTER ", character_id: "old-card-alias", chat_id: "old-chat-alias", server_chat_id: "old-server-alias", keep: "hash", historySelection: qualifiedHistory })
     if (choice === "invalid") serviceMocks.readSidepanelChatHandoff.mockResolvedValue(null)
+    // Not consumed yet: the browser address still carries the history selection.
+    window.history.replaceState({}, "", "/chat?" + search + "#?" + hash)
     renderWithRoute(<HookHarness initialDraft="KEEP EXACT  " />, "/chat?" + search + "#?" + hash)
     if (choice !== "invalid") fireEvent.click(await screen.findByRole("button", { name: choice }))
     else await waitFor(() => expect(notificationApi.warning).toHaveBeenCalledOnce())
@@ -1041,6 +1058,8 @@ describe("sidepanel chat handoff import", () => {
     const search = new URLSearchParams({ handoff: "hidden-copy", mode: "character", characterId: "old-card", chatId: "old-chat", keep: "query", historySelection: qualifiedHistory })
     const hash = new URLSearchParams({ handoff: encoded, character_id: "old-card-alias", server_chat_id: "old-chat-alias", keep: "hash", historySelection: qualifiedHistory })
     serviceMocks.readSidepanelChatHandoff.mockImplementation(async (id: string) => buildPackage({ id }))
+    // Not consumed yet: the browser address still carries the history selection.
+    window.history.replaceState({}, "", "/chat?" + search + "#" + hash)
     renderWithRoute(<HookHarness initialDraft="KEEP EXACT  " />, "/chat?" + search + "#" + hash)
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(serviceMocks.readSidepanelChatHandoff).toHaveBeenCalledWith("hidden-copy", expect.anything()))

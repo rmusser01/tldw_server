@@ -81,7 +81,7 @@ const playgroundTools: TutorialDefinition = {
   labelFallback: "Tools & Attachments",
   descriptionKey: "tutorials:playground.tools.description",
   descriptionFallback:
-    "Discover knowledge search, file uploads, and advanced tools",
+    "Discover Search & Context, file uploads, and advanced tools",
   icon: Wrench,
   priority: 2,
   prerequisites: ["playground-basics"],
@@ -92,23 +92,23 @@ const playgroundTools: TutorialDefinition = {
       titleFallback: "Tools & Attachments",
       contentKey: "tutorials:playground.tools.toolsButtonContent",
       contentFallback:
-        "Access knowledge search, upload files, configure MCP tools, and more advanced features here.",
+        "Open Search & Context, upload files, configure MCP tools, and more advanced features here.",
       placement: "top",
       disableBeacon: true
     },
     {
       target: '[data-testid="knowledge-search-toggle"]',
       titleKey: "tutorials:playground.tools.knowledgeTitle",
-      titleFallback: "Knowledge Search",
+      titleFallback: "Search & Context",
       contentKey: "tutorials:playground.tools.knowledgeContent",
       contentFallback:
-        "Enable knowledge search to let the AI reference your ingested documents, notes, and media. Great for research and fact-checking.",
+        "Search your documents, notes and media, and add what you find to the chat as context. Great for research and fact-checking.",
       placement: "top"
     },
     {
       target: '[data-testid="web-search-toggle"]',
       titleKey: "tutorials:playground.tools.webSearchTitle",
-      titleFallback: "Web Search",
+      titleFallback: "Web search",
       contentKey: "tutorials:playground.tools.webSearchContent",
       contentFallback:
         "Toggle web search to let the AI search the internet for current information. Perfect for recent news or topics not in your knowledge base.",

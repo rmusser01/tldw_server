@@ -3244,6 +3244,7 @@ class NoteStore:
         tokens: list[str],
         match: str,
         keyword_table: str,
+        required_tokens: list[str] | None = None,
     ) -> tuple[str, list[Any]]:
         """Build the keyword-token predicate for a notes search (NL-N1).
 
@@ -3252,10 +3253,16 @@ class NoteStore:
         of the tokens; ``match="all"`` keeps only a note that has every token. The
         caller joins ``nk`` (note_keywords) and ``n`` (notes). The keyword ids come
         from the owner's active keywords, so they carry the owner and deleted filters.
+
+        ``required_tokens`` must all match too, whatever ``match`` is (NL-12): the
+        tags a view implies, such as the Inbox's "captured".
         """
         if match not in ("all", "any"):
             raise ValueError(f"Unsupported keyword match mode: {match!r}")
-        found = self._active_keyword_ids_by_identity(tokens, keyword_table)
+        required = list(required_tokens or [])
+        if not tokens:
+            tokens, match, required = required, "all", []
+        found = self._active_keyword_ids_by_identity([*tokens, *required], keyword_table)
         groups = [found.get(normalize_keyword_identity(token), []) for token in tokens]
         if match == "all" and not all(groups):
             return "1 = 0", []
@@ -3272,6 +3279,15 @@ class NoteStore:
                     f"AND nk2.keyword_id IN ({', '.join(['?'] * len(ids))}))"
                 )
                 params.extend(ids)
+        for token in required:
+            ids = found.get(normalize_keyword_identity(token), [])
+            if not ids:
+                return "1 = 0", []
+            clause += (
+                " AND EXISTS (SELECT 1 FROM note_keywords nk3 WHERE nk3.note_id = n.id "
+                f"AND nk3.keyword_id IN ({', '.join(['?'] * len(ids))}))"
+            )
+            params.extend(ids)
         return clause, params
 
     def search_notes_with_keywords(
@@ -3284,17 +3300,20 @@ class NoteStore:
         *,
         sort_by: str | None = None,
         sort_order: str | None = None,
+        required_tokens: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Search notes with an optional FTS query and keyword-token filter.
 
         Tokens match keywords exactly (case-insensitive); ``match`` is "all"
-        (every token, the default) or "any" (at least one). With a query the
+        (every token, the default) or "any" (at least one). ``required_tokens``
+        must all match as well, whatever ``match`` is (NL-12). With a query the
         order is relevance; tokens alone list the most recently modified first.
         ``sort_by``/``sort_order`` order the whole result in SQL instead, as
         in ``search_notes`` (NL-07).
         """
         tokens = dedupe_keywords(t for t in keyword_tokens if isinstance(t, str))
-        if not tokens:
+        required = dedupe_keywords(t for t in (required_tokens or []) if isinstance(t, str))
+        if not tokens and not required:
             if not search_term or not str(search_term).strip():
                 return []
             return self.search_notes(
@@ -3302,7 +3321,7 @@ class NoteStore:
             )
 
         keyword_table = self._ctx.map_table("keywords")
-        like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table)
+        like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table, required)
         has_query = bool(search_term and str(search_term).strip())
         # ``n.id`` breaks ties, so pages never overlap or skip notes.
         if self._ctx.backend_type == BackendType.POSTGRESQL:
@@ -3399,19 +3418,23 @@ class NoteStore:
         search_term: str | None,
         keyword_tokens: list[str],
         match: str = "all",
+        *,
+        required_tokens: list[str] | None = None,
     ) -> int:
         """Return the total active notes matching an optional FTS query and keyword-token filter.
 
-        Uses the same exact, ``match``-mode token rules as ``search_notes_with_keywords``.
+        Uses the same exact, ``match``-mode and ``required_tokens`` rules as
+        ``search_notes_with_keywords``.
         """
         tokens = dedupe_keywords(t for t in keyword_tokens if isinstance(t, str))
-        if not tokens:
+        required = dedupe_keywords(t for t in (required_tokens or []) if isinstance(t, str))
+        if not tokens and not required:
             if not search_term or not str(search_term).strip():
                 return 0
             return self._ctx.db.count_notes_matching(str(search_term))
 
         keyword_table = self._ctx.map_table("keywords")
-        like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table)
+        like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table, required)
 
         if self._ctx.backend_type == BackendType.POSTGRESQL:
             note_scope, note_owner_params = self._ctx.owner_filter(self._ctx.client_id, "n")

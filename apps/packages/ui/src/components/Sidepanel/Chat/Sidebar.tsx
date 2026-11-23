@@ -43,7 +43,7 @@ import { exportServerChat } from "@/services/chat-transcript-export"
 import { runChatExport } from "@/components/Common/chat-export-action"
 import type { TranscriptFormat } from "@/utils/chat-transcript"
 import { ConversationMenuButton } from "./ConversationMenuButton"
-import { useUndoNotification } from "@/hooks/useUndoNotification"
+import { InlineUndoBanner, useInlineUndo, type UndoOutcome } from "@/components/Common/InlineUndo"
 import {
   moveServerChatToTrash,
   readTabConversationTitle,
@@ -62,6 +62,9 @@ const clamp = (value: number, min: number, max: number) =>
 
 const BulkFolderPickerModal = React.lazy(() => import("./BulkFolderPickerModal"))
 const BulkTagPickerModal = React.lazy(() => import("./BulkTagPickerModal"))
+
+/** A saved chat that went to Trash from this panel, for its Undo (XP-17). */
+type TrashedTabChat = { chatId: string; label: string }
 
 type SidebarGroup = {
   label: string
@@ -341,7 +344,14 @@ export const SidepanelChatSidebar = ({
 
   // Context menu handlers. Rename and Delete act on the tab's conversation
   // (XS-07); each resolves false to keep its dialog open after a failure.
-  const { showUndoNotification } = useUndoNotification()
+  // Move to Trash offers Undo inline, with no dialog first (XP-17; #3101).
+  const tabUndo = useInlineUndo()
+  const dismissTabUndo = tabUndo.dismiss
+  const undoOwnerKey = owner?.ownerKey
+  // Another account's Trash is not this account's to undo.
+  React.useEffect(() => {
+    dismissTabUndo()
+  }, [dismissTabUndo, undoOwnerKey])
   // Undo can run after this sidebar re-renders or closes; reopen through the
   // latest handler, whose tab list no longer holds the deleted tab.
   const openServerChatRef = React.useRef(onOpenServerChat)
@@ -358,6 +368,96 @@ export const SidepanelChatSidebar = ({
     "sidepanel:contextMenu.accountUnverified",
     "This conversation can't be changed until your account is verified."
   )
+
+  const showTabUndo = tabUndo.show
+  const offerTabUndoRef = React.useRef<
+    (chats: TrashedTabChat[], options?: { partial?: { restored: number; total: number }; initiator?: Element | null }) => void
+  >(() => undefined)
+
+  // Undo for Move to Trash, single or bulk: restores the chats and reopens
+  // their tabs. When only some come back, the offer is replaced by one for
+  // the rest (XP-17).
+  const restoreTrashedChats = React.useCallback(
+    async (chats: TrashedTabChat[]): Promise<UndoOutcome> => {
+      if (!owner?.isCurrent()) {
+        message.error(unverifiedAccountMessage)
+        return false
+      }
+      const results = await Promise.allSettled(
+        chats.map((chat) => restoreServerChatFromTrash(chat.chatId, owner.snapshot.requestScope))
+      )
+      const remaining = chats.filter((_chat, index) => results[index]?.status !== "fulfilled")
+      if (remaining.length < chats.length)
+        void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+      if (!owner.isCurrent() || !mountedRef.current) return false
+      results.forEach((result, index) => {
+        if (result.status !== "fulfilled") return
+        const chat = chats[index]
+        const restored = result.value
+        const createdAtMs = Date.parse(restored?.created_at ?? "")
+        openServerChatRef.current?.({
+          ...restored,
+          id: String(restored?.id ?? chat.chatId),
+          title: restored?.title || chat.label,
+          createdAtMs: Number.isNaN(createdAtMs) ? Date.now() : createdAtMs
+        })
+      })
+      if (remaining.length === 0)
+        return chats.length === 1
+          ? t("common:chatRestored", "Chat restored.")
+          : t("sidepanel:multiSelect.restoreSuccess", "Chats restored.")
+      console.error("[sidepanel] Failed to restore chat from Trash", results)
+      message.error(t("common:restoreChatError", "Failed to restore chat."))
+      if (remaining.length === chats.length) return false
+      offerTabUndoRef.current(remaining, {
+        partial: { restored: chats.length - remaining.length, total: chats.length }
+      })
+      return undefined
+    },
+    [owner, queryClient, t, unverifiedAccountMessage]
+  )
+
+  const offerTabUndo = React.useCallback(
+    (
+      chats: TrashedTabChat[],
+      options: { partial?: { restored: number; total: number }; initiator?: Element | null } = {}
+    ) => {
+      const count = chats.length
+      const label = chats[0]?.label?.trim()
+      const named = count === 1 && label
+      const movedText = named
+        ? t("sidepanel:contextMenu.movedChatToTrash", { defaultValue: 'Moved "{{title}}" to Trash.', title: label })
+        : t("common:chatSidebar.movedChatsToTrash", {
+            defaultValue: count === 1 ? "Moved {{count}} chat to Trash." : "Moved {{count}} chats to Trash.",
+            count
+          }).replace("{{count}}", String(count))
+      const offerMessage = options.partial
+        ? [
+            t("common:chatSidebar.undoPartialRestored", {
+              defaultValue: "Restored {{restored}} of {{total}} chats.",
+              restored: options.partial.restored,
+              total: options.partial.total
+            })
+              .replace("{{restored}}", String(options.partial.restored))
+              .replace("{{total}}", String(options.partial.total)),
+            named
+              ? t("common:chatSidebar.stillInTrashNamed", { defaultValue: '"{{title}}" is still in Trash.', title: label })
+              : t("common:chatSidebar.stillInTrash", {
+                  defaultValue: count === 1 ? "{{count}} chat is still in Trash." : "{{count}} chats are still in Trash.",
+                  count
+                }).replace("{{count}}", String(count))
+          ].join(" ")
+        : movedText
+      showTabUndo({
+        key: chats.map((chat) => chat.chatId).join(","),
+        message: offerMessage,
+        initiator: options.initiator,
+        onUndo: () => restoreTrashedChats(chats)
+      })
+    },
+    [restoreTrashedChats, showTabUndo, t]
+  )
+  offerTabUndoRef.current = offerTabUndo
 
   const handleLoadRenameTitle = React.useCallback(
     async (tabId: string): Promise<string | null> => {
@@ -411,6 +511,7 @@ export const SidepanelChatSidebar = ({
       const chatId = tab?.serverChatId
       if (!tab) return false
       if (!chatId) return (await onCloseTab(tabId)) !== false
+      const initiator = typeof document === "undefined" ? null : document.activeElement
       if (!owner?.isCurrent()) {
         message.error(unverifiedAccountMessage)
         return false
@@ -464,40 +565,14 @@ export const SidepanelChatSidebar = ({
         )
       if (currentTarget()) await onCloseTab(tabId)
       if (!owner.isCurrent() || !mountedRef.current) return true
-      showUndoNotification({
-        title: t("sidepanel:contextMenu.movedToTrash", "Moved to Trash"),
-        description: t("sidepanel:contextMenu.movedToTrashDescription", {
-          defaultValue: '"{{title}}" is in Trash.',
-          title: tab.label
-        }),
-        onUndo: async () => {
-          if (!owner.isCurrent()) {
-            throw new Error(unverifiedAccountMessage)
-          }
-          const restored = await restoreServerChatFromTrash(
-            chatId,
-            owner.snapshot.requestScope
-          )
-          void queryClient.invalidateQueries({
-            queryKey: ["serverChatHistory"]
-          })
-          if (!owner.isCurrent()) return
-          const createdAtMs = Date.parse(restored?.created_at ?? "")
-          openServerChatRef.current?.({
-            ...restored,
-            id: String(restored?.id ?? chatId),
-            title: restored?.title || tab.label,
-            createdAtMs: Number.isNaN(createdAtMs) ? Date.now() : createdAtMs
-          })
-        }
-      })
+      offerTabUndo([{ chatId, label: tab.label }], { initiator })
       return true
     },
     [
+      offerTabUndo,
       onCloseTab,
       owner,
       queryClient,
-      showUndoNotification,
       t,
       tabs,
       unverifiedAccountMessage
@@ -1048,10 +1123,17 @@ export const SidepanelChatSidebar = ({
     setSelectedTabIds([])
   }, [retireBulkAction])
 
-  const openBulkDeleteConfirm = React.useCallback(() => {
+  // Saved chats go to Trash at once with Undo; only a selection that would
+  // close a local or Temporary tab, which can't be undone, asks first (XP-17).
+  const requestBulkDelete = () => {
     retireBulkAction()
-    setBulkDeleteConfirmOpen(true)
-  }, [retireBulkAction])
+    const initiator = typeof document === "undefined" ? null : document.activeElement
+    if (selectedTabs.some((tab) => !tab.serverChatId)) {
+      setBulkDeleteConfirmOpen(true)
+      return
+    }
+    void handleBulkDelete(initiator)
+  }
 
   const handleBulkFolderPickerClose = React.useCallback(() => {
     setBulkFolderPickerOpen(false)
@@ -1066,7 +1148,7 @@ export const SidepanelChatSidebar = ({
     setBulkDeleteConfirmOpen(false)
   }, [retireBulkAction])
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = async (initiator?: Element | null) => {
     if (isBulkDeleting || selectedTabs.length === 0 || !owner?.isCurrent())
       return
     const revision = bulkActionRevisionRef.current
@@ -1088,7 +1170,8 @@ export const SidepanelChatSidebar = ({
       const failedConversationIds = new Set<string>()
       if (selectedConversationIds.length > 0) {
         const result = await applyBulkDelete(
-          () => isCurrent() && selectedTabs.every(targetIsCurrent)
+          () => isCurrent() && selectedTabs.every(targetIsCurrent),
+          { quietSuccess: true }
         )
         if (!result || !isCurrent() || !selectedTabs.every(targetIsCurrent))
           return
@@ -1154,6 +1237,13 @@ export const SidepanelChatSidebar = ({
 
       setSelectedTabIds(remainingSelection)
       setBulkDeleteConfirmOpen(false)
+      // The Undo offer reports the saved chats that went to Trash.
+      const trashed = new Map<string, TrashedTabChat>()
+      for (const tab of selectedTabs) {
+        if (tab.serverChatId && !failedConversationIds.has(tab.serverChatId))
+          trashed.set(tab.serverChatId, { chatId: tab.serverChatId, label: tab.label })
+      }
+      if (trashed.size > 0) offerTabUndo(Array.from(trashed.values()), { initiator })
     } finally {
       if (mountedRef.current && revision === bulkActionRevisionRef.current)
         setIsBulkDeleting(false)
@@ -1304,7 +1394,7 @@ export const SidepanelChatSidebar = ({
             </button>
             <button
               type="button"
-              onClick={openBulkDeleteConfirm}
+              onClick={requestBulkDelete}
               className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-danger hover:bg-surface2"
               disabled={selectedTabIds.length === 0}
               aria-label={t("common:delete", "Delete")}
@@ -1316,6 +1406,13 @@ export const SidepanelChatSidebar = ({
           </div>
         </div>
       )}
+
+      <InlineUndoBanner
+        undo={tabUndo}
+        testId="sidepanel-chat-undo"
+        className="mx-3 mt-2"
+        onReturnFocus={() => searchInputRef?.current?.focus()}
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
         {hasSearch ? (
@@ -1528,7 +1625,7 @@ export const SidepanelChatSidebar = ({
       <Modal
         open={bulkDeleteConfirmOpen}
         onCancel={handleBulkDeleteConfirmClose}
-        onOk={handleBulkDelete}
+        onOk={() => void handleBulkDelete()}
         okText={t("common:delete", "Delete")}
         cancelText={t("common:cancel", "Cancel")}
         okButtonProps={{ danger: true, loading: isBulkDeleting }}

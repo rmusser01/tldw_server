@@ -154,6 +154,18 @@ describe("KnowledgePanel tab routing", () => {
     expect(screen.getByText(/Open \/knowledge for the full QA workspace/i)).toBeInTheDocument()
   })
 
+  // CC-08, owner decision [1]: the panel is "Search & Context" everywhere.
+  it("titles the panel Search & Context", () => {
+    render(
+      <KnowledgePanel open onInsert={vi.fn()} onAsk={vi.fn()} />
+    )
+
+    expect(
+      screen.getByRole("heading", { name: "Search & Context" })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Knowledge Search")).not.toBeInTheDocument()
+  })
+
   it("maps backward-compat openTab=search to QA Search", () => {
     render(
       <KnowledgePanel
