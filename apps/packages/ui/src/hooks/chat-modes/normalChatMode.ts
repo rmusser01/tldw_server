@@ -807,6 +807,22 @@ export const captureNormalChatPreparation = (
   return { dispatchIsCurrent, draftIsCurrent, acceptDraftBind, sourceDraft }
 }
 
+/** A send from an empty view that addresses no chat creates its server chat first (D7 P4). */
+const createsServerChat = (
+  params: ChatModeParamsBase & HistoryChatModeParams,
+  current: { view: unknown }
+) => {
+  if (params.historyId || params.serverChatId || current.view || !params.historySelection?.createServerChat)
+    return false
+  const toolsState = useMcpToolsStore.getState()
+  return !resolveChatToolRequest({
+    tools: toolsState.chatTools ?? toolsState.tools,
+    toolChoice: params.toolChoice ?? useStoreMessageOption.getState().toolChoice,
+    mcpHealthState: toolsState.healthState,
+    hasMcp: toolsState.healthState !== "unavailable"
+  }).tools?.length
+}
+
 /** Establish one operation-lived adapter; display leases never authorize its later writes. */
 const captureNormalHistoryTurn = async (
   params: ChatModeParamsBase & HistoryChatModeParams,
@@ -860,15 +876,7 @@ const captureNormalHistoryTurn = async (
     let localId = params.historyId
     let serverId = params.serverChatId
     let createdNativeChat: Awaited<ReturnType<typeof tldwClient.createChat>> | undefined
-    const toolsState = useMcpToolsStore.getState()
-    const toolRequest = resolveChatToolRequest({
-      tools: toolsState.chatTools ?? toolsState.tools,
-      toolChoice: params.toolChoice ?? useStoreMessageOption.getState().toolChoice,
-      mcpHealthState: toolsState.healthState,
-      hasMcp: toolsState.healthState !== "unavailable"
-    })
-    if (!localId && !serverId && !current.view &&
-      params.historySelection!.createServerChat && !toolRequest.tools?.length) {
+    if (createsServerChat(params, current)) {
       if (!sourceDraft || sourceDraft.kind !== "fresh" || !params.surface)
         throw new Error("chat_creation_source_invalid")
       creationHandle = { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
@@ -920,9 +928,10 @@ const captureNormalHistoryTurn = async (
     let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
     const target = {
       historyId: localId, serverChatId: serverId, scope,
-      // This send created the chat: its empty first load stays quiet and leaves
-      // the question this turn renders alone (CM-14).
-      ...(!params.historyId && !params.serverChatId ? { quietLoad: true as const } : {}),
+      // This send created a server chat, so its first load is empty: it stays
+      // quiet and leaves the question this turn renders alone (CM-14). A local
+      // create may follow an unsaved transcript, which its load must replace.
+      ...(creationHandle ? { quietLoad: true as const } : {}),
       // Accepted saved ownership is independent of the originating turn's Stop.
       isCurrent: () => acceptDraftBind?.isCurrent() !== false &&
         (loadPhase === "accepted" || (loadPhase === "preparing" && preparationIsCurrent()))
@@ -1618,6 +1627,12 @@ const showQuestionEarly = <TParams extends ChatModeParamsBase & HistoryChatModeP
   if (!selection || isRegenerate || selection.regenerate || selection.editResend ||
     selection.editAndSend || selection.retryAdmission || !message.trim() ||
     mode.setupMessages || !mode.buildUserMessage)
+    return undefined
+  // Only a ready selection (no load) or a new server chat (a quiet load) keeps
+  // the transcript until the turn draws; any other first load replaces it, and
+  // the question would flicker.
+  const current = selection.controller.getCurrent()
+  if (current.owner ? current.status !== "ready" : current.status !== "idle" || !createsServerChat(params, current))
     return undefined
   const question: Message = {
     isBot: false,
