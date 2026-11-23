@@ -13,15 +13,25 @@ from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_auth_principal, get_request_user, require_expected_user_if_present
+import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
+import tldw_Server_API.app.core.Claims_Extraction.artifact_verification as _artifact_verification
+import tldw_Server_API.app.core.config as _config
+import tldw_Server_API.app.core.Flashcards.study_assistant as _study_assistant
+import tldw_Server_API.app.core.Workflows.adapters.content as _content
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    check_rate_limit,
+    get_auth_principal,
+    get_request_user,
+    require_expected_user_if_present,
+)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import (
     get_study_assistant_guidance,
     study_assistant_own_key,
 )
-from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
-from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Deck,
     DeckCreate,
@@ -66,16 +76,21 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantContextResponse,
     StudyAssistantRespondRequest,
     StudyAssistantRespondResponse,
+    StudyPackDeckCardsResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackCreateJobRequest,
     StudyPackJobAcceptedResponse,
     StudyPackJobListResponse,
     StudyPackJobStatusResponse,
+    StudyPackMediaSection,
+    StudyPackMediaSectionPreview,
     StudyPackSummaryResponse,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.permissions import FLASHCARDS_ADMIN
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
@@ -84,6 +99,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     ChatRateLimitError,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -91,6 +107,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.session import MediaDbSession
+from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, scoped_context
 from tldw_Server_API.app.core.Flashcards.apkg_exporter import export_apkg_from_rows
 from tldw_Server_API.app.core.Flashcards.apkg_importer import (
     APKGImportError,
@@ -121,6 +139,7 @@ from tldw_Server_API.app.core.Flashcards.structured_qa_import import parse_struc
 from tldw_Server_API.app.core.Flashcards.verification import build_flashcard_verification_units
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
+from tldw_Server_API.app.core.StudyPacks.chapter_browser import browse_deck_cards
 from tldw_Server_API.app.core.StudyPacks.jobs import (
     STUDY_PACKS_DOMAIN,
     STUDY_PACKS_JOB_TYPE,
@@ -128,6 +147,13 @@ from tldw_Server_API.app.core.StudyPacks.jobs import (
     extract_study_pack_source_items,
     study_pack_jobs_queue,
 )
+from tldw_Server_API.app.core.StudyPacks.media_sections import (
+    MAX_STUDY_PACK_PASSES,
+    plan_media_sections,
+    section_passages,
+)
+from tldw_Server_API.app.core.StudyPacks.source_resolver import StudySourceResolver, _max_evidence_chars_per_source
+from tldw_Server_API.app.core.StudyPacks.types import CHAPTER_ID_PATTERN, STUDY_PACK_FAILURE_MESSAGES
 from tldw_Server_API.app.core.StudySuggestions.jobs import (
     STUDY_SUGGESTIONS_DOMAIN,
     STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
@@ -139,12 +165,6 @@ from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_flashcard_asset_bytes,
     validate_uploaded_image_bytes,
 )
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
-import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
-import tldw_Server_API.app.core.Claims_Extraction.artifact_verification as _artifact_verification
-import tldw_Server_API.app.core.Flashcards.study_assistant as _study_assistant
-import tldw_Server_API.app.core.Workflows.adapters.content as _content
-import tldw_Server_API.app.core.config as _config
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 MAX_STUDY_PACK_JOBS_OFFSET = 10_000
@@ -413,6 +433,10 @@ def _public_study_pack_job_error(job: dict[str, Any]) -> str | None:
         return reason or "Study pack generation was cancelled."
     if raw_status not in {"failed", "quarantined"}:
         return None
+
+    message = STUDY_PACK_FAILURE_MESSAGES.get(str(job.get("error_code") or ""))
+    if message:
+        return message
 
     raw_error = str(job.get("last_error") or job.get("error_message") or "").strip()
     if raw_error:
@@ -2277,6 +2301,49 @@ def delete_source_review_plan(
         ) from exc
 
 
+@router.get(
+    "/study-packs/media/{media_id}/sections",
+    response_model=StudyPackMediaSectionPreview,
+    dependencies=[Depends(check_rate_limit)],
+)
+def preview_study_pack_media_sections(
+    media_id: int,
+    media_db: MediaDbSession = Depends(get_media_db_for_user),
+    current_user: User = Depends(get_request_user),
+    request_scope: ScopeContext | None = Depends(get_scope),
+) -> StudyPackMediaSectionPreview:
+    """Show the saved source's chapter and section boundaries without returning its body."""
+    try:
+        # A preview must use the same media visibility as the queued owner job.
+        with scoped_context(
+            user_id=current_user.id,
+            is_admin=False,
+            session_role=request_scope.session_role if request_scope else None,
+        ):
+            resolver = StudySourceResolver(media_db=media_db, expand_whole_media=True)
+            (item,) = resolver.resolve([{"source_type": "media", "source_id": str(media_id)}]).items
+        limit = _max_evidence_chars_per_source()
+        revision, sections = plan_media_sections(item.evidence_text, limit)
+    except ValueError as exc:
+        missing = str(exc).endswith(" not found")
+        raise HTTPException(status_code=404 if missing else 422, detail=str(exc)) from exc
+
+    return StudyPackMediaSectionPreview(
+        revision=revision,
+        max_generation_passes=MAX_STUDY_PACK_PASSES,
+        pass_chars=limit,
+        sections=[
+            StudyPackMediaSection(
+                index=index,
+                title=section.title,
+                character_count=section.end - section.start,
+                generation_passes=sum(1 for _ in section_passages(item.evidence_text, section, limit)),
+            )
+            for index, section in enumerate(sections)
+        ],
+    )
+
+
 @router.post("/study-packs/jobs", response_model=StudyPackJobAcceptedResponse, status_code=202)
 def create_study_pack_job(
     payload: StudyPackCreateJobRequest,
@@ -2370,6 +2437,34 @@ async def get_study_pack_job_status(
         study_pack=study_pack,
         error=error,
     )
+
+
+@router.get(
+    "/study-packs/decks/{deck_id}/cards",
+    response_model=StudyPackDeckCardsResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
+def browse_study_pack_deck_cards(
+    deck_id: int,
+    chapter_id: str | None = Query(None, pattern=CHAPTER_ID_PATTERN),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> StudyPackDeckCardsResponse:
+    try:
+        deck = db.get_deck(deck_id)
+        if deck is None or deck["deleted"]:
+            raise HTTPException(status_code=404, detail="Deck not found")
+        page = browse_deck_cards(db, deck_id, chapter_id=chapter_id, limit=limit, offset=offset)
+        return StudyPackDeckCardsResponse(
+            **page,
+            count=len(page["items"]),
+            pagination=build_offset_pagination_meta(
+                total=page["total"], limit=limit, offset=offset, count=len(page["items"]),
+            ),
+        )
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to browse the deck's cards") from exc
 
 
 @router.get("/study-packs/{pack_id}", response_model=StudyPackSummaryResponse)
