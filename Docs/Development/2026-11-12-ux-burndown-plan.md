@@ -697,6 +697,13 @@ review fixes went on the lanes. The lanes were merged into
   (1)).
 - **Native refusals:** a refusal is read only from the response the request
   got. The cause walk stops at the first error with an HTTP status.
+- **The wave-level review:** it found that a plain Retry sent its instructions
+  without filling in placeholders such as `{model}` and `{current_year}`. They
+  now go through `systemPromptFormatter`, as an ordinary send does. It also
+  polished the refusal wording per surface, with one alert at a time, and
+  documented ADR-068's 422 and 403.
+- **Dev merge (2026-11-23):** dev @ 4ebcd9ea64 (#3569, #3512) is merged in.
+  The only conflict was the OpenAPI fingerprint, which was regenerated.
 
 ### Follow-ups from Wave 8
 - **Plain native Retry, Regenerate and Continue:** they go through the
