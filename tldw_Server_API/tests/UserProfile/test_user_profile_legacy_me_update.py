@@ -176,9 +176,12 @@ def test_users_me_update_succeeds_when_row_is_updated(auth_headers, monkeypatch)
     assert payload.get("email") == "updated@example.com"
     assert fake_db.calls == [
         (
-            "UPDATE public.users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+            "UPDATE public.users SET email = $1, previous_email = CASE WHEN previous_email IS NOT NULL"
+            " AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' THEN previous_email ELSE email END,"
+            " email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND LOWER(email) <> LOWER($3)",
             "updated@example.com",
             1,
+            "updated@example.com",
         )
     ]
 

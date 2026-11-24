@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
 )
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import get_rate_limiter
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
 from tldw_Server_API.app.core.Usage.quota_resolver import invalidate_user
 from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import (
@@ -323,14 +324,17 @@ class UserProfileUpdateService:
                 logger.debug("Invalid email update for user {}", user_id)
                 raise ValueError("invalid_email") from exc
             if not dry_run:
-                await _update_user_field(
-                    db_conn,
-                    user_id,
-                    "email",
-                    str(email).lower(),
-                    anchor=anchor,
-                    is_postgres_backend=is_postgres_backend,
-                )
+                if updated_by == user_id:
+                    await _update_own_email(db_conn, user_id, str(email).lower(), anchor=anchor)
+                else:
+                    await _update_user_field(
+                        db_conn,
+                        user_id,
+                        "email",
+                        str(email).lower(),
+                        anchor=anchor,
+                        is_postgres_backend=is_postgres_backend,
+                    )
             return True
 
         if key == "identity.role":
@@ -851,6 +855,27 @@ async def _update_user_field(
             exception_type=type(exc).__name__,
         ).error("Failed to update user field")
         raise
+
+
+async def _update_own_email(
+    db_conn: Any,
+    user_id: int,
+    email: str,
+    *,
+    anchor: _CallerOwnedAnchor,
+) -> None:
+    """Self-service email change: the writer keeps the previous address."""
+    await anchor.capture()
+    write_result = await update_user_email(
+        db_conn,
+        backend=anchor.gateway.backend,
+        user_id=user_id,
+        email=email,
+        gateway=anchor.gateway,
+        ownership=UserVersionOwnership.CALLER_OWNS_ANCHOR,
+    )
+    if write_result.affected_user_ids:
+        anchor.mark_changed()
 
 
 async def _touch_user_updated_at(db_conn: Any, user_id: int) -> None:

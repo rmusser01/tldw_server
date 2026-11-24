@@ -6,7 +6,42 @@ import pytest
 pytestmark = pytest.mark.integration
 import uuid
 from datetime import datetime, timedelta
+
+import asyncpg
+
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.tests.helpers.pg_env import get_pg_env
+
+
+async def _pg_connect(db_name: str) -> asyncpg.Connection:
+    pg = get_pg_env()
+    return await asyncpg.connect(
+        host=pg.host, port=int(pg.port), user=pg.user, password=pg.password, database=db_name
+    )
+
+
+async def _email_columns(db_name: str, username: str) -> tuple[str, str | None, bool]:
+    conn = await _pg_connect(db_name)
+    try:
+        row = await conn.fetchrow(
+            "SELECT email, previous_email, email_changed_at IS NOT NULL AS changed FROM users WHERE username = $1",
+            username,
+        )
+    finally:
+        await conn.close()
+    return row["email"], row["previous_email"], row["changed"]
+
+
+async def _age_email_change(db_name: str, username: str, days: int) -> None:
+    conn = await _pg_connect(db_name)
+    try:
+        await conn.execute(
+            "UPDATE users SET email_changed_at = CURRENT_TIMESTAMP - make_interval(days => $2) WHERE username = $1",
+            username,
+            days,
+        )
+    finally:
+        await conn.close()
 
 
 class TestUserEndpointsIntegration:
@@ -88,6 +123,25 @@ class TestUserEndpointsIntegration:
         data = update_response.json()
         assert data["email"] == "newemail@example.com"
         assert data["username"] == "updateuser"
+
+    @pytest.mark.asyncio
+    async def test_email_change_keeps_the_original_previous_address_postgres(self, isolated_test_environment):
+        client, db_name = isolated_test_environment
+        password = "Change@Pass#2024!"
+        client.post("/api/v1/auth/register", json={"username": "pgchange", "email": "pgchange@example.com", "password": password})
+        token = client.post("/api/v1/auth/login", data={"username": "pgchange", "password": password}).json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        def _put(email: str) -> None:
+            response = client.put("/api/v1/users/me", headers=headers, json={"email": email, "current_password": password})
+            assert response.status_code == 200, response.text
+
+        _put("typo@example.com")
+        _put("fixed@example.com")
+        assert await _email_columns(db_name, "pgchange") == ("fixed@example.com", "pgchange@example.com", True)
+        await _age_email_change(db_name, "pgchange", days=8)
+        _put("final@example.com")
+        assert await _email_columns(db_name, "pgchange") == ("final@example.com", "fixed@example.com", True)
 
     @pytest.mark.asyncio
     async def test_change_password(self, isolated_test_environment):
