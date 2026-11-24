@@ -15,8 +15,8 @@
 - Precondition: the coordinator merges the design branch `docs/session-cap-alert-lock-design` (the spec, TASK-15632, this plan and the session-cap plan) to `dev` before execution starts. Branch from `origin/dev` after that merge.
 - Spec values: the **current password** is required **in the same request**; the old address goes to `users.previous_email` with `users.email_changed_at`; a notice goes to the **old address**; the both-addresses window is **7 days**; **admin changes of another user's email are unchanged** (admin sessions are outside this threat model; "Decisions" and Deviation 5 give the exact behaviour of each admin path).
 - Refusals are HTTP 403 with exactly these codes: `current_password_required`, `current_password_invalid`, `email_change_requires_admin`.
-- Branch: `git -C /Users/macbook-dev/Documents/GitHub/tldw_server worktree add .claude/worktrees/email-change-hardening -b feat/task-15633-email-change-hardening origin/dev`. Work only in that worktree. One PR, base `dev`. Never `git stash`, never `--no-verify`, never arm auto-merge.
-- Backlog first (Task 1 step 1) with the repo tool and explicit id `TASK-15633`. Edit the task only with `PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd "$PWD" task edit TASK-15633 ...`. Stage task files with `git add -A backlog/tasks`. The ADR assessment goes in the task notes.
+- Branch: `git -C /Users/macbook-dev/Documents/GitHub/tldw_server worktree add .claude/worktrees/email-change-hardening -b feat/task-15640-email-change-hardening origin/dev`. Work only in that worktree. One PR, base `dev`. Never `git stash`, never `--no-verify`, never arm auto-merge.
+- Backlog first (Task 1 step 1) with the repo tool and explicit id `TASK-15640`. Edit the task only with `PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd "$PWD" task edit TASK-15640 ...`. Stage task files with `git add -A backlog/tasks`. The ADR assessment goes in the task notes.
 - Python tests, always in this form (the guard deletes the basetemp afterwards):
   `zsh ~/.cache/claude-tools/disk_guard.zsh "$TMPDIR/ech-<n>" -- /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -p no:cacheprovider --basetemp "$TMPDIR/ech-<n>" <files> -q`
   Below, `PYTEST <files>` means this command with a fresh `<n>`.
@@ -76,7 +76,7 @@
 
 ```bash
 git -C /Users/macbook-dev/Documents/GitHub/tldw_server fetch origin dev
-git -C /Users/macbook-dev/Documents/GitHub/tldw_server worktree add .claude/worktrees/email-change-hardening -b feat/task-15633-email-change-hardening origin/dev
+git -C /Users/macbook-dev/Documents/GitHub/tldw_server worktree add .claude/worktrees/email-change-hardening -b feat/task-15640-email-change-hardening origin/dev
 cd /Users/macbook-dev/Documents/GitHub/tldw_server/.claude/worktrees/email-change-hardening
 PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd "$PWD" task create \
   "Email-change hardening: password on self-service change, previous address kept, notice to old address" \
@@ -89,7 +89,7 @@ PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/
   --ac "Admin changes of another user's email are unchanged" \
   --ac "Chatbook account restore no longer changes the account email" \
   --notes "ADR assessment: no ADR in this PR. It applies the approved design (section 0); the ADR for the session cap and account lock rules is written with PR 1 as the design states." \
-  --id TASK-15633
+  --id TASK-15640
 ```
 Expected: `backlog/tasks/task-15633 - ....md` exists.
 
@@ -98,7 +98,7 @@ Expected: `backlog/tasks/task-15633 - ....md` exists.
 Create `tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py` with this header (later tasks append to it) and the migration test:
 
 ```python
-"""TASK-15633: self-service email change needs the current password, keeps the previous address, notifies it."""
+"""TASK-15640: self-service email change needs the current password, keeps the previous address, notifies it."""
 
 import sqlite3
 from io import StringIO
@@ -220,7 +220,7 @@ git add tldw_Server_API/app/core/AuthNZ/migrations.py tldw_Server_API/app/core/A
   tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py tldw_Server_API/tests/AuthNZ/unit/test_pg_migrations_authnz_core.py \
   tldw_Server_API/tests/AuthNZ/unit/test_postgres_runtime_checks.py tldw_Server_API/tests/AuthNZ/unit/test_mcp_discovery_migration.py \
   tldw_Server_API/tests/AuthNZ/integration/test_postgres_runtime_schema.py
-git commit -m "feat(authnz): add users.previous_email and users.email_changed_at (TASK-15633)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(authnz): add users.previous_email and users.email_changed_at (TASK-15640)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task 2: The self-service writer keeps the previous address
@@ -408,7 +408,7 @@ git add tldw_Server_API/app/core/DB_Management/user_profile_writes.py tldw_Serve
   tldw_Server_API/app/core/UserProfiles/update_service.py tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py \
   tldw_Server_API/tests/UserProfile/test_user_profile_updates.py tldw_Server_API/tests/UserProfile/test_user_profile_legacy_me_update.py \
   tldw_Server_API/tests/AuthNZ/integration/test_user_endpoints_integration.py
-git commit -m "feat(authnz): keep the previous address on a self-service email change (TASK-15633)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(authnz): keep the previous address on a self-service email change (TASK-15640)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task 3: Chatbook account restore never changes the email
@@ -438,7 +438,7 @@ Expected: FAIL — `identity.email` still sent; the round-trip destination email
 
 - [ ] **Step 3: Implement**
 
-- `chatbook_service.py`: delete the `identity.email` comparison and append (keep the destination-exists check and the `profile` dict validation). One comment line: the sign-in address is never restored from an archive; changing it needs the account password (TASK-15633).
+- `chatbook_service.py`: delete the `identity.email` comparison and append (keep the destination-exists check and the `profile` dict validation). One comment line: the sign-in address is never restored from an archive; changing it needs the account password (TASK-15640).
 - UAT fixture `verify()`: compare the destination profile with `{"identity.email": DESTINATION_EMAIL}` instead of `expected["profile"]`. Keep `expected["profile"]` as is: the browser UAT checks the archive (`chatbooks_full_account_browser_uat.py:360`), which still holds the source email.
 - Browser UAT `_assert_destination_matches_expected`: compare only `settings` with the source (`for section in ("settings",)`). The real runtime's `verify_destination` runs the fixture's `verify()` (`:856-857`), which already requires the destination's own email.
 
@@ -453,7 +453,7 @@ git add tldw_Server_API/app/core/Chatbooks/chatbook_service.py Helper_Scripts/Te
   Helper_Scripts/Testing-related/chatbooks_full_account_browser_uat.py \
   tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_import_restore.py tldw_Server_API/tests/UserProfile/test_stage2_caller_characterization.py \
   tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_uat_fixture.py tldw_Server_API/tests/Chatbooks/test_chatbooks_full_account_browser_uat.py
-git commit -m "fix(chatbooks): account restore never changes the sign-in email (TASK-15633)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "fix(chatbooks): account restore never changes the sign-in email (TASK-15640)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task 4: The current password is required
@@ -763,7 +763,7 @@ git add tldw_Server_API/app/core/AuthNZ/email_change.py tldw_Server_API/app/core
   tldw_Server_API/tests/UserProfile/test_profile_command_service.py tldw_Server_API/tests/UserProfile/test_profile_contracts.py \
   tldw_Server_API/tests/UserProfile/test_admin_profiles_service_update.py tldw_Server_API/tests/AuthNZ/integration/test_user_endpoints_integration.py \
   tldw_Server_API/tests/AuthNZ/unit/test_user_endpoints.py tldw_Server_API/tests/AuthNZ/property/test_user_endpoints_property.py
-git commit -m "feat(authnz): require the current password for self-service email changes (TASK-15633)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(authnz): require the current password for self-service email changes (TASK-15640)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task 5: Notice to the previous address
@@ -914,12 +914,12 @@ Run the Step 2 command, then the Task 4 Step 6 command. Expected: PASS.
 git add tldw_Server_API/app/core/AuthNZ/email_service.py tldw_Server_API/app/core/AuthNZ/email_change.py \
   tldw_Server_API/app/api/v1/endpoints/users.py tldw_Server_API/app/api/v2/endpoints/user_profiles.py \
   tldw_Server_API/tests/AuthNZ/unit/test_email_service.py tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py
-git commit -m "feat(authnz): notify the previous address after an email change (TASK-15633)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(authnz): notify the previous address after an email change (TASK-15640)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ### Task 6: Branch verification and PR
 
-**Files:** Backlog only: edit TASK-15633, create TASK-15634.
+**Files:** Backlog only: edit TASK-15640, create TASK-15641.
 
 - [ ] **Step 1: Run every test that touches the changed surfaces**
 
@@ -946,28 +946,28 @@ Expected: lint ratchets pass; no new ruff findings (new files report none; no `N
 ```bash
 PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd "$PWD" task create \
   "Per-user rate limits on password-checked endpoints and self-service email changes" -l authnz,security \
-  -d "A wrong current password is answered without any per-user limit on PUT /api/v1/users/me, PATCH /api/v1/users/me/profile (email change, TASK-15633) and POST /api/v1/users/change-password, so a signed-in session can guess the password. Successful self-service email changes are not limited either, and each one mails the previous address: an account can set its email to someone else's address and change it away again, repeatedly, to flood that inbox. Add a per-user limit on failed password checks shared by these endpoints, and a per-user cap on successful self-service email changes." \
+  -d "A wrong current password is answered without any per-user limit on PUT /api/v1/users/me, PATCH /api/v1/users/me/profile (email change, TASK-15640) and POST /api/v1/users/change-password, so a signed-in session can guess the password. Successful self-service email changes are not limited either, and each one mails the previous address: an account can set its email to someone else's address and change it away again, repeatedly, to flood that inbox. Add a per-user limit on failed password checks shared by these endpoints, and a per-user cap on successful self-service email changes." \
   --ac "Repeated wrong current passwords on these endpoints are refused after a per-user limit, on SQLite and PostgreSQL" \
   --ac "The limit does not lock the account or affect sign-in" \
   --ac "A per-user cap on successful self-service email changes (e.g. 5 per 24 h) on PUT /users/me and PATCH v1/v2 users/me/profile" \
-  --id TASK-15634
+  --id TASK-15641
 git add -A backlog/tasks
 ```
 
 - [ ] **Step 4: Close out the Backlog task**
 
-`task edit TASK-15633 -s Done --check-ac 1 ... --check-ac 6 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --check-dod 6 --append-notes "<tests run, Postgres skips, bandit note, known limits>" --final-summary "<what changed>"`, then `git add -A backlog/tasks` and commit with the trailer. The six DoD items come from `backlog/config.yml:15`; #6 is "Known skips or blockers documented". `Done` is set in the PR branch, as recent tasks do (TASK-15582 closed in its own PR), so it lands with the merge.
+`task edit TASK-15640 -s Done --check-ac 1 ... --check-ac 6 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --check-dod 6 --append-notes "<tests run, Postgres skips, bandit note, known limits>" --final-summary "<what changed>"`, then `git add -A backlog/tasks` and commit with the trailer. The six DoD items come from `backlog/config.yml:15`; #6 is "Known skips or blockers documented". `Done` is set in the PR branch, as recent tasks do (TASK-15582 closed in its own PR), so it lands with the merge.
 
 - [ ] **Step 5: Open the PR**
 
 ```bash
-git push -u origin feat/task-15633-email-change-hardening
-gh pr create --base dev --title "feat(authnz): require the current password for self-service email changes (TASK-15633)" --body-file <body.md>
+git push -u origin feat/task-15640-email-change-hardening
+gh pr create --base dev --title "feat(authnz): require the current password for self-service email changes (TASK-15640)" --body-file <body.md>
 ```
 The body lists:
 - the four self-service paths and the three admin paths, and how each behaves (exactly as in "Decisions" below);
 - the new columns and migrations, with this upgrade note: non-owner PostgreSQL deployments refuse to start with `AUTHNZ_CORE_SCHEMA_NOT_READY` (`services/startup_auth.py:122-164`) until the owner migration (`python -m tldw_Server_API.app.core.AuthNZ.initialize` or an owner-role start) has run;
-- the notice, the chatbook restore change, the deviations and the known limits below, and the follow-up TASK-15634;
+- the notice, the chatbook restore change, the deviations and the known limits below, and the follow-up TASK-15641;
 - the pre-existing recipient logging in `email_service.py`, left out of scope;
 - the Claude Code line at the end.
 
@@ -997,11 +997,11 @@ Run the clean-subagent review and wait for green CI. No auto-merge.
 - The notice goes to the old address only, after the transaction commits, best effort. It shows the masked new address, UTC time and IP, and what to do. It does not mention the 7-day rule until PR 3 makes it true.
 - `is_verified` is left as is on change. Resetting it would lock the user out of every endpoint guarded by `_require_active_verified_user`.
 - Chatbook export still includes the email; restore ignores it.
-- No per-user limit on wrong passwords or on successful email changes in this PR: a signed-in session can keep guessing through `PUT /api/v1/users/me` and `PATCH /api/v1/users/me/profile`, as it already can through `POST /api/v1/users/change-password`. Follow-up TASK-15634 (filed in Task 6) adds a per-user limit for all password-checked endpoints and a cap on successful self-service email changes.
+- No per-user limit on wrong passwords or on successful email changes in this PR: a signed-in session can keep guessing through `PUT /api/v1/users/me` and `PATCH /api/v1/users/me/profile`, as it already can through `POST /api/v1/users/change-password`. Follow-up TASK-15641 (filed in Task 6) adds a per-user limit for all password-checked endpoints and a cap on successful self-service email changes.
 - `email_service.py` already logs recipient addresses (`:642`, `:834`, `:838`). That is pre-existing and out of scope; the new code logs user ids only.
 
 ## Known limits
 
 - With a stolen password, a change made inside the 7-day window after the owner's own change keeps the older previous address. Example: the owner changes Z to A, then the intruder changes A to B within 7 days. The result is `email = B`, `previous_email = Z`, so A (the owner's current mailbox) gets only the change notice and no later lock mail. One `previous_email` column cannot fix this; PR 3 or a later change would need a short history of addresses.
-- The old-address notice can be used to flood someone's inbox. The new address is not verified, so any account owner can set their email to another person's (unused) address and change it away again; each change away mails that person, with no limit (`PUT /api/v1/users/me`, `PATCH /api/v1/users/me/profile` and v2). TASK-15634 adds a per-user cap on successful self-service email changes.
+- The old-address notice can be used to flood someone's inbox. The new address is not verified, so any account owner can set their email to another person's (unused) address and change it away again; each change away mails that person, with no limit (`PUT /api/v1/users/me`, `PATCH /api/v1/users/me/profile` and v2). TASK-15641 adds a per-user cap on successful self-service email changes.
 - Sending lock mail to both addresses for 7 days lets the owner learn of a takeover, but does not by itself let the owner recover when the intruder has also changed the password. PR 3 must decide whether a link sent to `previous_email` within 7 days may restore that address, or whether forgot-password within 7 days also mails `previous_email`.
