@@ -12,7 +12,7 @@ read with ``ast.literal_eval`` and never imported. Keys (all optional but ``base
     base         the dev sha the manifest was written against
     rewrite      {local name: replacement expression}        e.g. {"top_k": "rcfg.retrieval.top_k"}
     hidden       {kwargs key: [group, default]}              ``kwargs.get("k", d)`` -> ``rcfg.<group>.k``
-    publish      [closure name]                              ``state.<n> = <n>`` right after each def
+    publish      [closure name]                              ``state.<n> = <n>`` right after each def, in the def's own block
     hoist        {closure name: method name}                 closure -> ``PipelineState`` method
     classes      {local class: module class}                 a class defined in the function becomes a ``run_state`` class
                                                              (its name must also be in ``rewrite``, as ``_run_state.<new>``)
@@ -27,6 +27,13 @@ read with ``ast.literal_eval`` and never imported. Keys (all optional but ``base
 ``apply`` edits the working tree as text edits at AST positions. ``verify`` rebuilds the expected result
 from the base *as an AST*, independently of those text edits, and compares it with the head.
 Every difference prints one line; any difference exits 1.
+
+Published closures: a name in ``publish`` may also be in ``rewrite``. Its ``def`` keeps its name and is followed
+by ``state.<n> = <n>`` (inside the same ``if``/``try`` block, at the same indentation); every other read of the name,
+in any cell including the def's own, becomes ``state.<n>``. This is allowed only while the ``def`` is the name's single
+binding anywhere in the function (no assignment, import, ``for``/``with``/``except`` target, walrus, parameter or
+nested-scope binding of the same name); otherwise V5 refuses it. ``verify`` rebuilds the publish statement and rejects
+a missing, extra or misplaced one.
 
 Limits:
 * V8 only flags names the manifest itself introduces (``rcfg``, ``state``, ``up``, ``_run_state``,
@@ -909,7 +916,10 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         elif isinstance(n, ast.Global) and set(n.names) & set(rewrite):
             bad = "a global statement"
         elif isinstance(n, SCOPE_NODES) and getattr(n, "name", None) in rewrite and is_f(n, key) and n.name not in hoist and n.name not in m["classes"]:
-            bad = "a def or class"
+            # a published closure may be mapped when its def is the name's only binding in the function
+            if isinstance(n, DEFS) and n.name in publish and sum(1 for nm, _ in binding_nodes(fn) if nm == n.name) == 1:
+                continue
+            bad = "a def or class" + (" (a published def must be the only binding of its name)" if isinstance(n, DEFS) and n.name in publish else "")
         if bad:
             out.errors.append(f"V5: line {n.lineno}: a mapped name is bound by {bad}")
     for n in publish:

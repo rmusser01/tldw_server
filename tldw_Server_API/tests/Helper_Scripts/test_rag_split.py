@@ -330,6 +330,54 @@ def test_state_module_constants_must_be_literals(tmp_path: Path, capsys: pytest.
     assert "not allowed in a stage module" in capsys.readouterr().out
 
 
+PUB_BASE = (
+    "async def pipe(query, flag):\n"
+    '    """Doc."""\n\n'
+    "    if flag:\n"
+    "        async def _pub():\n"
+    "            return 1\n\n"
+    "        first = await _pub()\n"
+    "    second = _pub\n"
+    "    return first, second\n"
+)
+PUB = {"publish": ["_pub"], "rewrite": {"_pub": "state._pub"}}
+
+
+def test_published_def_is_mapped_and_published_in_its_own_block(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = Tree(tmp_path, PUB_BASE, **PUB)
+    assert t.run("apply") == 0
+    head = t.text(FILE)
+    assert "            return 1\n        state._pub = _pub\n" in head  # inside the `if`, at the def's indentation
+    assert "first = await state._pub()" in head and "second = state._pub\n" in head
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_published_def_with_a_second_binding_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = PUB_BASE.replace("    second = _pub\n", "    _pub = None\n    second = _pub\n")
+    t = Tree(tmp_path, src, **PUB)
+    assert t.run("apply") == 1
+    assert "only binding of its name" in capsys.readouterr().out
+
+
+def test_an_unpublished_mapped_def_still_fails_v5(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = Tree(tmp_path, PUB_BASE, rewrite={"_pub": "state._pub"})
+    assert t.run("apply") == 1
+    assert "a mapped name is bound by a def or class" in capsys.readouterr().out
+
+
+def test_verify_rejects_a_moved_or_missing_publish_statement(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = Tree(tmp_path, PUB_BASE, **PUB)
+    assert t.run("apply") == 0
+    _edit(t, FILE, "        state._pub = _pub\n", "")
+    assert t.run("verify") == 1
+    _edit(t, FILE, "    second = state._pub\n", "    state._pub = _pub\n    second = state._pub\n")
+    assert t.run("verify") == 1  # published outside the `if` block
+    capsys.readouterr()
+    _edit(t, FILE, "    state._pub = _pub\n    second", "    second")
+    _edit(t, FILE, "            return 1\n", "            return 1\n        state._pub = _pub\n        state._pub = _pub\n")
+    assert t.run("verify") == 1  # an extra publish statement
+
+
 def test_move_prefixes_module_globals_with_up(tmp_path: Path) -> None:
     t = full(tmp_path)
     assert t.run("apply") == 0
