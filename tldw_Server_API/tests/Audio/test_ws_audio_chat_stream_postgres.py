@@ -1,16 +1,17 @@
 """/chat/stream persistence over a real PostgreSQL ChaCha database (TASK-13861 AC1, AC2)."""
 
 import asyncio
-import itertools
 import threading
 from collections import Counter
 
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import audio
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.tests.Audio.test_ws_audio_chat_stream import (  # noqa: F401 - autouse fixture
     _AUDIO_LABEL_TO_SAMPLE,
     DummyWebSocket,
@@ -80,20 +81,43 @@ def _persisting_session():
     )
 
 
-async def test_chat_stream_sessions_return_every_checkout_while_the_server_runs(pg_owners, monkeypatch):
-    owners, outstanding = pg_owners
+@pytest.fixture
+def authenticated_sockets(pg_owners, monkeypatch):
+    """Give each socket a stable owner, independent of concurrent DB lookup order."""
+    owners, _ = pg_owners
     sessions_per_user = 3
-    order = itertools.cycle([user_id for user_id in owners for _ in range(sessions_per_user)])
+    socket_owners = {_persisting_session(): user_id for user_id in owners for _ in range(sessions_per_user)}
+
+    async def _auth(websocket: DummyWebSocket, **_kwargs) -> tuple[bool, int]:
+        user_id = socket_owners[websocket]
+        websocket.state.auth_principal = AuthPrincipal(kind="user", user_id=user_id, subject=f"user:{user_id}")
+        return True, user_id
+
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_multi_user_mode", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio.streaming_service._audio_ws_authenticate", _auth)
+    return socket_owners
+
+
+async def test_chat_stream_sessions_return_every_checkout_while_the_server_runs(
+    pg_owners, authenticated_sockets, monkeypatch
+):
+    owners, outstanding = pg_owners
+    socket_owners = authenticated_sockets
+    sockets = list(socket_owners)
 
     async def _tts():
         return _DummyTTSService([b"tts"])
 
-    async def _db_for_user(_user_id, client_id=None):  # noqa: ARG001 - one call per session
-        return owners[next(order)]
+    async def _db_for_user(user_id: int, client_id: str | None = None) -> CharactersRAGDB:
+        assert client_id == str(user_id)
+        return owners[user_id]
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", _tts)
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", _db_for_user, raising=False)
-    sockets = [_persisting_session() for _ in range(len(owners) * sessions_per_user)]
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id",
+        _db_for_user,
+        raising=False,
+    )
 
     await asyncio.gather(*(audio.websocket_audio_chat_stream(ws, token=None) for ws in sockets))
 
@@ -101,6 +125,36 @@ async def test_chat_stream_sessions_return_every_checkout_while_the_server_runs(
     assert outstanding() == []
     warnings = [m for ws in sockets for m in ws.sent_json if "persist" in str(m.get("message", "")).lower()]
     assert warnings == []
+    conversation_ids = set()
+    for ws, user_id in socket_owners.items():
+        session_ids = [m["session_id"] for m in ws.sent_json if m.get("type") == "session"]
+        assert len(session_ids) == 1
+        conversation_id = session_ids[0]
+        conversation_ids.add(conversation_id)
+        with chacha_operation(independent=True):
+            conversation = owners[user_id].get_conversation_by_id(conversation_id)
+            assert conversation is not None
+            assert conversation["client_id"] == str(user_id)
+            messages = owners[user_id].get_messages_for_conversation(conversation_id)
+            assert Counter(m["sender"] for m in messages) == {"user": 1, "assistant": 1}
+            assert {m["client_id"] for m in messages} == {str(user_id)}
+        # The admin fixture proves the application guard, not restricted-role RLS.
+        for other_id, db in owners.items():
+            if other_id == user_id:
+                continue
+            with chacha_operation(independent=True):
+                with pytest.raises(InputError, match="not found or deleted") as rejected:
+                    db.add_message(
+                        {
+                            "conversation_id": conversation_id,
+                            "sender": "user",
+                            "content": "cross-owner write must fail",
+                            "client_id": str(user_id),
+                        }
+                    )
+                assert isinstance(rejected.value.__cause__, NotFoundError)
+    assert len(conversation_ids) == len(sockets)
     with chacha_operation(independent=True):
         rows = owners[1].execute_query("SELECT sender FROM messages").fetchall()  # one database for all three
     assert Counter(row["sender"] for row in rows) == {"user": len(sockets), "assistant": len(sockets)}
+    assert outstanding() == []
