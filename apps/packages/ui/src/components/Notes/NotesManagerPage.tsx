@@ -436,7 +436,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     window.addEventListener('tldw:auth-principal-changed', resetOnLogout)
     window.addEventListener('tldw:config-updated', retireOnConfigChange)
     return () => {
-      preparingDraftRef.current = null
+      retireDraftTransition()
       window.removeEventListener('tldw:auth-principal-changed', resetOnLogout)
       window.removeEventListener('tldw:config-updated', retireOnConfigChange)
     }

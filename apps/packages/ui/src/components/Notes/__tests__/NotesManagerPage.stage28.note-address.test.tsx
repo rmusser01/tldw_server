@@ -14,6 +14,7 @@ import OptionNotes from "@/routes/option-notes"
 // The web build's Next shim keys each location by router.asPath (pathname +
 // search), so two visits to the same address share a key. Tests opt in.
 const routerKeys = vi.hoisted(() => ({ shim: false }))
+const draftPreparation = vi.hoisted(() => ({ confirm: null as null | (() => Promise<boolean>) }))
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
   return {
@@ -34,12 +35,14 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockClearSetting,
+  mockGetCurrentUser,
   canonicalBoundary
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
   mockConfirmDanger: vi.fn(),
   mockGetSetting: vi.fn(),
   mockClearSetting: vi.fn(),
+  mockGetCurrentUser: vi.fn(async () => ({ id: 7, is_active: true })),
   canonicalBoundary: {
     storage: {} as Record<string, unknown>,
     getConfig: vi.fn()
@@ -133,13 +136,28 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
   )
 }))
 
-// The canonical config, Notes owner and editor hooks are real; only I/O is held.
+// Canonical config, Notes owner and editor hooks are real; only I/O or confirmation completion is held.
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (key: string, fallback: unknown) => [canonicalBoundary.storage[key] ?? fallback, vi.fn()]
 }))
 vi.mock("@/services/tldw/TldwAuth", () => ({
-  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 7, is_active: true })) }
+  tldwAuth: { getCurrentUser: mockGetCurrentUser }
 }))
+
+vi.mock("@/components/Notes/hooks/useNotesEditorState", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesEditorState")>()
+  return {
+    ...actual,
+    useNotesEditorState: (...args: Parameters<typeof actual.useNotesEditorState>) => {
+      const editor = actual.useNotesEditorState(...args)
+      return {
+        ...editor,
+        confirmDiscardIfDirty: (...confirmationArgs: Parameters<typeof editor.confirmDiscardIfDirty>) =>
+          draftPreparation.confirm ? draftPreparation.confirm() : editor.confirmDiscardIfDirty(...confirmationArgs)
+      }
+    }
+  }
+})
 
 const token = (id: number, revision: number) =>
   `test.${btoa(JSON.stringify({ sub: String(id), revision }))}.signature`
@@ -205,6 +223,8 @@ const editor = () =>
 describe("Notes addresses (XP-05)", { timeout: 60_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    draftPreparation.confirm = null
+    mockGetCurrentUser.mockReset().mockResolvedValue({ id: 7, is_active: true })
     localStorage.clear()
     document.title = "Options | tldw"
     canonicalBoundary.storage = {
@@ -312,6 +332,70 @@ describe("Notes addresses (XP-05)", { timeout: 60_000 }, () => {
     await waitFor(() => expect(address()).toBe("/notes"))
   })
 
+  it("does not strand the new-note editor while initial owner verification completes", async () => {
+    let releaseUser!: (user: { id: number; is_active: boolean }) => void
+    const pendingUser = new Promise<{ id: number; is_active: boolean }>((resolve) => {
+      releaseUser = resolve
+    })
+    mockGetCurrentUser.mockReturnValue(pendingUser)
+    renderNotesRoute(["/notes"])
+    const title = await screen.findByRole("textbox", { name: "Note title" })
+    fireEvent.click(screen.getByRole("button", { name: "New note", exact: true }))
+
+    await act(async () => {
+      releaseUser({ id: 7, is_active: true })
+      await pendingUser
+    })
+    await waitForNotesReady()
+    await waitFor(() => expect(title).toBeEnabled())
+    fireEvent.change(title, { target: { value: "Verified owner draft" } })
+    expect(title).toHaveValue("Verified owner draft")
+  })
+
+  it("retires a pending draft preparation when its initially unverified owner changes", async () => {
+    let releaseUser!: (user: { id: number; is_active: boolean }) => void
+    let releaseConfirmation!: (allow: boolean) => void
+    const pendingUser = new Promise<{ id: number; is_active: boolean }>((resolve) => {
+      releaseUser = resolve
+    })
+    const pendingConfirmation = new Promise<boolean>((resolve) => {
+      releaseConfirmation = resolve
+    })
+    mockGetCurrentUser.mockReturnValue(pendingUser)
+    draftPreparation.confirm = () => pendingConfirmation
+    renderNotesRoute(["/notes"])
+    const title = await screen.findByRole("textbox", { name: "Note title" })
+    fireEvent.click(screen.getByRole("button", { name: "New note", exact: true }))
+    await waitFor(() => expect(title).toBeDisabled())
+    try {
+      await act(async () => {
+        releaseUser({ id: 7, is_active: true })
+        await pendingUser
+      })
+      await waitForNotesReady()
+      await waitFor(() => expect(title).toBeEnabled())
+      fireEvent.change(title, { target: { value: "Verified owner sentinel" } })
+    } finally {
+      draftPreparation.confirm = null
+      await act(async () => releaseConfirmation(true))
+    }
+    expect(title).toHaveValue("Verified owner sentinel")
+    expect(mockBgRequest.mock.calls.filter(([request]) =>
+      String(request?.method || "GET").toUpperCase() !== "GET"
+    )).toEqual([])
+    draftPreparation.confirm = async () => true
+    try {
+      act(() => editor().focus())
+      expect(title).not.toHaveFocus()
+      fireEvent.click(screen.getByRole("button", { name: "New note", exact: true }))
+      await waitFor(() => expect(title).toHaveFocus())
+      expect(title).toBeEnabled()
+      expect(title).toHaveValue("")
+    } finally {
+      draftPreparation.confirm = null
+    }
+  })
+
   it("starts a new note at /notes?new=1 instead of reopening the last note (XP-06)", async () => {
     mockGetSetting.mockImplementation(async (setting: { key?: string }) => {
       const key = String(setting?.key || "")
@@ -363,6 +447,8 @@ describe.each([
   beforeEach(() => {
     routerKeys.shim = shim
     vi.clearAllMocks()
+    draftPreparation.confirm = null
+    mockGetCurrentUser.mockReset().mockResolvedValue({ id: 7, is_active: true })
     localStorage.clear()
     canonicalBoundary.storage = {
       serverUrl: "https://notes.test",
