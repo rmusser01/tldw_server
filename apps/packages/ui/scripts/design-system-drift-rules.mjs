@@ -11,6 +11,7 @@ import { JSDOM } from "jsdom"
 /** @typedef {{surfaces:Record<Surface, {semanticColors:Set<string>, cssVariables:Set<string>, radiusClasses:Set<string>, radiusValues:Set<string>, definitionPaths:string[]}>, definitionScopes:Definition[], diagnostics:Diagnostic[]}} Authority */
 
 const colorProbe = new JSDOM("").window.document.createElement("span").style
+const jsxEntities = new Map()
 const namedColors = new Map()
 const allowed = new Set([
   "transparent", "currentcolor", "inherit", "initial", "unset", "revert", "revert-layer",
@@ -66,7 +67,20 @@ function kebab(value) {
 }
 
 function normalizeRadius(value) {
-  return value.trim().toLowerCase().replace(/^(-?(?:\d+\.?\d*|\.\d+))([a-z%]*)$/, (_, number, unit) => Number(number) === 0 ? "0" : `${Number(number)}${unit}`)
+  return value.trim().replace(/^var\(/i, "var(").replace(/^(-?(?:\d+\.?\d*|\.\d+))([a-z%]*)$/i, (_, number, unit) => Number(number) === 0 ? "0" : `${Number(number)}${unit.toLowerCase()}`)
+}
+
+function decodeJsxName(entity) {
+  if (!jsxEntities.has(entity)) {
+    // Transform a single matched entity, not the product source. HTML recognizes extra names.
+    const { outputText } = ts.transpileModule(`<span value="${entity}" />`, {
+      fileName: "entity.tsx",
+      compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.Latest },
+    })
+    const statement = ts.createSourceFile("entity.js", outputText, ts.ScriptTarget.Latest).statements.find(ts.isExpressionStatement)
+    jsxEntities.set(entity, statement?.expression.arguments?.[1]?.properties?.[0]?.initializer?.text ?? entity)
+  }
+  return jsxEntities.get(entity)
 }
 
 function maskCssComments(value) {
@@ -189,8 +203,8 @@ export function analyzeDriftSource({ path, source, authority }) {
     const at = positionAt(offset)
     for (const part of split(value, /[\s/]/)) {
       const normalized = normalizeRadius(part.value)
-      if (radii.has(normalized) || allowed.has(normalized)) continue
-      const variable = part.value.match(/^var\(\s*(--[\w-]+)\s*\)$/)
+      if (radii.has(normalized) || allowed.has(normalized.toLowerCase())) continue
+      const variable = normalized.match(/^var\(\s*(--[\w-]+)\s*\)$/)
       if (variable && tokens.cssVariables.has(variable[1])) continue
       const literal = normalized.match(/^-?(?:\d*\.)?\d+([a-z%]*)$/i)
       const differentUnits = literal && [...radii].some(scale => {
@@ -293,17 +307,27 @@ export function analyzeDriftSource({ path, source, authority }) {
       while (node && (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node))) node = node.expression
       return node
     }
+    function constInitializer(decl) {
+      return ts.isIdentifier(decl.name) && (decl.parent.flags & ts.NodeFlags.Const) ? decl.initializer : null
+    }
     // Lexical lookup avoids confusing an API field with a class map or a shadowed prop.
     function lookup(identifier) {
       const name = identifier.text
       for (let scope = identifier.parent; scope; scope = scope.parent) {
         if (ts.isFunctionLike(scope) && scope.parameters.some(param => boundName(param.name, name))) return null
+        if (ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope)) {
+          const initializer = scope.initializer
+          if (initializer && ts.isVariableDeclarationList(initializer)) {
+            const decl = initializer.declarations.find(decl => boundName(decl.name, name))
+            if (decl) return constInitializer(decl)
+          }
+        }
         const statements = ts.isSourceFile(scope) || ts.isBlock(scope) ? scope.statements : null
         if (!statements) continue
         for (const statement of statements) {
           if (!ts.isVariableStatement(statement)) continue
           for (const decl of statement.declarationList.declarations) {
-            if (boundName(decl.name, name)) return ts.isIdentifier(decl.name) && (statement.declarationList.flags & ts.NodeFlags.Const) ? decl.initializer : null
+            if (boundName(decl.name, name)) return constInitializer(decl)
           }
         }
       }
@@ -326,7 +350,7 @@ export function analyzeDriftSource({ path, source, authority }) {
         if (!object || !ts.isObjectLiteralExpression(object) || key === null) return null
         for (const property of [...object.properties].reverse()) {
           if (ts.isSpreadAssignment(property) || property.name && ts.isComputedPropertyName(property.name)) return null
-          if (ts.isPropertyAssignment(property) && property.name.getText(ast).replace(/^['"]|['"]$/g, "") === key) return resolve(property.initializer, new Set([...visited, node]))
+          if (property.name?.text === key) return ts.isPropertyAssignment(property) ? resolve(property.initializer, new Set([...visited, node])) : null
         }
         return null
       }
@@ -343,16 +367,29 @@ export function analyzeDriftSource({ path, source, authority }) {
     }
     collectMutations(ast)
 
-    // Map cooked string indices back through escapes to the original source.
+    // Map cooked string indices back through escapes or entities to the original source.
     function stringContent(node) {
       const start = node.getStart(ast)
       const raw = source.slice(start + 1, node.end - (ts.isTemplateHead(node) || ts.isTemplateMiddle(node) ? 2 : 1))
+      const quotedJsx = ts.isJsxAttribute(node.parent)
       let value = ""
       const offsets = []
       for (let i = 0; i < raw.length; i++) {
         const original = i
         let decoded = raw[i]
-        if (raw[i] === "\\") {
+        if (quotedJsx && raw[i] === "&") {
+          const entity = raw.slice(i).match(/^&(?:#(\d+)|#x([\da-f]+)|([a-z][\da-z]*));/i)
+          if (entity) {
+            if (entity[3]) {
+              decoded = decodeJsxName(entity[0])
+            } else {
+              const codePoint = entity[1] ? parseInt(entity[1], 10) : parseInt(entity[2], 16)
+              decoded = codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : entity[0]
+            }
+            if (decoded !== entity[0]) i += entity[0].length - 1
+            else decoded = raw[i]
+          }
+        } else if (!quotedJsx && raw[i] === "\\") {
           const escape = raw[++i]
           if (escape === "\n") continue
           if (escape === "\r") { if (raw[i + 1] === "\n") i++; continue }
@@ -481,25 +518,36 @@ export function analyzeDriftSource({ path, source, authority }) {
       } else unresolved(node, "style value")
     }
 
-    function styleExpression(node, visited = new Set()) {
+    function styleExpression(node, visited = new Set(), later = new Set()) {
       node = unwrap(node)
-      if (!node) return
+      if (!node) return null
       const resolved = resolve(node, visited)
-      if (!resolved || visited.has(resolved)) { unresolved(node, "style"); return }
+      if (!resolved || visited.has(resolved)) { unresolved(node, "style"); return null }
       const nextVisited = new Set([...visited, resolved])
       if (ts.isConditionalExpression(resolved)) {
-        styleExpression(resolved.whenTrue, nextVisited)
-        styleExpression(resolved.whenFalse, nextVisited)
-        return
+        const whenTrue = styleExpression(resolved.whenTrue, nextVisited, later)
+        const whenFalse = styleExpression(resolved.whenFalse, nextVisited, later)
+        // Earlier values survive a conditional spread unless both paths replace the key.
+        return whenTrue && whenFalse ? new Set([...whenTrue].filter(key => whenFalse.has(key))) : null
       }
-      if (!ts.isObjectLiteralExpression(resolved)) { unresolved(resolved, "style"); return }
-      for (const prop of resolved.properties) {
-        if (ts.isSpreadAssignment(prop)) { styleExpression(prop.expression, nextVisited); continue }
-        if (!ts.isPropertyAssignment(prop) || ts.isComputedPropertyName(prop.name)) { unresolved(prop, "style property"); continue }
-        const property = kebab(prop.name.text)
+      if (!ts.isObjectLiteralExpression(resolved)) { unresolved(resolved, "style"); return null }
+      let overwritten = new Set(later)
+      for (const prop of [...resolved.properties].reverse()) {
+        if (ts.isSpreadAssignment(prop)) {
+          overwritten = styleExpression(prop.expression, nextVisited, overwritten)
+          if (!overwritten) return null
+          continue
+        }
+        const name = prop.name.text
+        if (name === undefined) { unresolved(prop, "style key"); return null }
+        if (overwritten.has(name)) continue
+        overwritten.add(name)
+        if (!ts.isPropertyAssignment(prop)) { unresolved(prop, "style property"); continue }
+        const property = kebab(name)
         if (!property.startsWith("--") && !colorProperty.test(property) && !radiusProperty.test(property) && !layoutProperty.test(property)) continue
         styleValue(prop.initializer, property, nextVisited)
       }
+      return overwritten
     }
     function visit(node) {
       if (ts.isJsxAttribute(node)) {

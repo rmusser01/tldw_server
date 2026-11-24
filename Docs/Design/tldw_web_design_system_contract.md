@@ -423,8 +423,10 @@ Inspect JSON for entries omitted from the summary.
 
 `sourceCommit` identifies checked-out HEAD, not necessarily the analyzed bytes.
 `dirtySource` includes relevant tracked edits/deletions, included untracked source,
-and changes to reporter/token/configuration inputs or exceptions. Output files
-and unrelated edits do not make the scan dirty. Unknown provenance remains
+and changes to reporter/token/configuration inputs or exceptions. A clean scan
+checks the bytes read, including pinned definitions and the exception manifest,
+against the reported commit. Output files and unrelated edits do not make the
+scan dirty. Unknown provenance remains
 nullable, not falsely clean. Use the commit and dirty indicator when comparing
 reports; timestamps and arbitrary repository-wide counts are not conformance gates.
 Git `skip-worktree` or `assume-unchanged` flags on relevant inputs produce a

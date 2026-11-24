@@ -55,6 +55,19 @@ describe("static drift token authority", () => {
     expect(result.surfaces.webui.cssVariables.has("--not-established")).toBe(false)
   })
 
+  it("merges color branches before flattening and drops descendants of replaced objects", () => {
+    const result = buildTokenAuthority({ sources: sources({
+      [webConfig]: `module.exports = { theme: {
+        colors: {
+          primary: { DEFAULT: 'var(--color-primary)', foreground: 'var(--color-danger)' },
+          surface: { DEFAULT: 'var(--not-established)', muted: 'var(--color-primary)' }
+        },
+        extend: { colors: { primary: 'var(--color-danger)', surface: { DEFAULT: 'var(--color-danger)' } } }
+      } }`,
+    }) })
+    expect([...result.surfaces.webui.semanticColors]).toEqual(["primary", "surface", "surface-muted"])
+  })
+
   it("pins extension inheritance without executing require or unrelated code", () => {
     const result = buildTokenAuthority({ sources: sources({
       [webConfig]: `${fixtures[webConfig]}; throw new Error('must not run');`,
@@ -139,6 +152,23 @@ describe("static drift token authority", () => {
     expect(result.diagnostics.some(diagnostic => diagnostic.severity === "coverage" && /radius/i.test(diagnostic.message))).toBe(true)
   })
 
+  it("keeps conditional CSS declarations scoped without authorizing their literal radii", () => {
+    const source = `@layer base {
+      :root { --radius-sm: 11px; }
+      @media (min-width: 1000px) { :root { --radius-sm: 21px; } }
+    }
+    @supports (display: grid) { @layer base { .dark { --radius-sm: 31px; } } }
+    @container (min-width: 500px) { :root { --radius-sm: 41px; } }`
+    const result = buildTokenAuthority({ sources: sources({ [sharedCss]: source }) })
+    expect(result.surfaces.webui.radiusValues.has("11px")).toBe(true)
+    for (const value of ["21px", "31px", "41px"]) {
+      expect(result.surfaces.webui.radiusValues.has(value)).toBe(false)
+    }
+    for (const match of source.matchAll(/--radius-sm:/g)) {
+      expect(covered(result, sharedCss, match.index!)).toBe(true)
+    }
+  })
+
   it("honors direct radius replacement before extend overrides", () => {
     const result = buildTokenAuthority({ sources: sources({
       [webConfig]: `module.exports = { theme: { borderRadius: { tiny: '3px' }, extend: { borderRadius: { card: '12px' } } } }`,
@@ -184,6 +214,47 @@ describe("static drift token authority", () => {
     expect(result.surfaces.extension.semanticColors).toEqual(result.surfaces.webui.semanticColors)
     expect(result.surfaces.extension.radiusClasses.has("rounded-card")).toBe(true)
     expect(result.surfaces.extension.radiusClasses.has("rounded-custom")).toBe(false)
+  })
+
+  it("does not trust inherited theme authority before an unresolved root spread", () => {
+    const result = buildTokenAuthority({ sources: sources({
+      [extensionConfig]: `const shared = require('../tldw-frontend/tailwind.config.js');
+        module.exports = { ...shared, ...loadConfig() }`,
+    }) })
+    expect([...result.surfaces.extension.radiusClasses]).toEqual([])
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      path: extensionConfig, code: "unsupported-config-expression", severity: "coverage",
+    }))
+  })
+
+  it.each(["...loadColors()", "[loadKey()]: 'red'"])(
+    "invalidates earlier color entries at %s but retains later explicit and spread keys", unknown => {
+      const result = buildTokenAuthority({ sources: sources({
+        [webConfig]: `const later = { branch: { ...loadBranch(), muted: 'var(--color-primary)' } };
+          module.exports = { theme: {
+            colors: { base: 'var(--color-primary)', branch: { keep: 'var(--color-danger)' } },
+            extend: { colors: {
+              stale: 'var(--color-danger)', ${unknown}, ...later, restored: 'var(--color-danger)'
+            } }
+          } }`,
+      }) })
+      expect([...result.surfaces.webui.semanticColors]).toEqual(["branch-muted", "restored"])
+      expect(result.diagnostics).toContainEqual(expect.objectContaining({
+        path: webConfig, code: "unsupported-config-expression", severity: "coverage",
+      }))
+    })
+
+  it("propagates unknown keys through known spreads without trusting earlier radius defaults", () => {
+    const result = buildTokenAuthority({ sources: sources({
+      [webConfig]: `const settings = { ...loadTheme(), colors: { primary: 'var(--color-primary)' } };
+        module.exports = { theme: { borderRadius: { stale: '3px' }, ...settings,
+          extend: { borderRadius: { custom: '12px' } } } }`,
+    }) })
+    expect([...result.surfaces.webui.radiusClasses]).toEqual(["rounded-custom"])
+    expect([...result.surfaces.webui.semanticColors]).toEqual(["primary"])
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      path: webConfig, code: "unsupported-config-expression", severity: "coverage",
+    }))
   })
 
   it("does not treat an operand of a symbolic radius calculation as its result", () => {

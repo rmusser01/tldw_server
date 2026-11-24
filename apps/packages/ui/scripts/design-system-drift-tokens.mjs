@@ -83,6 +83,13 @@ function variables(value) {
   return [...value.matchAll(/var\(\s*(--[\w-]+)/g)].map(match => match[1])
 }
 
+function unconditionalRule(rule) {
+  for (let parent = rule.parent; parent && parent.type !== "root"; parent = parent.parent) {
+    if (parent.type !== "atrule" || parent.name.toLowerCase() !== "layer") return false
+  }
+  return true
+}
+
 function emptySurface() {
   return { semanticColors: new Set(), cssVariables: new Set(), radiusClasses: new Set(), radiusValues: new Set(), definitionPaths: [] }
 }
@@ -127,7 +134,7 @@ export function buildTokenAuthority({ sources }) {
           if (!allowed.has(decl.prop) || decl.parent.type !== "rule" ||
             ![":root", ".dark"].includes(decl.parent.selector.trim())) return
           if (!values.has(decl.prop)) values.set(decl.prop, new Set())
-          values.get(decl.prop).add(decl.value)
+          if (unconditionalRule(decl.parent)) values.get(decl.prop).add(decl.value)
           const start = decl.source.start.offset
           definitionScopes.push({ path, start, end: start + decl.toString().length, owner: decl.parent.selector, kind: "css-variable" })
         })
@@ -218,7 +225,7 @@ export function buildTokenAuthority({ sources }) {
       }
       if (ts.isPropertyAccessExpression(node)) {
         const container = object(node.expression, "referenced theme object", next)
-        return resolve(valueOf(container?.get(node.name.text)), next)
+        return resolve(valueOf(container?.entries.get(node.name.text)), next)
       }
       if (file.fileName === EXT_CONFIG && ts.isCallExpression(node) &&
         ts.isIdentifier(node.expression) && node.expression.text === "require" &&
@@ -236,16 +243,24 @@ export function buildTokenAuthority({ sources }) {
       }
       const next = new Set([...visited, resolved])
       const entries = new Map()
+      let unknownKeys = false
+      const invalidate = () => {
+        entries.clear()
+        unknownKeys = true
+      }
       for (const prop of resolved.properties) {
         if (ts.isSpreadAssignment(prop)) {
-          for (const [name, inherited] of object(prop.expression, label, next) ?? []) entries.set(name, inherited)
+          const spread = object(prop.expression, label, next)
+          if (!spread || spread.unknownKeys) invalidate()
+          for (const [name, inherited] of spread?.entries ?? []) entries.set(name, inherited)
         } else if (key(prop.name)) {
           entries.set(key(prop.name), prop)
         } else {
           unsupported(prop, `Dynamic ${label} property is not statically resolved.`)
+          invalidate()
         }
       }
-      return entries
+      return { entries, unknownKeys }
     }
     const exported = exportedFrom(ast)
     const root = object(exported, "exported Tailwind config")
@@ -253,53 +268,75 @@ export function buildTokenAuthority({ sources }) {
       unavailable("Required exported Tailwind configuration cannot be read statically.")
       return null
     }
-    const themeProp = root.get("theme")
+    const themeProp = root.entries.get("theme")
     const theme = themeProp ? object(valueOf(themeProp), "theme") : null
     if (!theme) {
       unavailable("Required Tailwind theme is missing or cannot be read statically.")
       return null
     }
-    const extendProp = theme.get("extend")
-    const extend = extendProp ? object(valueOf(extendProp), "theme.extend") : null
-    if (![theme, extend].some(container => container?.has("colors") || container?.has("borderRadius"))) {
+    const empty = { entries: new Map(), unknownKeys: false }
+    const unknown = { entries: new Map(), unknownKeys: true }
+    const extendProp = theme.entries.get("extend")
+    const extend = extendProp ? object(valueOf(extendProp), "theme.extend") ?? unknown : theme.unknownKeys ? unknown : empty
+    if (![theme, extend].some(({ entries }) => entries.has("colors") || entries.has("borderRadius"))) {
       unavailable("Required Tailwind theme has no readable color or radius definition properties.")
       return null
     }
     for (const container of [theme, extend]) {
-      for (const [name, prop] of container ?? []) {
+      for (const [name, prop] of container.entries) {
         if (prop.getSourceFile() === ast && ts.isPropertyAssignment(prop) && THEME_PROPERTIES.has(name)) {
           scope(path, ast, prop, `theme.${container === extend ? "extend." : ""}${name}`, "tailwind-property")
         }
       }
     }
-    const leaves = (node, label, prefix = "", result = new Map(), visited = new Set()) => {
+    const readValues = (node, label, visited = new Set()) => {
       node = resolve(node)
       if (visited.has(node)) {
         unsupported(node, `Cyclic ${label} value is not statically resolved.`)
-        return result
+        return undefined
       }
       const obj = object(node, label)
-      if (!obj) return result
+      if (!obj) return undefined
       const next = new Set([...visited, node])
-      for (const [name, prop] of obj) {
-        const fullName = name === "DEFAULT" ? prefix : [prefix, name].filter(Boolean).join("-")
+      for (const [name, prop] of obj.entries) {
         const value = resolve(valueOf(prop))
-        if (value && ts.isObjectLiteralExpression(value)) leaves(value, label, fullName, result, next)
-        else if (value && (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value))) result.set(fullName, value.text)
+        let entry
+        if (value && ts.isObjectLiteralExpression(value)) entry = readValues(value, label, next)
+        else if (value && (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value))) entry = value.text
         else unsupported(prop, `Dynamic ${label} value is not statically resolved.`)
+        obj.entries.set(name, entry)
+      }
+      return obj
+    }
+    // Tailwind merges object branches, but a replacement leaf masks the entire old branch.
+    const mergeValues = (base, extra) => {
+      const entries = new Map([...base.entries].filter(([name]) => !extra.unknownKeys || extra.entries.has(name)))
+      for (const [name, value] of extra.entries) {
+        const previous = entries.get(name)
+        entries.set(name, typeof previous === "object" && typeof value === "object" ? mergeValues(previous, value) : value)
+      }
+      return { entries, unknownKeys: base.unknownKeys || extra.unknownKeys }
+    }
+    const flatten = (obj, prefix = "", result = new Map()) => {
+      for (const [name, value] of obj.entries) {
+        const fullName = name === "DEFAULT" ? prefix : [prefix, name].filter(Boolean).join("-")
+        if (typeof value === "object") flatten(value, fullName, result)
+        else if (typeof value === "string") result.set(fullName, value)
       }
       return result
     }
     let configuredEntries = 0
     const readScale = (name, defaults) => {
-      const direct = theme.get(name)
-      const extra = extend?.get(name)
-      const directValues = direct ? leaves(valueOf(direct), name) : null
-      const extraValues = extra ? leaves(valueOf(extra), name) : new Map()
-      configuredEntries += (directValues?.size ?? 0) + extraValues.size
+      const read = container => {
+        const prop = container.entries.get(name)
+        return prop ? readValues(valueOf(prop), name) ?? unknown : container.unknownKeys ? unknown : empty
+      }
+      const merged = mergeValues(read(theme), read(extend))
+      const values = flatten(merged)
+      configuredEntries += values.size
       return new Map([
-        ...(directValues ?? defaults),
-        ...extraValues,
+        ...(theme.entries.has(name) || merged.unknownKeys ? [] : defaults.filter(([key]) => !merged.entries.has(key))),
+        ...values,
       ])
     }
     const colors = readScale("colors", [])

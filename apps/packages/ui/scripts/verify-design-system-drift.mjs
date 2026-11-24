@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { execFile as execFileCallback } from "node:child_process"
+import { createHash } from "node:crypto"
 import { promisify } from "node:util"
 import { buildTokenAuthority, REQUIRED_DEFINITION_PATHS, TOKEN_SOURCE_PATHS } from "./design-system-drift-tokens.mjs"
 import { analyzeDriftSource } from "./design-system-drift-rules.mjs"
@@ -128,6 +129,7 @@ export async function runDriftReport({ repoRoot, outputPath }) {
   }
   let inventory = []
   let untracked = new Set()
+  const committedBlobs = new Map()
   try {
     const [listed, untrackedOutput, commit] = await Promise.all([
       git(repoRoot, ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...SOURCE_ROOTS]),
@@ -137,8 +139,28 @@ export async function runDriftReport({ repoRoot, outputPath }) {
     inventory = [...new Set(listed.split("\0").filter(Boolean))].sort()
     untracked = new Set(untrackedOutput.split("\0").filter(Boolean))
     provenance.sourceCommit = commit.trim()
+    const tree = await git(repoRoot, ["ls-tree", "-r", "-z", "--full-tree", provenance.sourceCommit, "--", ...SOURCE_ROOTS, ...TOKEN_SOURCE_PATHS, manifestPath])
+    for (const entry of tree.split("\0").filter(Boolean)) {
+      const tab = entry.indexOf("\t")
+      const [mode, type, oid] = entry.slice(0, tab).split(" ")
+      if (mode.startsWith("100") && type === "blob") committedBlobs.set(entry.slice(tab + 1), oid)
+    }
   } catch {
+    provenance.dirtySource = null
     diagnostics.push(errorDiagnostic("", "git-inventory", "Unable to establish Git source inventory and commit"))
+  }
+
+  const readPaths = new Set()
+  const readInput = async relative => {
+    const bytes = await fs.readFile(path.join(repoRoot, relative))
+    readPaths.add(relative)
+    if (provenance.dirtySource === false) {
+      // Hash the bytes analyzed, even if the worktree changes back before the report is written.
+      const algorithm = provenance.sourceCommit.length === 64 ? "sha256" : "sha1"
+      const oid = createHash(algorithm).update(`blob ${bytes.length}\0`).update(bytes).digest("hex")
+      if (committedBlobs.get(relative) !== oid) provenance.dirtySource = true
+    }
+    return bytes.toString("utf8")
   }
   const unavailableRoots = new Set()
   for (const root of SOURCE_ROOTS) {
@@ -175,7 +197,7 @@ export async function runDriftReport({ repoRoot, outputPath }) {
           }
           return
         }
-        sources.push({ path: relative, source: await fs.readFile(path.join(repoRoot, relative), "utf8") })
+        sources.push({ path: relative, source: await readInput(relative) })
         if (untracked.has(relative) && candidates.includes(relative)) provenance.untrackedSourceFileCount++
       } catch {
         diagnostics.push(errorDiagnostic(relative, "source-read", "Unable to read source file"))
@@ -204,9 +226,12 @@ export async function runDriftReport({ repoRoot, outputPath }) {
   let exceptions = { schemaVersion: 1, exceptions: [] }
   try {
     if (await safeSourceFile(repoRoot, manifestPath) !== "file") throw new Error("missing-manifest")
-    exceptions = JSON.parse(await fs.readFile(path.join(repoRoot, manifestPath), "utf8"))
+    exceptions = JSON.parse(await readInput(manifestPath))
   } catch {
     diagnostics.push(errorDiagnostic(manifestPath, "exceptions-read", "Unable to read a valid exception manifest"))
+  }
+  if (provenance.dirtySource === false && [...committedBlobs.keys()].some(relative => exclusion(relative) === null && !readPaths.has(relative))) {
+    provenance.dirtySource = true
   }
   coverage.excluded = [...excluded].map(([reason, count]) => ({ reason, count }))
   const report = assembleDriftReport({ analyses, exceptions, coverage, provenance, diagnostics })

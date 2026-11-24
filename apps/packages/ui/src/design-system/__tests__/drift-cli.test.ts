@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -84,6 +84,38 @@ describe("advisory drift CLI", () => {
     expect((await scan()).report.dirtySource).toBe(true)
   })
 
+  it("checks the bytes read even when an edit is restored before the report is assembled", async () => {
+    const relative = "apps/extension/Notice.tsx"
+    const target = path.join(repo, relative)
+    const readFile = fs.readFile.bind(fs)
+    const original = await readFile(target, "utf8")
+    const reader = vi.spyOn(fs, "readFile").mockImplementation(async (file, options) => {
+      if (file !== target) return readFile(file, options)
+      await fs.writeFile(target, 'export const Changed = () => <div className="bg-red-500"/>')
+      try { return await readFile(file, options) }
+      finally { await fs.writeFile(target, original) }
+    })
+    try {
+      const { report } = await scan()
+      expect(report.findings).toContainEqual(expect.objectContaining({ path: relative, value: "bg-red-500" }))
+      expect(report.dirtySource).toBe(true)
+      expect((await git("status", "--porcelain", "--", relative)).stdout).toBe("")
+    } finally { reader.mockRestore() }
+  })
+
+  it.each([REQUIRED_DEFINITION_PATHS[0], "apps/packages/ui/scripts/design-system-drift-exceptions.json"])(
+    "marks a locally read ignored input dirty when absent from HEAD: %s", async relative => {
+      await git("rm", "--cached", "--", relative)
+      await write(".gitignore", `ignored.tsx\n/${relative}\n`)
+      await git("add", ".gitignore")
+      await git("commit", "--quiet", "-m", "Keep this input as an ignored local file")
+      expect((await git("status", "--porcelain")).stdout).toBe("")
+      const { report, exitCode } = await scan()
+      expect(exitCode).toBe(0)
+      expect(report.dirtySource).toBe(true)
+    }
+  )
+
   it("retains a partial report when a root is missing", async () => {
     await fs.rm(path.join(repo, "admin-ui"), { recursive: true })
     const { report, exitCode } = await scan()
@@ -101,8 +133,11 @@ describe("advisory drift CLI", () => {
   })
 
   it("does not traverse source symlinks", async () => {
+    await write("notes.md", 'export const Outside = () => <div className="bg-red-500"/>')
     await fs.symlink(path.join(repo, "notes.md"), path.join(repo, "apps/packages/ui/src/Linked.tsx"))
-    const { report } = await scan()
+    const { report, exitCode } = await scan()
+    expect(exitCode).toBe(0)
+    expect(report.coverage.excluded).toContainEqual({ reason: "symlink-or-non-file-source", count: 1 })
     expect(report.findings.some(f => f.path.endsWith("Linked.tsx"))).toBe(false)
   })
 
@@ -159,7 +194,7 @@ describe("advisory drift CLI", () => {
 
   it("uses actual subprocess exit codes and rejects unknown flags", async () => {
     const result = await execFile(process.execPath, [cli, "--repo-root", repo, "--output", output])
-    expect(result.stdout).toContain("COMPLETE")
+    expect(result.stdout.split("\n")[0]).toBe("## UI Design-System Drift Report: COMPLETE")
     await expect(execFile(process.execPath, [cli, "--enforce"])).rejects.toMatchObject({ code: 1 })
     await fs.rm(path.join(repo, "admin-ui"), { recursive: true })
     await expect(execFile(process.execPath, [cli, "--repo-root", repo, "--output", output])).rejects.toMatchObject({ code: 1 })

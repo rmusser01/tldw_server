@@ -137,6 +137,15 @@ function Badge({active}) { return <div className={cn(styles.base, styles.sizes.s
     expect(result.diagnostics).toEqual([expect.objectContaining({severity: "coverage"})])
   })
 
+  it("compares radius variable names case-sensitively while normalizing numbers and units", () => {
+    const source = ".notice { border-radius: 8.00PX -0PX; border-radius: VAR(--radius); border-radius: INHERIT; border-radius: var(--RADIUS); }"
+    const result = analyze(source, cssPath)
+    expect(result.findings).toEqual([])
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({code: "unresolved-radius", severity: "coverage", column: source.indexOf("var(--RADIUS)") + 1})
+    ])
+  })
+
   it("honors React numeric dimensions without reporting irrelevant numeric properties", () => {
     const result = analyze('const View = () => <div style={{width: 44, marginTop: -2, zIndex: 10, gridTemplateColumns: "1fr 2fr", borderRadius: 13, opacity: 0.5, lineHeight: 1.5, fontWeight: 400}} />')
     expect(result.findings.map(f => [f.rule, f.value])).toEqual([
@@ -167,6 +176,26 @@ function Badge({active}) { return <div className={cn(styles.base, styles.sizes.s
     expect(result.findings.map(f => f.value)).toEqual(["red", "44px"])
   })
 
+  it("checks only the effective inline style keys after duplicate assignments and known spreads", () => {
+    const source = 'const finalStyle = {color: "blue"};\nconst View = () => <div style={{color: "red", ...finalStyle, width: 44, width: "inherit"}} />'
+    const result = analyze(source)
+    expect(result.findings).toEqual([
+      expect.objectContaining({value: "blue", owner: "finalStyle", line: 1, column: source.indexOf("blue") + 1})
+    ])
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("preserves only the inline styles that a nested unresolved spread cannot overwrite", () => {
+    const source = 'const uncertain = {...getStyles(), color: "blue"};\nconst View = () => <div style={{color: "red", width: 44, ...uncertain, height: 52}} />'
+    const result = analyze(source)
+    expect(result.findings.map(f => [f.value, f.owner, f.line])).toEqual([
+      ["blue", "uncertain", 1], ["52px", "View", 2]
+    ])
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({code: "dynamic-styling", severity: "coverage", line: 1, column: source.indexOf("getStyles") + 1})
+    ])
+  })
+
   it("returns error diagnostics for malformed JavaScript and CSS", () => {
     for (const [source, filePath] of [['const View = () => <div className="bg-red-500"', path], ['const View = () => <div className={"\\u{110000}"} />', path], [".bad { color: red;", cssPath]]) {
       expect(analyze(source, filePath).diagnostics).toContainEqual(expect.objectContaining({severity: "error", path: filePath, line: 1}))
@@ -183,6 +212,23 @@ function Badge({active}) { return <div className={cn(styles.base, styles.sizes.s
   it("maps inline shorthand color offsets through JavaScript escapes", () => {
     const result = analyze('const View = () => <div style={{border: "1px\\t solid\\u0020red"}} />')
     expect(result.findings).toEqual([expect.objectContaining({value: "red", line: 1, column: 59, owner: "View"})])
+  })
+
+  it("decodes entities in quoted JSX attributes without cooking them as JavaScript strings", () => {
+    const source = [
+      '<div className="p-2&#32;bg-red-500&#x20;&#116;ext-white&nbsp;[&amp;>div]:bg-black" />',
+      '<div className={"p-2&#32;bg-red-500"} />',
+      '<div className="p-2\\u0020text-white" />',
+      '<div className={"p-2\\u0020text-white"} />'
+    ]
+    const result = analyze(source.join(";\n"))
+    expect(result.findings.map(f => [f.value, f.line, f.column])).toEqual([
+      ["bg-red-500", 1, source[0].indexOf("bg-red-500") + 1],
+      ["text-white", 1, source[0].indexOf("&#116;") + 1],
+      ["[&>div]:bg-black", 1, source[0].indexOf("[&amp;") + 1],
+      ["text-white", 4, source[3].indexOf("text-white") + 1]
+    ])
+    expect(result.diagnostics).toEqual([])
   })
 
   it("analyzes standalone template expressions without fabricating classes across gaps", () => {
@@ -215,6 +261,38 @@ function Badge({active}) { return <div className={cn(styles.base, styles.sizes.s
     const result = analyze('const styles = {base: "bg-red-500"}; function View(styles) { return <div className={styles.base} /> }')
     expect(result.findings).toEqual([])
     expect(result.diagnostics).toEqual([expect.objectContaining({severity: "coverage"})])
+  })
+
+  it.each([
+    "let classes = getClasses(); ready();",
+    "const {classes} of entries",
+    "const classes in entries"
+  ])("respects a loop initializer binding without masking the outer const: %s", initializer => {
+    const source = [
+      'const classes = "bg-red-500";',
+      `for (${initializer}) {`,
+      '  show(<div className={classes} />);',
+      '}',
+      'show(<div className={classes} />);'
+    ]
+    const result = analyze(source.join("\n"))
+    expect(result.findings.map(f => [f.value, f.line])).toEqual([["bg-red-500", 1]])
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({code: "dynamic-styling", severity: "coverage", line: 3, column: source[2].indexOf("{classes}") + 2})
+    ])
+  })
+
+  it.each([
+    "get base() { return getClass() }",
+    "set base(value) {}",
+    "base() { return getClass() }"
+  ])("stops resolving a class map when a matching member replaces its value: %s", member => {
+    const usage = '<div className={cn(styles.base, styles.other)} />'
+    const result = analyze(`const styles = {base: "bg-red-500", ${member}, other: "text-white", unrelated() {}};\n${usage}`)
+    expect(result.findings.map(f => f.value)).toEqual(["text-white"])
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({code: "dynamic-styling", severity: "coverage", line: 2, column: usage.indexOf("styles.base") + 1})
+    ])
   })
 
   it("reports unresolved cva variants rather than silently dropping them", () => {
@@ -319,6 +397,24 @@ const View = cva('', {...options})`
     expect(result.findings.map(f => [f.rule, f.value])).toEqual([
       ["literal-color", "bg-[rgb(255_0_0_/_var(--alpha))]"], ["literal-color", "rgb(255 0 0 / var(--alpha))"]
     ])
+  })
+
+  it("keeps HTML-only entities literal in quoted JSX attributes", () => {
+    const source = '<div className="p-2&lbrack; bg-red-500" />'
+    const result = analyze(source)
+    expect(result.findings).toEqual([expect.objectContaining({ value: "bg-red-500", column: source.indexOf("bg-red-500") + 1 })])
+  })
+
+  it("retains both possible style values across a conditional spread", () => {
+    const result = analyze('<div style={{width: 44, ...(active ? {color: "red"} : {color: "blue"})}} />')
+    expect(result.findings.map(f => f.value)).toEqual(["44px", "red", "blue"])
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("preserves an earlier style unless both branches or a later key overwrite it", () => {
+    const result = analyze('<div style={{color: "red", width: 44, ...(active ? {color: "blue", width: 28} : {height: 32}), width: "auto"}} />')
+    expect(result.findings.map(f => f.value)).toEqual(["red", "blue", "32px", "auto"])
+    expect(result.diagnostics).toEqual([])
   })
 
   it("keeps semantic color channel variables allowed with either static or variable alpha", () => {

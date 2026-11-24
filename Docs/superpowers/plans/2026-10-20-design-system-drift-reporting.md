@@ -432,10 +432,10 @@ no lockfile changes. Latest full focused run: token44, rules57, report15, CLI19
 and existing guard54 tests pass (189 total); two CI contract modules pass113 tests. Scoped TypeScript compilation
 passes. Pinned frontend ESLint exits0 with the existing Next pages-directory
 advisory. Scoped CLI and analyzer re-reviews have no remaining findings.
-[Draft PR #3294](https://github.com/rmusser01/tldw_server/pull/3294) is published
-against `dev`; issue #1673 and epic #1655 link its progress. Stage5 remains
-In Progress until hosted CI/review and the human Change summary merge gate are
-settled; retain this plan during that delivery phase.
+[PR #3294](https://github.com/rmusser01/tldw_server/pull/3294) is in review
+against `dev`; issue #1673 and epic #1655 link its progress. Stage 5 remains
+In Progress until hosted CI and delivery are complete. The requester waived
+the human Change summary for this PR only.
 
 Reviewed corrections include atomic report-file replacement (verified hard-link
 overwrite regression), explicit errors for unavailable sparse source, and unknown
@@ -443,3 +443,17 @@ provenance for skip-worktree/assume-unchanged inputs. Known upstream
 `src/assets/react-pdf.css` is excluded as a documented vendor copy. Native CSS
 system colors remain allowed, and unresolved cross-unit radii yield coverage
 diagnostics. These preserve the approved advisory policy and add no dependencies.
+
+2026-11-24: Rebased the PR onto `dev` at `b4a9550f76`, kept ADR-098 and its
+published mirror, and resolved the CI test inventory conflicts without
+changing required workflows. The review follow-up addresses 11 inline
+findings and one summary finding: CSS/JSX parsing and effective style keys,
+conditional and overridden token definitions, Git blob provenance, and two
+CLI assertions. No new policy or enforcement was introduced.
+
+A final peer check added regressions for conditional style spreads and JSX
+entities that the compiler leaves literal. Local revalidation: 211 focused
+verifier tests and 482 Docs/CI/Backlog tests
+passed. The previously failing ChatSidebar file passed all 40 tests under
+local coverage; it is unchanged from the rebased base. Scoped TypeScript
+and ESLint passed, and Bandit reported no findings on added lines.
