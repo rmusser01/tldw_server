@@ -326,7 +326,8 @@ def test_rerun_chain_rewrite_reads_through_config_and_state() -> None:
 
 FUNC = "unified_rag_pipeline"
 CONFIG_FILE = PIPELINE_PKG / "run_config.py"
-PROLOGUE = "rcfg = RagRunConfig.from_call_locals(locals())"
+SHIM_RETURN = "return await run_rag_pipeline(RagRunConfig.from_call_locals(locals()))"
+ENTRY = "run_rag_pipeline"
 # The 35 parameters the body assigns; ``PipelineState`` holds them (Task 4).
 MUTATED_PARAMS = frozenset(
     {
@@ -346,6 +347,15 @@ def _pipeline_fn() -> ast.AsyncFunctionDef:
     return next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == FUNC)
 
 
+def _entry_fn() -> ast.AsyncFunctionDef:
+    """``run_rag_pipeline``: the orchestrator, defined right after the kwargs shim."""
+    body = parse_tree(RAG_SERVICE)[PIPELINE_FILE].body
+    shim = next(i for i, n in enumerate(body) if isinstance(n, ast.AsyncFunctionDef) and n.name == FUNC)
+    entry = body[shim + 1]
+    assert isinstance(entry, ast.AsyncFunctionDef) and entry.name == ENTRY
+    return entry
+
+
 def _config_fields() -> dict[str, set[str]]:
     """``{group: {field, ...}}`` read from ``run_config.py`` without importing it."""
     classes = {n.name: n for n in parse_tree(RAG_SERVICE)[CONFIG_FILE].body if isinstance(n, ast.ClassDef)}
@@ -356,17 +366,38 @@ def _config_fields() -> dict[str, set[str]]:
     return {group: {f for f, _ in names(classes[cls])} for group, cls in names(classes["RagRunConfig"])}
 
 
-def test_config_is_built_first_from_the_call_locals() -> None:
+def test_config_is_built_from_the_call_locals_and_handed_to_the_entry_point() -> None:
     body = _pipeline_fn().body
     assert isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)  # the docstring
-    assert ast.dump(body[1]) == ast.dump(ast.parse(PROLOGUE).body[0])
+    assert ast.dump(body[1]) == ast.dump(ast.parse(SHIM_RETURN, mode="exec").body[0])
 
 
-def _bare_parameter_reads(source: str, func: str, allowed: frozenset[str]) -> set[str]:
-    """Parameters of top-level ``func`` read by name, in its scope or any scope inside it, that are not in ``allowed``."""
+def test_shim_only_builds_the_config() -> None:
+    fn = _pipeline_fn()
+    assert len(fn.body) == 2 and isinstance(fn.body[1], ast.Return)
+    assert ENTRY in (ast.get_docstring(fn) or "")
+    entry = _entry_fn()
+    assert [a.arg for a in entry.args.args] == ["rcfg"] and not (entry.args.vararg or entry.args.kwonlyargs or entry.args.kwarg)
+    assert ast.unparse(entry.returns) == ast.unparse(fn.returns)
+
+
+def test_orchestrator_has_no_nested_defs() -> None:
+    nested = [
+        f"{n.lineno}: {type(n).__name__}"
+        for stmt in _entry_fn().body
+        for n in ast.walk(stmt)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef))
+    ]
+    assert nested == []
+
+
+def _bare_parameter_reads(source: str, func: str, allowed: frozenset[str], params_of: str | None = None) -> set[str]:
+    """Parameters of top-level ``params_of`` (default ``func``) read by name, in the scope of top-level ``func`` or any scope
+    inside it, that are not in ``allowed``."""
     top = symtable.symtable(source, "<pipeline>", "exec")
     table = next(t for t in top.get_children() if t.get_name() == func)
-    params = set(table.get_parameters()) - allowed
+    owner = next(t for t in top.get_children() if t.get_name() == (params_of or func))
+    params = set(owner.get_parameters()) - allowed
     out: set[str] = set()
 
     def walk(t: symtable.SymbolTable, shadowed: frozenset[str]) -> None:
@@ -393,7 +424,7 @@ def _bare_parameter_reads(source: str, func: str, allowed: frozenset[str]) -> se
 def test_body_reads_read_only_parameters_through_rcfg() -> None:
     fn = _pipeline_fn()
     assert {a.arg for a in fn.args.args} >= MUTATED_PARAMS and len(MUTATED_PARAMS) == 35
-    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), FUNC, MUTATED_PARAMS) == set()
+    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), ENTRY, MUTATED_PARAMS, params_of=FUNC) == set()
 
 
 # ---- PipelineState (Task 4) -----------------------------------------------------------------------
@@ -454,13 +485,13 @@ def test_state_attribute_scan_sees_a_seeded_attribute() -> None:
     assert set(_attrs_of(tree, "state")) == {"a", "b", "c"}
 
 
-def test_state_is_built_right_after_the_config() -> None:
-    body = _pipeline_fn().body
-    assert ast.dump(body[2]) == ast.dump(ast.parse(STATE_INIT).body[0])
+def test_state_is_the_orchestrators_first_statement() -> None:
+    assert ast.dump(_entry_fn().body[0]) == ast.dump(ast.parse(STATE_INIT).body[0])
 
 
-def test_body_reads_no_parameter_after_the_prologue() -> None:
-    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), FUNC, frozenset()) == set()
+def test_orchestrator_reads_no_signature_parameter() -> None:
+    """``run_rag_pipeline`` reads only ``rcfg`` and ``state``; none of the shim's 234 parameter names."""
+    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), ENTRY, frozenset(), params_of=FUNC) == set()
 
 
 def test_mutated_parameters_are_never_read_from_rcfg() -> None:
@@ -523,7 +554,7 @@ HOISTED = (
 
 
 def test_hoisted_helpers_are_methods_not_closures() -> None:
-    defined = {n.name for n in ast.walk(_pipeline_fn()) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    defined = {n.name for n in ast.walk(_entry_fn()) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
     gone = {f"_{h}" for h in HOISTED} | {"_EarlyReturn"}
     assert len(HOISTED) == 18 and defined & gone == set()
     cls = _state_class()
@@ -570,9 +601,9 @@ def test_pipeline_modules_import_in_either_order() -> None:
     import sys
 
     bad: list[str] = []
-    for first in ("run_state", "post_processing", "unified_pipeline"):
+    for first in ("run_state", "post_processing", "prepare", "unified_pipeline"):
         target = UNIFIED_MODULE if first == "unified_pipeline" else f"{PKG_NAME}.pipeline.{first}"
-        code = f"import importlib; importlib.import_module({target!r}); import {UNIFIED_MODULE} as up; up.unified_rag_pipeline"
+        code = f"import importlib; importlib.import_module({target!r}); import {UNIFIED_MODULE} as up; up.unified_rag_pipeline, up.run_rag_pipeline"
         done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300, cwd=REPO_ROOT)  # nosec B603
         if done.returncode:
             bad.append(f"{first}: {done.stderr[-800:]}")
