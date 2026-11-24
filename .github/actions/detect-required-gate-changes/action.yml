@@ -29,6 +29,9 @@ outputs:
   chacha_owner_scope_changed:
     description: Whether paths that run the ChaCha owner-isolation PostgreSQL job changed.
     value: ${{ steps.classify.outputs.chacha_owner_scope_changed }}
+  rag_pipeline_changed:
+    description: Whether paths that run the RAG pipeline golden and pipeline-test job changed.
+    value: ${{ steps.classify.outputs.rag_pipeline_changed }}
 
 runs:
   using: composite

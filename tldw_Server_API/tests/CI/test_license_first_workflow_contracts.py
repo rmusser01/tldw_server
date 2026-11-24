@@ -110,7 +110,7 @@ DIRECT_TRIGGER_DIGESTS = {
 }
 ORIGINAL_JOB_NAMES = {
     "actionlint.yml": ("actionlint",),
-    "backend-required.yml": ("changes", "non-utc-tests", "chacha-owner-isolation", "backend-required", "queue-tick"),
+    "backend-required.yml": ("changes", "non-utc-tests", "chacha-owner-isolation", "rag-pipeline", "backend-required", "queue-tick"),
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
@@ -168,7 +168,13 @@ ORIGINAL_JOB_NAMES = {
 ORIGINAL_DEPENDENCIES = {
     ("backend-required.yml", "non-utc-tests"): ("changes",),
     ("backend-required.yml", "chacha-owner-isolation"): ("changes",),
-    ("backend-required.yml", "backend-required"): ("changes", "non-utc-tests", "chacha-owner-isolation"),
+    ("backend-required.yml", "rag-pipeline"): ("changes",),
+    ("backend-required.yml", "backend-required"): (
+        "changes",
+        "non-utc-tests",
+        "chacha-owner-isolation",
+        "rag-pipeline",
+    ),
     ("backend-required.yml", "queue-tick"): ("backend-required",),
     ("ci.yml", "full-suite-linux-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-summary"): ("full-suite-linux-312-shards", "changes"),
@@ -228,6 +234,7 @@ LICENSE_RED_GATES = {
 DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | LICENSE_RED_GATES | {
     ("backend-required.yml", "non-utc-tests"),
     ("backend-required.yml", "chacha-owner-isolation"),
+    ("backend-required.yml", "rag-pipeline"),
     ("backend-required.yml", "backend-required"),
     ("frontend-e2e-tiers.yml", "critical"),
     ("frontend-e2e-tiers.yml", "features"),
@@ -262,6 +269,7 @@ NON_PR_FULL_SUITE_JOBS = {
 FETCH_DEPTH_CHECKOUTS = {
     ("backend-required.yml", "non-utc-tests"),
     ("backend-required.yml", "chacha-owner-isolation"),
+    ("backend-required.yml", "rag-pipeline"),
     ("backend-required.yml", "changes"),
     ("backend-required.yml", "backend-required"),
     ("ci.yml", "changes"),
@@ -283,6 +291,7 @@ CHANGE_CLASSIFIER_OUTPUTS = {
         "security_relevant_changed",
         "coverage_required",
         "chacha_owner_scope_changed",
+        "rag_pipeline_changed",
     },
     "ci.yml": {"backend_changed"},
     "coverage-required.yml": {
@@ -740,6 +749,12 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "needs.changes.outputs.backend_changed == 'true' && "
                         "needs.changes.outputs.chacha_owner_scope_changed == 'true'"
                     )
+                elif (name, job_name) == ("backend-required.yml", "rag-pipeline"):
+                    extra_condition = (
+                        "needs.changes.result == 'success' && "
+                        "needs.changes.outputs.backend_changed == 'true' && "
+                        "needs.changes.outputs.rag_pipeline_changed == 'true'"
+                    )
                 elif (name, job_name) == ("frontend-required.yml", "frontend-unit-tests"):
                     extra_condition = (
                         "needs.changes.result == 'success' && "
@@ -885,7 +900,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 62
+    assert checkout_count == 63
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -934,7 +949,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
     assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 57
-    assert combined_text.count("github.event.pull_request.head.sha") == 57
+    assert combined_text.count("github.event.pull_request.head.sha") == 58
     # The backlog task ratchet still gets the PR base (TASK-13440).
     assert combined_text.count("github.event.pull_request.base.sha") == 6
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
@@ -1230,7 +1245,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 29
+    assert setup_helper_count == 30
     assert setup_python_cache_count == 1
     assert cache_save_count == 7
     assert cache_restore_count == 7
@@ -2365,3 +2380,215 @@ def test_owner_isolation_contract_fails_when_the_junit_check_stops_failing(old: 
     assert _owner_isolation_job_problems(workflow, _owner_isolation_marked_files()) == [  # nosec B101
         "junit check does not exit non-zero on skipped or missing cases"
     ]
+
+
+# TASK-13950.24: the RAG pipeline golden and pipeline tests run in a required, path-gated job.
+RAG_GATE_JOB = "rag-pipeline"
+RAG_GATE_CHECK_STEP = "Require the RAG pipeline gate to have passed"
+_RAG_GATE_PATH_RE = re.compile(r"^tldw_Server_API/tests/\S+\.py$")
+# backend_changed:rag_pipeline_changed:result -- the only outcomes the required check may accept.
+RAG_GATE_ACCEPTED = "true:true:success|true:false:skipped|false:*:skipped) ;;"
+
+
+def _rag_gate_tests() -> tuple[str, ...]:
+    from Helper_Scripts.ci.path_classifier import RAG_PIPELINE_GATE_TESTS
+
+    return RAG_PIPELINE_GATE_TESTS
+
+
+def _rag_pipeline_job_problems(workflow: dict[str, Any]) -> list[str]:
+    """Problems with the ``rag-pipeline`` job and its required check; the file list is the classifier's."""
+    expected = set(_rag_gate_tests())
+    jobs = workflow["jobs"]
+    if RAG_GATE_JOB not in jobs:
+        return [f"no {RAG_GATE_JOB} job"]
+    job = jobs[RAG_GATE_JOB]
+    problems = ["job is continue-on-error"] if job.get("continue-on-error", False) else []
+    steps = job.get("steps", [])
+    if not any(str(step.get("env", {}).get("TLDW_TEST_POSTGRES_REQUIRED")) == "1" for step in steps):
+        problems.append("job does not require PostgreSQL")
+    listed: set[str] = set()
+    checked: set[str] = set()
+    has_check = False
+    for step in [step for step in steps if "pytest" in step.get("run", "")]:
+        command, sep, check = step["run"].partition("python - ")
+        command_tokens = _step_run_tokens(command)
+        listed |= {t for t in command_tokens if _RAG_GATE_PATH_RE.match(t)}
+        for token in sorted(command_tokens):
+            if token in ("-m", "-k") or token.startswith(("-m=", "-k=", "--deselect", "--ignore")):
+                problems.append(f"pytest command selects a subset with {token}")
+        if sep:
+            has_check = True
+            lines = [line.strip() for line in check.splitlines()]
+            checked |= {t for t in _step_run_tokens(check.split("<<", 1)[0]) if _RAG_GATE_PATH_RE.match(t)}
+            if "if skipped or missing:" not in lines or "sys.exit(1)" not in lines:
+                problems.append("junit check does not exit non-zero on skipped or missing cases")
+    if not has_check:
+        problems.append("job has no junit skipped/missing check")
+    problems += [f"job does not run {path}" for path in sorted(expected - listed)]
+    if has_check:
+        problems += [f"junit check does not cover {path}" for path in sorted(expected - checked)]
+    problems += [f"job runs unlisted {path}" for path in sorted((listed | checked) - expected)]
+    gate = jobs["backend-required"]
+    if RAG_GATE_JOB not in gate.get("needs", []):
+        problems.append(f"backend-required does not wait for {RAG_GATE_JOB}")
+    checks = [s for s in gate["steps"] if s.get("name") == RAG_GATE_CHECK_STEP]
+    if len(checks) != 1 or f"needs.{RAG_GATE_JOB}.result" not in str(checks[0].get("env", {})):
+        problems.append(f"backend-required has no {RAG_GATE_CHECK_STEP!r} step reading the job result")
+    elif RAG_GATE_ACCEPTED not in [line.strip() for line in checks[0].get("run", "").splitlines()]:
+        problems.append("required check accepts outcomes other than the three approved ones")
+    return problems
+
+
+def _rag_gate_pytest_step(workflow: dict[str, Any]) -> dict[str, Any]:
+    return next(s for s in workflow["jobs"][RAG_GATE_JOB]["steps"] if "pytest" in s.get("run", ""))
+
+
+@pytest.mark.unit
+def test_backend_required_runs_the_rag_pipeline_gate():
+    assert len(_rag_gate_tests()) >= 50  # nosec B101
+    assert _rag_pipeline_job_problems(_backend_required_workflow()) == []  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mutation", ["dropped", "commented-out"])
+def test_rag_gate_contract_fails_when_a_file_leaves_the_job(mutation: str):
+    workflow = _backend_required_workflow()
+    path = _rag_gate_tests()[0]
+    step = _rag_gate_pytest_step(workflow)
+    # Only the pytest command: the junit check lists the files separately and is pinned on its own.
+    command, sep, check = step["run"].partition("python - ")
+    lines = command.splitlines()
+    if mutation == "dropped":
+        command = "\n".join(line for line in lines if path not in line)
+    else:
+        command = "\n".join(line.replace(path, f"# {path}") for line in lines)
+    step["run"] = command + "\n" + sep + check
+    assert _rag_pipeline_job_problems(workflow) == [f"job does not run {path}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_rag_gate_contract_fails_when_an_unlisted_file_is_run():
+    workflow = _backend_required_workflow()
+    extra = "tldw_Server_API/tests/RAG_NEW/unit/test_not_listed.py"
+    step = _rag_gate_pytest_step(workflow)
+    step["run"] = step["run"].replace("pytest ", f"pytest {extra} ", 1)
+    assert _rag_pipeline_job_problems(workflow) == [f"job runs unlisted {extra}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_rag_gate_contract_fails_when_the_job_is_continue_on_error():
+    workflow = _backend_required_workflow()
+    workflow["jobs"][RAG_GATE_JOB]["continue-on-error"] = True
+    assert _rag_pipeline_job_problems(workflow) == ["job is continue-on-error"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_rag_gate_contract_fails_when_postgres_is_not_required():
+    workflow = _backend_required_workflow()
+    for step in workflow["jobs"][RAG_GATE_JOB]["steps"]:
+        step.get("env", {}).pop("TLDW_TEST_POSTGRES_REQUIRED", None)
+    assert _rag_pipeline_job_problems(workflow) == ["job does not require PostgreSQL"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_rag_gate_contract_fails_when_the_gate_does_not_wait_for_the_job():
+    workflow = _backend_required_workflow()
+    workflow["jobs"]["backend-required"]["needs"].remove(RAG_GATE_JOB)
+    assert _rag_pipeline_job_problems(workflow) == [  # nosec B101
+        f"backend-required does not wait for {RAG_GATE_JOB}"
+    ]
+
+
+@pytest.mark.unit
+def test_rag_gate_contract_fails_when_the_required_check_is_missing():
+    workflow = _backend_required_workflow()
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    steps[:] = [s for s in steps if s.get("name") != RAG_GATE_CHECK_STEP]
+    assert _rag_pipeline_job_problems(workflow) == [  # nosec B101
+        f"backend-required has no {RAG_GATE_CHECK_STEP!r} step reading the job result"
+    ]
+
+
+@pytest.mark.unit
+def test_rag_gate_contract_fails_when_the_accepted_outcomes_change() -> None:
+    workflow = _backend_required_workflow()
+    check = next(s for s in workflow["jobs"]["backend-required"]["steps"] if s.get("name") == RAG_GATE_CHECK_STEP)
+    check["run"] = check["run"].replace("true:true:success|", "true:true:success|true:true:failure|")
+    assert _rag_pipeline_job_problems(workflow) == [  # nosec B101
+        "required check accepts outcomes other than the three approved ones"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("flag", ["-m", "-k", "--deselect", "--ignore", "-m=", "--deselect="])
+def test_rag_gate_contract_fails_when_pytest_selects_a_subset(flag: str) -> None:
+    workflow = _backend_required_workflow()
+    step = _rag_gate_pytest_step(workflow)
+    step["run"] = step["run"].replace("--durations=15", f'--durations=15 {flag} "not postgres"', 1)
+    assert _rag_pipeline_job_problems(workflow) == [f"pytest command selects a subset with {flag}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_rag_gate_contract_fails_when_the_junit_check_misses_a_file() -> None:
+    workflow = _backend_required_workflow()
+    path = _rag_gate_tests()[0]
+    step = _rag_gate_pytest_step(workflow)
+    command, sep, check = step["run"].partition("python - ")
+    step["run"] = command + sep + "\n".join(line for line in check.splitlines() if path not in line)
+    assert _rag_pipeline_job_problems(workflow) == [f"junit check does not cover {path}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_rag_gate_contract_fails_when_the_junit_check_is_deleted() -> None:
+    workflow = _backend_required_workflow()
+    step = _rag_gate_pytest_step(workflow)
+    step["run"] = step["run"].partition("python - ")[0]
+    assert _rag_pipeline_job_problems(workflow) == ["job has no junit skipped/missing check"]  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("if skipped or missing:", "if skipped:"),
+        ("sys.exit(1)", "sys.exit(0)"),
+    ],
+)
+def test_rag_gate_contract_fails_when_the_junit_check_stops_failing(old: str, new: str) -> None:
+    workflow = _backend_required_workflow()
+    step = _rag_gate_pytest_step(workflow)
+    assert old in step["run"]  # nosec B101
+    step["run"] = step["run"].replace(old, new)
+    assert _rag_pipeline_job_problems(workflow) == [  # nosec B101
+        "junit check does not exit non-zero on skipped or missing cases"
+    ]
+
+
+@pytest.mark.unit
+def test_rag_pipeline_globs_cover_every_gate_test():
+    from fnmatch import fnmatch
+
+    from Helper_Scripts.ci.path_classifier import RAG_PIPELINE_GLOBS
+
+    uncovered = [t for t in _rag_gate_tests() if not any(fnmatch(t, g) for g in RAG_PIPELINE_GLOBS)]
+    assert uncovered == []  # nosec B101
+
+
+@pytest.mark.unit
+def test_rag_pipeline_gate_lists_every_pipeline_test_file():
+    from Helper_Scripts.ci.path_classifier import RAG_PIPELINE_GATE_EXCLUDED, RAG_PIPELINE_GATE_TESTS
+
+    listed = set(RAG_PIPELINE_GATE_TESTS)
+    excluded = set(RAG_PIPELINE_GATE_EXCLUDED)
+    assert not (listed & excluded)  # nosec B101
+    assert all(reason.strip() for reason in RAG_PIPELINE_GATE_EXCLUDED.values())  # nosec B101
+    tests_root = REPO_ROOT / "tldw_Server_API" / "tests"
+    found = {
+        path.relative_to(REPO_ROOT).as_posix()
+        for sub in ("RAG_NEW", "RAG")
+        for path in (tests_root / sub).rglob("test_*.py")
+        if "unified_pipeline" in path.read_text(encoding="utf-8", errors="ignore")
+    }
+    assert sorted(found - listed - excluded) == []  # nosec B101
+    assert sorted((listed | excluded) - {p.relative_to(REPO_ROOT).as_posix() for p in tests_root.rglob("test_*.py")}) == []  # nosec B101
