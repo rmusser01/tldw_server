@@ -1,0 +1,34 @@
+# Test-only runtime images. The build context is projected from tracked source.
+FROM python:3.12-bookworm AS backend
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libmagic1 portaudio19-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/outbound-project
+COPY pyproject.toml README.md LICENSE ./
+COPY LICENSES LICENSES
+
+# CPU wheels keep this test image independent of the runner's accelerator.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python -m pip install --no-cache-dir uv \
+    && uv pip install --system --no-deps --index-url https://download.pytorch.org/whl/cpu 'torch>=2.11.0' \
+    && uv pip install --system -r pyproject.toml --extra dev 'huggingface-hub>=1,<2'
+
+COPY --chown=10001:10001 tldw_Server_API tldw_Server_API
+COPY --chown=10001:10001 apps/mcp-unified/src apps/mcp-unified/src
+COPY --chown=10001:10001 apps/extension/wxt.config.ts apps/extension/wxt.config.ts
+COPY --chown=10001:10001 apps/extension/entrypoints/background.ts apps/extension/entrypoints/background.ts
+COPY --chown=10001:10001 apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/AddSourceModal.tsx apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/AddSourceModal.tsx
+COPY --chown=10001:10001 packages/tldw_profile_core packages/tldw_profile_core
+COPY --chown=10001:10001 Helper_Scripts Helper_Scripts
+COPY --chown=10001:10001 Docs/Published Docs/Published
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system --no-deps -e .
+
+RUN useradd -m -u 10001 -U outbound \
+    && install -d -o outbound -g outbound /outbound-report \
+    && chown outbound:outbound /opt/outbound-project
+ENV HOME=/home/outbound \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+USER 10001:10001

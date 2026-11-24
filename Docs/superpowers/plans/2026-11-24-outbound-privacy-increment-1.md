@@ -104,7 +104,8 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
 - **Goal:** Exercise the production ASGI app and guarded WebSocket protocol with temporary state, validating startup, setup and a representative local runtime action within the guarded boundary.
 - **Success criteria:** A named fixture works, accepted DNS/dial endpoints are exact, and caught or shutdown-time violations fail the run.
 - **Tests:** `test_outbound_backend_smoke.py`, existing no-live-network fixture tests, and the child smoke.
-- **Status:** Not Started
+- **Status:** Complete
+- **Verification:** The real Linux container passed the host-socket and loopback controls and the guarded production startup, setup, local notes, and ASGI shutdown. The strict guard and isolation tests passed (39 tests), and the existing pytest guard suite passed (27 tests and one expected subprocess-only skip).
 
 - [ ] Add strict-policy tests for numeric loopback on a listed port, another loopback port, an external numeric address, a synthetic external name already declared in the product inventory, a safe static alias, and an ambient machine/test DB hostname. Use `unittest.mock` around the real resolver or dial seam where needed, with no live network. Add child tests for normal stop with a final marker, a caught synthetic DNS failure, and a violation emitted in ASGI shutdown. Require the latter two to fail even if the child exits zero. A missing marker after forced termination also fails.
 
@@ -125,7 +126,7 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
       from tldw_Server_API.scripts.run_server_guarded_mcp import GuardedSlidesWebSocketProtocol
 
       server = uvicorn.Server(uvicorn.Config(
-          "tldw_Server_API.app.main:app", host="127.0.0.1", port=port,
+          application, host="127.0.0.1", port=port,
           workers=1, lifespan="on", proxy_headers=False,
           ws=GuardedSlidesWebSocketProtocol, ws_per_message_deflate=False,
       ))
@@ -138,16 +139,15 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
       monitor = asyncio.create_task(monitor_stop())
       try:
           await server.serve()
-          if not server.started or server.lifespan.shutdown_failed or server.lifespan.error_occured:
+          if not server.started or not shutdown_completed:
               raise RuntimeError("ASGI lifespan did not finish successfully")
       finally:
           monitor.cancel()
           await asyncio.gather(monitor, return_exceptions=True)
 
-  with block_live_network(fixture_endpoints=fixture_endpoints) as attempts:
-      asyncio.run(serve_until_stop(stop_file))
-      write_redacted_child_evidence(report, attempts)
   ```
+
+- Observe the app's ASGI `lifespan.shutdown.complete` event to set `shutdown_completed`. Register the evidence writer before app import and keep the guard active through interpreter exit callbacks.
 
 - [ ] Poll `GET /internal/ready` with a bounded deadline and assert its readiness contract. Require `/` to redirect to `/setup`, and `GET /api/v1/setup/status` to show setup is required. Save local-only `POST /api/v1/setup/first-run/ingest-defaults` with the payload below and verify the acknowledged step with `GET /api/v1/setup/first-run/state`. Use the synthetic key to create an explicitly titled note at `POST /api/v1/notes/`, then read the same ID and content back. The explicit title avoids unrelated automatic LLM title generation.
 

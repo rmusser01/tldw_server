@@ -49,7 +49,7 @@ def _origin(url: str, *, declaration: bool) -> str:
                 raise
             host = host.encode("idna").decode("ascii").lower().removesuffix(".")
             if len(host) > 253 or not all(_LABEL.fullmatch(label) for label in host.split(".")):
-                raise ValueError
+                raise ValueError from None
         else:
             host = f"[{address}]" if address.version == 6 else str(address)
         suffix = f":{port}" if port is not None and port != default_port else ""

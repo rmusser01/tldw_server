@@ -12,7 +12,7 @@ import os
 import socket
 import threading
 import traceback
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -87,8 +87,126 @@ def _is_local(host: str, allowed: frozenset[str]) -> bool:
     return ip is not None and (ip.is_loopback or ip.is_unspecified)
 
 
+def _strict_address(host: object) -> str | None:
+    name = _host(host)
+    if "%" in name:
+        return None
+    address = _ip(name)
+    return str(address) if address is not None and address.is_loopback else None
+
+
 @contextmanager
-def block_live_network() -> Iterator[Attempts]:
+def _block_except_fixtures(
+    endpoints: frozenset[tuple[str, int]], names: Mapping[str, str],
+) -> Iterator[Attempts]:
+    registered = set()
+    for host, port in endpoints:
+        numeric = _strict_address(host)
+        if numeric is None or type(port) is not int or not 1 <= port <= 65535:
+            raise ValueError("invalid fixture endpoint")
+        registered.add((numeric, port))
+    hosts = {host for host, _ in registered}
+    aliases = {}
+    for alias, host in names.items():
+        numeric = _strict_address(host)
+        if not alias or _host(alias) != alias or _ip(alias) is not None or numeric not in hosts:
+            raise ValueError("invalid fixture name")
+        aliases[alias] = numeric
+
+    attempts = Attempts()
+    active = True
+    getaddrinfo = socket.getaddrinfo
+    gethostbyname = socket.gethostbyname
+    gethostbyname_ex = socket.gethostbyname_ex
+    gethostbyaddr = socket.gethostbyaddr
+    create_connection = socket.create_connection
+
+    def fixture_host(value: object) -> str | None:
+        return aliases.get(_host(value)) or _strict_address(value)
+
+    def resolve_host(host: object) -> str:
+        numeric = fixture_host(host)
+        if numeric in hosts:
+            return numeric
+        attempts.record("dns", _host(host))
+        raise socket.gaierror(socket.EAI_NONAME, "non-fixture lookup blocked by the test")
+
+    def resolve(host, port, family=0, type=0, proto=0, flags=0):
+        if not active:
+            return getaddrinfo(host, port, family, type, proto, flags)
+        numeric = resolve_host(host)
+        service = int(port) if isinstance(port, str) and port.isascii() and port.isdigit() else port
+        if port is not None and (not isinstance(service, int) or (numeric, service) not in registered):
+            attempts.record("dns", _host(host))
+            raise socket.gaierror(socket.EAI_NONAME, "non-fixture service blocked by the test")
+        return getaddrinfo(numeric, service, family, type, proto, flags | socket.AI_NUMERICHOST | socket.AI_NUMERICSERV)
+
+    def resolve_ipv4(host):
+        if not active:
+            return gethostbyname(host)
+        numeric = resolve_host(host)
+        if ":" in numeric:
+            raise socket.gaierror(socket.EAI_FAMILY, "fixture has no IPv4 address")
+        return numeric
+
+    def resolve_ipv4_ex(host):
+        return (_host(host), [], [resolve_ipv4(host)]) if active else gethostbyname_ex(host)
+
+    def resolve_reverse(host):
+        if not active:
+            return gethostbyaddr(host)
+        numeric = resolve_host(host)
+        return numeric, [], [numeric]
+
+    def fixture_dial(address):
+        if isinstance(address, tuple) and len(address) in {2, 4}:
+            host, port, *ipv6 = address
+            numeric = fixture_host(host)
+            if isinstance(port, int) and (numeric, port) in registered and (not ipv6 or ipv6 == [0, 0]):
+                # Preserve an IPv4-mapped IPv6 literal for an IPv6 socket.
+                wire_host = host if numeric != _host(host) and ":" in _host(host) else numeric
+                return (wire_host, port, *ipv6)
+            name = _host(host)
+        else:
+            name = "<unix>"
+        attempts.record("connect", name)
+        raise OSError("non-fixture connect blocked by the test")
+
+    def guarded_dial(real):
+        def connect(sock, address, *args, **kwargs):
+            return real(sock, fixture_dial(address) if active else address, *args, **kwargs)
+        return connect
+
+    def create(address, *args, **kwargs):
+        return create_connection(fixture_dial(address) if active else address, *args, **kwargs)
+
+    with (
+        mock.patch.object(socket, "getaddrinfo", resolve),
+        mock.patch.object(socket, "gethostbyname", resolve_ipv4),
+        mock.patch.object(socket, "gethostbyname_ex", resolve_ipv4_ex),
+        mock.patch.object(socket, "gethostbyaddr", resolve_reverse),
+        mock.patch.object(socket, "create_connection", create),
+        mock.patch.object(socket.socket, "connect", guarded_dial(socket.socket.connect)),
+        mock.patch.object(socket.socket, "connect_ex", guarded_dial(socket.socket.connect_ex)),
+    ):
+        try:
+            yield attempts
+        finally:
+            active = False
+
+
+@contextmanager
+def block_live_network(
+    *,
+    fixture_endpoints: frozenset[tuple[str, int]] | None = None,
+    fixture_names: Mapping[str, str] | None = None,
+) -> Iterator[Attempts]:
+    if fixture_endpoints is not None:
+        with _block_except_fixtures(fixture_endpoints, fixture_names or {}) as attempts:
+            yield attempts
+        return
+    if fixture_names is not None:
+        raise ValueError("invalid fixture names without endpoints")
     attempts = Attempts()
     allowed = _allowed_names()
     # monkeypatch is set up before the autouse fixture, so its undo runs after this block exits and can

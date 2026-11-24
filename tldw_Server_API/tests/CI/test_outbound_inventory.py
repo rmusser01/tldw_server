@@ -5,7 +5,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
 from Helper_Scripts.ci.outbound_inventory import AssetIdentity, Inventory, InventoryError, origin_only
 
 ROOT = Path(__file__).resolve().parents[3]
