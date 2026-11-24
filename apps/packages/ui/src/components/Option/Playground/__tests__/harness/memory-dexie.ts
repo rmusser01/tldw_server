@@ -503,20 +503,47 @@ export type MemoryDexie = Record<string, MemoryTable> & {
  * Builds a fresh in-memory database. Transactions run one at a time (like
  * overlapping IndexedDB read-write transactions), nested calls join the
  * outer transaction, and a throwing transaction restores every table.
+ *
+ * Nested calls follow Dexie 4's parent-scope rule (`Dexie.prototype._transaction`):
+ * a read-write child of a read-only parent, or a child naming a table its
+ * immediate parent lacks, rejects with `SubTransactionError`. The `!` and `?`
+ * mode flags are not modelled; no caller uses them.
  */
 export const createMemoryDexie = (): MemoryDexie => {
   const tables = Object.fromEntries(
     Object.entries(PAGE_ASSIST_SCHEMA).map(([name, spec]) => [name, new MemoryTable(name, spec)])
   )
-  const active = new AsyncLocalStorage<{ aborted: boolean }>()
+  const active = new AsyncLocalStorage<{ aborted: boolean; tables: Set<string>; readOnly: boolean }>()
   let tail: Promise<unknown> = Promise.resolve()
   const transaction = (...args: unknown[]) => {
     const operation = args.at(-1) as (tx: unknown) => Promise<unknown>
+    const readOnly = args[0] === "r" || args[0] === "readonly"
+    const names = args
+      .slice(1, -1)
+      .flat()
+      .map((table) => (typeof table === "string" ? table : (table as MemoryTable).name))
+    const scope = { tables: new Set(names), readOnly }
     const outer = active.getStore()
-    if (outer) return Promise.resolve().then(() => operation({ abort: () => { throw new Error("AbortError") } }))
+    if (outer) {
+      const missing = names.find((name) => !outer.tables.has(name))
+      const message =
+        outer.readOnly && !readOnly
+          ? "Cannot enter a sub-transaction with READWRITE mode when parent transaction is READONLY"
+          : missing && `Table ${missing} not included in parent transaction.`
+      if (message) {
+        const error = new Error(message)
+        error.name = "SubTransactionError"
+        return Promise.reject(error)
+      }
+      return Promise.resolve().then(() =>
+        active.run({ ...outer, ...scope }, () =>
+          operation({ abort: () => { throw new Error("AbortError") } })
+        )
+      )
+    }
     const run = async () => {
       const snapshots = Object.values(tables).map((table) => new Map(table.rows))
-      const context = { aborted: false }
+      const context = { aborted: false, ...scope }
       try {
         return await active.run(context, () =>
           operation({
