@@ -9,6 +9,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Claims_Extraction.claims_cluster_rebuild import calculate_claim_cluster_rebuild
+from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import ClusterPublicationIdentity
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
@@ -87,6 +88,7 @@ def test_interleaved_generations_and_duplicate_replays_preserve_latest_output(or
                     assert db.load_claim_cluster_publication(identity=requests[generation]["identity"]).result == result
         finally:
             db.close_connection()
+            reset_managed_sqlite_backends(mode="hard", backends=[db.backend])
 
 
 @settings(max_examples=20, deadline=None)
@@ -120,3 +122,4 @@ def test_failed_bounded_rebuild_leaves_prior_receipt_and_output_intact(text_size
                 assert db.load_claim_cluster_publication(identity=identity).result["claims_assigned"] == 1
         finally:
             db.close_connection()
+            reset_managed_sqlite_backends(mode="hard", backends=[db.backend])
