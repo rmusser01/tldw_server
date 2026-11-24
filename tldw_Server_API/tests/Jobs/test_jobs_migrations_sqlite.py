@@ -4,6 +4,7 @@ import importlib
 import json
 import math
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -617,6 +618,64 @@ def test_jobs_migrations_uses_shared_sqlite_policy_helper(tmp_path):
         "foreign_keys": False,
         "temp_store": None,
     }]
+
+
+@pytest.mark.parametrize("outcome", ("success", "initialization-error", "audit-error"))
+def test_ensure_jobs_tables_closes_owned_connection_after_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    db_path = tmp_path / "schema-connection-lifecycle.db"
+    real_connect = sqlite3.connect
+    finish_indexes = jobs_migrations._ensure_sqlite_archive_batch_read_indexes
+    failure = sqlite3.OperationalError("injected schema initialization failure")
+
+    # Retain the real handle so finalization cannot hide a missing close.
+    with closing(real_connect(db_path)) as owned:
+        owned.execute("CREATE TABLE initialization_probe (value TEXT)")
+        owned.commit()
+
+        def finish_schema(conn: sqlite3.Connection) -> None:
+            finish_indexes(conn)
+            # This write follows the audit's explicit commit and needs the outer transaction exit.
+            conn.execute("INSERT INTO initialization_probe VALUES ('initialized')")
+            if outcome == "initialization-error":
+                raise failure
+
+        def fail_audit(conn: sqlite3.Connection) -> None:
+            raise failure
+
+        with monkeypatch.context() as patch:
+            patch.setattr(jobs_migrations.sqlite3, "connect", lambda path: owned)
+            patch.setattr(
+                jobs_migrations,
+                "_ensure_sqlite_archive_batch_read_indexes",
+                finish_schema,
+            )
+            if outcome == "audit-error":
+                patch.setattr(jobs_migrations, "_audit_and_index_slides_generation", fail_audit)
+
+            if outcome == "initialization-error":
+                with pytest.raises(sqlite3.OperationalError) as caught:
+                    ensure_jobs_tables(db_path)
+                assert caught.value is failure
+            else:
+                assert ensure_jobs_tables(db_path) == db_path
+
+        with closing(real_connect(db_path)) as verification:
+            assert verification.execute("SELECT value FROM initialization_probe").fetchall() == (
+                [] if outcome == "initialization-error" else [("initialized",)]
+            )
+            assert verification.execute(
+                "SELECT diagnostic_code, diagnostic_count FROM slides_standalone_reconciliation "
+                "WHERE singleton_id=1"
+            ).fetchone() == (
+                ("ambiguous_generation_legacy_row", 1) if outcome == "audit-error" else (None, 0)
+            )
+
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            owned.execute("SELECT 1")
 
 
 def test_ensure_jobs_tables_sanitizes_schema_failure_log(tmp_path, monkeypatch):

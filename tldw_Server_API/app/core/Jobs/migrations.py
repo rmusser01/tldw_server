@@ -1376,7 +1376,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
         db_path.parent.mkdir(parents=True, exist_ok=True)
     archive_locator_verified = False
     try:
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             # SQLite tuning for better concurrency
             try:
                 configure_sqlite_connection(
