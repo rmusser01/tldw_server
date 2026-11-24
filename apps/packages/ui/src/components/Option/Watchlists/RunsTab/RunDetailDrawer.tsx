@@ -669,6 +669,10 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       })
       void invalidateWatchlists("runs", "jobs", "overview")
       if (!isCurrentRun()) return
+      if (hostedMode) {
+        void refreshWatchlistsQuery("run-detail", runId)
+        void refreshWatchlistsQuery("items", itemsParams)
+      }
       setCancelState("idle")
       message.success(t("watchlists:runs.cancelRunSuccess", "Run cancelled"))
       manuallyClosedRef.current = true

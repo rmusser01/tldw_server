@@ -570,6 +570,24 @@ describe("RunDetailDrawer stream lifecycle", () => {
     expect(screen.getByText("Completed")).toBeInTheDocument()
   })
 
+  it("refreshes the persisted hosted snapshot and items after cancelling the open run", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    mocks.getRunDetailsMock.mockResolvedValueOnce(baseRunDetails)
+      .mockResolvedValueOnce({ ...baseRunDetails, status: "cancelled", log_text: "Collection cancelled after the first item" })
+    mocks.fetchScrapedItemsMock.mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({
+        items: [{ id: 1, title: "Item collected before cancel", url: "https://example.org/article", source_id: 1 }],
+        total: 1
+      })
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+    expect(await screen.findByText("No items found")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel run" }))
+
+    expect(await screen.findByText("Collection cancelled after the first item")).toBeInTheDocument()
+    expect(await screen.findByText("Item collected before cancel")).toBeInTheDocument()
+    expect(mocks.getRunDetailsMock).toHaveBeenCalledTimes(2)
+  })
+
   it("applies stream updates and transitions active run to completed without refetch", async () => {
     render(
       <>
