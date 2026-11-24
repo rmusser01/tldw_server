@@ -30,6 +30,7 @@ Give new contributors an architecture walkthrough and experienced contributors a
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: no. Documents existing boundaries. See ADR-003 for Jobs and Scheduler, ADR-021 for service lifecycle, ADR-025 for provider routing, ADR-049 for chat history ownership, and ADR-052 for admin claims.
 Verification on origin/dev worktree base 6d31f3d1a7. All five Mermaid diagrams parsed and rendered in Chromium with Mermaid 11.12.2. Checked 121 changed relative links and anchors, README and docs index path hygiene, public/private documentation boundary, and Backlog task IDs. Fifteen focused CI tests passed. Git whitespace check passed. Bandit covered the touched documentation directory and found zero Python lines. This documentation change required no runtime test run.
+Pull request [#3603](https://github.com/rmusser01/tldw_server/pull/3603) targets dev.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
