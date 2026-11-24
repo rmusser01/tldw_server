@@ -2356,12 +2356,12 @@ async def unified_rag_pipeline(
     state = _run_state.PipelineState(rcfg)
 
     ambient_scope = get_scope()
-    authorization_cache_scope: dict[str, object] | None = None
+    state.authorization_cache_scope: dict[str, object] | None = None
     authorization_cache_error: str | None = None
     if ambient_scope is not None:
         if isinstance(ambient_scope, ScopeContext):
             try:
-                authorization_cache_scope = content_authorization_cache_scope(
+                state.authorization_cache_scope = content_authorization_cache_scope(
                     ambient_scope
                 )
             except (TypeError, ValueError):
@@ -2369,19 +2369,19 @@ async def unified_rag_pipeline(
         else:
             authorization_cache_error = "malformed"
 
-    runtime_user_id = (
+    state.runtime_user_id = (
         getattr(rcfg.runtime.credential_runtime, "_user_id", None)
         if rcfg.runtime.credential_runtime is not None
         else None
     )
-    if runtime_user_id is not None:
+    if state.runtime_user_id is not None:
         if ambient_scope is None:
             authorization_cache_error = "missing"
-        elif authorization_cache_scope is None:
+        elif state.authorization_cache_scope is None:
             authorization_cache_error = "malformed"
         elif (
-            type(authorization_cache_scope["user_id"]) is not type(runtime_user_id)
-            or authorization_cache_scope["user_id"] != runtime_user_id
+            type(state.authorization_cache_scope["user_id"]) is not type(state.runtime_user_id)
+            or state.authorization_cache_scope["user_id"] != state.runtime_user_id
         ):
             authorization_cache_error = "user_mismatch"
 
@@ -2392,16 +2392,16 @@ async def unified_rag_pipeline(
     if state.generation_prompt is not None:
         request_metadata["generation_prompt"] = state.generation_prompt
     request_metadata["max_generation_tokens"] = rcfg.generation.max_generation_tokens
-    workspace_id = rcfg.scope.workspace_id
-    if workspace_id is None:
-        workspace_id = request_metadata.get("workspace_id")
-    if workspace_id is not None:
-        workspace_id = str(workspace_id).strip() or None
-        if workspace_id is not None:
-            request_metadata["workspace_id"] = workspace_id
-    prompts_db_path = rcfg.runtime.prompts_db_path
-    world_books_db_path = rcfg.runtime.world_books_db_path
-    chat_dictionaries_db_path = rcfg.runtime.chat_dictionaries_db_path
+    state.workspace_id = rcfg.scope.workspace_id
+    if state.workspace_id is None:
+        state.workspace_id = request_metadata.get("workspace_id")
+    if state.workspace_id is not None:
+        state.workspace_id = str(state.workspace_id).strip() or None
+        if state.workspace_id is not None:
+            request_metadata["workspace_id"] = state.workspace_id
+    state.prompts_db_path = rcfg.runtime.prompts_db_path
+    state.world_books_db_path = rcfg.runtime.world_books_db_path
+    state.chat_dictionaries_db_path = rcfg.runtime.chat_dictionaries_db_path
 
     if state.resolved_request is None:
         state.resolved_request = resolve_legacy_standard_pipeline_request(
@@ -2423,135 +2423,43 @@ async def unified_rag_pipeline(
     if state.retrieval_plan is None:
         state.retrieval_plan = build_retrieval_plan(state.resolved_request)
 
-    def _resolve_effective_enable_generation() -> bool:  # an explicit False is retrieval only (TASK-15482)
-        return bool(rcfg.generation.enable_generation) and bool((state.resolved_request.payload or {}).get("enable_generation", True))
+    effective_enable_generation = state.resolve_effective_enable_generation()
 
-    effective_enable_generation = _resolve_effective_enable_generation()
-
-    retrieval_query = state.query
-    retrieval_sources = rcfg.scope.sources
-    retrieval_search_mode = rcfg.retrieval.search_mode
-    retrieval_top_k = state.top_k
-    retrieval_min_score = rcfg.retrieval.min_score
-    retrieval_index_namespace = rcfg.retrieval.index_namespace
-
-    def _planned_index_namespace(plan: RetrievalPlan) -> Optional[str]:
-        if plan.index_namespace is not None:
-            return plan.index_namespace
-        normalized_sources = {getattr(source, "value", str(source)).strip() for source in plan.sources}
-        if "media_db" in normalized_sources:
-            return plan.collection_names.get("media_db")
-        return None
-
-    def _refresh_retrieval_snapshot_from_current_knobs(
-        *,
-        prefer_current_scalars: bool = False,
-    ) -> None:
-        nonlocal retrieval_query, retrieval_sources, retrieval_search_mode
-        nonlocal retrieval_top_k, retrieval_min_score, retrieval_index_namespace
-
-        snapshot_query = state.query
-        snapshot_sources = rcfg.scope.sources
-        snapshot_search_mode = rcfg.retrieval.search_mode
-        snapshot_top_k = state.top_k
-        snapshot_min_score = rcfg.retrieval.min_score
-        snapshot_index_namespace = rcfg.retrieval.index_namespace
-
-        if state.retrieval_plan is not None:
-            planned_query = str(state.retrieval_plan.query or "").strip()
-            if planned_query:
-                snapshot_query = planned_query
-            planned_sources = [
-                str(getattr(source, "value", source)).strip()
-                for source in state.retrieval_plan.sources
-                if str(getattr(source, "value", source)).strip()
-            ]
-            if planned_sources:
-                snapshot_sources = planned_sources
-            planned_search_mode = str(state.retrieval_plan.search_mode or "").strip().lower()
-            if planned_search_mode in {"fts", "vector", "hybrid"}:
-                snapshot_search_mode = cast(
-                    Literal["fts", "vector", "hybrid"],
-                    planned_search_mode,
-                )
-            if not prefer_current_scalars:
-                with contextlib.suppress(TypeError, ValueError):
-                    snapshot_top_k = max(1, int(state.retrieval_plan.top_k))
-                with contextlib.suppress(TypeError, ValueError):
-                    snapshot_min_score = float(state.retrieval_plan.min_score)
-            snapshot_index_namespace = _planned_index_namespace(state.retrieval_plan)
-
-        retrieval_query = snapshot_query
-        retrieval_sources = snapshot_sources
-        retrieval_search_mode = snapshot_search_mode
-        with contextlib.suppress(TypeError, ValueError):
-            retrieval_top_k = max(1, int(snapshot_top_k))
-        with contextlib.suppress(TypeError, ValueError):
-            retrieval_min_score = float(snapshot_min_score)
-        retrieval_index_namespace = snapshot_index_namespace
-
-        if state.retrieval_plan is not None:
-            state.retrieval_plan = replace(
-                state.retrieval_plan,
-                query=str(retrieval_query),
-                sources=tuple(str(source) for source in (retrieval_sources or [])),
-                search_mode=str(retrieval_search_mode),
-                top_k=int(retrieval_top_k),
-                min_score=float(retrieval_min_score),
-                index_namespace=retrieval_index_namespace,
-            )
+    state.retrieval_query = state.query
+    state.retrieval_sources = rcfg.scope.sources
+    state.retrieval_search_mode = rcfg.retrieval.search_mode
+    state.retrieval_top_k = state.top_k
+    state.retrieval_min_score = rcfg.retrieval.min_score
+    state.retrieval_index_namespace = rcfg.retrieval.index_namespace
 
     if state.retrieval_plan is not None:
         planned_query = str(state.retrieval_plan.query or "").strip()
         if planned_query:
-            retrieval_query = planned_query
+            state.retrieval_query = planned_query
         planned_sources = [
             str(getattr(source, "value", source)).strip()
             for source in state.retrieval_plan.sources
             if str(getattr(source, "value", source)).strip()
         ]
         if planned_sources:
-            retrieval_sources = planned_sources
+            state.retrieval_sources = planned_sources
         planned_search_mode = str(state.retrieval_plan.search_mode or "").strip().lower()
         if planned_search_mode in {"fts", "vector", "hybrid"}:
-            retrieval_search_mode = cast(
+            state.retrieval_search_mode = cast(
                 Literal["fts", "vector", "hybrid"],
                 planned_search_mode,
             )
         with contextlib.suppress(TypeError, ValueError):
-            retrieval_top_k = max(1, int(state.retrieval_plan.top_k))
+            state.retrieval_top_k = max(1, int(state.retrieval_plan.top_k))
         with contextlib.suppress(TypeError, ValueError):
-            retrieval_min_score = float(state.retrieval_plan.min_score)
-        retrieval_index_namespace = _planned_index_namespace(state.retrieval_plan)
+            state.retrieval_min_score = float(state.retrieval_plan.min_score)
+        state.retrieval_index_namespace = state.planned_index_namespace(state.retrieval_plan)
 
     query_expansion_corpus = (
         state.retrieval_plan.index_namespace
         if state.retrieval_plan is not None and state.retrieval_plan.index_namespace is not None
         else rcfg.retrieval.index_namespace
     )
-
-    def _retrieval_plan_for(query_text: str) -> Optional[RetrievalPlan]:
-        if state.retrieval_plan is None:
-            return None
-        if query_text == state.retrieval_plan.query:
-            return state.retrieval_plan
-        try:
-            return replace(state.retrieval_plan, query=query_text)
-        except TypeError:
-            return state.retrieval_plan
-
-    def _sync_effective_query(new_query: str) -> None:
-        nonlocal retrieval_query
-        state.query = str(new_query)
-        retrieval_query = state.query
-        state.result.query = state.query
-        result_payload = getattr(state.result, "payload", None)
-        if isinstance(result_payload, dict):
-            result_payload["query"] = state.query
-        state.resolved_request.query = state.query
-        state.resolved_request.payload["query"] = state.query
-        if state.retrieval_plan is not None:
-            state.retrieval_plan = replace(state.retrieval_plan, query=state.query)
 
     # Basic input validation (short-circuit before heavier setup)
     if not isinstance(state.query, str) or not state.query.strip():
@@ -2652,7 +2560,7 @@ async def unified_rag_pipeline(
             elif not state.enable_multi_vector_passages and presets.get("enable_multi_vector_passages"):
                 state.enable_multi_vector_passages = True
 
-    _refresh_retrieval_snapshot_from_current_knobs(
+    state.refresh_retrieval_snapshot_from_current_knobs(
         prefer_current_scalars=retrieval_scalar_overrides_applied,
     )
 
@@ -2663,31 +2571,7 @@ async def unified_rag_pipeline(
         query=state.query,
         metadata={"original_query": state.query}
     )
-    optional_provider_failure_code: str | None = None
-
-    def _latch_optional_provider_failure(
-        component: str,
-        exc: BaseException,
-    ) -> str:
-        """Latch the first optional retrieval provider failure for this request."""
-        nonlocal optional_provider_failure_code
-        if optional_provider_failure_code is None:
-            optional_provider_failure_code = _bounded_provider_failure_code(exc)
-        state.result.metadata.setdefault("retrieval_coverage", {})[component] = {
-            "coverage": "degraded",
-            "failure_code": optional_provider_failure_code,
-        }
-        return optional_provider_failure_code
-
-    def _latched_optional_provider_failure(component: str) -> str | None:
-        """Return and record the request's latched optional provider failure."""
-        if rcfg.runtime.credential_runtime is None or optional_provider_failure_code is None:
-            return None
-        state.result.metadata.setdefault("retrieval_coverage", {})[component] = {
-            "coverage": "degraded",
-            "failure_code": optional_provider_failure_code,
-        }
-        return optional_provider_failure_code
+    state.optional_provider_failure_code: str | None = None
 
     standard_evidence_coordinated = False
     claims_payload = None
@@ -2733,238 +2617,22 @@ async def unified_rag_pipeline(
             "code": authorization_cache_error,
         }
 
-    def _ensure_profile_resolution_metadata() -> dict[str, Any]:
-        profile_resolution = state.result.metadata.get("profile_resolution")
-        if not isinstance(profile_resolution, dict):
-            profile_resolution = {}
-        profile_resolution.setdefault("requested_profile", rcfg.request.rag_profile)
-        profile_resolution.setdefault("applied_profile", rcfg.request.rag_profile)
-        profile_resolution.setdefault("effective_overrides_count", 0)
-        if not isinstance(profile_resolution.get("degraded_features"), list):
-            profile_resolution["degraded_features"] = []
-        state.result.metadata["profile_resolution"] = profile_resolution
-        return profile_resolution
-
-    def _record_profile_degradation(
-        *,
-        component: str,
-        from_value: str,
-        to_value: str,
-        reason: str,
-    ) -> None:
-        if not rcfg.observability.include_retrieval_diagnostics:
-            return
-        profile_resolution = _ensure_profile_resolution_metadata()
-        degraded_features = profile_resolution.get("degraded_features")
-        if not isinstance(degraded_features, list):
-            degraded_features = []
-            profile_resolution["degraded_features"] = degraded_features
-        degraded_features.append(
-            {
-                "component": component,
-                "from": from_value,
-                "to": to_value,
-                "reason": reason,
-            }
-        )
-
     if rcfg.observability.include_retrieval_diagnostics:
-        _ensure_profile_resolution_metadata()
+        state.ensure_profile_resolution_metadata()
 
-    cache_instance = None
-    cache_setup_attempted = False
+    state.cache_instance = None
+    state.cache_setup_attempted = False
     cache_retrieval_snapshot: Optional[list[Any]] = None
     base_retrieval_executed = False
-    cache_max_size = 1000
+    state.cache_max_size = 1000
     try:
         from tldw_Server_API.app.core.config import RAG_SERVICE_CONFIG
 
         cfg = cast(dict[str, Any], RAG_SERVICE_CONFIG) if isinstance(RAG_SERVICE_CONFIG, dict) else {}
-        cache_max_size = int((cfg.get("cache") or {}).get("max_cache_size", cache_max_size))
+        state.cache_max_size = int((cfg.get("cache") or {}).get("max_cache_size", state.cache_max_size))
     except (ImportError, TypeError, ValueError):
         pass
-    def _build_cache_namespace() -> str:
-        def _cache_path_value(value: Any) -> Optional[str]:
-            if isinstance(value, (str, os.PathLike)):
-                return os.fspath(value)
-            return None
-
-        authorization_user_id = (
-            authorization_cache_scope.get("user_id")
-            if authorization_cache_scope is not None
-            else None
-        )
-        owner_scope: dict[str, str | dict[str, str | None]]
-        if authorization_user_id is not None:
-            owner_scope = {"kind": "user", "id": str(authorization_user_id)}
-        elif runtime_user_id is not None:
-            owner_scope = {
-                "kind": "user",
-                "id": str(runtime_user_id),
-            }
-        elif rcfg.runtime.credential_runtime is None and rcfg.scope.user_id is not None:
-            owner_scope = {"kind": "user", "id": str(rcfg.scope.user_id)}
-        else:
-            owner_paths = {
-                "media": _cache_path_value(state.media_db_path)
-                or _cache_path_value(getattr(rcfg.runtime.media_db, "db_path", None)),
-                "notes": _cache_path_value(rcfg.runtime.notes_db_path),
-                "characters": _cache_path_value(rcfg.runtime.character_db_path),
-                "kanban": _cache_path_value(rcfg.runtime.kanban_db_path),
-                "prompts": _cache_path_value(prompts_db_path),
-                "world_books": _cache_path_value(world_books_db_path),
-                "dictionaries": _cache_path_value(chat_dictionaries_db_path),
-            }
-            owner_scope = {
-                "kind": "database" if any(owner_paths.values()) else "server",
-                "paths": owner_paths,
-            }
-
-        collection_scope = (
-            {
-                str(key): str(value)
-                for key, value in sorted(state.retrieval_plan.collection_names.items())
-            }
-            if state.retrieval_plan is not None
-            else {}
-        )
-        normalized_search_mode = str(retrieval_search_mode or "").strip().lower()
-        effective_date_range = None
-        if state.enable_date_filter and isinstance(state.date_range, dict):
-            effective_date_range = {
-                "start": str(state.date_range.get("start") or ""),
-                "end": str(state.date_range.get("end") or ""),
-            }
-        retrieval_scope = {
-            "sources": sorted(
-                _normalize_pipeline_sources(
-                    list(retrieval_sources) if retrieval_sources is not None else None
-                )
-            ),
-            "search_mode": normalized_search_mode,
-            "use_fts": normalized_search_mode in {"fts", "hybrid"},
-            "use_vector": normalized_search_mode in {"vector", "hybrid"},
-            "top_k": int(retrieval_top_k),
-            "min_score": float(retrieval_min_score),
-            "fts_level": str(state.fts_level),
-            "date_range": effective_date_range,
-            "late_chunking": {
-                "enabled": bool(rcfg.processing.enable_text_late_chunking),
-                "method": rcfg.processing.chunk_method,
-                "size": rcfg.processing.chunk_size,
-                "overlap": rcfg.processing.chunk_overlap,
-                "language": rcfg.processing.chunk_language,
-            },
-            "index_namespace": str(retrieval_index_namespace or ""),
-            "collection_names": collection_scope,
-        }
-        namespace_parts = [
-            f"owner:{_cache_identity_digest(owner_scope)}",
-            f"workspace:{_cache_identity_digest({'id': 'global' if workspace_id is None else str(workspace_id)})}",
-            f"retrieval:{_cache_identity_digest(retrieval_scope)}",
-        ]
-        if authorization_cache_scope is not None:
-            namespace_parts.insert(
-                1,
-                f"authorization:{_cache_identity_digest(authorization_cache_scope)}",
-            )
-        return "|".join(namespace_parts)
-
-    def _get_cache_instance():
-        nonlocal cache_instance, cache_setup_attempted
-        if cache_setup_attempted:
-            return cache_instance
-        cache_setup_attempted = True
-        cache_cls = None
-        if rcfg.cache.adaptive_cache and AdaptiveCache:
-            cache_cls = AdaptiveCache
-        elif SemanticCache:
-            cache_cls = SemanticCache
-
-        if cache_cls:
-            try:
-                cache_namespace = _build_cache_namespace()
-                if get_shared_cache:
-                    cache_instance = get_shared_cache(
-                        cache_cls=cache_cls,
-                        similarity_threshold=rcfg.cache.cache_threshold,
-                        ttl=rcfg.cache.cache_ttl,
-                        max_size=cache_max_size,
-                        namespace=cache_namespace,
-                    )
-                else:
-                    cache_instance = cache_cls(
-                        similarity_threshold=rcfg.cache.cache_threshold,
-                        ttl=rcfg.cache.cache_ttl,
-                        namespace=cache_namespace,
-                    )
-            except (OSError, RuntimeError, TypeError, ValueError) as exc:
-                cache_instance = None
-                logger.warning(
-                    "Semantic cache disabled after scoped setup failure "
-                    "(error_type={})",
-                    type(exc).__name__,
-                )
-        # Register with the RAGCache facade so health endpoints see real stats
-        if cache_instance is not None:
-            try:
-                from .advanced_cache import register_semantic_cache
-
-                register_semantic_cache(cache_instance)
-            except (ImportError, TypeError):
-                pass
-        return cache_instance
-
     # --- Internal helpers (defined early so downstream phases can use them) ---
-    async def _with_timeout(coro, timeout: Optional[float]):
-        if timeout and timeout > 0:
-            return await asyncio.wait_for(coro, timeout=timeout)
-        return await coro
-
-    async def _resilient_call(
-        component: str,
-        func,
-        *args,
-        bypass_provider_failures: bool = False,
-        **kwargs,
-    ):
-        """Apply circuit breaker, retries, and timeout around async operations when enabled."""
-        breaker = None
-        if rcfg.resilience.enable_resilience and rcfg.resilience.circuit_breaker and get_coordinator and CircuitBreakerConfig:
-            try:
-                coord = get_coordinator()
-                if component not in coord.circuit_breakers:
-                    coord.register_circuit_breaker(component, CircuitBreakerConfig())
-                breaker = coord.circuit_breakers[component]
-            except (AttributeError, KeyError, TypeError):
-                breaker = None
-
-        async def _invoke():
-            try:
-                if asyncio.iscoroutinefunction(func):
-                    return await func(*args, **kwargs)
-                return func(*args, **kwargs)
-            except _RAG_PROVIDER_FAILURES as exc:
-                if bypass_provider_failures:
-                    raise _ProviderFailureBypass(exc) from None
-                raise
-
-        async def _attempt():
-            if breaker is not None:
-                return await breaker.call(_invoke)
-            return await _invoke()
-
-        if rcfg.resilience.enable_resilience and (rcfg.resilience.retry_attempts or 0) > 1 and RetryPolicy and RetryConfig:
-            policy = RetryPolicy(RetryConfig(max_attempts=int(rcfg.resilience.retry_attempts or 1)))
-            call_coro = policy.execute(_attempt)
-        else:
-            call_coro = _attempt()
-
-        try:
-            return await _with_timeout(call_coro, rcfg.resilience.timeout_seconds)
-        except _ProviderFailureBypass as bypass:
-            raise bypass.failure from None
-
     # Initialize monitoring if requested
     metrics = None
     if rcfg.observability.enable_monitoring:
@@ -2975,51 +2643,26 @@ async def unified_rag_pipeline(
             total_duration=0.0,
         )
 
-    def _apply_generation_gate(
-        reason: str,
-        *,
-        coverage: Optional[float] = None,
-        unsupported_ratio: Optional[float] = None,
-        threshold: Optional[float] = None,
-    ) -> None:
-        """Record a gating event in metadata for downstream observability."""
-        gate = state.result.metadata.setdefault("generation_gate", {})
-        gate.update(
-            {
-                "reason": reason,
-                "at": time.time(),
-            }
-        )
-        if coverage is not None:
-            gate["coverage"] = coverage
-        if unsupported_ratio is not None:
-            gate["unsupported_ratio"] = unsupported_ratio
-        if threshold is not None:
-            gate["threshold"] = threshold
-
-    class _EarlyReturn(Exception):
-        """Internal control-flow sentinel for intentional short-circuit paths."""
-
     resolved_data_sources: list[DataSource] = []
 
     try:
         try:
-            retrieval_sources = _normalize_pipeline_sources(retrieval_sources)
-            resolved_data_sources = _sources_to_data_sources(retrieval_sources)
+            state.retrieval_sources = _normalize_pipeline_sources(state.retrieval_sources)
+            resolved_data_sources = _sources_to_data_sources(state.retrieval_sources)
             explicit_include_sources = _explicit_include_data_sources(
                 include_media_ids=rcfg.scope.include_media_ids,
                 include_note_ids=rcfg.scope.include_note_ids,
             )
             if explicit_include_sources:
-                original_retrieval_sources = list(retrieval_sources)
+                original_retrieval_sources = list(state.retrieval_sources)
                 requested_sources = set(resolved_data_sources)
                 scoped_data_sources = [source for source in explicit_include_sources if source in requested_sources]
                 scope_intersection_empty = not scoped_data_sources
                 resolved_data_sources = (
                     list(explicit_include_sources) if scope_intersection_empty else scoped_data_sources
                 )
-                retrieval_sources = [_DATASOURCE_TO_CANONICAL_SOURCE[source] for source in resolved_data_sources]
-                state.resolved_request.payload["sources"] = list(retrieval_sources)
+                state.retrieval_sources = [_DATASOURCE_TO_CANONICAL_SOURCE[source] for source in resolved_data_sources]
+                state.resolved_request.payload["sources"] = list(state.retrieval_sources)
                 cache_disabled_for_scope = bool(state.enable_cache)
                 if cache_disabled_for_scope:
                     state.enable_cache = False
@@ -3030,28 +2673,28 @@ async def unified_rag_pipeline(
                 if state.retrieval_plan is not None:
                     scoped_retrieval_plan = replace(
                         state.retrieval_plan,
-                        sources=tuple(retrieval_sources),
+                        sources=tuple(state.retrieval_sources),
                         index_namespace=None,
                     )
                     state.retrieval_plan = replace(
                         scoped_retrieval_plan,
-                        index_namespace=_planned_index_namespace(scoped_retrieval_plan),
+                        index_namespace=state.planned_index_namespace(scoped_retrieval_plan),
                     )
-                    retrieval_index_namespace = _planned_index_namespace(state.retrieval_plan)
+                    state.retrieval_index_namespace = state.planned_index_namespace(state.retrieval_plan)
                 state.result.metadata["explicit_source_selection"] = {
                     "enabled": True,
                     "requested_sources": original_retrieval_sources,
-                    "resolved_sources": list(retrieval_sources),
+                    "resolved_sources": list(state.retrieval_sources),
                     "include_media_ids_count": len(rcfg.scope.include_media_ids or []),
                     "include_note_ids_count": len(rcfg.scope.include_note_ids or []),
                     "scope_intersection_empty": scope_intersection_empty,
                     "cache_disabled": cache_disabled_for_scope,
                 }
-            state.result.metadata["sources_requested"] = list(retrieval_sources)
+            state.result.metadata["sources_requested"] = list(state.retrieval_sources)
         except ValueError as exc:
             state.result.errors.append(f"invalid_source: {exc}")
             state.result.metadata["source_validation_error"] = str(exc)
-            raise _EarlyReturn() from exc
+            raise _run_state.EarlyReturn() from exc
 
         if (
             state.sql_retriever is None
@@ -3075,115 +2718,12 @@ async def unified_rag_pipeline(
                 ) as exc:
                     state.result.errors.append(f"SQL retriever init failed: {exc}")
 
-        def _build_multi_retriever(db_paths: dict[str, str]):
-            base_kwargs: dict[str, Any] = {"user_id": rcfg.scope.user_id or "0", "media_db": rcfg.runtime.media_db}
-            if rcfg.runtime.credential_runtime is not None:
-                base_kwargs["credential_runtime"] = rcfg.runtime.credential_runtime
-            if rcfg.runtime.chacha_db is not None:
-                base_kwargs["chacha_db"] = rcfg.runtime.chacha_db
-            prompts_db = rcfg.runtime.prompts_db
-            if prompts_db is not None:
-                base_kwargs["prompts_db"] = prompts_db
-            if state.sql_retriever is not None:
-                base_kwargs["sql_retriever"] = state.sql_retriever
-
-            optional_keys = ("chacha_db", "prompts_db", "sql_retriever")
-            variants = [dict(base_kwargs)]
-            for key in optional_keys:
-                if key in base_kwargs:
-                    variants.append({k: v for k, v in base_kwargs.items() if k != key})
-            variants.append({k: v for k, v in base_kwargs.items() if k not in set(optional_keys)})
-            seen: set[tuple[str, ...]] = set()
-            for variant in variants:
-                variant_key = tuple(sorted(variant.keys()))
-                if variant_key in seen:
-                    continue
-                seen.add(variant_key)
-                try:
-                    return MultiDatabaseRetriever(db_paths, **variant)
-                except TypeError:
-                    continue
-            if rcfg.runtime.credential_runtime is not None:
-                raise TypeError("MultiDatabaseRetriever does not accept credential runtime")
-            try:
-                return MultiDatabaseRetriever(db_paths, user_id=rcfg.scope.user_id or "0")
-            except TypeError:
-                return MultiDatabaseRetriever(db_paths)
-
-        def _build_pipeline_db_paths() -> dict[str, str]:
-            """Return the full source-to-database map for every retrieval pass."""
-            db_paths: dict[str, str] = {}
-            if state.media_db_path:
-                db_paths["media_db"] = str(state.media_db_path)
-            if rcfg.runtime.notes_db_path:
-                db_paths["notes_db"] = str(rcfg.runtime.notes_db_path)
-            if prompts_db_path:
-                db_paths["prompts_db"] = str(prompts_db_path)
-            if rcfg.runtime.character_db_path:
-                db_paths["character_cards_db"] = str(rcfg.runtime.character_db_path)
-                db_paths["world_books_db"] = str(world_books_db_path or rcfg.runtime.character_db_path)
-                db_paths["chat_dictionaries_db"] = str(chat_dictionaries_db_path or rcfg.runtime.character_db_path)
-            else:
-                if world_books_db_path:
-                    db_paths["world_books_db"] = str(world_books_db_path)
-                if chat_dictionaries_db_path:
-                    db_paths["chat_dictionaries_db"] = str(chat_dictionaries_db_path)
-            if rcfg.runtime.kanban_db_path:
-                db_paths["kanban_db"] = str(rcfg.runtime.kanban_db_path)
-            return db_paths
-
-        source_status_retriever: Any = None
-        source_failures: set[DataSource] = set()
-        cumulative_filtered_artifact_counts: dict[str, int] = {}
-        security_excluded_counts: Counter[str] = Counter()
-
-        def _apply_workspace_filtering_to_result() -> None:
-            """Filter the current result documents and refresh source diagnostics."""
-            filtered_documents, filtered_artifact_counts = _filter_workspace_artifacts(
-                list(state.result.documents or []),
-                workspace_id=workspace_id,
-            )
-            for source, count in filtered_artifact_counts.items():
-                cumulative_filtered_artifact_counts[source] = cumulative_filtered_artifact_counts.get(source, 0) + count
-            state.result.documents = filtered_documents
-            if rcfg.observability.include_retrieval_diagnostics and source_status_retriever is not None:
-                state.result.metadata["source_status"] = _build_source_status(
-                    _normalize_pipeline_sources(list(retrieval_sources)),
-                    retriever=source_status_retriever,
-                    documents=filtered_documents,
-                    filtered_counts=dict(cumulative_filtered_artifact_counts),
-                    source_failures=source_failures,
-                    security_excluded_counts=security_excluded_counts,
-                )
-            if workspace_id is not None:
-                state.result.metadata["workspace_id"] = workspace_id
-            state.result.metadata["documents_retrieved"] = len(filtered_documents)
+        state.source_status_retriever: Any = None
+        state.source_failures: set[DataSource] = set()
+        state.cumulative_filtered_artifact_counts: dict[str, int] = {}
+        state.security_excluded_counts: Counter[str] = Counter()
 
         # ========== LEARNED FUSION / CALIBRATION HELPERS ==========
-        def _decorate_calibration_metadata() -> None:
-            """
-            Attach learned-fusion specific fields (if present) to reranking calibration.
-
-            This keeps Two-Tier calibration behavior intact while making the new
-            enable_learned_fusion / calibrator_version flags observable.
-            """
-            if not isinstance(state.result.metadata, dict):
-                return
-            cal = state.result.metadata.get("reranking_calibration")
-            if not isinstance(cal, dict):
-                return
-            # Fused score is the calibrated probability of the top document
-            if "fused_score" not in cal and "top_doc_prob" in cal:
-                with contextlib.suppress(TypeError, ValueError):
-                    cal["fused_score"] = float(cal.get("top_doc_prob") or 0.0)
-            # Mark whether learned fusion was explicitly requested
-            if rcfg.rerank.enable_learned_fusion:
-                cal["enabled"] = True
-            # Version tag is purely informational for now
-            if rcfg.rerank.calibrator_version:
-                cal.setdefault("version", rcfg.rerank.calibrator_version)
-            state.result.metadata["reranking_calibration"] = cal
-
         # ========== PRE-RETRIEVAL CLARIFICATION ==========
         effective_pre_clarify = (
             rcfg.query_prep.enable_pre_retrieval_clarification
@@ -3224,7 +2764,7 @@ async def unified_rag_pipeline(
                     )
                 except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
                     pass
-                raise _EarlyReturn()
+                raise _run_state.EarlyReturn()
 
         # ========== SPELL CHECK ==========
         if rcfg.query_prep.spell_check:
@@ -3234,7 +2774,7 @@ async def unified_rag_pipeline(
                 if corrected != state.query:
                     state.result.metadata["original_query"] = state.query
                     state.result.metadata["corrected_query"] = corrected
-                    _sync_effective_query(corrected)
+                    state.sync_effective_query(corrected)
                 state.result.timings["spell_check"] = time.time() - spell_start
             else:
                 state.result.errors.append("Spell check module not available")
@@ -3254,7 +2794,7 @@ async def unified_rag_pipeline(
         ) -> list["Document"]:
             """Best-effort external prefetch when classification disables local DB search."""
             prefetched_docs: list[Document] = []
-            max_results = max(1, min(int(retrieval_top_k or 10), 25))
+            max_results = max(1, min(int(state.retrieval_top_k or 10), 25))
             seen_ids: set[str] = set()
 
             def _append_doc(doc: Document) -> None:
@@ -3385,7 +2925,7 @@ async def unified_rag_pipeline(
                 # Apply reformulated query
                 if _classification.standalone_query and _classification.standalone_query != state.query:
                     state.result.metadata["reformulated_query"] = _classification.standalone_query
-                    _sync_effective_query(_classification.standalone_query)
+                    state.sync_effective_query(_classification.standalone_query)
                     logger.debug(f"Query reformulated to: {state.query[:100]}")
 
                 # Route web fallback based on classification
@@ -3460,7 +3000,7 @@ async def unified_rag_pipeline(
                 )
                 if reformulated and reformulated != state.query:
                     state.result.metadata["reformulated_query"] = reformulated
-                    _sync_effective_query(reformulated)
+                    state.sync_effective_query(reformulated)
                 if _reformulation_stage_metadata:
                     state.result.metadata["query_reformulation"] = dict(
                         _reformulation_stage_metadata
@@ -3741,10 +3281,10 @@ async def unified_rag_pipeline(
         analysis_intent_val = None
         analysis_complexity_val = None
         analysis_domain = None
-        if QueryAnalyzer and retrieval_query:
+        if QueryAnalyzer and state.retrieval_query:
             try:
                 qa = QueryAnalyzer()
-                analysis = qa.analyze_query(retrieval_query)
+                analysis = qa.analyze_query(state.retrieval_query)
                 analysis_intent = getattr(analysis, "intent", None)
                 analysis_complexity = getattr(analysis, "complexity", None)
                 analysis_intent_val = (
@@ -3763,7 +3303,7 @@ async def unified_rag_pipeline(
                 analysis_domain = None
 
         # ========== QUERY EXPANSION ==========
-        expanded_queries = [retrieval_query]
+        expanded_queries = [state.retrieval_query]
         if state.expand_query:
             expansion_start = time.time()
             try:
@@ -3774,7 +3314,7 @@ async def unified_rag_pipeline(
                     try:
                         rc = RewriteCache(user_id=rcfg.scope.user_id)
                         cached = rc.get(
-                            retrieval_query,
+                            state.retrieval_query,
                             intent=intent_label,
                             corpus=query_expansion_corpus,
                         )
@@ -3789,14 +3329,14 @@ async def unified_rag_pipeline(
                 if multi_strategy_expansion:
                     if query_expansion_corpus:
                         expanded = await multi_strategy_expansion(
-                            retrieval_query,
+                            state.retrieval_query,
                             strategies=strategies,
                             corpus=query_expansion_corpus,
                         )
                     else:
                         # Avoid passing None to preserve expected call signature in tests
                         expanded = await multi_strategy_expansion(
-                            retrieval_query,
+                            state.retrieval_query,
                             strategies=strategies,
                         )
                     if isinstance(expanded, list):
@@ -3846,10 +3386,10 @@ async def unified_rag_pipeline(
                         if rew:
                             rc = RewriteCache(user_id=rcfg.scope.user_id)
                         rc.put(
-                            retrieval_query,
+                            state.retrieval_query,
                             rewrites=rew,
                             intent=intent_label,
-                            corpus=retrieval_index_namespace,
+                            corpus=state.retrieval_index_namespace,
                         )
                 except ValueError as exc:
                     logger.debug(f"Rewrite cache write disabled for user_id={rcfg.scope.user_id}: {exc}")
@@ -3958,7 +3498,7 @@ async def unified_rag_pipeline(
                 state.result.errors.append(f"Granularity routing failed: {e}")
                 logger.warning(f"Granularity routing error: {e}")
 
-        _refresh_retrieval_snapshot_from_current_knobs(
+        state.refresh_retrieval_snapshot_from_current_knobs(
             prefer_current_scalars=retrieval_scalar_overrides_applied,
         )
 
@@ -4126,7 +3666,7 @@ async def unified_rag_pipeline(
         # Resolve auto-temporal scope before deriving the retrieval cache identity.
         if retrieval_cache_eligible and not _skip_retrieval_stack and not _skip_local_retrieval:
             cache_start = time.time()
-            cache = _get_cache_instance()
+            cache = state.get_cache_instance()
 
             if cache:
                 get_fn = getattr(cache, "get", None)
@@ -4199,9 +3739,9 @@ async def unified_rag_pipeline(
                         _tr = _tm.get_tracer("tldw.rag")
                         _attrs = {
                             "rag.phase": "retrieval",
-                            "rag.search_mode": str(retrieval_search_mode),
-                            "rag.top_k": int(retrieval_top_k or 0),
-                            "rag.index_namespace": str(retrieval_index_namespace or ""),
+                            "rag.search_mode": str(state.retrieval_search_mode),
+                            "rag.top_k": int(state.retrieval_top_k or 0),
+                            "rag.index_namespace": str(state.retrieval_index_namespace or ""),
                         }
                         _otel_cm = _tr.start_as_current_span("rag.retrieval")
                         _otel_span = _otel_cm.__enter__()
@@ -4213,18 +3753,18 @@ async def unified_rag_pipeline(
                         _otel_span = None
                 if MultiDatabaseRetriever and RetrievalConfig:
                     # Set up database paths
-                    db_paths = _build_pipeline_db_paths()
+                    db_paths = state.build_pipeline_db_paths()
 
                     # Initialize retriever (tests may patch this constructor).
-                    retriever = _build_multi_retriever(db_paths)
-                    source_status_retriever = retriever
+                    retriever = state.build_multi_retriever(db_paths)
+                    state.source_status_retriever = retriever
 
                     # Configure retrieval
                     config = RetrievalConfig(
-                        max_results=retrieval_top_k,
-                        min_score=retrieval_min_score,
-                        use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
-                        use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
+                        max_results=state.retrieval_top_k,
+                        min_score=state.retrieval_min_score,
+                        use_fts=(state.retrieval_search_mode in ["fts", "hybrid"]),
+                        use_vector=(state.retrieval_search_mode in ["vector", "hybrid"]),
                         include_metadata=True,
                         fts_level=state.fts_level,
                         enable_text_late_chunking=rcfg.processing.enable_text_late_chunking,
@@ -4263,7 +3803,7 @@ async def unified_rag_pipeline(
                         user_key = str(rcfg.scope.user_id or rcfg.scope.feedback_user_id or "0").strip() or "0"
                         source_names = {
                             str(getattr(source, "value", source)).strip().lower()
-                            for source in retrieval_sources
+                            for source in state.retrieval_sources
                             if str(getattr(source, "value", source)).strip()
                         }
                         collection_names: dict[str, str] = {
@@ -4281,15 +3821,15 @@ async def unified_rag_pipeline(
                         *,
                         top_k_override: Optional[int] = None,
                     ) -> RetrievalPlan:
-                        plan = _retrieval_plan_for(query_text)
+                        plan = state.retrieval_plan_for(query_text)
                         if plan is None:
                             plan = RetrievalPlan(
                                 query=query_text,
-                                sources=tuple(str(source) for source in retrieval_sources),
-                                search_mode=str(retrieval_search_mode),
-                                top_k=int(retrieval_top_k),
-                                min_score=float(retrieval_min_score),
-                                index_namespace=retrieval_index_namespace,
+                                sources=tuple(str(source) for source in state.retrieval_sources),
+                                search_mode=str(state.retrieval_search_mode),
+                                top_k=int(state.retrieval_top_k),
+                                min_score=float(state.retrieval_min_score),
+                                index_namespace=state.retrieval_index_namespace,
                                 collection_names=_execution_collection_names(),
                             )
                         if top_k_override is not None:
@@ -4306,10 +3846,10 @@ async def unified_rag_pipeline(
                         retrieval_cfg: Optional[Any] = None,
                         top_k_override: Optional[int] = None,
                     ) -> list[Document]:
-                        if _latched_optional_provider_failure(component) is not None:
+                        if state.latched_optional_provider_failure(component) is not None:
                             return []
                         try:
-                            evidence = await _resilient_call(
+                            evidence = await state.resilient_call(
                                 component,
                                 execute_retrieval_phase,
                                 resolved_request=state.resolved_request,
@@ -4319,7 +3859,7 @@ async def unified_rag_pipeline(
                                 ),
                                 retriever=retriever,
                                 retrieval_config=retrieval_cfg or config,
-                                source_failures=source_failures,
+                                source_failures=state.source_failures,
                                 allowed_media_ids=rcfg.scope.include_media_ids,
                                 allowed_note_ids=rcfg.scope.include_note_ids,
                                 bypass_provider_failures=rcfg.runtime.credential_runtime is not None,
@@ -4327,26 +3867,26 @@ async def unified_rag_pipeline(
                         except asyncio.TimeoutError:
                             # This retrieval attempt did not finish. Keep base
                             # evidence, but disclose incomplete source coverage.
-                            source_failures.update(resolved_data_sources)
+                            state.source_failures.update(resolved_data_sources)
                             raise
                         except _RAG_PROVIDER_FAILURES as exc:
                             if rcfg.runtime.credential_runtime is None:
                                 raise
-                            _latch_optional_provider_failure(component, exc)
+                            state.latch_optional_provider_failure(component, exc)
                             return []
                         evidence_docs = getattr(evidence, "documents", None)
                         return list(evidence_docs or [])
 
-                    effective_retrieval_plan = _effective_retrieval_plan_for_query(retrieval_query)
+                    effective_retrieval_plan = _effective_retrieval_plan_for_query(state.retrieval_query)
 
-                    retrieved_evidence = await _resilient_call(
+                    retrieved_evidence = await state.resilient_call(
                         "retrieval",
                         execute_retrieval_phase,
                         resolved_request=state.resolved_request,
                         retrieval_plan=effective_retrieval_plan,
                         retriever=retriever,
                         retrieval_config=config,
-                        source_failures=source_failures,
+                        source_failures=state.source_failures,
                         allowed_media_ids=rcfg.scope.include_media_ids,
                         allowed_note_ids=rcfg.scope.include_note_ids,
                         bypass_provider_failures=rcfg.runtime.credential_runtime is not None,
@@ -4362,14 +3902,14 @@ async def unified_rag_pipeline(
                         (not documents)
                         and _scope_includes_data_source(resolved_data_sources, DataSource.MEDIA_DB)
                         and (state.media_db_path or rcfg.runtime.media_db is not None)
-                        and retrieval_search_mode in ("fts", "hybrid")
+                        and state.retrieval_search_mode in ("fts", "hybrid")
                     ):
                         try:
                             from .database_retrievers import MediaDBRetriever as _MDBR, RetrievalConfig as _RCfg
 
                             fb_cfg = _RCfg(
-                                max_results=retrieval_top_k,
-                                min_score=retrieval_min_score,
+                                max_results=state.retrieval_top_k,
+                                min_score=state.retrieval_min_score,
                                 use_fts=True,
                                 use_vector=False,
                                 include_metadata=True,
@@ -4382,7 +3922,7 @@ async def unified_rag_pipeline(
                                 media_db=rcfg.runtime.media_db,
                             )
                             fallback_docs = await fb_retriever.retrieve(
-                                query=retrieval_query,
+                                query=state.retrieval_query,
                                 media_type=None,
                                 allowed_media_ids=rcfg.scope.include_media_ids,
                             )
@@ -4407,16 +3947,16 @@ async def unified_rag_pipeline(
                     if (
                         state.enable_hyde
                         and hyde_vector
-                        and retrieval_search_mode == "hybrid"
+                        and state.retrieval_search_mode == "hybrid"
                         and _scope_includes_data_source(resolved_data_sources, DataSource.MEDIA_DB)
                     ):
                         try:
                             media_retr = retriever.retrievers.get(DataSource.MEDIA_DB)
                             if media_retr and hasattr(media_retr, "retrieve_hybrid"):
                                 hyde_docs = await media_retr.retrieve_hybrid(
-                                    query=retrieval_query,
+                                    query=state.retrieval_query,
                                     alpha=state.hybrid_alpha,
-                                    index_namespace=retrieval_index_namespace,
+                                    index_namespace=state.retrieval_index_namespace,
                                     query_vector=hyde_vector,
                                 )
                                 by_id: dict[str, Document] = {d.id: d for d in documents}
@@ -4443,12 +3983,12 @@ async def unified_rag_pipeline(
                     if state.expand_query and expanded_queries and len(expanded_queries) > 1:
                         exp_start = time.time()
                         try:
-                            extra_queries = [q for q in expanded_queries if q != retrieval_query]
+                            extra_queries = [q for q in expanded_queries if q != state.retrieval_query]
                             exp_docs: list[Document] = []
                             for eq in extra_queries:
                                 try:
                                     try:
-                                        expansion_top_k = max(1, int(retrieval_top_k or 1))
+                                        expansion_top_k = max(1, int(state.retrieval_top_k or 1))
                                         exp_cfg = replace(config, max_results=expansion_top_k)
                                     except (TypeError, ValueError):
                                         expansion_top_k = None
@@ -4505,14 +4045,14 @@ async def unified_rag_pipeline(
                             state.result.errors.append(f"Query expansion retrieval failed: {str(_exp_err)}")
 
                     state.result.documents = documents
-                    _apply_workspace_filtering_to_result()
+                    state.apply_workspace_filtering_to_result()
                     # Optional PRF second-pass retrieval to fill remaining slots
                     if (
                         rcfg.query_prep.enable_prf
                         and apply_prf
                         and PRFConfig
                         and state.result.documents
-                        and len(state.result.documents) < retrieval_top_k
+                        and len(state.result.documents) < state.retrieval_top_k
                     ):
                         try:
                             prf_cfg = PRFConfig(
@@ -4522,7 +4062,7 @@ async def unified_rag_pipeline(
                                 top_n=int(rcfg.query_prep.prf_top_n or 0),
                             )
                             prf_query, prf_meta = await apply_prf(
-                                retrieval_query,
+                                state.retrieval_query,
                                 state.result.documents,
                                 prf_cfg,
                             )
@@ -4530,8 +4070,8 @@ async def unified_rag_pipeline(
                             state.result.metadata["prf"].update(prf_meta)
 
                             # Only perform a second pass when PRF is enabled and query changed
-                            if prf_meta.get("enabled") and prf_query and prf_query != retrieval_query:
-                                remaining_slots = max(0, retrieval_top_k - len(state.result.documents))
+                            if prf_meta.get("enabled") and prf_query and prf_query != state.retrieval_query:
+                                remaining_slots = max(0, state.retrieval_top_k - len(state.result.documents))
                                 if remaining_slots > 0:
                                     prf_docs = await _execute_retrieval_variant(
                                         "retrieval_prf",
@@ -4546,7 +4086,7 @@ async def unified_rag_pipeline(
                                             state.result.documents.append(d)
                                             existing_ids.add(d.id)
                                             added += 1
-                                            if len(state.result.documents) >= retrieval_top_k:
+                                            if len(state.result.documents) >= state.retrieval_top_k:
                                                 break
                                     state.result.metadata["prf"]["second_pass_performed"] = True
                                     state.result.metadata["prf"]["second_pass_added"] = int(added)
@@ -4648,11 +4188,11 @@ async def unified_rag_pipeline(
                             # Only run additional retrievals for secondary subqueries
                             if len(subqueries) > 1:
                                 try:
-                                    subquery_max_results = max(1, int(retrieval_top_k or 1))
+                                    subquery_max_results = max(1, int(state.retrieval_top_k or 1))
                                     if doc_budget is not None:
                                         subquery_max_results = max(1, min(subquery_max_results, int(doc_budget)))
                                 except (TypeError, ValueError):
-                                    subquery_max_results = max(1, int(retrieval_top_k or 1))
+                                    subquery_max_results = max(1, int(state.retrieval_top_k or 1))
 
                                 async def _fetch_subquery(sq: str) -> list[Document]:
                                     try:
@@ -4670,7 +4210,7 @@ async def unified_rag_pipeline(
                                 subquery_results: dict[str, Any] = {}
                                 subqueries_to_run = (
                                     []
-                                    if _latched_optional_provider_failure(
+                                    if state.latched_optional_provider_failure(
                                         "retrieval_decomposition"
                                     )
                                     is not None
@@ -4694,7 +4234,7 @@ async def unified_rag_pipeline(
                                             remaining = max(0.0, time_budget - (time.time() - decomp_start))
                                             done, pending = await asyncio.wait(tasks, timeout=remaining)
                                             if pending:
-                                                source_failures.update(resolved_data_sources)
+                                                state.source_failures.update(resolved_data_sources)
                                         else:
                                             done, _ = await asyncio.wait(tasks)
                                     finally:
@@ -4746,7 +4286,7 @@ async def unified_rag_pipeline(
                                         state.result.documents,
                                         key=lambda d: getattr(d, "score", 0.0),
                                         reverse=True,
-                                    )[:retrieval_top_k]
+                                    )[:state.retrieval_top_k]
                                 except (TypeError, ValueError):
                                     # Fallback: leave documents in current order
                                     pass
@@ -4767,7 +4307,7 @@ async def unified_rag_pipeline(
                         ) as _dec_err:
                             state.result.errors.append(f"Query decomposition failed: {str(_dec_err)}")
 
-                    _apply_workspace_filtering_to_result()
+                    state.apply_workspace_filtering_to_result()
 
                     # Attach retrieval guidance prompt in metadata for downstream awareness/debugging
                     try:
@@ -4776,7 +4316,7 @@ async def unified_rag_pipeline(
                             state.result.metadata["retrieval_guidance"] = _rg
                     except (ImportError, OSError, RuntimeError, TypeError, ValueError):
                         pass
-                    state.result.metadata["sources_searched"] = list(retrieval_sources)
+                    state.result.metadata["sources_searched"] = list(state.retrieval_sources)
                     state.result.metadata["documents_retrieved"] = len(documents)
 
                     state.result.timings["retrieval"] = time.time() - retrieval_start
@@ -4857,7 +4397,7 @@ async def unified_rag_pipeline(
                     (not state.result.documents)
                     and _scope_includes_data_source(resolved_data_sources, DataSource.MEDIA_DB)
                     and (state.media_db_path or rcfg.runtime.media_db is not None)
-                    and retrieval_search_mode in ("fts", "hybrid")
+                    and state.retrieval_search_mode in ("fts", "hybrid")
                 ):
                     try:
                         from .database_retrievers import MediaDBRetriever as _MDBR, RetrievalConfig as _RCfg
@@ -4924,7 +4464,7 @@ async def unified_rag_pipeline(
             and not _skip_local_retrieval
             and state.result.documents
         ):
-            _apply_workspace_filtering_to_result()
+            state.apply_workspace_filtering_to_result()
             cache_retrieval_snapshot = _clone_cached_documents(
                 list(state.result.documents)
             )
@@ -5177,7 +4717,7 @@ async def unified_rag_pipeline(
                     followups = [f"detailed {state.query}", f"examples {state.query}"]
                 followups = [q for q in followups if isinstance(q, str) and q.strip()][:rcfg.retrieval.max_followup_searches]
                 if followups:
-                    if _latched_optional_provider_failure("retrieval_followup") is not None:
+                    if state.latched_optional_provider_failure("retrieval_followup") is not None:
                         follow_results = []
                     else:
                         # Calls already running when one fails finish normally; later
@@ -5477,7 +5017,7 @@ async def unified_rag_pipeline(
                                 sensitivity_filtered_docs.append(doc_ref)
 
                     if sensitivity_filtered_docs is not None:
-                        security_excluded_counts.update(
+                        state.security_excluded_counts.update(
                             incoming_source_counts
                             - Counter(_document_canonical_source(doc) for doc in sensitivity_filtered_docs)
                         )
@@ -5703,20 +5243,20 @@ async def unified_rag_pipeline(
 
                 # Create retrieval function for additional rounds
                 async def _additional_retrieval(gap_query: str, exclude_ids: set):
-                    if _latched_optional_provider_failure("evidence_accumulation") is not None:
+                    if state.latched_optional_provider_failure("evidence_accumulation") is not None:
                         return []
                     if not (MultiDatabaseRetriever and RetrievalConfig):
                         return []
                     try:
                         # Reuse the same retriever setup
-                        db_paths = _build_pipeline_db_paths()
+                        db_paths = state.build_pipeline_db_paths()
 
-                        retriever = _build_multi_retriever(db_paths)
+                        retriever = state.build_multi_retriever(db_paths)
                         config = RetrievalConfig(
-                            max_results=retrieval_top_k,
-                            min_score=retrieval_min_score,
-                            use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
-                            use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
+                            max_results=state.retrieval_top_k,
+                            min_score=state.retrieval_min_score,
+                            use_fts=(state.retrieval_search_mode in ["fts", "hybrid"]),
+                            use_vector=(state.retrieval_search_mode in ["vector", "hybrid"]),
                             include_metadata=True,
                             fts_level=state.fts_level,
                             enable_text_late_chunking=rcfg.processing.enable_text_late_chunking,
@@ -5732,9 +5272,9 @@ async def unified_rag_pipeline(
                             query=gap_query,
                             sources=data_sources,
                             config=config,
-                            source_failures=source_failures,
-                            index_namespace=retrieval_index_namespace,
-                            retrieval_plan=_retrieval_plan_for(gap_query),
+                            source_failures=state.source_failures,
+                            index_namespace=state.retrieval_index_namespace,
+                            retrieval_plan=state.retrieval_plan_for(gap_query),
                             allowed_media_ids=rcfg.scope.include_media_ids,
                             allowed_note_ids=rcfg.scope.include_note_ids,
                         )
@@ -5743,7 +5283,7 @@ async def unified_rag_pipeline(
                     except _RAG_PROVIDER_FAILURES as exc:
                         if rcfg.runtime.credential_runtime is None:
                             raise
-                        _latch_optional_provider_failure("evidence_accumulation", exc)
+                        state.latch_optional_provider_failure("evidence_accumulation", exc)
                         return []
                     except (
                         AttributeError,
@@ -5945,7 +5485,7 @@ async def unified_rag_pipeline(
 
                     # Re-run retrieval with rewritten query
                     if MultiDatabaseRetriever and RetrievalConfig:
-                        latched_code = _latched_optional_provider_failure("query_rewrite")
+                        latched_code = state.latched_optional_provider_failure("query_rewrite")
                         if latched_code is not None:
                             rewrite_attempts[-1].update(
                                 retrieval_coverage="degraded",
@@ -5953,14 +5493,14 @@ async def unified_rag_pipeline(
                             )
                             break
                         try:
-                            db_paths = _build_pipeline_db_paths()
+                            db_paths = state.build_pipeline_db_paths()
 
-                            retriever = _build_multi_retriever(db_paths)
+                            retriever = state.build_multi_retriever(db_paths)
                             retrieval_config = RetrievalConfig(
-                                max_results=retrieval_top_k,
-                                min_score=retrieval_min_score,
-                                use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
-                                use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
+                                max_results=state.retrieval_top_k,
+                                min_score=state.retrieval_min_score,
+                                use_fts=(state.retrieval_search_mode in ["fts", "hybrid"]),
+                                use_vector=(state.retrieval_search_mode in ["vector", "hybrid"]),
                                 include_metadata=True,
                                 fts_level=state.fts_level,
                                 enable_text_late_chunking=rcfg.processing.enable_text_late_chunking,
@@ -5975,9 +5515,9 @@ async def unified_rag_pipeline(
                                 query=rewritten_query,
                                 sources=data_sources,
                                 config=retrieval_config,
-                                source_failures=source_failures,
-                                index_namespace=retrieval_index_namespace,
-                                retrieval_plan=_retrieval_plan_for(rewritten_query),
+                                source_failures=state.source_failures,
+                                index_namespace=state.retrieval_index_namespace,
+                                retrieval_plan=state.retrieval_plan_for(rewritten_query),
                             )
 
                             if new_docs:
@@ -6026,7 +5566,7 @@ async def unified_rag_pipeline(
                         except _RAG_PROVIDER_FAILURES as ret_err:
                             if rcfg.runtime.credential_runtime is None:
                                 raise
-                            failure_code = _latch_optional_provider_failure(
+                            failure_code = state.latch_optional_provider_failure(
                                 "query_rewrite",
                                 ret_err,
                             )
@@ -6082,7 +5622,7 @@ async def unified_rag_pipeline(
         if state.enable_reranking and state.result.documents and state.reranking_strategy != "none":
             rerank_start = time.time()
             if state.reranking_strategy == "two_tier" and not (create_reranker and RerankingStrategy and RerankingConfig):
-                _record_profile_degradation(
+                state.record_profile_degradation(
                     component="reranking_strategy",
                     from_value="two_tier",
                     to_value="hybrid",
@@ -6259,7 +5799,7 @@ async def unified_rag_pipeline(
                             )
                         reranker = create_reranker(selected_strategy, rerank_config, llm_client=llm_client)
                         try:
-                            reranked = await _resilient_call(
+                            reranked = await state.resilient_call(
                                 "reranking",
                                 reranker.rerank,
                                 state.query,
@@ -6282,7 +5822,7 @@ async def unified_rag_pipeline(
                             "Two-tier reranker failed at runtime; degrading to hybrid strategy: {}",
                             rerank_exc,
                         )
-                        _record_profile_degradation(
+                        state.record_profile_degradation(
                             component="reranking_strategy",
                             from_value="two_tier",
                             to_value="hybrid",
@@ -6298,7 +5838,7 @@ async def unified_rag_pipeline(
                             sentinel_margin=rcfg.rerank.rerank_sentinel_margin,
                         )
                         reranker = create_reranker(selected_strategy, rerank_config, llm_client=llm_client)
-                        reranked = await _resilient_call("reranking", reranker.rerank, state.query, state.result.documents)
+                        reranked = await state.resilient_call("reranking", reranker.rerank, state.query, state.result.documents)
                     if reranked and hasattr(reranked[0], "document"):
                         state.result.documents = [sd.document for sd in reranked[: (rcfg.rerank.rerank_top_k or state.top_k)]]
                     else:
@@ -6359,7 +5899,7 @@ async def unified_rag_pipeline(
                                 state.result.metadata.setdefault("reranking_calibration", {})
                                 state.result.metadata["reranking_calibration"].update(reranker.last_metadata)
                                 # Attach learned-fusion specific decoration when applicable
-                                _decorate_calibration_metadata()
+                                state.decorate_calibration_metadata()
                     except (AttributeError, RuntimeError, TypeError, ValueError):
                         pass
 
@@ -6418,7 +5958,7 @@ async def unified_rag_pipeline(
                                         "gated": gated_flag,
                                     }
                                     # Ensure learned-fusion metadata decoration is applied
-                                    _decorate_calibration_metadata()
+                                    state.decorate_calibration_metadata()
                         except (AttributeError, TypeError, ValueError):
                             pass
 
@@ -6922,7 +6462,7 @@ async def unified_rag_pipeline(
         except (AttributeError, TypeError, ValueError):
             gated_generation = False
 
-        effective_enable_generation = _resolve_effective_enable_generation()
+        effective_enable_generation = state.resolve_effective_enable_generation()
 
         if (
             effective_enable_generation
@@ -7254,7 +6794,7 @@ async def unified_rag_pipeline(
                             generation_prompt: Optional[str] = None,
                             max_generation_tokens: Optional[int] = None,
                         ) -> Any:
-                            return await _resilient_call(
+                            return await state.resilient_call(
                                 "generation",
                                 generator.generate,
                                 query=query,
@@ -7496,7 +7036,7 @@ async def unified_rag_pipeline(
                     if bool(state.require_hard_citations):
                         cov = float(hc.get("coverage") or 0.0)
                         if cov < 1.0:
-                            _apply_generation_gate("missing_hard_citations", coverage=cov)
+                            state.apply_generation_gate("missing_hard_citations", coverage=cov)
                             try:
                                 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 
@@ -7729,13 +7269,13 @@ async def unified_rag_pipeline(
 
                     # Build a per-claim retrieval that uses MultiDatabaseRetriever and hybrid search when available
                     async def _retrieve_for_claim(c_text: str, top_k: int = 5):
-                        if _latched_optional_provider_failure("per_claim") is not None:
+                        if state.latched_optional_provider_failure("per_claim") is not None:
                             return state.result.documents[:top_k] if state.result.documents else []
                         try:
                             if MultiDatabaseRetriever and RetrievalConfig:
-                                db_paths = _build_pipeline_db_paths()
+                                db_paths = state.build_pipeline_db_paths()
                                 # Initialize multi retriever scoped to user's databases
-                                mdr = _build_multi_retriever(db_paths)
+                                mdr = state.build_multi_retriever(db_paths)
                                 ds = list(resolved_data_sources)
 
                                 # For media_db, attempt hybrid; for others, simple retrieve
@@ -7778,7 +7318,7 @@ async def unified_rag_pipeline(
                         except _RAG_PROVIDER_FAILURES as exc:
                             if rcfg.runtime.credential_runtime is None:
                                 raise
-                            _latch_optional_provider_failure("per_claim", exc)
+                            state.latch_optional_provider_failure("per_claim", exc)
                             return state.result.documents[:top_k] if state.result.documents else []
                         except (
                             AttributeError,
@@ -8033,7 +7573,7 @@ async def unified_rag_pipeline(
                                         and state.media_db_path
                                         and _scope_includes_data_source(resolved_data_sources, DataSource.MEDIA_DB)
                                     ):
-                                        mdr = _build_multi_retriever({"media_db": state.media_db_path})
+                                        mdr = state.build_multi_retriever({"media_db": state.media_db_path})
                                         conf = RetrievalConfig(
                                             max_results=min(10, state.top_k),
                                             min_score=rcfg.retrieval.min_score,
@@ -8049,7 +7589,7 @@ async def unified_rag_pipeline(
                                         )
                                         numeric_added: list[Document] = []
                                         for tok in list(nf.missing)[:3]:
-                                            latched_code = _latched_optional_provider_failure(
+                                            latched_code = state.latched_optional_provider_failure(
                                                 "numeric_fidelity"
                                             )
                                             if latched_code is not None:
@@ -8063,7 +7603,7 @@ async def unified_rag_pipeline(
                                             except _RAG_PROVIDER_FAILURES as exc:
                                                 if rcfg.runtime.credential_runtime is None:
                                                     raise
-                                                failure_code = _latch_optional_provider_failure(
+                                                failure_code = state.latch_optional_provider_failure(
                                                     "numeric_fidelity",
                                                     exc,
                                                 )
@@ -8237,7 +7777,7 @@ async def unified_rag_pipeline(
                 # Behavior toggles on low confidence and not fixed
                 low_confidence = (vres.unsupported_ratio > rcfg.verification.adaptive_unsupported_threshold) and (not vres.fixed)
                 if low_confidence:
-                    _apply_generation_gate(
+                    state.apply_generation_gate(
                         "nli_low_confidence",
                         unsupported_ratio=vres.unsupported_ratio,
                         threshold=rcfg.verification.adaptive_unsupported_threshold,
@@ -8706,7 +8246,7 @@ async def unified_rag_pipeline(
             except ImportError:
                 state.result.errors.append("Cost tracking module not available")
 
-        _apply_workspace_filtering_to_result()
+        state.apply_workspace_filtering_to_result()
 
         # ========== CACHE STORAGE ==========
         if (
@@ -8716,7 +8256,7 @@ async def unified_rag_pipeline(
         ):
             try:
                 # Store in cache for future use
-                cache = _get_cache_instance()
+                cache = state.get_cache_instance()
 
                 if cache:
                     # Support both async/sync and set/add method names
@@ -8791,7 +8331,7 @@ async def unified_rag_pipeline(
             except ImportError:
                 state.result.errors.append("Performance monitor not available")
 
-    except _EarlyReturn:
+    except _run_state.EarlyReturn:
         pass
     except _RAG_PROVIDER_FAILURES:
         raise

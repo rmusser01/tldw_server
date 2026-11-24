@@ -245,6 +245,29 @@ def test_state_init_goes_right_after_the_first_statement_and_is_verified(tmp_pat
     assert t.run("verify") == 1
 
 
+def test_classes_key_moves_a_local_class_to_run_state(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = (
+        "async def pipe(query):\n"
+        '    """Doc."""\n\n'
+        "    class _Stop(Exception):\n"
+        '        """Sentinel."""\n\n'
+        "    def _h():\n"
+        "        return 1\n\n"
+        "    try:\n"
+        "        raise _Stop()\n"
+        "    except _Stop:\n"
+        "        return _h()\n"
+    )
+    t = Tree(tmp_path, src, classes={"_Stop": "Stop"}, rewrite={"_Stop": "_run_state.Stop", "_h": "state.h"}, hoist={"_h": "h"})
+    assert t.run("apply") == 0
+    head, state = t.text(FILE), t.text(f"{PKG}/run_state.py")
+    assert "class _Stop" not in head and "except _run_state.Stop:" in head
+    assert state.index("class Stop(Exception):") < state.index("class PipelineState") and '"""Sentinel."""' in state
+    assert t.run("verify") == 0, capsys.readouterr().out
+    _edit(t, f"{PKG}/run_state.py", '"""Sentinel."""', '"""Other."""')
+    assert t.run("verify") == 1
+
+
 def test_move_prefixes_module_globals_with_up(tmp_path: Path) -> None:
     t = full(tmp_path)
     assert t.run("apply") == 0
