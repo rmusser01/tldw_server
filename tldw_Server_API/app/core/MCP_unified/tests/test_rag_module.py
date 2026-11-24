@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.rag_module imp
 from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
 from tldw_Server_API.app.core.Utils.app_services import app_services
+from tldw_Server_API.tests.helpers.run_config_spy import spy_from_kwargs
 
 pytestmark = pytest.mark.unit
 
@@ -389,6 +390,7 @@ async def test_rag_capabilities_reports_mcp_top_k_limit() -> None:
 async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
     calls: dict[str, object] = {}
+    passed = spy_from_kwargs(monkeypatch)
 
     async def fake_pipeline(rcfg):
         kwargs = rcfg.as_kwargs()
@@ -421,7 +423,7 @@ async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatc
     assert "answer" not in out  # nosec B101
     assert calls["enable_generation"] is False  # nosec B101
     assert calls["sources"] == ["media_db"]  # nosec B101
-    assert calls["include_sources"] is True  # nosec B101
+    assert passed["include_sources"] is True  # nosec B101  (the config default is also True: check the module passed it)
     assert calls["media_db_path"] == "media.db"  # nosec B101
     assert calls["notes_db_path"] == "notes.db"  # nosec B101
 
@@ -520,6 +522,7 @@ async def test_rag_search_applies_supported_scopes_and_disables_external_researc
 ) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
     calls: dict[str, object] = {}
+    passed = spy_from_kwargs(monkeypatch)
 
     async def fake_pipeline(rcfg):
         kwargs = rcfg.as_kwargs()
@@ -551,13 +554,12 @@ async def test_rag_search_applies_supported_scopes_and_disables_external_researc
     assert calls["include_media_ids"] == [1, 2]  # nosec B101
     assert calls["include_note_ids"] == ["note-7"]  # nosec B101
     assert calls["workspace_id"] == "ws-1"  # nosec B101
-    assert calls["enable_research_loop"] is False  # nosec B101
-    assert calls["search_url_scraping"] is False  # nosec B101
-    assert calls["enable_image_search"] is False  # nosec B101
-    assert calls["enable_video_search"] is False  # nosec B101
-    assert calls["enable_web_fallback"] is False  # nosec B101
-    assert calls["enable_query_classification"] is False  # nosec B101
-    assert calls["search_depth_mode"] is None  # nosec B101
+    # The pipeline config defaults these to False, so check what the module actually passed.
+    assert rag_module_impl._mcp_safe_search_agent_overrides() == rag_module_impl._EXTERNAL_RESEARCH_DISABLED_OVERRIDES  # nosec B101
+    for key in ("enable_research_loop", "search_url_scraping", "enable_image_search", "enable_video_search",
+                "enable_web_fallback", "enable_query_classification", "enable_discussion_search", "web_fallback_enabled"):
+        assert key in passed and passed[key] is False, key  # nosec B101
+    assert "search_depth_mode" in passed and passed["search_depth_mode"] is None  # nosec B101
 
 
 async def test_rag_capabilities_uses_only_protocol_rate_control() -> None:

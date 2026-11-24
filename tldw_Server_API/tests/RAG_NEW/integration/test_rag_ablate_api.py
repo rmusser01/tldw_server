@@ -84,16 +84,21 @@ async def test_authenticated_ablate_passes_same_real_runtime_to_all_four_calls(m
     seen = []
     _install_direct_ablate_fakes(monkeypatch, runtime)
 
-    async def provider_boundary(rcfg=None, **agentic_kwargs):  # rcfg: run_rag_pipeline; kwargs: agentic_rag_pipeline
-        kwargs = rcfg.as_kwargs() if rcfg is not None else agentic_kwargs
+    async def _boundary(kwargs):
         received = kwargs["credential_runtime"]
         seen.append(received)
         handle = await received.resolve("openai")
         assert handle.api_key == _SENTINEL  # nosec B101
         return UnifiedSearchResult(documents=[], query="ablate")
 
+    async def provider_boundary(rcfg):
+        return await _boundary(rcfg.as_kwargs())
+
+    async def provider_boundary_agentic(**kwargs):
+        return await _boundary(kwargs)
+
     monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", provider_boundary)
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", provider_boundary)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", provider_boundary_agentic)
 
     response = await rag_endpoint.rag_ablate(
         request_raw=_request(),
@@ -114,12 +119,16 @@ async def test_ablate_with_answer_refuses_an_over_quota_user(monkeypatch):
     ran = []
     _install_direct_ablate_fakes(monkeypatch, runtime)
 
-    async def recorder(rcfg=None, **_kwargs):  # rcfg: run_rag_pipeline; kwargs: agentic_rag_pipeline
+    async def recorder(rcfg):
+        ran.append(True)
+        return UnifiedSearchResult(documents=[], query="ablate")
+
+    async def recorder_agentic(**_kwargs):
         ran.append(True)
         return UnifiedSearchResult(documents=[], query="ablate")
 
     monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", recorder)
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", recorder)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", recorder_agentic)
     refuse_llm_work(monkeypatch)
 
     with pytest.raises(LLMQuotaExceededError):
@@ -140,12 +149,16 @@ async def test_ablate_without_answer_is_not_refused_by_the_llm_quota(monkeypatch
     ran = []
     _install_direct_ablate_fakes(monkeypatch, runtime)
 
-    async def recorder(rcfg=None, **_kwargs):  # rcfg: run_rag_pipeline; kwargs: agentic_rag_pipeline
+    async def recorder(rcfg):
+        ran.append(True)
+        return UnifiedSearchResult(documents=[], query="ablate")
+
+    async def recorder_agentic(**_kwargs):
         ran.append(True)
         return UnifiedSearchResult(documents=[], query="ablate")
 
     monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", recorder)
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", recorder)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", recorder_agentic)
     refuse_llm_work(monkeypatch)
 
     await rag_endpoint.rag_ablate(
@@ -326,13 +339,19 @@ async def test_ablate_passes_an_llm_quota_refusal_through(monkeypatch):
     runtime = _CountingRuntime()
     _install_direct_ablate_fakes(monkeypatch, runtime)
 
-    async def refused(rcfg=None, **_kwargs):  # rcfg: run_rag_pipeline; kwargs: agentic_rag_pipeline
-        raise LLMQuotaExceededError(
+    def _quota_refusal():
+        return LLMQuotaExceededError(
             category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
         )
 
+    async def refused(rcfg):
+        raise _quota_refusal()
+
+    async def refused_agentic(**_kwargs):
+        raise _quota_refusal()
+
     monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", refused)
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", refused)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", refused_agentic)
 
     with pytest.raises(LLMQuotaExceededError):
         await rag_endpoint.rag_ablate(

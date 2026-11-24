@@ -700,12 +700,11 @@ def _module_file(repo_root: Path, dotted: str) -> Path | None:
 
 
 def _loads_name(path: Path, name: str) -> bool:
+    """Whether the module reads ``name`` (a Name load or attribute access); an import binding alone does not count."""
     for n in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load):
             return True
         if isinstance(n, ast.Attribute) and n.attr == name and isinstance(n.ctx, ast.Load):
-            return True
-        if isinstance(n, ast.ImportFrom) and any(a.name == name for a in n.names):
             return True
     return False
 
@@ -763,7 +762,9 @@ def test_entry_point_patch_on_a_module_that_dropped_the_call_is_reported(tmp_pat
         "\n\ndef test_b(monkeypatch):\n    monkeypatch.setattr(m, 'unified_rag_pipeline', 1)\n"
     )
     assert len(entry_patch_violations([tests], tmp_path)) == 2
-    mod.write_text("from x import run_rag_pipeline, unified_rag_pipeline\n")
+    mod.write_text("from x import run_rag_pipeline, unified_rag_pipeline\n")  # imported, never used
+    assert len(entry_patch_violations([tests], tmp_path)) == 2
+    mod.write_text("from x import run_rag_pipeline, unified_rag_pipeline\n\n\nasync def f():\n    await run_rag_pipeline(1)\n    return x.unified_rag_pipeline\n")
     assert entry_patch_violations([tests], tmp_path) == []
 
 

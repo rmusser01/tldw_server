@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Evaluations.recipe_runs_jobs_worker import (
     start_recipe_run_jobs_worker,
 )
 from tldw_Server_API.app.core.Evaluations.recipe_runs_service import RecipeRunsService
+from tldw_Server_API.tests.helpers.run_config_spy import spy_from_kwargs
 
 
 def _inline_dataset() -> list[dict[str, Any]]:
@@ -555,6 +556,7 @@ def test_handle_recipe_run_job_executes_rag_answer_quality_live_mode_with_frozen
     import tldw_Server_API.app.core.Evaluations.recipes.rag_answer_quality_execution as execution
 
     captured_request: dict[str, Any] = {}
+    passed = spy_from_kwargs(monkeypatch)
 
     async def _fake_unified_rag_pipeline(rcfg):
         kwargs = rcfg.as_kwargs()
@@ -637,12 +639,19 @@ def test_handle_recipe_run_job_executes_rag_answer_quality_live_mode_with_frozen
     assert captured_request["top_k"] == 5
     assert captured_request["enable_reranking"] is False
     assert captured_request["expand_query"] is False
+    assert passed["expand_query"] is False  # explicit: the config default is also False
     assert captured_request["enable_intent_routing"] is False
+    assert passed["enable_intent_routing"] is False  # explicit: the config default is also False
     assert captured_request["enable_prf"] is False
+    assert passed["enable_prf"] is False  # explicit: the config default is also False
     assert captured_request["enable_hyde"] is False
+    assert passed["enable_hyde"] is False  # explicit: the config default is also False
     assert captured_request["enable_post_verification"] is False
+    assert passed["enable_post_verification"] is False  # explicit: the config default is also False
     assert captured_request["adaptive_rerun_on_low_confidence"] is False
+    assert passed["adaptive_rerun_on_low_confidence"] is False  # explicit: the config default is also False
     assert captured_request["adaptive_hybrid_weights"] is False
+    assert passed["adaptive_hybrid_weights"] is False  # explicit: the config default is also False
     assert refreshed.metadata["recipe_report_inputs"]["retrieval_baseline_ref"] == retrieval_record.run_id
     assert refreshed.metadata["recipe_report_inputs"]["retrieval_preset_hash"]
     assert refreshed.metadata["candidate_results"][0]["sample_results"][0]["retrieved_contexts"] == [

@@ -14,6 +14,8 @@ This module tests all RAG and search-related workflow adapters:
 
 import pytest
 import sys
+
+from tldw_Server_API.tests.helpers.run_config_spy import spy_from_kwargs
 from unittest.mock import AsyncMock, MagicMock, patch
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -246,6 +248,7 @@ class TestRAGSearchAdapter:
         """Test RAG search adapter passes through advanced options."""
         from tldw_Server_API.app.core.Workflows.adapters.rag import run_rag_search_adapter
 
+        passed = spy_from_kwargs(monkeypatch)
         mock_pipeline = AsyncMock(return_value=mock_rag_result)
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.search.run_rag_pipeline",
@@ -270,6 +273,7 @@ class TestRAGSearchAdapter:
 
         call_kwargs = mock_pipeline.call_args[0][0].as_kwargs()
         assert call_kwargs.get("enable_reranking") is True
+        assert passed["enable_reranking"] is True and passed["enable_generation"] is True  # config defaults are also True
         assert call_kwargs.get("enable_citations") is True
         assert call_kwargs.get("enable_generation") is True
         assert call_kwargs.get("min_score") == 0.5
