@@ -167,6 +167,8 @@ One helper in AuthNZ, `blocked_owner_ids()` / `owner_blocked(user_id)`: true whe
 - The background pause takes up to the cache interval (about 30 seconds) to apply.
 - The alert is in-app. A user with no other signed-in browser sees it on their next sign-in, not before.
 - Any signed-in browser session can lock, including an intruder's. The cost to the owner is one email round trip. Requiring the password first was rejected: the password may be what leaked.
+- Only one previous email address is kept. If the owner changes their email and an intruder holding the password changes it again within 7 days, lock mail goes to the oldest and the newest address; the one in between gets only the change notice.
+- Administrators can still change their own email through the admin endpoints without a password; admin sessions are outside this threat model.
 - Org and team API keys owned by a locked user stop working for the whole team until unlock.
 - Magic link has no MFA step for ordinary sign-in today (only the unlock path gets one here). Existing gap, separate task.
 - The hosted-mode `/api/auth/*` proxy is outside this repo; `is_current` and client IPs there are unverified.
