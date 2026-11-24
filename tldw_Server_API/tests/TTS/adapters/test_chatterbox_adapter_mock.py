@@ -5,6 +5,7 @@
 import pytest
 pytestmark = pytest.mark.unit
 import asyncio
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 #
@@ -1079,23 +1080,53 @@ class TestChatterboxAdapterMock:
 
 @pytest.mark.asyncio
 class TestChatterboxAdapterSanitizedLogs:
-    async def test_initialization_failure_log_sanitizes_exception_text(self):
+    async def test_initialization_failure_log_sanitizes_exception_text(self, capsys):
         raw_marker = "RAW_CHATTERBOX_INIT_SECRET_MARKER token=init-secret /tmp/chatterbox-init.wav"
         adapter = ChatterboxAdapter({})
+        formatted_exceptions = []
+        original_import = __import__
+
+        def fail_chatterbox_import(name, *args, **kwargs):
+            if name == "chatterbox" or name.startswith("chatterbox."):
+                raise RuntimeError(raw_marker)
+            return original_import(name, *args, **kwargs)
+
+        def format_with_time_import(record):
+            # TASK-15631.27: logging imports must survive the injected package fault.
+            import time
+
+            formatted_exceptions.append(record["exception"])
+            return f"{time.strftime('%H:%M:%S')} | {{message}}\n"
 
         with _LogCapture() as messages:
-            with patch(
-                "tldw_Server_API.app.core.TTS.adapters.chatterbox_adapter._get_torch",
-                return_value=MagicMock(),
-            ):
-                with patch("builtins.__import__", side_effect=RuntimeError(raw_marker)):
-                    success = await adapter.initialize()
+            sink_id = chatterbox_mod.logger.add(
+                sys.stderr,
+                level="ERROR",
+                format=format_with_time_import,
+            )
+            try:
+                with patch(
+                    "tldw_Server_API.app.core.TTS.adapters.chatterbox_adapter._get_torch",
+                    return_value=MagicMock(),
+                ):
+                    with patch("builtins.__import__", side_effect=fail_chatterbox_import):
+                        success = await adapter.initialize()
+            finally:
+                chatterbox_mod.logger.remove(sink_id)
 
+        stderr = capsys.readouterr().err
         assert success is False
         assert adapter._status == ProviderStatus.ERROR
         assert any("Initialization failed" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
         assert all("init-secret" not in message for message in messages)
+        assert formatted_exceptions == [None]
+        assert "Initialization failed (RuntimeError)" in stderr
+        assert raw_marker not in stderr
+        assert "RAW_CHATTERBOX_INIT_SECRET_MARKER" not in stderr
+        assert "init-secret" not in stderr
+        assert "chatterbox-init.wav" not in stderr
+        assert "Logging error" not in stderr
 
     async def test_voice_reference_processing_log_sanitizes_error_text(self):
         raw_marker = "RAW_CHATTERBOX_REFERENCE_PROCESSING_SECRET_MARKER token=voice-secret"
