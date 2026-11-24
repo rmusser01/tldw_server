@@ -746,7 +746,9 @@ async def isolated_test_environment(monkeypatch, tmp_path):
                 totp_secret TEXT,
                 backup_codes TEXT,
                 created_by INTEGER REFERENCES users(id),
-                password_changed_at TIMESTAMP
+                password_changed_at TIMESTAMP,
+                previous_email VARCHAR(255),
+                email_changed_at TIMESTAMPTZ
             )
         """)
 
@@ -1536,7 +1538,9 @@ async def setup_test_database(monkeypatch):
                 totp_secret TEXT,
                 backup_codes TEXT,
                 created_by INTEGER REFERENCES users(id),
-                password_changed_at TIMESTAMP
+                password_changed_at TIMESTAMP,
+                previous_email VARCHAR(255),
+                email_changed_at TIMESTAMPTZ
             )
         """)
 
