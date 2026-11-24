@@ -9,7 +9,7 @@
 
 ## Decision
 
-Keep a single owner-bound document association with each linked native Chat record. Store the canonical Media UUID and bind the link to the original conversation record. Media authorizes document access. Chat authorizes conversation access and owns the transcript, continuation, and lifecycle. Document-scoped reads and sends require both authorities and a matching association.
+Keep a single owner-bound document association with each linked native Chat record. Store the canonical Media UUID and bind the link to the original conversation record. Media authorizes document access. Chat authorizes conversation access and owns the transcript, continuation, and lifecycle. Opening or admitting a turn in a linked Document Workspace chat requires both authorities and a matching association at the server operation.
 
 ## Context
 
@@ -26,5 +26,6 @@ Document Workspace discovers conversation tabs through an IndexedDB index on the
 ## Consequences
 
 - One document can have many chats. Each chat has at most one document link, tied to its own native record.
-- Association writes are idempotent. Losing the link response or retrying after an import preserves the existing native chat ID. Discovery considers only live chats with a verified link and live documents accessible to the caller.
-- The browser can reconcile a verified existing server copy. Saving a truly browser-only conversation requires the user to choose **Save to server** for that chat and the account to support native import. Drafts and tab selection stay in the browser.
+- Association writes are idempotent. Losing the link response or retrying after an import preserves the existing native chat identity. Discovery requires a saved message, a live chat with a verified link, and a live document accessible to the caller.
+- Automatic reconciliation of a browser link requires a matching saved Media UUID and verified chat ownership. Numeric-only legacy links require the user to confirm the document. Saving a browser-only conversation requires **Save to server** for that chat and account support for native import. Drafts and tab selection stay in the browser.
+- Removing document access blocks Document Workspace discovery and retrieval. Passages already included in saved transcripts follow ordinary Chat ownership and retention. Source links require fresh Media access.
