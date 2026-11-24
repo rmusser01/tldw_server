@@ -116,13 +116,26 @@ class TestUserEndpointsIntegration:
         update_response = client.put(
             "/api/v1/users/me",
             headers={"Authorization": f"Bearer {token}"},
-            json={"email": "newemail@example.com"}
+            json={"email": "newemail@example.com", "current_password": "Update@Pass#2024!"}
         )
 
         assert update_response.status_code == 200
         data = update_response.json()
         assert data["email"] == "newemail@example.com"
         assert data["username"] == "updateuser"
+
+    @pytest.mark.asyncio
+    async def test_update_email_without_password_is_refused(self, isolated_test_environment):
+        client, db_name = isolated_test_environment
+        password = "Refuse@Change#2024!"
+        client.post("/api/v1/auth/register", json={"username": "nopass", "email": "nopass@example.com", "password": password})
+        token = client.post("/api/v1/auth/login", data={"username": "nopass", "password": password}).json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        refused = client.put("/api/v1/users/me", headers=headers, json={"email": "nopass-new@example.com"})
+        assert refused.status_code == 403, refused.text
+        assert refused.json()["error_code"] == "current_password_required"
+        assert client.get("/api/v1/users/me", headers=headers).json()["email"] == "nopass@example.com"
 
     @pytest.mark.asyncio
     async def test_email_change_keeps_the_original_previous_address_postgres(self, isolated_test_environment):

@@ -22,20 +22,20 @@ from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOver
 from tldw_Server_API.app.core.UserProfiles.update_service import UserProfileUpdateService
 from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
 
-OWNER_EMAIL = "owner@example.test"
+OWNER_EMAIL = "owner@example.com"
 OWNER_PASSWORD = "Owner-Pass-2026!"
 
 
 def test_migration_108_adds_email_change_columns_once(tmp_path) -> None:
     with sqlite3.connect(tmp_path / "users.db") as conn:
         conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL)")
-        conn.execute("INSERT INTO users (id, email) VALUES (1, 'owner@example.test')")
+        conn.execute("INSERT INTO users (id, email) VALUES (1, 'owner@example.com')")
         migrations.migration_108_add_users_email_change_columns(conn)
         migrations.migration_108_add_users_email_change_columns(conn)
         columns = [row[1] for row in conn.execute("PRAGMA table_info(users)")]
         row = conn.execute("SELECT email, previous_email, email_changed_at FROM users").fetchone()
     assert (columns.count("previous_email"), columns.count("email_changed_at")) == (1, 1)
-    assert row == ("owner@example.test", None, None)
+    assert row == ("owner@example.com", None, None)
 
 
 def test_migration_108_skips_without_users_table(tmp_path) -> None:
@@ -82,25 +82,25 @@ async def _change(db, email: str):
 
 @pytest.mark.asyncio
 async def test_email_change_keeps_the_previous_address_and_time(owner_db):
-    await _change(owner_db, "second@example.test")
+    await _change(owner_db, "second@example.com")
     email, previous, changed_at = await _columns(owner_db)
-    assert (email, previous) == ("second@example.test", OWNER_EMAIL)
+    assert (email, previous) == ("second@example.com", OWNER_EMAIL)
     assert changed_at is not None
 
 
 @pytest.mark.asyncio
 async def test_second_change_within_seven_days_keeps_the_original_previous_address(owner_db):
-    await _change(owner_db, "typo@example.test")
-    await _change(owner_db, "fixed@example.test")
-    assert (await _columns(owner_db))[:2] == ("fixed@example.test", OWNER_EMAIL)
+    await _change(owner_db, "typo@example.com")
+    await _change(owner_db, "fixed@example.com")
+    assert (await _columns(owner_db))[:2] == ("fixed@example.com", OWNER_EMAIL)
 
 
 @pytest.mark.asyncio
 async def test_change_after_seven_days_records_the_immediately_previous_address(owner_db):
-    await _change(owner_db, "second@example.test")
+    await _change(owner_db, "second@example.com")
     _raw(owner_db, "UPDATE users SET email_changed_at = datetime('now', '-8 days') WHERE id = ?")
-    await _change(owner_db, "third@example.test")
-    assert (await _columns(owner_db))[:2] == ("third@example.test", "second@example.test")
+    await _change(owner_db, "third@example.com")
+    assert (await _columns(owner_db))[:2] == ("third@example.com", "second@example.com")
 
 
 @pytest.mark.asyncio
@@ -119,3 +119,135 @@ async def test_own_profile_email_edit_records_the_previous_address(owner_db):
         )
     assert result.applied == ["identity.email"]
     assert (await _columns(owner_db))[:2] == ("second@example.com", OWNER_EMAIL)
+
+
+class _FixedStorage:
+    async def user_quota_status(self, user_id: int) -> dict[str, float]:
+        return {"quota_mb": 5120, "used_mb": 0.0}
+
+    async def native_usage(self, user_id: int) -> dict[str, int]:
+        return {"bytes": 0}
+
+
+@pytest.fixture
+async def email_api(owner_db, monkeypatch):
+    async def _principal():
+        return AuthPrincipal(kind="user", user_id=owner_db.user_id, username="owner", email=OWNER_EMAIL, roles=["user"])
+
+    async def _storage():
+        return _FixedStorage()
+
+    async def _no_rate_limit():
+        return None
+
+    monkeypatch.setattr("tldw_Server_API.app.services.storage_quota_service.get_storage_service", _storage)
+    app = FastAPI()
+    app.include_router(users.router, prefix="/api/v1")
+    app.include_router(v2_profiles.router, prefix="/api/v2")
+    app.dependency_overrides[get_auth_principal] = _principal
+    app.dependency_overrides[check_rate_limit] = _no_rate_limit
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+
+
+EMAIL_UPDATE = {"updates": [{"key": "identity.email", "value": "new@example.com"}]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("blank_hash", "password", "code"),
+    [
+        (False, None, "current_password_required"),
+        (False, "Wrong-Pass-2026!", "current_password_invalid"),
+        (True, OWNER_PASSWORD, "email_change_requires_admin"),
+    ],
+    ids=["missing", "wrong", "no-password-account"],
+)
+async def test_put_email_change_without_the_owners_password_is_refused(owner_db, email_api, blank_hash, password, code):
+    if blank_hash:
+        _raw(owner_db, "UPDATE users SET password_hash = '' WHERE id = ?")
+    body = {"email": "new@example.com", **({"current_password": password} if password else {})}
+    response = await email_api.put("/api/v1/users/me", json=body)
+    assert (response.status_code, response.json()["error_code"]) == (403, code)
+    assert (await _columns(owner_db))[:2] == (OWNER_EMAIL, None)
+
+
+@pytest.mark.asyncio
+async def test_put_email_change_with_the_owners_password_succeeds(owner_db, email_api):
+    response = await email_api.put("/api/v1/users/me", json={"email": "new@example.com", "current_password": OWNER_PASSWORD})
+    assert response.status_code == 200, response.text
+    assert response.json()["email"] == "new@example.com"
+    assert (await _columns(owner_db))[:2] == ("new@example.com", OWNER_EMAIL)
+
+
+@pytest.mark.asyncio
+async def test_patch_v1_email_change_requires_the_owners_password(owner_db, email_api):
+    refused = await email_api.patch("/api/v1/users/me/profile", json=EMAIL_UPDATE)
+    assert (refused.status_code, refused.json()["error_code"]) == (403, "current_password_required")
+    accepted = await email_api.patch("/api/v1/users/me/profile", json={**EMAIL_UPDATE, "current_password": OWNER_PASSWORD})
+    assert accepted.status_code == 200, accepted.text
+    assert "identity.email" in accepted.json()["applied"]
+    assert (await _columns(owner_db))[:2] == ("new@example.com", OWNER_EMAIL)
+
+
+@pytest.mark.asyncio
+async def test_patch_v2_email_change_requires_the_owners_password(owner_db, email_api):
+    response = await email_api.patch("/api/v2/users/me/profile", json={**EMAIL_UPDATE, "current_password": "Wrong-Pass-2026!"})
+    assert response.status_code == 403
+    assert response.json()["detail"]["error_code"] == "current_password_invalid"
+    assert (await _columns(owner_db))[0] == OWNER_EMAIL
+
+
+@pytest.mark.asyncio
+async def test_refused_email_change_applies_none_of_the_other_updates(owner_db, email_api):
+    body = {
+        "updates": [{"key": "preferences.ui.theme", "value": "paper"}, *EMAIL_UPDATE["updates"]],
+        "current_password": "Wrong-Pass-2026!",
+    }
+    response = await email_api.patch("/api/v1/users/me/profile", json=body)
+    assert response.status_code == 403
+    overrides = await UserProfileOverridesRepo(owner_db.pool).list_overrides_for_user(owner_db.user_id)
+    assert all(row["key"] != "preferences.ui.theme" for row in overrides)
+
+
+@pytest.mark.asyncio
+async def test_unchanged_address_in_other_case_needs_no_password(owner_db, email_api):
+    body = {"updates": [{"key": "identity.email", "value": OWNER_EMAIL.upper()}]}
+    response = await email_api.patch("/api/v1/users/me/profile", json=body)
+    assert response.status_code == 200, response.text
+    assert await _columns(owner_db) == (OWNER_EMAIL, None, None)
+
+
+@pytest.mark.asyncio
+async def test_any_changed_identity_email_in_the_request_needs_the_password(owner_db, email_api):
+    body = {
+        "updates": [
+            {"key": "identity.email", "value": "new@example.com"},
+            {"key": "identity.email", "value": OWNER_EMAIL},
+        ]
+    }
+    response = await email_api.patch("/api/v1/users/me/profile", json=body)
+    assert (response.status_code, response.json()["error_code"]) == (403, "current_password_required")
+    assert await _columns(owner_db) == (OWNER_EMAIL, None, None)
+
+
+@pytest.mark.asyncio
+async def test_dry_run_email_change_needs_no_password(owner_db, email_api):
+    response = await email_api.patch("/api/v1/users/me/profile", json={**EMAIL_UPDATE, "dry_run": True})
+    assert response.status_code == 200, response.text
+    assert (await _columns(owner_db))[0] == OWNER_EMAIL
+
+
+@pytest.mark.asyncio
+async def test_single_user_mode_needs_no_password(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import email_change
+
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    reset_settings()
+    try:
+        # db_conn=None: single-user mode must decide without reading anything.
+        await email_change.authorize_own_email_change(
+            db_conn=None, is_postgres=False, user_id=1, new_emails=("new@example.com",), current_password=None
+        )
+    finally:
+        reset_settings()

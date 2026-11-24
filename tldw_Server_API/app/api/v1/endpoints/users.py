@@ -90,6 +90,7 @@ from tldw_Server_API.app.services.storage_quota_service import (
 import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
 import tldw_Server_API.app.core.AuthNZ.api_key_manager as _api_key_manager
 import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.AuthNZ.email_change as _email_change
 import tldw_Server_API.app.core.AuthNZ.principal_model as _principal_model
 import tldw_Server_API.app.core.AuthNZ.repos.users_repo as _users_repo
 import tldw_Server_API.app.core.UserProfiles.command_service as _command_service
@@ -512,6 +513,7 @@ async def update_current_user_profile(
         dry_run=payload.dry_run,
         expected_profile_version=payload.profile_version,
         contract_mode=ProfileContractMode.LEGACY_V1,
+        current_password=payload.current_password.get_secret_value() if payload.current_password else None,
     )
     result = await _command_service.ProfileCommandService(db_pool=db_pool).apply(
         command,
@@ -616,9 +618,26 @@ async def update_user_profile(
         _require_active_verified_user(user_context)
         user_id = int(user_context["id"])
         updates_made = False
+        is_pg = await _database.is_postgres_backend()
 
-        if request.email and request.email != user_context.get("email"):
-            is_pg = await _database.is_postgres_backend()
+        if request.email and request.email.lower() != str(user_context.get("email") or "").lower():
+            try:
+                await _email_change.authorize_own_email_change(
+                    db_conn=db,
+                    is_postgres=is_pg,
+                    user_id=user_id,
+                    new_emails=(request.email,),
+                    current_password=(
+                        request.current_password.get_secret_value() if request.current_password else None
+                    ),
+                )
+            except _email_change.EmailChangeRefused as exc:
+                return _profile_error_response(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    error_code=exc.code,
+                    detail=exc.detail,
+                    errors=[UserProfileErrorDetail(key="email", message=exc.code)],
+                )
             try:
                 await update_user_email(
                     db,

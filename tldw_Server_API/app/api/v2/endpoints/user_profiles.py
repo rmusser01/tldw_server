@@ -66,6 +66,7 @@ async def update_current_user_profile_v2(
         dry_run=payload.dry_run,
         expected_profile_version=payload.profile_version,
         contract_mode=ProfileContractMode.CLEAN_V2,
+        current_password=payload.current_password.get_secret_value() if payload.current_password else None,
     )
     result = await command_service.apply(command, db_conn=db, scope=None)
     if result.status_code != status.HTTP_200_OK:
@@ -74,7 +75,7 @@ async def update_current_user_profile_v2(
             detail={
                 "error_code": result.error_code or "profile_update_failed",
                 "detail": result.detail or "One or more updates failed validation",
-                "errors": list(result.skipped),
+                "errors": [dict(item) for item in result.skipped],
             },
         )
 

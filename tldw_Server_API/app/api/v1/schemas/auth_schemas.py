@@ -8,7 +8,7 @@ from uuid import UUID
 
 #
 # 3rd-party imports
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, SecretStr, field_validator
 
 #
 # Local imports
@@ -94,6 +94,10 @@ class RefreshTokenRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     """Request model for updating user profile."""
     email: Optional[EmailStr] = Field(None, description="New email address")
+    current_password: Optional[SecretStr] = Field(
+        None,
+        description="Your current password. Required when the request changes your own email address (multi-user mode).",
+    )
 
     @field_validator('email')
     @classmethod
@@ -106,7 +110,8 @@ class UpdateProfileRequest(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "email": "newemail@example.com"
+                "email": "newemail@example.com",
+                "current_password": "SecurePass123!"
             }
         }
     }
