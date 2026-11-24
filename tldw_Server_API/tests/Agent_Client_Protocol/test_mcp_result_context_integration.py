@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import re
+import tracemalloc
 from typing import Any, Literal
 from unittest.mock import AsyncMock
 
@@ -130,6 +132,85 @@ async def test_off_preserves_history_and_tool_schema() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("current_content", "expected_question"),
+    [
+        (
+            [{"type": "text", "text": "Current question"}, {"type": "text", "text": "Second part"}],
+            "Current question\nSecond part",
+        ),
+        ([{"type": "image_url", "image_url": {"url": "https://example.invalid/fixture.png"}}], ""),
+    ],
+)
+async def test_worker_question_comes_only_from_the_latest_user_turn(
+    current_content: list[dict[str, Any]], expected_question: str
+) -> None:
+    """Multipart and image-only turns cannot send earlier conversation text."""
+    worker = AsyncMock()
+    worker.call.return_value = LLMResponse(text='{"segment_ids": [0]}')
+    runner, _, _, _, _ = make_runner(mode="worker", worker=worker)
+    await runner.run(
+        [
+            {"role": "user", "content": "An earlier unrelated conversation"},
+            {"role": "assistant", "content": "Earlier reply"},
+            {"role": "user", "content": current_content},
+        ]
+    )
+    worker.call.assert_awaited_once()
+    request = json.loads(worker.call.await_args.args[0][-1]["content"])
+    assert request["question"] == expected_question
+
+
+@pytest.mark.asyncio
+async def test_oversized_multipart_question_does_not_allocate_a_full_copy() -> None:
+    """Large multipart questions keep the worker limit without copying the whole turn."""
+    worker = AsyncMock()
+    runner, _, events, _, _ = make_runner(mode="worker", worker=worker)
+    part_size = 1024 * 1024
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "a" * part_size}, {"type": "text", "text": "b" * part_size}],
+        }
+    ]
+    tracemalloc.start()
+    try:
+        await runner.run(messages)
+        peak_bytes = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+    worker.call.assert_not_awaited()
+    result = next(event for event in events if event.kind == AgentEventKind.TOOL_RESULT)
+    assert result.metadata["result_context"]["outcome"] == "worker_input_limit"
+    assert peak_bytes < part_size
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mcp_result",
+    [
+        {"content": [{"type": "image", "mimeType": "image/png", "data": "AAAA" * 400}]},
+        {"content": [], "structuredContent": {"description": "structured " * 200}},
+    ],
+    ids=["image-only", "structured-only"],
+)
+async def test_worker_does_not_receive_nontext_mcp_results(mcp_result: dict[str, Any]) -> None:
+    """Only actual MCP text enters optional selection, even for large fallback representations."""
+    worker = AsyncMock()
+    worker.call.return_value = LLMResponse(text='{"segment_ids": [0]}')
+    runner, caller, events, _, transport = make_runner(mode="worker", worker=worker)
+    transport.call_tool.return_value = mcp_result
+
+    await runner.run([{"role": "user", "content": "needle"}])
+
+    worker.call.assert_not_awaited()
+    result = next(event for event in events if event.kind == AgentEventKind.TOOL_RESULT)
+    assert result.payload["output"] == caller.calls[1][0][-1]["content"] == str(mcp_result)
+    assert "result_context" not in result.metadata
+
+
+@pytest.mark.asyncio
 async def test_exact_reread_rechecks_original_call() -> None:
     """A source reread must reauthorize the original tool and arguments."""
     runner, caller, _, approvals, transport = make_runner(RecordingCaller(reread=True))
@@ -137,6 +218,58 @@ async def test_exact_reread_rechecks_original_call() -> None:
     assert TEXT[:19] in caller.calls[2][0][-1]["content"]
     assert approvals == [("session", "search", {"query": "needle"})] * 2
     assert transport.call_tool.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_reread_reauthorizes_call_before_transport_consumes_arguments() -> None:
+    """A transport may consume its arguments without rewriting the source's approval identity."""
+    runner, _, _, approvals, transport = make_runner(RecordingCaller(reread=True))
+
+    async def consume_argument(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Simulate a transport normalizing the provided request in place."""
+        assert arguments.pop("query") == "needle"
+        return {"content": [{"type": "text", "text": TEXT}]}
+
+    transport.call_tool.side_effect = consume_argument
+    await runner.run([{"role": "user", "content": "needle"}])
+
+    assert approvals == [("session", "search", {"query": "needle"})] * 2
+
+
+@pytest.mark.asyncio
+async def test_event_callback_cannot_change_tool_arguments_after_approval() -> None:
+    """Observer changes to a tool-call event cannot affect the approved execution."""
+    runner, _, _, _, transport = make_runner()
+    emit_original = runner._emit
+
+    async def mutate_event(event: AgentEvent) -> None:
+        """Change only the callback's representation of the search call."""
+        if event.kind == AgentEventKind.TOOL_CALL:
+            event.payload["arguments"]["query"] = "changed by observer"
+        await emit_original(event)
+
+    runner._emit = mutate_event
+    await runner.run([{"role": "user", "content": "needle"}])
+
+    transport.call_tool.assert_awaited_once_with("search", {"query": "needle"})
+
+
+@pytest.mark.asyncio
+async def test_event_callback_cannot_change_authorized_reread() -> None:
+    """A virtual read uses the same source and offset through approval and execution."""
+    runner, caller, _, _, _ = make_runner(RecordingCaller(reread=True))
+    emit_original = runner._emit
+
+    async def mutate_event(event: AgentEvent) -> None:
+        """Simulate an event processor rewriting the offset in its event."""
+        if event.kind == AgentEventKind.TOOL_CALL and event.payload["tool_name"] == READ_RESULT_TOOL:
+            event.payload["arguments"]["offset"] = len(TEXT)
+        await emit_original(event)
+
+    runner._emit = mutate_event
+    await runner.run([{"role": "user", "content": "needle"}])
+
+    assert TEXT[:19] in caller.calls[2][0][-1]["content"]
 
 
 @pytest.mark.asyncio
@@ -276,10 +409,22 @@ async def test_source_store_is_cleared_even_when_traceback_retains_run(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["off", "excerpt", "worker"])
 async def test_completed_result_survives_cancellation_at_transport_return(
+    monkeypatch: pytest.MonkeyPatch,
     mode: Literal["off", "excerpt", "worker"],
 ) -> None:
     """A completed tool must retain its raw event even if cancellation arrives immediately."""
-    runner, _, events, _, transport = make_runner(mode=mode, worker=AsyncMock())
+    from tldw_Server_API.app.core.Agent_Client_Protocol import metrics
+
+    outcomes: list[str] = []
+
+    def record_outcome(*, outcome: str, **kwargs: Any) -> None:
+        """Record every run-first completion metric."""
+        outcomes.append(outcome)
+
+    monkeypatch.setattr(metrics, "record_run_first_completion_proxy", record_outcome)
+    runner, _, events, _, transport = make_runner(
+        mode=mode, worker=AsyncMock(), metrics_context={"presentation_variant": "compact"}
+    )
 
     async def complete_then_cancel(*args: Any) -> dict[str, Any]:
         """Finish transport execution and signal cancellation before returning."""
@@ -294,6 +439,7 @@ async def test_completed_result_survives_cancellation_at_transport_return(
             await runner.run([{"role": "user", "content": "needle"}])
     assert [event.kind for event in events] == [AgentEventKind.TOOL_CALL, AgentEventKind.TOOL_RESULT]
     assert events[-1].payload == {"tool_name": "search", "output": TEXT, "is_error": False}
+    assert outcomes == ["cancelled"]
 
 
 @pytest.mark.asyncio

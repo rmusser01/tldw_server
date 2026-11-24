@@ -119,17 +119,20 @@ requires an explicit `mcp_result_worker` implementing `LLMCaller` and
 must bind the approved credentials, provider/model and egress policy; declaring
 provider names does not authenticate arbitrary caller code. No provider or
 model is automatically selected or contacted. Configure the worker's generation
-token limit in its caller implementation. The worker receives no tools and only
-the question plus numbered source segments, and returns JSON segment IDs. Only
+token limit in its caller implementation. The worker receives only text from
+the latest user turn and numbered source segments. The runner assembles only
+the prefix it needs from multipart questions.
+The worker returns JSON with a single field containing segment IDs. Only
 server-held text is admitted to context. Optional numeric `LLMResponse.usage`
 is recorded in comparison metadata; absent usage remains unknown.
 
 Enabled runs expose `tldw_read_tool_result(source_id, offset=0, limit=512)` for
 exact follow-up reads. Offsets and limits count characters; every excerpt/read
 is additionally bounded by UTF-8 output bytes. Reads reauthorize the original
-tool and arguments through `ToolGate`. Sources expire at the end of each run.
-The reserved tool name must not collide with a server tool. Failed tool results
-and small results pass through; when the retained-source budget is exhausted,
+tool and its original approved arguments through `ToolGate`. Sources expire at
+the end of each run. The reserved tool name must not collide with a server tool.
+Failed tool results, small results, and responses without an explicit first
+MCP text block pass through. When the retained-source budget is exhausted,
 the original result passes through with `storage_limit` metadata. Thus this is
 an evidence-selection experiment, not a hard total-context or memory quota.
 Internal reads are excluded from run-first first-tool and typed-tool fallback
@@ -143,14 +146,17 @@ oversized input use deterministic excerpts. Cancellation of the run or caller
 task propagates and cancels outstanding worker work. Request construction checks
 the encoded byte budget incrementally and yields while encoding. A request
 rejected before encoding finishes has unknown `worker_request_bytes`; dispatched
-requests report the exact encoded messages size, including nested JSON escapes. Cleanup
-waits at most 100 ms beyond the worker deadline, then cancels again. Injected
+requests report the exact encoded messages size, including nested JSON escapes.
+Source and worker response bytes are counted in bounded chunks. Rereads reuse
+the original source byte count. Cleanup waits at most 100 ms beyond the worker
+deadline, then cancels again. Injected
 callers must cooperate with asyncio cancellation; arbitrary caller code cannot
 be forcibly terminated by an asyncio task. The source store is explicitly
 cleared in a run-level `finally`, including callback failure/cancellation.
-If selection is cancelled after a tool has completed, the runner emits that
-tool's raw result exactly once before propagating cancellation. That event has
-no selection metadata because preparation did not finish.
+If selection is cancelled after a tool has completed, the runner records the
+cancelled outcome and emits that tool's raw result exactly once before
+propagating cancellation. That event has no selection metadata because
+preparation did not finish.
 
 Run the no-network fixture replay from the repository root:
 

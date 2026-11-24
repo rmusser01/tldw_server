@@ -45,6 +45,7 @@ _SEGMENT_CHARS = 256
 _RANK_BATCH_SEGMENTS = 64
 _MAX_QUERY_CHARS = 8192
 _MAX_QUERY_TERMS = 128
+_UTF8_COUNT_CHUNK_CHARS = 65_536
 _USAGE_KEYS = frozenset(
     {
         "input_tokens",
@@ -85,6 +86,7 @@ class _Source:
     """Exact retained text and an isolated copy of its original authorized call."""
 
     text: str
+    input_bytes: int
     tool_name: str
     arguments: dict[str, Any]
 
@@ -92,6 +94,28 @@ class _Source:
 def _prefix(text: str, byte_limit: int) -> str:
     """Return a valid UTF-8 prefix without splitting a character."""
     return text.encode("utf-8")[: max(0, byte_limit)].decode("utf-8", errors="ignore")
+
+
+async def _utf8_byte_count(text: str, cancel_event: asyncio.Event) -> int:
+    """Measure UTF-8 bytes with fixed-size temporary buffers for large Unicode strings."""
+    if text.isascii():
+        return len(text)
+    size = 0
+    for offset in range(0, len(text), _UTF8_COUNT_CHUNK_CHARS):
+        if offset:
+            await asyncio.sleep(0)
+            if cancel_event.is_set():
+                raise asyncio.CancelledError
+        size += len(text[offset : offset + _UTF8_COUNT_CHUNK_CHARS].encode("utf-8"))
+    return size
+
+
+def _unique_selection_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject duplicate JSON fields before the decoder can discard earlier values."""
+    selection = dict(pairs)
+    if len(selection) != len(pairs):
+        raise ValueError("Duplicate worker selection field")
+    return selection
 
 
 def _usage(response: LLMResponse) -> dict[str, int | float] | None:
@@ -143,6 +167,33 @@ class ToolResultContext:
         self._retained_bytes = 0
         if policy.mode == "worker" and worker is None:
             raise ValueError("Worker result mode requires an explicitly configured worker caller")
+
+    def question_text(self, content: object) -> str:
+        """Read the needed prefix of one user turn's string or text parts."""
+        remaining = _MAX_QUERY_CHARS
+        if self.policy.mode == "worker":
+            # Keep one character past the worker budget so oversized questions still fall back.
+            remaining = max(remaining, self.policy.max_worker_input_bytes + 1)
+        if isinstance(content, str):
+            return content[:remaining]
+        if not isinstance(content, list):
+            return ""
+
+        parts: list[str] = []
+        for part in content:
+            if not isinstance(part, dict) or part.get("type") != "text":
+                continue
+            text = part.get("text")
+            if not isinstance(text, str):
+                continue
+            if parts:
+                remaining -= 1  # Account for the newline between text parts.
+            prefix = text[:remaining]
+            parts.append(prefix)
+            remaining -= len(prefix)
+            if not remaining:
+                break
+        return "\n".join(parts)
 
     def source_call(self, source_id: str) -> tuple[str, dict[str, Any]]:
         """Return an isolated original call for reauthorization, without its text.
@@ -217,7 +268,7 @@ class ToolResultContext:
                 "mode": self.policy.mode,
                 "outcome": outcome,
                 "source_id": source_id,
-                "input_bytes": len(source.text.encode("utf-8")),
+                "input_bytes": source.input_bytes,
                 "output_bytes": len(output.encode("utf-8")),
                 "ranges": selected,
             },
@@ -251,7 +302,7 @@ class ToolResultContext:
             asyncio.CancelledError: The run or caller task is cancelled.
         """
         try:
-            input_bytes = len(text.encode("utf-8"))
+            input_bytes = await _utf8_byte_count(text, cancel_event)
         except UnicodeEncodeError:
             return PreparedResult(
                 text,
@@ -285,7 +336,7 @@ class ToolResultContext:
             raise asyncio.CancelledError
 
         source_id = "r_" + uuid.uuid4().hex
-        self._sources[source_id] = _Source(text, tool_name, deepcopy(arguments))
+        self._sources[source_id] = _Source(text, input_bytes, tool_name, deepcopy(arguments))
         self._retained_bytes += input_bytes
         segments = [
             {"id": index, "text": text[start : start + _SEGMENT_CHARS]}
@@ -369,14 +420,14 @@ class ToolResultContext:
             return None, "worker_invalid", metadata
         raw = response.text or ""
         try:
-            response_bytes = len(raw.encode("utf-8"))
+            response_bytes = await _utf8_byte_count(raw, cancel_event)
         except UnicodeEncodeError:
             return None, "worker_invalid", metadata
         metadata["worker_response_bytes"] = response_bytes
         if response.tool_calls or response_bytes > 4096:
             return None, "worker_invalid", metadata
         try:
-            selection = json.loads(raw)
+            selection = json.loads(raw, object_pairs_hook=_unique_selection_object)
         except (ValueError, TypeError, RecursionError):
             return None, "worker_invalid", metadata
         ids = selection.get("segment_ids") if isinstance(selection, dict) else None

@@ -53,6 +53,18 @@ def _extract_text_content(result: dict[str, Any]) -> str:
         return str(result)
 
 
+def _selection_source_text(result: dict[str, Any]) -> str | None:
+    """Use the first MCP text block, the same position used for model history."""
+    content = result.get("content")
+    if not isinstance(content, list) or not content:
+        return None
+    block = content[0]
+    if not isinstance(block, dict) or block.get("type") != "text":
+        return None
+    text = block.get("text")
+    return text if isinstance(text, str) else None
+
+
 async def _emit_malformed_step_error(
     emit: Callable[[AgentEventKind, dict[str, Any]], Awaitable[None]],
     *,
@@ -384,10 +396,13 @@ class LLMDrivenRunner:
     async def _run_loop(self, messages: list[dict], result_context: ToolResultContext | None) -> None:
         """Execute tool/model turns within the run-owned context lifetime."""
         self._record_run_first_rollout()
-        question = next((
-            message["content"] for message in reversed(messages)
-            if message.get("role") == "user" and isinstance(message.get("content"), str)
-        ), "")
+        question = ""
+        if result_context is not None:
+            current_content = next(
+                (message.get("content") for message in reversed(messages) if message.get("role") == "user"),
+                None,
+            )
+            question = result_context.question_text(current_content)
         history = list(messages)
         first_tool_name: str | None = None
         fallback_recorded = False
@@ -462,15 +477,19 @@ class LLMDrivenRunner:
                             fallback_recorded = True
                             self._record_run_first_fallback_after_run(tc.name)
 
-                    approval_name, approval_arguments = tc.name, tc.arguments
+                    # Keep the approved snapshot private across callbacks and transport.
+                    arguments = deepcopy(tc.arguments) if result_context is not None else tc.arguments
                     if is_result_read:
                         try:
                             approval_name, approval_arguments = result_context.source_call(
-                                tc.arguments.get("source_id")
+                                arguments.get("source_id")
                             )
                         except MCPResultSourceNotFoundError as exc:
                             await self._deliver_result(tc, str(exc), True, history)
                             continue
+                    else:
+                        approval_name = tc.name
+                        approval_arguments = deepcopy(arguments) if result_context is not None else arguments
 
                     try:
                         gate_result = await self._gate.request_approval(
@@ -507,36 +526,43 @@ class LLMDrivenRunner:
                         })
                         continue
 
+                    event_arguments = deepcopy(arguments) if result_context is not None else arguments
                     await self._emit_event(
                         AgentEventKind.TOOL_CALL,
-                        {"tool_name": tc.name, "arguments": tc.arguments},
+                        {"tool_name": tc.name, "arguments": event_arguments},
                         metadata={"_already_approved": True},
                     )
 
                     prepared = None
                     if is_result_read:
                         try:
-                            prepared = result_context.read(**tc.arguments)
+                            prepared = result_context.read(**arguments)
                             output, is_error = prepared.output, False
                         except (TypeError, ValueError):
                             output, is_error = "Invalid result read arguments", True
                     else:
+                        source_text = None
                         try:
-                            result = await self._transport.call_tool(tc.name, tc.arguments)
-                            output = _extract_text_content(result)
+                            transport_arguments = deepcopy(arguments) if result_context is not None else arguments
+                            result = await self._transport.call_tool(tc.name, transport_arguments)
+                            if result_context is not None:
+                                source_text = _selection_source_text(result)
+                            output = source_text if source_text is not None else _extract_text_content(result)
                             is_error = result.get("isError", False)
                         except Exception as exc:
                             output = str(exc)
                             is_error = True
-                        if result_context is not None and isinstance(output, str):
+                            source_text = None
+                        if result_context is not None and source_text is not None:
                             try:
                                 prepared = await result_context.prepare(
-                                    tool_name=tc.name, arguments=tc.arguments, text=output,
+                                    tool_name=tc.name, arguments=arguments, text=source_text,
                                     question=question, is_error=is_error, cancel_event=self._cancel,
                                 )
                             except asyncio.CancelledError:
                                 # Execution has completed; cancellation of optional
                                 # selection must not discard its raw result event.
+                                self._record_run_first_completion_proxy("cancelled")
                                 await self._deliver_result(tc, output, is_error, history)
                                 raise
                     await self._deliver_result(

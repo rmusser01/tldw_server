@@ -126,6 +126,7 @@ async def test_worker_selects_exact_source_and_has_no_tools_or_history() -> None
         '{"segment_ids": [0, 0]}',
         '{"segment_ids": ["0"]}',
         '{"segment_ids": [0], "invented": "fact"}',
+        '{"segment_ids": [999], "segment_ids": [0]}',
     ],
 )
 async def test_unverifiable_worker_selection_falls_back(response: str) -> None:
@@ -478,3 +479,33 @@ async def test_dispatched_worker_request_reports_exact_encoded_size(source: str)
     result = await prepare(context("worker", worker), source)
     messages, _tools = worker.requests[0]
     assert result.metadata["worker_request_bytes"] == len(json.dumps(messages, ensure_ascii=False).encode("utf-8"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["over-capacity-source", "oversized-worker-reply", "retained-reread"])
+async def test_byte_accounting_avoids_full_size_unicode_copies(operation: str) -> None:
+    """Rejections and small reads must report exact bytes without duplicating large values."""
+    text = "東京" * (512 * 1024)
+    byte_count = 3 * 1024 * 1024
+    source_id = None
+    if operation == "over-capacity-source":
+        ctx = context(max_retained_bytes=1024)
+        input_text, outcome, measurement = text, "storage_limit", "input_bytes"
+    elif operation == "oversized-worker-reply":
+        ctx = context("worker", SelectingWorker(LLMResponse(text=text)))
+        input_text, outcome, measurement = "needle " * 400, "worker_invalid", "worker_response_bytes"
+    else:
+        ctx = context()
+        retained = await prepare(ctx, text)
+        source_id = retained.metadata["source_id"]
+        input_text, outcome, measurement = text, "reread", "input_bytes"
+
+    tracemalloc.start()
+    try:
+        result = await prepare(ctx, input_text) if source_id is None else ctx.read(source_id, limit=1)
+        peak_bytes = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert result.metadata["outcome"] == outcome
+    assert result.metadata[measurement] == byte_count
+    assert peak_bytes < byte_count // 2

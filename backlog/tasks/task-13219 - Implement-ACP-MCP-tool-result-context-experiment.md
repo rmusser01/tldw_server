@@ -3,14 +3,14 @@ id: TASK-13219
 title: Implement ACP MCP tool-result context experiment
 status: Done
 assignee: []
-created_date: '2026-09-08 04:46'
-updated_date: '2026-09-08 06:17'
+created_date: 2026-09-08 04:46
+updated_date: 2026-09-08 06:17
 labels: []
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/2932'
+- https://github.com/rmusser01/tldw_server/pull/2932
 documentation:
-  - Docs/Design/ACP_Tool_Result_Context_Experiment.md
+- Docs/Design/ACP_Tool_Result_Context_Experiment.md
 ---
 
 ## Description
@@ -34,6 +34,9 @@ Approved ACP/MCP experiment: compare unchanged output, deterministic excerpts, a
 - [x] #11 Worker self-cancellation falls back without aborting the run, while caller and run cancellation still propagate.
 - [x] #12 Worker request construction stops at its encoded byte budget and yields for cancellation.
 - [x] #13 New result-context contracts, test helpers, and benchmark helpers have useful docstrings and annotations; missing sources raise a classifiable central exception.
+- [x] #14 Superpowers review confirms the worker receives only text from the current user turn and actual MCP text output.
+- [x] #15 Superpowers review confirms source rereads use the originally approved call and do not depend on mutable callback arguments.
+- [x] #16 Superpowers review confirms bounded UTF-8 accounting, strict worker JSON selection, and cancellation metrics.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -66,14 +69,14 @@ Confirmed Qodo runtime findings locally: a worker raising CancelledError escapes
 PR review follow-up complete: five new regression cases failed before implementation (worker-only cancellation at policy/run boundaries, temporary allocations for oversized source/question JSON, cancellation before worker dispatch); two additional cases preserve exact encoded sizes for escapes and Unicode. Incremental JSON construction stops at the byte limit and yields; early rejections keep full request bytes unknown. A cancelled child worker raises a central classifiable error and falls back, while caller/event cancellation propagates. Missing-source handles now raise a central ValueError-compatible exception. All new definitions have docstrings and parameter/return annotations, with explicit casts only for deliberately malformed provider fixtures. Final validation: 143 targeted ACP tests passed (4 warnings), Ruff passed on all nine PR Python files, format checks passed on the five new files, scoped mypy passed those five files, Bandit on four follow-up runtime/script paths found zero findings and zero scan errors, shard guard passed, and all nine fixture replay rows recovered expected evidence. Independent review passed 225 encoded-size boundary probes and cancellation race checks without actionable findings. Only task/docs changed after runtime verification. GitHub shard guard passed; remaining hosted checks continue on the PR. Removed the completed temporary follow-up plan.
 Rebased PR #2932 onto dev at 6d31f3d1a7. Resolved the CI workflow conflict by using the new platform-acp shard on Ubuntu 3.12 and retaining explicit coverage for the three experiment test files in the other four full-suite matrices. Preserved the separate MCP in-app shards. Git range-diff confirmed the four remaining patches replayed identically. Canonicalized this task with backlog-py for the current format ratchet. Validation on Python 3.12: 335 focused ACP and CI contract tests passed, shard coverage had zero newly uncovered files, task format and ID checks passed, Ruff and scoped mypy passed, and Bandit reported zero findings or scan errors.
 ADR required: no. The experiment uses the existing injected caller and retains source text only for the current run. Provider-backed callers follow Docs/ADR/025-llm-provider-adapter-routing-and-overrides.md. Persisted ACP session ownership follows Docs/ADR/016-acp-session-and-orchestration-persistence.md.
+Requester asked for a fresh Superpowers requesting-code-review before merge. Disarmed auto-merge on PR #2932. Independent review of 6d31f3d1a7..902bcd6d87 reproduced six findings. Follow-up plan: Docs/Plans/IMPLEMENTATION_PLAN_acp_result_merge_review.md. ADR required: no. The fixes enforce the existing experiment boundaries and do not change ADR-016 or ADR-025.
+Pre-merge Superpowers review complete. Six original findings produced 13 failing cases: latest-turn text selection, non-text MCP passthrough, approval argument isolation, UTF-8 accounting, duplicate worker JSON fields, and the cancelled outcome metric. Follow-up review found a full multipart question allocation. Reproduced it separately, then bounded assembly while preserving the worker budget fallback. The independent reviewer closed all seven findings and approved the fixes after checking 560 multipart prefixes and three runner cases. Final validation: 347 ACP and CI contract tests passed on Python 3.12 (5 warnings), including 12 new cases plus strengthened cancellation assertions. Ruff, scoped mypy, Bandit, the shard guard, Backlog checks, and all nine fixture comparison rows passed. PR #2932 can return to the queue under the requester’s existing change-summary waiver.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the default-off ACP/MCP result-context experiment and resolved all four follow-up review findings. Completed tool results are emitted exactly once before optional-selection cancellation propagates. Deterministic ranking uses bounded query scoring, casefolds each segment once, and yields between batches; successful worker selection skips ranking. Benchmark evidence must occur in exact returned source excerpts, excluding generated wrappers. Internal rereads no longer replace real first-tool/fallback metrics. Added 12 regression cases, updated README/design, and passed 126 targeted tests, Ruff, Bandit and independent review. Real-model cost, full-task quality and whole-repository tests remain outside this scoped experiment; fixture replay is explicitly labeled and makes no real-model savings claim. Branch: codex/acp-tool-result-experiment.
-
-PR #2932 targets dev and includes the original four findings plus all five additional Qodo findings and their resolutions. Added seven PR-review regression/boundary cases and CI enrollment for all three new test files. Latest focused validation is 143 passing tests plus Ruff, mypy, Bandit and independent boundary/race review. Requester-authored Change summary remains required before merge.
+Implemented the default-off ACP/MCP result context experiment, original review fixes, and cross-platform CI coverage. Rebasing preserved the runtime patches and current CI coverage. Independent pre-merge review closed all seven further findings: latest-turn isolation, non-text MCP passthrough, stable authorization arguments, bounded byte counts, duplicate JSON rejection, cancellation metrics, and bounded multipart input. Final validation was 347 focused passing tests, lint, typing, Bandit, Backlog and shard checks, and fixture replay. Live-provider economics and complete-task quality were outside the experiment’s fixture validation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
