@@ -58,6 +58,18 @@ export const useCancelWatchlistsQuery = () => {
   }, [client, generation])
 }
 
+export const useRefreshWatchlistsQuery = () => {
+  const client = useQueryClient()
+  const generation = useWatchlistsAccountGeneration()
+  return useCallback(async (resource: string, params: unknown) => {
+    if (generation !== getWatchlistsAccountGeneration()) return
+    const filter = { queryKey: queryKey(generation, resource, params), exact: true }
+    await client.cancelQueries(filter)
+    if (generation !== getWatchlistsAccountGeneration()) return
+    await client.invalidateQueries(filter)
+  }, [client, generation])
+}
+
 export const useFetchWatchlistsQuery = () => {
   const client = useQueryClient()
   const generation = useWatchlistsAccountGeneration()

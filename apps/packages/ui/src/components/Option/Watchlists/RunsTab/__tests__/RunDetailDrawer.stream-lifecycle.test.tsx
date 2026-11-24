@@ -362,6 +362,11 @@ describe("RunDetailDrawer stream lifecycle", () => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
     const hostedConfig = { serverUrl: window.location.origin, authMode: "multi-user" }
     mocks.getConfigMock.mockResolvedValue(hostedConfig)
+    mocks.fetchScrapedItemsMock.mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({
+        items: [{ id: 1, title: "Fresh scraped item", url: "https://example.org/article", source_id: 1 }],
+        total: 1
+      })
 
     const completedRun = {
       ...baseRunDetails,
@@ -419,6 +424,8 @@ describe("RunDetailDrawer stream lifecycle", () => {
     })
     expect(screen.getByText("Running")).toBeInTheDocument()
 
+    expect(screen.getByText("No items found")).toBeInTheDocument()
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_001)
     })
@@ -440,6 +447,8 @@ describe("RunDetailDrawer stream lifecycle", () => {
       await vi.advanceTimersByTimeAsync(15_000)
     })
     expect(screen.getByTestId("cached-run-status")).toHaveTextContent("completed")
+    expect(screen.getByText("Fresh scraped item")).toBeInTheDocument()
+    expect(mocks.fetchScrapedItemsMock).toHaveBeenCalledTimes(2)
     expect(fetchRunDetails).toHaveBeenCalledTimes(4)
   })
 

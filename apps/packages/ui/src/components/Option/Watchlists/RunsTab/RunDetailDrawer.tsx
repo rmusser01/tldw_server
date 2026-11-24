@@ -23,6 +23,7 @@ import {
   useCancelWatchlistsQuery,
   useInvalidateWatchlists,
   useIsCurrentWatchlistsAccount,
+  useRefreshWatchlistsQuery,
   useSetWatchlistsQueryData,
   useWatchlistsQuery
 } from "@/hooks/useWatchlistsQuery"
@@ -157,6 +158,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const manuallyClosedRef = useRef(false)
   const currentStatusRef = useRef<string | null>(null)
   const runViewRef = useRef<symbol | null>(null)
+  const pollingRunIdRef = useRef<number | null>(null)
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
   const setActiveTab = useWatchlistsStore((s) => s.setActiveTab)
@@ -166,6 +168,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
 
   const invalidateWatchlists = useInvalidateWatchlists()
   const cancelWatchlistsQuery = useCancelWatchlistsQuery()
+  const refreshWatchlistsQuery = useRefreshWatchlistsQuery()
   const isCurrentWatchlistsAccount = useIsCurrentWatchlistsAccount()
   const setQueryData = useSetWatchlistsQueryData()
   const patchRunLists = usePatchRunLists()
@@ -397,7 +400,9 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   }, [pollingRunDetails, runId, cancelWatchlistsQuery])
 
   useEffect(() => {
-    if (!hostedLiveUpdates || !data) return
+    const previousPollingRunId = pollingRunIdRef.current
+    pollingRunIdRef.current = pollingRunDetails ? runId : null
+    if (!hostedLiveUpdates || !data || data.id !== runId) return
     patchRunLists(data.id, {
       status: data.status as RunStatus,
       started_at: data.started_at,
@@ -406,7 +411,10 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       error_msg: data.error_msg,
       log_path: data.log_path
     })
-  }, [data, hostedLiveUpdates, patchRunLists])
+    if (previousPollingRunId === runId && isWatchlistRunTerminal(data.status)) {
+      void refreshWatchlistsQuery("items", { run_id: runId, page: itemsPage, size: itemsPageSize })
+    }
+  }, [data, hostedLiveUpdates, itemsPage, itemsPageSize, patchRunLists, pollingRunDetails, refreshWatchlistsQuery, runId])
 
   const itemsError = itemsQuery.error
   useEffect(() => {

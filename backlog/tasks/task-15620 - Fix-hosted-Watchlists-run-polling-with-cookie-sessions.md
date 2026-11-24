@@ -54,13 +54,14 @@ Hosted WebUI sessions authenticate through cookies and keep the browser access t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Ported the previously reviewed drawer and regression changes onto public dev 2aa1f81c37. Both public main and dev still required a browser JWT for the run stream in hosted cookie mode before this change.
 
 Local verification passed 79 Watchlists run and hosted-auth tests, 106 Watchlists accessibility tests, 54 Watchlists scale tests, and git diff --check. Bandit has no Python scope in this TypeScript change. The maintainer's human-written Change summary is required before merge.
 
 Opened public draft PR #3580 against dev. Hosted browser acceptance belongs to the private deployment and is pending.
-<!-- SECTION:NOTES:END -->
+Rebased #3580 onto dev while retaining its Watchlists React Query migration. Hosted sessions reuse the scoped run-details query and refresh the exact items page when the observed run reaches a terminal state. ADR required: no. This uses the existing account-scoped query keys, hosted transport, and persisted run state.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
