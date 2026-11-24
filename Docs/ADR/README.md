@@ -118,6 +118,7 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-094](094-jobs-resource-admission-and-domain-publication.md) | Accepted | Keep exclusive resource admission and monotonic authority in shared Jobs, with atomic output fences and replay receipts in domain storage. |
 | [ADR-095](095-coordinated-chroma-sdk-storage-lifetimes.md) | Proposed | Coordinate validation and complete canonical Chroma SDK lifetimes in shared storage sessions; fail closed on unsupported or incomplete existing storage. |
 | [ADR-096](096-tiered-development-and-release-ci.md) | Proposed | Run focused CI on dev PRs and require full same-commit qualification on main PRs and server publication. |
+| [ADR-098](098-document-workspace-chat-association.md) | Proposed | Store Document Workspace chat links with the owned native conversation and verify access through Media and Chat. |
 
 
 

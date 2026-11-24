@@ -1,7 +1,7 @@
 ---
 id: TASK-15586
 title: Sync Document Workspace conversations across devices
-status: To Do
+status: In Progress
 labels:
 - document-workspace
 - chat
@@ -11,6 +11,8 @@ dependencies:
 references:
 - Docs/superpowers/specs/2026-11-20-document-workspace-conversation-tabs-design.md
 - Docs/ADR/049-chat-history-selection-ownership.md
+- Docs/superpowers/specs/2026-11-23-document-workspace-conversation-sync-design.md
+- Docs/ADR/098-document-workspace-chat-association.md
 ---
 
 ## Description
@@ -30,6 +32,7 @@ Let a signed-in user discover and resume the same document conversations from an
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Requested as a follow-up to the browser-scoped conversation tabs. Assess the server-owned document-to-chat association and migration behavior during design. ADR-049 governs owner-bound chat history. A durable server-side contract needs a separate ADR assessment.
+The approved first-release design covers same-server discovery and a per-chat Save to server action for existing browser-only conversations. The [design spec](../../Docs/superpowers/specs/2026-11-23-document-workspace-conversation-sync-design.md) and [proposed ADR-098](../../Docs/ADR/098-document-workspace-chat-association.md) are ready for review. ADR required: yes. ADR path: Docs/ADR/098-document-workspace-chat-association.md. The association is a durable Chat persistence and Media access contract.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
