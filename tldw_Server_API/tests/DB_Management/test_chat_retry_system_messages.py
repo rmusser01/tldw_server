@@ -168,9 +168,14 @@ async def test_changed_retry_instruction_survives_overlapping_client_history(ret
 
 def test_retry_context_does_not_expose_another_owners_instructions(retry_chat: SimpleNamespace) -> None:
     """The new canonical lookup keeps conversation ownership on both backends."""
-    foreign = retry_chat.db.add_conversation({"client_id": "2", "title": "Private instructions"})
-    retry_chat.db.add_message({"conversation_id": foreign, "sender": "system", "content": "Private prompt"})
-    assert retry_chat.db.get_retry_message_context(foreign) == ([], [])
+    foreign_db = CharactersRAGDB(retry_chat.db.db_path, client_id="2", backend=retry_chat.db.backend)
+    try:
+        foreign = foreign_db.add_conversation({"client_id": "2", "title": "Private instructions"})
+        foreign_db.add_message({"conversation_id": foreign, "sender": "system", "content": "Private prompt"})
+        assert [row["content"] for row in foreign_db.get_messages_for_conversation(foreign)] == ["Private prompt"]
+        assert retry_chat.db.get_retry_message_context(foreign) == ([], [])
+    finally:
+        foreign_db.close_all_connections()
 
 
 @pytest.mark.asyncio
