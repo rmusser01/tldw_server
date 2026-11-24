@@ -37,6 +37,7 @@ Requester-approved plan review amendments: use disposable Linux test containers 
 Implementation started in the isolated outbound-egress-design worktree. Stage commits will record test-first verification and limitations.
 Stage 1: observed missing-validator test failure, then 73 passed with the direct HTTP guard. Bandit on the validator and its unit tests and git diff --check passed. Package registry and downstream hosts are unverified where installer argv cannot identify them.
 Stage 2: 39 harness and strict-guard tests passed after red runs, and the existing guard suite delivered 27 passes and one expected subprocess-only skip. The real Linux Docker controls and guarded default smoke passed, including startup, local setup state and notes, ASGI shutdown, and zero recorded attempts. Follow-up review regression tests require the preflight at internal entry points and reject local-only config edits before image preparation. The smoke uses the ASGI shutdown-complete message because Uvicorn 0.54 changed a private field name. Bandit and Ruff passed.
+Stage 3: 77 tests passed in the isolated Linux backend image (Hugging Face Hub 1.33.0, zero skips). All 11 opt-in subprocess cases also passed with Hub 0.36.0 under macOS OS-level network denial in Python 3.12. The fixtures assert both the built-in and configured OpenAI destinations and leave HF_ENDPOINT unset on the successful Hub cases. Pip/uv and Git coverage is limited to exact argv dispatch. Ruff and Bandit passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

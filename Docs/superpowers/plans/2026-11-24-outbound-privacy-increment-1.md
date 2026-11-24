@@ -174,7 +174,8 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
 - **Goal:** Check the advertised choice at installer dispatch and the destination selected by real download and provider code while using no live services.
 - **Success criteria:** The real SDK downloads the fixture bytes through an allowed synthetic redirect. An undeclared hop or changed identity fails even if caught. The real provider adapter receives a synthetic completion.
 - **Tests:** `test_outbound_opt_in.py`, `test_install_manager_dependencies.py`, and `test_openai_native_http.py`.
-- **Status:** Not Started
+- **Status:** Complete
+- **Verification:** The prepared Linux backend passed 77 tests with Hugging Face Hub 1.33.0 and zero skips. All 11 opt-in subprocess cases also passed with Hugging Face Hub 0.36.0 in a Python 3.12 environment with OS-level network denial. Both the configured and default OpenAI paths exercised the real adapter.
 
 - [ ] Add process-isolated tests in `tldw_Server_API/tests/CI/test_outbound_opt_in.py` for the Kokoro ONNX download, the same asset selecting an undeclared initial origin, the allowed fixture CDN responding with a second redirect to an undeclared origin, a changed file, and a swap to another repository with the same file and revision on the same host. In the negative cases assert the recorder's rejection and the expected install failure. Run both the download and provider children inside the prepared backend container with the Python guard active before app or SDK imports. Each uses zero allowed raw dials. After cleanup, independently assert zero raw DNS/dial attempts and verify the expected fixture transport events. Add a caught-attempt canary for each child that returns an otherwise valid fixture response and makes the check fail based on the recorded raw attempt.
 - [ ] In the prepared backend test container, run `python -m pytest -q tldw_Server_API/tests/CI/test_outbound_opt_in.py`. Expect the transport or evidence assertions to fail before the fixture is implemented. Use `run_isolated` from Stage 2 for direct container commands during development.
@@ -210,7 +211,7 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
 - **Goal:** Exercise the shipped API wizard, production WebUI, and packaged Chrome extension with the network boundary active before process launch.
 - **Success criteria:** Only assigned fixtures receive requests. The wizard persists a local edit, WebUI renders search results, and the MV3 worker and content script execute against local fixtures.
 - **Tests:** Dedicated Playwright configs and specs, the Add Source unit regression, and harness self-tests.
-- **Status:** Not Started
+- **Status:** In Progress
 
 - [ ] Add a failing unit regression in `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/AddSourceModal.stage2.intake.test.tsx`. Replace its current Google URL assertion with a local bundled icon assertion and preserve its result/snippet assertions. Run `cd apps/packages/ui && bunx vitest run src/components/Option/ResearchWorkspace/__tests__/AddSourceModal.stage2.intake.test.tsx`. Expect failure while the remote image exists.
 - [ ] In `AddSourceModal.tsx`, remove `getFaviconUrl` and the remote `img` branch. Render an existing icon from the local icon system, marked decorative. Preserve the search text and import behaviour. In the browser, load a same-origin fixture JSON search response at `POST /api/v1/research/websearch`, render its result through the Add Sources modal, and assert the local marker and the visible snippet.
