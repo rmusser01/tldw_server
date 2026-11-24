@@ -26,12 +26,14 @@ Local audio/video deduplication can skip a file based on a historical document v
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: no. This restores the precedence specified by the existing media pre-check design. Verification stages: reproduce with mismatched row and version hashes, verify the fix and indexed path, then review and publish.
 Regression tests reproduced stale metadata overriding the stored hash and a failed schema inspection unlocking fallback. The final focused run passed all 56 tests, including a genuine old SQLite schema. Ruff and git diff --check passed. Bandit reported only pytest assertions.
+Independent review follow-up: catch the backend error family during schema inspection and verify filename and live PostgreSQL owner precedence.
+Independent review follow-up verifies real backend exception handling, preserved local filename identity, and owner filters on a live PostgreSQL instance. Final validation: 62 focused tests plus one live PostgreSQL test passed. Ruff and Bandit production checks passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-An indexed hash is authoritative. Legacy fallback is limited to NULL rows unless schema inspection confirms the column is absent. Tests verify stale hashes, the indexed path, NULL rows, the old schema, and schema inspection failure.
+Stored hashes retain precedence when schema inspection raises a backend error. The lookup only checks legacy metadata for NULL hashes or a confirmed old schema, and preserves filename and PostgreSQL owner scoping.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_utils import (
 )
 from tldw_Server_API.app.core.config import loaded_config_data, settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
@@ -1272,7 +1273,7 @@ def _media_has_source_hash_column(db: MediaDatabase) -> bool | None:
             columns = {col.get("name", "").lower() for col in db.backend.get_table_info(table_name)}
             if columns:
                 return "source_hash" in columns
-        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+        except (BackendDatabaseError, *_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
             continue
     return None
 

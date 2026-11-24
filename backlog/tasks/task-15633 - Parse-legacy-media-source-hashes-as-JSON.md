@@ -26,12 +26,14 @@ Local audio/video deduplication misses legacy source hashes in normally formatte
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: no. This corrects how the existing metadata fallback interprets stored JSON. Verification stages: reproduce in the local audio pre-check, fix and run adjacent tests, then review and publish.
 Regression tests reproduced the whitespace and malformed JSON behavior before the fix. The final focused run passed all 56 tests, including an unreadable version followed by a valid match. Ruff and git diff --check passed. Bandit reported only pytest assertions.
+Independent review follow-up: reject NaN and infinity tokens, handle corrupt SQLite text per version, and bound legacy version batches.
+Two independent Superpowers reviews completed. Legacy version reads now require SQLite TEXT, decode with the database encoding, reject non-JSON constants, and return at most 64 rows per query. Regression cases verify corrupt and binary metadata, deep nesting, and matches in later batches. Final validation: 62 focused tests plus one live PostgreSQL test passed. Ruff and Bandit production checks passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The media lookup repository parses legacy metadata and matches its top-level hash. Tests cover compact, spaced, malformed, nested, and deeply nested documents. The draft PR contains the fix and the updated design note.
+Legacy metadata is decoded and strictly parsed in bounded batches. Corrupt, binary, and invalid JSON metadata cannot affect matching. The regression suite covers both lookup paths and listing compatibility.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
