@@ -2,9 +2,8 @@
 
 The fixtures in this module are immutable server-owned source material. Runtime
 code must copy their assets and manifests into normal user-owned draft visual
-packs before a persona can use them. The basic tier contains reviewed,
-production-ready deterministic starter art; higher-complexity tiers remain
-catalog scaffolds until their final reviewed animation assets are authored.
+packs before a persona can use them. Bundled artwork includes PNG sequences
+and region-based sprite atlases.
 """
 
 from __future__ import annotations
@@ -15,6 +14,8 @@ import zlib
 from dataclasses import dataclass, field
 from importlib import resources
 from typing import Any
+
+from tldw_Server_API.app.core.Persona.visual_artwork import ARTWORK_MANIFEST_KEY
 
 DEFAULT_PERSONA_VISUAL_STARTER_PACK_ID = "search-lens-basic"
 LEGACY_PERSONA_VISUAL_STARTER_PACK_ID = "research-buddy-starter"
@@ -35,6 +36,13 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS: tuple[str, ...] = (
 )
 
 _REQUIRED_STATE_IDS = ("idle", "listening", "thinking", "speaking", "error")
+_BUILTIN_FALLBACKS = {
+    "wake_armed": ["listening"],
+    "tool_running": ["thinking"],
+    "approval_needed": ["thinking"],
+    "offline": ["idle"],
+}
+_AUTHORED_ARTWORK_LICENSE = "AGPL-3.0-only"
 _BASIC_EXPECTED_ASSET_GROUPS = (
     "identity_brief",
     "neutral_anchor",
@@ -61,14 +69,6 @@ _INTRICATE_EXPECTED_ASSET_GROUPS = (
     "custom_state_variants",
 )
 _BASIC_ANIMATION_NOTES = ("Reviewed bundled basic default with neutral-anchor-derived required-state loops.",)
-_INTERMEDIATE_ANIMATION_NOTES = (
-    "Scaffold fixture only: final intermediate art should add a neutral model "
-    "sheet, separate talking and reaction sheets, and short custom-state loops.",
-)
-_INTRICATE_ANIMATION_NOTES = (
-    "Scaffold fixture only: final intricate art should compile reviewed "
-    "neutral-anchor-derived strips or atlas regions into runtime animations.",
-)
 _RECIPE_REVIEW_CHECKS = (
     "neutral_identity_consistency",
     "transparent_background",
@@ -169,12 +169,6 @@ def _png_from_rgba(width: int, height: int, pixels: bytes | bytearray) -> bytes:
         + _png_chunk(b"IDAT", zlib.compress(raw))
         + _png_chunk(b"IEND", b"")
     )
-
-
-def _solid_png(width: int, height: int, rgba: tuple[int, int, int, int]) -> bytes:
-    """Return one solid-color PNG for non-final scaffold fixtures."""
-    pixel = bytes(rgba)
-    return _png_from_rgba(width, height, pixel * width * height)
 
 
 def _blank_canvas(width: int = 96, height: int = 96) -> bytearray:
@@ -404,33 +398,6 @@ def _draw_diamond_outline(
     )
 
 
-def _asset(
-    starter_id: str,
-    key: str,
-    rgba: tuple[int, int, int, int],
-    *,
-    size: tuple[int, int] = (4, 4),
-    role: str = "frame",
-) -> PersonaVisualStarterAsset:
-    """Create one deterministic raster fixture asset for a starter pack."""
-    return PersonaVisualStarterAsset(
-        asset_key=key,
-        filename=f"{starter_id}-{key}.png",
-        mime_type="image/png",
-        content=_solid_png(size[0], size[1], rgba),
-        asset_role=role,
-    )
-
-
-def _animation(asset_key: str, *, duration_ms: int = 250) -> dict[str, Any]:
-    """Create single-frame sprite animation metadata for a fixture asset key."""
-    return {
-        "frames": [{"asset_id": asset_key, "duration_ms": duration_ms}],
-        "frame_rate": 1,
-        "preview_asset_id": asset_key,
-    }
-
-
 def _state_loop_animation(
     state: str,
     *,
@@ -455,6 +422,7 @@ def _basic_art_manifest() -> dict[str, Any]:
         "renderer_type": "sprite_frames",
         "states": {state: {"animation_id": f"{state}-loop"} for state in _REQUIRED_STATE_IDS},
         "animations": {f"{state}-loop": _state_loop_animation(state) for state in _REQUIRED_STATE_IDS},
+        "fallbacks": {state: targets.copy() for state, targets in _BUILTIN_FALLBACKS.items()},
     }
 
 
@@ -470,7 +438,7 @@ def _success_reaction_art_manifest(success_description: str) -> dict[str, Any]:
         }
     }
     manifest["states"]["reaction.success"] = {"animation_id": "reaction-success-loop"}
-    manifest["fallbacks"] = {"reaction.success": ["speaking", "idle"]}
+    manifest["fallbacks"]["reaction.success"] = ["speaking", "idle"]
     manifest["animations"]["reaction-success-loop"] = {
         "frames": [{"asset_id": "reaction-success-1", "duration_ms": 700}],
         "frame_rate": 1,
@@ -1219,120 +1187,6 @@ def _pixel_migu_pack() -> PersonaVisualStarterPack:
     )
 
 
-def _custom_state_asset_key(state: str) -> str:
-    """Return a stable fixture asset key for one custom state id."""
-    normalized_state = state.replace(".", "-").replace(":", "-")
-    return f"variant-{normalized_state}"
-
-
-def _atlas_animation(
-    asset_key: str,
-    *,
-    y: int,
-    duration_ms: int = 160,
-) -> dict[str, Any]:
-    """Create two-frame atlas animation metadata with bounded sheet regions."""
-    return {
-        "frames": [
-            {
-                "asset_id": asset_key,
-                "region": {"x": 0, "y": y, "width": 2, "height": 2},
-                "duration_ms": duration_ms,
-            },
-            {
-                "asset_id": asset_key,
-                "region": {"x": 2, "y": y, "width": 2, "height": 2},
-                "duration_ms": duration_ms,
-            },
-        ],
-        "frame_rate": 8,
-        "preview_frame": 0,
-    }
-
-
-def _sprite_manifest(
-    *,
-    base_asset_key: str,
-    state_asset_keys: dict[str, str] | None = None,
-    custom_states: dict[str, dict[str, Any]] | None = None,
-    custom_state_assets: dict[str, str] | None = None,
-    authored_triggers: list[dict[str, Any]] | None = None,
-    fallbacks: dict[str, list[str]] | None = None,
-) -> dict[str, Any]:
-    """Create a sprite_frames manifest with required and optional custom states."""
-    state_asset_keys = state_asset_keys or {}
-    animations: dict[str, Any] = {}
-    states: dict[str, dict[str, str]] = {}
-    for state in _REQUIRED_STATE_IDS:
-        asset_key = state_asset_keys.get(state, base_asset_key)
-        animation_id = f"{state}-loop"
-        animations[animation_id] = _animation(asset_key)
-        states[state] = {"animation_id": animation_id}
-
-    for state, asset_key in (custom_state_assets or {}).items():
-        animation_id = state.replace(".", "-").replace(":", "-") + "-loop"
-        animations[animation_id] = _animation(asset_key, duration_ms=180)
-        states[state] = {"animation_id": animation_id}
-
-    manifest: dict[str, Any] = {
-        "manifest_version": 1,
-        "renderer_type": "sprite_frames",
-        "states": states,
-        "animations": animations,
-    }
-    if custom_states:
-        manifest["state_catalog"] = custom_states
-    if authored_triggers:
-        manifest["authored_triggers"] = authored_triggers
-    if fallbacks:
-        manifest["fallbacks"] = fallbacks
-    return manifest
-
-
-def _atlas_manifest(asset_key: str) -> dict[str, Any]:
-    """Create a sprite_frames manifest that demonstrates atlas-backed frames."""
-    states = {
-        "idle": {"animation_id": "idle-loop"},
-        "listening": {"animation_id": "listening-loop"},
-        "thinking": {"animation_id": "thinking-loop"},
-        "speaking": {"animation_id": "speaking-loop"},
-        "error": {"animation_id": "error-loop"},
-        "tool.research": {"animation_id": "tool-research-loop"},
-    }
-    return {
-        "manifest_version": 1,
-        "renderer_type": "sprite_frames",
-        "state_catalog": {
-            "tool.research": {
-                "label": "Researching",
-                "kind": "tool_variant",
-                "description": "Used while research or retrieval tools are running.",
-                "tags": ["tool", "search"],
-            }
-        },
-        "states": states,
-        "fallbacks": {"tool.research": ["tool_running", "thinking", "idle"]},
-        "authored_triggers": [
-            {
-                "id": "research-tool-category",
-                "source": "tool_category",
-                "match": "search",
-                "state": "tool.research",
-                "duration_ms": 2400,
-                "priority": 70,
-            }
-        ],
-        "animations": {
-            "idle-loop": _atlas_animation(asset_key, y=0),
-            "listening-loop": _atlas_animation(asset_key, y=0),
-            "thinking-loop": _atlas_animation(asset_key, y=2),
-            "speaking-loop": _atlas_animation(asset_key, y=2, duration_ms=120),
-            "error-loop": _atlas_animation(asset_key, y=0, duration_ms=300),
-            "tool-research-loop": _atlas_animation(asset_key, y=2, duration_ms=140),
-        },
-    }
-
-
 def _basic_pack(
     *,
     starter_id: str,
@@ -1397,122 +1251,102 @@ def _basic_pack(
     )
 
 
-def _multi_asset_pack(
+def _authored_sprite_pack(
     *,
     starter_id: str,
     title: str,
-    description: str,
-    palette: tuple[tuple[int, int, int, int], ...],
+    identity: str,
     tags: tuple[str, ...],
     complexity_tier: str = "intermediate",
     custom_states: dict[str, dict[str, Any]] | None = None,
     authored_triggers: list[dict[str, Any]] | None = None,
     fallbacks: dict[str, list[str]] | None = None,
 ) -> PersonaVisualStarterPack:
-    """Create an intermediate starter with separate required-state assets."""
-    custom_state_asset_keys = tuple(_custom_state_asset_key(state) for state in (custom_states or {}))
-    asset_keys = (
-        "idle",
-        "listening",
-        "thinking",
-        "speaking",
-        "error",
-        *custom_state_asset_keys,
-    )
-    assets = tuple(_asset(starter_id, key, palette[index % len(palette)]) for index, key in enumerate(asset_keys))
-    state_asset_keys = {state: state for state in _REQUIRED_STATE_IDS}
-    custom_state_assets = {state: _custom_state_asset_key(state) for state in (custom_states or {})}
+    """Bind reviewed package artwork to the established starter states."""
+    uses_atlas = complexity_tier == "intricate"
+    states: dict[str, dict[str, str]] = {}
+    animations: dict[str, Any] = {}
+    assets: list[PersonaVisualStarterAsset] = []
+    if uses_atlas:
+        assets.append(_resource_png_asset(starter_id, "atlas", "atlas.png", role="sprite_sheet"))
+
+    durations = {
+        "idle": (1500, 150),
+        "listening": (360, 360),
+        "thinking": (480, 480),
+        "speaking": (140, 140),
+        "error": (430, 430),
+    }
+    for row, state in enumerate((*_REQUIRED_STATE_IDS, *(custom_states or {}))):
+        key = state.replace(".", "-")
+        animation_id = f"{key}-loop"
+        states[state] = {"animation_id": animation_id}
+        frames: list[dict[str, Any]] = []
+        for index, duration in enumerate(durations.get(state, (380, 420))):
+            if uses_atlas:
+                frames.append(
+                    {
+                        "asset_id": "atlas",
+                        "duration_ms": duration,
+                        "region": {"x": index * 128, "y": row * 128, "width": 128, "height": 128},
+                    }
+                )
+            else:
+                asset_key = f"{key}-{index + 1}"
+                assets.append(_resource_png_asset(starter_id, asset_key, f"{asset_key}.png", role="frame"))
+                frames.append({"asset_id": asset_key, "duration_ms": duration})
+        animations[animation_id] = {
+            "frames": frames,
+            **({"preview_frame": 0} if uses_atlas else {"preview_asset_id": frames[0]["asset_id"]}),
+        }
+
+    manifest: dict[str, Any] = {
+        "manifest_version": 1,
+        "renderer_type": "sprite_frames",
+        "states": states,
+        "animations": animations,
+        "fallbacks": {
+            **{state: targets.copy() for state, targets in _BUILTIN_FALLBACKS.items()},
+            **(fallbacks or {}),
+        },
+        ARTWORK_MANIFEST_KEY: {
+            "version": 1,
+            "creator": "tldw-project",
+            "license": _AUTHORED_ARTWORK_LICENSE,
+            "source_url": "https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/Buddy_Starter_Artwork.md",
+            "notices": "Original AI-assisted Buddy artwork prepared by tldw-project.",
+        },
+    }
+    if custom_states:
+        manifest["state_catalog"] = custom_states
+    if authored_triggers:
+        manifest["authored_triggers"] = authored_triggers
+
+    outputs = ["required_state_loops"]
+    if uses_atlas:
+        outputs.extend(("animation_strips", "animation_atlas"))
+    if custom_states:
+        outputs.append("custom_state_variants")
     return PersonaVisualStarterPack(
         id=starter_id,
         title=title,
-        description=("Catalog scaffold fixture, not final character art or animation: " f"{description}"),
+        description=identity,
         renderer_type="sprite_frames",
-        manifest=_sprite_manifest(
-            base_asset_key="idle",
-            state_asset_keys=state_asset_keys,
-            custom_states=custom_states,
-            custom_state_assets=custom_state_assets,
-            authored_triggers=authored_triggers,
-            fallbacks=fallbacks,
-        ),
-        assets=assets,
-        tags=("starter", "sprite_frames", "catalog:scaffold", *tags),
+        manifest=manifest,
+        assets=tuple(assets),
+        tags=("starter", "sprite_frames", "catalog:art-ready", f"tier:{complexity_tier}", *tags),
+        license_label=_AUTHORED_ARTWORK_LICENSE,
         complexity_tier=complexity_tier,
-        production_status="scaffold",
-        neutral_anchor_required=True,
+        production_status="art_ready",
         expected_asset_groups=(
-            _INTRICATE_EXPECTED_ASSET_GROUPS if complexity_tier == "intricate" else _INTERMEDIATE_EXPECTED_ASSET_GROUPS
+            _INTRICATE_EXPECTED_ASSET_GROUPS if uses_atlas else _INTERMEDIATE_EXPECTED_ASSET_GROUPS
         ),
-        animation_coverage_notes=(
-            _INTRICATE_ANIMATION_NOTES if complexity_tier == "intricate" else _INTERMEDIATE_ANIMATION_NOTES
-        ),
+        animation_coverage_notes=("Reviewed two-pose loops aligned to a fixed neutral anchor.",),
         production_recipe=_production_recipe(
-            identity_brief=description,
-            neutral_anchor=("Author a neutral model sheet or pose set before generating state frames."),
-            static_sheet=(
-                "Create separate static talking and reaction sheets for mouth, face, "
-                "and small pose changes before compiling timed animation loops."
-            ),
-            animation_outputs=(
-                (
-                    "required_state_loops",
-                    "animation_strips",
-                    "animation_atlas",
-                    "custom_state_variants",
-                )
-                if complexity_tier == "intricate"
-                else (
-                    "required_state_loops",
-                    "custom_state_variants",
-                )
-            ),
-        ),
-    )
-
-
-def _atlas_pack(
-    *,
-    starter_id: str,
-    title: str,
-    description: str,
-    rgba: tuple[int, int, int, int],
-    tags: tuple[str, ...],
-) -> PersonaVisualStarterPack:
-    """Create an intricate starter that uses one sprite-sheet fixture asset."""
-    asset = _asset(starter_id, "atlas", rgba, size=(4, 4), role="sprite_sheet")
-    return PersonaVisualStarterPack(
-        id=starter_id,
-        title=title,
-        description=("Catalog scaffold fixture, not final character art or animation: " f"{description}"),
-        renderer_type="sprite_frames",
-        manifest=_atlas_manifest(asset.asset_key),
-        assets=(asset,),
-        tags=(
-            "starter",
-            "sprite_frames",
-            "catalog:scaffold",
-            "tier:intricate",
-            "atlas",
-            *tags,
-        ),
-        complexity_tier="intricate",
-        production_status="scaffold",
-        neutral_anchor_required=True,
-        expected_asset_groups=_INTRICATE_EXPECTED_ASSET_GROUPS,
-        animation_coverage_notes=_INTRICATE_ANIMATION_NOTES,
-        production_recipe=_production_recipe(
-            identity_brief=description,
-            neutral_anchor=("Author a full neutral model sheet before generating atlas-backed loops."),
-            static_sheet=(
-                "Create separate static talking and reaction sheets for expression "
-                "choices before compiling timed atlas regions."
-            ),
-            animation_outputs=(
-                "required_state_loops",
-                "animation_strips",
-                "animation_atlas",
-                "custom_state_variants",
-            ),
+            identity_brief=identity,
+            neutral_anchor="The neutral pose fixes the position and scale on the 128 × 128 canvas.",
+            static_sheet="Separate static mouth and reaction pose sheets provide the source for the timed loops.",
+            animation_outputs=tuple(outputs),
         ),
     )
 
@@ -1525,27 +1359,17 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
     _terminal_tile_basic_pack(),
     _migu_marker_basic_pack(),
     _pixel_migu_pack(),
-    _multi_asset_pack(
+    _authored_sprite_pack(
         starter_id="study-desk-intermediate",
         title="Study Desk Intermediate",
-        description=("Calm study companion starter with separate required-state frame assets."),
-        palette=(
-            (76, 106, 146, 255),
-            (95, 128, 176, 255),
-            (126, 111, 168, 255),
-        ),
-        tags=("tier:intermediate", "study", "desk"),
+        identity="Bespectacled study companion with an open book on a walnut desk.",
+        tags=("study", "desk"),
     ),
-    _multi_asset_pack(
+    _authored_sprite_pack(
         starter_id="tool-helper-intermediate",
         title="Tool Helper Intermediate",
-        description=("Utility-themed starter with a declared exact tool animation variant."),
-        palette=(
-            (44, 132, 116, 255),
-            (72, 150, 132, 255),
-            (96, 166, 148, 255),
-        ),
-        tags=("tier:intermediate", "tool", "variant"),
+        identity="Teal utility toolbox with two rubber feet and a notes-search magnifier.",
+        tags=("tool", "variant"),
         custom_states={
             "tool.notes_search": {
                 "label": "Searching notes",
@@ -1566,16 +1390,11 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
         ],
         fallbacks={"tool.notes_search": ["tool_running", "thinking", "idle"]},
     ),
-    _multi_asset_pack(
+    _authored_sprite_pack(
         starter_id="object-creature-intermediate",
         title="Object Creature Intermediate",
-        description=("Non-human expressive object starter to show the format is not " "humanoid-only."),
-        palette=(
-            (144, 92, 72, 255),
-            (168, 118, 88, 255),
-            (190, 142, 108, 255),
-        ),
-        tags=("tier:intermediate", "object", "creature"),
+        identity="Coral enamel teapot with a cream lid and a small celebration pose.",
+        tags=("object", "creature"),
         custom_states={
             "reaction.success": {
                 "label": "Success reaction",
@@ -1586,23 +1405,37 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
         },
         fallbacks={"reaction.success": ["speaking", "idle"]},
     ),
-    _atlas_pack(
+    _authored_sprite_pack(
         starter_id="lofi-study-intricate",
         title="Lo-fi Study Intricate",
-        description=("Original study companion starter with atlas-backed loops and " "tool variant metadata."),
-        rgba=(108, 84, 164, 255),
-        tags=("lofi", "study"),
+        identity="Amber fox student in violet headphones and an indigo hoodie.",
+        tags=("atlas", "lofi", "study"),
+        complexity_tier="intricate",
+        custom_states={
+            "tool.research": {
+                "label": "Researching",
+                "kind": "tool_variant",
+                "description": "Used while research or retrieval tools are running.",
+                "tags": ["tool", "search"],
+            }
+        },
+        authored_triggers=[
+            {
+                "id": "research-tool-category",
+                "source": "tool_category",
+                "match": "search",
+                "state": "tool.research",
+                "duration_ms": 2400,
+                "priority": 70,
+            }
+        ],
+        fallbacks={"tool.research": ["tool_running", "thinking", "idle"]},
     ),
-    _multi_asset_pack(
+    _authored_sprite_pack(
         starter_id="action-guide-intricate",
         title="Action Guide Intricate",
-        description=("Energetic guide starter with reaction beats and richer state metadata."),
-        palette=(
-            (186, 72, 76, 255),
-            (208, 96, 88, 255),
-            (232, 132, 92, 255),
-        ),
-        tags=("tier:intricate", "action", "reaction"),
+        identity="Moss-green lizard guide in an orange neckerchief with anticipation and success poses.",
+        tags=("atlas", "action", "reaction"),
         complexity_tier="intricate",
         custom_states={
             "reaction.anticipation": {
@@ -1623,16 +1456,11 @@ DEFAULT_PERSONA_VISUAL_STARTER_PACKS: tuple[PersonaVisualStarterPack, ...] = (
             "reaction.success": ["speaking", "idle"],
         },
     ),
-    _multi_asset_pack(
+    _authored_sprite_pack(
         starter_id="elaborate-persona-intricate",
         title="Elaborate Persona Intricate",
-        description=("High-detail fantasy/sci-fi starter demonstrating multiple custom-state rows."),
-        palette=(
-            (92, 78, 142, 255),
-            (116, 96, 166, 255),
-            (148, 124, 192, 255),
-        ),
-        tags=("tier:intricate", "fantasy", "sci-fi"),
+        identity="Cloaked stargazer with a gold star clasp, focused expression and floating media cards.",
+        tags=("atlas", "fantasy", "sci-fi"),
         complexity_tier="intricate",
         custom_states={
             "mood.focused": {

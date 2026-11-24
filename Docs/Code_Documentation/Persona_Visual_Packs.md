@@ -424,10 +424,9 @@ recovery flows. They are not global Persona Visual pack rows or shared library
 entries. Listing the catalog returns safe fixture metadata only, and copying a
 starter always creates a normal user-owned draft pack before activation.
 
-The current bundled catalog exposes twelve starter IDs in stable order. The
-basic tier is the six bundled Codex Buddy defaults; the intermediate and
-intricate tiers remain bundled scaffold entries until their reviewed production
-assets are authored:
+The bundled catalog exposes thirteen art-ready starters in stable order.
+Six basic Buddy defaults and Pixel-Migu ship alongside three intermediate and
+three intricate defaults. Additional Buddy packs are optional downloads:
 
 1. `search-lens-basic`
 2. `index-card-basic`
@@ -435,12 +434,13 @@ assets are authored:
 4. `paperclip-basic`
 5. `terminal-tile-basic`
 6. `migu-marker-basic`
-7. `study-desk-intermediate`
-8. `tool-helper-intermediate`
-9. `object-creature-intermediate`
-10. `lofi-study-intricate`
-11. `action-guide-intricate`
-12. `elaborate-persona-intricate`
+7. `pixel-migu`
+8. `study-desk-intermediate`
+9. `tool-helper-intermediate`
+10. `object-creature-intermediate`
+11. `lofi-study-intricate`
+12. `action-guide-intricate`
+13. `elaborate-persona-intricate`
 
 The bundled basic tier is Search Lens, Index Card, Archive Cube, Paperclip,
 Terminal Tile, and Migu. Earlier tracker text that described only three basic
@@ -598,13 +598,11 @@ interchange path.
    - `reaction.success`: single celebratory pose from the same source sheet.
    - `error`: worried mouth plus a red alert mark.
 
-The six intermediate and intricate starters remain catalog scaffolds until their
-own asset-production issues produce reviewed final art. Their included PNGs are
-small deterministic fixtures and their manifest animations are metadata examples
-that validate state/asset copying, custom-state examples, and atlas-backed
-support. Real intermediate and intricate default Buddy assets still need to be
-created through the approved neutral-pose-to-animation pipeline and can replace
-those fixture assets without changing the catalog copy contract.
+The intermediate starters use individual transparent PNGs. The intricate
+starters use one atlas per Buddy with distinct regions for each state.
+All six use a fixed neutral anchor and include any custom variants defined by
+their catalog entries. See the [starter artwork and review sheets][starter-art]
+for the neutral, talking and reaction poses.
 
 The bundled starter catalog preserves the same explicit activation rule as
 user-created packs. The legacy `research-buddy-starter` id remains accepted as a
@@ -616,9 +614,8 @@ review surfaces, and future generation workers can distinguish current
 scaffolds from final authored default assets:
 
 1. `complexity_tier` is one of `basic`, `intermediate`, or `intricate`.
-2. `production_status` is `art_ready` for the current basic bundled defaults and
-   `scaffold` for the six intermediate/intricate starters until their final
-   assets pass review.
+2. `production_status` is `art_ready` for the bundled catalog. The `scaffold`
+   status describes templates awaiting final artwork.
 3. `neutral_anchor_required` is true when the final authored pack should begin
    from a neutral identity anchor.
 4. `expected_asset_groups` lists the authored inputs and outputs expected
@@ -626,8 +623,7 @@ scaffolds from final authored default assets:
    `neutral_anchor`, `static_talking_sheet`, `static_reaction_sheet`,
    `required_state_loops`, `animation_strips`, or `animation_atlas`.
 5. `animation_coverage_notes` are bounded notes for reviewers and future
-   generation jobs. They describe the missing neutral-anchor-derived animation
-   work and do not grant runtime support by themselves.
+   generation jobs. They describe the coverage of the current art.
 6. `production_recipe` is structured handoff metadata for authored assets. It
    includes an `identity_brief`, `neutral_anchor` guidance, `static_sheet`
    guidance, timed runtime `animation_outputs`, and `review_checks`.
@@ -796,3 +792,5 @@ feature is not VN gameplay, not VN Play rendering, and not CYOA scene state.
 Do not route Persona Visual Packs through VN runtime assumptions. Persona Buddy
 renders the active pack from the selected persona context; VN and CYOA modules
 have separate asset models, review surfaces, and runtime semantics.
+
+[starter-art]: https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/Buddy_Starter_Artwork.md

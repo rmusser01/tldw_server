@@ -83,6 +83,13 @@ it("shows authenticated source artwork before enabling copy as draft", async () 
   const image = preview.querySelector("image")!
   await waitFor(() => expect(image).toHaveAttribute("href", "blob:starter-art"))
   expect(preview).toHaveAttribute("viewBox", "64 0 64 64")
+  const clip = preview.querySelector("clipPath")!
+  expect(image).toHaveAttribute("clip-path", `url(#${clip.id})`)
+  const cell = clip.querySelector("rect")
+  expect(cell).toHaveAttribute("x", "64")
+  expect(cell).toHaveAttribute("y", "0")
+  expect(cell).toHaveAttribute("width", "64")
+  expect(cell).toHaveAttribute("height", "64")
   expect(mocks.fetch).toHaveBeenCalledWith(
     "/api/v1/persona/visual-starter-packs/search-lens-basic/assets/sheet/content",
     expect.objectContaining({ responseType: "arrayBuffer" })
