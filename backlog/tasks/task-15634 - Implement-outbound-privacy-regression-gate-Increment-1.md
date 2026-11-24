@@ -22,9 +22,9 @@ Deliver the reviewed product destination and asset inventory plus the required C
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A versioned inventory validates exact origins and real asset identities, distinguishes declared from transport-verified evidence, and guards new usage in its covered paths.
+- [x] #1 A versioned inventory validates exact origins and real asset identities, distinguishes declared from transport-verified evidence, and guards new usage in its covered paths.
 - [ ] #2 The same local and required-CI runner exercises fresh server startup, first-run setup, selected runtime behavior, and opted-in synthetic download and provider paths with no real external traffic.
-- [ ] #3 Guarded production browser smoke covers the shipped setup wizard, Next.js including its server process, and the packaged Chrome worker and content script. Search results use a bundled icon.
+- [x] #3 Guarded production browser smoke covers the shipped setup wizard, Next.js including its server process, and the packaged Chrome worker and content script. Search results use a bundled icon.
 - [ ] #4 License-admitted required contexts fail on violations, missing evidence, or failed coverage. Relevant changes trigger the check, diagnostics are redacted, and coverage limits are documented.
 <!-- AC:END -->
 
@@ -38,6 +38,7 @@ Implementation started in the isolated outbound-egress-design worktree. Stage co
 Stage 1: observed missing-validator test failure, then 73 passed with the direct HTTP guard. Bandit on the validator and its unit tests and git diff --check passed. Package registry and downstream hosts are unverified where installer argv cannot identify them.
 Stage 2: 39 harness and strict-guard tests passed after red runs, and the existing guard suite delivered 27 passes and one expected subprocess-only skip. The real Linux Docker controls and guarded default smoke passed, including startup, local setup state and notes, ASGI shutdown, and zero recorded attempts. Follow-up review regression tests require the preflight at internal entry points and reject local-only config edits before image preparation. The smoke uses the ASGI shutdown-complete message because Uvicorn 0.54 changed a private field name. Bandit and Ruff passed.
 Stage 3: 77 tests passed in the isolated Linux backend image (Hugging Face Hub 1.33.0, zero skips). All 11 opt-in subprocess cases also passed with Hub 0.36.0 under macOS OS-level network denial in Python 3.12. The fixtures assert both the built-in and configured OpenAI destinations and leave HF_ENDPOINT unset on the successful Hub cases. Pip/uv and Git coverage is limited to exact argv dispatch. Ruff and Bandit passed.
+Stage 4: all four browser scenarios ran together in disconnected Linux Docker and passed with zero violations. Wizard persistence, quickstart WebUI cookie and bundled search icon, the packaged copilot worker POST and rendered reply, and independent content-script activation are proved. Added the app early ONNX telemetry opt-out after a native DNS attempt was reproduced and verified absent. The missing-credentials check now precedes DNS on sample OpenAI endpoints, verified by 63 provider-readiness tests. The WebUI models catalog uses four exact unavailable local provider fixtures. Only Chromium’s verified failed UDP IPv6 route query is classified as platform behavior; actual network traffic remains subject to the exact fixture rules. 18 harness tests, 35 Add Sources tests, both TypeScript checks, Ruff, Bandit, and whitespace checks passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

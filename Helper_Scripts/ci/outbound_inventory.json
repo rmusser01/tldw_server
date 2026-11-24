@@ -227,6 +227,19 @@
       "assets": []
     },
     {
+      "id": "runtime.onnx-telemetry",
+      "kind": "builtin",
+      "component": "onnxruntime",
+      "source_path": "tldw_Server_API/app/__init__.py",
+      "purpose": "Report ONNX Runtime telemetry on SDK builds that include the native uploader",
+      "phase": "runtime",
+      "enabled_when": "An operator explicitly overrides ORT_DISABLE_TELEMETRY to enable SDK telemetry before app import",
+      "origins": [
+        "https://mobile.events.data.microsoft.com"
+      ],
+      "assets": []
+    },
+    {
       "id": "webui.research-sources",
       "kind": "user-directed",
       "component": "webui",
@@ -235,6 +248,22 @@
       "phase": "runtime",
       "enabled_when": "A user selects a web source",
       "origins": [],
+      "assets": []
+    },
+    {
+      "id": "webui.local-provider-discovery",
+      "kind": "builtin",
+      "component": "llm-provider",
+      "source_path": "tldw_Server_API/app/api/v1/endpoints/llm_providers.py",
+      "purpose": "Discover models at the shipped loopback endpoints for optional local providers",
+      "phase": "runtime",
+      "enabled_when": "A client loads the model catalog and local providers use their shipped loopback endpoints",
+      "origins": [
+        "http://127.0.0.1:5000",
+        "http://127.0.0.1:5001",
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:8080"
+      ],
       "assets": []
     },
     {

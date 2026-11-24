@@ -15,6 +15,27 @@ ENDPOINTS = frozenset({("127.0.0.1", 18081), ("::1", 18082)})
 ROOT = Path(__file__).resolve().parents[3]
 
 
+@pytest.mark.parametrize(("configured", "expected"), [(None, "1"), ("0", "0")])
+def test_app_configures_onnx_telemetry_before_native_imports(configured, expected):
+    code = """
+import os
+import sys
+
+if sys.argv[1] == "unset":
+    os.environ.pop("ORT_DISABLE_TELEMETRY", None)
+else:
+    os.environ["ORT_DISABLE_TELEMETRY"] = sys.argv[1]
+import tldw_Server_API.app
+assert "onnxruntime" not in sys.modules
+print(os.environ.get("ORT_DISABLE_TELEMETRY"))
+"""
+    child = subprocess.run(  # nosec B603
+        [sys.executable, "-B", "-c", code, "unset" if configured is None else configured],
+        cwd=ROOT, capture_output=True, text=True, timeout=8, check=True,
+    )
+    assert child.stdout.strip() == expected
+
+
 def test_exact_numeric_and_static_names_never_hit_dns(monkeypatch):
     getaddrinfo = socket.getaddrinfo
 
@@ -87,7 +108,7 @@ def test_internal_backend_entry_points_require_container_preflight(monkeypatch, 
     assert smoke.main(args) == 1
 
 
-@pytest.mark.parametrize("case", ["normal", "caught", "shutdown", "atexit", "missing"])
+@pytest.mark.parametrize("case", ["normal", "local-providers", "caught", "shutdown", "atexit", "missing"])
 def test_child_terminal_evidence_survives_swallowed_attempts_and_requires_shutdown(tmp_path, case):
     from Helper_Scripts.ci.outbound_backend_smoke import SmokeError, check_child_result
 
@@ -101,6 +122,9 @@ from Helper_Scripts.ci import outbound_backend_smoke as smoke
 
 case = sys.argv[1]
 async def serve(stop):
+    if case == 'local-providers':
+        for port in (5000, 5001, 8000, 8080):
+            assert socket.getaddrinfo('127.0.0.1', port)[0][4] == ('127.0.0.1', port)
     if case == 'atexit':
         @atexit.register
         def probe():
@@ -125,7 +149,8 @@ async def serve(stop):
                 pass
 
 smoke.serve_until_stop = serve
-smoke.run_child(Path(sys.argv[2]), Path(sys.argv[3]))
+args = {'local_provider_fixtures': True} if case == 'local-providers' else {}
+smoke.run_child(Path(sys.argv[2]), Path(sys.argv[3]), **args)
 """
     report, stop = tmp_path / "result.json", tmp_path / "stop"
     stop.touch()
@@ -138,7 +163,7 @@ smoke.run_child(Path(sys.argv[2]), Path(sys.argv[3]))
         assert not report.exists()
         with pytest.raises(SmokeError, match="backend_child_failed"):
             check_child_result(child.returncode, report)
-    elif case == "normal":
+    elif case in {"normal", "local-providers"}:
         assert check_child_result(child.returncode, report) == []
     else:
         assert child.returncode == 0

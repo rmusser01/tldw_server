@@ -1269,7 +1269,11 @@ def get_configured_providers(
 
             endpoint_scope: ConfiguredEndpointScope | None = None
             endpoint_policy: URLPolicyResult | None = None
-            if endpoint_url:
+            # Credential-free catalog views must not resolve endpoints they already know are unusable.
+            needs_credentials = __provider_readiness.custom_openai_endpoint_requires_credentials(
+                _normalize_catalog_provider_for_chat(provider_name), endpoint_url, api_key_value,
+            )
+            if endpoint_url and not needs_credentials:
                 try:
                     endpoint_scope = ConfiguredEndpointScope.from_url(endpoint_url)
                     endpoint_policy = _egress.evaluate_url_policy(

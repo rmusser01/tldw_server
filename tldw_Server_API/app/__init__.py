@@ -7,6 +7,11 @@ parallelism defaults (joblib/loky/BLAS threads) live in the root conftest.py.
 
 from __future__ import annotations
 
+import os
+
+# ONNX Runtime reads this before initializing its native telemetry uploader.
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+
 try:
     from starlette import status as _starlette_status
 except Exception:  # pragma: no cover - fallback for minimal tooling environments

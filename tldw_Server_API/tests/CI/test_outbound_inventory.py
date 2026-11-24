@@ -51,6 +51,14 @@ def test_shipped_inventory_anchors_and_kokoro_identity():
         assert all(".invalid" not in origin for origin in item.origins)
 
 
+def test_shipped_local_provider_discovery_matches_the_reviewed_loopback_origins():
+    from Helper_Scripts.ci.outbound_backend_smoke import LOCAL_PROVIDER_FIXTURE_PORTS
+
+    inventory = Inventory.load(ROOT / "Helper_Scripts/ci/outbound_inventory.json")
+    expected = {f"http://127.0.0.1:{port}" for port in LOCAL_PROVIDER_FIXTURE_PORTS}
+    assert inventory.capabilities["webui.local-provider-discovery"].origins == expected
+
+
 @pytest.mark.parametrize("field,value,reason", [
     ("extra", True, "invalid_schema"),
     ("enabled_when", "", "invalid_schema"),

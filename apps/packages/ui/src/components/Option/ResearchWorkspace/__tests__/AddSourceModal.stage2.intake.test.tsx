@@ -785,7 +785,7 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     })
   })
 
-  it("renders search snippets and favicon hints in web results", async () => {
+  it("renders web result snippets with a bundled icon and no remote image", async () => {
     workspaceStoreState.addSourceModalTab = "search"
     mockWebSearch.mockResolvedValueOnce({
       results: [
@@ -808,8 +808,9 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
       await screen.findByText("Key findings about climate mitigation strategies.")
     ).toBeInTheDocument()
 
-    const favicon = screen.getByTestId("search-result-favicon-0")
-    expect(favicon).toHaveAttribute("src", expect.stringContaining("google.com/s2/favicons"))
+    const result = screen.getByRole("listitem")
+    expect(result.querySelector("img")).toBeNull()
+    expect(screen.getByTestId("search-result-icon")).toHaveAttribute("aria-hidden", "true")
   })
 
   it("keeps Search Server import results visible with imported and failed row states", async () => {

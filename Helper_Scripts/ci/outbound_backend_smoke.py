@@ -15,10 +15,12 @@ import signal
 import subprocess  # nosec B404
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from tldw_Server_API.tests.helpers.offline_network import Attempts, block_live_network
@@ -36,6 +38,8 @@ REPORT = Path("/outbound-report/result.json")
 HOST = "127.0.0.1"
 PORT = 18081
 ORIGIN = f"http://{HOST}:{PORT}"
+# Shipped local endpoints for Oobabooga/TabbyAPI, KoboldCpp, vLLM, and llama.cpp/Aphrodite.
+LOCAL_PROVIDER_FIXTURE_PORTS = (5000, 5001, 8000, 8080)
 COVERAGE = ["production-asgi-lifespan", "local-setup", "local-notes", "python-dns-and-connect"]
 SOURCE_TREES = (
     "Helper_Scripts/ci",
@@ -133,9 +137,11 @@ async def serve_until_stop(stop: Path) -> None:
             await asyncio.gather(monitor, return_exceptions=True)
 
 
-def run_child(stop: Path, report: Path) -> None:
+def run_child(stop: Path, report: Path, *, local_provider_fixtures: bool = False) -> None:
     cleanup = ExitStack()
-    attempts = cleanup.enter_context(block_live_network(fixture_endpoints=frozenset({(HOST, PORT)})))
+    ports = (PORT, *LOCAL_PROVIDER_FIXTURE_PORTS) if local_provider_fixtures else (PORT,)
+    endpoints = frozenset((HOST, port) for port in ports)
+    attempts = cleanup.enter_context(block_live_network(fixture_endpoints=endpoints))
     finished = False
 
     # Register before importing the app, so its exit handlers run before evidence is written.
@@ -210,16 +216,49 @@ def _wait_ready(child: subprocess.Popen, fixture: BackendFixture) -> None:
     raise SmokeError("backend_not_ready")
 
 
+class _UnavailableProvider(BaseHTTPRequestHandler):
+    """An explicit loopback fixture for an unavailable optional local model server."""
+
+    def do_GET(self) -> None:
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    do_POST = do_GET
+
+    def log_message(self, *_args) -> None:
+        pass
+
+
 @contextmanager
-def backend_fixture(root: Path, temp: Path, *, trace_prefix: Path | None = None) -> Iterator[BackendFixture]:
+def _local_provider_fixtures(enabled: bool) -> Iterator[None]:
+    with ExitStack() as cleanup:
+        for port in LOCAL_PROVIDER_FIXTURE_PORTS if enabled else ():
+            server = cleanup.enter_context(ThreadingHTTPServer((HOST, port), _UnavailableProvider))
+            thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+            thread.start()
+            cleanup.callback(thread.join, timeout=5)
+            cleanup.callback(server.shutdown)
+        yield
+
+
+@contextmanager
+def backend_fixture(
+    root: Path, temp: Path, *, trace_prefix: Path | None = None, local_provider_fixtures: bool = False,
+) -> Iterator[BackendFixture]:
     """Provide the isolated fresh API and require a successful guarded shutdown."""
     project, fixture, env = _prepare_fixture(root, temp)
     stop, evidence = temp / "stop", temp / "backend-evidence.json"
     argv = [sys.executable, "-m", "Helper_Scripts.ci.outbound_backend_smoke",
             "--child", str(stop), str(evidence)]
+    if local_provider_fixtures:
+        argv.append("--with-local-provider-fixtures")
     if trace_prefix is not None:
-        argv = ["/usr/bin/strace", "-ff", "-e", "trace=connect,sendto", "-s", "0", "-o", str(trace_prefix), *argv]
-    with (temp / "backend.log").open("wb") as log:
+        argv = [
+            "/usr/bin/strace", "-ff", "--seccomp-bpf", "-e", "trace=connect,sendto",
+            "-s", "0", "-o", str(trace_prefix), *argv,
+        ]
+    with _local_provider_fixtures(local_provider_fixtures), (temp / "backend.log").open("wb") as log:
         # Only fixed local commands and private fixture paths are passed.
         child = subprocess.Popen(  # nosec B603
             argv, cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
@@ -314,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--child", nargs=2, type=Path, metavar=("STOP", "EVIDENCE"))
     group.add_argument("--inside-container", action="store_true")
     group.add_argument("--report-dir", type=Path)
+    parser.add_argument("--with-local-provider-fixtures", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.child or args.inside_container:
         try:
@@ -322,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Backend fixture requires the isolated container preflight.", file=sys.stderr)
             return 1
     if args.child:
-        run_child(*args.child)
+        run_child(*args.child, local_provider_fixtures=args.with_local_provider_fixtures)
         return 0
     if args.inside_container:
         return run_backend_smoke(ROOT, REPORT)
