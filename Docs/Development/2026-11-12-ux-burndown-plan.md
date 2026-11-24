@@ -710,13 +710,15 @@ review fixes went on the lanes. The lanes were merged into
   character settings validator, which refuses settings an ordinary plain send
   accepts (topK, seed, minP, numCtx, thinking, historyMessageLimit, Auto model,
   client tools). Plain Regenerate and Continue also drop the default non-RAG
-  prompt.
+  prompt. Filed as #3608.
 - **"Server save unconfirmed" during a slow first send:**
   `createChatWithRecovery` writes the recovery record before the create, so
   `ChatDraftRecovery` shows it while a live turn owns the create. This
-  contradicts CM-14's calm first send and touches frozen P4 files.
+  contradicts CM-14's calm first send and touches frozen P4 files. Filed as
+  #3609.
 - **Stopping a Retry before its first token:** it shows an "Aborted" error
   bubble and "Could not retry…". This is pre-existing in the shared send.
+  Filed as #3610.
 - **A Stop during the turn's selection read:** it shows a raw
   `request_config_scope_changed` notification.
 - **After a successful Retry:** the earlier "Reply not confirmed" card keeps
