@@ -396,7 +396,8 @@ vi.mock("~/store/webui", () => ({
 }))
 
 vi.mock("@/hooks/useConnectionState", () => ({
-  useConnectionState: () => playgroundFormConnectionState
+  useConnectionState: (select?: (state: typeof playgroundFormConnectionState) => unknown) =>
+    select ? select(playgroundFormConnectionState) : playgroundFormConnectionState
 }))
 
 vi.mock("@/types/connection", () => ({

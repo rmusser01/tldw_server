@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { JobPreviewModal } from "../JobPreviewModal"
+import type { JobPreviewResult } from "@/types/watchlists"
 
 const mocks = vi.hoisted(() => ({
   previewWatchlistJobMock: vi.fn()
@@ -153,6 +155,23 @@ describe("JobPreviewModal focus restoration", () => {
     })
 
     trigger.remove()
+  })
+
+  it("keeps the selected monitor's preview when an earlier monitor responds late", async () => {
+    let finishFirstRequest!: (result: JobPreviewResult) => void
+    mocks.previewWatchlistJobMock
+      .mockReturnValueOnce(new Promise((resolve) => { finishFirstRequest = resolve }))
+      .mockResolvedValueOnce({ items: [], total: 7, ingestable: 2, filtered: 5 })
+
+    const job = buildJob()
+    const onClose = vi.fn()
+    const { rerender } = render(<JobPreviewModal job={job} open onClose={onClose} />)
+    rerender(<JobPreviewModal job={{ ...job, id: 12 }} open onClose={onClose} />)
+    expect(await screen.findByText("7 candidates: 2 ingestable, 5 filtered")).toBeInTheDocument()
+
+    await act(async () => { finishFirstRequest({ items: [], total: 0, ingestable: 0, filtered: 0 }) })
+
+    expect(screen.getByText("7 candidates: 2 ingestable, 5 filtered")).toBeInTheDocument()
   })
 
   it("renders preview candidates as constrained cards in a full-width dialog", async () => {

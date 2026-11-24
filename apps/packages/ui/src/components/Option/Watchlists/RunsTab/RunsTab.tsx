@@ -14,6 +14,7 @@ import type { ColumnsType } from "antd/es/table"
 import { Alert } from "@/components/ui/primitives"
 import { ChevronDown, Eye, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { useInvalidateWatchlists, useWatchlistsAccountGeneration, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   fetchJobRuns,
@@ -22,7 +23,7 @@ import {
   fetchWatchlistJobs,
   fetchWatchlistRuns
 } from "@/services/watchlists"
-import type { WatchlistJob, WatchlistRun } from "@/types/watchlists"
+import type { PaginatedResponse, WatchlistRun } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { StatusTag } from "../shared"
 import {
@@ -39,6 +40,7 @@ import {
 } from "./run-notifications"
 import { fetchFilteredJobRuns, RUNS_CLIENT_FILTER_PAGE_SIZE } from "./runs-filter-fetch"
 import { hasActiveWatchlistRuns } from "./polling-utils"
+import { usePatchRunLists } from "./usePatchRunLists"
 
 const POLL_INTERVAL_MS = 5000
 const DEFAULT_RUNS_CSV_SERVER_THRESHOLD = 2000
@@ -46,6 +48,8 @@ const RUNS_API_PAGE_SIZE = RUNS_CLIENT_FILTER_PAGE_SIZE
 const RUNS_CSV_SERVER_PAGE_SIZE = 1000
 const RUNS_ADVANCED_FILTERS_STORAGE_KEY = "watchlists:runs:advanced-filters:v1"
 const RUN_STALLED_THRESHOLD_MS = 45 * 60_000
+const EMPTY_RUNS: WatchlistRun[] = []
+type RunsPage = PaginatedResponse<WatchlistRun> & { activeOutsidePage?: boolean }
 type RunsCsvTalliesMode = "none" | "per_run" | "aggregate"
 
 const toStatusDefaultLabel = (status: string): string =>
@@ -109,25 +113,18 @@ export const RunsTab: React.FC = () => {
   const { isConstrained } = useWatchlistsViewport()
 
   // Store state
-  const runs = useWatchlistsStore((s) => s.runs)
-  const runsLoading = useWatchlistsStore((s) => s.runsLoading)
-  const runsTotal = useWatchlistsStore((s) => s.runsTotal)
   const activeTab = useWatchlistsStore((s) => s.activeTab)
   const runsPage = useWatchlistsStore((s) => s.runsPage)
   const runsPageSize = useWatchlistsStore((s) => s.runsPageSize)
   const runsJobFilter = useWatchlistsStore((s) => s.runsJobFilter)
   const runsStatusFilter = useWatchlistsStore((s) => s.runsStatusFilter)
-  const pollingActive = useWatchlistsStore((s) => s.pollingActive)
   const runDetailOpen = useWatchlistsStore((s) => s.runDetailOpen)
   const selectedRunId = useWatchlistsStore((s) => s.selectedRunId)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
-  const [jobs, setJobs] = useState<WatchlistJob[]>([])
   const [exportingRunsCsv, setExportingRunsCsv] = useState(false)
   const [runsCsvTalliesMode, setRunsCsvTalliesMode] = useState<RunsCsvTalliesMode>("none")
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null)
   const [cancellingRunIds, setCancellingRunIds] = useState<number[]>([])
   const [failedCancelRunIds, setFailedCancelRunIds] = useState<number[]>([])
-  const [runsLoadError, setRunsLoadError] = useState<ReturnType<typeof mapWatchlistsError> | null>(null)
   const [runsLiveAnnouncement, setRunsLiveAnnouncement] = useState("")
   const hasActiveRunsFilters = Boolean(runsJobFilter || runsStatusFilter)
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(() => {
@@ -140,8 +137,6 @@ export const RunsTab: React.FC = () => {
   })
 
   // Store actions
-  const setRuns = useWatchlistsStore((s) => s.setRuns)
-  const setRunsLoading = useWatchlistsStore((s) => s.setRunsLoading)
   const setRunsPage = useWatchlistsStore((s) => s.setRunsPage)
   const setRunsPageSize = useWatchlistsStore((s) => s.setRunsPageSize)
   const setRunsJobFilter = useWatchlistsStore((s) => s.setRunsJobFilter)
@@ -152,118 +147,77 @@ export const RunsTab: React.FC = () => {
   const setPollingActive = useWatchlistsStore((s) => s.setPollingActive)
   const openRunDetail = useWatchlistsStore((s) => s.openRunDetail)
   const closeRunDetail = useWatchlistsStore((s) => s.closeRunDetail)
-  const updateRunInList = useWatchlistsStore((s) => s.updateRunInList)
 
-  // Refs for polling
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const previousVisibleRunsStatusRef = useRef<Map<number, string>>(new Map())
-  const hasRunsAnnouncementBaselineRef = useRef(false)
-  const previousSelectedWatchlistIdRef = useRef<number | null>(selectedWatchlistId)
 
-  // Fetch runs
-  const loadRuns = useCallback(async (showLoading = true) => {
-    if (showLoading) setRunsLoading(true)
-    try {
-      let items: WatchlistRun[] = []
-      let total = 0
-      let pagedItems: WatchlistRun[] = []
+  const invalidateWatchlists = useInvalidateWatchlists()
+  const patchRunLists = usePatchRunLists()
+  const accountGeneration = useWatchlistsAccountGeneration()
+  const pagination = { page: runsPage, size: runsPageSize }
+  const status = runsStatusFilter || undefined
+  const watchlistId = selectedWatchlistId ?? undefined
+  const globalParams = { ...pagination, watchlist_id: watchlistId, q: status }
+  const runsParams = runsJobFilter ? { ...pagination, job_id: runsJobFilter, status } : globalParams
+  const runsQuery = useWatchlistsQuery<RunsPage>("runs", runsParams, async ({ signal }) => {
+    if (!runsJobFilter) return fetchWatchlistRuns(globalParams, signal)
+    if (!status) return fetchJobRuns(runsJobFilter, pagination, signal)
 
-      if (runsJobFilter && runsStatusFilter) {
-        const filtered = await fetchFilteredJobRuns({
-          jobId: runsJobFilter,
-          statusFilter: runsStatusFilter,
-          currentPage: runsPage,
-          pageSize: runsPageSize,
-          fetchPage: fetchJobRuns
-        })
-
-        const start = (runsPage - 1) * runsPageSize
-        const end = runsPage * runsPageSize
-        items = filtered.filteredItems
-        total = filtered.exactTotal
-          ? items.length
-          : Math.max(items.length, end + (filtered.hasMoreInSource ? 1 : 0))
-        pagedItems = items.slice(start, end)
-      } else if (runsJobFilter) {
-        const result = await fetchJobRuns(runsJobFilter, {
-          page: runsPage,
-          size: runsPageSize
-        })
-        items = result.items || []
-        total = result.total || items.length
-        pagedItems = items
-      } else {
-        const result = await fetchWatchlistRuns({
-          watchlist_id: selectedWatchlistId ?? undefined,
-          q: runsStatusFilter || undefined,
-          page: runsPage,
-          size: runsPageSize
-        })
-        items = result.items || []
-        total = result.total || items.length
-        pagedItems = items
+    const { filteredItems, exactTotal, hasMoreInSource } = await fetchFilteredJobRuns({
+      jobId: runsJobFilter,
+      statusFilter: status,
+      currentPage: runsPage,
+      pageSize: runsPageSize,
+      fetchPage: (id, params) => {
+        signal.throwIfAborted()
+        return fetchJobRuns(id, params, signal)
       }
-
-      setRuns(pagedItems, total)
-      setRunsLoadError(null)
-
-      // Check if any runs are still running
-      setPollingActive(hasActiveWatchlistRuns(items))
-      setLastRefreshedAt(new Date().toISOString())
-    } catch (err) {
-      console.error("Failed to fetch runs:", err)
-      setRunsLoadError(
-        mapWatchlistsError(err, {
-          t,
-          context: t("watchlists:runs.title", "Activity"),
-          fallbackMessage: t("watchlists:runs.fetchError", "Failed to load runs")
-        })
-      )
-    } finally {
-      if (showLoading) setRunsLoading(false)
+    })
+    const start = (runsPage - 1) * runsPageSize
+    const end = runsPage * runsPageSize
+    return {
+      items: filteredItems.slice(start, end),
+      total: exactTotal
+        ? filteredItems.length
+        : Math.max(filteredItems.length, end + (hasMoreInSource ? 1 : 0)),
+      activeOutsidePage: hasActiveWatchlistRuns(filteredItems.slice(0, start)) ||
+        hasActiveWatchlistRuns(filteredItems.slice(end))
     }
-  }, [
-    runsJobFilter,
-    runsStatusFilter,
-    selectedWatchlistId,
-    runsPage,
-    runsPageSize,
-    setRuns,
-    setRunsLoading,
-    setPollingActive,
-    t
-  ])
+  }, {
+    refetchInterval: (query) =>
+      activeTab === "runs" && documentVisible &&
+      (query.state.data?.activeOutsidePage || hasActiveWatchlistRuns(query.state.data?.items))
+        ? POLL_INTERVAL_MS
+        : false
+  })
+  const runs = runsQuery.data?.items ?? EMPTY_RUNS
+  const runsTotal = runsQuery.data?.total || runs.length
+  const pollingActive = Boolean(runsQuery.data?.activeOutsidePage || hasActiveWatchlistRuns(runs))
+  const runsLoading = runsQuery.isLoading
+  const [refreshingRuns, setRefreshingRuns] = useState(false)
+  const lastRefreshedAt = runsQuery.dataUpdatedAt
+    ? new Date(runsQuery.dataUpdatedAt).toISOString()
+    : null
+  const runsLoadError = runsQuery.error ? mapWatchlistsError(runsQuery.error, {
+    t,
+    context: t("watchlists:runs.title", "Activity"),
+    fallbackMessage: t("watchlists:runs.fetchError", "Failed to load runs")
+  }) : null
 
-  // Load jobs for filter dropdown
-  const loadJobs = useCallback(async () => {
+  const jobsParams = { watchlist_id: watchlistId, page: 1, size: 200 }
+  const { data: jobsPage } = useWatchlistsQuery("jobs", jobsParams, ({ signal }) => fetchWatchlistJobs(jobsParams, signal))
+
+  const refreshRuns = async () => {
+    setRefreshingRuns(true)
     try {
-      const result = await fetchWatchlistJobs({
-        watchlist_id: selectedWatchlistId ?? undefined,
-        page: 1,
-        size: 200
-      })
-      setJobs(result.items || [])
-    } catch (err) {
-      console.error("Failed to fetch jobs:", err)
+      await runsQuery.refetch()
+    } finally {
+      setRefreshingRuns(false)
     }
-  }, [selectedWatchlistId])
-
-  // Initial load
-  useEffect(() => {
-    if (previousSelectedWatchlistIdRef.current === selectedWatchlistId) return
-    previousSelectedWatchlistIdRef.current = selectedWatchlistId
-    if (runsJobFilter != null) {
-      setRunsJobFilter(null)
-    }
-    if (runsPage !== 1) {
-      setRunsPage(1)
-    }
-  }, [runsJobFilter, runsPage, selectedWatchlistId, setRunsJobFilter, setRunsPage])
+  }
 
   useEffect(() => {
-    loadRuns()
-    loadJobs()
-  }, [loadRuns, loadJobs])
+    setPollingActive(pollingActive)
+  }, [pollingActive, setPollingActive])
 
   useEffect(() => {
     if (runsJobFilter && runsCsvTalliesMode === "aggregate") {
@@ -303,25 +257,10 @@ export const RunsTab: React.FC = () => {
     )
   }, [t])
 
-  const shouldAutoRefreshRuns = pollingActive && activeTab === "runs" && documentVisible
-
-  // Polling for active runs
   useEffect(() => {
-    if (shouldAutoRefreshRuns) {
-      pollIntervalRef.current = setInterval(() => {
-        loadRuns(false)
-      }, POLL_INTERVAL_MS)
-    } else if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current)
-      pollIntervalRef.current = null
-    }
-
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current)
-      }
-    }
-  }, [loadRuns, shouldAutoRefreshRuns])
+    previousVisibleRunsStatusRef.current = new Map()
+    setRunsLiveAnnouncement("")
+  }, [accountGeneration, selectedWatchlistId])
 
   useEffect(() => {
     const visibleRuns = Array.isArray(runs) ? runs : []
@@ -329,12 +268,6 @@ export const RunsTab: React.FC = () => {
     visibleRuns.forEach((run) => {
       nextStatuses.set(run.id, normalizeWatchlistRunStatus(run.status))
     })
-
-    if (!hasRunsAnnouncementBaselineRef.current) {
-      hasRunsAnnouncementBaselineRef.current = true
-      previousVisibleRunsStatusRef.current = nextStatuses
-      return
-    }
 
     const changedRuns = visibleRuns.filter((run) => {
       const previousStatus = previousVisibleRunsStatusRef.current.get(run.id)
@@ -362,19 +295,52 @@ export const RunsTab: React.FC = () => {
   }, [getRunStatusLabel, runs, t])
 
   useEffect(() => {
-    if (!runsLoadError) return
+    if (!runsQuery.error) return
     setRunsLiveAnnouncement(
       t("watchlists:runs.live.loadError", "Activity refresh failed.")
     )
-  }, [runsLoadError, t])
+  }, [runsQuery.error, t])
+
+  const handleCancelRun = async (runId: number) => {
+    if (cancellingRunIds.includes(runId)) return
+    setCancellingRunIds((prev) => [...prev, runId])
+    setFailedCancelRunIds((prev) => prev.filter((id) => id !== runId))
+    try {
+      const result = await cancelWatchlistRun(runId)
+      if (!result?.cancelled) {
+        setFailedCancelRunIds((prev) => [...prev, runId])
+        message.error(t("watchlists:runs.cancelRunError", "Failed to cancel run"))
+        return
+      }
+      patchRunLists(runId, {
+        status: "cancelled",
+        finished_at: new Date().toISOString(),
+        error_msg: "cancelled_by_user"
+      })
+      void invalidateWatchlists("runs", "run-detail", "jobs", "overview")
+      message.success(t("watchlists:runs.cancelRunSuccess", "Run cancelled"))
+      setRunsLiveAnnouncement(
+        t("watchlists:runs.live.cancelRunSuccess", "Run #{{id}} cancelled.", { id: runId })
+      )
+    } catch (err) {
+      console.error("Failed to cancel run:", err)
+      setFailedCancelRunIds((prev) => [...prev, runId])
+      message.error(t("watchlists:runs.cancelRunError", "Failed to cancel run"))
+      setRunsLiveAnnouncement(
+        t("watchlists:runs.live.cancelRunError", "Failed to cancel run #{{id}}.", { id: runId })
+      )
+    } finally {
+      setCancellingRunIds((prev) => prev.filter((id) => id !== runId))
+    }
+  }
 
   // Get job name by ID
   const getJobName = useCallback(
     (jobId: number) => {
-      const job = jobs.find((j) => j.id === jobId)
+      const job = jobsPage?.items?.find((j) => j.id === jobId)
       return job?.name || `Monitor #${jobId}`
     },
-    [jobs]
+    [jobsPage]
   )
 
   // Calculate duration
@@ -768,47 +734,7 @@ export const RunsTab: React.FC = () => {
                   }
                   icon={!cancelling ? <Square className="h-4 w-4" /> : undefined}
                   data-testid={`watchlists-run-cancel-${record.id}`}
-                  onClick={async () => {
-                    if (cancelling) return
-                    setCancellingRunIds((prev) => (prev.includes(record.id) ? prev : [...prev, record.id]))
-                    setFailedCancelRunIds((prev) => prev.filter((id) => id !== record.id))
-                    try {
-                      const result = await cancelWatchlistRun(record.id)
-                      if (!result?.cancelled) {
-                        setFailedCancelRunIds((prev) => (prev.includes(record.id) ? prev : [...prev, record.id]))
-                        message.error(
-                          t("watchlists:runs.cancelRunError", "Failed to cancel run")
-                        )
-                        return
-                      }
-                      updateRunInList(record.id, {
-                        status: "cancelled" as any,
-                        finished_at: new Date().toISOString(),
-                        error_msg: "cancelled_by_user"
-                      })
-                      message.success(
-                        t("watchlists:runs.cancelRunSuccess", "Run cancelled")
-                      )
-                      setRunsLiveAnnouncement(
-                        t("watchlists:runs.live.cancelRunSuccess", "Run #{{id}} cancelled.", {
-                          id: record.id
-                        })
-                      )
-                    } catch (err) {
-                      console.error("Failed to cancel run:", err)
-                      setFailedCancelRunIds((prev) => (prev.includes(record.id) ? prev : [...prev, record.id]))
-                      message.error(
-                        t("watchlists:runs.cancelRunError", "Failed to cancel run")
-                      )
-                      setRunsLiveAnnouncement(
-                        t("watchlists:runs.live.cancelRunError", "Failed to cancel run #{{id}}.", {
-                          id: record.id
-                        })
-                      )
-                    } finally {
-                      setCancellingRunIds((prev) => prev.filter((id) => id !== record.id))
-                    }
-                  }}
+                  onClick={() => void handleCancelRun(record.id)}
                 />
               </Tooltip>
             )}
@@ -1016,47 +942,7 @@ export const RunsTab: React.FC = () => {
                   }
                   icon={!cancelling ? <Square className="h-4 w-4" /> : undefined}
                   data-testid={`watchlists-run-cancel-${run.id}`}
-                  onClick={async () => {
-                    if (cancelling) return
-                    setCancellingRunIds((prev) => (prev.includes(run.id) ? prev : [...prev, run.id]))
-                    setFailedCancelRunIds((prev) => prev.filter((id) => id !== run.id))
-                    try {
-                      const result = await cancelWatchlistRun(run.id)
-                      if (!result?.cancelled) {
-                        setFailedCancelRunIds((prev) => (prev.includes(run.id) ? prev : [...prev, run.id]))
-                        message.error(
-                          t("watchlists:runs.cancelRunError", "Failed to cancel run")
-                        )
-                        return
-                      }
-                      updateRunInList(run.id, {
-                        status: "cancelled" as any,
-                        finished_at: new Date().toISOString(),
-                        error_msg: "cancelled_by_user"
-                      })
-                      message.success(
-                        t("watchlists:runs.cancelRunSuccess", "Run cancelled")
-                      )
-                      setRunsLiveAnnouncement(
-                        t("watchlists:runs.live.cancelRunSuccess", "Run #{{id}} cancelled.", {
-                          id: run.id
-                        })
-                      )
-                    } catch (err) {
-                      console.error("Failed to cancel run:", err)
-                      setFailedCancelRunIds((prev) => (prev.includes(run.id) ? prev : [...prev, run.id]))
-                      message.error(
-                        t("watchlists:runs.cancelRunError", "Failed to cancel run")
-                      )
-                      setRunsLiveAnnouncement(
-                        t("watchlists:runs.live.cancelRunError", "Failed to cancel run #{{id}}.", {
-                          id: run.id
-                        })
-                      )
-                    } finally {
-                      setCancellingRunIds((prev) => prev.filter((id) => id !== run.id))
-                    }
-                  }}
+                  onClick={() => void handleCancelRun(run.id)}
                 />
               )}
             </div>
@@ -1135,7 +1021,7 @@ export const RunsTab: React.FC = () => {
                 onChange={setRunsJobFilter}
                 allowClear
                 className="w-48"
-                options={jobs.map((j) => ({
+                options={(jobsPage?.items ?? []).map((j) => ({
                   label: j.name,
                   value: j.id
                 }))}
@@ -1187,8 +1073,8 @@ export const RunsTab: React.FC = () => {
           </span>
           <Button
             icon={<RefreshCw className="h-4 w-4" />}
-            onClick={() => loadRuns()}
-            loading={runsLoading}
+            onClick={() => void refreshRuns()}
+            loading={runsLoading || refreshingRuns}
           >
             {t("common:refresh", "Refresh")}
           </Button>
@@ -1260,8 +1146,8 @@ export const RunsTab: React.FC = () => {
           title={runsLoadError.title}
           action={{
             label: t("watchlists:errors.retry", "Retry"),
-            onClick: () => void loadRuns(),
-            loading: runsLoading
+            onClick: () => void refreshRuns(),
+            loading: runsLoading || refreshingRuns
           }}
         >
           {runsLoadError.description}
@@ -1276,7 +1162,7 @@ export const RunsTab: React.FC = () => {
           columns={columns}
           rowKey="id"
           aria-label={t("watchlists:runs.tableAria", "Activity runs table")}
-          loading={runsLoading}
+          loading={runsLoading || refreshingRuns}
           pagination={{
             current: runsPage,
             pageSize: runsPageSize,

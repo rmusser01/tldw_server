@@ -444,8 +444,9 @@ const PlaygroundContent = () => {
   const onCharacterRouteApplyReady = React.useCallback((apply: ApplyCharacterRoute | null) => {
     setApplyCharacterRoute(() => apply);
   }, []);
-  const catalogConnection = useConnectionState();
-  const catalogConnectionReady = catalogConnection.isConnected && catalogConnection.phase === ConnectionPhase.CONNECTED;
+  const { catalogConnectionReady } = useConnectionState((s) => ({
+    catalogConnectionReady: s.isConnected && s.phase === ConnectionPhase.CONNECTED,
+  }));
   const { data: readinessChatModels, isFetching: chatModelsFetching, isError: chatModelsError, refetch: refreshCharacterChatModels } = useChatModelCatalog(catalogConnectionReady);
   const [composerKeyboardInsetPx, setComposerKeyboardInsetPx] =
     React.useState(0)

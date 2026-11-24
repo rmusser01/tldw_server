@@ -885,12 +885,15 @@ export const PlaygroundForm = ({
     setVoiceChatTriggerInput((prev) => (prev === next ? prev : next));
   }, [voiceChatTriggerPhrases]);
 
-  const connectionState = useConnectionState();
-  const { phase, isConnected } = connectionState;
-  const connectionUxState = React.useMemo(
-    () => deriveConnectionUxState(connectionState),
-    [connectionState],
-  );
+  // Derive inside the selector: isChecking and lastCheckedAt change on every
+  // health poll, so select what the form reads, not the raw fields.
+  const { phase, isConnected, connectionUxState, connectionPending } =
+    useConnectionState((s) => ({
+      phase: s.phase,
+      isConnected: s.isConnected,
+      connectionUxState: deriveConnectionUxState(s),
+      connectionPending: isAwaitingFirstConnectionCheck(s),
+    }));
   const setOptionalPanelVisible = useChatSurfaceCoordinatorStore(
     (state) => state.setPanelVisible,
   );
@@ -904,7 +907,6 @@ export const PlaygroundForm = ({
     shouldEnableOptionalResource(state, "audio-health"),
   );
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED;
-  const connectionPending = isAwaitingFirstConnectionCheck(connectionState);
   const needsConnectionSetup = ["unconfigured", "configuring_url", "configuring_auth"].includes(connectionUxState);
   const { capabilities, loading: capsLoading } = useServerCapabilities();
   const {

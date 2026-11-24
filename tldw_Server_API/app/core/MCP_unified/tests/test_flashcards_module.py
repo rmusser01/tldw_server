@@ -6,10 +6,13 @@ import pytest
 
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.flashcards_module import FlashcardsModule
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 
 
 class FakeFlashcardsDB:
+    flashcard_store = property(lambda self: self)  # the fake defines the flashcard methods itself
     def __init__(self) -> None:
         self._deck_id = 0
         self.decks: Dict[int, Dict[str, Any]] = {}
@@ -48,8 +51,7 @@ class FakeFlashcardsDB:
         include_workspace_items=False,
         include_deleted=False,
     ):
-        clause, params, _ = CharactersRAGDB._flashcard_visibility_filter(  # type: ignore[misc]
-            self,
+        clause, params, _ = FlashcardStore(ChaChaContext(self))._flashcard_visibility_filter(  # type: ignore[arg-type]
             deck_id=deck_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,

@@ -23,6 +23,7 @@ class _LoggerStub:
 
 
 class _CloseFailsDB:
+    flashcard_store = property(lambda self: self)  # the fake defines the flashcard methods itself
     def __init__(self, sensitive_detail: str) -> None:
         self.sensitive_detail = sensitive_detail
 

@@ -310,7 +310,7 @@ def test_sync_merge_snapshot_detects_active_or_dormant_flashcard_dependency(
     source_id = store.add_keyword(f"sync-merge-flash-source-{dormant}")
     target_id = store.add_keyword(f"sync-merge-flash-target-{dormant}")
     assert source_id is not None and target_id is not None
-    card_uuid = db.add_flashcard({"front": "Front", "back": "Back"})
+    card_uuid = db.flashcard_store.add_flashcard({"front": "Front", "back": "Back"})
     with db.transaction() as conn:
         card = conn.execute(
             "SELECT id FROM flashcards WHERE uuid = ?", (card_uuid,)

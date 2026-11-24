@@ -303,7 +303,7 @@ class TestWorkspaceLifecycle:
             "scope_type": "workspace", "workspace_id": "ws-1",
         })
         quiz_id = db.create_quiz(name="Workspace Quiz", workspace_id="ws-1")
-        deck_id = db.add_deck("Workspace Deck", workspace_id="ws-1")
+        deck_id = db.flashcard_store.add_deck("Workspace Deck", workspace_id="ws-1")
         db.workspace_store.delete_workspace("ws-1", expected_version=1)
 
         # Workspace is soft-deleted
@@ -315,7 +315,7 @@ class TestWorkspaceLifecycle:
         assert conv is None
 
         quiz = db.get_quiz(quiz_id)
-        deck = db.get_deck(deck_id)
+        deck = db.flashcard_store.get_deck(deck_id)
         assert quiz is not None
         assert deck is not None
         assert quiz["workspace_id"] is None

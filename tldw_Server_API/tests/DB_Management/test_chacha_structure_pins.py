@@ -138,6 +138,7 @@ def test_context_module_privates_are_pinned() -> None:
         "tldw_Server_API.app.core.DB_Management.chacha.postgres_schema",
         "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap",
         "tldw_Server_API.app.core.DB_Management.chacha.workspace_store",
+        "tldw_Server_API.app.core.DB_Management.chacha.flashcard_store",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.sqlite_steps",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.postgres_steps",
     ],
@@ -466,3 +467,18 @@ def test_workspace_methods_live_on_the_store() -> None:
     assert [n for n in names if n in vars(CharactersRAGDB)] == []  # nosec B101
     assert [n for n in names if n not in vars(WorkspaceStore)] == []  # nosec B101
     assert not hasattr(WorkspaceStore, "__getattr__")  # nosec B101
+
+
+def test_flashcard_methods_live_on_the_store() -> None:
+    """PR J2: the flashcard bodies moved into ``FlashcardStore``, which no longer forwards to the DB."""
+    import ast as _ast
+
+    from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
+
+    manifest = _ast.literal_eval(
+        Path("Helper_Scripts/chacha_split/manifests/t12_flashcards.py").read_text().split("MANIFEST = ", 1)[1]
+    )
+    names = manifest["names"]
+    assert [n for n in names if n in vars(CharactersRAGDB)] == []  # nosec B101
+    assert [n for n in names if n not in vars(FlashcardStore)] == []  # nosec B101
+    assert not hasattr(FlashcardStore, "__getattr__")  # nosec B101

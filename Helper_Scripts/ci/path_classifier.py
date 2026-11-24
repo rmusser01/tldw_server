@@ -11,6 +11,7 @@ BACKEND_GLOBS = [
     "Helper_Scripts/ci/merge_queue.py",
     "Helper_Scripts/ci/path_classifier.py",
     "Helper_Scripts/ci/vitest_base_ratchet.py",
+    "Helper_Scripts/rag_split/**",
     "tools/backlog-py/**",
     "pyproject.toml",
     "uv.lock",
@@ -67,6 +68,102 @@ CHACHA_OWNER_SCOPE_GLOBS = [
     "uv.lock",
 ]
 
+# Paths that run the required `rag-pipeline` job (TASK-13950.24): the golden-output test and the
+# pipeline tests below, only when RAG code, its request mapping, a gate test or the job itself changes.
+RAG_PIPELINE_GLOBS = [
+    "tldw_Server_API/app/core/RAG/**",
+    "tldw_Server_API/app/api/v1/endpoints/rag_*.py",
+    "tldw_Server_API/app/api/v1/schemas/rag_schemas*.py",
+    "tldw_Server_API/tests/RAG_NEW/**",
+    "tldw_Server_API/tests/RAG/**",
+    "tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py",
+    "tldw_Server_API/tests/_plugins/postgres.py",
+    ".github/workflows/backend-required.yml",
+    "Helper_Scripts/ci/path_classifier.py",
+    "Helper_Scripts/rag_split/**",
+    "pyproject.toml",
+    "uv.lock",
+]
+
+_RAG_NEW = "tldw_Server_API/tests/RAG_NEW/"
+_RAG_NEW_UNIT = [
+    "test_batch_round2_flags",
+    "test_evidence_chain_provider_isolation",
+    "test_generation_executor",
+    "test_hyde",
+    "test_knowledge_source_retrieval_coverage",
+    "test_learned_fusion_simple",
+    "test_pipeline_generation_controls",
+    "test_pipeline_post_verification_metadata",
+    "test_pipeline_two_tier_gate",
+    "test_post_retrieval_coordinator",
+    "test_post_verifier",
+    "test_pre_retrieval_clarification_metrics",
+    "test_pre_retrieval_clarification_pipeline",
+    "test_quick_wins_spell_check_compat",
+    "test_rag_endpoint_contract_cleanup",
+    "test_rag_pipeline_types",
+    "test_rag_profiles",
+    "test_rag_provider_credentials",
+    "test_rag_result_mapping_core",
+    "test_rag_transport_helpers",
+    "test_rag_unified_response_mapping",
+    "test_rag_unified_search_agent_defaults",
+    "test_retrieval_plan_usage",
+    "test_retrieval",
+    "test_search_depth_explicit_overrides",
+    "test_slides_source_retrieval_hardening",
+    "test_source_contract",
+    "test_standard_core_contract_threading",
+    "test_streaming_executor",
+    "test_strict_extractive_and_citations",
+    "test_temporal_filters",
+    "test_unified_pipeline_decomposition",
+    "test_unified_pipeline_focused",
+    "test_unified_pipeline_golden",
+    "test_unified_pipeline_profile_metadata",
+    "test_unified_pipeline_query_expansion",
+    "test_unified_pipeline_security_cache_helpers",
+    "test_unified_pipeline_structured_writer",
+    "test_unified_pipeline",
+]
+_RAG_NEW_INTEGRATION = [
+    "test_rag_ablate_api",
+    "test_rag_batch_checkpoint_api",
+    "test_rag_batch_resume_api",
+    "test_rag_convenience_endpoint_credentials",
+    "test_rag_doc_researcher_api",
+    "test_rag_integration",
+    "test_rag_request_contract_parity",
+    "test_rag_stream_parity",
+    "test_rag_strict_extractive_nli_api",
+]
+_RAG_OLD = [
+    "test_unified_pipeline_document_serialization",
+    "test_unified_schema_and_pipeline",
+    "test_doc_researcher_features",
+    "test_knowledge_qa_live_regressions",
+    "test_restricted_postgres_media_retrieval",
+    "test_sql_retriever_integration",
+]
+# The `rag-pipeline` job runs exactly these files, serially (the workflow lists the same paths literally).
+RAG_PIPELINE_GATE_TESTS: tuple[str, ...] = (
+    *(f"{_RAG_NEW}integration/{n}.py" for n in _RAG_NEW_INTEGRATION),
+    f"{_RAG_NEW}property/test_rag_properties.py",
+    f"{_RAG_NEW}test_prf_and_spans.py",
+    *(f"{_RAG_NEW}unit/{n}.py" for n in _RAG_NEW_UNIT),
+    *(f"tldw_Server_API/tests/RAG/{n}.py" for n in _RAG_OLD),
+    "tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py",
+)
+# Pipeline test files the job does not run, with the reason.
+RAG_PIPELINE_GATE_EXCLUDED: dict[str, str] = {
+    f"{_RAG_NEW}test_unified_pipeline.py": (
+        "4 tests attempt live DNS to api.openai.com (teardown errors) and 3 are live_network_baseline entries"
+    ),
+    f"{_RAG_NEW}integration/test_rag_agentic_api.py": "it skips on HTTP 500",
+    f"{_RAG_NEW}integration/test_rag_benchmarks_ablation.py": "it skips without TestClient lifespan",
+}
+
 FAMILY_GUARDRAILS_GLOBS = [
     "apps/tldw-frontend/**/family-guardrails*",
     "apps/tldw-frontend/**/option-family-guardrails-wizard*",
@@ -118,6 +215,7 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
     chacha_owner_scope_changed = any(
         _matches_any(path, CHACHA_OWNER_SCOPE_GLOBS) for path in normalized_paths
     )
+    rag_pipeline_changed = any(_matches_any(path, RAG_PIPELINE_GLOBS) for path in normalized_paths)
     security_relevant_changed = backend_changed or any(
         path.endswith(("requirements.txt", "pyproject.toml", "uv.lock")) for path in normalized_paths
     )
@@ -132,4 +230,5 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         "security_relevant_changed": security_relevant_changed,
         "coverage_required": coverage_required,
         "chacha_owner_scope_changed": chacha_owner_scope_changed,
+        "rag_pipeline_changed": rag_pipeline_changed,
     }

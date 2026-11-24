@@ -73,8 +73,8 @@ def _complete_job(jm: JobManager, job_id: int) -> dict[str, object]:
 
 
 def _seed_pack(db: CharactersRAGDB, *, title: str = "Networks 101") -> tuple[int, int]:
-    deck_id = db.add_deck(f"{title} Deck", workspace_id="ws-1")
-    pack_id = db.create_study_pack(
+    deck_id = db.flashcard_store.add_deck(f"{title} Deck", workspace_id="ws-1")
+    pack_id = db.flashcard_store.create_study_pack(
         title=title,
         workspace_id="ws-1",
         deck_id=deck_id,
@@ -182,9 +182,9 @@ def test_browse_study_pack_deck_cards_pages_live_chapter_sets(client: TestClient
         ("Deleted card", "Chapter 1", original_revision),
         ("Intro card", "Introduction", edited_revision),
     ):
-        uuid = db.add_flashcard({"deck_id": deck_id, "front": front, "back": "Answer"})
+        uuid = db.flashcard_store.add_flashcard({"deck_id": deck_id, "front": front, "back": "Answer"})
         chapter_cards.append(uuid)
-        db.add_flashcard_citations(uuid, [{
+        db.flashcard_store.add_flashcard_citations(uuid, [{
             "source_type": "media",
             "source_id": "7",
             "locator": {"study_pack_chapter": {
@@ -194,14 +194,14 @@ def test_browse_study_pack_deck_cards_pages_live_chapter_sets(client: TestClient
                 "source_title": "Book",
             }},
         }])
-    db.soft_delete_flashcard(chapter_cards[2], expected_version=1)
+    db.flashcard_store.soft_delete_flashcard(chapter_cards[2], expected_version=1)
     other_device = CharactersRAGDB(db.db_path, client_id="another-device")
     try:
-        other_device.update_flashcard(chapter_cards[0], {"front": "First card edited"})
+        other_device.flashcard_store.update_flashcard(chapter_cards[0], {"front": "First card edited"})
     finally:
         other_device.close_connection()
-    db.add_flashcard({"deck_id": deck_id, "front": "Uncategorized card", "back": "Answer"})
-    db.add_flashcard({"deck_id": db.add_deck("Other deck"), "front": "Other card", "back": "Answer"})
+    db.flashcard_store.add_flashcard({"deck_id": deck_id, "front": "Uncategorized card", "back": "Answer"})
+    db.flashcard_store.add_flashcard({"deck_id": db.flashcard_store.add_deck("Other deck"), "front": "Other card", "back": "Answer"})
 
     path = f"/api/v1/flashcards/study-packs/decks/{deck_id}/cards"
     response = client.get(path)
@@ -260,8 +260,8 @@ def test_regenerate_study_pack_returns_400_when_job_payload_is_too_large(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setenv("JOBS_MAX_JSON_BYTES", "64")
-    deck_id = db.add_deck("Oversized Deck", workspace_id="ws-1")
-    pack_id = db.create_study_pack(
+    deck_id = db.flashcard_store.add_deck("Oversized Deck", workspace_id="ws-1")
+    pack_id = db.flashcard_store.create_study_pack(
         title="Oversized",
         workspace_id="ws-1",
         deck_id=deck_id,

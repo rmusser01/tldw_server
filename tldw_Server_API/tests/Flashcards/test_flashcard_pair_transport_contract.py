@@ -151,7 +151,7 @@ def test_basic_generation_sends_question_and_direct_answer_contract(pair_client,
     assert "a question or statement" not in system  # nosec B101 - catches ambiguous basic contract
     assert "directly answers the front question" in system  # nosec B101 - outgoing semantic contract
     assert [(card["front"], card["back"]) for card in response.json()["flashcards"]] == [(card["front"], card["back"]) for card in VALID]  # nosec B101
-    assert db.list_decks() == []  # nosec B101 - generation does not persist
+    assert db.flashcard_store.list_decks() == []  # nosec B101 - generation does not persist
     assert inference_transport.responses_closed == len(inference_transport.requests) == 6  # nosec B101
 
 
@@ -190,7 +190,7 @@ def test_duplicate_pairs_cannot_satisfy_requested_count(pair_client, inference_t
     assert response.status_code == 422, response.text  # nosec B101 - clear causal refusal diagnostic
     assert response.json()["detail"] == "duplicate_flashcards"  # nosec B101
     assert len(inference_transport.requests) == 1  # nosec B101 - refuse before verification
-    assert db.list_decks() == []  # nosec B101 - no duplicate drafts persisted
+    assert db.flashcard_store.list_decks() == []  # nosec B101 - no duplicate drafts persisted
 
 
 def test_same_pair_in_different_requested_types_is_not_a_duplicate(pair_client, inference_transport):
@@ -218,7 +218,7 @@ def test_observed_unique_wrong_pairs_retain_semantic_refusal_and_report(pair_cli
     judge_inputs = [request["messages"][1]["content"] for request in inference_transport.requests[1:]]
     assert all(SOURCE in prompt for prompt in judge_inputs)  # nosec B101
     assert any("Question: Water boils at 100 degrees Celsius at sea level.\nAnswer: Primary revision one." in prompt for prompt in judge_inputs)  # nosec B101
-    assert db.list_decks() == []  # nosec B101
+    assert db.flashcard_store.list_decks() == []  # nosec B101
 
 
 def test_empty_generation_keeps_existing_422(pair_client, inference_transport):
@@ -263,7 +263,7 @@ def test_study_suggestion_real_configuration_refusal_does_not_create_deck(pair_c
                        options=["Deoxyribonucleic acid", "Light"], correct_answer=0,
                        explanation="DNA stands for deoxyribonucleic acid.")
     attempt = db.start_attempt(quiz_id)
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz", activity_type="quiz_attempt", anchor_type="quiz_attempt", anchor_id=int(attempt["id"]),
         suggestion_type="study_suggestions", payload_json={"topics": [{"id": "topic-1", "display_label": "Biology", "selected": True}]})
     response = client.post(f"/api/v1/study-suggestions/snapshots/{snapshot_id}/actions", headers=headers, json={
@@ -271,7 +271,7 @@ def test_study_suggestion_real_configuration_refusal_does_not_create_deck(pair_c
         "selected_topic_ids": ["topic-1"], "generator_version": "v1", "force_regenerate": True})
     assert (response.status_code, response.json()["detail"]) == (400, "flashcard_generate_error")  # nosec B101
     assert inference_transport.requests == []  # nosec B101 - precisely states the earlier refusal boundary
-    assert db.list_decks(include_deleted=True) == []  # nosec B101 - no partial persistence
+    assert db.flashcard_store.list_decks(include_deleted=True) == []  # nosec B101 - no partial persistence
 
 
 @pytest.mark.parametrize("judge", [
@@ -316,7 +316,7 @@ def test_observed_duplicate_drafts_are_refused_before_judging(pair_client, infer
     response = client.post("/api/v1/flashcards/generate", headers=headers, json=_request())
     assert response.status_code == 422, response.text  # nosec B101
     assert response.json()["detail"] == "duplicate_flashcards"  # nosec B101
-    assert len(inference_transport.requests) == 1 and db.list_decks() == []  # nosec B101
+    assert len(inference_transport.requests) == 1 and db.flashcard_store.list_decks() == []  # nosec B101
 
 
 def test_unrelated_adapter_configuration_error_retains_400(pair_client, inference_transport, monkeypatch):

@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { OutputsTab } from "../OutputsTab"
 
@@ -105,6 +106,7 @@ vi.mock("@/utils/dateFormatters", () => ({
 vi.mock("@/services/watchlists", () => ({
   createWatchlistOutput: (...args: any[]) => mocks.createWatchlistOutputMock(...args),
   fetchWatchlistJobs: (...args: any[]) => mocks.fetchWatchlistJobsMock(...args),
+  fetchWatchlists: async () => ({ items: [], total: 0 }),
   fetchWatchlistOutputs: (...args: any[]) => mocks.fetchWatchlistOutputsMock(...args),
   fetchWatchlistTemplates: (...args: any[]) => mocks.fetchWatchlistTemplatesMock(...args),
   downloadWatchlistOutput: (...args: any[]) => mocks.downloadWatchlistOutputMock(...args)
@@ -129,17 +131,12 @@ vi.mock("../OutputPreviewDrawer", () => ({
 }))
 
 const baseState = (overrides: Record<string, unknown> = {}) => ({
-  outputs: [],
-  outputsLoading: false,
-  outputsTotal: 0,
   outputsPage: 1,
   outputsPageSize: 20,
   outputsJobFilter: null,
   outputsRunFilter: null,
   outputPreviewOpen: false,
   selectedOutputId: null,
-  setOutputs: vi.fn(),
-  setOutputsLoading: vi.fn(),
   setOutputsPage: vi.fn(),
   setOutputsPageSize: vi.fn(),
   setOutputsJobFilter: vi.fn(),
@@ -218,16 +215,13 @@ describe("OutputsTab advanced filters disclosure", () => {
   })
 
   it("filters visible outputs by delivery status in advanced mode", async () => {
-    mocks.storeStateRef.current = baseState({
-      outputs: [buildOutput(1, "failed"), buildOutput(2, "sent")],
-      outputsTotal: 2
-    })
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: [buildOutput(1, "failed"), buildOutput(2, "sent")], total: 2, has_more: false })
 
     render(<OutputsTab />)
 
     fireEvent.click(screen.getByTestId("watchlists-outputs-advanced-toggle"))
     expect(screen.getByTestId("watchlists-outputs-delivery-filter")).toBeInTheDocument()
-    expect(screen.getByTestId("outputs-table-rows")).toHaveTextContent("2")
+    await waitFor(() => expect(screen.getByTestId("outputs-table-rows")).toHaveTextContent("2"))
 
     fireEvent.change(screen.getByTestId("watchlists-outputs-delivery-filter"), {
       target: { value: "failed" }
@@ -243,9 +237,8 @@ describe("OutputsTab advanced filters disclosure", () => {
     const setRunsJobFilter = vi.fn()
     const setActiveTab = vi.fn()
 
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: [buildOutput(1, "failed"), buildOutput(2, "sent")], total: 2, has_more: false })
     mocks.storeStateRef.current = baseState({
-      outputs: [buildOutput(1, "failed"), buildOutput(2, "sent")],
-      outputsTotal: 2,
       setRunsStatusFilter,
       setRunsJobFilter,
       setActiveTab
@@ -253,12 +246,12 @@ describe("OutputsTab advanced filters disclosure", () => {
 
     render(<OutputsTab />)
 
-    const deliveryIssuesBanner = screen.getByTestId("watchlists-outputs-delivery-issues-banner")
+    const deliveryIssuesBanner = await screen.findByTestId("watchlists-outputs-delivery-issues-banner")
     expect(deliveryIssuesBanner).toHaveAttribute("data-ds-component", "Alert")
     expect(deliveryIssuesBanner).toHaveTextContent(
       "Delivery issues detected in 1 report."
     )
-    expect(screen.getByTestId("outputs-table-rows")).toHaveTextContent("2")
+    await waitFor(() => expect(screen.getByTestId("outputs-table-rows")).toHaveTextContent("2"))
 
     fireEvent.click(screen.getByTestId("watchlists-outputs-banner-show-failed"))
 

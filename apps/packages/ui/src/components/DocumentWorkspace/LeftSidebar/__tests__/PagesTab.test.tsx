@@ -39,10 +39,25 @@ vi.mock("react-pdf", () => ({
 
     return <div data-testid="mock-document">{children}</div>
   },
-  Page: ({ pageNumber }: { pageNumber: number }) => (
-    <div data-testid={`mock-page-${pageNumber}`} />
-  )
+  Page: ({
+    pageNumber,
+    onLoadSuccess,
+    onRenderSuccess
+  }: {
+    pageNumber: number
+    onLoadSuccess?: (page: typeof pdfPage) => void
+    onRenderSuccess?: (page: typeof pdfPage) => void
+  }) => {
+    React.useEffect(() => {
+      onLoadSuccess?.(pdfPage)
+      onRenderSuccess?.(pdfPage)
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- react-pdf reads its callbacks at call time
+    }, [])
+    return <div data-testid={`mock-page-${pageNumber}`} />
+  }
 }))
+
+const pdfPage = vi.hoisted(() => ({ cleanup: vi.fn(() => true) }))
 
 describe("PagesTab", () => {
   beforeEach(() => {
@@ -77,5 +92,14 @@ describe("PagesTab", () => {
       message.closest('[data-ds-component="Alert"]')
     ).toBeInTheDocument()
     expect(screen.getByText("Failed to load document")).toBeInTheDocument()
+  })
+
+  it("releases pdf.js render data for a thumbnail once painted and again on unmount", async () => {
+    const view = render(<PagesTab />)
+    await screen.findByTestId("mock-page-1")
+
+    expect(pdfPage.cleanup).toHaveBeenCalledTimes(1)
+    view.unmount()
+    expect(pdfPage.cleanup).toHaveBeenCalledTimes(2)
   })
 })

@@ -208,8 +208,8 @@ def _create_flashcard_session_for_audit_case(
     case: dict[str, object],
 ) -> tuple[int, int, int]:
     deck_name = str(case["deck_name"])
-    deck_id = db.add_deck(deck_name, "desc")
-    session = db.get_or_create_flashcard_review_session(
+    deck_id = db.flashcard_store.add_deck(deck_name, "desc")
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode=str(case["review_mode"]),
         tag_filter=case.get("tag_filter") if isinstance(case.get("tag_filter"), str) else None,
@@ -231,14 +231,14 @@ def _create_flashcard_session_for_audit_case(
     )
     review_specs = case.get("reviews") or []
     for index, review_spec in enumerate(review_specs):
-        card_uuid = db.add_flashcard(
+        card_uuid = db.flashcard_store.add_flashcard(
             {
                 "deck_id": deck_id,
                 "front": f"Front {index}",
                 "back": f"Back {index}",
             }
         )
-        db.review_flashcard(
+        db.flashcard_store.review_flashcard(
             card_uuid,
             rating=int(review_spec["rating"]),
             answer_time_ms=review_spec.get("answer_time_ms"),
@@ -260,7 +260,7 @@ def test_flashcard_snapshot_audit_cases_classify_grounding_from_rollups(
         anchor_id=session_id,
         principal=_admin_principal(),
     )
-    row = db.get_suggestion_snapshot(snapshot_id)
+    row = db.flashcard_store.get_suggestion_snapshot(snapshot_id)
     payload = row["payload_json"]
     topics = payload["topics"][:3]
     grounded_types = {topic["type"] for topic in topics if isinstance(topic, dict)}
@@ -279,8 +279,8 @@ def test_flashcard_snapshot_audit_cases_classify_grounding_from_rollups(
 
 
 def test_flashcard_snapshot_assigns_source_refs_only_to_matching_topics(db: CharactersRAGDB):
-    deck_id = db.add_deck("Grounded Audit Deck", "desc")
-    session = db.get_or_create_flashcard_review_session(
+    deck_id = db.flashcard_store.add_deck("Grounded Audit Deck", "desc")
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -298,14 +298,14 @@ def test_flashcard_snapshot_assigns_source_refs_only_to_matching_topics(db: Char
         ),
         commit=True,
     )
-    card_uuid = db.add_flashcard(
+    card_uuid = db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Front",
             "back": "Back",
         }
     )
-    db.review_flashcard(
+    db.flashcard_store.review_flashcard(
         card_uuid,
         rating=4,
         answer_time_ms=700,
@@ -318,7 +318,7 @@ def test_flashcard_snapshot_assigns_source_refs_only_to_matching_topics(db: Char
         anchor_id=int(session["id"]),
         principal=_admin_principal(),
     )
-    payload = db.get_suggestion_snapshot(snapshot_id)["payload_json"]
+    payload = db.flashcard_store.get_suggestion_snapshot(snapshot_id)["payload_json"]
     topics_by_label = {
         topic["display_label"]: topic
         for topic in payload["topics"]

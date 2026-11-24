@@ -25,8 +25,8 @@ def chacha_db(tmp_path):
 
 
 def _create_flashcard(chacha_db: CharactersRAGDB, *, notes: str | None = "Renal physiology") -> str:
-    deck_id = chacha_db.add_deck("Study Assistant Context Deck")
-    return chacha_db.add_flashcard(
+    deck_id = chacha_db.flashcard_store.add_deck("Study Assistant Context Deck")
+    return chacha_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "What is the nephron?",

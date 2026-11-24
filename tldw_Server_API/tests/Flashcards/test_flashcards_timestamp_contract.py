@@ -52,15 +52,15 @@ def test_deck_create_returns_written_row_with_string_timestamps(timestamp_client
     response = timestamp_client.post("/api/v1/flashcards/decks", json={"name": "Generated notes"})
     assert response.status_code == 200
     deck = response.json()
-    assert deck["id"] == timestamp_db.get_deck_by_name("Generated notes")["id"]
-    assert len(timestamp_db.list_decks()) == 1
+    assert deck["id"] == timestamp_db.flashcard_store.get_deck_by_name("Generated notes")["id"]
+    assert len(timestamp_db.flashcard_store.list_decks()) == 1
     _assert_timestamp_strings(deck)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("operation", ["list", "update"])
 def test_existing_deck_responses_have_string_timestamps(timestamp_client, timestamp_db, operation):
-    deck_id = timestamp_db.add_deck("Existing deck")
+    deck_id = timestamp_db.flashcard_store.add_deck("Existing deck")
     if operation == "list":
         response = timestamp_client.get("/api/v1/flashcards/decks")
     else:
@@ -82,7 +82,7 @@ def test_generated_card_save_preserves_provenance_and_timestamp_contract(
     timestamp_db,
     bulk,
 ):
-    deck_id = timestamp_db.add_deck("Generated deck")
+    deck_id = timestamp_db.flashcard_store.add_deck("Generated deck")
     payload = {
         "deck_id": deck_id,
         "front": "What is the Citrine marker?",
@@ -100,7 +100,7 @@ def test_generated_card_save_preserves_provenance_and_timestamp_contract(
     assert card["source_ref_type"] == "note"
     assert card["source_ref_id"] == "synthetic-note-167"
     assert card["deck_id"] == deck_id
-    assert timestamp_db.get_flashcard(card["uuid"])["back"] == "Amber"
+    assert timestamp_db.flashcard_store.get_flashcard(card["uuid"])["back"] == "Amber"
     _assert_timestamp_strings(card)
     assert card["last_reviewed_at"] is None
 
@@ -108,7 +108,7 @@ def test_generated_card_save_preserves_provenance_and_timestamp_contract(
 @pytest.mark.integration
 @pytest.mark.parametrize("operation", ["read", "update", "list"])
 def test_saved_card_responses_have_string_timestamps(timestamp_client, timestamp_db, operation):
-    card_uuid = timestamp_db.add_flashcard({"front": "Marker?", "back": "Amber"})
+    card_uuid = timestamp_db.flashcard_store.add_flashcard({"front": "Marker?", "back": "Amber"})
     if operation == "read":
         response = timestamp_client.get(f"/api/v1/flashcards/id/{card_uuid}")
     elif operation == "update":

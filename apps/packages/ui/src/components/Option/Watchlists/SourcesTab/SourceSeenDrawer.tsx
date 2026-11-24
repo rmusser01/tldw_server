@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import {
   Button,
   Descriptions,
@@ -14,7 +14,7 @@ import { RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives"
 import { clearSourceSeen, getSourceSeenStats } from "@/services/watchlists"
-import type { SourceSeenStats } from "@/types/watchlists"
+import { useInvalidateWatchlists, useIsCurrentWatchlistsAccount, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 
 interface SourceSeenDrawerProps {
@@ -33,44 +33,32 @@ export const SourceSeenDrawer: React.FC<SourceSeenDrawerProps> = ({
   isAdmin
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
-  const [loading, setLoading] = useState(false)
-  const [stats, setStats] = useState<SourceSeenStats | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
   const [targetUserId, setTargetUserId] = useState<number | null>(null)
 
-  const loadStats = useCallback(async () => {
-    if (!sourceId) return
-    setLoading(true)
-    setError(null)
-    try {
-      const params: { target_user_id?: number; keys_limit?: number } = {
-        keys_limit: 50
-      }
-      if (targetUserId) params.target_user_id = targetUserId
-      const result = await getSourceSeenStats(sourceId, params)
-      setStats(result)
-    } catch (err: any) {
-      const msg = err?.message || "Failed to load seen stats"
-      setError(msg)
-      console.error("Failed to load seen stats:", err)
-    } finally {
-      setLoading(false)
-    }
-  }, [sourceId, targetUserId])
+  const invalidateWatchlists = useInvalidateWatchlists()
+  const isCurrentAccount = useIsCurrentWatchlistsAccount()
+  const targetUser = targetUserId || undefined
+  const statsParams = { keys_limit: 50, target_user_id: targetUser }
+  const statsQuery = useWatchlistsQuery(
+    "source-seen",
+    { sourceId, ...statsParams },
+    ({ signal }) => sourceId == null ? Promise.resolve(null) : getSourceSeenStats(sourceId, statsParams, signal),
+    { enabled: open && Boolean(sourceId) }
+  )
+  const stats = statsQuery.data
+  const loading = statsQuery.isFetching
+  const error = statsQuery.error
+    ? statsQuery.error.message || "Failed to load seen stats"
+    : null
+  const loadStats = () => void statsQuery.refetch()
 
   useEffect(() => {
-    if (open && sourceId) {
-      loadStats()
-    } else {
-      setStats(null)
-      setError(null)
-      setTargetUserId(null)
-    }
-  }, [open, sourceId, loadStats])
+    if (!open || !sourceId) setTargetUserId(null)
+  }, [open, sourceId])
 
   const handleReset = async (clearBackoff: boolean) => {
-    if (!sourceId) return
+    if (!sourceId || !isCurrentAccount()) return
     setResetting(true)
     try {
       const params: { target_user_id?: number; clear_backoff?: boolean } = {
@@ -83,7 +71,7 @@ export const SourceSeenDrawer: React.FC<SourceSeenDrawerProps> = ({
           count: result.cleared
         })
       )
-      await loadStats()
+      await invalidateWatchlists("source-seen", "sources", "overview")
     } catch (err: any) {
       console.error("Failed to reset seen:", err)
       message.error(

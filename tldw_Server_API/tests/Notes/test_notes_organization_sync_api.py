@@ -2995,7 +2995,7 @@ def test_merge_sync_rejects_dormant_flashcard_dependency_before_append(
     sync_service: SyncV2Service,
 ) -> None:
     source, target = _setup_sync_merge(chacha_db, sync_service, suffix="flashcard")
-    card_uuid = chacha_db.add_flashcard({"front": "Front", "back": "Back"})
+    card_uuid = chacha_db.flashcard_store.add_flashcard({"front": "Front", "back": "Back"})
     with chacha_db.transaction() as conn:
         card = conn.execute(
             "SELECT id FROM flashcards WHERE uuid = ?", (card_uuid,)

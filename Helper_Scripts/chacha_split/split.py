@@ -216,6 +216,20 @@ def collisions(root: Path, names: set[str]) -> set[str]:
     return found
 
 
+def _imported_modules(root: Path, tree: ast.Module) -> set[str]:
+    """Names the file binds to a module: ``import X``, ``import X as Y``, ``from P import X`` where P/X is a module."""
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            bound |= {(a.asname or a.name).split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            base = root / node.module.replace(".", "/")
+            for a in node.names:
+                if (base / f"{a.name}.py").exists() or (base / a.name / "__init__.py").exists():
+                    bound.add(a.asname or a.name)
+    return bound
+
+
 def _is_store_module(key: str, tree: ast.Module, names: set[str]) -> bool:
     return key.startswith(STORES) and any(
         isinstance(n, ast.ClassDef) and _defined(n, names) for n in ast.walk(tree)
@@ -437,7 +451,11 @@ def run(root: Path, attr: str, wanted: set[str], check: bool, show_tests: bool) 
         text, tree = _parse(path)
         if _is_store_module(key, tree, names):
             continue
-        hits, notes = scan(tree, names, attr, key == DB_MODULE)
+        hits, notes = scan(tree, wanted if key == DB_MODULE else names, attr, key == DB_MODULE)
+        if key == DB_MODULE:  # inside the class, ``self.<name>`` is its own method even for a collision name
+            hits = [h for h in hits if h.name not in clash or (isinstance(h.receiver, ast.Name) and h.receiver.id == "self")]
+        modules = _imported_modules(root, tree)  # a module function that shares a moved name is not a DB call
+        hits = [h for h in hits if not (isinstance(h.receiver, ast.Name) and h.receiver.id in modules)]
         if not check and key.startswith(SCANNED[1]) and (hits or references(tree, names)):
             referencing.append(key)
         if not check:

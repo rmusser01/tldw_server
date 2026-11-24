@@ -29,7 +29,9 @@ export const PlaygroundEmpty = () => {
   const isConnected = useIsConnected();
   // While the first server check runs, keep the normal chat card instead of
   // flashing "Connect to start chatting" and then jumping to it (CC-03).
-  const connectionPending = isAwaitingFirstConnectionCheck(useConnectionState());
+  const { connectionPending } = useConnectionState((s) => ({
+    connectionPending: isAwaitingFirstConnectionCheck(s),
+  }));
   const { open: openHelpModal } = useHelpModal();
   const navigate = useNavigate();
   const [modesExpanded, setModesExpanded] = React.useState(false);

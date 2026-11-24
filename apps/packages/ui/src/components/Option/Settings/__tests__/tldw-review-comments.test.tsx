@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { FormInstance } from "antd"
 import type { TFunction } from "i18next"
@@ -563,6 +563,38 @@ describe("settings PR review fixes", () => {
       "aria-busy",
       "true"
     )
+  })
+
+  it("explains the unkept sign-in cookie until the connection succeeds", async () => {
+    // Fresh modules keep this page-lifetime notice out of the other tests.
+    vi.resetModules()
+    const { TldwConnectionSettings: Settings } = await import("../TldwConnectionSettings")
+    const recovery = await import("@/services/tldw/runtime-bootstrap-recovery")
+    const { useConnectionStore } = await import("@/store/connection")
+    const title = "The sign-in cookie was not kept or not accepted"
+    render(
+      <Settings
+        {...createConnectionProps({ configuredServerUrl: "", authSource: undefined })}
+      />
+    )
+    expect(screen.queryByText(title)).toBeNull()
+
+    act(() => recovery.reportRuntimeAuthCookieNotKept())
+    expect(screen.getByText(title)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Only if you reach tldw solely over http:\/\/localhost/)
+    ).toBeInTheDocument()
+
+    // Starting a save retires recovery but must not hide the advice before it succeeds.
+    act(() => recovery.cancelRuntimeAuthBootstrapRecovery())
+    expect(screen.getByText(title)).toBeInTheDocument()
+
+    act(() =>
+      useConnectionStore.setState((store) => ({
+        state: { ...store.state, isConnected: true }
+      }))
+    )
+    expect(screen.queryByText(title)).toBeNull()
   })
 
   it("formats invoice amounts using the invoice currency instead of a hardcoded dollar prefix", () => {

@@ -11,6 +11,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha.character_store import CharacterStore
 from tldw_Server_API.app.core.DB_Management.chacha.keyword_store import KeywordStore
+from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, OwnerScope
 
 
@@ -28,6 +29,8 @@ class _CursorStub:
 def _make_postgres_db() -> CharactersRAGDB:
 
     db = CharactersRAGDB.__new__(CharactersRAGDB)
+
+    db.flashcard_store = FlashcardStore(db.ctx)
     db.client_id = "pg-test"
     db._local = SimpleNamespace(backend_ref=None)
     db._uses_shared_content_backend = False
@@ -85,6 +88,8 @@ def test_rebuild_full_text_indexes_postgres_calls_backend():
 def test_rebuild_full_text_indexes_sqlite_executes_rebuild():
 
     db = CharactersRAGDB.__new__(CharactersRAGDB)
+
+    db.flashcard_store = FlashcardStore(db.ctx)
     db._local = SimpleNamespace(backend_ref=None)
     db._uses_shared_content_backend = False
     db._backend = MagicMock()
@@ -136,7 +141,7 @@ def test_list_flashcards_postgres_translates_fts(monkeypatch: pytest.MonkeyPatch
     db.ctx.utc_now_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
     db.execute_query = MagicMock(return_value=_CursorStub([]))
 
-    result = db.list_flashcards(q="alchemy", limit=10, offset=0)
+    result = db.flashcard_store.list_flashcards(q="alchemy", limit=10, offset=0)
 
     assert result == []
     sql, params = db.execute_query.call_args[0]
@@ -152,7 +157,7 @@ def test_get_flashcards_by_uuids_postgres_uses_boolean_deleted(
     db = postgres_db
     db.execute_query = MagicMock(return_value=_CursorStub([]))
 
-    result = db.get_flashcards_by_uuids(["uuid-1", "uuid-2"])
+    result = db.flashcard_store.get_flashcards_by_uuids(["uuid-1", "uuid-2"])
 
     assert result == []
     sql, params = db.execute_query.call_args[0]
@@ -245,7 +250,7 @@ def test_set_flashcard_tags_postgres_uses_on_conflict():
 
     db.transaction = fake_transaction  # type: ignore[assignment]
 
-    assert db.set_flashcard_tags("uuid-123", ["Alpha"]) is True
+    assert db.flashcard_store.set_flashcard_tags("uuid-123", ["Alpha"]) is True
 
     insert_calls = [sql.lower() for sql in conn.calls if sql.lower().startswith("insert into flashcard_keywords")]
     assert insert_calls, "expected flashcard_keywords insert when adding tags"

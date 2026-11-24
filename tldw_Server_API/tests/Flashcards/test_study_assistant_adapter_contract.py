@@ -204,7 +204,7 @@ def study_database(request, tmp_path):
 def study_route(request, study_database, provider_boundary):
     db = study_database
     if request.param == "flashcard":
-        card = db.add_flashcard({"front": "When does Citrine meet?", "back": "Tuesday at 14:00."})
+        card = db.flashcard_store.add_flashcard({"front": "When does Citrine meet?", "back": "Tuesday at 14:00."})
         path = f"/api/v1/flashcards/{card}/assistant"
     else:
         quiz = db.create_quiz(name="Citrine")

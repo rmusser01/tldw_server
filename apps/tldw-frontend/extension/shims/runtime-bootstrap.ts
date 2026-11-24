@@ -5,6 +5,7 @@ import { createSafeStorage } from "@/utils/safe-storage"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
   cancelRuntimeAuthBootstrapRecovery,
+  reportRuntimeAuthCookieNotKept,
   setRuntimeAuthBootstrapRecovery
 } from "@/services/tldw/runtime-bootstrap-recovery"
 import { FEATURE_FLAGS } from "@/hooks/useFeatureFlags"
@@ -214,6 +215,7 @@ const RUNTIME_CONFIG_ENDPOINT = "/api/_tldw-webui/runtime-config"
 const RUNTIME_SESSION_ENDPOINT = "/api/_tldw-webui/session"
 const RUNTIME_PROFILE_PROBE_ENDPOINT = "/api/v1/users/me/profile"
 const RUNTIME_REQUEST_TIMEOUT_MS = 8_000
+const COOKIE_NOT_KEPT_ATTEMPT_LIMIT = 2
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
 const MANUAL_SESSION_API_KEY = "tldwManualSessionApiKey"
 const MANUAL_SESSION_CREDENTIAL_LOCK = "tldw:manual-session-credential"
@@ -294,11 +296,48 @@ const fetchRuntimeConfig = async (): Promise<RuntimeConfigPayload | null> => {
   }
 }
 
+/**
+ * "cookie-not-kept": the session POST succeeded but the next request was not signed in, so
+ * the sign-in cookie was not kept or not accepted (e.g. Safari drops a Secure cookie over
+ * plain http, or the WebUI and API disagree on the cookie name). "refused": the WebUI or API
+ * declined runtime sign-in with a 4xx. Anything else, 503 included, may pass with time.
+ */
+type CookieSessionOutcome = "ok" | "retry" | "cookie-not-kept" | "refused"
+
+const isTransientStatus = (status: number): boolean =>
+  status === 408 || status === 429 || status >= 500
+
+// Set while a session POST succeeded but its probe has not answered yet: the next attempt
+// re-probes before POSTing, because each POST without a kept cookie mints a new session.
+let sessionPostedUnverified = false
+
+const probeCookieSession = async (): Promise<CookieSessionOutcome> => {
+  const probe = await withRuntimeRequestTimeout((signal) =>
+    fetch(RUNTIME_PROFILE_PROBE_ENDPOINT, {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      signal
+    })
+  )
+  if (probe.ok) return "ok"
+  return probe.status === 401 || probe.status === 403 ? "cookie-not-kept" : "retry"
+}
+
 const bootstrapCookieSession = async (
   isCurrent: () => boolean
-): Promise<boolean> => {
+): Promise<CookieSessionOutcome> => {
   try {
-    if (!isCurrent()) return false
+    if (!isCurrent()) return "retry"
+    if (sessionPostedUnverified) {
+      const reprobe = await probeCookieSession()
+      if (reprobe !== "cookie-not-kept") {
+        if (reprobe === "ok") sessionPostedUnverified = false
+        return reprobe
+      }
+      sessionPostedUnverified = false
+      if (!isCurrent()) return "retry"
+    }
     const response = await withRuntimeRequestTimeout((signal) =>
       fetch(RUNTIME_SESSION_ENDPOINT, {
         method: "POST",
@@ -307,19 +346,23 @@ const bootstrapCookieSession = async (
         signal
       })
     )
-    if (!response.ok || !isCurrent()) return false
-
-    const probe = await withRuntimeRequestTimeout((signal) =>
-      fetch(RUNTIME_PROFILE_PROBE_ENDPOINT, {
-        method: "GET",
-        credentials: "same-origin",
-        cache: "no-store",
-        signal
-      })
-    )
-    return probe.ok && isCurrent()
+    if (!response.ok) {
+      if (isTransientStatus(response.status)) return "retry"
+      if (response.status === 401)
+        console.warn(
+          "tldw: the API rejected the WebUI server's SINGLE_USER_API_KEY (401), so automatic " +
+            "sign-in stopped. Give the WebUI server and the API the same SINGLE_USER_API_KEY and " +
+            "reload, or enter the API key under Settings > tldw Server."
+        )
+      return "refused"
+    }
+    if (!isCurrent()) return "retry"
+    sessionPostedUnverified = true
+    const outcome = await probeCookieSession()
+    if (outcome !== "retry") sessionPostedUnverified = false
+    return outcome
   } catch {
-    return false
+    return "retry"
   }
 }
 
@@ -392,9 +435,11 @@ const scrubMismatchedManualSessionKey = async (
   }
 }
 
+type RuntimeSeedOutcome = "ready" | "retry" | "cookie-not-kept" | "unavailable"
+
 const seedTldwConfigFromRuntime = async (
   isCurrent: () => boolean = () => true
-): Promise<"ready" | "retry" | "unavailable"> => {
+): Promise<RuntimeSeedOutcome> => {
   if (typeof window === "undefined" || !isCurrent()) return "unavailable"
 
   const storage = createSafeStorage()
@@ -419,7 +464,9 @@ const seedTldwConfigFromRuntime = async (
       return "unavailable"
     }
 
-    if (!(await bootstrapCookieSession(isCurrent))) return isCurrent() ? "retry" : "unavailable"
+    const session = await bootstrapCookieSession(isCurrent)
+    if (!isCurrent() || session === "refused") return "unavailable"
+    if (session !== "ok") return session
 
     const existing =
       (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
@@ -624,7 +671,7 @@ export const runtimeBootstrapReady: Promise<void> = (async () => {
   })
   invalidateCookieSessionConfig()
   const outcome = await seedTldwConfigFromRuntime(initialIsCurrent).catch(
-    () => "retry"
+    (): RuntimeSeedOutcome => "retry"
   )
   if (initialIsCurrent()) await seedTldwConfigFromEnv().catch(() => undefined)
   const canRecoverRuntimeAuth = () => {
@@ -657,9 +704,16 @@ export const runtimeBootstrapReady: Promise<void> = (async () => {
       return false
     }
   }
+  // A dropped cookie is deterministic for this page; allow one retry for a racy first probe.
+  let cookieNotKeptAttempts = 0
+  const mayRetry = (result: RuntimeSeedOutcome): boolean => {
+    if (result !== "cookie-not-kept") return result === "retry"
+    cookieNotKeptAttempts += 1
+    return cookieNotKeptAttempts < COOKIE_NOT_KEPT_ATTEMPT_LIMIT
+  }
   if (
     !initialIsCurrent() ||
-    outcome !== "retry" ||
+    !mayRetry(outcome) ||
     !getQuickstartWebUiServerUrl() ||
     !canRecoverRuntimeAuth()
   ) {
@@ -670,9 +724,21 @@ export const runtimeBootstrapReady: Promise<void> = (async () => {
   setRuntimeAuthBootstrapRecovery(async (isCurrent) => {
     const current = () => isCurrent() && canRecoverRuntimeAuth()
     const recovered = await seedTldwConfigFromRuntime(current)
-    if (recovered !== "retry" || !current()) {
-      stop()
-      if (isCurrent()) cancelRuntimeAuthBootstrapRecovery()
+    if (mayRetry(recovered) && current()) return
+    stop()
+    if (!isCurrent()) return
+    cancelRuntimeAuthBootstrapRecovery()
+    if (recovered === "cookie-not-kept" && canRecoverRuntimeAuth()) {
+      console.warn(
+        "tldw: the WebUI sign-in cookie was not kept or not accepted (the session was created " +
+          "but the next request was not signed in), so automatic sign-in stopped. Common causes: " +
+          "the browser refuses a Secure cookie over plain http, or the WebUI and the API use " +
+          "different SINGLE_USER_SESSION_COOKIE_NAME values. Enter your API key under Settings > " +
+          "tldw Server; or, only if you reach tldw solely over http://localhost or " +
+          "http://127.0.0.1, restart the API with SESSION_COOKIE_SECURE=0 (it applies to the " +
+          "whole server, including the CSRF cookie) and reload this page."
+      )
+      reportRuntimeAuthCookieNotKept()
     }
   })
 })()

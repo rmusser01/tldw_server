@@ -1,9 +1,10 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react"
+import React, { useLayoutEffect, useRef } from "react"
 import { Modal, Spin, Table, Tag } from "antd"
 import type { ColumnsType } from "antd/es/table"
 import { useTranslation } from "react-i18next"
+import { useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { previewWatchlistJob } from "@/services/watchlists"
-import type { JobPreviewResult, PreviewItem, WatchlistJob } from "@/types/watchlists"
+import type { PreviewItem, WatchlistJob } from "@/types/watchlists"
 import { buildWatchlistsModalChrome, useWatchlistsViewport } from "../shared"
 import {
   getFocusableActiveElement,
@@ -16,14 +17,21 @@ interface JobPreviewModalProps {
   onClose: () => void
 }
 
+const PREVIEW_PARAMS = { limit: 50, per_source: 10 }
+
 export const JobPreviewModal: React.FC<JobPreviewModalProps> = ({
   job,
   open,
   onClose
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
-  const [loading, setLoading] = useState(false)
-  const [preview, setPreview] = useState<JobPreviewResult | null>(null)
+  const jobId = job?.id
+  const { data: preview, isFetching: loading } = useWatchlistsQuery(
+    "job-preview",
+    { jobId, ...PREVIEW_PARAMS },
+    ({ signal }) => jobId == null ? Promise.resolve(null) : previewWatchlistJob(jobId, PREVIEW_PARAMS, signal),
+    { enabled: open && Boolean(jobId) }
+  )
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
   const { isConstrained } = useWatchlistsViewport()
@@ -50,20 +58,6 @@ export const JobPreviewModal: React.FC<JobPreviewModalProps> = ({
       restoreFocusToElement(restoreFocusTargetRef.current)
     }
   }, [open])
-
-  useEffect(() => {
-    if (!open || !job) {
-      setPreview(null)
-      return
-    }
-    setLoading(true)
-    previewWatchlistJob(job.id, { limit: 50, per_source: 10 })
-      .then((result) => setPreview(result))
-      .catch((err) => {
-        console.error("Failed to preview job:", err)
-      })
-      .finally(() => setLoading(false))
-  }, [open, job])
 
   const columns: ColumnsType<PreviewItem> = [
     {

@@ -23,6 +23,7 @@ export const PdfSearch: React.FC<PdfSearchProps> = ({ pdfDocumentRef }) => {
     searchResults,
     activeSearchIndex,
     isIndexing,
+    indexFailed,
     setSearchQuery,
     closeSearch,
     goToNextResult,
@@ -96,6 +97,16 @@ export const PdfSearch: React.FC<PdfSearchProps> = ({ pdfDocumentRef }) => {
             ) : matchCount > 0 ? (
               <span className="text-xs text-muted">
                 {currentMatch} / {matchCount}
+              </span>
+            ) : indexFailed ? (
+              <span
+                className="text-xs text-danger"
+                title={t(
+                  "option:documentWorkspace.searchIndexFailedHint",
+                  "Could not index this PDF. Close and reopen search to retry."
+                )}
+              >
+                {t("option:documentWorkspace.searchIndexFailed", "Unavailable")}
               </span>
             ) : searchQuery ? (
               <span className="text-xs text-muted">0 / 0</span>

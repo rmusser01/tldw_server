@@ -62,8 +62,8 @@ def client(db: CharactersRAGDB):
 
 
 def _create_card(db: CharactersRAGDB, *, deck_name: str = "Session Deck") -> tuple[int, str]:
-    deck_id = db.add_deck(deck_name, "desc")
-    card_uuid = db.add_flashcard(
+    deck_id = db.flashcard_store.add_deck(deck_name, "desc")
+    card_uuid = db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Front",
@@ -79,10 +79,10 @@ def _create_cards(
     count: int,
     deck_name: str = "Session Deck",
 ) -> tuple[int, list[str]]:
-    deck_id = db.add_deck(deck_name, "desc")
+    deck_id = db.flashcard_store.add_deck(deck_name, "desc")
     card_uuids: list[str] = []
     for index in range(count):
-        card_uuid = db.add_flashcard(
+        card_uuid = db.flashcard_store.add_flashcard(
             {
                 "deck_id": deck_id,
                 "front": f"Front {index}",
@@ -96,7 +96,7 @@ def _create_cards(
 def test_first_review_submission_in_scope_creates_active_session_and_links_review(db: CharactersRAGDB):
     deck_id, card_uuid = _create_card(db)
 
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -105,13 +105,13 @@ def test_first_review_submission_in_scope_creates_active_session_and_links_revie
 
     assert session["status"] == "active"  # nosec B101
 
-    updated = db.review_flashcard(
+    updated = db.flashcard_store.review_flashcard(
         card_uuid,
         rating=1,
         answer_time_ms=900,
         review_session_id=session["id"],
     )
-    review_row = db.get_latest_flashcard_review(card_uuid)
+    review_row = db.flashcard_store.get_latest_flashcard_review(card_uuid)
 
     assert updated["review_session_id"] == session["id"]  # nosec B101
     assert review_row["review_session_id"] == session["id"]  # nosec B101
@@ -120,7 +120,7 @@ def test_first_review_submission_in_scope_creates_active_session_and_links_revie
 def test_stale_active_sessions_older_than_thirty_minutes_are_marked_abandoned(db: CharactersRAGDB):
     deck_id, _ = _create_card(db)
 
-    stale = db.get_or_create_flashcard_review_session(
+    stale = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -136,7 +136,7 @@ def test_stale_active_sessions_older_than_thirty_minutes_are_marked_abandoned(db
         (stale_at, stale_at, stale["id"]),
     )
 
-    refreshed = db.get_or_create_flashcard_review_session(
+    refreshed = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -156,7 +156,7 @@ def test_stale_active_sessions_older_than_thirty_minutes_are_marked_abandoned(db
 def test_same_scope_duplicates_collapse_to_newest_active_session(db: CharactersRAGDB):
     deck_id, _ = _create_card(db)
 
-    oldest = db.get_or_create_flashcard_review_session(
+    oldest = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -199,7 +199,7 @@ def test_same_scope_duplicates_collapse_to_newest_active_session(db: CharactersR
         (f"due:deck:{deck_id}",),
     ).fetchone()
 
-    authoritative = db.get_or_create_flashcard_review_session(
+    authoritative = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -225,16 +225,16 @@ def test_same_scope_duplicates_collapse_to_newest_active_session(db: CharactersR
 def test_manual_end_marks_session_completed(db: CharactersRAGDB):
     deck_id, _ = _create_card(db)
 
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
         scope_key=f"due:deck:{deck_id}",
     )
 
-    db.mark_flashcard_review_session_completed(session["id"])
+    db.flashcard_store.mark_flashcard_review_session_completed(session["id"])
 
-    sessions = db.list_flashcard_review_sessions(deck_id=deck_id)
+    sessions = db.flashcard_store.list_flashcard_review_sessions(deck_id=deck_id)
 
     assert sessions[0]["id"] == session["id"]  # nosec B101
     assert sessions[0]["status"] == "completed"  # nosec B101
@@ -244,9 +244,9 @@ def test_manual_end_marks_session_completed(db: CharactersRAGDB):
 def test_review_flashcard_without_review_session_id_auto_creates_active_session(db: CharactersRAGDB):
     deck_id, card_uuid = _create_card(db, deck_name="Auto Session Deck")
 
-    updated = db.review_flashcard(card_uuid, rating=4, answer_time_ms=700)
-    review_row = db.get_latest_flashcard_review(card_uuid)
-    sessions = db.list_flashcard_review_sessions(deck_id=deck_id)
+    updated = db.flashcard_store.review_flashcard(card_uuid, rating=4, answer_time_ms=700)
+    review_row = db.flashcard_store.get_latest_flashcard_review(card_uuid)
+    sessions = db.flashcard_store.list_flashcard_review_sessions(deck_id=deck_id)
 
     assert updated["review_session_id"] is not None  # nosec B101
     assert review_row["review_session_id"] == updated["review_session_id"]  # nosec B101
@@ -257,11 +257,11 @@ def test_review_flashcard_without_review_session_id_auto_creates_active_session(
 def test_review_session_preserves_deck_name_snapshot_after_deck_rename(db: CharactersRAGDB):
     deck_id, card_uuid = _create_card(db, deck_name="Original Deck Name")
 
-    updated = db.review_flashcard(card_uuid, rating=4, answer_time_ms=700)
+    updated = db.flashcard_store.review_flashcard(card_uuid, rating=4, answer_time_ms=700)
     session_id = int(updated["review_session_id"])
-    db.update_deck(deck_id, name="Renamed Deck")
+    db.flashcard_store.update_deck(deck_id, name="Renamed Deck")
 
-    sessions = db.list_flashcard_review_sessions(deck_id=deck_id)
+    sessions = db.flashcard_store.list_flashcard_review_sessions(deck_id=deck_id)
 
     assert int(sessions[0]["id"]) == session_id  # nosec B101
     assert sessions[0]["deck_name_snapshot"] == "Original Deck Name"  # nosec B101
@@ -270,7 +270,7 @@ def test_review_session_preserves_deck_name_snapshot_after_deck_rename(db: Chara
 def test_review_flashcard_rejects_unknown_or_wrong_deck_review_session_id(db: CharactersRAGDB):
     deck_id, card_uuid = _create_card(db, deck_name="Primary Session Deck")
     other_deck_id, _ = _create_card(db, deck_name="Other Session Deck")
-    other_session = db.get_or_create_flashcard_review_session(
+    other_session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=other_deck_id,
         review_mode="due",
         tag_filter=None,
@@ -278,30 +278,30 @@ def test_review_flashcard_rejects_unknown_or_wrong_deck_review_session_id(db: Ch
     )
 
     with pytest.raises(ConflictError, match="Flashcard review session not found"):
-        db.review_flashcard(card_uuid, rating=4, answer_time_ms=500, review_session_id=999999)
+        db.flashcard_store.review_flashcard(card_uuid, rating=4, answer_time_ms=500, review_session_id=999999)
 
     with pytest.raises(InputError, match="deck scope"):
-        db.review_flashcard(card_uuid, rating=4, answer_time_ms=500, review_session_id=other_session["id"])
+        db.flashcard_store.review_flashcard(card_uuid, rating=4, answer_time_ms=500, review_session_id=other_session["id"])
 
-    sessions = db.list_flashcard_review_sessions(deck_id=deck_id)
+    sessions = db.flashcard_store.list_flashcard_review_sessions(deck_id=deck_id)
     assert sessions == []  # nosec B101
 
 
 def test_review_flashcard_updates_session_aggregates_and_rollup(db: CharactersRAGDB):
     deck_id, card_uuids = _create_cards(db, count=3, deck_name="Aggregate Session Deck")
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
         scope_key=f"due:deck:{deck_id}",
     )
 
-    db.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
 
-    session_row = db.get_flashcard_review_session(session["id"])
-    rollup = db.get_flashcard_review_session_rollup(session["id"])
+    session_row = db.flashcard_store.get_flashcard_review_session(session["id"])
+    rollup = db.flashcard_store.get_flashcard_review_session_rollup(session["id"])
 
     assert session_row["cards_reviewed"] == 3  # nosec B101
     assert session_row["correct_count"] == 2  # nosec B101
@@ -312,16 +312,16 @@ def test_review_flashcard_updates_session_aggregates_and_rollup(db: CharactersRA
 
 def test_flashcard_review_session_rollup_reconstructs_missing_aggregates(db: CharactersRAGDB):
     deck_id, card_uuids = _create_cards(db, count=3, deck_name="Legacy Aggregate Deck")
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
         scope_key=f"due:deck:{deck_id}",
     )
 
-    db.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[1], rating=2, answer_time_ms=750, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[1], rating=2, answer_time_ms=750, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
     db.execute_query(
         """
         UPDATE flashcard_review_sessions
@@ -333,7 +333,7 @@ def test_flashcard_review_session_rollup_reconstructs_missing_aggregates(db: Cha
         commit=True,
     )
 
-    rollup = db.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=False)
+    rollup = db.flashcard_store.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=False)
 
     assert rollup["cards_reviewed"] == 3  # nosec B101
     assert rollup["correct_count"] == 3  # nosec B101
@@ -342,16 +342,16 @@ def test_flashcard_review_session_rollup_reconstructs_missing_aggregates(db: Cha
 
 def test_flashcard_review_session_rollup_reconstructs_impossible_aggregates(db: CharactersRAGDB):
     deck_id, card_uuids = _create_cards(db, count=3, deck_name="Impossible Aggregate Deck")
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
         scope_key=f"due:deck:{deck_id}",
     )
 
-    db.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
     db.execute_query(
         """
         UPDATE flashcard_review_sessions
@@ -363,7 +363,7 @@ def test_flashcard_review_session_rollup_reconstructs_impossible_aggregates(db: 
         commit=True,
     )
 
-    rollup = db.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=False)
+    rollup = db.flashcard_store.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=False)
 
     assert rollup["cards_reviewed"] == 3  # nosec B101
     assert rollup["correct_count"] == 2  # nosec B101
@@ -372,16 +372,16 @@ def test_flashcard_review_session_rollup_reconstructs_impossible_aggregates(db: 
 
 def test_flashcard_review_session_rollup_repairs_stale_aggregates_from_reviews(db: CharactersRAGDB):
     deck_id, card_uuids = _create_cards(db, count=3, deck_name="Repair Aggregate Deck")
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
         scope_key=f"due:deck:{deck_id}",
     )
 
-    db.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
     db.execute_query(
         """
         UPDATE flashcard_review_sessions
@@ -393,8 +393,8 @@ def test_flashcard_review_session_rollup_repairs_stale_aggregates_from_reviews(d
         commit=True,
     )
 
-    rollup = db.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=True)
-    repaired = db.get_flashcard_review_session(session["id"])
+    rollup = db.flashcard_store.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=True)
+    repaired = db.flashcard_store.get_flashcard_review_session(session["id"])
 
     assert rollup["cards_reviewed"] == 3  # nosec B101
     assert rollup["correct_count"] == 2  # nosec B101
@@ -408,16 +408,16 @@ def test_flashcard_review_session_rollup_reload_after_conditional_repair_race(
     monkeypatch: pytest.MonkeyPatch,
 ):
     deck_id, card_uuids = _create_cards(db, count=4, deck_name="Repair Race Deck")
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
         scope_key=f"due:deck:{deck_id}",
     )
 
-    db.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
+    db.flashcard_store.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
     db.execute_query(
         """
         UPDATE flashcard_review_sessions
@@ -464,13 +464,13 @@ def test_flashcard_review_session_rollup_reload_after_conditional_repair_race(
         return False
 
     monkeypatch.setattr(
-        db,
+        db.flashcard_store,
         "_repair_flashcard_review_session_aggregates_if_unchanged",
         _lose_repair_race,
     )
 
-    rollup = db.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=True)
-    repaired = db.get_flashcard_review_session(session["id"])
+    rollup = db.flashcard_store.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=True)
+    repaired = db.flashcard_store.get_flashcard_review_session(session["id"])
 
     assert rollup["cards_reviewed"] == 4  # nosec B101
     assert rollup["correct_count"] == 3  # nosec B101
@@ -481,7 +481,7 @@ def test_flashcard_review_session_rollup_reload_after_conditional_repair_race(
 
 def test_legacy_rows_with_null_review_session_id_remain_readable(db: CharactersRAGDB):
     deck_id, card_uuid = _create_card(db)
-    card_row = db.get_flashcard(card_uuid)
+    card_row = db.flashcard_store.get_flashcard(card_uuid)
     assert deck_id == card_row["deck_id"]  # nosec B101
 
     reviewed_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -526,7 +526,7 @@ def test_legacy_rows_with_null_review_session_id_remain_readable(db: CharactersR
         (reviewed_at, db.client_id, reviewed_at, card_uuid),
     )
 
-    review_row = db.get_latest_flashcard_review(card_uuid)
+    review_row = db.flashcard_store.get_latest_flashcard_review(card_uuid)
 
     assert review_row["rating"] == 3  # nosec B101
     assert review_row["review_session_id"] is None  # nosec B101
@@ -546,8 +546,8 @@ def test_review_endpoint_returns_review_session_id_and_persists_linkage(
 
     assert response.status_code == 200  # nosec B101
     payload = response.json()
-    review_row = db.get_latest_flashcard_review(card_uuid)
-    sessions = db.list_flashcard_review_sessions(deck_id=deck_id)
+    review_row = db.flashcard_store.get_latest_flashcard_review(card_uuid)
+    sessions = db.flashcard_store.list_flashcard_review_sessions(deck_id=deck_id)
 
     assert payload["review_session_id"] == review_row["review_session_id"]  # nosec B101
     assert payload["review_session_id"] == sessions[0]["id"]  # nosec B101
@@ -567,8 +567,8 @@ def test_explicit_all_decks_run_keeps_seven_reviews_in_one_completed_session(
     client.app.dependency_overrides[endpoints.get_job_manager] = lambda: None
     monkeypatch.setattr(endpoints, "_enqueue_study_suggestions_refresh", lambda **_kwargs: None)
     deck_id, deck_cards = _create_cards(db, count=5)
-    undecked = [db.add_flashcard({"front": f"Undecked {i}", "back": "Answer"}) for i in range(2)]
-    unrelated = db.get_or_create_flashcard_review_session(
+    undecked = [db.flashcard_store.add_flashcard({"front": f"Undecked {i}", "back": "Answer"}) for i in range(2)]
+    unrelated = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
@@ -596,10 +596,10 @@ def test_explicit_all_decks_run_keeps_seven_reviews_in_one_completed_session(
     completed = response.json()
     assert completed["cards_reviewed"] == 7  # nosec B101
     assert completed["status"] == "completed"  # nosec B101
-    assert db.get_flashcard_review_session_rollup(session_id)["cards_reviewed"] == 7  # nosec B101
-    assert db.get_flashcard_review_session(unrelated["id"])["cards_reviewed"] == 0  # nosec B101
-    assert db.get_flashcard_review_session(unrelated["id"])["status"] == "active"  # nosec B101
-    assert {db.get_latest_flashcard_review(card)["review_session_id"] for card in [*undecked, *deck_cards]} == {
+    assert db.flashcard_store.get_flashcard_review_session_rollup(session_id)["cards_reviewed"] == 7  # nosec B101
+    assert db.flashcard_store.get_flashcard_review_session(unrelated["id"])["cards_reviewed"] == 0  # nosec B101
+    assert db.flashcard_store.get_flashcard_review_session(unrelated["id"])["status"] == "active"  # nosec B101
+    assert {db.flashcard_store.get_latest_flashcard_review(card)["review_session_id"] for card in [*undecked, *deck_cards]} == {
         session_id
     }  # nosec B101
 
@@ -609,8 +609,8 @@ def test_explicit_deck_scope_rejects_other_deck_before_creating_session_or_revie
     db: CharactersRAGDB,
 ):
     _, card_uuid = _create_card(db)
-    other_deck = db.add_deck("Other deck", "desc")
-    before = db.get_flashcard(card_uuid)
+    other_deck = db.flashcard_store.add_deck("Other deck", "desc")
+    before = db.flashcard_store.get_flashcard(card_uuid)
     response = client.post(
         "/api/v1/flashcards/review",
         json={
@@ -620,9 +620,9 @@ def test_explicit_deck_scope_rejects_other_deck_before_creating_session_or_revie
         },
     )
     assert response.status_code == 400  # nosec B101
-    assert db.get_flashcard(card_uuid) == before  # nosec B101
-    assert db.get_latest_flashcard_review(card_uuid) is None  # nosec B101
-    assert db.list_flashcard_review_sessions() == []  # nosec B101
+    assert db.flashcard_store.get_flashcard(card_uuid) == before  # nosec B101
+    assert db.flashcard_store.get_latest_flashcard_review(card_uuid) is None  # nosec B101
+    assert db.flashcard_store.list_flashcard_review_sessions() == []  # nosec B101
 
 
 @pytest.mark.parametrize(
@@ -640,18 +640,18 @@ def test_explicit_review_session_rejects_invalid_context_without_writes(
     scope = f"{mode}:deck:{deck_id}" if session_deck else f"{mode}:global"
     if tag:
         scope += f":tag:{tag}"
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=session_deck,
         review_mode=mode,
         tag_filter=tag,
         scope_key=scope,
     )
     if invalid_session == "completed":
-        db.mark_flashcard_review_session_completed(session["id"])
+        db.flashcard_store.mark_flashcard_review_session_completed(session["id"])
     elif invalid_session == "abandoned":
         db.execute_query("UPDATE flashcard_review_sessions SET status = 'abandoned' WHERE id = ?", (session["id"],))
-    session_before = db.get_flashcard_review_session(session["id"])
-    card_before = db.get_flashcard(card_uuid)
+    session_before = db.flashcard_store.get_flashcard_review_session(session["id"])
+    card_before = db.flashcard_store.get_flashcard(card_uuid)
     response = client.post(
         "/api/v1/flashcards/review",
         json={
@@ -663,10 +663,10 @@ def test_explicit_review_session_rejects_invalid_context_without_writes(
     )
     expected_status = 404 if invalid_session in {"unknown", "completed", "abandoned"} else 400
     assert response.status_code == expected_status, response.text  # nosec B101
-    assert db.get_flashcard(card_uuid) == card_before  # nosec B101
-    assert db.get_latest_flashcard_review(card_uuid) is None  # nosec B101
-    assert db.get_flashcard_review_session(session["id"]) == session_before  # nosec B101
-    assert len(db.list_flashcard_review_sessions()) == 1  # nosec B101
+    assert db.flashcard_store.get_flashcard(card_uuid) == card_before  # nosec B101
+    assert db.flashcard_store.get_latest_flashcard_review(card_uuid) is None  # nosec B101
+    assert db.flashcard_store.get_flashcard_review_session(session["id"]) == session_before  # nosec B101
+    assert len(db.flashcard_store.list_flashcard_review_sessions()) == 1  # nosec B101
 
 
 def test_explicit_schedule_updating_cram_retains_its_mode_and_tag(
@@ -674,7 +674,7 @@ def test_explicit_schedule_updating_cram_retains_its_mode_and_tag(
     db: CharactersRAGDB,
 ):
     _, card_uuid = _create_card(db)
-    db.set_flashcard_tags(card_uuid, ["biology"])
+    db.flashcard_store.set_flashcard_tags(card_uuid, ["biology"])
     response = client.post(
         "/api/v1/flashcards/review",
         json={
@@ -684,7 +684,7 @@ def test_explicit_schedule_updating_cram_retains_its_mode_and_tag(
         },
     )
     assert response.status_code == 200, response.text  # nosec B101
-    session = db.get_flashcard_review_session(response.json()["review_session_id"])
+    session = db.flashcard_store.get_flashcard_review_session(response.json()["review_session_id"])
     assert session["scope_key"] == "cram:global:tag:biology"  # nosec B101
     assert session["review_mode"] == "cram"  # nosec B101
     assert session["tag_filter"] == "biology"  # nosec B101
@@ -706,28 +706,28 @@ def test_review_context_requires_an_explicit_valid_deck_selection(
         },
     )
     assert response.status_code == 422  # nosec B101
-    assert db.get_latest_flashcard_review(card_uuid) is None  # nosec B101
-    assert db.list_flashcard_review_sessions() == []  # nosec B101
+    assert db.flashcard_store.get_latest_flashcard_review(card_uuid) is None  # nosec B101
+    assert db.flashcard_store.list_flashcard_review_sessions() == []  # nosec B101
 
 
 def test_legacy_session_id_does_not_implicitly_allow_mixed_decks(db: CharactersRAGDB):
     _, card_uuid = _create_card(db)
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=None,
         review_mode="due",
         tag_filter=None,
         scope_key="due:global",
     )
-    before = db.get_flashcard(card_uuid)
+    before = db.flashcard_store.get_flashcard(card_uuid)
     with pytest.raises(InputError, match="deck scope"):
-        db.review_flashcard(card_uuid, rating=4, review_session_id=session["id"])
-    assert db.get_flashcard(card_uuid) == before  # nosec B101
-    assert db.get_latest_flashcard_review(card_uuid) is None  # nosec B101
+        db.flashcard_store.review_flashcard(card_uuid, rating=4, review_session_id=session["id"])
+    assert db.flashcard_store.get_flashcard(card_uuid) == before  # nosec B101
+    assert db.flashcard_store.get_latest_flashcard_review(card_uuid) is None  # nosec B101
 
 
 def test_supplied_session_cannot_revive_thirty_one_minute_old_run(db):
     _, card = _create_card(db)
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=None, review_mode="due", tag_filter=None, scope_key="due:global"
     )
     old = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -735,31 +735,31 @@ def test_supplied_session_cannot_revive_thirty_one_minute_old_run(db):
         "UPDATE flashcard_review_sessions SET started_at = ?, last_activity_at = ? WHERE id = ?",
         (old, old, session["id"]),
     )
-    before = db.get_flashcard(card)
+    before = db.flashcard_store.get_flashcard(card)
     with pytest.raises(ConflictError):
-        db.review_flashcard(card, 4, review_session_id=session["id"], review_mode="due", review_deck_id=None)
-    assert db.get_flashcard(card) == before
-    assert db.get_latest_flashcard_review(card) is None
+        db.flashcard_store.review_flashcard(card, 4, review_session_id=session["id"], review_mode="due", review_deck_id=None)
+    assert db.flashcard_store.get_flashcard(card) == before
+    assert db.flashcard_store.get_latest_flashcard_review(card) is None
 
 
 def test_explicit_tag_scope_rejects_card_outside_tag_before_writes(db):
     _, card = _create_card(db)
-    db.set_flashcard_tags(card, ["chemistry"])
-    before = db.get_flashcard(card)
+    db.flashcard_store.set_flashcard_tags(card, ["chemistry"])
+    before = db.flashcard_store.get_flashcard(card)
     with pytest.raises(InputError):
-        db.review_flashcard(card, 4, review_mode="due", review_deck_id=None, review_tag_filter="biology")
-    assert db.get_flashcard(card) == before
-    assert db.get_latest_flashcard_review(card) is None
-    assert db.list_flashcard_review_sessions() == []
+        db.flashcard_store.review_flashcard(card, 4, review_mode="due", review_deck_id=None, review_tag_filter="biology")
+    assert db.flashcard_store.get_flashcard(card) == before
+    assert db.flashcard_store.get_latest_flashcard_review(card) is None
+    assert db.flashcard_store.list_flashcard_review_sessions() == []
 
 
 def test_whitespace_tag_normalizes_to_matching_session_scope(db):
     _, card = _create_card(db)
-    db.set_flashcard_tags(card, ["biology"])
-    session = db.get_or_create_flashcard_review_session(
+    db.flashcard_store.set_flashcard_tags(card, ["biology"])
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=None, review_mode="due", tag_filter="biology", scope_key="due:global:tag:biology"
     )
-    result = db.review_flashcard(
+    result = db.flashcard_store.review_flashcard(
         card,
         4,
         review_session_id=session["id"],
@@ -771,22 +771,22 @@ def test_whitespace_tag_normalizes_to_matching_session_scope(db):
 
 
 def test_review_session_creation_and_stale_cleanup_roll_back_with_outer_transaction(db):
-    stale = db.get_or_create_flashcard_review_session(
+    stale = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=None, review_mode="due", tag_filter=None, scope_key="due:global"
     )
     old = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat().replace("+00:00", "Z")
     # Commit fixture setup before testing the separate caller-owned rollback.
     db.execute_query("UPDATE flashcard_review_sessions SET last_activity_at = ? WHERE id = ?", (old, stale["id"]), commit=True)
-    before = db.get_flashcard_review_session(stale["id"])
+    before = db.flashcard_store.get_flashcard_review_session(stale["id"])
     with pytest.raises(RuntimeError, match="rollback control"):
         with db.transaction():
-            replacement = db.get_or_create_flashcard_review_session(
+            replacement = db.flashcard_store.get_or_create_flashcard_review_session(
                 deck_id=None, review_mode="due", tag_filter=None, scope_key="due:global"
             )
             assert replacement["id"] != stale["id"]
             raise RuntimeError("rollback control")
-    assert db.get_flashcard_review_session(stale["id"]) == before
-    assert db.get_flashcard_review_session(replacement["id"]) is None
+    assert db.flashcard_store.get_flashcard_review_session(stale["id"]) == before
+    assert db.flashcard_store.get_flashcard_review_session(replacement["id"]) is None
 
 
 @pytest.mark.integration
@@ -796,21 +796,21 @@ def test_flashcard_review_sessions_postgres_round_trip(pg_database_config: Datab
 
     try:
         deck_id, card_uuid = _create_card(db, deck_name="Postgres Session Deck")
-        session = db.get_or_create_flashcard_review_session(
+        session = db.flashcard_store.get_or_create_flashcard_review_session(
             deck_id=deck_id,
             review_mode="due",
             tag_filter=None,
             scope_key=f"due:deck:{deck_id}",
         )
 
-        updated = db.review_flashcard(
+        updated = db.flashcard_store.review_flashcard(
             card_uuid,
             rating=4,
             answer_time_ms=1100,
             review_session_id=session["id"],
         )
-        review_row = db.get_latest_flashcard_review(card_uuid)
-        sessions = db.list_flashcard_review_sessions(deck_id=deck_id)
+        review_row = db.flashcard_store.get_latest_flashcard_review(card_uuid)
+        sessions = db.flashcard_store.list_flashcard_review_sessions(deck_id=deck_id)
 
         assert updated["review_session_id"] == session["id"]  # nosec B101
         assert review_row["review_session_id"] == session["id"]  # nosec B101

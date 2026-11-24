@@ -112,7 +112,7 @@ vi.mock("@/hooks/useAntdMessage", () => ({
   })
 }))
 vi.mock("@/store/connection", () => ({
-  useConnectionStore: { getState: () => ({ checkOnce: vi.fn() }) }
+  useConnectionStore: Object.assign(() => false, { getState: () => ({ checkOnce: vi.fn() }) })
 }))
 vi.mock("@/services/auth-errors", () => ({
   mapMultiUserLoginErrorMessage: vi.fn(() => "Login failed")

@@ -48,7 +48,7 @@ def _create_completed_attempt_with_one_miss(quizzes_db: CharactersRAGDB) -> tupl
 
 def test_create_active_remediation_conversion(quizzes_db: CharactersRAGDB):
     attempt_id, quiz_id, question_id = _create_completed_attempt_with_one_miss(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
 
     row = quizzes_db.create_quiz_remediation_conversion(
         attempt_id=attempt_id,
@@ -72,7 +72,7 @@ def test_create_active_remediation_conversion(quizzes_db: CharactersRAGDB):
 
 def test_create_active_remediation_conversion_rejects_second_active_row(quizzes_db: CharactersRAGDB):
     attempt_id, quiz_id, question_id = _create_completed_attempt_with_one_miss(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
 
     quizzes_db.create_quiz_remediation_conversion(
         attempt_id=attempt_id,
@@ -98,7 +98,7 @@ def test_create_active_remediation_conversion_rejects_second_active_row(quizzes_
 
 def test_supersede_quiz_remediation_conversion_marks_previous_row(quizzes_db: CharactersRAGDB):
     attempt_id, quiz_id, question_id = _create_completed_attempt_with_one_miss(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
     original = quizzes_db.create_quiz_remediation_conversion(
         attempt_id=attempt_id,
         quiz_id=quiz_id,
@@ -125,7 +125,7 @@ def test_list_attempt_remediation_conversions_returns_active_rows_and_superseded
     quizzes_db: CharactersRAGDB,
 ):
     attempt_id, quiz_id, question_id = _create_completed_attempt_with_one_miss(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
     original = quizzes_db.create_quiz_remediation_conversion(
         attempt_id=attempt_id,
         quiz_id=quiz_id,

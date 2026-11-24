@@ -187,7 +187,7 @@ def _mark_orphaned_remediation_items(
     }
     existing_uuids = {
         str(card.get("uuid"))
-        for card in db.get_flashcards_by_uuids(sorted(all_uuids))
+        for card in db.flashcard_store.get_flashcards_by_uuids(sorted(all_uuids))
         if str(card.get("uuid") or "").strip()
     }
     marked_items: list[dict[str, Any]] = []

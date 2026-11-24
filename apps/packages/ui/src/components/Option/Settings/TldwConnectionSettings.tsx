@@ -18,6 +18,11 @@ import { Button as AuthButton } from "@/components/Common/Button"
 import { useAntdModal } from "@/hooks/useAntdModal"
 import { shouldClearManualApiKeyForServerChange } from "@/components/Option/Onboarding/validation"
 import {
+  isRuntimeAuthCookieNotKept,
+  subscribeRuntimeAuthCookieNotKept
+} from "@/services/tldw/runtime-bootstrap-recovery"
+import { useConnectionStore } from "@/store/connection"
+import {
   getCoreStatusLabel,
   getRagStatusLabel,
   type CoreStatus,
@@ -126,6 +131,12 @@ export const TldwConnectionSettings = ({
   onOpenHealthDiagnostics
 }: TldwConnectionSettingsProps) => {
   const modal = useAntdModal()
+  const cookieNotKept = React.useSyncExternalStore(
+    subscribeRuntimeAuthCookieNotKept,
+    isRuntimeAuthCookieNotKept,
+    () => false
+  )
+  const isConnected = useConnectionStore((store) => store.state.isConnected)
   return (
     <>
       <Form.Item
@@ -232,6 +243,21 @@ export const TldwConnectionSettings = ({
 
       {authMode === 'single-user' && authSource !== 'cookie-session' && (
         <>
+          {cookieNotKept && !isConnected && (
+            <Alert
+              title={t(
+                'settings:tldw.cookieNotKept.title',
+                'The sign-in cookie was not kept or not accepted'
+              )}
+              variant="warning"
+              className="mb-4"
+            >
+              {t(
+                'settings:tldw.cookieNotKept.description',
+                'Automatic sign-in stopped. Enter your API key below to connect. Only if you reach tldw solely over http://localhost or http://127.0.0.1, you can instead restart the server with SESSION_COOKIE_SECURE=0 (it applies to the whole server) and reload this page.'
+              )}
+            </Alert>
+          )}
           <Form.Item
             label={t('settings:tldw.fields.apiKey.label', 'API Key')}
             name="apiKey"

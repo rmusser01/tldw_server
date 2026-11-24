@@ -44,8 +44,8 @@ def test_scheduler_schema_columns_exist_on_fresh_db(chacha_db: CharactersRAGDB):
 
 
 def test_new_deck_persists_default_scheduler_settings(chacha_db: CharactersRAGDB):
-    deck_id = chacha_db.add_deck("Scheduler Defaults")
-    deck = chacha_db.get_deck(deck_id)
+    deck_id = chacha_db.flashcard_store.add_deck("Scheduler Defaults")
+    deck = chacha_db.flashcard_store.get_deck(deck_id)
 
     assert deck is not None
     raw_settings = deck.get("scheduler_settings_json")

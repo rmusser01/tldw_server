@@ -19,6 +19,12 @@ import {
   Workflow
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import {
+  useAssertCurrentWatchlistsAccount,
+  useInvalidateWatchlists,
+  useSetWatchlistsQueryData,
+  useWatchlistsQuery
+} from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   createWatchlistJob,
@@ -79,6 +85,7 @@ import {
 } from "../shared/watchlists-announcements"
 
 const OVERVIEW_REFRESH_INTERVAL_MS = 30_000
+const EMPTY_PIPELINE_SOURCES: WatchlistSource[] = []
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -135,15 +142,10 @@ export const extractPipelineErrorMessage = (error: unknown): string => {
 
 export const OverviewTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
-  const [data, setData] = useState<WatchlistsOverviewData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [politeAnnouncement, setPoliteAnnouncement] = useState("")
   const [assertiveAnnouncement, setAssertiveAnnouncement] = useState("")
   const [pipelineSetupOpen, setPipelineSetupOpen] = useState(false)
   const [pipelineSetupSubmitting, setPipelineSetupSubmitting] = useState(false)
-  const [pipelineSourcesLoading, setPipelineSourcesLoading] = useState(false)
-  const [pipelineSources, setPipelineSources] = useState<WatchlistSource[]>([])
   const [pipelinePreviewLoading, setPipelinePreviewLoading] = useState(false)
   const [pipelinePreviewError, setPipelinePreviewError] = useState<string | null>(null)
   const [pipelinePreviewRendered, setPipelinePreviewRendered] = useState<string | null>(null)
@@ -152,9 +154,6 @@ export const OverviewTab: React.FC = () => {
   const [pipelineSetupError, setPipelineSetupError] = useState<string | null>(null)
   const [pipelineInitialDraft, setPipelineInitialDraft] = useState<Partial<PipelineWizardDraft>>()
   const [pipelineSessionKey, setPipelineSessionKey] = useState(0)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const pipelineSourcesLoadingRef = useRef(false)
-  const overviewRequestRef = useRef(0)
   const previousBriefingRef = useRef<WatchlistBriefingProjection | null>(null)
   const explicitPoliteAnnouncementRef = useRef(false)
   const briefingActionGenerationRef = useRef(0)
@@ -167,12 +166,35 @@ export const OverviewTab: React.FC = () => {
 
   const setActiveTab = useWatchlistsStore((s) => s.setActiveTab)
   const setRunsStatusFilter = useWatchlistsStore((s) => s.setRunsStatusFilter)
-  const setOverviewHealth = useWatchlistsStore((s) => s.setOverviewHealth)
   const openRunDetail = useWatchlistsStore((s) => s.openRunDetail)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
   const openOutputPreview = useWatchlistsStore((s) => s.openOutputPreview)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
   const hasSelectedWatchlist = selectedWatchlistId != null
+  const overviewQuery = useWatchlistsQuery("overview", { watchlist_id: selectedWatchlistId },
+    ({ signal }) => fetchWatchlistsOverviewData({ watchlist_id: selectedWatchlistId ?? undefined }, signal), {
+      enabled: hasSelectedWatchlist,
+      refetchInterval: OVERVIEW_REFRESH_INTERVAL_MS
+    })
+  const data = overviewQuery.data ?? null
+  const loading = overviewQuery.isLoading
+  const error = overviewQuery.isError && overviewQuery.error.name !== "AbortError"
+    ? t("watchlists:overview.fetchError", "Failed to load overview")
+    : null
+  const pipelineSourceParams = {
+    watchlist_id: selectedWatchlistId ?? undefined,
+    page: 1,
+    size: 200
+  }
+  const pipelineSourcesQuery = useWatchlistsQuery("sources", pipelineSourceParams,
+    ({ signal }) => fetchWatchlistSources(pipelineSourceParams, signal), {
+      enabled: pipelineSetupOpen && hasSelectedWatchlist
+    })
+  const pipelineSources = pipelineSourcesQuery.data?.items ?? EMPTY_PIPELINE_SOURCES
+  const pipelineSourcesLoading = pipelineSourcesQuery.isLoading
+  const setQueryData = useSetWatchlistsQueryData()
+  const assertCurrentAccount = useAssertCurrentWatchlistsAccount()
+  const invalidate = useInvalidateWatchlists()
 
   useEffect(() => {
     briefingActionGenerationRef.current += 1
@@ -183,6 +205,7 @@ export const OverviewTab: React.FC = () => {
     explicitPoliteAnnouncementRef.current = false
     setPoliteAnnouncement("")
     setAssertiveAnnouncement("")
+    return () => { briefingActionControllerRef.current?.abort() }
   }, [selectedWatchlistId])
 
   const announceBriefingTransition = useCallback((next: WatchlistBriefingProjection | null) => {
@@ -220,78 +243,28 @@ export const OverviewTab: React.FC = () => {
   }, [selectedWatchlistId, t])
 
   const applyBriefingProjection = useCallback((next: WatchlistBriefingProjection) => {
-    announceBriefingTransition(next)
-    setData((current) => current ? {
+    setQueryData<WatchlistsOverviewData>("overview", { watchlist_id: selectedWatchlistId }, (current) => current ? {
       ...current,
       fetchedAt: new Date().toISOString(),
       latestBriefing: next
     } : current)
-  }, [announceBriefingTransition])
-
-  const loadOverview = useCallback(async (showLoading: boolean) => {
-    const requestId = ++overviewRequestRef.current
-    if (selectedWatchlistId == null) {
-      setData(null)
-      setError(null)
-      previousBriefingRef.current = null
-      explicitPoliteAnnouncementRef.current = false
-      setPoliteAnnouncement("")
-      setAssertiveAnnouncement("")
-      if (typeof setOverviewHealth === "function") {
-        setOverviewHealth(null, null)
-      }
-      setLoading(false)
-      return
-    }
-
-    if (showLoading) {
-      setLoading(true)
-    }
-    try {
-      const result = await fetchWatchlistsOverviewData({
-        watchlist_id: selectedWatchlistId ?? undefined
-      })
-      if (requestId !== overviewRequestRef.current) return
-      announceBriefingTransition(result.latestBriefing)
-      setData(result)
-      if (typeof setOverviewHealth === "function") {
-        setOverviewHealth(result.health, result.fetchedAt)
-      }
-      if (result.outputs.total > 0) {
-        void trackWatchlistsOnboardingTelemetry({
-          type: "quick_setup_first_run_succeeded",
-          source: "overview"
-        })
-        void trackWatchlistsOnboardingTelemetry({
-          type: "quick_setup_first_output_succeeded",
-          source: "overview"
-        })
-      }
-      setError(null)
-    } catch (err) {
-      if ((err as { name?: string } | null)?.name === "AbortError") return
-      if (requestId !== overviewRequestRef.current) return
-      console.error("Failed to load watchlists overview:", err)
-      setError(t("watchlists:overview.fetchError", "Failed to load overview"))
-    } finally {
-      if (requestId === overviewRequestRef.current) {
-        setLoading(false)
-      }
-    }
-  }, [announceBriefingTransition, selectedWatchlistId, setOverviewHealth, t])
+  }, [selectedWatchlistId, setQueryData])
 
   useEffect(() => {
-    void loadOverview(true)
-    intervalRef.current = setInterval(() => {
-      void loadOverview(false)
-    }, OVERVIEW_REFRESH_INTERVAL_MS)
+    announceBriefingTransition(data?.latestBriefing ?? null)
+  }, [announceBriefingTransition, data?.latestBriefing])
 
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
-  }, [loadOverview])
-
+  useEffect(() => {
+    if (!data?.outputs.total) return
+    void trackWatchlistsOnboardingTelemetry({
+      type: "quick_setup_first_run_succeeded",
+      source: "overview"
+    })
+    void trackWatchlistsOnboardingTelemetry({
+      type: "quick_setup_first_output_succeeded",
+      source: "overview"
+    })
+  }, [data?.outputs.total])
 
   useLayoutEffect(() => {
     if (pipelineSetupOpen) {
@@ -387,6 +360,7 @@ export const OverviewTab: React.FC = () => {
         next.job_id !== actionKey.jobId
       ) return
       applyBriefingProjection(next)
+      void invalidate("overview", "runs", "run-detail", "run-audio", "outputs")
     } catch (err) {
       if (controller.signal.aborted || generation !== briefingActionGenerationRef.current) return
       console.error("Failed to recover watchlists briefing stage:", err)
@@ -397,7 +371,7 @@ export const OverviewTab: React.FC = () => {
         briefingActionKeyRef.current = null
       }
     }
-  }, [applyBriefingProjection, selectedWatchlistId, t])
+  }, [applyBriefingProjection, invalidate, selectedWatchlistId, t])
 
   const handleRetryBriefingStage = useCallback(async (
     runId: number,
@@ -445,38 +419,13 @@ export const OverviewTab: React.FC = () => {
     setActiveTab("sources")
   }, [setActiveTab])
 
-  const loadPipelineSources = useCallback(async () => {
-    if (pipelineSourcesLoadingRef.current) return
-    pipelineSourcesLoadingRef.current = true
-    setPipelineSourcesLoading(true)
-    try {
-      const result = await fetchWatchlistSources({
-        watchlist_id: selectedWatchlistId ?? undefined,
-        page: 1,
-        size: 200
-      })
-      const items = Array.isArray(result.items) ? result.items : []
-      setPipelineSources(items)
-    } catch (err) {
-      console.error("Failed to load watchlist sources for pipeline setup:", err)
-      setPipelineSources([])
-      message.error(
-        t(
-          "watchlists:overview.pipelineSetup.sourcesError",
-          "Failed to load feeds for the pipeline builder."
-        )
-      )
-    } finally {
-      pipelineSourcesLoadingRef.current = false
-      setPipelineSourcesLoading(false)
-    }
-  }, [selectedWatchlistId, t])
-
   useEffect(() => {
-    if (pipelineSetupOpen && pipelineSources.length === 0) {
-      void loadPipelineSources()
-    }
-  }, [loadPipelineSources, pipelineSetupOpen, pipelineSources.length])
+    if (!pipelineSetupOpen || !pipelineSourcesQuery.isError) return
+    message.error(t(
+      "watchlists:overview.pipelineSetup.sourcesError",
+      "Failed to load feeds for the pipeline builder."
+    ))
+  }, [pipelineSetupOpen, pipelineSourcesQuery.isError, t])
 
   const openPipelineSetup = useCallback(() => {
     pipelineSetupRestoreFocusTargetRef.current = getFocusableActiveElement()
@@ -505,13 +454,13 @@ export const OverviewTab: React.FC = () => {
         "watchlists:overview.latest.announcements.testQueued",
         "Test run queued. Progress will appear in the latest briefing."
       ))
-      void loadOverview(false)
+      void invalidate("overview", "runs")
     } catch (err) {
       if ((err as { name?: string } | null)?.name === "AbortError") return
       console.error("Failed to start watchlists briefing test:", err)
       message.error(t("watchlists:overview.latest.testError", "Could not start the test run."))
     }
-  }, [loadOverview, openPipelineSetup, t])
+  }, [invalidate, openPipelineSetup, t])
 
   const closePipelineSetup = useCallback(() => {
     if (pipelineSetupSubmitting) return
@@ -652,6 +601,7 @@ export const OverviewTab: React.FC = () => {
     requestedJobId?: number,
     testOptions?: PipelineWizardTestOptions
   ) => {
+    assertCurrentAccount(testOptions?.signal)
     const signature = getPipelineWizardSourceSignature(wizardDraft)
     const sourcePayload = toPipelineWizardSourcePayload(
       wizardDraft,
@@ -668,6 +618,7 @@ export const OverviewTab: React.FC = () => {
         const updatePayload = { ...sourcePayload }
         delete updatePayload.watchlist_id
         await updateWatchlistSource(binding.ids[0], updatePayload)
+        void invalidate("overview", "sources")
         sourceIds = binding.ids
         pipelineSourceBindingRef.current = {
           mode: "new",
@@ -680,6 +631,7 @@ export const OverviewTab: React.FC = () => {
         sourceIds = binding.ids
       } else {
         const source = await createWatchlistSource(sourcePayload)
+        void invalidate("overview", "sources")
         sourceIds = [source.id]
         pipelineSourceBindingRef.current = {
           mode: "new",
@@ -701,6 +653,7 @@ export const OverviewTab: React.FC = () => {
       }
     }
 
+    assertCurrentAccount(testOptions?.signal)
     const draft = toBriefingPipelineDraft(wizardDraft, sourceIds)
     const jobPayload = testOptions
       ? toPipelineTestJobCreatePayload(draft, testOptions)
@@ -713,14 +666,16 @@ export const OverviewTab: React.FC = () => {
     const jobId = requestedJobId || pipelinePersistedJobIdRef.current
     if (jobId) {
       await updateWatchlistJob(jobId, payload)
+      void invalidate("overview", "jobs")
       pipelinePersistedJobIdRef.current = jobId
       return { jobId, draft }
     }
 
     const job = await createWatchlistJob(payload)
+    void invalidate("overview", "jobs")
     pipelinePersistedJobIdRef.current = job.id
     return { jobId: job.id, draft }
-  }, [pipelineSessionKey, selectedWatchlistId])
+  }, [assertCurrentAccount, invalidate, pipelineSessionKey, selectedWatchlistId])
 
   const testPipeline = useCallback(async (
     wizardDraft: PipelineWizardDraft,
@@ -730,7 +685,9 @@ export const OverviewTab: React.FC = () => {
     setPipelineSetupSubmitting(true)
     try {
       const persisted = await persistInactivePipeline(wizardDraft, options.jobId, options)
+      assertCurrentAccount(options.signal)
       const run = await triggerWatchlistRun(persisted.jobId)
+      void invalidate("overview", "runs")
       const briefing = await waitForPipelineWizardBriefing(
         run.id,
         getWatchlistRunBriefing,
@@ -738,7 +695,7 @@ export const OverviewTab: React.FC = () => {
         { waitForDelivery: options.externalDelivery, signal: options.signal }
       )
       const outcome = getPipelineWizardBriefingOutcome(briefing, options.externalDelivery)
-      void loadOverview(false)
+      void invalidate("overview", "runs", "items", "items-counts", "outputs")
       return {
         jobId: persisted.jobId,
         runId: run.id,
@@ -748,7 +705,7 @@ export const OverviewTab: React.FC = () => {
     } finally {
       setPipelineSetupSubmitting(false)
     }
-  }, [loadOverview, persistInactivePipeline])
+  }, [assertCurrentAccount, invalidate, persistInactivePipeline])
 
   const previewPipelineSchedule = useCallback(async (
     wizardDraft: PipelineWizardDraft,
@@ -773,15 +730,17 @@ export const OverviewTab: React.FC = () => {
     setPipelineSetupSubmitting(true)
     try {
       const persisted = await persistInactivePipeline(wizardDraft, options.jobId)
+      assertCurrentAccount()
       await updateWatchlistJob(persisted.jobId, { active: true })
+      assertCurrentAccount()
       closePipelineSetup()
-      void loadOverview(false)
+      void invalidate("overview", "sources", "jobs")
       setActiveTab("overview")
       return { jobId: persisted.jobId, status: "active" as const }
     } finally {
       setPipelineSetupSubmitting(false)
     }
-  }, [closePipelineSetup, loadOverview, persistInactivePipeline, setActiveTab])
+  }, [assertCurrentAccount, closePipelineSetup, invalidate, persistInactivePipeline, setActiveTab])
 
   const testPipelineSource = useCallback(async (wizardDraft: PipelineWizardDraft) => {
     if (wizardDraft.sourceMode === "new") {

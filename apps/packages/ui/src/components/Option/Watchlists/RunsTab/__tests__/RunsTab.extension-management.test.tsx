@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunsTab } from "../RunsTab"
 import { RunDetailDrawer } from "../RunDetailDrawer"
@@ -216,19 +217,13 @@ const buildRun = (overrides: Record<string, unknown> = {}) => ({
 
 const baseState = (overrides: Record<string, unknown> = {}) => ({
   activeTab: "runs",
-  runs: [buildRun()],
-  runsLoading: false,
-  runsTotal: 1,
   runsPage: 1,
   runsPageSize: 20,
   runsJobFilter: null,
   runsStatusFilter: null,
-  pollingActive: false,
   runDetailOpen: false,
   selectedRunId: null,
   selectedWatchlistId: 42,
-  setRuns: vi.fn(),
-  setRunsLoading: vi.fn(),
   setRunsPage: vi.fn(),
   setRunsPageSize: vi.fn(),
   setRunsJobFilter: vi.fn(),
@@ -239,8 +234,6 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
   setPollingActive: vi.fn(),
   openRunDetail: vi.fn(),
   closeRunDetail: vi.fn(),
-  updateRunInList: vi.fn(),
-  addRun: vi.fn(),
   openJobForm: vi.fn(),
   ...overrides
 })
@@ -276,8 +269,8 @@ describe("RunsTab constrained management", () => {
     expect(screen.getByTestId("runs-csv-export-button")).toHaveTextContent("Export CSV")
     expect(screen.getByTestId("runs-csv-export-button")).not.toHaveTextContent("Standard CSV")
 
-    const card = screen.getByTestId("watchlists-run-card-55")
-    expect(within(card).getByText("Ransomware monitor")).toBeInTheDocument()
+    const card = await screen.findByTestId("watchlists-run-card-55")
+    expect(await within(card).findByText("Ransomware monitor")).toBeInTheDocument()
     expect(within(card).getByText("Running")).toBeInTheDocument()
     expect(within(card).getByText("Found")).toBeInTheDocument()
     expect(within(card).getByText("12")).toBeInTheDocument()

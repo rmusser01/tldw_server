@@ -111,7 +111,7 @@ def _is_generation_link_target_live(note_db: CharactersRAGDB, generation_link: d
             deck_id = int(target_id)
         except (TypeError, ValueError):
             return False
-        deck = note_db.get_deck(deck_id)
+        deck = note_db.flashcard_store.get_deck(deck_id)
         return bool(deck) and not bool(deck.get("deleted"))
     return False
 
@@ -126,7 +126,7 @@ def _iter_refreshed_ancestor_snapshots(
     parent_id = snapshot_row.get("refreshed_from_snapshot_id")
     while parent_id is not None:
         try:
-            ancestor_snapshot = note_db.get_suggestion_snapshot(int(parent_id))
+            ancestor_snapshot = note_db.flashcard_store.get_suggestion_snapshot(int(parent_id))
         except (TypeError, ValueError):
             break
         if not ancestor_snapshot:
@@ -305,17 +305,17 @@ def _resolve_quiz_sources(
         workspace_id = quiz.get("workspace_id")
         workspace_tag = quiz.get("workspace_tag")
     elif anchor_type == "flashcard_review_session":
-        session = note_db.get_flashcard_review_session(anchor_id)
+        session = note_db.flashcard_store.get_flashcard_review_session(anchor_id)
         if not session:
             raise HTTPException(status_code=404, detail="Flashcard review session not found")
         deck_id = session.get("deck_id")
         if deck_id is None:
             raise HTTPException(status_code=400, detail="Flashcard review session has no deck lineage for quiz follow-up")
-        deck = note_db.get_deck(int(deck_id))
+        deck = note_db.flashcard_store.get_deck(int(deck_id))
         workspace_id = str(deck.get("workspace_id") or "").strip() or None if deck else None
         tag_filter = str(session.get("tag_filter") or "").strip() or None
         if tag_filter:
-            cards = note_db.list_flashcards(
+            cards = note_db.flashcard_store.list_flashcards(
                 deck_id=int(deck_id),
                 tag=tag_filter,
                 due_status="all",
@@ -356,7 +356,7 @@ def _persist_flashcard_deck(
             selected_topics=selected_topics,
         )
         try:
-            deck_id = note_db.add_deck(
+            deck_id = note_db.flashcard_store.add_deck(
                 deck_name,
                 description=f"Generated from study suggestion snapshot {int(snapshot_row['id'])}.",
             )
@@ -377,7 +377,7 @@ def _persist_flashcard_deck(
         raw_flashcards=raw_flashcards,
     )
     try:
-        note_db.add_flashcards_bulk(flashcard_payloads)
+        note_db.flashcard_store.add_flashcards_bulk(flashcard_payloads)
     except Exception:
         try:
             soft_delete_deck(note_db, deck_id=int(deck_id))
@@ -504,7 +504,7 @@ def get_suggestion_snapshot(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> SuggestionSnapshotResponse:
-    snapshot_row = db.get_suggestion_snapshot(snapshot_id)
+    snapshot_row = db.flashcard_store.get_suggestion_snapshot(snapshot_id)
     if not snapshot_row:
         raise HTTPException(status_code=404, detail="Suggestion snapshot not found")
 
@@ -541,7 +541,7 @@ def refresh_suggestion_snapshot(
     jm: JobManager = Depends(get_job_manager),
 ) -> SuggestionJobAcceptedResponse:
     _ = payload
-    snapshot_row = db.get_suggestion_snapshot(snapshot_id)
+    snapshot_row = db.flashcard_store.get_suggestion_snapshot(snapshot_id)
     if not snapshot_row:
         raise HTTPException(status_code=404, detail="Suggestion snapshot not found")
 
@@ -572,7 +572,7 @@ def _prepare_action(
 ) -> tuple[dict[str, Any], dict[str, str], list[str], str, bool, str | None]:
     """Synchronous pre-dispatch phase: validate, deduplicate, and reserve."""
 
-    snapshot_row = db.get_suggestion_snapshot(snapshot_id)
+    snapshot_row = db.flashcard_store.get_suggestion_snapshot(snapshot_id)
     if not snapshot_row:
         raise HTTPException(status_code=404, detail="Suggestion snapshot not found")
     try:
@@ -693,7 +693,7 @@ def _prepare_action(
     if not payload.force_regenerate:
         for _existing_link, matched_existing_fingerprint in stale_existing:
             try:
-                db.soft_delete_suggestion_generation_link(
+                db.flashcard_store.soft_delete_suggestion_generation_link(
                     snapshot_id=snapshot_id,
                     target_service=action_contract["target_service"],
                     target_type=action_contract["target_type"],
@@ -797,7 +797,7 @@ def _finalize_action(
     """Synchronous post-dispatch phase: persist the generation link."""
 
     if retired_selection_fingerprint:
-        db.soft_delete_suggestion_generation_link(
+        db.flashcard_store.soft_delete_suggestion_generation_link(
             snapshot_id=snapshot_id,
             target_service=str(generated["target_service"]),
             target_type=str(generated["target_type"]),
@@ -813,7 +813,7 @@ def _finalize_action(
             final_target_id=str(generated["target_id"]),
         )
     elif force_regenerate:
-        db.replace_suggestion_generation_link(
+        db.flashcard_store.replace_suggestion_generation_link(
             snapshot_id=snapshot_id,
             target_service=str(generated["target_service"]),
             target_type=str(generated["target_type"]),
@@ -821,7 +821,7 @@ def _finalize_action(
             selection_fingerprint=selection_fingerprint,
         )
     else:
-        db.create_suggestion_generation_link(
+        db.flashcard_store.create_suggestion_generation_link(
             snapshot_id=snapshot_id,
             target_service=str(generated["target_service"]),
             target_type=str(generated["target_type"]),

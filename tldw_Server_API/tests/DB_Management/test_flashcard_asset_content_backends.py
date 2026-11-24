@@ -13,6 +13,7 @@ from PIL import Image
 from tldw_Server_API.app.api.v1.endpoints import flashcards
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
+from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB
 
 
@@ -49,7 +50,7 @@ def _client(db):
 
 
 def _save_asset(db):
-    return db.add_flashcard_asset(
+    return db.flashcard_store.add_flashcard_asset(
         image_bytes=PNG_BYTES,
         mime_type="image/png",
         original_filename="pixel.png",
@@ -61,11 +62,11 @@ def _save_asset(db):
 @pytest.mark.integration
 def test_populated_asset_content_round_trips_exact_bytes(asset_db):
     asset_uuid = _save_asset(asset_db)
-    metadata = asset_db.get_flashcard_asset(asset_uuid)
+    metadata = asset_db.flashcard_store.get_flashcard_asset(asset_uuid)
     assert metadata["uuid"] == asset_uuid
     assert metadata["byte_size"] == len(PNG_BYTES)
     assert metadata["sha256"] == hashlib.sha256(PNG_BYTES).hexdigest()
-    assert asset_db.get_flashcard_asset_content(asset_uuid) == PNG_BYTES
+    assert asset_db.flashcard_store.get_flashcard_asset_content(asset_uuid) == PNG_BYTES
 
 
 @pytest.mark.integration
@@ -92,7 +93,7 @@ def test_unavailable_asset_returns_none_and_actual_http_404(asset_db, state):
         asset_uuid = _save_asset(asset_db)
         with asset_db.transaction() as conn:
             conn.execute("UPDATE flashcard_assets SET deleted = ? WHERE uuid = ?", (True, asset_uuid))
-    assert asset_db.get_flashcard_asset_content(asset_uuid) is None
+    assert asset_db.flashcard_store.get_flashcard_asset_content(asset_uuid) is None
     with _client(asset_db) as client:
         content = client.get(f"/api/v1/flashcards/assets/{asset_uuid}/content")
         assert content.status_code == 404, content.text
@@ -106,11 +107,12 @@ def test_unavailable_asset_returns_none_and_actual_http_404(asset_db, state):
 def test_named_binary_row_preserves_conversion_and_defensive_null(monkeypatch, blob):
     """NULL is defensive only: both real database schemas require image_data."""
     db = object.__new__(CharactersRAGDB)
+    db.flashcard_store = FlashcardStore(db.ctx)
     db.client_id = "row-owner"
     monkeypatch.setattr(CharactersRAGDB, "backend_type", property(lambda _self: BackendType.POSTGRESQL))
     monkeypatch.setattr(
         db, "execute_query", lambda *_args, **_kwargs: SimpleNamespace(fetchone=lambda: {"image_data": blob})
     )
-    result = db.get_flashcard_asset_content("row-boundary-control")
+    result = db.flashcard_store.get_flashcard_asset_content("row-boundary-control")
     assert result == (None if blob is None else bytes(blob))
     assert result is None or isinstance(result, bytes)

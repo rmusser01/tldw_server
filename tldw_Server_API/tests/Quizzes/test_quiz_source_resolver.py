@@ -74,9 +74,9 @@ def test_resolves_flashcard_deck_to_card_evidence_chunks(
     quizzes_db: CharactersRAGDB,
     media_db: MediaDatabase,
 ):
-    deck_id = quizzes_db.add_deck(name="Biology")
-    quizzes_db.add_flashcard({"deck_id": deck_id, "front": "Mitochondria", "back": "Powerhouse of the cell"})
-    quizzes_db.add_flashcard({"deck_id": deck_id, "front": "Ribosome", "back": "Synthesizes proteins"})
+    deck_id = quizzes_db.flashcard_store.add_deck(name="Biology")
+    quizzes_db.flashcard_store.add_flashcard({"deck_id": deck_id, "front": "Mitochondria", "back": "Powerhouse of the cell"})
+    quizzes_db.flashcard_store.add_flashcard({"deck_id": deck_id, "front": "Ribosome", "back": "Synthesizes proteins"})
 
     evidence = resolve_quiz_sources(
         [{"source_type": "flashcard_deck", "source_id": str(deck_id)}],
@@ -88,7 +88,7 @@ def test_resolves_flashcard_deck_to_card_evidence_chunks(
 
 
 def test_resolves_flashcard_card_source(quizzes_db: CharactersRAGDB, media_db: MediaDatabase):
-    card_uuid = quizzes_db.add_flashcard({"front": "ATP", "back": "Cell energy currency"})
+    card_uuid = quizzes_db.flashcard_store.add_flashcard({"front": "ATP", "back": "Cell energy currency"})
 
     evidence = resolve_quiz_sources(
         [{"source_type": "flashcard_card", "source_id": card_uuid}],

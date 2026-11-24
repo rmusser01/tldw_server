@@ -51,7 +51,7 @@ def _create_snapshot(
     *,
     anchor_id: int = 101,
 ) -> int:
-    return db.create_suggestion_snapshot(
+    return db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -99,7 +99,7 @@ async def test_handle_refresh_job_creates_new_snapshot_with_refresh_lineage(
         assert note_db is db  # nosec B101
         assert anchor_type == "quiz_attempt"  # nosec B101
         assert anchor_id == 101  # nosec B101
-        return db.create_suggestion_snapshot(
+        return db.flashcard_store.create_suggestion_snapshot(
             service="quiz",
             activity_type="quiz_attempt",
             anchor_type=anchor_type,
@@ -115,8 +115,8 @@ async def test_handle_refresh_job_creates_new_snapshot_with_refresh_lineage(
         _fake_refresh_job(jobs_mod, snapshot_id=original_snapshot_id)
     )
 
-    refreshed_snapshot = db.get_suggestion_snapshot(int(result["snapshot_id"]))
-    original_snapshot = db.get_suggestion_snapshot(original_snapshot_id)
+    refreshed_snapshot = db.flashcard_store.get_suggestion_snapshot(int(result["snapshot_id"]))
+    original_snapshot = db.flashcard_store.get_suggestion_snapshot(original_snapshot_id)
 
     assert int(result["snapshot_id"]) != original_snapshot_id  # nosec B101
     assert refreshed_snapshot["refreshed_from_snapshot_id"] == original_snapshot_id  # nosec B101
@@ -182,7 +182,7 @@ async def test_failed_jobs_surface_failed_without_mutating_prior_snapshots(
         anchor_type="quiz_attempt",
         anchor_id=101,
     )
-    snapshots = db.list_suggestion_snapshots_for_anchor("quiz_attempt", 101)
+    snapshots = db.flashcard_store.list_suggestion_snapshots_for_anchor("quiz_attempt", 101)
 
     assert status["status"] == "failed"  # nosec B101
     assert len(snapshots) == 1  # nosec B101

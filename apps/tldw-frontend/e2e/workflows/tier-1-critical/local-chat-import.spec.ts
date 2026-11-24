@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { test } from '@playwright/test';
-import runLocalChatImport from './helpers/local-chat-import.mjs';
+import runLocalChatImport from '../../helpers/local-chat-import.mjs';
 
 test('restores local chat data through its enclosing atomic transaction', async ({ page }) => {
   const historyId = randomUUID();
