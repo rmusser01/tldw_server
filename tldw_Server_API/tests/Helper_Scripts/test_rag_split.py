@@ -488,6 +488,31 @@ def test_a_name_that_is_only_ever_the_same_import_does_not_cross(tmp_path: Path,
     assert "sgl" in capsys.readouterr().out
 
 
+def test_a_read_before_the_cells_own_import_still_crosses(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = textwrap.dedent(
+        """\
+        def pipe(a):
+            import json as sgl
+            try:
+                x = a
+                y = sgl.dumps(x)
+                import json as sgl
+                z = y
+            finally:
+                pass
+            return z
+        """
+    )
+    rw = {"a": "rcfg.r.a", "x": "state.x", "y": "state.y", "z": "state.z"}
+    t = Tree(tmp_path, src, rewrite=rw, moves=[{"name": "m", "module": "mod", "span": [4, 7]}])
+    assert t.run("shared", "--base-dir", str(t.base)) == 0
+    assert "sgl: bound in <rest>, live-in at m" in capsys.readouterr().out
+    ok = src.replace("        y = sgl.dumps(x)\n        import json as sgl\n", "        import json as sgl\n        y = sgl.dumps(x)\n")
+    t2 = Tree(tmp_path / "ok", ok, rewrite=rw, moves=[{"name": "m", "module": "mod", "span": [4, 7]}])
+    assert t2.run("shared", "--base-dir", str(t2.base)) == 0
+    assert "sgl" not in capsys.readouterr().out
+
+
 INTRO_SRC = textwrap.dedent(
     """\
     def pipe():

@@ -499,11 +499,24 @@ class Cells:
         self.live.append(self._flow(n, fn.body, set(self.params)))
         self.bound: list[dict[str, list[int]]] = []
         self.refs: list[set[str]] = []
+        self.first_read: list[dict[str, int]] = []
+        self.first_import: list[dict[str, int]] = []
         for i in range(n + 1):
             b: dict[str, list[int]] = defaultdict(list)
             r: set[str] = set()
             for x in self.nodes[i]:
                 self._collect(x, b, r)
+            fr: dict[str, int] = {}
+            fi: dict[str, int] = {}
+            for x in self.nodes[i]:
+                if isinstance(x, ast.Name) and is_f(x, key) and isinstance(x.ctx, ast.Load):
+                    fr[x.id] = min(fr.get(x.id, x.lineno), x.lineno)
+                elif isinstance(x, (ast.Import, ast.ImportFrom)):
+                    for al, res in zip(x.names, x._rs):  # type: ignore[attr-defined]
+                        if res is key:
+                            fi[_bound(al)] = min(fi.get(_bound(al), x.lineno), x.lineno)
+            self.first_read.append(fr)
+            self.first_import.append(fi)
             if i == n:
                 for p in self.params:
                     b[p].append(0)
@@ -669,7 +682,7 @@ class Cells:
         for j in range(n):
             for name in self.live[j]:
                 for i in range(n):
-                    if i != j and name in self.bound[i] and not (name in self.idem and name in self.bound[j]):
+                    if i != j and name in self.bound[i] and not (name in self.idem and self.first_import[j].get(name, 10**9) < self.first_read[j].get(name, 0)):
                         out[name].append(f"bound in {self.labels[i]}, live-in at {self.labels[j]}")
         for c in range(n):
             for d in (x for x in self.nodes[c] if isinstance(x, DEFS) and is_f(x, self.key)):
