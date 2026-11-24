@@ -207,6 +207,27 @@ def test_hidden_kwarg_reads_are_rewritten(tmp_path: Path) -> None:
     assert t.run("verify") == 0
 
 
+def test_prologue_and_imports_round_trip_and_are_verified(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = 'import os\n\n\nasync def pipe(query, **kwargs):\n    """Doc."""\n\n    return query, os, kwargs.get("k")\n'
+    t = Tree(
+        tmp_path,
+        src,
+        rewrite={"query": "rcfg.request.query"},
+        hidden={"k": ["g", None]},
+        prologue="rcfg = Config.build(locals())",
+        imports=["from .pipeline.config import Config"],
+    )
+    assert t.run("apply") == 0
+    head = t.text(FILE)
+    assert head.index("from .pipeline.config import Config") > head.index("import os")
+    assert head.index('"""Doc."""') < head.index("rcfg = Config.build(locals())") < head.index("return rcfg.request.query")
+    assert t.run("verify") == 0, capsys.readouterr().out
+    _edit(t, FILE, "    rcfg = Config.build(locals())\n\n", "")
+    assert t.run("verify") == 1
+    t.set(rewrite={"query": "rcfg.request.query"}, hidden={"k": ["g", None]}, prologue="rcfg = Config.build(locals())")
+    assert t.run("verify") == 1
+
+
 def test_move_prefixes_module_globals_with_up(tmp_path: Path) -> None:
     t = full(tmp_path)
     assert t.run("apply") == 0

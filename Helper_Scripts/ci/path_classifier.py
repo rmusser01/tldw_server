@@ -102,6 +102,7 @@ _RAG_NEW_UNIT = [
     "test_pre_retrieval_clarification_pipeline",
     "test_quick_wins_spell_check_compat",
     "test_rag_endpoint_contract_cleanup",
+    "test_rag_pipeline_types",
     "test_rag_profiles",
     "test_rag_provider_credentials",
     "test_rag_result_mapping_core",

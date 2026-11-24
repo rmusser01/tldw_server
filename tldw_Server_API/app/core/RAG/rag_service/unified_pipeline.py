@@ -557,6 +557,7 @@ from .request_resolution import (
 from .result_model import RAGResult
 from .retrieval_plan import build_retrieval_plan
 from .types import DataSource, Document
+from .pipeline.run_config import RagRunConfig
 
 if TYPE_CHECKING:
     from .database_retrievers import (
@@ -2350,6 +2351,8 @@ async def unified_rag_pipeline(
         )
     """
 
+    rcfg = RagRunConfig.from_call_locals(locals())
+
     ambient_scope = get_scope()
     authorization_cache_scope: dict[str, object] | None = None
     authorization_cache_error: str | None = None
@@ -2365,8 +2368,8 @@ async def unified_rag_pipeline(
             authorization_cache_error = "malformed"
 
     runtime_user_id = (
-        getattr(credential_runtime, "_user_id", None)
-        if credential_runtime is not None
+        getattr(rcfg.runtime.credential_runtime, "_user_id", None)
+        if rcfg.runtime.credential_runtime is not None
         else None
     )
     if runtime_user_id is not None:
@@ -2381,37 +2384,37 @@ async def unified_rag_pipeline(
             authorization_cache_error = "user_mismatch"
 
     request_metadata: dict[str, Any] = {}
-    inbound_metadata = kwargs.get("metadata")
+    inbound_metadata = rcfg.request.metadata
     if isinstance(inbound_metadata, dict):
         request_metadata.update(inbound_metadata)
     if generation_prompt is not None:
         request_metadata["generation_prompt"] = generation_prompt
-    request_metadata["max_generation_tokens"] = max_generation_tokens
-    workspace_id = kwargs.get("workspace_id")
+    request_metadata["max_generation_tokens"] = rcfg.generation.max_generation_tokens
+    workspace_id = rcfg.scope.workspace_id
     if workspace_id is None:
         workspace_id = request_metadata.get("workspace_id")
     if workspace_id is not None:
         workspace_id = str(workspace_id).strip() or None
         if workspace_id is not None:
             request_metadata["workspace_id"] = workspace_id
-    prompts_db_path = kwargs.get("prompts_db_path")
-    world_books_db_path = kwargs.get("world_books_db_path")
-    chat_dictionaries_db_path = kwargs.get("chat_dictionaries_db_path")
+    prompts_db_path = rcfg.runtime.prompts_db_path
+    world_books_db_path = rcfg.runtime.world_books_db_path
+    chat_dictionaries_db_path = rcfg.runtime.chat_dictionaries_db_path
 
     if resolved_request is None:
         resolved_request = resolve_legacy_standard_pipeline_request(
             query=query,
-            search_mode=search_mode,
+            search_mode=rcfg.retrieval.search_mode,
             top_k=top_k,
-            sources=sources,
-            min_score=min_score,
-            index_namespace=index_namespace,
-            rag_profile=rag_profile,
-            user_id=user_id,
-            feedback_user_id=feedback_user_id,
-            enable_generation=enable_generation,
-            include_sources=bool(kwargs.get("include_sources", True)),
-            include_metadata=bool(kwargs.get("include_metadata", True)),
+            sources=rcfg.scope.sources,
+            min_score=rcfg.retrieval.min_score,
+            index_namespace=rcfg.retrieval.index_namespace,
+            rag_profile=rcfg.request.rag_profile,
+            user_id=rcfg.scope.user_id,
+            feedback_user_id=rcfg.scope.feedback_user_id,
+            enable_generation=rcfg.generation.enable_generation,
+            include_sources=bool(rcfg.request.include_sources),
+            include_metadata=bool(rcfg.request.include_metadata),
             metadata=request_metadata,
         )
 
@@ -2419,16 +2422,16 @@ async def unified_rag_pipeline(
         retrieval_plan = build_retrieval_plan(resolved_request)
 
     def _resolve_effective_enable_generation() -> bool:  # an explicit False is retrieval only (TASK-15482)
-        return bool(enable_generation) and bool((resolved_request.payload or {}).get("enable_generation", True))
+        return bool(rcfg.generation.enable_generation) and bool((resolved_request.payload or {}).get("enable_generation", True))
 
     effective_enable_generation = _resolve_effective_enable_generation()
 
     retrieval_query = query
-    retrieval_sources = sources
-    retrieval_search_mode = search_mode
+    retrieval_sources = rcfg.scope.sources
+    retrieval_search_mode = rcfg.retrieval.search_mode
     retrieval_top_k = top_k
-    retrieval_min_score = min_score
-    retrieval_index_namespace = index_namespace
+    retrieval_min_score = rcfg.retrieval.min_score
+    retrieval_index_namespace = rcfg.retrieval.index_namespace
 
     def _planned_index_namespace(plan: RetrievalPlan) -> Optional[str]:
         if plan.index_namespace is not None:
@@ -2446,11 +2449,11 @@ async def unified_rag_pipeline(
         nonlocal retrieval_top_k, retrieval_min_score, retrieval_index_namespace, retrieval_plan
 
         snapshot_query = query
-        snapshot_sources = sources
-        snapshot_search_mode = search_mode
+        snapshot_sources = rcfg.scope.sources
+        snapshot_search_mode = rcfg.retrieval.search_mode
         snapshot_top_k = top_k
-        snapshot_min_score = min_score
-        snapshot_index_namespace = index_namespace
+        snapshot_min_score = rcfg.retrieval.min_score
+        snapshot_index_namespace = rcfg.retrieval.index_namespace
 
         if retrieval_plan is not None:
             planned_query = str(retrieval_plan.query or "").strip()
@@ -2522,7 +2525,7 @@ async def unified_rag_pipeline(
     query_expansion_corpus = (
         retrieval_plan.index_namespace
         if retrieval_plan is not None and retrieval_plan.index_namespace is not None
-        else index_namespace
+        else rcfg.retrieval.index_namespace
     )
 
     def _retrieval_plan_for(query_text: str) -> Optional[RetrievalPlan]:
@@ -2553,7 +2556,7 @@ async def unified_rag_pipeline(
         msg = "Invalid query"
         metadata = {"original_query": query}
         try:
-            inbound_meta = kwargs.get("metadata")
+            inbound_meta = rcfg.request.metadata
             if isinstance(inbound_meta, dict):
                 metadata.update(inbound_meta)
         except TypeError:
@@ -2603,15 +2606,15 @@ async def unified_rag_pipeline(
     if "expand_query" in explicit_fields:
         expand_query = explicit_payload["expand_query"]
     else:
-        expand_query = expand_query or kwargs.get("enable_expansion", False)
-    media_db_path = _resolve_sqlite_rag_db_path(media_db_path, db=media_db)
+        expand_query = expand_query or rcfg.query_prep.enable_expansion
+    media_db_path = _resolve_sqlite_rag_db_path(media_db_path, db=rcfg.runtime.media_db)
 
     # ========== SEARCH DEPTH MODE PRESETS ==========
     # Apply parameter presets based on search_depth_mode. Individual parameter
     # overrides take precedence; legacy calls retain their default-value heuristic.
     retrieval_scalar_overrides_applied = False
-    if search_depth_mode is not None:
-        presets = _SEARCH_DEPTH_PRESETS.get(search_depth_mode)
+    if rcfg.request.search_depth_mode is not None:
+        presets = _SEARCH_DEPTH_PRESETS.get(rcfg.request.search_depth_mode)
         # Canonical requests distinguish an omitted value from an explicit default.
         if presets:
             if "top_k" in explicit_fields:
@@ -2676,7 +2679,7 @@ async def unified_rag_pipeline(
 
     def _latched_optional_provider_failure(component: str) -> str | None:
         """Return and record the request's latched optional provider failure."""
-        if credential_runtime is None or optional_provider_failure_code is None:
+        if rcfg.runtime.credential_runtime is None or optional_provider_failure_code is None:
             return None
         result.metadata.setdefault("retrieval_coverage", {})[component] = {
             "coverage": "degraded",
@@ -2689,7 +2692,7 @@ async def unified_rag_pipeline(
     factuality_payload = None
     # Merge inbound metadata if provided (API pattern)
     try:
-        inbound_meta = kwargs.get("metadata")
+        inbound_meta = rcfg.request.metadata
         if isinstance(inbound_meta, dict):
             result.metadata.update(inbound_meta)
     except TypeError:
@@ -2701,23 +2704,23 @@ async def unified_rag_pipeline(
         for enabled, mode in (
             (expand_query, "query_expansion"),
             (enable_hyde, "hyde"),
-            (enable_prf, "prf"),
-            (enable_query_decomposition, "query_decomposition"),
-            (enable_gap_analysis, "gap_analysis"),
+            (rcfg.query_prep.enable_prf, "prf"),
+            (rcfg.retrieval.enable_query_decomposition, "query_decomposition"),
+            (rcfg.retrieval.enable_gap_analysis, "gap_analysis"),
         )
         if enabled
     ]
     retrieval_cache_eligible = bool(
         enable_cache
         and not cache_bypass_modes
-        and not auto_temporal_filters
+        and not rcfg.query_prep.auto_temporal_filters
     )
     if enable_cache and cache_bypass_modes:
         result.metadata["cache_bypassed"] = {
             "reason": "secondary_retrieval_mode",
             "modes": cache_bypass_modes,
         }
-    elif enable_cache and auto_temporal_filters:
+    elif enable_cache and rcfg.query_prep.auto_temporal_filters:
         result.metadata["cache_bypassed"] = {
             "reason": "auto_temporal_window",
         }
@@ -2732,8 +2735,8 @@ async def unified_rag_pipeline(
         profile_resolution = result.metadata.get("profile_resolution")
         if not isinstance(profile_resolution, dict):
             profile_resolution = {}
-        profile_resolution.setdefault("requested_profile", rag_profile)
-        profile_resolution.setdefault("applied_profile", rag_profile)
+        profile_resolution.setdefault("requested_profile", rcfg.request.rag_profile)
+        profile_resolution.setdefault("applied_profile", rcfg.request.rag_profile)
         profile_resolution.setdefault("effective_overrides_count", 0)
         if not isinstance(profile_resolution.get("degraded_features"), list):
             profile_resolution["degraded_features"] = []
@@ -2747,7 +2750,7 @@ async def unified_rag_pipeline(
         to_value: str,
         reason: str,
     ) -> None:
-        if not include_retrieval_diagnostics:
+        if not rcfg.observability.include_retrieval_diagnostics:
             return
         profile_resolution = _ensure_profile_resolution_metadata()
         degraded_features = profile_resolution.get("degraded_features")
@@ -2763,7 +2766,7 @@ async def unified_rag_pipeline(
             }
         )
 
-    if include_retrieval_diagnostics:
+    if rcfg.observability.include_retrieval_diagnostics:
         _ensure_profile_resolution_metadata()
 
     cache_instance = None
@@ -2797,15 +2800,15 @@ async def unified_rag_pipeline(
                 "kind": "user",
                 "id": str(runtime_user_id),
             }
-        elif credential_runtime is None and user_id is not None:
-            owner_scope = {"kind": "user", "id": str(user_id)}
+        elif rcfg.runtime.credential_runtime is None and rcfg.scope.user_id is not None:
+            owner_scope = {"kind": "user", "id": str(rcfg.scope.user_id)}
         else:
             owner_paths = {
                 "media": _cache_path_value(media_db_path)
-                or _cache_path_value(getattr(media_db, "db_path", None)),
-                "notes": _cache_path_value(notes_db_path),
-                "characters": _cache_path_value(character_db_path),
-                "kanban": _cache_path_value(kanban_db_path),
+                or _cache_path_value(getattr(rcfg.runtime.media_db, "db_path", None)),
+                "notes": _cache_path_value(rcfg.runtime.notes_db_path),
+                "characters": _cache_path_value(rcfg.runtime.character_db_path),
+                "kanban": _cache_path_value(rcfg.runtime.kanban_db_path),
                 "prompts": _cache_path_value(prompts_db_path),
                 "world_books": _cache_path_value(world_books_db_path),
                 "dictionaries": _cache_path_value(chat_dictionaries_db_path),
@@ -2844,11 +2847,11 @@ async def unified_rag_pipeline(
             "fts_level": str(fts_level),
             "date_range": effective_date_range,
             "late_chunking": {
-                "enabled": bool(enable_text_late_chunking),
-                "method": chunk_method,
-                "size": chunk_size,
-                "overlap": chunk_overlap,
-                "language": chunk_language,
+                "enabled": bool(rcfg.processing.enable_text_late_chunking),
+                "method": rcfg.processing.chunk_method,
+                "size": rcfg.processing.chunk_size,
+                "overlap": rcfg.processing.chunk_overlap,
+                "language": rcfg.processing.chunk_language,
             },
             "index_namespace": str(retrieval_index_namespace or ""),
             "collection_names": collection_scope,
@@ -2871,7 +2874,7 @@ async def unified_rag_pipeline(
             return cache_instance
         cache_setup_attempted = True
         cache_cls = None
-        if adaptive_cache and AdaptiveCache:
+        if rcfg.cache.adaptive_cache and AdaptiveCache:
             cache_cls = AdaptiveCache
         elif SemanticCache:
             cache_cls = SemanticCache
@@ -2882,15 +2885,15 @@ async def unified_rag_pipeline(
                 if get_shared_cache:
                     cache_instance = get_shared_cache(
                         cache_cls=cache_cls,
-                        similarity_threshold=cache_threshold,
-                        ttl=cache_ttl,
+                        similarity_threshold=rcfg.cache.cache_threshold,
+                        ttl=rcfg.cache.cache_ttl,
                         max_size=cache_max_size,
                         namespace=cache_namespace,
                     )
                 else:
                     cache_instance = cache_cls(
-                        similarity_threshold=cache_threshold,
-                        ttl=cache_ttl,
+                        similarity_threshold=rcfg.cache.cache_threshold,
+                        ttl=rcfg.cache.cache_ttl,
                         namespace=cache_namespace,
                     )
             except (OSError, RuntimeError, TypeError, ValueError) as exc:
@@ -2925,7 +2928,7 @@ async def unified_rag_pipeline(
     ):
         """Apply circuit breaker, retries, and timeout around async operations when enabled."""
         breaker = None
-        if enable_resilience and circuit_breaker and get_coordinator and CircuitBreakerConfig:
+        if rcfg.resilience.enable_resilience and rcfg.resilience.circuit_breaker and get_coordinator and CircuitBreakerConfig:
             try:
                 coord = get_coordinator()
                 if component not in coord.circuit_breakers:
@@ -2949,20 +2952,20 @@ async def unified_rag_pipeline(
                 return await breaker.call(_invoke)
             return await _invoke()
 
-        if enable_resilience and (retry_attempts or 0) > 1 and RetryPolicy and RetryConfig:
-            policy = RetryPolicy(RetryConfig(max_attempts=int(retry_attempts or 1)))
+        if rcfg.resilience.enable_resilience and (rcfg.resilience.retry_attempts or 0) > 1 and RetryPolicy and RetryConfig:
+            policy = RetryPolicy(RetryConfig(max_attempts=int(rcfg.resilience.retry_attempts or 1)))
             call_coro = policy.execute(_attempt)
         else:
             call_coro = _attempt()
 
         try:
-            return await _with_timeout(call_coro, timeout_seconds)
+            return await _with_timeout(call_coro, rcfg.resilience.timeout_seconds)
         except _ProviderFailureBypass as bypass:
             raise bypass.failure from None
 
     # Initialize monitoring if requested
     metrics = None
-    if enable_monitoring:
+    if rcfg.observability.enable_monitoring:
         metrics = QueryMetrics(
             query_id=str(uuid.uuid4()),
             query=query,
@@ -3002,8 +3005,8 @@ async def unified_rag_pipeline(
             retrieval_sources = _normalize_pipeline_sources(retrieval_sources)
             resolved_data_sources = _sources_to_data_sources(retrieval_sources)
             explicit_include_sources = _explicit_include_data_sources(
-                include_media_ids=include_media_ids,
-                include_note_ids=include_note_ids,
+                include_media_ids=rcfg.scope.include_media_ids,
+                include_note_ids=rcfg.scope.include_note_ids,
             )
             if explicit_include_sources:
                 original_retrieval_sources = list(retrieval_sources)
@@ -3037,8 +3040,8 @@ async def unified_rag_pipeline(
                     "enabled": True,
                     "requested_sources": original_retrieval_sources,
                     "resolved_sources": list(retrieval_sources),
-                    "include_media_ids_count": len(include_media_ids or []),
-                    "include_note_ids_count": len(include_note_ids or []),
+                    "include_media_ids_count": len(rcfg.scope.include_media_ids or []),
+                    "include_note_ids_count": len(rcfg.scope.include_note_ids or []),
                     "scope_intersection_empty": scope_intersection_empty,
                     "cache_disabled": cache_disabled_for_scope,
                 }
@@ -3053,12 +3056,12 @@ async def unified_rag_pipeline(
             and SQLRetriever is not None
             and any(src == DataSource.SQL for src in resolved_data_sources)
         ):
-            sql_db_path = _resolve_sqlite_rag_db_path(media_db_path, db=media_db)
+            sql_db_path = _resolve_sqlite_rag_db_path(media_db_path, db=rcfg.runtime.media_db)
             if sql_db_path:
                 try:
                     sql_retriever = SQLRetriever(
                         db_path=str(sql_db_path),
-                        target_id=str(sql_target_id or "media_db"),
+                        target_id=str(rcfg.scope.sql_target_id or "media_db"),
                     )
                 except (
                     AttributeError,
@@ -3071,12 +3074,12 @@ async def unified_rag_pipeline(
                     result.errors.append(f"SQL retriever init failed: {exc}")
 
         def _build_multi_retriever(db_paths: dict[str, str]):
-            base_kwargs: dict[str, Any] = {"user_id": user_id or "0", "media_db": media_db}
-            if credential_runtime is not None:
-                base_kwargs["credential_runtime"] = credential_runtime
-            if chacha_db is not None:
-                base_kwargs["chacha_db"] = chacha_db
-            prompts_db = kwargs.get("prompts_db")
+            base_kwargs: dict[str, Any] = {"user_id": rcfg.scope.user_id or "0", "media_db": rcfg.runtime.media_db}
+            if rcfg.runtime.credential_runtime is not None:
+                base_kwargs["credential_runtime"] = rcfg.runtime.credential_runtime
+            if rcfg.runtime.chacha_db is not None:
+                base_kwargs["chacha_db"] = rcfg.runtime.chacha_db
+            prompts_db = rcfg.runtime.prompts_db
             if prompts_db is not None:
                 base_kwargs["prompts_db"] = prompts_db
             if sql_retriever is not None:
@@ -3098,10 +3101,10 @@ async def unified_rag_pipeline(
                     return MultiDatabaseRetriever(db_paths, **variant)
                 except TypeError:
                     continue
-            if credential_runtime is not None:
+            if rcfg.runtime.credential_runtime is not None:
                 raise TypeError("MultiDatabaseRetriever does not accept credential runtime")
             try:
-                return MultiDatabaseRetriever(db_paths, user_id=user_id or "0")
+                return MultiDatabaseRetriever(db_paths, user_id=rcfg.scope.user_id or "0")
             except TypeError:
                 return MultiDatabaseRetriever(db_paths)
 
@@ -3110,21 +3113,21 @@ async def unified_rag_pipeline(
             db_paths: dict[str, str] = {}
             if media_db_path:
                 db_paths["media_db"] = str(media_db_path)
-            if notes_db_path:
-                db_paths["notes_db"] = str(notes_db_path)
+            if rcfg.runtime.notes_db_path:
+                db_paths["notes_db"] = str(rcfg.runtime.notes_db_path)
             if prompts_db_path:
                 db_paths["prompts_db"] = str(prompts_db_path)
-            if character_db_path:
-                db_paths["character_cards_db"] = str(character_db_path)
-                db_paths["world_books_db"] = str(world_books_db_path or character_db_path)
-                db_paths["chat_dictionaries_db"] = str(chat_dictionaries_db_path or character_db_path)
+            if rcfg.runtime.character_db_path:
+                db_paths["character_cards_db"] = str(rcfg.runtime.character_db_path)
+                db_paths["world_books_db"] = str(world_books_db_path or rcfg.runtime.character_db_path)
+                db_paths["chat_dictionaries_db"] = str(chat_dictionaries_db_path or rcfg.runtime.character_db_path)
             else:
                 if world_books_db_path:
                     db_paths["world_books_db"] = str(world_books_db_path)
                 if chat_dictionaries_db_path:
                     db_paths["chat_dictionaries_db"] = str(chat_dictionaries_db_path)
-            if kanban_db_path:
-                db_paths["kanban_db"] = str(kanban_db_path)
+            if rcfg.runtime.kanban_db_path:
+                db_paths["kanban_db"] = str(rcfg.runtime.kanban_db_path)
             return db_paths
 
         source_status_retriever: Any = None
@@ -3142,7 +3145,7 @@ async def unified_rag_pipeline(
             for source, count in filtered_artifact_counts.items():
                 cumulative_filtered_artifact_counts[source] = cumulative_filtered_artifact_counts.get(source, 0) + count
             result.documents = filtered_documents
-            if include_retrieval_diagnostics and source_status_retriever is not None:
+            if rcfg.observability.include_retrieval_diagnostics and source_status_retriever is not None:
                 result.metadata["source_status"] = _build_source_status(
                     _normalize_pipeline_sources(list(retrieval_sources)),
                     retriever=source_status_retriever,
@@ -3173,25 +3176,25 @@ async def unified_rag_pipeline(
                 with contextlib.suppress(TypeError, ValueError):
                     cal["fused_score"] = float(cal.get("top_doc_prob") or 0.0)
             # Mark whether learned fusion was explicitly requested
-            if enable_learned_fusion:
+            if rcfg.rerank.enable_learned_fusion:
                 cal["enabled"] = True
             # Version tag is purely informational for now
-            if calibrator_version:
-                cal.setdefault("version", calibrator_version)
+            if rcfg.rerank.calibrator_version:
+                cal.setdefault("version", rcfg.rerank.calibrator_version)
             result.metadata["reranking_calibration"] = cal
 
         # ========== PRE-RETRIEVAL CLARIFICATION ==========
         effective_pre_clarify = (
-            enable_pre_retrieval_clarification
-            if enable_pre_retrieval_clarification is not None
+            rcfg.query_prep.enable_pre_retrieval_clarification
+            if rcfg.query_prep.enable_pre_retrieval_clarification is not None
             else effective_enable_generation
         )
         if effective_pre_clarify and assess_query_for_clarification is not None:
             clarification_start = time.time()
             decision = await assess_query_for_clarification(
                 query=query,
-                chat_history=chat_history,
-                timeout_sec=float(clarification_timeout_sec or 1.5),
+                chat_history=rcfg.query_prep.chat_history,
+                timeout_sec=float(rcfg.query_prep.clarification_timeout_sec or 1.5),
             )
             result.timings["pre_retrieval_clarification"] = time.time() - clarification_start
             if decision.required:
@@ -3223,7 +3226,7 @@ async def unified_rag_pipeline(
                 raise _EarlyReturn()
 
         # ========== SPELL CHECK ==========
-        if spell_check:
+        if rcfg.query_prep.spell_check:
             if spell_check_query:
                 spell_start = time.time()
                 corrected = await spell_check_query(query)
@@ -3266,7 +3269,7 @@ async def unified_rag_pipeline(
 
                     discussion_results = await search_discussions(
                         query=query_text,
-                        platforms=discussion_platforms,
+                        platforms=rcfg.research.discussion_platforms,
                         max_results=max_results,
                     )
                     for item in discussion_results or []:
@@ -3335,23 +3338,23 @@ async def unified_rag_pipeline(
 
             return prefetched_docs[:max_results]
 
-        if enable_query_classification and classify_and_reformulate is not None:
+        if rcfg.query_prep.enable_query_classification and classify_and_reformulate is not None:
             try:
                 _cls_start = time.time()
-                _cls_provider = classifier_provider or generation_provider or "openai"
-                _cls_model = classifier_model or generation_model
+                _cls_provider = rcfg.research.classifier_provider or rcfg.generation.generation_provider or "openai"
+                _cls_model = rcfg.research.classifier_model or rcfg.generation.generation_model
                 _classification_stage_metadata: dict[str, Any] = {}
                 _classification = await classify_and_reformulate(
                     query=query,
-                    chat_history=chat_history,
+                    chat_history=rcfg.query_prep.chat_history,
                     llm_provider=_cls_provider,
                     llm_model=_cls_model,
                     **(
                         {
-                            "credential_runtime": credential_runtime,
+                            "credential_runtime": rcfg.runtime.credential_runtime,
                             "stage_metadata": _classification_stage_metadata,
                         }
-                        if credential_runtime is not None
+                        if rcfg.runtime.credential_runtime is not None
                         else {}
                     ),
                 )
@@ -3395,7 +3398,7 @@ async def unified_rag_pipeline(
 
                     # If local retrieval is disabled but external routes are requested,
                     # prefetch external docs directly in non-research-loop mode.
-                    if not enable_research_loop and (
+                    if not rcfg.research.enable_research_loop and (
                         _classification.search_web
                         or _classification.search_academic
                         or _classification.search_discussions
@@ -3431,26 +3434,26 @@ async def unified_rag_pipeline(
             except Exception as _cls_exc:
                 logger.warning(f"Query classification failed: {_cls_exc!r}")
                 result.errors.append(f"Query classification failed: {_cls_exc}")
-        elif chat_history and enable_query_reformulation and classify_and_reformulate is not None:
+        elif rcfg.query_prep.chat_history and rcfg.query_prep.enable_query_reformulation and classify_and_reformulate is not None:
             # Even without full classification, do reformulation if chat history present
             try:
                 from .query_classifier import reformulate_query as _reformulate_q
 
                 _ref_start = time.time()
-                _ref_provider = classifier_provider or generation_provider or "openai"
-                _ref_model = classifier_model or generation_model
+                _ref_provider = rcfg.research.classifier_provider or rcfg.generation.generation_provider or "openai"
+                _ref_model = rcfg.research.classifier_model or rcfg.generation.generation_model
                 _reformulation_stage_metadata: dict[str, Any] = {}
                 reformulated = await _reformulate_q(
                     query=query,
-                    chat_history=chat_history,
+                    chat_history=rcfg.query_prep.chat_history,
                     llm_provider=_ref_provider,
                     llm_model=_ref_model,
                     **(
                         {
-                            "credential_runtime": credential_runtime,
+                            "credential_runtime": rcfg.runtime.credential_runtime,
                             "stage_metadata": _reformulation_stage_metadata,
                         }
-                        if credential_runtime is not None
+                        if rcfg.runtime.credential_runtime is not None
                         else {}
                     ),
                 )
@@ -3469,25 +3472,25 @@ async def unified_rag_pipeline(
         # If research loop is enabled and we're in balanced/quality mode,
         # delegate to the research agent instead of the standard pipeline
         if (
-            enable_research_loop
+            rcfg.research.enable_research_loop
             and research_loop is not None
             and _classification is not None
             and not _classification.skip_search
         ):
             try:
                 _research_start = time.time()
-                _research_mode = search_depth_mode or "balanced"
+                _research_mode = rcfg.request.search_depth_mode or "balanced"
                 _db_ctx = {
-                    "user_id": user_id or "0",
+                    "user_id": rcfg.scope.user_id or "0",
                     "media_db_path": media_db_path,
-                    "notes_db_path": notes_db_path,
-                    "character_db_path": character_db_path,
-                    "kanban_db_path": kanban_db_path,
+                    "notes_db_path": rcfg.runtime.notes_db_path,
+                    "character_db_path": rcfg.runtime.character_db_path,
+                    "kanban_db_path": rcfg.runtime.kanban_db_path,
                 }
-                if media_db is not None:
-                    _db_ctx["media_db"] = media_db
-                if chacha_db is not None:
-                    _db_ctx["chacha_db"] = chacha_db
+                if rcfg.runtime.media_db is not None:
+                    _db_ctx["media_db"] = rcfg.runtime.media_db
+                if rcfg.runtime.chacha_db is not None:
+                    _db_ctx["chacha_db"] = rcfg.runtime.chacha_db
 
                 def _positive_int_or_none(value: Any) -> Optional[int]:
                     try:
@@ -3497,11 +3500,11 @@ async def unified_rag_pipeline(
                     return ivalue if ivalue > 0 else None
 
                 _mode_specific_overrides = {
-                    "speed": _positive_int_or_none(research_max_iterations_speed),
-                    "balanced": _positive_int_or_none(research_max_iterations_balanced),
-                    "quality": _positive_int_or_none(research_max_iterations_quality),
+                    "speed": _positive_int_or_none(rcfg.research.research_max_iterations_speed),
+                    "balanced": _positive_int_or_none(rcfg.research.research_max_iterations_balanced),
+                    "quality": _positive_int_or_none(rcfg.research.research_max_iterations_quality),
                 }
-                _effective_max_iterations = _positive_int_or_none(research_max_iterations)
+                _effective_max_iterations = _positive_int_or_none(rcfg.research.research_max_iterations)
                 if _effective_max_iterations is None:
                     _effective_max_iterations = _mode_specific_overrides.get(_research_mode)
                 if _effective_max_iterations is None:
@@ -3511,19 +3514,19 @@ async def unified_rag_pipeline(
                         _env_key = f"SEARCH_MAX_ITERATIONS_{_research_mode.upper()}"
                         _effective_max_iterations = _positive_int_or_none(_os.getenv(_env_key))
 
-                _progress_cb = research_progress_callback if enable_research_progress else None
+                _progress_cb = rcfg.runtime.research_progress_callback if rcfg.research.enable_research_progress else None
                 _registry = None
                 if create_default_registry is not None:
                     with contextlib.suppress(TypeError, ValueError):
                         _registry = create_default_registry(
-                            discussion_platforms=discussion_platforms,
-                            enable_url_scraping=bool(search_url_scraping),
-                            enable_image_search=bool(enable_image_search),
-                            enable_video_search=bool(enable_video_search),
+                            discussion_platforms=rcfg.research.discussion_platforms,
+                            enable_url_scraping=bool(rcfg.research.search_url_scraping),
+                            enable_image_search=bool(rcfg.generation.enable_image_search),
+                            enable_video_search=bool(rcfg.generation.enable_video_search),
                             on_progress=_progress_cb,
                             **(
-                                {"credential_runtime": credential_runtime}
-                                if credential_runtime is not None
+                                {"credential_runtime": rcfg.runtime.credential_runtime}
+                                if rcfg.runtime.credential_runtime is not None
                                 else {}
                             ),
                         )
@@ -3532,20 +3535,20 @@ async def unified_rag_pipeline(
                     query=query,
                     classification=_classification,
                     mode=_research_mode,
-                    llm_provider=classifier_provider or generation_provider or "openai",
-                    llm_model=classifier_model or generation_model,
+                    llm_provider=rcfg.research.classifier_provider or rcfg.generation.generation_provider or "openai",
+                    llm_model=rcfg.research.classifier_model or rcfg.generation.generation_model,
                     max_iterations=_effective_max_iterations,
                     on_progress=_progress_cb,
                     registry=_registry,
                     db_context=_db_ctx,
-                    discussion_platforms=discussion_platforms,
-                    enable_url_scraping=bool(search_url_scraping),
-                    enable_action_dedup=bool(enable_research_action_dedup),
-                    enable_image_search=bool(enable_image_search),
-                    enable_video_search=bool(enable_video_search),
+                    discussion_platforms=rcfg.research.discussion_platforms,
+                    enable_url_scraping=bool(rcfg.research.search_url_scraping),
+                    enable_action_dedup=bool(rcfg.research.enable_research_action_dedup),
+                    enable_image_search=bool(rcfg.generation.enable_image_search),
+                    enable_video_search=bool(rcfg.generation.enable_video_search),
                     **(
-                        {"credential_runtime": credential_runtime}
-                        if credential_runtime is not None
+                        {"credential_runtime": rcfg.runtime.credential_runtime}
+                        if rcfg.runtime.credential_runtime is not None
                         else {}
                     ),
                 )
@@ -3582,9 +3585,9 @@ async def unified_rag_pipeline(
                     "completed": _research_output.completed,
                     "final_reasoning": _research_output.final_reasoning,
                     "max_iterations_requested": _effective_max_iterations,
-                    "url_scraping_enabled": bool(search_url_scraping),
+                    "url_scraping_enabled": bool(rcfg.research.search_url_scraping),
                     "action_dedup": _research_output.metadata.get("action_dedup", {}),
-                    "discussion_platforms": discussion_platforms or ["reddit", "stackoverflow", "hackernews"],
+                    "discussion_platforms": rcfg.research.discussion_platforms or ["reddit", "stackoverflow", "hackernews"],
                     "url_dedup": _research_output.metadata.get("url_dedup", {}),
                     **(
                         dict(_research_output.metadata.get("provider_stage") or {})
@@ -3607,7 +3610,7 @@ async def unified_rag_pipeline(
                 }
 
                 # Collect media search results from research steps
-                if enable_image_search or enable_video_search:
+                if rcfg.generation.enable_image_search or rcfg.generation.enable_video_search:
                     _images = []
                     _videos = []
                     _media_provider_stage: dict[str, Any] = {}
@@ -3766,9 +3769,9 @@ async def unified_rag_pipeline(
                 # Try rewrite cache first
                 cached_rewrites: list[str] = []
                 intent_label = analysis_intent_val
-                if RewriteCache and user_id:
+                if RewriteCache and rcfg.scope.user_id:
                     try:
-                        rc = RewriteCache(user_id=user_id)
+                        rc = RewriteCache(user_id=rcfg.scope.user_id)
                         cached = rc.get(
                             retrieval_query,
                             intent=intent_label,
@@ -3777,10 +3780,10 @@ async def unified_rag_pipeline(
                         if cached:
                             cached_rewrites = [c for c in cached if isinstance(c, str) and c.strip()]
                     except ValueError as exc:
-                        logger.debug(f"Rewrite cache disabled for user_id={user_id}: {exc}")
+                        logger.debug(f"Rewrite cache disabled for user_id={rcfg.scope.user_id}: {exc}")
                     except (AttributeError, OSError, RuntimeError, TypeError, sqlite3.Error):
                         pass
-                strategies = (expansion_strategies or ["acronym", "synonym"]).copy()
+                strategies = (rcfg.query_prep.expansion_strategies or ["acronym", "synonym"]).copy()
                 expanded_variants: list[str] = []
                 if multi_strategy_expansion:
                     if query_expansion_corpus:
@@ -3829,7 +3832,7 @@ async def unified_rag_pipeline(
 
                 # Bound the number of variations to avoid excessive retrieval fan-out
                 try:
-                    max_variations = max(0, int(max_query_variations))
+                    max_variations = max(0, int(rcfg.query_prep.max_query_variations))
                 except (TypeError, ValueError):
                     max_variations = 3
                 limit = 1 + max_variations
@@ -3837,10 +3840,10 @@ async def unified_rag_pipeline(
                     expanded_queries = expanded_queries[:limit]
                 # Persist effective rewrites for future reuse (best-effort)
                 try:
-                    if RewriteCache and user_id and len(expanded_queries) > 1:
+                    if RewriteCache and rcfg.scope.user_id and len(expanded_queries) > 1:
                         rew = [q for q in expanded_queries if q != query][:5]
                         if rew:
-                            rc = RewriteCache(user_id=user_id)
+                            rc = RewriteCache(user_id=rcfg.scope.user_id)
                         rc.put(
                             retrieval_query,
                             rewrites=rew,
@@ -3848,7 +3851,7 @@ async def unified_rag_pipeline(
                             corpus=retrieval_index_namespace,
                         )
                 except ValueError as exc:
-                    logger.debug(f"Rewrite cache write disabled for user_id={user_id}: {exc}")
+                    logger.debug(f"Rewrite cache write disabled for user_id={rcfg.scope.user_id}: {exc}")
                 except (AttributeError, TypeError):
                     pass
                 result.expanded_queries = [q for q in expanded_queries if q != query]
@@ -3871,7 +3874,7 @@ async def unified_rag_pipeline(
                 logger.warning(f"Query expansion error: {e}")
 
         # ========== INTENT ROUTING (optional) ==========
-        if enable_intent_routing and QueryRouter:
+        if rcfg.query_prep.enable_intent_routing and QueryRouter:
             try:
                 router = QueryRouter()
                 routing = router.route_query(query)
@@ -3907,7 +3910,7 @@ async def unified_rag_pipeline(
 
         # ========== DYNAMIC GRANULARITY ROUTING ==========
         granularity_decision = None
-        if enable_dynamic_granularity and GranularityRouter and route_query_granularity:
+        if rcfg.query_prep.enable_dynamic_granularity and GranularityRouter and route_query_granularity:
             try:
                 granularity_start = time.time()
                 granularity_decision = route_query_granularity(query)
@@ -3959,7 +3962,7 @@ async def unified_rag_pipeline(
         )
 
         # ========== INTENT-BASED WEIGHTING (optional) ==========
-        if adaptive_hybrid_weights and search_mode == "hybrid":
+        if rcfg.retrieval.adaptive_hybrid_weights and rcfg.retrieval.search_mode == "hybrid":
             try:
                 local_analysis = analysis
                 if local_analysis is None and QueryAnalyzer and query:
@@ -4009,7 +4012,7 @@ async def unified_rag_pipeline(
                 except (ImportError, AttributeError, OSError, TypeError, ValueError):
                     pass
                 hyde_embedding_metadata: dict[str, Any] = {}
-                if credential_runtime is None:
+                if rcfg.runtime.credential_runtime is None:
                     # Off the loop: a sync LLM call on the loop's thread blocks it and cannot be quota-checked.
                     hypo = await asyncio.to_thread(generate_hypothetical_answer, query, hyde_provider, hyde_model)
                     vec = await hyde_embed_text(hypo)
@@ -4018,12 +4021,12 @@ async def unified_rag_pipeline(
                         query,
                         hyde_provider,
                         hyde_model,
-                        credential_runtime=credential_runtime,
+                        credential_runtime=rcfg.runtime.credential_runtime,
                         stage_metadata=hyde_embedding_metadata,
                     )
                     vec = await hyde_embed_text(
                         hypo,
-                        credential_runtime=credential_runtime,
+                        credential_runtime=rcfg.runtime.credential_runtime,
                         stage_metadata=hyde_embedding_metadata,
                     )
                 if hyde_embedding_metadata:
@@ -4044,7 +4047,7 @@ async def unified_rag_pipeline(
                 result.errors.append(f"HyDE prep failed: {e}")
 
         # ========== AUTO TEMPORAL FILTERS (optional) ==========
-        if auto_temporal_filters:
+        if rcfg.query_prep.auto_temporal_filters:
             try:
                 qlower = query.lower()
                 start_dt = None
@@ -4189,7 +4192,7 @@ async def unified_rag_pipeline(
                 # --- OTEL: retrieval span ---
                 _otel_cm = None
                 _otel_span = None
-                if enable_observability and get_telemetry_manager:
+                if rcfg.observability.enable_observability and get_telemetry_manager:
                     try:
                         _tm = get_telemetry_manager()
                         _tr = _tm.get_tracer("tldw.rag")
@@ -4223,11 +4226,11 @@ async def unified_rag_pipeline(
                         use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
                         include_metadata=True,
                         fts_level=fts_level,
-                        enable_text_late_chunking=enable_text_late_chunking,
-                        chunk_method=chunk_method,
-                        chunk_size=chunk_size,
-                        chunk_overlap=chunk_overlap,
-                        chunk_language=chunk_language,
+                        enable_text_late_chunking=rcfg.processing.enable_text_late_chunking,
+                        chunk_method=rcfg.processing.chunk_method,
+                        chunk_size=rcfg.processing.chunk_size,
+                        chunk_overlap=rcfg.processing.chunk_overlap,
+                        chunk_language=rcfg.processing.chunk_language,
                     )
                     # Optional date filter
                     if enable_date_filter and date_range and isinstance(date_range, dict):
@@ -4256,7 +4259,7 @@ async def unified_rag_pipeline(
                                 pass
 
                     def _execution_collection_names() -> dict[str, str]:
-                        user_key = str(user_id or feedback_user_id or "0").strip() or "0"
+                        user_key = str(rcfg.scope.user_id or rcfg.scope.feedback_user_id or "0").strip() or "0"
                         source_names = {
                             str(getattr(source, "value", source)).strip().lower()
                             for source in retrieval_sources
@@ -4316,9 +4319,9 @@ async def unified_rag_pipeline(
                                 retriever=retriever,
                                 retrieval_config=retrieval_cfg or config,
                                 source_failures=source_failures,
-                                allowed_media_ids=include_media_ids,
-                                allowed_note_ids=include_note_ids,
-                                bypass_provider_failures=credential_runtime is not None,
+                                allowed_media_ids=rcfg.scope.include_media_ids,
+                                allowed_note_ids=rcfg.scope.include_note_ids,
+                                bypass_provider_failures=rcfg.runtime.credential_runtime is not None,
                             )
                         except asyncio.TimeoutError:
                             # This retrieval attempt did not finish. Keep base
@@ -4326,7 +4329,7 @@ async def unified_rag_pipeline(
                             source_failures.update(resolved_data_sources)
                             raise
                         except _RAG_PROVIDER_FAILURES as exc:
-                            if credential_runtime is None:
+                            if rcfg.runtime.credential_runtime is None:
                                 raise
                             _latch_optional_provider_failure(component, exc)
                             return []
@@ -4343,9 +4346,9 @@ async def unified_rag_pipeline(
                         retriever=retriever,
                         retrieval_config=config,
                         source_failures=source_failures,
-                        allowed_media_ids=include_media_ids,
-                        allowed_note_ids=include_note_ids,
-                        bypass_provider_failures=credential_runtime is not None,
+                        allowed_media_ids=rcfg.scope.include_media_ids,
+                        allowed_note_ids=rcfg.scope.include_note_ids,
+                        bypass_provider_failures=rcfg.runtime.credential_runtime is not None,
                     )
                     base_retrieval_executed = True
                     documents = list(retrieved_evidence.documents)
@@ -4357,7 +4360,7 @@ async def unified_rag_pipeline(
                     if (
                         (not documents)
                         and _scope_includes_data_source(resolved_data_sources, DataSource.MEDIA_DB)
-                        and (media_db_path or media_db is not None)
+                        and (media_db_path or rcfg.runtime.media_db is not None)
                         and retrieval_search_mode in ("fts", "hybrid")
                     ):
                         try:
@@ -4374,13 +4377,13 @@ async def unified_rag_pipeline(
                             fb_retriever = _MDBR(
                                 db_path=media_db_path,
                                 config=fb_cfg,
-                                user_id=str(user_id or "0"),
-                                media_db=media_db,
+                                user_id=str(rcfg.scope.user_id or "0"),
+                                media_db=rcfg.runtime.media_db,
                             )
                             fallback_docs = await fb_retriever.retrieve(
                                 query=retrieval_query,
                                 media_type=None,
-                                allowed_media_ids=include_media_ids,
+                                allowed_media_ids=rcfg.scope.include_media_ids,
                             )
                             if fallback_docs:
                                 documents = fallback_docs
@@ -4504,7 +4507,7 @@ async def unified_rag_pipeline(
                     _apply_workspace_filtering_to_result()
                     # Optional PRF second-pass retrieval to fill remaining slots
                     if (
-                        enable_prf
+                        rcfg.query_prep.enable_prf
                         and apply_prf
                         and PRFConfig
                         and result.documents
@@ -4512,10 +4515,10 @@ async def unified_rag_pipeline(
                     ):
                         try:
                             prf_cfg = PRFConfig(
-                                max_terms=int(prf_terms or 0),
-                                sources=prf_sources or ["keywords", "entities", "numbers"],
-                                alpha=float(prf_alpha or 0.0),
-                                top_n=int(prf_top_n or 0),
+                                max_terms=int(rcfg.query_prep.prf_terms or 0),
+                                sources=rcfg.query_prep.prf_sources or ["keywords", "entities", "numbers"],
+                                alpha=float(rcfg.query_prep.prf_alpha or 0.0),
+                                top_n=int(rcfg.query_prep.prf_top_n or 0),
                             )
                             prf_query, prf_meta = await apply_prf(
                                 retrieval_query,
@@ -4561,7 +4564,7 @@ async def unified_rag_pipeline(
                             result.errors.append(f"PRF second-pass retrieval failed: {str(_prf_err)}")
 
                     # Optional: guided query decomposition to broaden recall for multi-part queries
-                    if enable_query_decomposition:
+                    if rcfg.retrieval.enable_query_decomposition:
                         decomp_start = time.time()
                         try:
                             # Prefer agentic planner-style decomposition when available and
@@ -4585,7 +4588,7 @@ async def unified_rag_pipeline(
                                         _decompose_query as _agentic_decompose,
                                     )
 
-                                    subgoal_max = max_subqueries if max_subqueries is not None else 3
+                                    subgoal_max = rcfg.retrieval.max_subqueries if rcfg.retrieval.max_subqueries is not None else 3
                                     acfg = _ACfg(enable_query_decomposition=True, subgoal_max=int(subgoal_max))
                                     subqueries = _agentic_decompose(q_norm, acfg) or []
                                     used_agentic = True
@@ -4618,7 +4621,7 @@ async def unified_rag_pipeline(
 
                             # Apply max_subqueries cap if provided (includes primary query implicitly)
                             try:
-                                max_sub = int(max_subqueries or 0)
+                                max_sub = int(rcfg.retrieval.max_subqueries or 0)
                             except (TypeError, ValueError):
                                 max_sub = 0
                             if max_sub and len(subqueries) > max_sub:
@@ -4632,9 +4635,9 @@ async def unified_rag_pipeline(
                                 meta_decomp["intent"] = intent_val
                             if comp_val is not None:
                                 meta_decomp["complexity"] = comp_val
-                            time_budget = float(subquery_time_budget_sec) if subquery_time_budget_sec else None
+                            time_budget = float(rcfg.retrieval.subquery_time_budget_sec) if rcfg.retrieval.subquery_time_budget_sec else None
                             try:
-                                doc_budget = int(subquery_doc_budget) if subquery_doc_budget is not None else None
+                                doc_budget = int(rcfg.retrieval.subquery_doc_budget) if rcfg.retrieval.subquery_doc_budget is not None else None
                             except (TypeError, ValueError):
                                 doc_budget = None
 
@@ -4673,7 +4676,7 @@ async def unified_rag_pipeline(
                                     else list(subqueries[1:])
                                 )
                                 try:
-                                    max_workers = max(1, int(subquery_max_concurrency or 1))
+                                    max_workers = max(1, int(rcfg.retrieval.subquery_max_concurrency or 1))
                                 except (TypeError, ValueError):
                                     max_workers = 3
                                 max_workers = min(max_workers, len(subqueries_to_run)) or 1
@@ -4786,7 +4789,7 @@ async def unified_rag_pipeline(
                                     difficulty = "hard"
                                 else:
                                     high = sum(
-                                        1 for d in docs if float(getattr(d, "score", 0.0)) >= max(min_score, 0.3)
+                                        1 for d in docs if float(getattr(d, "score", 0.0)) >= max(rcfg.retrieval.min_score, 0.3)
                                     )
                                     if high >= max(3, int(0.3 * len(docs))):
                                         difficulty = "easy"
@@ -4826,7 +4829,7 @@ async def unified_rag_pipeline(
                 asyncio.TimeoutError,
                 sqlite3.Error,
             ) as e:
-                if credential_runtime is not None and isinstance(e, _RAG_PROVIDER_FAILURES):
+                if rcfg.runtime.credential_runtime is not None and isinstance(e, _RAG_PROVIDER_FAILURES):
                     raise
                 result.errors.append("document_retrieval_failed")
                 logger.error("Document retrieval failed")
@@ -4839,8 +4842,8 @@ async def unified_rag_pipeline(
                         documents=result.documents or [],
                         answer=result.generated_answer or "",
                         reason="retrieval_error",
-                        user_id=user_id,
-                        namespace=index_namespace,
+                        user_id=rcfg.scope.user_id,
+                        namespace=rcfg.retrieval.index_namespace,
                     )
                 except (ImportError, OSError, RuntimeError, TypeError, ValueError):
                     pass
@@ -4852,7 +4855,7 @@ async def unified_rag_pipeline(
                 if (
                     (not result.documents)
                     and _scope_includes_data_source(resolved_data_sources, DataSource.MEDIA_DB)
-                    and (media_db_path or media_db is not None)
+                    and (media_db_path or rcfg.runtime.media_db is not None)
                     and retrieval_search_mode in ("fts", "hybrid")
                 ):
                     try:
@@ -4860,7 +4863,7 @@ async def unified_rag_pipeline(
 
                         fb_cfg = _RCfg(
                             max_results=top_k,
-                            min_score=min_score,
+                            min_score=rcfg.retrieval.min_score,
                             use_fts=True,
                             use_vector=False,
                             include_metadata=True,
@@ -4869,13 +4872,13 @@ async def unified_rag_pipeline(
                         fb_retriever = _MDBR(
                             db_path=media_db_path,
                             config=fb_cfg,
-                            user_id=str(user_id or "0"),
-                            media_db=media_db,
+                            user_id=str(rcfg.scope.user_id or "0"),
+                            media_db=rcfg.runtime.media_db,
                         )
                         fallback_docs = await fb_retriever.retrieve(
                             query=query,
                             media_type=None,
-                            allowed_media_ids=include_media_ids,
+                            allowed_media_ids=rcfg.scope.include_media_ids,
                         )
                         if fallback_docs:
                             result.documents = fallback_docs
@@ -4930,14 +4933,14 @@ async def unified_rag_pipeline(
             mv_start = time.time()
             try:
                 used_precomputed = False
-                if enable_precomputed_spans and apply_precomputed_spans and PrecomputedSpanConfig:
+                if rcfg.retrieval.enable_precomputed_spans and apply_precomputed_spans and PrecomputedSpanConfig:
                     try:
                         pcfg = PrecomputedSpanConfig()
                         pre_docs = await apply_precomputed_spans(
                             query=query,
                             documents=result.documents,
                             config=pcfg,
-                            user_id=user_id,
+                            user_id=rcfg.scope.user_id,
                         )
                         result.metadata.setdefault("multi_vector", {})
                         # When implementation is available, pre_docs can override documents
@@ -4957,18 +4960,18 @@ async def unified_rag_pipeline(
                         span_chars=int(mv_span_chars or 300),
                         stride=int(mv_stride or 150),
                         max_spans_per_doc=int(mv_max_spans or 8),
-                        flatten_to_spans=bool(mv_flatten_to_spans or False),
+                        flatten_to_spans=bool(rcfg.retrieval.mv_flatten_to_spans or False),
                     )
                     multi_vector_embedding_metadata: dict[str, Any] = {}
                     multi_vector_kwargs: dict[str, Any] = {
                         "query": query,
                         "documents": result.documents,
                         "config": cfg,
-                        "user_id": user_id,
+                        "user_id": rcfg.scope.user_id,
                     }
-                    if credential_runtime is not None:
+                    if rcfg.runtime.credential_runtime is not None:
                         multi_vector_kwargs.update(
-                            credential_runtime=credential_runtime,
+                            credential_runtime=rcfg.runtime.credential_runtime,
                             stage_metadata=multi_vector_embedding_metadata,
                         )
                     mv_docs = await apply_multi_vector_passages(**multi_vector_kwargs)
@@ -5016,7 +5019,7 @@ async def unified_rag_pipeline(
         # ========== NUMERIC/TABLE-AWARE BOOST (optional, pre-rerank) ==========
         # Record the metadata block even when no documents are retrieved so tests can
         # confirm the feature path was considered for numeric queries.
-        if enable_numeric_table_boost:
+        if rcfg.retrieval.enable_numeric_table_boost:
             try:
                 import re as _re
 
@@ -5050,7 +5053,7 @@ async def unified_rag_pipeline(
                 result.metadata["numeric_table_boost"] = {"enabled": True, "affected": int(affected)}
 
         # ========== GAP ANALYSIS / FOLLOW-UPS (optional) ==========
-        if enable_gap_analysis and result.documents:
+        if rcfg.retrieval.enable_gap_analysis and result.documents:
             try:
                 ga_start = time.time()
                 followups: list[str] = []
@@ -5079,8 +5082,8 @@ async def unified_rag_pipeline(
                         prompt += f"- {snippet}\n"
                     prompt += "\nJSON:"
                     gap_handle = None
-                    if credential_runtime is not None:
-                        gap_handle = await credential_runtime.resolve(
+                    if rcfg.runtime.credential_runtime is not None:
+                        gap_handle = await rcfg.runtime.credential_runtime.resolve(
                             _prov,
                             model=_model,
                         )
@@ -5124,7 +5127,7 @@ async def unified_rag_pipeline(
                             if gap_handle is not None and (
                                 gap_completed or gap_stream_state["content"]
                             ):
-                                await credential_runtime.mark_used(gap_handle)
+                                await rcfg.runtime.credential_runtime.mark_used(gap_handle)
 
                     gap_operation = _run_gap_analyzer()
                     llm_out = (
@@ -5165,13 +5168,13 @@ async def unified_rag_pipeline(
                     ValueError,
                     asyncio.TimeoutError,
                 ):
-                    if credential_runtime is not None:
+                    if rcfg.runtime.credential_runtime is not None:
                         result.metadata["gap_analysis"] = {
                             "failure_code": "provider_unavailable",
                             "verification_available": False,
                         }
                     followups = [f"detailed {query}", f"examples {query}"]
-                followups = [q for q in followups if isinstance(q, str) and q.strip()][:max_followup_searches]
+                followups = [q for q in followups if isinstance(q, str) and q.strip()][:rcfg.retrieval.max_followup_searches]
                 if followups:
                     if _latched_optional_provider_failure("retrieval_followup") is not None:
                         follow_results = []
@@ -5217,12 +5220,12 @@ async def unified_rag_pipeline(
                 result.errors.append(f"Gap analysis failed: {e}")
 
         # ========== KEYWORD FILTERING ==========
-        if keyword_filter and result.documents:
+        if rcfg.scope.keyword_filter and result.documents:
             filter_start = time.time()
             filtered_docs = []
             for doc in result.documents:
                 content_lower = doc.content.lower()
-                if any(keyword.lower() in content_lower for keyword in keyword_filter):
+                if any(keyword.lower() in content_lower for keyword in rcfg.scope.keyword_filter):
                     filtered_docs.append(doc)
 
             result.metadata["pre_filter_count"] = len(result.documents)
@@ -5231,19 +5234,19 @@ async def unified_rag_pipeline(
             result.timings["keyword_filter"] = time.time() - filter_start
 
         # ========== INSTRUCTION-INJECTION FILTERING (pre-reranking) ==========
-        if enable_injection_filter and result.documents:
+        if rcfg.safety.enable_injection_filter and result.documents:
             inj_start = time.time()
             try:
                 if downweight_injection_docs:
                     summary = downweight_injection_docs(
-                        result.documents, strength=float(injection_filter_strength or 0.5)
+                        result.documents, strength=float(rcfg.safety.injection_filter_strength or 0.5)
                     )
                     result.metadata.setdefault("injection_filter", {})
                     result.metadata["injection_filter"].update(
                         {
                             "affected": int(summary.get("affected", 0)),
                             "total": int(summary.get("total", len(result.documents))),
-                            "strength": float(injection_filter_strength or 0.5),
+                            "strength": float(rcfg.safety.injection_filter_strength or 0.5),
                         }
                     )
                     # Optional metric
@@ -5272,10 +5275,10 @@ async def unified_rag_pipeline(
                 result.timings["injection_filter"] = time.time() - inj_start
 
         # ========== OPTIONAL CHUNK TYPE FILTER (metadata-based) ==========
-        if chunk_type_filter and result.documents:
+        if rcfg.processing.chunk_type_filter and result.documents:
             try:
                 allowed: set[str] = set()
-                for t in chunk_type_filter:
+                for t in rcfg.processing.chunk_type_filter:
                     norm = _normalize_chunk_type_value(t)
                     if norm:
                         allowed.add(norm)
@@ -5299,22 +5302,22 @@ async def unified_rag_pipeline(
         if result.documents:
             try:
                 # OCR gating
-                if ocr_confidence_threshold is not None:
+                if rcfg.safety.ocr_confidence_threshold is not None:
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 
-                        dropped = gate_docs_by_ocr_confidence(result.documents, float(ocr_confidence_threshold))
+                        dropped = gate_docs_by_ocr_confidence(result.documents, float(rcfg.safety.ocr_confidence_threshold))
                         if dropped > 0:
                             increment_counter("rag_ocr_dropped_docs_total", dropped)
                     except (ImportError, RuntimeError, TypeError, ValueError):
                         pass
                 # HTML sanitation
-                if enable_html_sanitizer:
+                if rcfg.safety.enable_html_sanitizer:
                     sanitized = 0
                     for d in result.documents or []:
                         try:
                             before = d.content or ""
-                            after = sanitize_html_allowlist(before, html_allowed_tags, html_allowed_attrs)
+                            after = sanitize_html_allowlist(before, rcfg.safety.html_allowed_tags, rcfg.safety.html_allowed_attrs)
                             if after != before:
                                 d.content = after
                                 sanitized += 1
@@ -5328,18 +5331,18 @@ async def unified_rag_pipeline(
                     except (ImportError, RuntimeError, TypeError, ValueError):
                         pass
                 # Content policy (PII/PHI)
-                if enable_content_policy_filter:
+                if rcfg.safety.enable_content_policy_filter:
                     summary = apply_content_policy(
                         result.documents,
-                        policy_types=(content_policy_types or ["pii"]),
-                        mode=str(content_policy_mode or "redact"),
+                        policy_types=(rcfg.safety.content_policy_types or ["pii"]),
+                        mode=str(rcfg.safety.content_policy_mode or "redact"),
                     )
                     result.metadata.setdefault("content_policy", {})
                     result.metadata["content_policy"].update(
                         {
                             "enabled": True,
-                            "types": content_policy_types or ["pii"],
-                            "mode": content_policy_mode,
+                            "types": rcfg.safety.content_policy_types or ["pii"],
+                            "mode": rcfg.safety.content_policy_mode,
                             "affected": int(summary.get("affected", 0)),
                             "dropped": int(summary.get("dropped", 0)),
                         }
@@ -5351,7 +5354,7 @@ async def unified_rag_pipeline(
                             increment_counter(
                                 "rag_policy_filtered_chunks_total",
                                 int(summary.get("affected", 0)),
-                                labels={"mode": str(content_policy_mode or "redact")},
+                                labels={"mode": str(rcfg.safety.content_policy_mode or "redact")},
                             )
                     except (ImportError, RuntimeError, TypeError, ValueError):
                         pass
@@ -5360,7 +5363,7 @@ async def unified_rag_pipeline(
                 pass
 
         # ========== SECURITY FILTERING ==========
-        if enable_security_filter and result.documents:
+        if rcfg.safety.enable_security_filter and result.documents:
             security_start = time.time()
             incoming_source_counts = Counter(_document_canonical_source(doc) for doc in result.documents)
             try:
@@ -5372,15 +5375,15 @@ async def unified_rag_pipeline(
                         "confidential": SensitivityLevel.CONFIDENTIAL,
                         "restricted": SensitivityLevel.RESTRICTED,
                     }
-                    sensitivity_value = sensitivity_map.get(sensitivity_level)
+                    sensitivity_value = sensitivity_map.get(rcfg.safety.sensitivity_level)
                     if sensitivity_value is None:
                         valid_levels = ", ".join(sensitivity_map.keys())
                         raise ValueError(
-                            f"Invalid sensitivity_level '{sensitivity_level}'. Expected one of: {valid_levels}"
+                            f"Invalid sensitivity_level '{rcfg.safety.sensitivity_level}'. Expected one of: {valid_levels}"
                         )
 
                     # Detect PII if requested
-                    if detect_pii:
+                    if rcfg.safety.detect_pii:
                         detect_pii_batch = getattr(security_filter, "detect_pii_batch", None)
                         if callable(detect_pii_batch):
                             pii_report = detect_pii_batch([doc.content for doc in result.documents])
@@ -5419,7 +5422,7 @@ async def unified_rag_pipeline(
                             description="document sequence",
                         )
 
-                        if redact_pii:
+                        if rcfg.safety.redact_pii:
                             redact_pii_fn = getattr(security_filter, "redact_pii", None)
                             if callable(redact_pii_fn):
                                 for doc in sensitivity_filtered_docs:
@@ -5439,9 +5442,9 @@ async def unified_rag_pipeline(
                             ]
                             filtered_payloads = filter_documents(
                                 serialized_docs,
-                                user_id=_resolve_security_user_id(user_id, feedback_user_id),
+                                user_id=_resolve_security_user_id(rcfg.scope.user_id, rcfg.scope.feedback_user_id),
                                 max_sensitivity=sensitivity_value,
-                                mask_pii=bool(redact_pii),
+                                mask_pii=bool(rcfg.safety.redact_pii),
                             )
                             if inspect.isawaitable(filtered_payloads):
                                 filtered_payloads = await filtered_payloads
@@ -5501,7 +5504,7 @@ async def unified_rag_pipeline(
                 logger.error(f"Security filter error: {e}")
 
         # ========== TABLE PROCESSING ==========
-        if enable_table_processing and result.documents:
+        if rcfg.processing.enable_table_processing and result.documents:
             table_start = time.time()
             try:
                 if TableProcessor:
@@ -5513,11 +5516,11 @@ async def unified_rag_pipeline(
                         process_document_tables = getattr(processor, "process_document_tables", None)
 
                         if callable(process_document):
-                            processed = process_document(doc.content, method=table_method)
+                            processed = process_document(doc.content, method=rcfg.processing.table_method)
                             processed = await processed if inspect.isawaitable(processed) else processed
                             doc.content = processed
                         elif callable(process_document_tables):
-                            processed = process_document_tables(doc.content, serialize_method=table_method)
+                            processed = process_document_tables(doc.content, serialize_method=rcfg.processing.table_method)
                             processed = await processed if inspect.isawaitable(processed) else processed
                             if isinstance(processed, tuple):
                                 processed_text, table_metadata = processed
@@ -5538,7 +5541,7 @@ async def unified_rag_pipeline(
                 logger.warning("Table processing requested but module not available")
 
         # ========== VLM LATE CHUNKING (Optional) ==========
-        if enable_vlm_late_chunking and result.documents:
+        if rcfg.processing.enable_vlm_late_chunking and result.documents:
             vlm_start = time.time()
             try:
                 try:
@@ -5553,7 +5556,7 @@ async def unified_rag_pipeline(
                     _get_vlm_backend = _unavailable_vlm_backend
 
                 # Pick backend
-                backend = _get_vlm_backend(vlm_backend if vlm_backend not in (None, "auto") else None)
+                backend = _get_vlm_backend(rcfg.processing.vlm_backend if rcfg.processing.vlm_backend not in (None, "auto") else None)
                 if backend is None:
                     result.errors.append("VLM requested but no backend available")
                 else:
@@ -5565,12 +5568,12 @@ async def unified_rag_pipeline(
                         for d in result.documents
                         if (d.metadata or {}).get("source") in allowed_sources and (d.metadata or {}).get("url")
                     ]
-                    selected_docs = selected_docs[: max(1, int(vlm_late_chunk_top_k_docs or 1))]
+                    selected_docs = selected_docs[: max(1, int(rcfg.processing.vlm_late_chunk_top_k_docs or 1))]
 
                     vlm_added: list[Document] = []
                     for doc in selected_docs:
                         url = (doc.metadata or {}).get("url")
-                        page_limit = vlm_max_pages
+                        page_limit = rcfg.processing.vlm_max_pages
                         if not url:
                             continue
                         # Resolve PDF path: strictly require local file path (no remote URLs)
@@ -5601,7 +5604,7 @@ async def unified_rag_pipeline(
                                         page_no = entry.get("page")
                                         for d in entry.get("detections") or []:
                                             label = str(d.get("label"))
-                                            if vlm_detect_tables_only and label.lower() != "table":
+                                            if rcfg.processing.vlm_detect_tables_only and label.lower() != "table":
                                                 continue
                                             detections.append(
                                                 {
@@ -5629,7 +5632,7 @@ async def unified_rag_pipeline(
                                             )
                                             for det in getattr(res, "detections", []) or []:
                                                 label = str(getattr(det, "label", ""))
-                                                if vlm_detect_tables_only and label.lower() != "table":
+                                                if rcfg.processing.vlm_detect_tables_only and label.lower() != "table":
                                                     continue
                                                 detections.append(
                                                     {
@@ -5684,15 +5687,15 @@ async def unified_rag_pipeline(
                 logger.warning(f"VLM late-chunking failed: {e}")
 
         # ========== PROGRESSIVE EVIDENCE ACCUMULATION ==========
-        if enable_evidence_accumulation and result.documents and EvidenceAccumulator:
+        if rcfg.retrieval.enable_evidence_accumulation and result.documents and EvidenceAccumulator:
             accumulation_start = time.time()
             try:
                 accumulator = EvidenceAccumulator(
-                    max_rounds=accumulation_max_rounds,
+                    max_rounds=rcfg.retrieval.accumulation_max_rounds,
                     enable_gap_assessment=True,
                     **(
-                        {"credential_runtime": credential_runtime}
-                        if credential_runtime is not None
+                        {"credential_runtime": rcfg.runtime.credential_runtime}
+                        if rcfg.runtime.credential_runtime is not None
                         else {}
                     ),
                 )
@@ -5715,11 +5718,11 @@ async def unified_rag_pipeline(
                             use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
                             include_metadata=True,
                             fts_level=fts_level,
-                            enable_text_late_chunking=enable_text_late_chunking,
-                            chunk_method=chunk_method,
-                            chunk_size=chunk_size,
-                            chunk_overlap=chunk_overlap,
-                            chunk_language=chunk_language,
+                            enable_text_late_chunking=rcfg.processing.enable_text_late_chunking,
+                            chunk_method=rcfg.processing.chunk_method,
+                            chunk_size=rcfg.processing.chunk_size,
+                            chunk_overlap=rcfg.processing.chunk_overlap,
+                            chunk_language=rcfg.processing.chunk_language,
                         )
                         data_sources = list(resolved_data_sources)
                         if not data_sources:
@@ -5731,13 +5734,13 @@ async def unified_rag_pipeline(
                             source_failures=source_failures,
                             index_namespace=retrieval_index_namespace,
                             retrieval_plan=_retrieval_plan_for(gap_query),
-                            allowed_media_ids=include_media_ids,
-                            allowed_note_ids=include_note_ids,
+                            allowed_media_ids=rcfg.scope.include_media_ids,
+                            allowed_note_ids=rcfg.scope.include_note_ids,
                         )
                         # Filter out already-seen documents
                         return [d for d in new_docs if d.id not in exclude_ids]
                     except _RAG_PROVIDER_FAILURES as exc:
-                        if credential_runtime is None:
+                        if rcfg.runtime.credential_runtime is None:
                             raise
                         _latch_optional_provider_failure("evidence_accumulation", exc)
                         return []
@@ -5757,7 +5760,7 @@ async def unified_rag_pipeline(
                     query=query,
                     initial_results=result.documents,
                     retrieval_fn=_additional_retrieval,
-                    time_budget_sec=accumulation_time_budget_sec,
+                    time_budget_sec=rcfg.retrieval.accumulation_time_budget_sec,
                 )
 
                 # Update documents with accumulated results
@@ -5793,45 +5796,45 @@ async def unified_rag_pipeline(
 
         # Apply personalization priors (pre-rerank) if requested
         try:
-            if apply_feedback_boost and result.documents and UserPersonalizationStore:
-                store = UserPersonalizationStore(feedback_user_id or user_id)
-                result.documents = store.boost_documents(result.documents, corpus=index_namespace)
+            if rcfg.observability.apply_feedback_boost and result.documents and UserPersonalizationStore:
+                store = UserPersonalizationStore(rcfg.scope.feedback_user_id or rcfg.scope.user_id)
+                result.documents = store.boost_documents(result.documents, corpus=rcfg.retrieval.index_namespace)
                 result.metadata.setdefault("personalization", {})["boost_applied_pre_rerank"] = True
         except ValueError as exc:
-            logger.debug(f"Personalization boost disabled for user_id={feedback_user_id or user_id}: {exc}")
+            logger.debug(f"Personalization boost disabled for user_id={rcfg.scope.feedback_user_id or rcfg.scope.user_id}: {exc}")
         except (AttributeError, OSError, RuntimeError, TypeError, sqlite3.Error):
             pass
 
         # ========== SELF-CORRECTING RAG: DOCUMENT GRADING (Stage 1) ==========
         # Grade documents for relevance BEFORE expensive reranking/generation
-        if enable_document_grading and result.documents and DocumentGrader:
+        if rcfg.self_correct.enable_document_grading and result.documents and DocumentGrader:
             grading_start = time.time()
             try:
                 grading_config = GradingConfig(
-                    provider=grading_provider or "openai",
-                    model=grading_model,
-                    batch_size=grading_batch_size,
-                    timeout_seconds=grading_timeout_sec,
-                    fallback_to_score=grading_fallback_to_score,
-                    fallback_min_score=grading_fallback_min_score,
+                    provider=rcfg.self_correct.grading_provider or "openai",
+                    model=rcfg.self_correct.grading_model,
+                    batch_size=rcfg.self_correct.grading_batch_size,
+                    timeout_seconds=rcfg.self_correct.grading_timeout_sec,
+                    fallback_to_score=rcfg.self_correct.grading_fallback_to_score,
+                    fallback_min_score=rcfg.self_correct.grading_fallback_min_score,
                 )
                 grader = DocumentGrader(
                     config=grading_config,
-                    credential_runtime=credential_runtime,
+                    credential_runtime=rcfg.runtime.credential_runtime,
                 )
 
                 filtered_docs, grading_metadata = await grader.filter_relevant(
                     query=query,
                     documents=result.documents,
-                    threshold=grading_threshold,
-                    provider=grading_provider,
-                    model=grading_model,
+                    threshold=rcfg.self_correct.grading_threshold,
+                    provider=rcfg.self_correct.grading_provider,
+                    model=rcfg.self_correct.grading_model,
                 )
 
                 # Store grading metadata
                 result.metadata["document_grading"] = {
                     "enabled": True,
-                    "threshold": grading_threshold,
+                    "threshold": rcfg.self_correct.grading_threshold,
                     "total_graded": grading_metadata.get("total_graded", 0),
                     "relevant_count": grading_metadata.get("relevant_count", 0),
                     "filtered_count": grading_metadata.get("filtered_count", 0),
@@ -5852,7 +5855,7 @@ async def unified_rag_pipeline(
 
                 # Check if we should trigger query rewriting loop (Stage 2)
                 avg_relevance = grading_metadata.get("avg_relevance", 0.0)
-                if enable_query_rewriting_loop and avg_relevance < rewrite_relevance_threshold:
+                if rcfg.self_correct.enable_query_rewriting_loop and avg_relevance < rcfg.self_correct.rewrite_relevance_threshold:
                     result.metadata["document_grading"]["low_relevance_detected"] = True
                     result.metadata["document_grading"]["will_rewrite"] = True
 
@@ -5862,18 +5865,18 @@ async def unified_rag_pipeline(
                 else:
                     # If no documents passed grading, keep original for fallback
                     result.metadata["document_grading"]["fallback_to_original"] = True
-                    logger.warning(f"No documents passed grading threshold {grading_threshold}, keeping originals")
+                    logger.warning(f"No documents passed grading threshold {rcfg.self_correct.grading_threshold}, keeping originals")
 
                 result.timings["document_grading"] = time.time() - grading_start
 
                 # --- OTEL span for document grading ---
-                if enable_observability and get_telemetry_manager:
+                if rcfg.observability.enable_observability and get_telemetry_manager:
                     try:
                         _tm = get_telemetry_manager()
                         _tr = _tm.get_tracer("tldw.rag")
                         with _tr.start_as_current_span("rag.document_grading") as _span:
                             _span.set_attribute("rag.phase", "document_grading")
-                            _span.set_attribute("rag.grading_threshold", grading_threshold)
+                            _span.set_attribute("rag.grading_threshold", rcfg.self_correct.grading_threshold)
                             _span.set_attribute("rag.docs_graded", grading_metadata.get("total_graded", 0))
                             _span.set_attribute("rag.docs_passed", grading_metadata.get("filtered_count", 0))
                             _span.set_attribute("rag.avg_relevance", avg_relevance)
@@ -5896,7 +5899,7 @@ async def unified_rag_pipeline(
         # ========== SELF-CORRECTING RAG: QUERY REWRITING LOOP (Stage 2) ==========
         # When document grading shows low relevance, rewrite query and retry retrieval
         if (
-            enable_query_rewriting_loop
+            rcfg.self_correct.enable_query_rewriting_loop
             and QueryRewriter
             and result.metadata.get("document_grading", {}).get("low_relevance_detected")
         ):
@@ -5909,7 +5912,7 @@ async def unified_rag_pipeline(
             try:
                 rewriter = QueryRewriter()
 
-                for attempt in range(max_rewrite_attempts):
+                for attempt in range(rcfg.self_correct.max_rewrite_attempts):
                     # Rewrite the query using improve_for_retrieval strategy
                     rewrites = rewriter.rewrite_query(
                         current_query,
@@ -5959,11 +5962,11 @@ async def unified_rag_pipeline(
                                 use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
                                 include_metadata=True,
                                 fts_level=fts_level,
-                                enable_text_late_chunking=enable_text_late_chunking,
-                                chunk_method=chunk_method,
-                                chunk_size=chunk_size,
-                                chunk_overlap=chunk_overlap,
-                                chunk_language=chunk_language,
+                                enable_text_late_chunking=rcfg.processing.enable_text_late_chunking,
+                                chunk_method=rcfg.processing.chunk_method,
+                                chunk_size=rcfg.processing.chunk_size,
+                                chunk_overlap=rcfg.processing.chunk_overlap,
+                                chunk_language=rcfg.processing.chunk_language,
                             )
                             data_sources = list(resolved_data_sources)
 
@@ -5978,23 +5981,23 @@ async def unified_rag_pipeline(
 
                             if new_docs:
                                 # Re-grade the new documents
-                                if enable_document_grading and DocumentGrader:
+                                if rcfg.self_correct.enable_document_grading and DocumentGrader:
                                     grading_config = GradingConfig(
-                                        provider=grading_provider or "openai",
-                                        model=grading_model,
-                                        batch_size=grading_batch_size,
-                                        timeout_seconds=grading_timeout_sec,
-                                        fallback_to_score=grading_fallback_to_score,
-                                        fallback_min_score=grading_fallback_min_score,
+                                        provider=rcfg.self_correct.grading_provider or "openai",
+                                        model=rcfg.self_correct.grading_model,
+                                        batch_size=rcfg.self_correct.grading_batch_size,
+                                        timeout_seconds=rcfg.self_correct.grading_timeout_sec,
+                                        fallback_to_score=rcfg.self_correct.grading_fallback_to_score,
+                                        fallback_min_score=rcfg.self_correct.grading_fallback_min_score,
                                     )
                                     grader = DocumentGrader(
                                         config=grading_config,
-                                        credential_runtime=credential_runtime,
+                                        credential_runtime=rcfg.runtime.credential_runtime,
                                     )
                                     _, new_grading_metadata = await grader.filter_relevant(
                                         query=rewritten_query,
                                         documents=new_docs,
-                                        threshold=grading_threshold,
+                                        threshold=rcfg.self_correct.grading_threshold,
                                     )
 
                                     new_avg_relevance = new_grading_metadata.get("avg_relevance", 0.0)
@@ -6007,7 +6010,7 @@ async def unified_rag_pipeline(
                                         current_query = rewritten_query
 
                                     # Check if we've exceeded threshold
-                                    if new_avg_relevance >= rewrite_relevance_threshold:
+                                    if new_avg_relevance >= rcfg.self_correct.rewrite_relevance_threshold:
                                         logger.info(
                                             f"Query rewrite succeeded after {attempt + 1} attempts, relevance: {new_avg_relevance:.2f}"
                                         )
@@ -6020,7 +6023,7 @@ async def unified_rag_pipeline(
                                     break
 
                         except _RAG_PROVIDER_FAILURES as ret_err:
-                            if credential_runtime is None:
+                            if rcfg.runtime.credential_runtime is None:
                                 raise
                             failure_code = _latch_optional_provider_failure(
                                 "query_rewrite",
@@ -6051,10 +6054,10 @@ async def unified_rag_pipeline(
                 result.metadata["query_rewrite_loop"] = {
                     "enabled": True,
                     "attempts": len(rewrite_attempts),
-                    "max_attempts": max_rewrite_attempts,
+                    "max_attempts": rcfg.self_correct.max_rewrite_attempts,
                     "initial_relevance": result.metadata.get("document_grading", {}).get("avg_relevance", 0.0),
                     "final_relevance": best_relevance,
-                    "threshold": rewrite_relevance_threshold,
+                    "threshold": rcfg.self_correct.rewrite_relevance_threshold,
                     "improved": best_relevance > result.metadata.get("document_grading", {}).get("avg_relevance", 0.0),
                     "rewrite_attempts": rewrite_attempts,
                 }
@@ -6089,14 +6092,14 @@ async def unified_rag_pipeline(
                 # --- OTEL: reranking span ---
                 _otel_cm_rk = None
                 _otel_span_rk = None
-                if enable_observability and get_telemetry_manager:
+                if rcfg.observability.enable_observability and get_telemetry_manager:
                     try:
                         _tm = get_telemetry_manager()
                         _tr = _tm.get_tracer("tldw.rag")
                         _attrs = {
                             "rag.phase": "rerank",
                             "rag.strategy": str(reranking_strategy),
-                            "rag.top_k": int((rerank_top_k or top_k) or 0),
+                            "rag.top_k": int((rcfg.rerank.rerank_top_k or top_k) or 0),
                         }
                         _otel_cm_rk = _tr.start_as_current_span("rag.rerank")
                         _otel_span_rk = _otel_cm_rk.__enter__()
@@ -6139,9 +6142,9 @@ async def unified_rag_pipeline(
                                 if selected_strategy == RerankingStrategy.LLM_SCORING:
                                     selected_strategy = RerankingStrategy.FLASHRANK
                             else:
-                                if credential_runtime is not None:
+                                if rcfg.runtime.credential_runtime is not None:
                                     try:
-                                        reranker_credential_handle = await credential_runtime.resolve(
+                                        reranker_credential_handle = await rcfg.runtime.credential_runtime.resolve(
                                             prov or "openai",
                                             model=model,
                                         )
@@ -6196,7 +6199,7 @@ async def unified_rag_pipeline(
                                         self.used = True
                                         return response
 
-                                if credential_runtime is None or reranker_credential_handle is not None:
+                                if rcfg.runtime.credential_runtime is None or reranker_credential_handle is not None:
                                     llm_client = _LLMClient(
                                         prov,
                                         model,
@@ -6218,7 +6221,7 @@ async def unified_rag_pipeline(
                         except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
                             reranker_model_config = {}
                         # Precedence: explicit param -> env/config
-                        model_name_for_reranker = reranking_model or reranker_model_config.get(
+                        model_name_for_reranker = rcfg.rerank.reranking_model or reranker_model_config.get(
                             "RAG_LLAMA_RERANKER_MODEL"
                         )
                     elif selected_strategy == RerankingStrategy.CROSS_ENCODER:
@@ -6230,22 +6233,22 @@ async def unified_rag_pipeline(
                                 reranker_model_config = {}
                         except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
                             reranker_model_config = {}
-                        model_name_for_reranker = reranking_model or reranker_model_config.get(
+                        model_name_for_reranker = rcfg.rerank.reranking_model or reranker_model_config.get(
                             "RAG_TRANSFORMERS_RERANKER_MODEL"
                         )
 
                     rerank_config = RerankingConfig(
                         strategy=selected_strategy,
-                        top_k=rerank_top_k or top_k,
+                        top_k=rcfg.rerank.rerank_top_k or top_k,
                         model_name=model_name_for_reranker,
                         # Request-level gating overrides (TwoTier)
-                        min_relevance_prob=rerank_min_relevance_prob,
-                        sentinel_margin=rerank_sentinel_margin,
+                        min_relevance_prob=rcfg.rerank.rerank_min_relevance_prob,
+                        sentinel_margin=rcfg.rerank.rerank_sentinel_margin,
                     )
-                    include_rerank_snapshots = debug_mode and _resolve_include_rerank_debug_documents(
-                        include_rerank_debug_documents
+                    include_rerank_snapshots = rcfg.observability.debug_mode and _resolve_include_rerank_debug_documents(
+                        rcfg.observability.include_rerank_debug_documents
                     )
-                    rerank_debug_limit = max(1, int(rerank_top_k or top_k or 1))
+                    rerank_debug_limit = max(1, int(rcfg.rerank.rerank_top_k or top_k or 1))
                     try:
                         if include_rerank_snapshots and isinstance(result.metadata, dict):
                             result.metadata["pre_rerank_documents"] = _serialize_rerank_debug_documents(
@@ -6263,12 +6266,12 @@ async def unified_rag_pipeline(
                             )
                         finally:
                             if (
-                                credential_runtime is not None
+                                rcfg.runtime.credential_runtime is not None
                                 and reranker_credential_handle is not None
                                 and llm_client is not None
                                 and llm_client.used
                             ):
-                                await credential_runtime.mark_used(
+                                await rcfg.runtime.credential_runtime.mark_used(
                                     reranker_credential_handle
                                 )
                     except Exception as rerank_exc:
@@ -6288,17 +6291,17 @@ async def unified_rag_pipeline(
                         selected_strategy = RerankingStrategy.HYBRID
                         rerank_config = RerankingConfig(
                             strategy=selected_strategy,
-                            top_k=rerank_top_k or top_k,
+                            top_k=rcfg.rerank.rerank_top_k or top_k,
                             model_name=None,
-                            min_relevance_prob=rerank_min_relevance_prob,
-                            sentinel_margin=rerank_sentinel_margin,
+                            min_relevance_prob=rcfg.rerank.rerank_min_relevance_prob,
+                            sentinel_margin=rcfg.rerank.rerank_sentinel_margin,
                         )
                         reranker = create_reranker(selected_strategy, rerank_config, llm_client=llm_client)
                         reranked = await _resilient_call("reranking", reranker.rerank, query, result.documents)
                     if reranked and hasattr(reranked[0], "document"):
-                        result.documents = [sd.document for sd in reranked[: (rerank_top_k or top_k)]]
+                        result.documents = [sd.document for sd in reranked[: (rcfg.rerank.rerank_top_k or top_k)]]
                     else:
-                        result.documents = reranked[: (rerank_top_k or top_k)]
+                        result.documents = reranked[: (rcfg.rerank.rerank_top_k or top_k)]
                     if include_rerank_snapshots and isinstance(result.metadata, dict):
                         result.metadata["reranked_documents"] = _serialize_rerank_debug_documents(
                             result.documents,
@@ -6363,7 +6366,7 @@ async def unified_rag_pipeline(
                     # compute a simple fused probability from the top document score.
                     # A credential-degraded reranker has no trustworthy verification
                     # signal, so it must not synthesize calibration or gate generation.
-                    if enable_learned_fusion:
+                    if rcfg.rerank.enable_learned_fusion:
                         try:
                             reranking_status = result.metadata.get("reranking", {})
                             verification_unavailable = (
@@ -6441,8 +6444,8 @@ async def unified_rag_pipeline(
                         documents=result.documents or [],
                         answer=result.generated_answer or "",
                         reason="reranking_error",
-                        user_id=user_id,
-                        namespace=index_namespace,
+                        user_id=rcfg.scope.user_id,
+                        namespace=rcfg.retrieval.index_namespace,
                     )
                 except (ImportError, RuntimeError, TypeError, ValueError):
                     pass
@@ -6469,19 +6472,19 @@ async def unified_rag_pipeline(
                         relevance_signal = sum(scores) / len(scores) if scores else 0.0
 
                 # Only trigger if below threshold
-                if relevance_signal < web_fallback_threshold:
+                if relevance_signal < rcfg.self_correct.web_fallback_threshold:
                     logger.debug(
-                        f"Web fallback triggered: relevance {relevance_signal:.2f} < threshold {web_fallback_threshold}"
+                        f"Web fallback triggered: relevance {relevance_signal:.2f} < threshold {rcfg.self_correct.web_fallback_threshold}"
                     )
 
                     merged_docs, web_metadata = await fallback_to_web_search(
                         query=query,
                         local_docs=result.documents or [],
                         relevance_signal=relevance_signal,
-                        threshold=web_fallback_threshold,
-                        engine=web_search_engine,
-                        result_count=web_fallback_result_count,
-                        merge_strategy=web_fallback_merge_strategy,
+                        threshold=rcfg.self_correct.web_fallback_threshold,
+                        engine=rcfg.self_correct.web_search_engine,
+                        result_count=rcfg.self_correct.web_fallback_result_count,
+                        merge_strategy=rcfg.self_correct.web_fallback_merge_strategy,
                         max_total=top_k * 2,  # Allow some extra docs from web
                     )
 
@@ -6491,23 +6494,23 @@ async def unified_rag_pipeline(
                             "enabled": True,
                             "triggered": True,
                             "relevance_signal": relevance_signal,
-                            "threshold": web_fallback_threshold,
+                            "threshold": rcfg.self_correct.web_fallback_threshold,
                             "web_results_count": web_metadata.get("web_results_count", 0),
                             "merged_count": web_metadata.get("merged_count", 0),
                             "engine_used": web_metadata.get("engine_used"),
-                            "merge_strategy": web_fallback_merge_strategy,
+                            "merge_strategy": rcfg.self_correct.web_fallback_merge_strategy,
                             "search_time_ms": web_metadata.get("search_time_ms", 0),
                         }
 
                         # --- OTEL span for web fallback ---
-                        if enable_observability and get_telemetry_manager:
+                        if rcfg.observability.enable_observability and get_telemetry_manager:
                             try:
                                 _tm = get_telemetry_manager()
                                 _tr = _tm.get_tracer("tldw.rag")
                                 with _tr.start_as_current_span("rag.web_fallback") as _span:
                                     _span.set_attribute("rag.phase", "web_fallback")
                                     _span.set_attribute("rag.web_results", web_metadata.get("web_results_count", 0))
-                                    _span.set_attribute("rag.engine", web_search_engine)
+                                    _span.set_attribute("rag.engine", rcfg.self_correct.web_search_engine)
                             except (AttributeError, RuntimeError, TypeError, ValueError):
                                 pass
                 else:
@@ -6515,7 +6518,7 @@ async def unified_rag_pipeline(
                         "enabled": True,
                         "triggered": False,
                         "relevance_signal": relevance_signal,
-                        "threshold": web_fallback_threshold,
+                        "threshold": rcfg.self_correct.web_fallback_threshold,
                         "reason": "relevance_above_threshold",
                     }
 
@@ -6536,7 +6539,7 @@ async def unified_rag_pipeline(
 
         # ========== WHY THESE SOURCES (metadata) ==========
         try:
-            docs = (result.documents or []) if include_retrieval_diagnostics else []
+            docs = (result.documents or []) if rcfg.observability.include_retrieval_diagnostics else []
             if docs:
                 import urllib.parse
 
@@ -6624,7 +6627,7 @@ async def unified_rag_pipeline(
             pass
 
         # ========== SIBLING INCLUSION ==========
-        if include_sibling_chunks and result.documents and sibling_window and sibling_window > 0:
+        if rcfg.processing.include_sibling_chunks and result.documents and rcfg.processing.sibling_window and rcfg.processing.sibling_window > 0:
             siblings_start = time.time()
             try:
                 # Index docs by parent and index
@@ -6655,7 +6658,7 @@ async def unified_rag_pipeline(
                         continue
                     siblings = parents.get(pid, {})
                     # expand symmetrically up to window size
-                    for w in range(1, int(sibling_window) + 1):
+                    for w in range(1, int(rcfg.processing.sibling_window) + 1):
                         for adj in (cidx - w, cidx + w):
                             sdoc = siblings.get(adj)
                             if sdoc is not None and getattr(sdoc, "id", None) not in seen_ids:
@@ -6688,7 +6691,7 @@ async def unified_rag_pipeline(
         evidence_chain_result = None
 
         # ========== CITATION GENERATION ==========
-        if enable_citations and result.documents:
+        if rcfg.citations.enable_citations and result.documents:
             citation_start = time.time()
             try:
                 if CitationGenerator:
@@ -6701,11 +6704,11 @@ async def unified_rag_pipeline(
                         "harvard": getattr(CitationStyle, "HARVARD", None),
                         "ieee": getattr(CitationStyle, "IEEE", None),
                     }
-                    style_enum = style_map.get(citation_style) or next(
+                    style_enum = style_map.get(rcfg.citations.citation_style) or next(
                         iter([v for v in style_map.values() if v is not None]), None
                     )
 
-                    if enable_evidence_chains and hasattr(generator, "generate_citations_with_chains"):
+                    if rcfg.citations.enable_evidence_chains and hasattr(generator, "generate_citations_with_chains"):
                         dual, chain_result = await generator.generate_citations_with_chains(
                             documents=result.documents,
                             query=query,
@@ -6713,15 +6716,15 @@ async def unified_rag_pipeline(
                             style=(
                                 style_enum if style_enum is not None else CitationStyle.MLA if CitationStyle else None
                             ),
-                            include_chunks=bool(enable_chunk_citations),
-                            max_citations=min(len(result.documents), (rerank_top_k or top_k or 10)),
+                            include_chunks=bool(rcfg.citations.enable_chunk_citations),
+                            max_citations=min(len(result.documents), (rcfg.rerank.rerank_top_k or top_k or 10)),
                             **(
                                 {
-                                    "credential_runtime": credential_runtime,
-                                    "llm_provider": generation_provider,
-                                    "llm_model": generation_model,
+                                    "credential_runtime": rcfg.runtime.credential_runtime,
+                                    "llm_provider": rcfg.generation.generation_provider,
+                                    "llm_model": rcfg.generation.generation_model,
                                 }
-                                if credential_runtime is not None
+                                if rcfg.runtime.credential_runtime is not None
                                 else {}
                             ),
                         )
@@ -6734,8 +6737,8 @@ async def unified_rag_pipeline(
                             style=(
                                 style_enum if style_enum is not None else CitationStyle.MLA if CitationStyle else None
                             ),
-                            include_chunks=bool(enable_chunk_citations),
-                            max_citations=min(len(result.documents), (rerank_top_k or top_k or 10)),
+                            include_chunks=bool(rcfg.citations.enable_chunk_citations),
+                            max_citations=min(len(result.documents), (rcfg.rerank.rerank_top_k or top_k or 10)),
                         )
 
                     # Combined citations list for backward compatibility
@@ -6766,25 +6769,25 @@ async def unified_rag_pipeline(
 
         # ========== SELF-CORRECTING RAG: KNOWLEDGE STRIPS (Stage 4) ==========
         # Partition documents into semantic strips and filter by relevance before generation
-        if enable_knowledge_strips and result.documents and process_knowledge_strips:
+        if rcfg.self_correct.enable_knowledge_strips and result.documents and process_knowledge_strips:
             strips_start = time.time()
             try:
                 filtered_docs, strips_metadata = await process_knowledge_strips(
                     query=query,
                     documents=result.documents,
-                    strip_size_tokens=strip_size_tokens,
-                    min_relevance=strip_min_relevance,
-                    max_strips=max_strips,
+                    strip_size_tokens=rcfg.self_correct.strip_size_tokens,
+                    min_relevance=rcfg.self_correct.strip_min_relevance,
+                    max_strips=rcfg.self_correct.max_strips,
                     use_llm_grading=False,  # Use heuristic for speed by default
                     **(
                         {
-                            "llm_provider": classifier_provider
-                            or generation_provider
+                            "llm_provider": rcfg.research.classifier_provider
+                            or rcfg.generation.generation_provider
                             or "openai",
-                            "llm_model": classifier_model or generation_model,
-                            "credential_runtime": credential_runtime,
+                            "llm_model": rcfg.research.classifier_model or rcfg.generation.generation_model,
+                            "credential_runtime": rcfg.runtime.credential_runtime,
                         }
-                        if credential_runtime is not None
+                        if rcfg.runtime.credential_runtime is not None
                         else {}
                     ),
                 )
@@ -6798,8 +6801,8 @@ async def unified_rag_pipeline(
                     "relevant_strips": strips_metadata.get("relevant_strips", 0),
                     "filtered_strips": strips_metadata.get("filtered_strips", 0),
                     "avg_relevance": strips_metadata.get("avg_relevance", 0.0),
-                    "strip_size_tokens": strip_size_tokens,
-                    "min_relevance": strip_min_relevance,
+                    "strip_size_tokens": rcfg.self_correct.strip_size_tokens,
+                    "min_relevance": rcfg.self_correct.strip_min_relevance,
                     "resulting_docs": len(filtered_docs) if filtered_docs else 0,
                     **(
                         {
@@ -6813,7 +6816,7 @@ async def unified_rag_pipeline(
                 result.timings["knowledge_strips"] = time.time() - strips_start
 
                 # --- OTEL span for knowledge strips ---
-                if enable_observability and get_telemetry_manager:
+                if rcfg.observability.enable_observability and get_telemetry_manager:
                     try:
                         _tm = get_telemetry_manager()
                         _tr = _tm.get_tracer("tldw.rag")
@@ -6838,17 +6841,17 @@ async def unified_rag_pipeline(
                 result.metadata["knowledge_strips"] = {"enabled": True, "error": str(e)}
 
         # ========== EVIDENCE CHAINS (before generation for chain-aware citations) ==========
-        if enable_evidence_chains and result.documents and EvidenceChainBuilder:
+        if rcfg.citations.enable_evidence_chains and result.documents and EvidenceChainBuilder:
             chain_start = time.time()
             try:
                 if evidence_chain_result is None:
                     chain_builder = EvidenceChainBuilder(
                         enable_llm_extraction=True,
-                        llm_provider=generation_provider,
-                        llm_model=generation_model,
+                        llm_provider=rcfg.generation.generation_provider,
+                        llm_model=rcfg.generation.generation_model,
                         **(
-                            {"credential_runtime": credential_runtime}
-                            if credential_runtime is not None
+                            {"credential_runtime": rcfg.runtime.credential_runtime}
+                            if rcfg.runtime.credential_runtime is not None
                             else {}
                         ),
                     )
@@ -6909,10 +6912,10 @@ async def unified_rag_pipeline(
                 if "fused_score" not in _cal and "top_doc_prob" in _cal:
                     with contextlib.suppress(TypeError, ValueError):
                         _cal["fused_score"] = float(_cal.get("top_doc_prob") or 0.0)
-                if enable_learned_fusion:
+                if rcfg.rerank.enable_learned_fusion:
                     _cal["enabled"] = True
-                if calibrator_version:
-                    _cal.setdefault("version", calibrator_version)
+                if rcfg.rerank.calibrator_version:
+                    _cal.setdefault("version", rcfg.rerank.calibrator_version)
                 # Decision will be finalized in the gated branch below
                 result.metadata["reranking_calibration"] = _cal
         except (AttributeError, TypeError, ValueError):
@@ -6954,15 +6957,15 @@ async def unified_rag_pipeline(
                 # --- OTEL: generation span ---
                 _otel_cm_gen = None
                 _otel_span_gen = None
-                if enable_observability and get_telemetry_manager:
+                if rcfg.observability.enable_observability and get_telemetry_manager:
                     try:
                         _tm = get_telemetry_manager()
                         _tr = _tm.get_tracer("tldw.rag")
                         _attrs = {
                             "rag.phase": "generation",
-                            "rag.model": str(generation_model or ""),
-                            "rag.provider": str(generation_provider or ""),
-                            "rag.multi_turn": bool(enable_multi_turn_synthesis),
+                            "rag.model": str(rcfg.generation.generation_model or ""),
+                            "rag.provider": str(rcfg.generation.generation_provider or ""),
+                            "rag.multi_turn": bool(rcfg.generation.enable_multi_turn_synthesis),
                         }
                         _otel_cm_gen = _tr.start_as_current_span("rag.generation")
                         _otel_span_gen = _otel_cm_gen.__enter__()
@@ -7005,9 +7008,9 @@ async def unified_rag_pipeline(
                         result.generated_answer = None
                 elif AnswerGenerator:
                     generator = AnswerGenerator(
-                        model=generation_model,
-                        provider=generation_provider,
-                        credential_runtime=credential_runtime,
+                        model=rcfg.generation.generation_model,
+                        provider=rcfg.generation.generation_provider,
+                        credential_runtime=rcfg.runtime.credential_runtime,
                     )
 
                     # Prepare base context from top documents
@@ -7015,7 +7018,7 @@ async def unified_rag_pipeline(
 
                     # Structured response writer: XML-tagged context with citation rules
                     if (
-                        enable_structured_response
+                        rcfg.generation.enable_structured_response
                         and format_context_xml is not None
                         and build_writer_system_prompt is not None
                     ):
@@ -7031,17 +7034,17 @@ async def unified_rag_pipeline(
                                 }
                             )
                         context = format_context_xml(_writer_chunks)
-                        _writer_mode = search_depth_mode or "balanced"
+                        _writer_mode = rcfg.request.search_depth_mode or "balanced"
                         _writer_policy = None
                         if get_writer_depth_policy is not None:
                             with contextlib.suppress(TypeError, ValueError):
                                 _writer_policy = get_writer_depth_policy(
                                     mode=_writer_mode,
-                                    max_generation_tokens=max_generation_tokens,
+                                    max_generation_tokens=rcfg.generation.max_generation_tokens,
                                 )
                         _writer_sys = build_writer_system_prompt(
                             mode=_writer_mode,
-                            max_generation_tokens=max_generation_tokens,
+                            max_generation_tokens=rcfg.generation.max_generation_tokens,
                         )
                         # Override generation_prompt with structured writer prompt
                         if not generation_prompt:
@@ -7056,7 +7059,7 @@ async def unified_rag_pipeline(
                                 "enabled": True,
                                 "mode": _writer_mode,
                                 "context_results": len(_writer_chunks),
-                                "max_generation_tokens": int(max_generation_tokens),
+                                "max_generation_tokens": int(rcfg.generation.max_generation_tokens),
                             }
                         )
                         if isinstance(_writer_policy, dict):
@@ -7064,14 +7067,14 @@ async def unified_rag_pipeline(
                     else:
                         context = "\n\n".join([getattr(doc, "content", str(doc)) for doc in context_docs])
 
-                    if enable_multi_turn_synthesis:
+                    if rcfg.generation.enable_multi_turn_synthesis:
                         # Strict budget control
                         t0 = time.time()
-                        budget = float(synthesis_time_budget_sec) if synthesis_time_budget_sec else None
+                        budget = float(rcfg.generation.synthesis_time_budget_sec) if rcfg.generation.synthesis_time_budget_sec else None
                         aborted = False
 
                         # Draft
-                        draft_tokens = int(synthesis_draft_tokens or min(max_generation_tokens, 400))
+                        draft_tokens = int(rcfg.generation.synthesis_draft_tokens or min(rcfg.generation.max_generation_tokens, 400))
                         d_start = time.time()
                         draft_out = await generator.generate(
                             query=query,
@@ -7112,8 +7115,8 @@ async def unified_rag_pipeline(
                             )
                             c_start = time.time()
                             critique_handle = None
-                            if credential_runtime is not None:
-                                critique_handle = await credential_runtime.resolve("openai")
+                            if rcfg.runtime.credential_runtime is not None:
+                                critique_handle = await rcfg.runtime.credential_runtime.resolve("openai")
                             critique_stream_state = {"content": False}
 
                             def _call_critique() -> Any:
@@ -7163,7 +7166,7 @@ async def unified_rag_pipeline(
                                         critique_completed
                                         or critique_stream_state["content"]
                                     ):
-                                        await credential_runtime.mark_used(
+                                        await rcfg.runtime.credential_runtime.mark_used(
                                             critique_handle
                                         )
 
@@ -7188,7 +7191,7 @@ async def unified_rag_pipeline(
                             )
                             c_text = "- Ensure claims are supported by provided snippets."
                         except (ImportError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError):
-                            if credential_runtime is not None:
+                            if rcfg.runtime.credential_runtime is not None:
                                 result.metadata.setdefault("synthesis", {})
                                 result.metadata["synthesis"].update(
                                     {
@@ -7221,7 +7224,7 @@ async def unified_rag_pipeline(
                             )
                         else:
                             # Refine
-                            refine_tokens = int(synthesis_refine_tokens or max_generation_tokens)
+                            refine_tokens = int(rcfg.generation.synthesis_refine_tokens or rcfg.generation.max_generation_tokens)
                             r_ctx = context + "\n\nCRITIQUE:\n" + c_text_val
                             r_start = time.time()
                             r_out = await generator.generate(
@@ -7260,7 +7263,7 @@ async def unified_rag_pipeline(
                             )
 
                         resolved_request.payload["generation_prompt"] = generation_prompt
-                        resolved_request.payload["max_generation_tokens"] = max_generation_tokens
+                        resolved_request.payload["max_generation_tokens"] = rcfg.generation.max_generation_tokens
                         generation_phase_kwargs: dict[str, Any] = {
                             "resolved_request": resolved_request,
                             "retrieval_plan": retrieval_plan,
@@ -7322,7 +7325,7 @@ async def unified_rag_pipeline(
                                 "difficulty": str(result.metadata.get("query_intent", "na")),
                             },
                         )
-                        if enable_multi_turn_synthesis:
+                        if rcfg.generation.enable_multi_turn_synthesis:
                             observe_histogram(
                                 "rag_phase_duration_seconds",
                                 result.timings["answer_generation"],
@@ -7343,24 +7346,24 @@ async def unified_rag_pipeline(
                         metrics.generation_time = result.timings["answer_generation"]
 
                     # Follow-up suggestions generation (bounded-latency, best effort)
-                    if enable_suggestions and generate_suggestions is not None and result.generated_answer:
+                    if rcfg.generation.enable_suggestions and generate_suggestions is not None and result.generated_answer:
                         try:
                             _suggestions_start = time.time()
                             _suggestion_stage_metadata: dict[str, Any] = {}
                             _suggestions = await generate_suggestions(
                                 query=query,
                                 response_text=str(result.generated_answer),
-                                chat_history=chat_history,
-                                llm_provider=classifier_provider or generation_provider or "openai",
-                                llm_model=classifier_model or generation_model,
-                                num_suggestions=num_suggestions,
+                                chat_history=rcfg.query_prep.chat_history,
+                                llm_provider=rcfg.research.classifier_provider or rcfg.generation.generation_provider or "openai",
+                                llm_model=rcfg.research.classifier_model or rcfg.generation.generation_model,
+                                num_suggestions=rcfg.generation.num_suggestions,
                                 llm_timeout_sec=3.0,
                                 **(
                                     {
-                                        "credential_runtime": credential_runtime,
+                                        "credential_runtime": rcfg.runtime.credential_runtime,
                                         "stage_metadata": _suggestion_stage_metadata,
                                     }
-                                    if credential_runtime is not None
+                                    if rcfg.runtime.credential_runtime is not None
                                     else {}
                                 ),
                             )
@@ -7395,8 +7398,8 @@ async def unified_rag_pipeline(
                         documents=result.documents or [],
                         answer=result.generated_answer or "",
                         reason="generation_error",
-                        user_id=user_id,
-                        namespace=index_namespace,
+                        user_id=rcfg.scope.user_id,
+                        namespace=rcfg.retrieval.index_namespace,
                     )
                 except (ImportError, RuntimeError, TypeError, ValueError):
                     pass
@@ -7428,8 +7431,8 @@ async def unified_rag_pipeline(
                     documents=result.documents or [],
                     answer=result.generated_answer or "",
                     reason="generation_gated",
-                    user_id=user_id,
-                    namespace=index_namespace,
+                    user_id=rcfg.scope.user_id,
+                    namespace=rcfg.retrieval.index_namespace,
                 )
             except (ImportError, RuntimeError, TypeError, ValueError):
                 pass
@@ -7440,10 +7443,10 @@ async def unified_rag_pipeline(
             #   2) enable_abstention + abstention_behavior
             #   3) default "continue" (no replacement answer)
             effective_policy: str = "continue"
-            if enable_learned_fusion:
-                effective_policy = abstention_policy or "continue"
-            elif enable_abstention:
-                effective_policy = abstention_behavior or "continue"
+            if rcfg.rerank.enable_learned_fusion:
+                effective_policy = rcfg.generation.abstention_policy or "continue"
+            elif rcfg.generation.enable_abstention:
+                effective_policy = rcfg.generation.abstention_behavior or "continue"
 
             # Record the decision in reranking calibration metadata when present
             try:
@@ -7531,16 +7534,16 @@ async def unified_rag_pipeline(
         fast_grounded = True  # default assumption
         fast_groundedness_confidence = 0.0
         try:
-            if enable_fast_hallucination_check and result.generated_answer and check_fast_groundedness:
+            if rcfg.self_correct.enable_fast_hallucination_check and result.generated_answer and check_fast_groundedness:
                 with otel_span("rag.fast_groundedness_check"):
                     fg_result, fg_meta = await check_fast_groundedness(
                         query=query,
                         answer=result.generated_answer,
                         documents=result.documents or [],
-                        provider=fast_hallucination_provider,
-                        model=fast_hallucination_model,
-                        timeout_sec=fast_hallucination_timeout_sec,
-                        credential_runtime=credential_runtime,
+                        provider=rcfg.self_correct.fast_hallucination_provider,
+                        model=rcfg.self_correct.fast_hallucination_model,
+                        timeout_sec=rcfg.self_correct.fast_hallucination_timeout_sec,
+                        credential_runtime=rcfg.runtime.credential_runtime,
                     )
                     fast_grounded = fg_result.is_grounded
                     fast_groundedness_confidence = fg_result.confidence
@@ -7563,12 +7566,12 @@ async def unified_rag_pipeline(
         # ========== CLAIMS & FACTUALITY ==========
         # Optionally skip if fast groundedness check passed with high confidence
         skip_claims_due_to_groundedness = (
-            enable_fast_hallucination_check
+            rcfg.self_correct.enable_fast_hallucination_check
             and fast_grounded
             and fast_groundedness_confidence >= 0.9
             and result.metadata.get("fast_groundedness", {}).get("skip_full_claims", False)
         )
-        if enable_claims and result.generated_answer and not skip_claims_due_to_groundedness:
+        if rcfg.verification.enable_claims and result.generated_answer and not skip_claims_due_to_groundedness:
             try:
                 # Import shared analyze function for LLM calls
                 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
@@ -7576,13 +7579,13 @@ async def unified_rag_pipeline(
                 claims_handle = None
                 claims_provider = None
                 claims_state = {"used": False, "marked": False}
-                if credential_runtime is not None:
+                if rcfg.runtime.credential_runtime is not None:
                     from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
                         _resolve_claims_llm_config,
                     )
 
                     claims_provider, claims_model, _ = _resolve_claims_llm_config()
-                    claims_handle = await credential_runtime.resolve(
+                    claims_handle = await rcfg.runtime.credential_runtime.resolve(
                         claims_provider,
                         model=claims_model,
                     )
@@ -7659,7 +7662,7 @@ async def unified_rag_pipeline(
                             and claims_state["used"]
                             and not claims_state["marked"]
                         ):
-                            await credential_runtime.mark_used(claims_handle)
+                            await rcfg.runtime.credential_runtime.mark_used(claims_handle)
                             claims_state["marked"] = True
 
                     async def _run_claims_engine(**run_kwargs: Any) -> dict[str, Any]:
@@ -7683,12 +7686,12 @@ async def unified_rag_pipeline(
                     if ClaimsJobContext is not None:
                         user_id_val = None
                         try:
-                            user_id_val = int(user_id) if user_id is not None else None
+                            user_id_val = int(rcfg.scope.user_id) if rcfg.scope.user_id is not None else None
                         except (TypeError, ValueError):
                             user_id_val = None
                         job_context = ClaimsJobContext(
                             user_id=user_id_val,
-                            request_id=trace_id,
+                            request_id=rcfg.observability.trace_id,
                             endpoint="rag_claims",
                         )
                     job_budget = None
@@ -7703,9 +7706,9 @@ async def unified_rag_pipeline(
                                 settings_obj = _settings.dict()
                         except (ImportError, AttributeError, TypeError):
                             settings_obj = None
-                        budget_usd = kwargs.get("claims_budget_usd")
-                        budget_tokens = kwargs.get("claims_budget_tokens")
-                        budget_strict = kwargs.get("claims_budget_strict")
+                        budget_usd = rcfg.verification.claims_budget_usd
+                        budget_tokens = rcfg.verification.claims_budget_tokens
+                        budget_strict = rcfg.verification.claims_budget_strict
                         try:
                             budget_usd = float(budget_usd) if budget_usd is not None else None
                         except (TypeError, ValueError):
@@ -7742,7 +7745,7 @@ async def unified_rag_pipeline(
                                     resolved_data_sources, DataSource.MEDIA_DB
                                 ):
                                     rh = getattr(med, "retrieve_hybrid", None)
-                                    if rh is not None and asyncio.iscoroutinefunction(rh) and search_mode == "hybrid":
+                                    if rh is not None and asyncio.iscoroutinefunction(rh) and rcfg.retrieval.search_mode == "hybrid":
                                         media_docs = await rh(query=c_text, alpha=hybrid_alpha)
                                     else:
                                         media_docs = await med.retrieve(query=c_text)
@@ -7772,7 +7775,7 @@ async def unified_rag_pipeline(
                                 docs = sorted(docs, key=lambda d: getattr(d, "score", 0.0), reverse=True)
                                 return docs[:top_k]
                         except _RAG_PROVIDER_FAILURES as exc:
-                            if credential_runtime is None:
+                            if rcfg.runtime.credential_runtime is None:
                                 raise
                             _latch_optional_provider_failure("per_claim", exc)
                             return result.documents[:top_k] if result.documents else []
@@ -7822,7 +7825,7 @@ async def unified_rag_pipeline(
                                     for mid in media_ids:
                                         rows = db.execute_query(
                                             "SELECT claim_text FROM Claims WHERE media_id = ? AND deleted = 0 LIMIT ?",
-                                            (int(mid), int(claims_max)),
+                                            (int(mid), int(rcfg.verification.claims_max)),
                                         ).fetchall()
                                         pre_claims.extend([r[0] for r in rows])
                         if pre_claims:
@@ -7831,19 +7834,19 @@ async def unified_rag_pipeline(
 
                             verifications = []
                             try:
-                                for i, ctext in enumerate(pre_claims[:claims_max]):
+                                for i, ctext in enumerate(pre_claims[:rcfg.verification.claims_max]):
                                     cv = await engine.verifier.verify(
                                         claim=_Claim(id=f"pc{i+1}", text=ctext),
                                         query=query,
                                         base_documents=result.documents or [],
                                         retrieve_fn=_retrieve_for_claim,
-                                        top_k=claims_top_k,
-                                        conf_threshold=claims_conf_threshold,
-                                        mode=(claim_verifier or "hybrid").strip().lower(),
+                                        top_k=rcfg.verification.claims_top_k,
+                                        conf_threshold=rcfg.verification.claims_conf_threshold,
+                                        mode=(rcfg.verification.claim_verifier or "hybrid").strip().lower(),
                                         budget=job_budget,
                                         job_context=job_context,
-                                        doc_only_mode=doc_only_verification,
-                                        numeric_precision_mode=numeric_precision_mode,
+                                        doc_only_mode=rcfg.verification.doc_only_verification,
+                                        numeric_precision_mode=rcfg.verification.numeric_precision_mode,
                                     )
                                     verifications.append(cv)
                             finally:
@@ -7900,14 +7903,14 @@ async def unified_rag_pipeline(
                                 answer=result.generated_answer,
                                 query=query,
                                 documents=result.documents or [],
-                                claim_extractor=claim_extractor,
-                                claim_verifier=claim_verifier,
-                                claims_top_k=claims_top_k,
-                                claims_conf_threshold=claims_conf_threshold,
-                                claims_max=claims_max,
+                                claim_extractor=rcfg.verification.claim_extractor,
+                                claim_verifier=rcfg.verification.claim_verifier,
+                                claims_top_k=rcfg.verification.claims_top_k,
+                                claims_conf_threshold=rcfg.verification.claims_conf_threshold,
+                                claims_max=rcfg.verification.claims_max,
                                 retrieve_fn=_retrieve_for_claim,
                                 nli_model=nli_model,
-                                claims_concurrency=claims_concurrency,
+                                claims_concurrency=rcfg.verification.claims_concurrency,
                                 job_budget=job_budget,
                                 job_context=job_context,
                             )
@@ -7923,7 +7926,7 @@ async def unified_rag_pipeline(
                         ValueError,
                         asyncio.TimeoutError,
                     ) as _eclaims:
-                        if credential_runtime is not None:
+                        if rcfg.runtime.credential_runtime is not None:
                             logger.debug(
                                 "Pre-extracted claims path failed; using on-the-fly fallback"
                             )
@@ -7933,14 +7936,14 @@ async def unified_rag_pipeline(
                             answer=result.generated_answer,
                             query=query,
                             documents=result.documents or [],
-                            claim_extractor=claim_extractor,
-                            claim_verifier=claim_verifier,
-                            claims_top_k=claims_top_k,
-                            claims_conf_threshold=claims_conf_threshold,
-                            claims_max=claims_max,
+                            claim_extractor=rcfg.verification.claim_extractor,
+                            claim_verifier=rcfg.verification.claim_verifier,
+                            claims_top_k=rcfg.verification.claims_top_k,
+                            claims_conf_threshold=rcfg.verification.claims_conf_threshold,
+                            claims_max=rcfg.verification.claims_max,
                             retrieve_fn=_retrieve_for_claim,
                             nli_model=nli_model,
-                            claims_concurrency=claims_concurrency,
+                            claims_concurrency=rcfg.verification.claims_concurrency,
                             job_budget=job_budget,
                             job_context=job_context,
                         )
@@ -7953,7 +7956,7 @@ async def unified_rag_pipeline(
                     result.metadata["factuality"] = factuality_payload
 
                     # Generate verification report if requested
-                    if generate_verification_report and verifications:
+                    if rcfg.verification.generate_verification_report and verifications:
                         try:
                             from tldw_Server_API.app.core.Claims_Extraction.verification_report import (
                                 generate_verification_report as gen_report,
@@ -7988,7 +7991,7 @@ async def unified_rag_pipeline(
                 ValueError,
                 asyncio.TimeoutError,
             ) as e:
-                if credential_runtime is not None:
+                if rcfg.runtime.credential_runtime is not None:
                     result.metadata["claims"] = {
                         "failure_code": "provider_unavailable",
                         "verification_available": False,
@@ -8032,16 +8035,16 @@ async def unified_rag_pipeline(
                                         mdr = _build_multi_retriever({"media_db": media_db_path})
                                         conf = RetrievalConfig(
                                             max_results=min(10, top_k),
-                                            min_score=min_score,
+                                            min_score=rcfg.retrieval.min_score,
                                             use_fts=True,
                                             use_vector=True,
                                             include_metadata=True,
                                             fts_level=fts_level,
-                                            enable_text_late_chunking=enable_text_late_chunking,
-                                            chunk_method=chunk_method,
-                                            chunk_size=chunk_size,
-                                            chunk_overlap=chunk_overlap,
-                                            chunk_language=chunk_language,
+                                            enable_text_late_chunking=rcfg.processing.enable_text_late_chunking,
+                                            chunk_method=rcfg.processing.chunk_method,
+                                            chunk_size=rcfg.processing.chunk_size,
+                                            chunk_overlap=rcfg.processing.chunk_overlap,
+                                            chunk_language=rcfg.processing.chunk_language,
                                         )
                                         numeric_added: list[Document] = []
                                         for tok in list(nf.missing)[:3]:
@@ -8055,9 +8058,9 @@ async def unified_rag_pipeline(
                                                 )
                                                 break
                                             try:
-                                                numeric_added.extend(await mdr.retrieve(query=f"{query} {tok}", sources=[DataSource.MEDIA_DB], config=conf, index_namespace=index_namespace))
+                                                numeric_added.extend(await mdr.retrieve(query=f"{query} {tok}", sources=[DataSource.MEDIA_DB], config=conf, index_namespace=rcfg.retrieval.index_namespace))
                                             except _RAG_PROVIDER_FAILURES as exc:
-                                                if credential_runtime is None:
+                                                if rcfg.runtime.credential_runtime is None:
                                                     raise
                                                 failure_code = _latch_optional_provider_failure(
                                                     "numeric_fidelity",
@@ -8100,9 +8103,9 @@ async def unified_rag_pipeline(
                                             if AnswerGenerator:
                                                 try:
                                                     generator = AnswerGenerator(
-                                                        model=generation_model,
-                                                        provider=generation_provider,
-                                                        credential_runtime=credential_runtime,
+                                                        model=rcfg.generation.generation_model,
+                                                        provider=rcfg.generation.generation_provider,
+                                                        credential_runtime=rcfg.runtime.credential_runtime,
                                                     )
                                                     context = "\n\n".join(
                                                         [
@@ -8114,7 +8117,7 @@ async def unified_rag_pipeline(
                                                         query=query,
                                                         context=context,
                                                         prompt_template=generation_prompt,
-                                                        max_tokens=max_generation_tokens,
+                                                        max_tokens=rcfg.generation.max_generation_tokens,
                                                     )
                                                     if isinstance(regen, dict) and regen.get("answer"):
                                                         result.generated_answer = regen.get("answer")
@@ -8160,28 +8163,28 @@ async def unified_rag_pipeline(
                     adaptive_time_budget_sec = float(_os.getenv("RAG_ADAPTIVE_TIME_BUDGET_SEC", "0")) or None
                 except (TypeError, ValueError):
                     adaptive_time_budget_sec = None
-            if enable_post_verification and result.generated_answer and PostGenerationVerifier:
+            if rcfg.verification.enable_post_verification and result.generated_answer and PostGenerationVerifier:
                 verifier = PostGenerationVerifier(
-                    max_retries=adaptive_max_retries,
-                    unsupported_threshold=adaptive_unsupported_threshold,
-                    max_claims=adaptive_max_claims,
+                    max_retries=rcfg.verification.adaptive_max_retries,
+                    unsupported_threshold=rcfg.verification.adaptive_unsupported_threshold,
+                    max_claims=rcfg.verification.adaptive_max_claims,
                     time_budget_sec=adaptive_time_budget_sec,
-                    use_advanced_rewrites=adaptive_advanced_rewrites,
-                    credential_runtime=credential_runtime,
+                    use_advanced_rewrites=rcfg.verification.adaptive_advanced_rewrites,
+                    credential_runtime=rcfg.runtime.credential_runtime,
                 )
                 vres = await verifier.verify_and_maybe_fix(
                     query=query,
                     answer=result.generated_answer,
                     base_documents=result.documents or [],
                     media_db_path=media_db_path,
-                    notes_db_path=notes_db_path,
-                    character_db_path=character_db_path,
-                    user_id=user_id,
-                    generation_model=generation_model,
-                    generation_provider=generation_provider,
+                    notes_db_path=rcfg.runtime.notes_db_path,
+                    character_db_path=rcfg.runtime.character_db_path,
+                    user_id=rcfg.scope.user_id,
+                    generation_model=rcfg.generation.generation_model,
+                    generation_provider=rcfg.generation.generation_provider,
                     existing_claims=claims_payload,
                     existing_summary=factuality_payload,
-                    search_mode=search_mode,
+                    search_mode=rcfg.retrieval.search_mode,
                     hybrid_alpha=hybrid_alpha,
                     top_k=top_k,
                 )
@@ -8231,12 +8234,12 @@ async def unified_rag_pipeline(
                 if vres.fixed and vres.new_answer:
                     result.generated_answer = vres.new_answer
                 # Behavior toggles on low confidence and not fixed
-                low_confidence = (vres.unsupported_ratio > adaptive_unsupported_threshold) and (not vres.fixed)
+                low_confidence = (vres.unsupported_ratio > rcfg.verification.adaptive_unsupported_threshold) and (not vres.fixed)
                 if low_confidence:
                     _apply_generation_gate(
                         "nli_low_confidence",
                         unsupported_ratio=vres.unsupported_ratio,
-                        threshold=adaptive_unsupported_threshold,
+                        threshold=rcfg.verification.adaptive_unsupported_threshold,
                     )
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
@@ -8259,127 +8262,127 @@ async def unified_rag_pipeline(
                             documents=result.documents or [],
                             answer=result.generated_answer or "",
                             reason="post_verification_low_confidence",
-                            user_id=user_id,
-                            namespace=index_namespace,
+                            user_id=rcfg.scope.user_id,
+                            namespace=rcfg.retrieval.index_namespace,
                         )
                 except (ImportError, RuntimeError, TypeError, ValueError):
                     pass
 
                 # Optional: bounded full pipeline rerun to seek a better answer
                 try:
-                    if low_confidence and adaptive_rerun_on_low_confidence and not _adaptive_rerun:
+                    if low_confidence and rcfg.verification.adaptive_rerun_on_low_confidence and not rcfg.verification._adaptive_rerun:
                         rerun_start = time.time()
                         # Prefer to broaden recall on rerun
                         rerun_expand = expand_query if expand_query else True
                         # Build rerun with post-verification off and a guard to prevent nesting
                         new_result = await unified_rag_pipeline(
                             query=query,
-                            sources=sources,
+                            sources=rcfg.scope.sources,
                             media_db_path=media_db_path,
-                            notes_db_path=notes_db_path,
-                            character_db_path=character_db_path,
-                            kanban_db_path=kanban_db_path,
+                            notes_db_path=rcfg.runtime.notes_db_path,
+                            character_db_path=rcfg.runtime.character_db_path,
+                            kanban_db_path=rcfg.runtime.kanban_db_path,
                             # Prefer adapters to avoid raw SQL in prod
-                            media_db=media_db,
-                            chacha_db=chacha_db,
+                            media_db=rcfg.runtime.media_db,
+                            chacha_db=rcfg.runtime.chacha_db,
                             # Use same retrieval/reranking settings but broaden expansion
-                            search_mode=search_mode,
+                            search_mode=rcfg.retrieval.search_mode,
                             fts_level=fts_level,
                             hybrid_alpha=hybrid_alpha,
                             top_k=top_k,
-                            min_score=min_score,
+                            min_score=rcfg.retrieval.min_score,
                             expand_query=rerun_expand,
-                            expansion_strategies=expansion_strategies,
-                            spell_check=spell_check,
-                            enable_cache=False if adaptive_rerun_bypass_cache else enable_cache,
-                            cache_threshold=cache_threshold,
-                            adaptive_cache=adaptive_cache,
-                            keyword_filter=keyword_filter,
-                            include_media_ids=include_media_ids,
-                            include_note_ids=include_note_ids,
-                            enable_security_filter=enable_security_filter,
-                            detect_pii=detect_pii,
-                            redact_pii=redact_pii,
-                            sensitivity_level=sensitivity_level,
-                            content_filter=content_filter,
-                            enable_table_processing=enable_table_processing,
-                            table_method=table_method,
-                            enable_vlm_late_chunking=enable_vlm_late_chunking,
-                            vlm_backend=vlm_backend,
-                            vlm_detect_tables_only=vlm_detect_tables_only,
-                            vlm_max_pages=vlm_max_pages,
-                            vlm_late_chunk_top_k_docs=vlm_late_chunk_top_k_docs,
-                            enable_enhanced_chunking=enable_enhanced_chunking,
-                            chunk_type_filter=chunk_type_filter,
+                            expansion_strategies=rcfg.query_prep.expansion_strategies,
+                            spell_check=rcfg.query_prep.spell_check,
+                            enable_cache=False if rcfg.verification.adaptive_rerun_bypass_cache else enable_cache,
+                            cache_threshold=rcfg.cache.cache_threshold,
+                            adaptive_cache=rcfg.cache.adaptive_cache,
+                            keyword_filter=rcfg.scope.keyword_filter,
+                            include_media_ids=rcfg.scope.include_media_ids,
+                            include_note_ids=rcfg.scope.include_note_ids,
+                            enable_security_filter=rcfg.safety.enable_security_filter,
+                            detect_pii=rcfg.safety.detect_pii,
+                            redact_pii=rcfg.safety.redact_pii,
+                            sensitivity_level=rcfg.safety.sensitivity_level,
+                            content_filter=rcfg.safety.content_filter,
+                            enable_table_processing=rcfg.processing.enable_table_processing,
+                            table_method=rcfg.processing.table_method,
+                            enable_vlm_late_chunking=rcfg.processing.enable_vlm_late_chunking,
+                            vlm_backend=rcfg.processing.vlm_backend,
+                            vlm_detect_tables_only=rcfg.processing.vlm_detect_tables_only,
+                            vlm_max_pages=rcfg.processing.vlm_max_pages,
+                            vlm_late_chunk_top_k_docs=rcfg.processing.vlm_late_chunk_top_k_docs,
+                            enable_enhanced_chunking=rcfg.processing.enable_enhanced_chunking,
+                            chunk_type_filter=rcfg.processing.chunk_type_filter,
                             enable_parent_expansion=enable_parent_expansion,
                             parent_context_size=parent_context_size,
-                            include_sibling_chunks=include_sibling_chunks,
-                            sibling_window=sibling_window,
+                            include_sibling_chunks=rcfg.processing.include_sibling_chunks,
+                            sibling_window=rcfg.processing.sibling_window,
                             include_parent_document=include_parent_document,
                             parent_max_tokens=parent_max_tokens,
                             enable_reranking=enable_reranking,
                             reranking_strategy=reranking_strategy,
-                            rerank_top_k=rerank_top_k,
-                            reranking_model=reranking_model,
-                            rerank_min_relevance_prob=rerank_min_relevance_prob,
-                            rerank_sentinel_margin=rerank_sentinel_margin,
-                            enable_citations=enable_citations,
-                            citation_style=citation_style,
-                            include_page_numbers=include_page_numbers,
-                            enable_chunk_citations=enable_chunk_citations,
-                            enable_generation=bool(adaptive_rerun_include_generation),
-                            generation_model=generation_model,
-                            generation_provider=generation_provider,
+                            rerank_top_k=rcfg.rerank.rerank_top_k,
+                            reranking_model=rcfg.rerank.reranking_model,
+                            rerank_min_relevance_prob=rcfg.rerank.rerank_min_relevance_prob,
+                            rerank_sentinel_margin=rcfg.rerank.rerank_sentinel_margin,
+                            enable_citations=rcfg.citations.enable_citations,
+                            citation_style=rcfg.citations.citation_style,
+                            include_page_numbers=rcfg.citations.include_page_numbers,
+                            enable_chunk_citations=rcfg.citations.enable_chunk_citations,
+                            enable_generation=bool(rcfg.verification.adaptive_rerun_include_generation),
+                            generation_model=rcfg.generation.generation_model,
+                            generation_provider=rcfg.generation.generation_provider,
                             generation_prompt=generation_prompt,
-                            max_generation_tokens=max_generation_tokens,
+                            max_generation_tokens=rcfg.generation.max_generation_tokens,
                             # Disable post-verification in rerun to avoid loops
                             enable_post_verification=False,
                             # Guard: mark this as an adaptive rerun
                             _adaptive_rerun=True,
                             # Preserve guardrails & claims defaults
-                            enable_injection_filter=enable_injection_filter,
-                            injection_filter_strength=injection_filter_strength,
+                            enable_injection_filter=rcfg.safety.enable_injection_filter,
+                            injection_filter_strength=rcfg.safety.injection_filter_strength,
                             require_hard_citations=require_hard_citations,
                             enable_numeric_fidelity=enable_numeric_fidelity,
                             numeric_fidelity_behavior=numeric_fidelity_behavior,
                             enable_claims=False,  # skip claims during rerun to save time
-                            index_namespace=index_namespace,
-                            user_id=user_id,
-                            session_id=session_id,
-                            enable_monitoring=enable_monitoring,
-                            enable_observability=enable_observability,
-                            trace_id=trace_id,
-                            credential_runtime=credential_runtime,
-                            enable_performance_analysis=enable_performance_analysis,
-                            timeout_seconds=timeout_seconds,
-                            highlight_results=highlight_results,
-                            highlight_query_terms=highlight_query_terms,
-                            track_cost=track_cost,
-                            debug_mode=debug_mode,
-                            include_rerank_debug_documents=include_rerank_debug_documents,
+                            index_namespace=rcfg.retrieval.index_namespace,
+                            user_id=rcfg.scope.user_id,
+                            session_id=rcfg.scope.session_id,
+                            enable_monitoring=rcfg.observability.enable_monitoring,
+                            enable_observability=rcfg.observability.enable_observability,
+                            trace_id=rcfg.observability.trace_id,
+                            credential_runtime=rcfg.runtime.credential_runtime,
+                            enable_performance_analysis=rcfg.observability.enable_performance_analysis,
+                            timeout_seconds=rcfg.resilience.timeout_seconds,
+                            highlight_results=rcfg.observability.highlight_results,
+                            highlight_query_terms=rcfg.observability.highlight_query_terms,
+                            track_cost=rcfg.observability.track_cost,
+                            debug_mode=rcfg.observability.debug_mode,
+                            include_rerank_debug_documents=rcfg.observability.include_rerank_debug_documents,
                         )
                         # Quick verify the new answer without repairs to compare factuality
                         new_ratio = None
                         if PostGenerationVerifier and (new_result.generated_answer or "").strip():
                             v2 = await PostGenerationVerifier(
                                 max_retries=0,
-                                max_claims=min(10, adaptive_max_claims),
-                                credential_runtime=credential_runtime,
+                                max_claims=min(10, rcfg.verification.adaptive_max_claims),
+                                credential_runtime=rcfg.runtime.credential_runtime,
                             ).verify_and_maybe_fix(
                                 query=query,
                                 answer=new_result.generated_answer,
                                 base_documents=(
-                                    new_result.documents[: int(adaptive_rerun_doc_budget)]
-                                    if (adaptive_rerun_doc_budget and isinstance(adaptive_rerun_doc_budget, int))
+                                    new_result.documents[: int(rcfg.verification.adaptive_rerun_doc_budget)]
+                                    if (rcfg.verification.adaptive_rerun_doc_budget and isinstance(rcfg.verification.adaptive_rerun_doc_budget, int))
                                     else (new_result.documents or [])
                                 ),
                                 media_db_path=media_db_path,
-                                notes_db_path=notes_db_path,
-                                character_db_path=character_db_path,
-                                user_id=user_id,
-                                generation_model=generation_model,
-                                generation_provider=generation_provider,
-                                search_mode=search_mode,
+                                notes_db_path=rcfg.runtime.notes_db_path,
+                                character_db_path=rcfg.runtime.character_db_path,
+                                user_id=rcfg.scope.user_id,
+                                generation_model=rcfg.generation.generation_model,
+                                generation_provider=rcfg.generation.generation_provider,
+                                search_mode=rcfg.retrieval.search_mode,
                                 hybrid_alpha=hybrid_alpha,
                                 top_k=top_k,
                             )
@@ -8447,7 +8450,7 @@ async def unified_rag_pipeline(
                                 "old_ratio": vres.unsupported_ratio,
                                 "new_ratio": new_ratio,
                                 "adopted": bool(adopt),
-                                "bypass_cache": bool(adaptive_rerun_bypass_cache),
+                                "bypass_cache": bool(rcfg.verification.adaptive_rerun_bypass_cache),
                                 "old_nf_missing": old_nf_missing if "old_nf_missing" in locals() else None,
                                 "new_nf_missing": new_nf_missing if "new_nf_missing" in locals() else None,
                                 "old_hard_citation_coverage": old_cov if "old_cov" in locals() else None,
@@ -8473,8 +8476,8 @@ async def unified_rag_pipeline(
                             pass
                         # Budget check and metric
                         try:
-                            if adaptive_rerun_time_budget_sec is not None and dur > float(
-                                adaptive_rerun_time_budget_sec
+                            if rcfg.verification.adaptive_rerun_time_budget_sec is not None and dur > float(
+                                rcfg.verification.adaptive_rerun_time_budget_sec
                             ):
                                 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 
@@ -8518,15 +8521,15 @@ async def unified_rag_pipeline(
 
         # ========== POST-GENERATION EVIDENCE CHAINS UPDATE ==========
         # Now that we have the generated answer, rebuild evidence chains with claim extraction
-        if enable_evidence_chains and result.generated_answer and result.documents and EvidenceChainBuilder:
+        if rcfg.citations.enable_evidence_chains and result.generated_answer and result.documents and EvidenceChainBuilder:
             try:
                 chain_builder = EvidenceChainBuilder(
                     enable_llm_extraction=True,
-                    llm_provider=generation_provider,
-                    llm_model=generation_model,
+                    llm_provider=rcfg.generation.generation_provider,
+                    llm_model=rcfg.generation.generation_model,
                     **(
-                        {"credential_runtime": credential_runtime}
-                        if credential_runtime is not None
+                        {"credential_runtime": rcfg.runtime.credential_runtime}
+                        if rcfg.runtime.credential_runtime is not None
                         else {}
                     ),
                 )
@@ -8569,7 +8572,7 @@ async def unified_rag_pipeline(
                     }
 
                     # Optionally include full chain data for debugging
-                    if debug_mode:
+                    if rcfg.observability.debug_mode:
                         result.metadata["evidence_chains_full"] = evidence_chain_result.to_dict()
 
             except (
@@ -8587,15 +8590,15 @@ async def unified_rag_pipeline(
         # ========== UTILITY GRADING (Self-Correcting RAG Stage 6) ==========
         # Rate response usefulness independent of factual grounding
         try:
-            if enable_utility_grading and result.generated_answer and grade_utility:
+            if rcfg.self_correct.enable_utility_grading and result.generated_answer and grade_utility:
                 with otel_span("rag.utility_grading"):
                     ug_result, ug_meta = await grade_utility(
                         query=query,
                         answer=result.generated_answer,
-                        provider=utility_grading_provider,
-                        model=utility_grading_model,
-                        timeout_sec=utility_grading_timeout_sec,
-                        credential_runtime=credential_runtime,
+                        provider=rcfg.self_correct.utility_grading_provider,
+                        model=rcfg.self_correct.utility_grading_model,
+                        timeout_sec=rcfg.self_correct.utility_grading_timeout_sec,
+                        credential_runtime=rcfg.runtime.credential_runtime,
                     )
                     result.metadata["utility_grade"] = ug_meta
         except (
@@ -8610,7 +8613,7 @@ async def unified_rag_pipeline(
             result.errors.append(f"Utility grading failed: {str(e)}")
 
         # ========== USER FEEDBACK ==========
-        if collect_feedback:
+        if rcfg.observability.collect_feedback:
             feedback_start = time.time()
             try:
                 if UnifiedFeedbackSystem:
@@ -8619,14 +8622,14 @@ async def unified_rag_pipeline(
                     result.metadata["feedback_enabled"] = True
 
                     # Apply feedback boost if requested
-                    if apply_feedback_boost and result.documents:
+                    if rcfg.observability.apply_feedback_boost and result.documents:
                         try:
                             if UserPersonalizationStore:
-                                store = UserPersonalizationStore(feedback_user_id or user_id)
-                                result.documents = store.boost_documents(result.documents, corpus=index_namespace)
+                                store = UserPersonalizationStore(rcfg.scope.feedback_user_id or rcfg.scope.user_id)
+                                result.documents = store.boost_documents(result.documents, corpus=rcfg.retrieval.index_namespace)
                         except ValueError as exc:
                             logger.debug(
-                                f"Personalization boost disabled for user_id={feedback_user_id or user_id}: {exc}"
+                                f"Personalization boost disabled for user_id={rcfg.scope.feedback_user_id or rcfg.scope.user_id}: {exc}"
                             )
                         except (AttributeError, RuntimeError, TypeError):
                             pass
@@ -8665,13 +8668,13 @@ async def unified_rag_pipeline(
                 logger.error(f"Feedback error: {e}")
 
         # ========== RESULT HIGHLIGHTING ==========
-        if highlight_results and result.documents:
+        if rcfg.observability.highlight_results and result.documents:
             highlight_start = time.time()
             try:
                 if highlight_func:
                     highlight_context = SimpleNamespace(
                         config={"highlighting": {"enabled": True}},
-                        query=query if highlight_query_terms else "",
+                        query=query if rcfg.observability.highlight_query_terms else "",
                         documents=result.documents,
                     )
                     highlighted = highlight_func(highlight_context)
@@ -8686,13 +8689,13 @@ async def unified_rag_pipeline(
                 logger.warning("Highlighting requested but module not available")
 
         # ========== COST TRACKING ==========
-        if track_cost:
+        if rcfg.observability.track_cost:
             try:
                 if track_llm_cost:
                     # Calculate estimated cost
                     total_tokens = sum(len(doc.content.split()) for doc in result.documents)
                     cost = await track_llm_cost(
-                        model=generation_model or "gpt-3.5-turbo",
+                        model=rcfg.generation.generation_model or "gpt-3.5-turbo",
                         input_tokens=total_tokens,
                         output_tokens=len(result.generated_answer.split()) if result.generated_answer else 0,
                     )
@@ -8749,7 +8752,7 @@ async def unified_rag_pipeline(
                                 set_fn,
                                 cq,
                                 sanitized_cache_payload,
-                                ttl=cache_ttl,
+                                ttl=rcfg.cache.cache_ttl,
                             )
             except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
                 logger.error(
@@ -8758,12 +8761,12 @@ async def unified_rag_pipeline(
                 )
 
         # ========== OBSERVABILITY ==========
-        if enable_observability:
+        if rcfg.observability.enable_observability:
             try:
                 if Tracer:
                     tracer = Tracer()
                     await tracer.trace(
-                        trace_id=trace_id or str(uuid.uuid4()),
+                        trace_id=rcfg.observability.trace_id or str(uuid.uuid4()),
                         operation="unified_rag_pipeline",
                         query=query,
                         timings=result.timings,
@@ -8774,7 +8777,7 @@ async def unified_rag_pipeline(
                 result.errors.append("Observability module not available")
 
         # ========== PERFORMANCE ANALYSIS ==========
-        if enable_performance_analysis:
+        if rcfg.observability.enable_performance_analysis:
             try:
                 if PerformanceMonitor:
                     monitor = PerformanceMonitor()
@@ -8802,7 +8805,7 @@ async def unified_rag_pipeline(
     ):
         result.errors.append("pipeline_failed")
         logger.error("Unified pipeline failed")
-        if fallback_on_error:
+        if rcfg.resilience.fallback_on_error:
             return {
                 "query": query,
                 "documents": [],
@@ -8824,7 +8827,7 @@ async def unified_rag_pipeline(
             metrics.cache_hit = result.cache_hit
             metrics.documents_retrieved = len(result.documents)
 
-            if enable_monitoring:
+            if rcfg.observability.enable_monitoring:
                 try:
                     collector = MetricsCollector()
                     collector.end_query(metrics)
@@ -8832,15 +8835,15 @@ async def unified_rag_pipeline(
                     logger.error(f"Metrics recording error: {e}")
 
         # ---- Retrieval quality metrics (optional) ----
-        if ground_truth_doc_ids and result.documents:
+        if rcfg.observability.ground_truth_doc_ids and result.documents:
             try:
                 from .retrieval_metrics import evaluate_retrieval as _eval_retrieval
 
                 _retrieved_ids = [str(getattr(d, "id", "")) for d in result.documents]
                 _ret_metrics = _eval_retrieval(
                     _retrieved_ids,
-                    [str(gid) for gid in ground_truth_doc_ids],
-                    k=metrics_k,
+                    [str(gid) for gid in rcfg.observability.ground_truth_doc_ids],
+                    k=rcfg.observability.metrics_k,
                 )
                 result.metadata["retrieval_metrics"] = _ret_metrics.to_dict()
                 # Emit to Prometheus
@@ -8860,7 +8863,7 @@ async def unified_rag_pipeline(
                 result.errors.append(f"Retrieval metrics failed: {_rm_err}")
 
         # ---- Faithfulness evaluation (optional) ----
-        if enable_faithfulness_eval and result.generated_answer:
+        if rcfg.verification.enable_faithfulness_eval and result.generated_answer:
             try:
                 from .faithfulness import FaithfulnessEvaluator as _FaithEval
 
@@ -8869,7 +8872,7 @@ async def unified_rag_pipeline(
                 _ctx_text = "\n\n".join(p for p in _ctx_parts if p)
                 if _ctx_text:
                     # Attempt to find an LLM callable from kwargs or auto-construct one
-                    _llm_obj = kwargs.get("faithfulness_llm")
+                    _llm_obj = rcfg.runtime.faithfulness_llm
                     if _llm_obj is None:
                         # Auto-construct an LLM adapter from the pipeline's config
                         try:
@@ -8881,10 +8884,10 @@ async def unified_rag_pipeline(
                             _f_cfg = _load_cfg() or {}
                             from .generation_defaults import resolve_generation_defaults
 
-                            _f_prov, _f_model = resolve_generation_defaults(_f_cfg, generation_provider, generation_model)
+                            _f_prov, _f_model = resolve_generation_defaults(_f_cfg, rcfg.generation.generation_provider, rcfg.generation.generation_model)
                             _f_handle = None
-                            if credential_runtime is not None:
-                                _f_handle = await credential_runtime.resolve(
+                            if rcfg.runtime.credential_runtime is not None:
+                                _f_handle = await rcfg.runtime.credential_runtime.resolve(
                                     _f_prov,
                                     model=_f_model,
                                 )
@@ -8945,7 +8948,7 @@ async def unified_rag_pipeline(
                                                     or _f_state["content"]
                                                 )
                                             ):
-                                                await credential_runtime.mark_used(
+                                                await rcfg.runtime.credential_runtime.mark_used(
                                                     _f_handle
                                                 )
                                                 _f_state["marked"] = True
@@ -8967,7 +8970,7 @@ async def unified_rag_pipeline(
                     if _llm_obj is not None:
                         _faith_eval = _FaithEval(
                             _llm_obj,
-                            propagate_errors=credential_runtime is not None,
+                            propagate_errors=rcfg.runtime.credential_runtime is not None,
                         )
                         _faith_result = await _faith_eval.evaluate_detailed(
                             result.generated_answer, _ctx_text
@@ -8997,7 +9000,7 @@ async def unified_rag_pipeline(
                 }
                 logger.warning("Faithfulness evaluation provider unavailable")
             except Exception as _fe_err:
-                if credential_runtime is not None:
+                if rcfg.runtime.credential_runtime is not None:
                     result.metadata["faithfulness"] = {
                         "failure_code": "provider_unavailable",
                         "verification_available": False,
@@ -9008,7 +9011,7 @@ async def unified_rag_pipeline(
                     result.errors.append(f"Faithfulness eval failed: {_fe_err}")
 
         # Debug output if requested
-        if debug_mode:
+        if rcfg.observability.debug_mode:
             try:
                 _qh = hashlib.md5((query or "").encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
                 logger.debug(f"Query hash={_qh} len={len(query or '')}")
