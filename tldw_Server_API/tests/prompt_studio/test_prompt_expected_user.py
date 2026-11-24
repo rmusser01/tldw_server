@@ -1,5 +1,8 @@
 """Prompt ownership assertions bind routes to the loaded account scope."""
 
+import sqlite3
+import threading
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -36,12 +39,20 @@ def scoped_routes(isolated_db, tmp_path, monkeypatch):
     app.include_router(prompt_studio_projects.router)
     app.include_router(prompt_studio_prompts.router)
     app.include_router(prompts.router, prefix="/api/v1/prompts")
+
+    async def studio_db():
+        try:
+            yield isolated_db
+        finally:
+            # The portal thread owns a different connection from the fixture thread.
+            isolated_db.close_connection()
+
     app.dependency_overrides[prompt_studio_deps.get_prompt_studio_user] = lambda: {
         "user_id": "3",
         "client_id": "scope-test",
         "is_admin": False,
     }
-    app.dependency_overrides[prompt_studio_deps.get_prompt_studio_db] = lambda: isolated_db
+    app.dependency_overrides[prompt_studio_deps.get_prompt_studio_db] = studio_db
     app.dependency_overrides[prompt_studio_deps.get_security_config] = lambda: SecurityConfig(
         enable_rate_limiting=False
     )
@@ -103,3 +114,29 @@ def test_matching_and_absent_scope_headers_keep_existing_reads(scoped_routes, ex
         assert [row["name"] for row in payload["items"]] == ["Bob private"]  # nosec B101 - Real account-owned library list.
     else:
         assert payload["user_prompt"] == "BOB CONTENT"  # nosec B101 - Real account-owned library prompt.
+
+
+@pytest.mark.parametrize("path", ["/api/v1/prompt-studio/projects", "/api/v1/prompt-studio/prompts/get/1"])
+def test_scoped_studio_reads_close_only_the_request_connection(scoped_routes, monkeypatch, path):
+    client, studio, library, project_id = scoped_routes
+    main_thread = threading.get_ident()
+    main_connection = studio.get_connection()
+    get_connection = studio._impl._get_thread_connection
+    opened = []
+
+    def track_connection():
+        connection = get_connection()
+        opened.append((threading.get_ident(), connection))
+        return connection
+
+    monkeypatch.setattr(studio._impl, "_get_thread_connection", track_connection)
+    response = client.get(path, headers={"X-TLDW-Expected-User-ID": "3"})
+    assert response.status_code == 200
+    request_connections = {connection for owner, connection in opened if owner != main_thread}
+    assert request_connections
+    for connection in request_connections:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+            connection.execute("SELECT 1")
+    assert main_connection.execute("SELECT 1").fetchone()[0] == 1
+    assert studio.get_project(project_id)["name"] == "Bob project"
+    assert library.fetch_prompt_details(1)["user_prompt"] == "BOB CONTENT"
