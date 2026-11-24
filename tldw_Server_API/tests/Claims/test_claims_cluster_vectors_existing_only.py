@@ -2,11 +2,17 @@
 
 import hashlib
 import importlib
+import json
 import multiprocessing
+import os
 import sqlite3
+import subprocess  # nosec B404 - Isolate fixed native SDK regression code without changing the parent cwd.
+import sys
+import textwrap
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from chromadb.errors import ChromaError
@@ -77,6 +83,88 @@ def test_existing_only_reads_real_vectors(config, seeded):
     with open_reader(config) as read:
         assert read is not None
         assert list(read(("0",))["0"]) == [1.0, 1.0]
+
+
+def test_existing_sdk_does_not_create_uri_shaped_directories(config, seeded, tmp_path):
+    private_cwd = tmp_path / "reader_cwd"
+    private_cwd.mkdir()
+    script = textwrap.dedent("""
+        import json
+        import sys
+        from pathlib import Path
+
+        from tldw_Server_API.app.core.Embeddings.chroma_storage import ExistingClient, StorageSession
+
+        cwd = Path.cwd()
+        before = set(cwd.rglob("*"))
+        session = StorageSession(Path(sys.argv[1]))
+        reader = ExistingClient(session)
+        with session:
+            collection = reader.get_collection("claims_for_1")
+            result = collection.get(ids=["0"], include=["embeddings"])
+            assert result["ids"] == ["0"]
+            assert list(result["embeddings"][0]) == [1.0, 1.0]
+        reader.closed = True
+        added = sorted(str(path.relative_to(cwd)) for path in set(cwd.rglob("*")) - before)
+        print(json.dumps(added))
+        """)
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, (str(Path(__file__).resolve().parents[3]), os.getenv("PYTHONPATH")))
+        ),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "ANONYMIZED_TELEMETRY": "False",
+    }
+    completed = subprocess.run(  # nosec B603 - Fixed code, trusted interpreter and owned fixture path; no shell.
+        [sys.executable, "-c", script, str(seeded)],
+        cwd=private_cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == [], "Native reader created URI-shaped directories in its private cwd"
+
+
+def test_existing_sdk_preserves_special_path_identity_non_target_and_quota(config, tmp_path):
+    from tldw_Server_API.app.core.DB_Management.chroma_read_validation import ChromaPreflightLimits
+
+    config["USER_DB_BASE_DIR"] = str(tmp_path / "space ' hash# percent% %2F %3F %25 &mode=rwc caf\u00e9")
+    paths, collection_ids = {}, {}
+    for owner, offset in (("1", 0.0), ("2", 100.0)):
+        with ChromaDBManager(owner, config) as manager:
+            collection = manager.client.create_collection(
+                "claims_for_1",
+                embedding_function=None,
+                configuration={"hnsw": {"batch_size": 2, "sync_threshold": 2}},
+            )
+            collection.upsert(ids=[str(i) for i in range(10)], embeddings=[[offset + i + 1, 1.0] for i in range(10)])
+            paths[owner], collection_ids[owner] = manager.user_chroma_path, collection.id
+    assert collection_ids["1"] != collection_ids["2"]
+    before = inventory(paths["1"])
+    other_before = inventory(paths["2"])
+    database_before = (paths["1"] / "chroma.sqlite3").stat()
+    limits = ChromaPreflightLimits(returned_components=2)
+    with ChromaDBManager("1", config, existing_only=True, preflight_limits=limits) as manager:
+        with manager.storage_access():
+            collection = manager.get_existing_collection_strict("claims_for_1")
+            assert collection.id == collection_ids["1"]
+            result = collection.get(ids=["0"], include=["embeddings"])
+            assert result["ids"] == ["0"]
+            assert list(result["embeddings"][0]) == [1.0, 1.0]
+            with pytest.raises(ChromaStorageError, match="resource_limit"):
+                collection.get(ids=["0"], include=["embeddings"])
+    database_after = (paths["1"] / "chroma.sqlite3").stat()
+    assert (database_after.st_dev, database_after.st_ino) == (database_before.st_dev, database_before.st_ino)
+    after = inventory(paths["1"])
+    assert after.keys() == before.keys()
+    assert {key: value for key, value in after.items() if key != "chroma.sqlite3"} == {
+        key: value for key, value in before.items() if key != "chroma.sqlite3"
+    }
+    assert inventory(paths["2"]) == other_before
 
 
 @pytest.mark.parametrize("failure", [None, "budget", "identity", "sdk"])
@@ -393,9 +481,11 @@ def test_source_disappearance_immediately_before_sdk_open_does_not_recreate(conf
     from tldw_Server_API.app.core.Embeddings.chroma_storage import ExistingClient
 
     original = ExistingClient._factory
+    remaining_inventory = []
 
     def disappeared(self):
         (seeded / "chroma.sqlite3").unlink()
+        remaining_inventory.append(inventory(seeded))
         return original(self)
 
     monkeypatch.setattr(ExistingClient, "_factory", disappeared)
@@ -403,6 +493,7 @@ def test_source_disappearance_immediately_before_sdk_open_does_not_recreate(conf
         with open_reader(config) as read:
             read(("0",))
     assert not (seeded / "chroma.sqlite3").exists()
+    assert inventory(seeded) == remaining_inventory[0]
 
 
 def test_existing_only_never_uses_forced_stub_or_fallback(config, seeded, monkeypatch):
