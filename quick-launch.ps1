@@ -281,12 +281,18 @@ function Save-QuickLaunchEnv {
     return $Saved
 }
 
-# A $null value removes the variable, so "unset" is restored as unset.
+# "Unset" is restored as unset. Passing $null to SetEnvironmentVariable is not enough: PowerShell
+# hands a .NET string argument "" instead, and .NET 9 (PowerShell 7.5+) keeps "" as an empty
+# variable rather than deleting it.
 function Restore-QuickLaunchEnv {
     param([hashtable]$Saved)
 
     foreach ($Name in $Saved.Keys) {
-        [Environment]::SetEnvironmentVariable($Name, $Saved[$Name], "Process")
+        if ($null -eq $Saved[$Name]) {
+            Remove-Item -Path "Env:$Name" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($Name, $Saved[$Name], "Process")
+        }
     }
 }
 

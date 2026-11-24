@@ -1039,3 +1039,15 @@ def test_powershell_launcher_restores_environment_after_webui() -> None:
         "finally",
     ):
         _require(expected in text, f"quick-launch.ps1 should include {expected}")
+
+
+def test_powershell_launcher_removes_variables_that_were_unset() -> None:
+    """A variable that was unset before the launch is removed, not left behind as empty.
+
+    Found by a real Windows run (2026-11-24): PowerShell passes $null to a .NET string argument
+    as "", and .NET 9 (PowerShell 7.5+) stores "" as an empty variable instead of deleting it.
+    """
+    text = _read("quick-launch.ps1")
+    restore = text.split("function Restore-QuickLaunchEnv", 1)[1].split("\nfunction ", 1)[0]
+
+    _require('Remove-Item -Path "Env:$Name"' in restore, "Restore-QuickLaunchEnv should remove unset variables")
