@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Calendar.errors import (
 )
 from tldw_Server_API.app.core.Calendar.provider_operations import call_provider, resolve_caldav_credentials
 from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
+from tldw_Server_API.app.core.config_sections.calendar import load_calendar_sync_worker_config
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
     CalendarDatabase,
     CalendarSyncAdmissionRow,
@@ -369,14 +370,15 @@ async def handle_calendar_sync_job(
 
 async def run_calendar_sync_worker(stop_event: asyncio.Event | None = None) -> None:
     """Run the Calendar Jobs consumer with configured leases until stopped."""
-    worker_id = (os.getenv("CALENDAR_SYNC_WORKER_ID") or f"calendar-sync-worker-{os.getpid()}").strip()
+    settings = load_calendar_sync_worker_config(default_worker_id=f"calendar-sync-worker-{os.getpid()}")
+    worker_id = settings.worker_id
     cfg = WorkerConfig(
         domain=CALENDAR_SYNC_DOMAIN,
         queue=CALENDAR_SYNC_QUEUE,
         worker_id=worker_id,
-        lease_seconds=int(os.getenv("CALENDAR_SYNC_LEASE_SECONDS", os.getenv("JOBS_LEASE_SECONDS", "120")) or "120"),
-        renew_threshold_seconds=int(os.getenv("CALENDAR_SYNC_RENEW_THRESHOLD_SECONDS", "10") or "10"),
-        renew_jitter_seconds=int(os.getenv("CALENDAR_SYNC_RENEW_JITTER_SECONDS", "0") or "0"),
+        lease_seconds=settings.lease_seconds,
+        renew_threshold_seconds=settings.renew_threshold_seconds,
+        renew_jitter_seconds=settings.renew_jitter_seconds,
     )
     job_manager = JobManager()
     sdk = WorkerSDK(job_manager, cfg)

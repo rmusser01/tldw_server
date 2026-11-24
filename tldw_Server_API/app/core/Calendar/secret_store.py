@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
+from tldw_Server_API.app.core.config_sections.calendar import calendar_secret_encryption_key
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
 from tldw_Server_API.app.core.Security.crypto import (
     decrypt_json_blob_with_key,
@@ -71,7 +71,7 @@ class CalendarSecretStore:
 
     @staticmethod
     def _required_encryption_key() -> str:
-        key = os.getenv(_CALENDAR_SECRET_KEY_ENV, "").strip()
+        key = calendar_secret_encryption_key()
         if not key:
             raise CalendarValidationError(
                 f"{_CALENDAR_SECRET_KEY_ENV} must be set before storing Calendar external account credentials"

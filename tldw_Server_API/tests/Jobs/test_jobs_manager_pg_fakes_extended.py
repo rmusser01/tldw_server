@@ -155,7 +155,10 @@ class FakePGConn:
 @pytest.fixture(autouse=True)
 def _stub_pg_bootstrap(monkeypatch):
     import tldw_Server_API.app.core.Jobs.manager as mgr
+    from tldw_Server_API.app.core.Jobs import pg_util
 
+    # Fake database operations must also avoid the constructor's connection probe.
+    monkeypatch.setattr(pg_util, "negotiate_pg_dsn", pg_util.normalize_pg_dsn)
     monkeypatch.setattr(mgr, "ensure_jobs_tables_pg", lambda dsn: dsn)
     monkeypatch.setattr(mgr, "ensure_job_counters_pg", lambda dsn: dsn, raising=False)
 

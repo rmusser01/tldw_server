@@ -709,7 +709,7 @@ def test_create_org_calendar_requires_active_authenticated_membership(
     monkeypatch: pytest.MonkeyPatch, claimed_orgs: list[int], membership: dict[str, Any],
 ) -> None:
     """Neither an org claim nor an unrelated/inactive DB membership grants creation."""
-    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+    from tldw_Server_API.app.core.AuthNZ import orgs_teams
 
     client, db, _reminders = calendar_api_client
     client.current_org_ids["value"] = claimed_orgs  # type: ignore[attr-defined]
@@ -717,7 +717,7 @@ def test_create_org_calendar_requires_active_authenticated_membership(
     async def memberships(user_id: int) -> list[dict[str, Any]]:
         return [membership]
 
-    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", memberships)
+    monkeypatch.setattr(orgs_teams, "list_org_memberships_for_user", memberships)
     result = client.post("/api/v1/calendar/calendars", json={"name": "Forged org", "org_id": 42})
     assert result.status_code == 403, result.text
     assert db.list_calendars(tenant_id="default") == []
@@ -727,7 +727,7 @@ def test_create_org_calendar_allows_active_authenticated_member(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Creation membership is independent of a specific calendar access role."""
-    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+    from tldw_Server_API.app.core.AuthNZ import orgs_teams
 
     client, _db, _reminders = calendar_api_client
     client.current_org_ids["value"] = [42]  # type: ignore[attr-defined]
@@ -735,7 +735,7 @@ def test_create_org_calendar_allows_active_authenticated_member(
     async def memberships(user_id: int) -> list[dict[str, Any]]:
         return [{"org_id": 42, "role": "member", "status": "active"}]
 
-    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", memberships)
+    monkeypatch.setattr(orgs_teams, "list_org_memberships_for_user", memberships)
     result = client.post("/api/v1/calendar/calendars", json={"name": "Verified org", "org_id": 42})
     assert result.status_code == 201, result.text
     assert result.json()["org_id"] == 42
@@ -788,13 +788,13 @@ def test_create_binding_rejects_malformed_collection_authority(
 def test_api_resolves_only_active_scoped_org_roles(
     calendar_api_client, monkeypatch, membership, expected_status
 ) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+    from tldw_Server_API.app.core.AuthNZ import orgs_teams
 
     client, _db, _reminders = calendar_api_client
     async def creator_memberships(user_id: int) -> list[dict[str, Any]]:
         return [{"org_id": 42, "role": "member", "status": "active"}] if user_id == 1 else []
 
-    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", creator_memberships)
+    monkeypatch.setattr(orgs_teams, "list_org_memberships_for_user", creator_memberships)
     client.current_org_ids["value"] = [42]
     calendar = _create_calendar(client, org_id=42, visibility="shared")
     grant = client.post(
@@ -811,7 +811,7 @@ def test_api_resolves_only_active_scoped_org_roles(
         assert user_id == 2
         return [membership]
 
-    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", memberships, raising=False)
+    monkeypatch.setattr(orgs_teams, "list_org_memberships_for_user", memberships)
     _set_user(client, 2)
     client.current_org_ids["value"] = [42]
     result = client.post(
@@ -1354,13 +1354,13 @@ def test_personal_provider_imports_are_hidden_from_shared_org_queries_until_copi
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+    from tldw_Server_API.app.core.AuthNZ import orgs_teams
 
     client, db, _reminder_service = calendar_api_client
     async def memberships(user_id: int) -> list[dict[str, Any]]:
         return [{"org_id": 42, "role": "member", "status": "active"}] if user_id == 1 else []
 
-    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", memberships)
+    monkeypatch.setattr(orgs_teams, "list_org_memberships_for_user", memberships)
     client.current_org_ids["value"] = [42]
     _personal_calendar, provider_item = _create_provider_item(db, owner_user_id=1)
     org_calendar = _create_calendar(client, name="Org", org_id=42, visibility="shared")

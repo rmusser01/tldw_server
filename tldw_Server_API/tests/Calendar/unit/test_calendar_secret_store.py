@@ -105,3 +105,30 @@ def test_secret_store_requires_calendar_encryption_key(calendar_db, monkeypatch)
             provider="caldav",
             payload={"username": "reader@example.test", "password": "app-secret"},
         )
+
+
+@pytest.mark.parametrize("crypto_available", [True, False])
+def test_secret_store_never_persists_plaintext_when_encryption_fails(
+    calendar_db, monkeypatch, crypto_available,
+) -> None:
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Security import crypto
+
+    key = "invalid-test-key" if crypto_available else base64.b64encode(b"c" * 32).decode("ascii")
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", key)
+    if not crypto_available:
+        monkeypatch.setattr(crypto, "_HAS_CRYPTO", False)
+    store = CalendarSecretStore(db=calendar_db, tenant_id="default")
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)))
+    try:
+        with pytest.raises(CalendarValidationError, match="encryption is unavailable") as failure:
+            store.create_secret(owner_user_id=1, provider="caldav", payload={"password": "private-test-password"})  # nosec B105 - synthetic plaintext sentinel for the no-persistence/no-logging assertion.
+    finally:
+        logger.remove(sink)
+    with calendar_db.connection() as connection:
+        count = connection.execute("SELECT COUNT(*) FROM calendar_external_account_secrets").fetchone()[0]
+    assert count == 0
+    assert key not in str(failure.value)
+    assert all(key not in message and "private-test-password" not in message for message in messages)

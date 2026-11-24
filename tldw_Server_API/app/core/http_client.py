@@ -4664,9 +4664,9 @@ def _fetch_httpx_response(
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise NetworkError("TimeoutError")
-            delay = min(delay, remaining)
-        time.sleep(delay)
-        if deadline is not None and time.monotonic() >= deadline:
+            exhausts_deadline = delay >= remaining
+        time.sleep(min(delay, remaining) if deadline is not None else delay)
+        if deadline is not None and (exhausts_deadline or time.monotonic() >= deadline):
             raise NetworkError("TimeoutError")
 
     def _do_once(sc: httpx.Client, target_url: str) -> tuple[httpx.Response | None, str]:

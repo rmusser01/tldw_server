@@ -13,21 +13,21 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from tldw_Server_API.app.core.Calendar.constants import (
-    CALENDAR_ROLE_OWNER,
-    CALENDAR_SOURCE_OWNER_PROVIDER,
-    CALENDAR_SOURCE_OWNER_TLDW,
-    DEFAULT_SYNC_INTERVAL_MINUTES,
-    DEFAULT_SYNC_LOOKAHEAD_DAYS,
-    DEFAULT_SYNC_LOOKBACK_DAYS,
-)
-from tldw_Server_API.app.core.Calendar.errors import (
+from tldw_Server_API.app.core.exception_types import (
     CalendarItemNotFound,
     CalendarNotFound,
     CalendarPermissionDenied,
     CalendarReadOnlyError,
     CalendarSyncError,
     CalendarValidationError,
+)
+from tldw_Server_API.app.core.Utils.calendar_constants import (
+    CALENDAR_ROLE_OWNER,
+    CALENDAR_SOURCE_OWNER_PROVIDER,
+    CALENDAR_SOURCE_OWNER_TLDW,
+    DEFAULT_SYNC_INTERVAL_MINUTES,
+    DEFAULT_SYNC_LOOKAHEAD_DAYS,
+    DEFAULT_SYNC_LOOKBACK_DAYS,
 )
 
 _UNSET = object()

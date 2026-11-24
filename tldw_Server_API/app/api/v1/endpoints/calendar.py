@@ -60,7 +60,7 @@ from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
     ExternalCalendarDiscoveryResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import ReminderTaskCreateRequest
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_memberships_for_user
+from tldw_Server_API.app.core.AuthNZ import orgs_teams
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     CALENDAR_READ,
     CALENDAR_SYNC,
@@ -126,7 +126,7 @@ async def get_calendar_service(
 ) -> CalendarService:
     """Build request-local permissions from current active AuthNZ organization roles."""
     user_id = _user_id(current_user)
-    memberships = await list_org_memberships_for_user(user_id) if current_user.org_ids else []
+    memberships = await orgs_teams.list_org_memberships_for_user(user_id) if current_user.org_ids else []
     active_orgs = frozenset(
         int(row["org_id"]) for row in memberships
         if row.get("status") == "active" and row.get("org_id") in current_user.org_ids

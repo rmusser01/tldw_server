@@ -53,6 +53,33 @@ def _binding(db: CalendarDatabase, owner_user_id: int = 1) -> ExternalCalendarBi
 
 
 @pytest.mark.asyncio
+async def test_scheduler_explicit_interval_queues_real_job_and_stops_without_env_parsing(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit runtime intervals bypass env parsing while the stop signal ends real work."""
+    binding = _binding(calendar_db)
+    stop_event = asyncio.Event()
+    queue_due = scheduler.queue_due_calendar_sync_jobs
+
+    async def scan(**kwargs):
+        result = await queue_due(**kwargs)
+        stop_event.set()
+        return result
+
+    def unexpected_env_read():
+        raise AssertionError("explicit interval must bypass environment parsing")
+
+    monkeypatch.setattr(scheduler, "queue_due_calendar_sync_jobs", scan)
+    monkeypatch.setattr(scheduler, "_scheduler_interval_seconds", unexpected_env_read)
+    await scheduler.run_calendar_sync_scheduler(
+        stop_event, interval_seconds=0.5, db=calendar_db, job_manager=jobs_manager,
+    )
+    admission = calendar_db.get_sync_admission(binding.id)
+    assert admission is not None and admission.job_id is not None
+    assert jobs_manager.count_jobs(domain="calendar") == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("delayed_operation", [
     "calendar_init", "jobs_init", "scan", "account", "admit_idempotent_operation", "audit",
 ])

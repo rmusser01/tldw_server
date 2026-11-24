@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +14,7 @@ from tldw_Server_API.app.core.Calendar.calendar_sync_worker import (
 )
 from tldw_Server_API.app.core.Calendar.errors import CalendarError
 from tldw_Server_API.app.core.Calendar.provider_operations import log_calendar_failure
+from tldw_Server_API.app.core.config_sections.calendar import calendar_sync_scheduler_interval_seconds
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
@@ -156,7 +156,7 @@ async def run_calendar_sync_scheduler(
 
 def _scheduler_interval_seconds() -> float:
     try:
-        return max(5.0, float(os.getenv("CALENDAR_SYNC_SCHEDULER_INTERVAL_SECONDS", "60") or "60"))
+        return calendar_sync_scheduler_interval_seconds()
     except _SCHEDULER_GUARD_EXCEPTIONS:
         return 60.0
 

@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.config_sections.calendar import load_calendar_sync_startup_config
 from tldw_Server_API.app.services.lifecycle_worker_specs import (
     ShutdownPhase,
     WorkerLifecycleContext,
@@ -133,6 +134,20 @@ def _standalone_html_worker_enabled(context: WorkerLifecycleContext) -> bool:
     """Keep cleanup/handler ownership aligned with the existing Slides route."""
 
     return bool(context.route_enabled("slides"))
+
+
+def _calendar_sync_jobs_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    """Require the typed opt-in and the existing Calendar lifecycle route gate."""
+    return load_calendar_sync_startup_config().jobs_worker_enabled and bool(
+        context.route_enabled("calendar", default_stable=False)
+    )
+
+
+def _calendar_sync_scheduler_enabled(context: WorkerLifecycleContext) -> bool:
+    """Require the scheduler opt-in without changing route or test-mode policy."""
+    return load_calendar_sync_startup_config().scheduler_enabled and bool(
+        context.route_enabled("calendar", default_stable=False)
+    )
 
 
 def _standalone_html_worker_factory(
@@ -262,22 +277,14 @@ def provide_content_jobs_worker_specs(
             worker_service=_run_calendar_sync_jobs_worker_service,
             category="jobs",
             phase=ShutdownPhase.JOB_POLLER_QUIESCE,
-            enabled=route_enabled_predicate(
-                "CALENDAR_SYNC_JOBS_WORKER_ENABLED",
-                "calendar",
-                default_stable=False,
-            ),
+            enabled=_calendar_sync_jobs_worker_enabled,
         ),
         stop_event_worker_spec(
             name="calendar_sync_scheduler_task",
             worker_service=_run_calendar_sync_scheduler_service,
             category="jobs",
             phase=ShutdownPhase.JOB_POLLER_QUIESCE,
-            enabled=route_enabled_predicate(
-                "CALENDAR_SYNC_SCHEDULER_ENABLED",
-                "calendar",
-                default_stable=False,
-            ),
+            enabled=_calendar_sync_scheduler_enabled,
         ),
         stop_event_worker_spec(
             name="chat_macros_jobs_task",

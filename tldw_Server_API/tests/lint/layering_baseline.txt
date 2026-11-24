@@ -118,5 +118,5 @@ services -> api.v1.endpoints.llamacpp: 1
 services -> api.v1.endpoints.llm_providers: 1
 services -> api.v1.endpoints.media: 2
 services -> api.v1.endpoints.sharing: 1
-services -> api.v1.schemas: 34
+services -> api.v1.schemas: 33
 services -> api.v1.utils: 7

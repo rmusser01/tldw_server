@@ -33,9 +33,6 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
 from tldw_Server_API.app.core.Scheduled_Tasks.control_plane_models import (
     ScheduledTaskListResponse,
 )
-from tldw_Server_API.app.services.scheduled_tasks_control_plane_service import (
-    ScheduledTasksControlPlaneService,
-)
 
 TemporalValue = date | datetime | str
 
@@ -114,7 +111,7 @@ class CalendarViewService:
         scheduled_tasks_service: ScheduledTasksListService | None = None,
     ) -> None:
         self.calendar_service = calendar_service
-        self.scheduled_tasks_service = scheduled_tasks_service or ScheduledTasksControlPlaneService()
+        self.scheduled_tasks_service = scheduled_tasks_service
 
     async def agenda(
         self,
@@ -260,6 +257,8 @@ class CalendarViewService:
         validate_query_window(start_at, end_at)
         window_start = _coerce_datetime(start_at)
         window_end = _coerce_datetime(end_at)
+        if self.scheduled_tasks_service is None:
+            raise CalendarValidationError("Scheduled-task projections require an injected scheduled-task service")
         response = await self.scheduled_tasks_service.list_tasks(user_id=actor_user_id)
         if warnings is not None and (response.partial or response.errors):
             warnings.extend(

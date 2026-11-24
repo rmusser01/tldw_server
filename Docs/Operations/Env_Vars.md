@@ -224,6 +224,18 @@ Notes:
 - `PROMPT_STUDIO_JOBS_WORKER_ENABLED`: Enable the in-process Prompt Studio jobs worker (`true|false`, default follows route policy for `prompt-studio`).
 - `PRIVILEGE_SNAPSHOT_WORKER_ENABLED`: Enable the in-process privilege snapshot jobs worker (`true|false`, default follows route policy for `privileges`).
 
+## Calendar External Sync
+These settings are environment-only (including values supplied through `.env`); there are no Calendar `config.txt` overrides or aliases. They are read on demand, without a Calendar settings cache.
+
+- `CALENDAR_SYNC_JOBS_WORKER_ENABLED`: Opt in to the Calendar Jobs consumer (default `false`).
+- `CALENDAR_SYNC_SCHEDULER_ENABLED`: Opt in to the recurring due-binding scan that enqueues Calendar Jobs (default `false`). Both flags also require the existing `calendar` route policy with `default_stable=false`; a true flag does not bypass route admission or its test-runtime rules. Flags accept the shared case-insensitive, whitespace-trimmed truthy values `1`, `true`, `yes`, `y`, `on`, `enabled`; unset, blank and unrecognized values are false.
+- `CALENDAR_SYNC_WORKER_ID`: Calendar consumer identity. Unset or empty uses `calendar-sync-worker-<pid>`. The selected value is stripped, so a whitespace-only explicit identity becomes empty.
+- `CALENDAR_SYNC_LEASE_SECONDS`: Integer lease passed to the Calendar worker. Only an unset value inherits `JOBS_LEASE_SECONDS`; if both are unset, the Calendar default is `120`. An empty Calendar value selects `120` rather than inheriting Jobs; an empty inherited Jobs value also selects `120`.
+- `CALENDAR_SYNC_RENEW_THRESHOLD_SECONDS`: Integer renewal threshold passed to the worker (default `10`; empty also uses `10`).
+- `CALENDAR_SYNC_RENEW_JITTER_SECONDS`: Integer renewal jitter passed to the worker (default `0`; empty also uses `0`). Worker integer settings accept surrounding whitespace on valid integers, but whitespace-only or invalid integers raise during worker initialization. This Calendar layer adds no bounds or clamping.
+- `CALENDAR_SYNC_SCHEDULER_INTERVAL_SECONDS`: Due-binding scan interval in seconds (default `60`; empty also uses `60`). Parsed as a float with a minimum of `5`; invalid values or guarded read/parse errors fall back to `60`. There is no finite-value check (`nan` selects `5`, positive infinity remains infinite). An explicit runtime `interval_seconds` argument bypasses environment parsing and the minimum.
+- `CALENDAR_SECRET_ENCRYPTION_KEY`: Required strict-base64-encoded 32-byte encryption key for external-account credentials; no default or fallback to other encryption keys. Read from the environment only, stripped and used with the existing AES-GCM helpers. Missing/blank keys, unavailable encryption, invalid key material or decryption failures fail closed; plaintext credentials are not persisted. The key is not part of aggregate/effective configuration or configuration logging.
+
 ## Embeddings Jobs
 - `EMBEDDINGS_JOBS_BACKEND`: Backend is fixed to "core"; this environment variable exists for compatibility and is ignored.
 - `EMBEDDINGS_JOBS_QUEUE`: Queue for embeddings stage jobs (default `default`).

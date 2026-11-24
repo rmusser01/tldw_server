@@ -145,8 +145,14 @@ async def test_strict_deadline_retires_socket_without_a_retry(monkeypatch):
         request["call_policy"] = replace(request["call_policy"], maximum_timeout_seconds=0.15)
         with pytest.raises(ChatProviderError):
             await asyncio.wait_for(LlamaCppAdapter().achat(request), 2)
-        await asyncio.wait_for(closed.wait(), 2)
-        assert len(payloads) == 1  # nosec B101 -- Pytest checks classification, authority or resource retirement.
+        try:
+            await asyncio.wait_for(closed.wait(), 2)
+        except TimeoutError as exc:
+            raise AssertionError(
+                f"strict deadline phase: inference_received={received.is_set()} "
+                f"payload_count={len(payloads)} socket_closed={closed.is_set()}"
+            ) from exc
+        assert len(payloads) == 1  # nosec B101 -- Preserve the original post-retirement cardinality check.
 
 
 @pytest.mark.asyncio
@@ -431,8 +437,10 @@ async def test_raw_route_disconnect_retires_runtime_operation_monitor_and_real_s
                 review.list_items()["items"],
             ) == ([499], 0 if disconnect_before_inference else 1, [])
             assert len(runtimes) == 1 and runtimes[0]._closed  # nosec B101 -- Pytest checks classification, authority or resource retirement.
-            assert not [t for t in set(asyncio.all_tasks()) - before if not t.done()]  # nosec B101 -- Pytest checks classification, authority or resource retirement.
         finally:
             if not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+    # IOCP posts a new listener-owned accept task after each accepted connection.
+    await asyncio.sleep(0)
+    assert not [t for t in set(asyncio.all_tasks()) - before if not t.done()]  # nosec B101 -- Check after listener retirement, without filtering task types.

@@ -18,7 +18,7 @@ import json
 import os
 import sys
 from collections.abc import Callable, Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import pytest
@@ -236,8 +236,50 @@ SUBJECTS: dict[str, Callable[[Mapping[str, str], Any], object]] = {
 
 def _plain(value: object) -> object:
     """JSON-shaped: tuples become lists, Paths strings, and the repo root ``<repo>``."""
-    text = json.dumps(value, default=str).replace(str(REPO_ROOT), "<repo>")
-    return json.loads(text)
+    def portable(item: object) -> object:
+        if isinstance(item, list):
+            return [portable(child) for child in item]
+        if isinstance(item, dict):
+            return {key: portable(child) for key, child in item.items()}
+        if isinstance(item, str):
+            path = type(REPO_ROOT)(item)
+            if path.is_absolute():
+                try:
+                    relative = path.relative_to(REPO_ROOT)
+                except ValueError:
+                    return item
+                return "<repo>" + ("/" + relative.as_posix() if relative.parts else "")
+        return item
+
+    return portable(json.loads(json.dumps(value, default=str)))
+
+
+@pytest.mark.parametrize("root", [
+    PurePosixPath("/tmp/checkout with spaces"),  # nosec B108 - in-memory path flavor; no filesystem operation.
+    PureWindowsPath("D:/a/checkout with spaces"),
+    PureWindowsPath("//server/share/checkout with spaces"),
+])
+def test_plain_repo_paths_are_portable_without_rewriting_unrelated_values(monkeypatch, root) -> None:
+    """Only actual root-relative path components lose the checkout prefix."""
+    monkeypatch.setattr(sys.modules[__name__], "REPO_ROOT", root)
+    sibling = str(root.with_name(root.name + "-other") / "policy.yaml")
+    embedded = f"https://example.test/?value={root}"
+    value = {
+        "path": root / "Config_Files" / "policy.yaml",
+        "nested": (str(root), {"path": str(root / "  7  ")}),
+        "sibling": sibling,
+        "embedded": embedded,
+        "literal": 'literal\\value "quoted"\n',
+        "scalars": [None, True, 17],
+    }
+    assert _plain(value) == {
+        "path": "<repo>/Config_Files/policy.yaml",
+        "nested": ["<repo>", {"path": "<repo>/  7  "}],
+        "sibling": sibling,
+        "embedded": embedded,
+        "literal": 'literal\\value "quoted"\n',
+        "scalars": [None, True, 17],
+    }
 
 
 def outcome(subject: Callable[[Mapping[str, str], Any], object], env_value: str | None, parser_value: Any) -> dict:

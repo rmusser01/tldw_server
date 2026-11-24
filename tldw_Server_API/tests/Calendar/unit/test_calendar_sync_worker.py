@@ -380,7 +380,7 @@ async def test_unsafe_persisted_custom_timezone_reports_partial_later_view(
 async def test_import_preserves_master_and_detached_occurrences_across_refresh(calendar_db: CalendarDatabase) -> None:
     from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
     from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
-    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewFilters, CalendarViewService
 
     fixture = _create_sync_fixture(calendar_db)
     events = CalDavProvider().parse_vevents("""BEGIN:VCALENDAR
@@ -421,7 +421,8 @@ END:VCALENDAR""")
     )
     assert {row.source_uid: row.id for row in refreshed} == first_ids
     result = await CalendarViewService(calendar_service=CalendarService(db=calendar_db)).agenda(
-        actor_user_id=1, start_at="2026-06-01T00:00:00Z", end_at="2026-06-12T00:00:00Z"
+        actor_user_id=1, start_at="2026-06-01T00:00:00Z", end_at="2026-06-12T00:00:00Z",
+        filters=CalendarViewFilters(include_scheduled_tasks=False),
     )
     assert [(entry.title, entry.start_at) for entry in result.items] == [
         ("Daily", "2026-06-05T09:00:00+00:00"),
@@ -455,7 +456,7 @@ END:VCALENDAR""")
 async def test_imported_all_day_until_dates_expand_with_exclusions(calendar_db: CalendarDatabase) -> None:
     from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
     from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
-    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewFilters, CalendarViewService
 
     fixture = _create_sync_fixture(calendar_db)
     events = CalDavProvider().parse_vevents("""BEGIN:VCALENDAR
@@ -468,7 +469,8 @@ END:VEVENT
 END:VCALENDAR""")
     _upsert_events(calendar_db, binding=calendar_db.get_external_binding(fixture.binding_id), events=events)
     result = await CalendarViewService(calendar_service=CalendarService(db=calendar_db)).agenda(
-        actor_user_id=1, start_at="2026-06-05T12:00:00Z", end_at="2026-06-09T00:00:00Z"
+        actor_user_id=1, start_at="2026-06-05T12:00:00Z", end_at="2026-06-09T00:00:00Z",
+        filters=CalendarViewFilters(include_scheduled_tasks=False),
     )
     assert [item.start_at for item in result.items] == ["2026-06-05", "2026-06-07", "2026-06-08"]
     assert result.partial is False
