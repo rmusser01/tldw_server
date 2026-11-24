@@ -140,7 +140,7 @@ async def test_handle_study_pack_job_rolls_back_late_persistence_failures(
         original_add_study_pack_cards(study_pack_id, flashcard_uuids)
         raise CharactersRAGDBError("membership write failed")
 
-    monkeypatch.setattr(db, "add_study_pack_cards", fail_membership_insert)
+    monkeypatch.setattr(db.flashcard_store, "add_study_pack_cards", fail_membership_insert)
 
     with pytest.raises(CharactersRAGDBError, match="membership write failed"):
         await worker_mod.handle_study_pack_job(_fake_job())

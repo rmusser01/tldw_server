@@ -84,6 +84,26 @@ def test_collision_name_is_listed_not_rewritten(tmp_path: Path, capsys: pytest.C
     assert "collision get_x" in capsys.readouterr().out
 
 
+def test_collision_name_is_rewritten_inside_the_class_only(tmp_path: Path) -> None:
+    root = _seed(tmp_path, {"tldw_Server_API/app/api/other.py": "class Other:\n    def get_x(self): ...\n", APP: "def f(db):\n    return db.get_x()\n"})
+    before = _text(root, APP)
+    assert _callers(root) == 0
+    assert "self.s_store.get_x()" in _text(root, DB)  # self in CharactersRAGDB can only be its own method
+    assert _text(root, APP) == before  # every other receiver keeps the collision skip
+
+
+def test_an_imported_module_is_not_a_db_receiver(tmp_path: Path) -> None:
+    root = _seed(
+        tmp_path,
+        {
+            "tldw_Server_API/app/api/mod.py": "def get_x(): ...\n",
+            APP: "from tldw_Server_API.app.api import mod as mod_alias\nimport json\n\n\ndef f(db):\n    return mod_alias.get_x(), db.get_x()\n",
+        },
+    )
+    assert _callers(root) == 0
+    assert "mod_alias.get_x(), db.s_store.get_x()" in _text(root, APP)
+
+
 def test_unusual_receiver_is_reported(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _seed(tmp_path)
     (root / APP).parent.mkdir(parents=True)

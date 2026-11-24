@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as database_module
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import flashcard_store as flashcard_store_module
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
@@ -22,6 +23,7 @@ def fixed_analytics_clock(monkeypatch):
             return datetime(2026, 9, 16, 12, tzinfo=timezone.utc).astimezone(tz)
 
     monkeypatch.setattr(database_module, "datetime", FixedDatetime)
+    monkeypatch.setattr(flashcard_store_module, "datetime", FixedDatetime)
 
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])

@@ -469,21 +469,16 @@ def test_workspace_methods_live_on_the_store() -> None:
     assert not hasattr(WorkspaceStore, "__getattr__")  # nosec B101
 
 
-def test_flashcard_facade_forwards_moving_names_at_call_time() -> None:
-    """PR J1: ``db.flashcard_store.<m>`` reads ``db.<m>`` when called, so an instance patch of the DB stays live."""
+def test_flashcard_methods_live_on_the_store() -> None:
+    """PR J2: the flashcard bodies moved into ``FlashcardStore``, which no longer forwards to the DB."""
+    import ast as _ast
+
     from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
 
-    db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db.flashcard_store = FlashcardStore(db.ctx)
-    patched = object()
-    db.get_deck = patched  # type: ignore[method-assign]
-    assert db.flashcard_store.get_deck is patched  # nosec B101
-
-
-def test_flashcard_facade_rejects_other_names() -> None:
-    from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
-
-    db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db.flashcard_store = FlashcardStore(db.ctx)
-    with pytest.raises(AttributeError):
-        db.flashcard_store.add_note  # noqa: B018
+    manifest = _ast.literal_eval(
+        Path("Helper_Scripts/chacha_split/manifests/t12_flashcards.py").read_text().split("MANIFEST = ", 1)[1]
+    )
+    names = manifest["names"]
+    assert [n for n in names if n in vars(CharactersRAGDB)] == []  # nosec B101
+    assert [n for n in names if n not in vars(FlashcardStore)] == []  # nosec B101
+    assert not hasattr(FlashcardStore, "__getattr__")  # nosec B101

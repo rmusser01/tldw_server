@@ -107,8 +107,16 @@ MANIFEST = {
         "supersede_study_pack",
     ],
     "shims": [],
+    "class_constants": [
+        "_STUDY_PACK_JSON_FIELDS",
+        "_SUGGESTION_SNAPSHOT_JSON_FIELDS",
+        "_SAFE_SUGGESTION_PAYLOAD_EXACT_KEYS",
+        "_SAFE_SUGGESTION_PAYLOAD_SUFFIXES",
+        "_SAFE_SUGGESTION_PAYLOAD_MAX_TEXT_LENGTH",
+        "_SAFE_SUGGESTION_EVIDENCE_REASONS",
+    ],
     "constants": [],
     "rewrites": {},
     "renames": {},
-    "structural": [],
+    "structural": ["__init__"],  # T12 m1: the FlashcardStore import sorted among its neighbours
 }

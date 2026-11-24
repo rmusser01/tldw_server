@@ -1681,8 +1681,8 @@ def test_get_attempt_remediation_conversions_marks_orphaned_linked_flashcards(
     def fail_single_lookup(_uuid: str):
         raise AssertionError("Expected remediation orphan detection to use batch flashcard lookup.")
 
-    monkeypatch.setattr(quizzes_db, "get_flashcards_by_uuids", track_batch_lookup)
-    monkeypatch.setattr(quizzes_db, "get_flashcard", fail_single_lookup)
+    monkeypatch.setattr(quizzes_db.flashcard_store, "get_flashcards_by_uuids", track_batch_lookup)
+    monkeypatch.setattr(quizzes_db.flashcard_store, "get_flashcard", fail_single_lookup)
 
     response = client_with_quizzes_db.get(
         f"/api/v1/quizzes/attempts/{attempt_id}/remediation-conversions",

@@ -302,8 +302,8 @@ def test_convert_quiz_remediation_questions_translates_unique_violation_to_confl
             ],
         ),
     )
-    monkeypatch.setattr(quizzes_db, "get_deck", lambda deck_id: {"id": deck_id, "name": "Target Deck", "deleted": False})
-    monkeypatch.setattr(quizzes_db, "add_flashcards_bulk", lambda payloads: ["fc-race-1"])
+    monkeypatch.setattr(quizzes_db.flashcard_store, "get_deck", lambda deck_id: {"id": deck_id, "name": "Target Deck", "deleted": False})
+    monkeypatch.setattr(quizzes_db.flashcard_store, "add_flashcards_bulk", lambda payloads: ["fc-race-1"])
     monkeypatch.setattr(quizzes_db, "transaction", lambda: _FakeTransaction())
 
     with pytest.raises(ConflictError):

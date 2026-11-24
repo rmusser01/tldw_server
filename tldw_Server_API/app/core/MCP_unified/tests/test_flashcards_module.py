@@ -6,7 +6,9 @@ import pytest
 
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.flashcards_module import FlashcardsModule
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.DB_Management.chacha.context import ChaChaContext
+from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 
 
 class FakeFlashcardsDB:
@@ -49,8 +51,7 @@ class FakeFlashcardsDB:
         include_workspace_items=False,
         include_deleted=False,
     ):
-        clause, params, _ = CharactersRAGDB._flashcard_visibility_filter(  # type: ignore[misc]
-            self,
+        clause, params, _ = FlashcardStore(ChaChaContext(self))._flashcard_visibility_filter(  # type: ignore[arg-type]
             deck_id=deck_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,

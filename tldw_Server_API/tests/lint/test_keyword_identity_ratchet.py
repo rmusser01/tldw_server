@@ -81,9 +81,10 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Character_Chat/modules/persona_exemplar_selector.py": 1,
     "tldw_Server_API/app/core/Character_Chat/world_book_manager.py": 2,
     "tldw_Server_API/app/core/Chat/conversation_enrichment.py": 4,
-    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": 2,
+    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": 1,
     "tldw_Server_API/app/core/DB_Management/chacha/character_store.py": 4,
     "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py": 1,
+    "tldw_Server_API/app/core/DB_Management/chacha/flashcard_store.py": 1,  # bump: moved from ChaChaNotes_DB (TASK-13950.22 T13)
     "tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py": 5,
     "tldw_Server_API/app/core/DB_Management/chacha/note_semantic_store.py": 1,
     "tldw_Server_API/app/core/DB_Management/chacha/note_store.py": 1,  # "tag:" prefix check in _normalize_graph_tag_filter, not identity

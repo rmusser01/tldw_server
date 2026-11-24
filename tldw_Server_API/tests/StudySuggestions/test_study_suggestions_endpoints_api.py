@@ -404,7 +404,7 @@ def test_snapshot_live_evidence_db_failure_marks_source_unavailable(
     def fail_get_deck(deck_id_arg: int):
         raise CharactersRAGDBError(f"deck lookup failed for {deck_id_arg}")
 
-    monkeypatch.setattr(db, "get_deck", fail_get_deck)
+    monkeypatch.setattr(db.flashcard_store, "get_deck", fail_get_deck)
 
     response = client.get(f"/api/v1/study-suggestions/snapshots/{snapshot_id}")
 
