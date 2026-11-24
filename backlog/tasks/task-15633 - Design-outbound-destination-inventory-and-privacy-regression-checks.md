@@ -29,6 +29,8 @@ Specify a required CI and local check for new outbound destinations and assets d
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: yes. Proposed ADR-097 adds a durable CI declaration and strict-mode release policy alongside ADR-026, ADR-030, and ADR-090. The written design records the approved order: CI/local gate first, broader coverage second, deployment-wide strict modes last. Awaiting review of the written spec before implementation planning. Bandit is not applicable to this documentation-only scope.
+Written-spec review findings addressed at the requester’s direction. Increment 1 now requires the shipped browser setup wizard, transport observation for one opt-in download, and an exact local fixture allowlist. Later increments specify approval authority, ledger access and unknown ownership, and denial of new sends on open sessions after revocation or expiry. The proposed ADR records these boundaries. Work in this revision is documentation only.
+Verification for the revision: reviewed all five changes against the spec and ADR, checked Markdown links and placeholders, and passed Backlog canonical-format and Git whitespace checks. No runtime code changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

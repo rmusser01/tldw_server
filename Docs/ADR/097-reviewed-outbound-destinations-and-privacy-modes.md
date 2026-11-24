@@ -26,6 +26,8 @@ App-controlled requests can originate in the API, workers, installers, native li
 ## Consequences
 
 - Use the existing required CI contexts and a locally runnable entry point. Keep this compatible with the proposed CI tiers in [ADR-096](096-tiered-development-and-release-ci.md).
+- Default smoke scenarios permit only named local fixtures. A download counts as destination-verified when the check observes the SDK-selected origin and redirect hops at the transport boundary.
 - Keep product declarations separate from instance-local approvals. Strict admission composes with [ADR-026](026-security-outbound-egress-and-ssrf-policy.md) and preserves the scoped local endpoint rules in [ADR-030](030-configured-local-llm-egress-policy.md) and [ADR-090](090-configured-searx-egress-policy.md).
+- Reserve deployment-wide approvals for platform administrators and deployment operators. Tenant approvals require explicitly delegated tenant administrator authority. Expired or effectively revoked approvals cannot authorize new sends over an existing session.
 - Clearly report which scenarios and transports produced evidence. Require coverage or fail-closed handling for every enabled boundary before offering deployment-wide strict modes. Use audit as the compatibility default. Loopback-only offline mode excludes sibling network services.
-- Keep observed contact history local, bounded, access-controlled, and separate from external telemetry. Track policy decisions separately from observed contacts.
+- Keep observed contact history local, bounded, and separate from external telemetry. Scope reads and exports by trusted ownership and administrator authority. Track policy decisions separately from observed contacts.
