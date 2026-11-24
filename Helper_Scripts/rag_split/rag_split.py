@@ -22,6 +22,8 @@ read with ``ast.literal_eval`` and never imported. Keys (all optional but ``base
     state_init   "state = ..."                               one statement inserted right after the first statement after the docstring
     imports      ["from .x import Y"]                        module-level imports added after the file's last import
     entry_split  true
+    entry_doc    str: the docstring of ``run_rag_pipeline`` (unset: it has none, and its body starts at the first statement)
+    shim_doc     str: replaces the docstring of the shim (unset: the shim keeps the original one)
     file, func, pkg    the pipeline file, function and package directory (defaults below; tests override)
 
 ``apply`` edits the working tree as text edits at AST positions. ``verify`` rebuilds the expected result
@@ -44,8 +46,10 @@ Limits:
 * A leaf in the same module as its wrapper is called bare (``leaf(rcfg, state)``); in another module it is
   ``_module.leaf(rcfg, state)`` with ``from . import module as _module``.
 * ``entry_split`` needs ``rcfg = <expr>`` as the first statement after the docstring. The shim becomes
-  ``return [await] run_rag_pipeline(<expr>)``; the old body, docstring included, moves into
-  ``run_rag_pipeline(rcfg)``.
+  ``return [await] run_rag_pipeline(<expr>)``; the old body, minus its docstring, moves into
+  ``run_rag_pipeline(rcfg)``. The docstring stays on the shim, or is replaced by ``shim_doc``; ``run_rag_pipeline``
+  gets ``entry_doc`` as its docstring or none. ``verify`` rebuilds both docstrings from the manifest and compares
+  them exactly, so a missing, extra, non-string or differing docstring is a difference.
 * Scopes are matched to symtable by (name, line) in visit order; two lambdas on one line can swap.
 """
 
@@ -82,6 +86,8 @@ DEFAULTS: dict[str, Any] = {
     "moves": [],
     "cells": [],
     "entry_split": False,
+    "entry_doc": None,
+    "shim_doc": None,
     "prologue": "",
     "state_init": "",
     "imports": [],
@@ -354,6 +360,11 @@ def load_manifest(path: Path) -> dict[str, Any]:
             for key in ("prologue", "state_init"):
                 if m[key] and len(ast.parse(m[key]).body) != 1:
                     raise SplitError(f"{path}: {key} must be exactly one statement")
+            for key in ("entry_doc", "shim_doc"):
+                if m[key] is not None and not isinstance(m[key], str):
+                    raise SplitError(f"{path}: {key} must be a str")
+                if m[key] is not None and not m["entry_split"]:
+                    raise SplitError(f"{path}: {key} needs entry_split")
             return m
     raise SplitError(f"{path}: no MANIFEST literal")
 
@@ -1046,14 +1057,26 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             return out
         aw = isinstance(fn, ast.AsyncFunctionDef)
         new = ast.parse(f"{'async ' if aw else ''}def run_rag_pipeline(rcfg: RagRunConfig):\n    pass").body[0]
-        new.body = body[:i0] + body[i0 + 1 :]
+        new.body = ([doc_stmt(m["entry_doc"])] if m["entry_doc"] is not None else []) + body[i0 + 1 :]
         new.returns = fn.returns
         shim = ast.Return(value=ast.Call(ast.Name("run_rag_pipeline", ast.Load()), [s1.value], []))
         if aw:
             shim.value = ast.Await(shim.value)
-        fn.body = body[:i0] + [shim]
+        head = [doc_stmt(m["shim_doc"])] if m["shim_doc"] is not None else body[:i0]
+        fn.body = head + [shim]
         out.entry = new
     return out
+
+
+def doc_stmt(text: str) -> ast.stmt:
+    return ast.Expr(ast.Constant(text))
+
+
+def doc_text(text: str, indent: str = "    ") -> list[str]:
+    """Source rows of a docstring statement whose value is exactly ``text``."""
+    if '"""' in text or "\\" in text or text.endswith('"'):
+        return [indent + repr(text)]
+    return (indent + '"""' + text + '"""').split("\n")
 
 
 def docstring_len(fn: Any) -> int:
@@ -1532,7 +1555,7 @@ def run_apply(root: Path, m: dict) -> list[str]:
         frows[first.end_lineno : first.end_lineno] = [" " * first.col_offset + m["state_init"]]
         new_f = "\n".join(frows)
     if m["entry_split"]:
-        new_f = split_entry(new_f)
+        new_f = split_entry(new_f, m)
     rows = rows_text[: f_lo - 1] + new_f.rstrip("\n").split("\n") + rows_text[f_hi:]
     new_text = "\n".join(rows)
     mods = list(dict.fromkeys([x.module for x in moves] + (["run_state"] if m["hoist"] else [])))
@@ -1578,7 +1601,7 @@ def run_apply(root: Path, m: dict) -> list[str]:
     return []
 
 
-def split_entry(f_text: str) -> str:
+def split_entry(f_text: str, m: dict) -> str:
     tree = ast.parse(f_text)
     f = tree.body[0]
     i0 = 1 if isinstance(f.body[0], ast.Expr) and isinstance(getattr(f.body[0], "value", None), ast.Constant) else 0
@@ -1587,10 +1610,14 @@ def split_entry(f_text: str) -> str:
     rows = f_text.split("\n")
     value = ast.get_source_segment(f_text, s1.value)
     ret = f" -> {ast.get_source_segment(f_text, f.returns)}" if f.returns else ""
-    shim = rows[: stmt_start(s1) - 1] + [f"    return {'await ' if aw else ''}run_rag_pipeline({value})"]
+    head = rows[: stmt_start(s1) - 1]
+    if m["shim_doc"] is not None:
+        d0 = f.body[0].lineno - 1 if i0 else stmt_start(s1) - 1
+        head = head[:d0] + doc_text(m["shim_doc"]) + ([""] if i0 == 0 else head[f.body[0].end_lineno :])
+    shim = head + [f"    return {'await ' if aw else ''}run_rag_pipeline({value})"]
     new = ["", "", f"{'async ' if aw else ''}def run_rag_pipeline(rcfg: RagRunConfig){ret}:"]
-    if i0:
-        new += rows[f.body[0].lineno - 1 : f.body[0].end_lineno]
+    if m["entry_doc"] is not None:
+        new += doc_text(m["entry_doc"]) + [""]
     new += rows[s1.end_lineno : f.end_lineno]
     return "\n".join(shim + new) + "\n"
 
