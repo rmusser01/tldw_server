@@ -948,7 +948,7 @@ def dispatch_license(gh: GhApi, pr: PrState, log: Callable[[str], None]) -> None
 
     Any error re-raises: the dispatch runs on dev, so a refusal is never the PR's fault.
     """
-    dispatch(gh, LICENSE.workflow, BASE, {"pr": str(pr.number)})
+    dispatch(gh, LICENSE.workflow, BASE, {"pr": str(pr.number), "head": pr.head_sha})
     log(f"  dispatched {LICENSE.workflow} on {BASE} for #{pr.number}")
 
 
@@ -1570,6 +1570,32 @@ def _retry(gh: GhApi, pr: PrState, action: Action, log: Callable[[str], None], s
     return False
 
 
+def _license_dispatch_live(gh: GhApi, pr: PrState) -> bool:
+    """Find a trusted dispatch for this PR/head even before a runner posts its status.
+
+    A dispatch's head_sha is dev's source commit, so the intended PR head comes from
+    its run title. This identity suppresses duplicate work; it never counts as a pass.
+    Filter live statuses at the API to avoid paging through completed dispatch history.
+    Read failures and the existing pagination cap propagate before any replacement.
+    """
+    title = f"Frontend license gate: PR #{pr.number} at {pr.head_sha}"
+    path = f"repos/{REPO}/actions/workflows/{LICENSE.workflow}/runs?event=workflow_dispatch&branch={BASE}"
+    # Read pre-run states first: queued -> in_progress between reads must remain visible.
+    for status in ("requested", "pending", "waiting", "queued", "in_progress"):
+        runs = _rest_pages(gh, f"{path}&status={status}", "workflow_runs")
+        if any(
+            run.get("display_title") == title
+            and run.get("event") == "workflow_dispatch"
+            and _workflow_name(run) == LICENSE.workflow
+            and run.get("head_branch") == BASE
+            and (run.get("head_repository") or {}).get("full_name") == REPO
+            and run.get("status") in LIVE_RUN_STATUSES
+            for run in runs
+        ):
+            return True
+    return False
+
+
 def _appeared(gh: GhApi, pr: PrState, names: tuple[str, ...], now: datetime) -> tuple[str, ...]:
     """The named contexts that have a live run on the head right now."""
     kinds = {c.kind for c in CONTEXTS if c.name in names}
@@ -1578,7 +1604,10 @@ def _appeared(gh: GhApi, pr: PrState, names: tuple[str, ...], now: datetime) -> 
         fresh += required_run_stand_ins(runs_on(gh, pr.head_sha), ())
     if "status" in kinds:
         fresh += read_statuses(gh, pr.head_sha)
-    return tuple(n for n in names if context_state([c for c in fresh if c.context == n], now) == RUNNING)
+    appeared = tuple(n for n in names if context_state([c for c in fresh if c.context == n], now) == RUNNING)
+    if LICENSE.name in names and LICENSE.name not in appeared and _license_dispatch_live(gh, pr):
+        appeared += (LICENSE.name,)
+    return appeared
 
 
 def apply(
