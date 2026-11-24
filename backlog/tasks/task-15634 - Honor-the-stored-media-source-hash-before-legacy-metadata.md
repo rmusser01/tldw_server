@@ -1,10 +1,12 @@
 ---
 id: TASK-15634
 title: Honor the stored media source hash before legacy metadata
-status: In Progress
+status: Done
 labels:
 - media
 - bug
+references:
+- https://github.com/rmusser01/tldw_server/pull/3602
 ---
 
 ## Description
@@ -29,6 +31,7 @@ Regression tests reproduced stale metadata overriding the stored hash and a fail
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+An indexed hash is authoritative. Legacy fallback is limited to NULL rows unless schema inspection confirms the column is absent. Tests verify stale hashes, the indexed path, NULL rows, the old schema, and schema inspection failure.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

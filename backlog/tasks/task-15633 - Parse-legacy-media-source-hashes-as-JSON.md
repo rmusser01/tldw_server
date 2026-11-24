@@ -1,10 +1,12 @@
 ---
 id: TASK-15633
 title: Parse legacy media source hashes as JSON
-status: In Progress
+status: Done
 labels:
 - media
 - bug
+references:
+- https://github.com/rmusser01/tldw_server/pull/3602
 ---
 
 ## Description
@@ -29,6 +31,7 @@ Regression tests reproduced the whitespace and malformed JSON behavior before th
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The media lookup repository parses legacy metadata and matches its top-level hash. Tests cover compact, spaced, malformed, nested, and deeply nested documents. The draft PR contains the fix and the updated design note.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
