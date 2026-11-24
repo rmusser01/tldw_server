@@ -255,7 +255,7 @@ The controller's fix-round-2 rulings (binding):
       - That removes Task 4's pinned getter reach (−1).
       - The bootstrap writes `ctx.db.runtime_schema_version`, so the context needs no setter and makes no write reach.
       - `_POSTGRES_SCHEMA_VERSION` must stay a literal class attribute, because tests patch it 49 times. A property would cost a method, so it is the one new pin (+1).
-      - Net 0: H stays at 296, and no fifth bump is needed.
+      - Net 0: H measured 298 at base and 295 after (six store reaches moved to the context, three new pins); no fifth bump was needed.
     - Tasks 6-8 read only already-pinned attributes (`_SCHEMA_NAME`, `_CURRENT_SCHEMA_VERSION`; measured), so they add no pin.
 30. **R30, free names are watched (N-2, closes I1).** `patches` and `check` also watch the module-level names each manifest's moved bodies import from ChaChaNotes_DB's namespace. A patch of `ChaChaNotes_DB.<name>` whose reader now reads `<newmodule>.<name>` is inert.
     - There are four known sites at base, retargeted in their tasks:
@@ -972,7 +972,7 @@ A DB private helper whose last reference outside the class is gone keeps a forwa
 - Modify: `context.py`:
   - `postgres_schema_version -> int` (reads `_POSTGRES_SCHEMA_VERSION`);
   - `runtime_schema_version` now reads the public `self._db.runtime_schema_version`;
-  - `PINNED_DB_PRIVATES` gains `_POSTGRES_SCHEMA_VERSION` and loses `_runtime_schema_version`: net 0, so reaches stay 296;
+  - `PINNED_DB_PRIVATES` gains `_POSTGRES_SCHEMA_VERSION` and loses `_runtime_schema_version`: reaches measured 298 at base and 295 after (six store reaches moved to the context, three new pins);
   - moved bootstrap code writes `ctx.db.runtime_schema_version = N`, a public attribute, so the context needs no setter;
   - plus any member the fail-closed list asks for. A new pin must be offset in this PR (R29).
 - Modify: `function_size_baseline.json` (re-key `_initialize_schema_sqlite_legacy` and `_initialize_schema_postgres`, with its body)
@@ -1000,7 +1000,7 @@ A DB private helper whose last reference outside the class is gone keeps a forwa
 - [ ] **Step 2: Run them, and expect FAIL** for the context tests.
 - [ ] **Step 3: Generate and apply** `select init` plus the `_initialize_schema_postgres` body, then the structural deletion.
 - [ ] **Step 4: Run C2's checks.** The only differences are R18's deleted lines. `patches` and `check` are 0.
-- [ ] **Step 5: Bookkeeping,** as in Task 6. Expect about 23,370 file lines, about 588 methods and reaches at 296, the same as base. The surface ratchet must pass without a reach bump.
+- [ ] **Step 5: Bookkeeping,** as in Task 6. Expect about 23,370 file lines, about 588 methods and reaches at or below base (measured 298 -> 295). The surface ratchet must pass without a reach bump.
 - [ ] **Step 6: Verify.** C1-C5, plus C6 with PROOF_BOOT and `TLDW_TEST_POSTGRES_REQUIRED=1`, and OWNER_ISO. Record each wall time. Bandit.
 - [ ] **Step 7: Commit** `refactor(chacha): schema bootstrap moves to chacha/schema_bootstrap.py (TASK-13950.22 PR H)`.
 
