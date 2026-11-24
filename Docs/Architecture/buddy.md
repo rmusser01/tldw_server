@@ -8,7 +8,8 @@ All paths under `tldw_Server_API/` unless noted.
 
 | Concern | File | Key symbols |
 | --- | --- | --- |
-| Service | `app/core/Buddy/service.py` | `BuddyService` — create (starter or persona-pack source), asset reads with sha256 re-verification, target resolution (ownership-checked), roleplay-resume effective completion ("no server defaults apply"), attachments, activity projection, acknowledgements; snapshot limits 256 assets / 64 MiB |
+| Service | `app/core/Buddy/service.py` | `BuddyService` — create from starter art, an owned Persona pack, or a reviewed native upload. Asset reads verify the SHA-256. The service resolves authorized targets, roleplay completion settings, attachments, activity and acknowledgements. |
+| Native upload | `app/core/Buddy/native_pack.py`, `app/api/v1/endpoints/buddies.py` | The two multipart upload routes bound the request before parsing. Preview and import use the same archive and snapshot validation. Import requires the reviewed SHA-256 and saves into the ordinary Buddy store on SQLite and PostgreSQL. Snapshot limits are 256 assets and 64 MiB of artwork. |
 | Turns runtime | `app/core/Buddy/turns.py` | `BuddyTurnRuntime` — capacity 64 (16 per user), 120 s timeout, idempotency digests, per-(user, conversation) FIFO drain, 5 s lease heartbeats, credentials cleared after execution |
 | Publication | `publication.py` | the `current_buddy_publication` ContextVar — "cannot be supplied in HTTP input" |
 | Profile DB | `app/core/DB_Management/Buddy_DB.py` | `buddy_profiles/assets/attachments/result_acknowledgements`; optimistic `expected_version` updates |

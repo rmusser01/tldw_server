@@ -8,9 +8,10 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from tldw_Server_API.app.core.Buddy.buddy_schemas import BuddyCreate
+from tldw_Server_API.app.core.Buddy.native_pack import MAX_BUDDY_ART_BYTES, MAX_BUDDY_ASSETS, read_buddy_archive
 from tldw_Server_API.app.core.DB_Management.Buddy_DB import BuddyRepository
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, NotFoundError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -21,9 +22,6 @@ from tldw_Server_API.app.core.Persona.visual_manifest_assets import remap_visual
 from tldw_Server_API.app.core.Persona.visual_service import MAX_VISUAL_UPLOAD_BYTES, PersonaVisualService
 from tldw_Server_API.app.core.Persona.visual_starter_catalog import PersonaVisualStarterCatalogService
 from tldw_Server_API.app.core.Persona.visuals import validate_visual_manifest
-
-MAX_BUDDY_ASSETS = 256
-MAX_BUDDY_ART_BYTES = 64 * 1024 * 1024
 
 
 def _now() -> str:
@@ -160,6 +158,42 @@ class BuddyService:
                 ):
                     raise ValueError("Source artwork checksum mismatch")
                 source_assets.append((asset["id"], content, asset["mime_type"]))
+        return self._create_snapshot(
+            name=request.name,
+            manifest=manifest,
+            source_assets=source_assets,
+            attribution=attribution,
+            optional_persona_id=request.optional_persona_id,
+            display_mode=request.display_mode,
+        )
+
+    def preview_archive(self, archive: BinaryIO) -> dict[str, Any]:
+        """Validate a native archive without publishing artwork or preferences."""
+        pack = read_buddy_archive(archive)
+        manifest, assets = self._validate_snapshot(pack.manifest, pack.assets)
+        return {
+            "archive_sha256": pack.sha256,
+            "name": pack.name,
+            "asset_count": len(assets),
+            "state_count": len(manifest["states"]),
+            "artwork": manifest.get(ARTWORK_MANIFEST_KEY),
+        }
+
+    def import_archive(self, archive: BinaryIO, *, reviewed_sha256: str) -> dict[str, Any]:
+        """Publish a native archive as an owned, unattached snapshot."""
+        pack = read_buddy_archive(archive, reviewed_sha256=reviewed_sha256)
+        return self._create_snapshot(
+            name=pack.name,
+            manifest=pack.manifest,
+            source_assets=pack.assets,
+            attribution={"source_kind": "archive", "archive_sha256": pack.sha256, "title": pack.name},
+        )
+
+    def _validate_snapshot(
+        self,
+        manifest: dict[str, Any],
+        source_assets: list[tuple[str, bytes, str]],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         if (
             not source_assets
             or len(source_assets) > MAX_BUDDY_ASSETS
@@ -167,7 +201,7 @@ class BuddyService:
         ):
             raise ValueError("Artwork exceeds Buddy snapshot limits")
 
-        buddy_id = uuid.uuid4().hex
+        visual_service = PersonaVisualService(self.db)
         assets = []
         mapped_ids = {}
         for source_id, content, mime_type in source_assets:
@@ -193,8 +227,22 @@ class BuddyService:
             available_asset_dimensions={asset["id"]: (asset["width"], asset["height"]) for asset in assets},
             require_activatable=True,
         )
-        if ARTWORK_MANIFEST_KEY in validation.manifest:
-            attribution["artwork"] = validation.manifest[ARTWORK_MANIFEST_KEY]
+        return validation.manifest, assets
+
+    def _create_snapshot(
+        self,
+        *,
+        name: str,
+        manifest: dict[str, Any],
+        source_assets: list[tuple[str, bytes, str]],
+        attribution: dict[str, Any],
+        optional_persona_id: str | None = None,
+        display_mode: str = "dynamic",
+    ) -> dict[str, Any]:
+        manifest, assets = self._validate_snapshot(manifest, source_assets)
+        if ARTWORK_MANIFEST_KEY in manifest:
+            attribution["artwork"] = manifest[ARTWORK_MANIFEST_KEY]
+        buddy_id = uuid.uuid4().hex
         directory: Path | None = None
         try:
             for asset, (_, content, _) in zip(assets, source_assets, strict=True):
@@ -206,10 +254,10 @@ class BuddyService:
             self.repository.create(
                 {
                     "id": buddy_id,
-                    "name": request.name,
-                    "optional_persona_id": request.optional_persona_id,
-                    "display_mode": request.display_mode,
-                    "manifest": validation.manifest,
+                    "name": name,
+                    "optional_persona_id": optional_persona_id,
+                    "display_mode": display_mode,
+                    "manifest": manifest,
                     "attribution": attribution,
                     "created_at": _now(),
                 },

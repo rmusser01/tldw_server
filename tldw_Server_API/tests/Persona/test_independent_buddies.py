@@ -53,6 +53,26 @@ def _create(client, **updates):
     return response.json()
 
 
+@pytest.mark.parametrize("route", ["import-preview", "import"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_buddy_upload_rejects_oversized_multipart_request(db, monkeypatch, route, stream):
+    endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.buddies")
+    monkeypatch.setattr(endpoint, "MAX_BUDDY_REQUEST_BYTES", 1024, raising=False)
+    parts = [
+        b'--pack\r\nContent-Disposition: form-data; name="archive"; filename="pack.zip"\r\n\r\n',
+        b"x" * 2048,
+        b"\r\n--pack--\r\n",
+    ]
+    with _client(db) as client:
+        response = client.post(
+            f"/api/v1/buddies/{route}",
+            content=iter(parts) if stream else b"".join(parts),
+            headers={"Content-Type": "multipart/form-data; boundary=pack"},
+        )
+        assert response.status_code == 413, response.text
+        assert client.get("/api/v1/buddies").json() == {"buddies": []}
+
+
 def _seed_v65_conversation(database: CharactersRAGDB, title: str) -> str:
     """Insert a row using only columns that existed in the v65 schema."""
     conversation_id = "retained-v65"

@@ -37,6 +37,19 @@ export type BuddySource =
   | { kind: "starter"; starter_id: string }
   | { kind: "persona_pack"; persona_id: string; pack_id: string }
 
+export type BuddyImportPreview = {
+  name: string
+  archive_sha256: string
+  asset_count: number
+  state_count: number
+  artwork: {
+    creator?: string
+    license?: string
+    source_url?: string
+    notices?: string
+  } | null
+}
+
 type BuddyReadOptions = { suppressBackendUnavailableEvent?: boolean }
 
 export async function buddyRequest<T>(
@@ -87,6 +100,25 @@ export const createBuddy = (body: {
   optional_persona_id?: string | null
   display_mode?: "dynamic" | "static"
 }) => buddyRequest<BuddyProfile>("", "POST", body)
+const uploadBuddyArchive = <T>(
+  path: "/api/v1/buddies/import-preview" | "/api/v1/buddies/import",
+  file: File,
+  fields?: { reviewed_sha256: string }
+) =>
+  tldwClient.upload<T>({
+    path,
+    method: "POST",
+    directFile: file,
+    fileFieldName: "archive",
+    fields,
+    timeoutMs: 130_000
+  })
+export const previewBuddyArchive = (file: File) =>
+  uploadBuddyArchive<BuddyImportPreview>("/api/v1/buddies/import-preview", file)
+export const importBuddyArchive = (file: File, reviewedSha256: string) =>
+  uploadBuddyArchive<BuddyProfile>("/api/v1/buddies/import", file, {
+    reviewed_sha256: reviewedSha256
+  })
 export const updateBuddy = (
   id: string,
   body: {

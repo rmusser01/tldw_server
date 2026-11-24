@@ -81,6 +81,16 @@ class BuddyList(BuddyModel):
     buddies: list[BuddyProfile]
 
 
+class BuddyImportPreview(BuddyModel):
+    """Return validated archive details before saving an independent Buddy."""
+
+    archive_sha256: str
+    name: BuddyName
+    asset_count: int
+    state_count: int
+    artwork: dict[str, Any] | None
+
+
 class BuddyAttachment(BuddyModel):
     """Select an existing conversation or workspace using bounded resource IDs.
 

@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   locale: "en-US",
   t: (_key: string, options: { defaultValue: string }) => options.defaultValue,
   createBuddy: vi.fn(),
+  previewBuddyArchive: vi.fn(),
+  importBuddyArchive: vi.fn(),
   putBuddyAttachment: vi.fn(),
   listChats: vi.fn(),
   listWorkspaces: vi.fn(),
@@ -31,6 +33,8 @@ vi.mock("react-i18next", () => ({
 }))
 vi.mock("@/services/buddies", () => ({
   createBuddy: mocks.createBuddy,
+  previewBuddyArchive: mocks.previewBuddyArchive,
+  importBuddyArchive: mocks.importBuddyArchive,
   putBuddyAttachment: mocks.putBuddyAttachment,
   resolveBuddyConversationTarget: mocks.resolveBuddyConversationTarget,
   buddyAssets: () => ({})
@@ -118,6 +122,58 @@ it("attaches existing artwork to a named conversation without requiring a Person
     })
   )
   expect(mocks.createBuddy).not.toHaveBeenCalled()
+})
+
+it("reviews a downloaded pack and reuses the saved avatar after attachment fails", async () => {
+  const digest = "a".repeat(64)
+  const file = new File(["archive"], "moss.tldw-persona-vpack")
+  mocks.previewBuddyArchive.mockResolvedValue({
+    name: "Moss",
+    archive_sha256: digest,
+    asset_count: 1,
+    state_count: 9,
+    artwork: {
+      creator: "tldw-project",
+      license: "Apache-2.0",
+      source_url: "https://example.com/moss"
+    }
+  })
+  mocks.importBuddyArchive.mockResolvedValue({ ...profile, id: "moss", name: "Moss" })
+  mocks.putBuddyAttachment.mockRejectedValueOnce(new Error("Stale attachment"))
+  const refresh = vi.fn()
+  const { rerender } = render(<BuddyManagementModal {...props} onRetryCollections={refresh} />)
+  await screen.findByRole("option", { name: "Research" })
+  fireEvent.change(screen.getByLabelText("Choose avatar pack"), {
+    target: { files: [file] }
+  })
+  expect(await screen.findByText("tldw-project")).toBeInTheDocument()
+  expect(screen.getByText("https://example.com/moss")).toBeInTheDocument()
+  expect(mocks.previewBuddyArchive).toHaveBeenCalledWith(file)
+  expect(mocks.importBuddyArchive).not.toHaveBeenCalled()
+
+  fireEvent.change(screen.getByLabelText("Conversation"), { target: { value: "chat" } })
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+  expect(await screen.findByRole("alert")).toHaveTextContent("Stale attachment")
+  expect(refresh).toHaveBeenCalledOnce()
+  expect(mocks.importBuddyArchive).toHaveBeenCalledWith(file, digest)
+  expect(screen.getByRole("button", { name: "Use Moss" })).toHaveAttribute("aria-pressed", "true")
+
+  rerender(
+    <BuddyManagementModal
+      {...props}
+      attachment={{ ...props.attachment, version: 1 }}
+      onRetryCollections={refresh}
+    />
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+  await waitFor(() => expect(mocks.putBuddyAttachment).toHaveBeenCalledTimes(2))
+  expect(mocks.putBuddyAttachment).toHaveBeenLastCalledWith({
+    expected_version: 1,
+    buddy_id: "moss",
+    scope_type: "conversation",
+    scope_id: "chat"
+  })
+  expect(mocks.importBuddyArchive).toHaveBeenCalledTimes(1)
 })
 
 it("resolves a composer conversation into its workspace before allowing Apply", async () => {

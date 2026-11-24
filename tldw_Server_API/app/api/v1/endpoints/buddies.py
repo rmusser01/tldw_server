@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi.routing import APIRoute
+from starlette.types import Message
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -19,11 +21,13 @@ from tldw_Server_API.app.api.v1.schemas.buddies import (
     BuddyConversationList,
     BuddyConversationSummary,
     BuddyCreate,
+    BuddyImportPreview,
     BuddyList,
     BuddyProfile,
     BuddyReplySettings,
     BuddyUpdate,
 )
+from tldw_Server_API.app.core.Buddy.native_pack import MAX_BUDDY_ARCHIVE_BYTES
 from tldw_Server_API.app.core.Buddy.service import BuddyService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import BuddyConflictError, BuddyNotFoundError
@@ -33,6 +37,40 @@ from tldw_Server_API.app.core.Persona.visual_starter_catalog import PersonaVisua
 router = APIRouter(dependencies=[Depends(check_rate_limit)])
 router.include_router(buddy_turns.router)
 ClientSlot = Annotated[str, Query(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
+MAX_BUDDY_REQUEST_BYTES = MAX_BUDDY_ARCHIVE_BYTES + 1024 * 1024
+
+
+class BuddyUploadRoute(APIRoute):
+    """Bound the request stream before multipart parsing can spool the file."""
+
+    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        handler = super().get_route_handler()
+
+        async def bounded_handler(request: Request) -> Response:
+            limit = MAX_BUDDY_REQUEST_BYTES
+            detail = "The avatar upload is too large."
+            declared = request.headers.get("content-length", "").lstrip("0")
+            if declared.isascii() and declared.isdecimal() and (
+                len(declared) > len(str(limit)) or int(declared) > limit
+            ):
+                raise HTTPException(status_code=413, detail=detail)
+            remaining = limit
+
+            async def bounded_receive() -> Message:
+                nonlocal remaining
+                message = await request.receive()
+                if message["type"] == "http.request":
+                    remaining -= len(message.get("body", b""))
+                    if remaining < 0:
+                        raise HTTPException(status_code=413, detail=detail)
+                return message
+
+            return await handler(Request(request.scope, receive=bounded_receive))
+
+        return bounded_handler
+
+
+_upload_router = APIRouter(route_class=BuddyUploadRoute)
 
 
 def get_buddy_service(
@@ -77,6 +115,33 @@ def create_buddy(body: BuddyCreate, service: BuddyService = Depends(get_buddy_se
     """Create an independent immutable artwork snapshot."""
     with _errors():
         return service.create(body)
+
+
+@_upload_router.post("/import-preview", response_model=BuddyImportPreview)
+def preview_buddy_archive(
+    archive: Annotated[UploadFile, File()],
+    response: Response,
+    service: BuddyService = Depends(get_buddy_service),
+) -> dict:
+    """Review the supplied native archive without creating a Buddy."""
+    with _errors():
+        preview = service.preview_archive(archive.file)
+    response.headers["Cache-Control"] = "private, no-store"
+    return preview
+
+
+@_upload_router.post("/import", response_model=BuddyProfile, status_code=201)
+def import_buddy_archive(
+    archive: Annotated[UploadFile, File()],
+    reviewed_sha256: Annotated[str, Form(pattern=r"^[a-f0-9]{64}$")],
+    service: BuddyService = Depends(get_buddy_service),
+) -> dict:
+    """Install the reviewed native archive as an independent Buddy."""
+    with _errors():
+        return service.import_archive(archive.file, reviewed_sha256=reviewed_sha256)
+
+
+router.include_router(_upload_router)
 
 
 @router.get("/conversation-targets/{conversation_id}", response_model=BuddyConversationSummary)

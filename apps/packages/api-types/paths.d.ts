@@ -368,6 +368,8 @@ export type ApiPath =
   | "/api/v1/buddies/attachment/conversations"
   | "/api/v1/buddies/conversation-targets/{conversation_id}"
   | "/api/v1/buddies/conversation-targets/{conversation_id}/reply-settings"
+  | "/api/v1/buddies/import"
+  | "/api/v1/buddies/import-preview"
   | "/api/v1/buddies/turns"
   | "/api/v1/buddies/turns/{turn_id}"
   | "/api/v1/buddies/turns/{turn_id}/stop"

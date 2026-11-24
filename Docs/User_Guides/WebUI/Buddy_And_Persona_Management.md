@@ -58,14 +58,19 @@ The full Persona Live session remains available in Persona Garden for its existi
 
 ## Downloaded avatar packs and credits
 
-Downloaded `.tldw-persona-vpack` files currently use the Persona import API;
-Avatar settings offers your existing avatars and ready-made artwork, without a
-file-upload control. After importing and reviewing a pack, create an independent
-copy through the [avatar API (Buddies)](https://github.com/rmusser01/tldw_server/blob/dev/Docs/API/Buddies.md), leave the optional Persona
-unset if desired, then select the new avatar and apply its target in Avatar settings.
+1. Open **Avatar settings** in WebUI or the extension. Under **Import an avatar
+   pack**, choose the downloaded `.tldw-persona-vpack` file.
+2. Review the pack name, contents and any artwork credits.
+3. Select a conversation or workspace and choose **Apply**. The artwork is
+   saved to **Your avatars** and attached to your selection. If the attachment
+   fails after saving, refresh and apply the saved avatar.
+
+This import works on SQLite and PostgreSQL and does not require a Persona.
+To import artwork into a Persona's own visual pack, use the Persona visual-pack
+editor or its preview and commit API. That import job still requires SQLite.
 
 Credited packs keep their embedded creator, license, source URL and notices
 through new imports, independent copies and native exports. Older imports may
 have lost those fields; recover them by re-importing the original download and
 making a new avatar copy. Keep the accompanying license files when the original
-archive did not embed notices. Import jobs currently require SQLite storage.
+archive did not embed notices.

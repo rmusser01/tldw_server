@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   getBuddyAttachment,
+  importBuddyArchive,
   listBuddies,
   listBuddyConversations,
   listBuddyActivity,
   listBuddyTurns,
+  previewBuddyArchive,
   putBuddyAttachment,
   readBuddyConversation
 } from "../buddies"
 
 const mocks = vi.hoisted(() => ({
   fetchWithAuth: vi.fn(),
+  upload: vi.fn(),
   requestWithCurrentConfig: vi.fn(),
   getChat: vi.fn(),
   listChatMessages: vi.fn(),
@@ -27,6 +30,26 @@ beforeEach(() => {
   })
 })
 describe("independent Buddy authority", () => {
+  it("keeps the native file on the direct upload transport for review and import", async () => {
+    const file = new File(["archive"], "moss.tldw-persona-vpack")
+    const digest = "a".repeat(64)
+    mocks.upload.mockResolvedValueOnce({ archive_sha256: digest }).mockResolvedValueOnce({ id: "moss" })
+    await expect(previewBuddyArchive(file)).resolves.toEqual({ archive_sha256: digest })
+    await expect(importBuddyArchive(file, digest)).resolves.toEqual({ id: "moss" })
+    expect(mocks.upload).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      path: "/api/v1/buddies/import-preview",
+      directFile: file,
+      fileFieldName: "archive"
+    }))
+    expect(mocks.upload).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      path: "/api/v1/buddies/import",
+      directFile: file,
+      fileFieldName: "archive",
+      fields: { reviewed_sha256: digest }
+    }))
+    expect(mocks.fetchWithAuth).not.toHaveBeenCalled()
+  })
+
   it("sends attachment version and scope without interpreting the client slot as authority", async () => {
     mocks.fetchWithAuth.mockResolvedValue({
       ok: true,
