@@ -14,6 +14,8 @@ read with ``ast.literal_eval`` and never imported. Keys (all optional but ``base
     hidden       {kwargs key: [group, default]}              ``kwargs.get("k", d)`` -> ``rcfg.<group>.k``
     publish      [closure name]                              ``state.<n> = <n>`` right after each def
     hoist        {closure name: method name}                 closure -> ``PipelineState`` method
+    classes      {local class: module class}                 a class defined in the function becomes a ``run_state`` class
+                                                             (its name must also be in ``rewrite``, as ``_run_state.<new>``)
     moves        [{"name", "module", "span": [a, b], "doc", "noqa": [line]}]
     cells        [[a, b]]                                    extra cells for ``shared``
     prologue     "rcfg = ..."                                one statement inserted first in the function, after its docstring
@@ -69,6 +71,7 @@ DEFAULTS: dict[str, Any] = {
     "hidden": {},
     "publish": [],
     "hoist": {},
+    "classes": {},
     "moves": [],
     "cells": [],
     "entry_split": False,
@@ -797,6 +800,26 @@ class UpTransform(ast.NodeTransformer):
         return node
 
 
+def binding_nodes(root: ast.AST) -> Iterator[tuple[str, ast.AST]]:
+    """Every ``(name, node)`` under ``root`` that binds a name: stores, parameters, imports, handlers, defs, matches."""
+    for n in ast.walk(root):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            yield n.id, n
+        elif isinstance(n, ast.arg):
+            yield n.arg, n
+        elif isinstance(n, ast.alias):
+            yield _bound(n), n
+        elif isinstance(n, (ast.Global, ast.Nonlocal)):
+            for x in n.names:
+                yield x, n
+        elif isinstance(n, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and n.name:
+            yield n.name, n
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            yield n.rest, n
+        elif isinstance(n, SCOPE_NODES) and getattr(n, "name", None) and n is not root:
+            yield n.name, n
+
+
 def contains_await(stmts: list[ast.stmt]) -> bool:
     return any(isinstance(n, (ast.Await, ast.AsyncFor, ast.AsyncWith)) for n in walk_own(stmts))
 
@@ -835,6 +858,7 @@ class Built:
         self.defs: dict[tuple[str, str], Any] = {}  # (module, name) -> def
         self.moves: list[Move] = []
         self.entry: Any = None
+        self.classes: dict[str, ast.ClassDef] = {}
         self.imports: list[str] = []  # module names to import into the pipeline file
 
 
@@ -864,6 +888,13 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     intro |= {"rcfg"} if m["prologue"] else set()
     intro |= {"state", "_run_state"} if m["state_init"] else set()
     intro |= ({"up"} if moves or hoist else set()) | ({"_run_state"} if hoist else set()) | {f"_{x.module}" for x in moves}
+    init = [x for x in fn.body[:3] if isinstance(x, ast.Assign) and ast.unparse(x).startswith(f"state = _run_state.{STATE_CLASS}(")]
+    if init:
+        # An earlier PR (D1's state_init) already introduced both names, so reads of them are fine. Only
+        # that one statement may bind them; any other binding would capture the rewritten ``state.<x>``.
+        intro -= {"state", "_run_state"}
+        mine = {id(x) for st in init for x in ast.walk(st)}
+        out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside D1's state statement" for nm, x in binding_nodes(fn) if nm in ("state", "_run_state") and id(x) not in mine]
     out.errors += [f"V8: {n} is already a name in {fn.name}" for n in sorted(intro & used)]
 
     # mapped names that cannot become attributes
@@ -877,13 +908,26 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             bad = "an import"
         elif isinstance(n, ast.Global) and set(n.names) & set(rewrite):
             bad = "a global statement"
-        elif isinstance(n, SCOPE_NODES) and getattr(n, "name", None) in rewrite and is_f(n, key) and n.name not in hoist:
+        elif isinstance(n, SCOPE_NODES) and getattr(n, "name", None) in rewrite and is_f(n, key) and n.name not in hoist and n.name not in m["classes"]:
             bad = "a def or class"
         if bad:
             out.errors.append(f"V5: line {n.lineno}: a mapped name is bound by {bad}")
     for n in publish:
         if not any(isinstance(s, DEFS) and s.name == n for b in own_blocks(fn) for s in b):
             out.errors.append(f"V5: publish: no closure {n} in {fn.name}")
+
+    # classes: each is one ClassDef of the function, mapped to ``_run_state.<new>``
+    class_defs: dict[str, tuple[list, Any]] = {}
+    for old, new in m["classes"].items():
+        defs = [(b, s) for b in own_blocks(fn) for s in b if isinstance(s, ast.ClassDef) and s.name == old]
+        if len(defs) != 1:
+            out.errors.append(f"V6: expected one class {old}, found {len(defs)}")
+        elif rewrite.get(old) != f"_run_state.{new}":
+            out.errors.append(f"V6: class {old} must be in rewrite as _run_state.{new}")
+        elif any(is_f(x, key) for x in ast.walk(defs[0][1]) if isinstance(x, ast.Name) and x is not defs[0][1]):
+            out.errors.append(f"V6: class {old} reads a function local")
+        else:
+            class_defs[old] = defs[0]
 
     # hoist checks on the base
     closures: dict[str, Any] = {}
@@ -897,7 +941,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         if name not in rewrite:
             out.errors.append(f"V6: hoisted closure {name} is not in rewrite")
         free = free_locals(d, key)
-        out.errors += [f"V6: {name} reads function local {x}, which is not in rewrite" for x in sorted(free - set(rewrite))]
+        out.errors += [f"V6: {name} reads function local {x}, which is not in rewrite" for x in sorted(free - set(rewrite) - {"rcfg", "state"})]  # rcfg and state become self
+        out.errors += [f"V6: {name} binds {nm} itself (line {getattr(x, 'lineno', '?')}), which would capture the rewritten name" for nm, x in binding_nodes(d) if nm in ("state", "rcfg", "self")]
         a = d.args
         head_nodes = d.decorator_list + a.defaults + [x for x in a.kw_defaults if x] + [x.annotation for x in a.posonlyargs + a.args + a.kwonlyargs if x.annotation] + ([d.returns] if d.returns else [])
         if any(is_f(x, key) for r in head_nodes for x in ast.walk(r) if isinstance(x, ast.Name)):
@@ -913,9 +958,13 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
 
     for s in fn.body:
         Rewriter(key, rewrite, hidden).visit(s)
-    # hoist: take the closures out
     names = src.names
     up = UpTransform(names, src.exempt)
+    for old, (block, d) in class_defs.items():
+        block[:] = [x for x in block if x is not d]
+        d.name = m["classes"][old]
+        out.classes[d.name] = up.visit(d)  # a module global read by the class becomes up.<name>, as in a def
+    # hoist: take the closures out
     for block, d, method in closures.values():
         block[:] = [s for s in block if s is not d]
         d = Methodize().visit(d)
@@ -1104,6 +1153,13 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
         wd = ast.dump(want_def)
         if wd != ast.dump(got):
             errs += diff_lines(f"{mod}.py: {name}", want_def, got)
+    for new, want_cls in b.classes.items():
+        tree = module("run_state")
+        got_cls = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == new), None) if tree else None
+        if got_cls is None:
+            errs.append(f"run_state.py: no class {new}")
+        elif ast.dump(want_cls) != ast.dump(got_cls):
+            errs += diff_lines(f"run_state.py: class {new}", want_cls, got_cls)
     if b.methods:
         tree = module("run_state")
         cls = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == STATE_CLASS), None) if tree else None
@@ -1121,6 +1177,14 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
         if t is not None:
             errs += check_module(t, name, m, stdlib, {x.module for x in b.moves}, name == "run_state")
     return errs
+
+
+def _is_literal(node: ast.expr) -> bool:
+    try:
+        ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+    return True
 
 
 def check_module(text: str, name: str, m: dict, stdlib: dict[str, Info], modules: set[str], is_state: bool) -> list[str]:
@@ -1152,6 +1216,8 @@ def check_module(text: str, name: str, m: dict, stdlib: dict[str, Info], modules
                     if isinstance(x, DEFS):
                         seen[x.name] += 1
                 errs += [f"{label}: {st.name}.{k} is defined {v} times" for k, v in seen.items() if v > 1]
+        elif is_state and isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name) and st.value is not None and _is_literal(st.value):
+            bind(st.target.id)  # run_state's own constants, such as MUTATED_PARAMS
         else:
             errs.append(f"{label}: line {st.lineno}: a module-level {type(st).__name__} is not allowed in a stage module")
     errs += [f"{label}: {k} is bound {v} times at module level" for k, v in bound.items() if v > 1]
@@ -1375,6 +1441,13 @@ def run_apply(root: Path, m: dict) -> list[str]:
         d = next(s for blk in blocks for s in blk if isinstance(s, DEFS) and s.name == name)
         tail = d.end_lineno + 1 if d.end_lineno < len(rows_text) and not rows_text[d.end_lineno].strip() else d.end_lineno
         hoist_cuts[name] = Cut(stmt_start(d), tail, None, d.col_offset)
+    class_text: dict[str, str] = {}
+    class_nodes: dict[str, Any] = {}
+    for old, new in m["classes"].items():
+        d = next(s for blk in blocks for s in blk if isinstance(s, ast.ClassDef) and s.name == old)
+        tail = d.end_lineno + 1 if d.end_lineno < len(rows_text) and not rows_text[d.end_lineno].strip() else d.end_lineno
+        hoist_cuts[f"class {old}"] = Cut(stmt_start(d), tail, None, d.col_offset)
+        class_nodes[new] = d
     move_cuts: dict[str, Cut] = {}
     for mv in moves:
         recv = "" if mv.parent and mv.parent.module == mv.module else f"_{mv.module}."
@@ -1423,6 +1496,16 @@ def run_apply(root: Path, m: dict) -> list[str]:
         methods.append(render(lines, cont, lo, d.end_lineno, d.col_offset - 4, ed, cuts, hoist=True, own=hoist_cuts[name]))
         wanted[pkg_dir / "run_state.py"].update(needed_imports(fresh, m, [d], set(), any(e.text.startswith("up.") for e in ed), False))
 
+    for new, d in class_nodes.items():
+        lo = stmt_start(d)
+        ed = region_edits(fresh, lines, lo, d.end_lineno, [d], False)
+        mt = re.match(rb"(\s*class\s+)(\w+)", lines[d.lineno - 1])
+        if not mt:
+            return [f"{new}: cannot find the class line"]
+        ed.append(Edit(d.lineno, mt.start(2), d.lineno, mt.end(2), new))
+        class_text[new] = render(lines, cont, lo, d.end_lineno, d.col_offset, ed, cuts, own=hoist_cuts[f"class {d.name}"]).rstrip("\n")
+        wanted[pkg_dir / "run_state.py"].update(needed_imports(fresh, m, [d], set(), any(e.text.startswith("up.") for e in ed), False))
+
     # the pipeline function itself
     f_lo, f_hi = stmt_start(fn), fn.end_lineno
     new_f = render(lines, cont, f_lo, f_hi, 0, edits, cuts)
@@ -1468,6 +1551,8 @@ def run_apply(root: Path, m: dict) -> list[str]:
         else:
             end = cls.end_lineno
         crow[end:end] = [x for t in methods for x in [""] + t.rstrip("\n").split("\n")]
+        for t in class_text.values():
+            crow[cls.lineno - 1 : cls.lineno - 1] = t.split("\n") + ["", ""]
         state_text = "\n".join(crow)
         if not state_text.endswith("\n"):
             state_text += "\n"

@@ -434,6 +434,21 @@ def test_state_slots_cover_every_state_attribute() -> None:
     assert bad == []
 
 
+def test_every_state_slot_is_read_or_written() -> None:
+    cls = _state_class()
+    slots = {
+        n
+        for s in cls.body
+        if isinstance(s, (ast.Assign, ast.AnnAssign))
+        for n in (ast.literal_eval(s.value) if any(isinstance(t, ast.Name) and t.id == "__slots__" for t in (s.targets if isinstance(s, ast.Assign) else [s.target])) else ())
+    }
+    used = set(_attrs_of(cls, "self"))
+    for path in [PIPELINE_FILE, *sorted(PIPELINE_PKG.rglob("*.py"))]:
+        used |= set(_attrs_of(parse_tree(RAG_SERVICE)[path], "state"))
+    # the 35 mutated parameters are set by ``__init__`` through ``setattr``
+    assert slots - used - MUTATED_PARAMS == set()
+
+
 def test_state_attribute_scan_sees_a_seeded_attribute() -> None:
     tree = ast.parse("state.a = 1\nprint(state.b)\ndel state.c\nother.d")
     assert set(_attrs_of(tree, "state")) == {"a", "b", "c"}
@@ -495,3 +510,24 @@ def test_every_rcfg_read_names_a_config_field() -> None:
             elif outer.attr not in fields[n.attr]:
                 bad.append(f"{path.name}:{n.lineno}: rcfg.{n.attr}.{outer.attr} is not a field")
     assert bad == []
+
+
+HOISTED = (
+    "resolve_effective_enable_generation", "planned_index_namespace", "refresh_retrieval_snapshot_from_current_knobs",
+    "retrieval_plan_for", "sync_effective_query", "latch_optional_provider_failure",
+    "latched_optional_provider_failure", "ensure_profile_resolution_metadata", "record_profile_degradation",
+    "build_cache_namespace", "get_cache_instance", "with_timeout", "resilient_call", "apply_generation_gate",
+    "build_multi_retriever", "build_pipeline_db_paths", "apply_workspace_filtering_to_result",
+    "decorate_calibration_metadata",
+)  # fmt: skip
+
+
+def test_hoisted_helpers_are_methods_not_closures() -> None:
+    defined = {n.name for n in ast.walk(_pipeline_fn()) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    gone = {f"_{h}" for h in HOISTED} | {"_EarlyReturn"}
+    assert len(HOISTED) == 18 and defined & gone == set()
+    cls = _state_class()
+    methods = {s.name for s in cls.body if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    assert set(HOISTED) <= methods
+    module = parse_tree(RAG_SERVICE)[STATE_FILE]
+    assert any(isinstance(n, ast.ClassDef) and n.name == "EarlyReturn" for n in module.body)

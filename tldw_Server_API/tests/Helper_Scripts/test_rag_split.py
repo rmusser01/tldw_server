@@ -245,6 +245,91 @@ def test_state_init_goes_right_after_the_first_statement_and_is_verified(tmp_pat
     assert t.run("verify") == 1
 
 
+def test_classes_key_moves_a_local_class_to_run_state(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = (
+        "async def pipe(query):\n"
+        '    """Doc."""\n\n'
+        "    class _Stop(Exception):\n"
+        '        """Sentinel."""\n\n'
+        "    def _h():\n"
+        "        return 1\n\n"
+        "    try:\n"
+        "        raise _Stop()\n"
+        "    except _Stop:\n"
+        "        return _h()\n"
+    )
+    t = Tree(tmp_path, src, classes={"_Stop": "Stop"}, rewrite={"_Stop": "_run_state.Stop", "_h": "state.h"}, hoist={"_h": "h"})
+    assert t.run("apply") == 0
+    head, state = t.text(FILE), t.text(f"{PKG}/run_state.py")
+    assert "class _Stop" not in head and "except _run_state.Stop:" in head
+    assert state.index("class Stop(Exception):") < state.index("class PipelineState") and '"""Sentinel."""' in state
+    assert t.run("verify") == 0, capsys.readouterr().out
+    _edit(t, f"{PKG}/run_state.py", '"""Sentinel."""', '"""Other."""')
+    assert t.run("verify") == 1
+
+
+def test_moved_class_reads_module_globals_through_up(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = (
+        "LIMIT = 5\n\n\ndef helper2():\n    pass\n\n\n"
+        "async def pipe(query):\n"
+        '    """Doc."""\n\n'
+        "    class _Stop(helper2):\n"
+        "        x = LIMIT\n\n"
+        "    def _h():\n"
+        "        return 1\n\n"
+        "    return _Stop, _h()\n"
+    )
+    t = Tree(tmp_path, src, classes={"_Stop": "Stop"}, rewrite={"_Stop": "_run_state.Stop", "_h": "state.h"}, hoist={"_h": "h"})
+    assert t.run("apply") == 0
+    state = t.text(f"{PKG}/run_state.py")
+    assert "class Stop(up.helper2):" in state and "x = up.LIMIT" in state
+    assert t.run("verify") == 0, capsys.readouterr().out
+    _edit(t, f"{PKG}/run_state.py", "x = up.LIMIT", "x = LIMIT")
+    assert t.run("verify") == 1
+
+
+STATE_BASE = (
+    "async def pipe(query, total=0):\n"
+    '    """Doc."""\n\n'
+    "    rcfg = Config()\n"
+    "    state = _run_state.PipelineState(rcfg)\n"
+    "    count = 1\n\n"
+    "    def _h():\n"
+    "{body}"
+    "        return count\n\n"
+    "{extra}"
+    "    return _h()\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("body", "extra", "needle"),
+    [
+        ("        state = {}\n", "", "binds state itself"),
+        ("", "    def other(state):\n        return state.total\n\n", "state is bound outside"),
+        ("        rcfg = 1\n", "", "binds rcfg itself"),
+        ("        return [self for self in range(2)]\n", "", "binds self itself"),
+        ("        return [state for state in range(2)]\n", "", "binds state itself"),
+    ],
+)
+def test_hoist_refuses_a_closure_or_def_that_binds_state_rcfg_or_self(tmp_path: Path, capsys: pytest.CaptureFixture, body: str, extra: str, needle: str) -> None:
+    t = Tree(tmp_path, STATE_BASE.format(body=body, extra=extra), rewrite={"count": "state.count", "_h": "state.h"}, hoist={"_h": "h"})
+    assert t.run("apply") == 1
+    assert needle in capsys.readouterr().out
+
+
+def test_state_module_constants_must_be_literals(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = Tree(tmp_path, STATE_BASE.format(body="", extra=""), rewrite={"count": "state.count", "_h": "state.h"}, hoist={"_h": "h"})
+    assert t.run("apply") == 0
+    path = t.head / PKG / "run_state.py"
+    path.write_text(path.read_text().replace("class PipelineState", "X: int = 1\n\n\nclass PipelineState", 1))
+    capsys.readouterr()
+    assert t.run("verify") == 0, capsys.readouterr().out
+    path.write_text(path.read_text().replace("X: int = 1", "X: int = print('side effect')"))
+    assert t.run("verify") == 1
+    assert "not allowed in a stage module" in capsys.readouterr().out
+
+
 def test_move_prefixes_module_globals_with_up(tmp_path: Path) -> None:
     t = full(tmp_path)
     assert t.run("apply") == 0
