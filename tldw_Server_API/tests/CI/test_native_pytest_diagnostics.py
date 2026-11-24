@@ -7,6 +7,7 @@ import subprocess  # nosec B404 -- Isolated pytest child processes.
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -98,6 +99,58 @@ def test_native_stack_dump_excludes_live_locals(tmp_path: Path) -> None:
     diagnostic = output.read_text(encoding="utf-8")
     assert "in test_native_stack_dump_excludes_live_locals" in diagnostic
     assert diagnostic_canary not in diagnostic
+
+
+@pytest.mark.parametrize("phase", ["setup", "call", "teardown"])
+def test_native_runner_retains_completed_slow_phases(tmp_path: Path, phase: str) -> None:
+    test_path = tmp_path / "test_sample.py"
+    test_path.write_text(
+        "import time\nimport pytest\n"
+        "@pytest.fixture(autouse=True)\n"
+        "def slow_fixture():\n"
+        f"    if {phase == 'setup'!r}: time.sleep(1.05)\n"
+        "    yield\n"
+        f"    if {phase == 'teardown'!r}: time.sleep(1.05)\n"
+        "def test_sample():\n"
+        f"    if {phase == 'call'!r}: time.sleep(1.05)\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(  # nosec B603 -- Fixed interpreter and repository script.
+        [sys.executable, str(RUNNER), "--noconftest", "-q", str(test_path)],
+        cwd=tmp_path,
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"[native-pytest] phase-complete phase={phase} seconds=" in result.stderr
+
+
+@pytest.mark.parametrize("phase,duration", [("setup", 1.0), ("call", 1.25), ("teardown", 2.0), ("call", 0.99), ("collect", 2.0)])
+def test_native_phase_diagnostics_are_bounded_and_value_free(tmp_path: Path, phase: str, duration: float) -> None:
+    from Helper_Scripts.ci.native_pytest import _PhaseDiagnostics
+
+    output = tmp_path / "phase.log"
+    report = SimpleNamespace(
+        when=phase, duration=duration, nodeid="private-diagnostic-canary",
+        location=("private-diagnostic-canary", 1, "private-diagnostic-canary"),
+        longrepr="private-diagnostic-canary", capstdout="private-diagnostic-canary",
+    )
+    with output.open("wb") as stream:
+        _PhaseDiagnostics(stream.fileno()).pytest_runtest_logreport(report)
+    diagnostic = output.read_text(encoding="utf-8")
+    expected = f"[native-pytest] phase-complete phase={phase} seconds={duration:.3f}\n"
+    assert diagnostic == (expected if phase in {"setup", "call", "teardown"} and duration >= 1 else "")
+    assert report.nodeid not in diagnostic
+
+
+def test_native_phase_diagnostic_write_failure_does_not_change_test_result(monkeypatch) -> None:
+    from Helper_Scripts.ci.native_pytest import _PhaseDiagnostics
+
+    def closed_output(*_args):
+        raise OSError("private-diagnostic-canary")
+
+    monkeypatch.setattr("Helper_Scripts.ci.native_pytest.os", SimpleNamespace(write=closed_output))
+    assert _PhaseDiagnostics(-1).pytest_runtest_logreport(SimpleNamespace(when="call", duration=2.0)) is None
 
 
 def test_native_workflow_preserves_limits_paths_and_timeout_backends() -> None:

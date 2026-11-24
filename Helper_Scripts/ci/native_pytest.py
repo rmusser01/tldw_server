@@ -10,6 +10,21 @@ import time
 import pytest
 
 
+class _PhaseDiagnostics:
+    def __init__(self, output_fd: int) -> None:
+        self._output_fd = output_fd
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        """Retain completed slow phases without reading test identities or values."""
+        if report.when not in {"setup", "call", "teardown"} or report.duration < 1.0:
+            return
+        line = f"[native-pytest] phase-complete phase={report.when} seconds={report.duration:.3f}\n"
+        try:
+            os.write(self._output_fd, line.encode("ascii"))
+        except OSError:
+            pass  # A failed diagnostic sink must not replace pytest's result.
+
+
 def _dump_thread_stacks(output_fd: int) -> None:
     """Emit frame locations without source lines, locals or exception values."""
     frames = sys._current_frames()
@@ -44,7 +59,7 @@ def main(args: list[str] | None = None, *, traceback_interval: float = 120.0) ->
         name="native-pytest-diagnostics", daemon=True,
     ).start()
     print("[native-pytest] pytest-start", flush=True)
-    result = int(pytest.main(args))
+    result = int(pytest.main(args, plugins=[_PhaseDiagnostics(output_fd)]))
     print(f"[native-pytest] pytest-return exit={result}", flush=True)
     return result
 
