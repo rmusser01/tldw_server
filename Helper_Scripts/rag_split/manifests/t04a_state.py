@@ -1,0 +1,48 @@
+"""TASK-13950.24 PR D1: ``result`` and the 35 reassigned parameters live on ``PipelineState``.
+
+``state_init`` builds the state right after ``rcfg``; the mapped names are dropped from ``nonlocal``.
+"""
+
+MANIFEST = {
+    "base": "a513a13a3c",
+    "state_init": "state = _run_state.PipelineState(rcfg)",
+    "imports": ["from .pipeline import run_state as _run_state"],
+    "rewrite": {
+        "adaptive_time_budget_sec": "state.adaptive_time_budget_sec",
+        "date_range": "state.date_range",
+        "enable_cache": "state.enable_cache",
+        "enable_date_filter": "state.enable_date_filter",
+        "enable_discussion_search": "state.enable_discussion_search",
+        "enable_hyde": "state.enable_hyde",
+        "enable_multi_vector_passages": "state.enable_multi_vector_passages",
+        "enable_numeric_fidelity": "state.enable_numeric_fidelity",
+        "enable_parent_expansion": "state.enable_parent_expansion",
+        "enable_reranking": "state.enable_reranking",
+        "enable_web_fallback": "state.enable_web_fallback",
+        "expand_query": "state.expand_query",
+        "fts_level": "state.fts_level",
+        "generation_prompt": "state.generation_prompt",
+        "hybrid_alpha": "state.hybrid_alpha",
+        "hyde_model": "state.hyde_model",
+        "hyde_provider": "state.hyde_provider",
+        "include_parent_document": "state.include_parent_document",
+        "low_confidence_behavior": "state.low_confidence_behavior",
+        "media_db_path": "state.media_db_path",
+        "mv_max_spans": "state.mv_max_spans",
+        "mv_span_chars": "state.mv_span_chars",
+        "mv_stride": "state.mv_stride",
+        "nli_model": "state.nli_model",
+        "numeric_fidelity_behavior": "state.numeric_fidelity_behavior",
+        "parent_context_size": "state.parent_context_size",
+        "parent_max_tokens": "state.parent_max_tokens",
+        "query": "state.query",
+        "require_hard_citations": "state.require_hard_citations",
+        "reranking_strategy": "state.reranking_strategy",
+        "resolved_request": "state.resolved_request",
+        "retrieval_plan": "state.retrieval_plan",
+        "sql_retriever": "state.sql_retriever",
+        "strict_extractive": "state.strict_extractive",
+        "top_k": "state.top_k",
+        "result": "state.result",
+    },
+}

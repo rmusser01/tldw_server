@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.RAG.rag_service.pipeline.run_config import (
     RagRunConfig,
     hidden_kwarg_values,
 )
+from tldw_Server_API.app.core.RAG.rag_service.pipeline.run_state import MUTATED_PARAMS, PipelineState
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 
 pytestmark = pytest.mark.unit
@@ -155,3 +156,36 @@ def test_config_tracks_the_request_schema() -> None:
         or (not model[n].is_required() and not same(model[n].default, FIELDS[n].default))
     }
     assert differing == {"sources", "enable_generation"}
+
+
+FROZEN_MUTATED = frozenset(
+    {
+        "adaptive_time_budget_sec", "date_range", "enable_cache", "enable_date_filter", "enable_discussion_search",
+        "enable_hyde", "enable_multi_vector_passages", "enable_numeric_fidelity", "enable_parent_expansion",
+        "enable_reranking", "enable_web_fallback", "expand_query", "fts_level", "generation_prompt", "hybrid_alpha",
+        "hyde_model", "hyde_provider", "include_parent_document", "low_confidence_behavior", "media_db_path",
+        "mv_max_spans", "mv_span_chars", "mv_stride", "nli_model", "numeric_fidelity_behavior",
+        "parent_context_size", "parent_max_tokens", "query", "require_hard_citations", "reranking_strategy",
+        "resolved_request", "retrieval_plan", "sql_retriever", "strict_extractive", "top_k",
+    }
+)  # fmt: skip
+
+
+def test_mutated_parameters_are_frozen() -> None:
+    assert len(MUTATED_PARAMS) == 35 and {n for _, n in MUTATED_PARAMS} == FROZEN_MUTATED
+    assert all(FIELD_GROUP[n] == g for g, n in MUTATED_PARAMS)
+
+
+def test_unset_state_slot_reads_like_an_unbound_local() -> None:
+    cfg = RagRunConfig.from_kwargs(query="q", top_k=7)
+    state = PipelineState(cfg)
+    with pytest.raises(UnboundLocalError, match="local variable 'result' where it is not associated with a value"):
+        _ = state.result
+    with pytest.raises(AttributeError):
+        _ = state.nope
+    assert state.top_k == cfg.retrieval.top_k == 7 and state.query == "q" and state.rcfg is cfg
+    state.result = 1
+    assert state.result == 1
+    del state.result
+    with pytest.raises(UnboundLocalError):
+        _ = state.result

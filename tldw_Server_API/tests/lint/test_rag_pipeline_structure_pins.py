@@ -327,7 +327,7 @@ def test_rerun_chain_rewrite_reads_through_config_and_state() -> None:
 FUNC = "unified_rag_pipeline"
 CONFIG_FILE = PIPELINE_PKG / "run_config.py"
 PROLOGUE = "rcfg = RagRunConfig.from_call_locals(locals())"
-# The 35 parameters the body assigns; they stay bare until Task 4 moves them into ``state``.
+# The 35 parameters the body assigns; ``PipelineState`` holds them (Task 4).
 MUTATED_PARAMS = frozenset(
     {
         "adaptive_time_budget_sec", "date_range", "enable_cache", "enable_date_filter", "enable_discussion_search",
@@ -377,7 +377,7 @@ def _bare_parameter_reads(source: str, func: str, allowed: frozenset[str]) -> se
             except KeyError:
                 continue
             if t is table:
-                if sym.is_referenced():
+                if sym.is_referenced() or sym.is_assigned():
                     out.add(name)
             elif sym.is_free():
                 out.add(name)
@@ -394,6 +394,79 @@ def test_body_reads_read_only_parameters_through_rcfg() -> None:
     fn = _pipeline_fn()
     assert {a.arg for a in fn.args.args} >= MUTATED_PARAMS and len(MUTATED_PARAMS) == 35
     assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), FUNC, MUTATED_PARAMS) == set()
+
+
+# ---- PipelineState (Task 4) -----------------------------------------------------------------------
+STATE_FILE = PIPELINE_PKG / "run_state.py"
+STATE_INIT = "state = _run_state.PipelineState(rcfg)"
+
+
+def _state_class() -> ast.ClassDef:
+    return next(n for n in parse_tree(RAG_SERVICE)[STATE_FILE].body if isinstance(n, ast.ClassDef) and n.name == "PipelineState")
+
+
+def _slots_and_methods(cls: ast.ClassDef) -> set[str]:
+    slots: set[str] = set()
+    for s in cls.body:
+        targets = s.targets if isinstance(s, ast.Assign) else [s.target] if isinstance(s, ast.AnnAssign) else []
+        if any(isinstance(t, ast.Name) and t.id == "__slots__" for t in targets):
+            slots |= set(ast.literal_eval(s.value))  # type: ignore[arg-type]
+    return slots | {s.name for s in cls.body if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def _attrs_of(tree: ast.AST, owner: str) -> dict[str, int]:
+    """``{attr: first line}`` for every ``<owner>.<attr>`` (Load, Store or Del) in ``tree``."""
+    out: dict[str, int] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == owner:
+            out.setdefault(n.attr, n.lineno)
+    return out
+
+
+def test_state_slots_cover_every_state_attribute() -> None:
+    known = _slots_and_methods(_state_class())
+    assert {"rcfg", "result"} <= known
+    bad: list[str] = []
+    for path in [PIPELINE_FILE, *sorted(PIPELINE_PKG.rglob("*.py"))]:
+        tree = parse_tree(RAG_SERVICE)[path]
+        bad += [f"{path.name}:{ln}: state.{a}" for a, ln in _attrs_of(tree, "state").items() if a not in known]
+    bad += [f"run_state.py:{ln}: self.{a}" for a, ln in _attrs_of(_state_class(), "self").items() if a not in known]
+    assert bad == []
+
+
+def test_state_attribute_scan_sees_a_seeded_attribute() -> None:
+    tree = ast.parse("state.a = 1\nprint(state.b)\ndel state.c\nother.d")
+    assert set(_attrs_of(tree, "state")) == {"a", "b", "c"}
+
+
+def test_state_is_built_right_after_the_config() -> None:
+    body = _pipeline_fn().body
+    assert ast.dump(body[2]) == ast.dump(ast.parse(STATE_INIT).body[0])
+
+
+def test_body_reads_no_parameter_after_the_prologue() -> None:
+    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), FUNC, frozenset()) == set()
+
+
+def test_mutated_parameters_are_never_read_from_rcfg() -> None:
+    bad: list[str] = []
+    for path in [PIPELINE_FILE, *sorted(PIPELINE_PKG.rglob("*.py"))]:
+        tree = parse_tree(RAG_SERVICE)[path]
+        skip: set[int] = set()
+        if path == STATE_FILE:
+            init = next(n for n in _state_class().body if isinstance(n, ast.FunctionDef) and n.name == "__init__")
+            skip = {id(n) for n in ast.walk(init)}
+        for n in ast.walk(tree):
+            if (
+                isinstance(n, ast.Attribute)
+                and n.attr in MUTATED_PARAMS
+                and isinstance(n.value, ast.Attribute)
+                and isinstance(n.value.value, ast.Name)
+                and n.value.value.id == "rcfg"
+                and id(n) not in skip
+            ):
+                bad.append(f"{path.name}:{n.lineno}: rcfg.{n.value.attr}.{n.attr}")
+    assert bad == []
 
 
 def test_bare_read_scan_sees_a_seeded_read() -> None:
