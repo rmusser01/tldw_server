@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunsTab } from "../RunsTab"
 
@@ -127,18 +128,12 @@ vi.mock("../RunDetailDrawer", () => ({
 }))
 
 const baseState = (overrides: Record<string, unknown> = {}) => ({
-  runs: [],
-  runsLoading: false,
-  runsTotal: 0,
   runsPage: 1,
   runsPageSize: 20,
   runsJobFilter: null,
   runsStatusFilter: null,
-  pollingActive: false,
   runDetailOpen: false,
   selectedRunId: null,
-  setRuns: vi.fn(),
-  setRunsLoading: vi.fn(),
   setRunsPage: vi.fn(),
   setRunsPageSize: vi.fn(),
   setRunsJobFilter: vi.fn(),

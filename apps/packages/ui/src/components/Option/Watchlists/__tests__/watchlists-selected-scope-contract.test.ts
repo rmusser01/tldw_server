@@ -26,11 +26,13 @@ describe("Watchlists selected container scoping contract", () => {
   it("creation forms attach newly created feeds and monitors to the selected Watchlist", () => {
     const sourcesTab = readWatchlistsFile("SourcesTab/SourcesTab.tsx")
     const jobForm = readWatchlistsFile("JobsTab/JobFormModal.tsx")
+    const briefingContract = readWatchlistsFile("shared/briefing-contract.ts")
 
     expect(sourcesTab).toContain("createWatchlistSource({")
     expect(sourcesTab).toContain("watchlist_id: selectedWatchlistId ?? undefined")
     expect(jobForm).toContain("watchlistId?: number | null")
-    expect(jobForm).toContain("watchlist_id: watchlistId ?? undefined")
+    expect(jobForm).toMatch(/toCanonicalWatchlistJobPayload\(\{[\s\S]*?\bwatchlistId\s*\}\)/)
+    expect(briefingContract).toContain("watchlist_id: Math.floor(watchlistId)")
   })
 
   it("contains child tab width inside the Watchlists page shell for constrained viewports", () => {

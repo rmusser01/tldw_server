@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { describe, expect, it, vi } from "vitest"
 import { OutputPreviewDrawer } from "../OutputPreviewDrawer"
 import type { WatchlistOutput } from "@/types/watchlists"
@@ -325,7 +326,7 @@ describe("OutputPreviewDrawer focus management", () => {
     await screen.findByText("# Morning brief")
     expect(await screen.findByText("Evidence snapshot")).toBeInTheDocument()
     expect(await screen.findByText("Vendor advisory")).toBeInTheDocument()
-    expect(serviceMocks.getWatchlistOutputEvidence).toHaveBeenCalledWith(77)
+    expect(serviceMocks.getWatchlistOutputEvidence).toHaveBeenCalledWith(77, expect.any(AbortSignal))
   })
 
   it("keeps report evidence visible when downloaded output content is empty", async () => {
@@ -380,6 +381,6 @@ describe("OutputPreviewDrawer focus management", () => {
 
     expect(await screen.findByText("No content available")).toBeInTheDocument()
     expect(await screen.findByText("Evidence snapshot")).toBeInTheDocument()
-    expect(serviceMocks.getWatchlistOutputEvidence).toHaveBeenCalledWith(77)
+    expect(serviceMocks.getWatchlistOutputEvidence).toHaveBeenCalledWith(77, expect.any(AbortSignal))
   })
 })

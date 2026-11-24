@@ -177,25 +177,39 @@ describe("first-class watchlists client contract", () => {
     )
   })
 
-  it("stores and updates selected Watchlist container state", () => {
+  it("carries React Query cancellation to the Watchlists transport", async () => {
+    const controller = new AbortController()
+    await fetchWatchlists({ page: 1, size: 100 }, controller.signal)
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: "GET",
+      abortSignal: controller.signal
+    }))
+  })
+
+  it("resets scoped pagination and the run monitor filter when the Watchlist changes", () => {
     const store = useWatchlistsStore.getState()
-    expect(store.watchlists).toEqual([])
-    expect(store.selectedWatchlistId).toBeNull()
-
-    store.setWatchlists([container])
     store.setSelectedWatchlistId(42)
-    expect(useWatchlistsStore.getState().watchlists).toEqual([container])
-    expect(useWatchlistsStore.getState().selectedWatchlistId).toBe(42)
-
-    store.updateWatchlistInList(42, { status: "paused", priority: "critical" })
-    expect(useWatchlistsStore.getState().watchlists[0]).toMatchObject({
-      id: 42,
-      status: "paused",
-      priority: "critical"
+    store.setRunsJobFilter(12)
+    store.setSourcesPage(3)
+    store.setJobsPage(3)
+    store.setRunsPage(3)
+    store.setOutputsPage(3)
+    store.setSelectedWatchlistId(21)
+    expect(useWatchlistsStore.getState()).toMatchObject({
+      selectedWatchlistId: 21,
+      sourcesPage: 1,
+      jobsPage: 1,
+      runsPage: 1,
+      outputsPage: 1,
+      runsJobFilter: null
     })
+  })
 
-    store.removeWatchlist(42)
-    expect(useWatchlistsStore.getState().watchlists).toEqual([])
-    expect(useWatchlistsStore.getState().selectedWatchlistId).toBeNull()
+  it("preserves a deep-linked run filter when the initial Watchlist loads", () => {
+    const store = useWatchlistsStore.getState()
+    store.setRunsJobFilter(44)
+    store.setSelectedWatchlistId(42)
+    expect(useWatchlistsStore.getState().runsJobFilter).toBe(44)
   })
 })

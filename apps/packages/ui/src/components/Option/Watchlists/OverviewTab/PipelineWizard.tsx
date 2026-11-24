@@ -13,6 +13,7 @@ import {
 } from "antd"
 import { useTranslation } from "react-i18next"
 import { Alert as DesignSystemAlert } from "@/components/ui"
+import { READY_STATE_LABEL } from "@/design-system"
 import type {
   JobPreviewResult,
   WatchlistBriefingProjection,
@@ -1087,7 +1088,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                     <span>{item.title || item.url || t("watchlists:overview.pipelineSetup.sourceTest.untitled", "Untitled item")}</span>
                     <span className="text-text-muted">
                       {item.decision === "ingest"
-                        ? t("watchlists:overview.pipelineSetup.sourceTest.readyItem", "Ready")
+                        ? t("watchlists:overview.pipelineSetup.sourceTest.readyItem", READY_STATE_LABEL)
                         : t("watchlists:overview.pipelineSetup.sourceTest.filteredItem", "Filtered")}
                     </span>
                   </li>

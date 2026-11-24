@@ -4,6 +4,7 @@ import type { RcFile } from "antd/es/upload/interface"
 import { UploadCloud } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives"
+import { useIsCurrentWatchlistsAccount, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { fetchWatchlistSources, importOpml } from "@/services/watchlists"
 import type { SourcesImportResponse, WatchlistGroup, WatchlistTag } from "@/types/watchlists"
 import {
@@ -136,14 +137,12 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
   const [importing, setImporting] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preflight, setPreflight] = useState<ReturnType<typeof buildOpmlPreflightSummary> | null>(null)
-  const [existingUrls, setExistingUrls] = useState<string[]>([])
-  const [existingUrlsLoading, setExistingUrlsLoading] = useState(false)
-  const [existingUrlsLoaded, setExistingUrlsLoaded] = useState(false)
   const [result, setResult] = useState<SourcesImportResponse | null>(null)
   const [retryingFailedOnly, setRetryingFailedOnly] = useState(false)
   const { isConstrained } = useWatchlistsViewport()
   const modalChrome = buildWatchlistsModalChrome(isConstrained, 900)
-  const existingUrlsRequestRef = useRef(0)
+  const previewGeneration = useRef(0)
+  const isCurrentAccount = useIsCurrentWatchlistsAccount()
 
   const resetState = useCallback(() => {
     setActive(true)
@@ -152,68 +151,48 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
     setImporting(false)
     setSelectedFile(null)
     setPreflight(null)
-    setExistingUrls([])
-    setExistingUrlsLoading(false)
-    setExistingUrlsLoaded(false)
     setResult(null)
     setRetryingFailedOnly(false)
   }, [defaultGroupId])
 
-  const loadExistingUrls = useCallback(async (): Promise<string[]> => {
-    const requestId = existingUrlsRequestRef.current + 1
-    existingUrlsRequestRef.current = requestId
-    setExistingUrlsLoading(true)
-    setExistingUrlsLoaded(false)
-    try {
+  const urlLookup = {
+    watchlist_id: watchlistId ?? undefined,
+    size: EXISTING_URL_LOOKUP_PAGE_SIZE,
+    maxPages: EXISTING_URL_LOOKUP_MAX_PAGES
+  }
+  const { data: existingUrls, isFetching: existingUrlsLoading, error: existingUrlsError, refetch } =
+    useWatchlistsQuery("sources", { ...urlLookup, catalog: "urls" }, async ({ signal }) => {
       const urls: string[] = []
-      let page = 1
-      while (page <= EXISTING_URL_LOOKUP_MAX_PAGES) {
+      for (let page = 1; page <= urlLookup.maxPages; page += 1) {
         const response = await fetchWatchlistSources({
-          watchlist_id: watchlistId ?? undefined,
+          watchlist_id: urlLookup.watchlist_id,
           page,
-          size: EXISTING_URL_LOOKUP_PAGE_SIZE
+          size: urlLookup.size
         })
         const pageItems = Array.isArray(response.items) ? response.items : []
         urls.push(...pageItems.map((item) => item.url).filter(Boolean))
-        if (
-          pageItems.length < EXISTING_URL_LOOKUP_PAGE_SIZE ||
-          urls.length >= Number(response.total || 0)
-        ) {
+        if (pageItems.length < urlLookup.size || urls.length >= Number(response.total || 0)) {
           break
         }
-        page += 1
       }
-      if (existingUrlsRequestRef.current !== requestId) return []
-      setExistingUrls(urls)
-      setExistingUrlsLoaded(true)
       return urls
-    } catch (err) {
-      if (existingUrlsRequestRef.current !== requestId) return []
-      console.error("Failed to load existing sources for import preview:", err)
-      setExistingUrlsLoaded(true)
+    }, { enabled: open })
+
+  useEffect(() => {
+    previewGeneration.current += 1
+    resetState()
+  }, [open, resetState, watchlistId])
+
+  useEffect(() => {
+    if (open && existingUrlsError) {
       message.warning(
         t(
           "watchlists:sources.importPreviewLookupError",
           "Could not load existing feeds for duplicate checks."
         )
       )
-      return []
-    } finally {
-      if (existingUrlsRequestRef.current === requestId) {
-        setExistingUrlsLoading(false)
-      }
     }
-  }, [t, watchlistId])
-
-  useEffect(() => {
-    if (!open) {
-      existingUrlsRequestRef.current += 1
-      resetState()
-      return
-    }
-    resetState()
-    void loadExistingUrls()
-  }, [loadExistingUrls, open, resetState])
+  }, [existingUrlsError, open, t])
 
   const summary = useMemo(() => {
     if (!result?.items?.length) return null
@@ -232,24 +211,31 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
   )
 
   const handlePreflight = useCallback(async (file: File) => {
+    const generation = ++previewGeneration.current
     setSelectedFile(file)
+    setPreflight(null)
     setResult(null)
     try {
       const opml = await file.text()
-      const urls = existingUrlsLoaded ? existingUrls : await loadExistingUrls()
+      if (!isCurrentAccount() || generation !== previewGeneration.current) return
+      const urls = existingUrls ?? (existingUrlsError
+        ? []
+        : (await refetch({ cancelRefetch: false })).data ?? [])
+      if (!isCurrentAccount() || generation !== previewGeneration.current) return
       const preview = buildOpmlPreflightSummary(opml, { existingUrls: urls })
       setPreflight(preview)
     } catch (err) {
+      if (!isCurrentAccount() || generation !== previewGeneration.current) return
       console.error("OPML preview failed:", err)
       setPreflight(null)
       message.error(
         t("watchlists:sources.importPreviewError", "Failed to preview OPML file")
       )
     }
-  }, [existingUrls, existingUrlsLoaded, loadExistingUrls, t])
+  }, [existingUrls, existingUrlsError, isCurrentAccount, refetch, t])
 
   const handleCommitImport = async () => {
-    if (!selectedFile || !preflight) return
+    if (!isCurrentAccount() || !selectedFile || !preflight) return
     if (preflight.parseError || preflight.ready === 0) {
       message.warning(
         t(
@@ -314,6 +300,7 @@ export const SourcesBulkImport: React.FC<SourcesBulkImportProps> = ({
   )
 
   const handleRetryFailedOnly = async () => {
+    if (!isCurrentAccount()) return
     if (!selectedFile || retryableFailedItems.length === 0) {
       message.warning(
         t(

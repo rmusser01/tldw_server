@@ -2,7 +2,8 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { ItemsTab } from "../ItemsTab/ItemsTab"
 import { useWatchlistsStore } from "@/store/watchlists"
 

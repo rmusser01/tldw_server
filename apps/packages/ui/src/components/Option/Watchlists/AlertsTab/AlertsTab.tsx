@@ -20,6 +20,7 @@ import {
   updateWatchlistContentAlertRule
 } from "@/services/watchlists"
 import { Alert } from "@/components/ui/primitives"
+import { useInvalidateWatchlists, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { safeExternalUrl } from "@/utils/safe-external-url"
 import { useWatchlistsStore } from "@/store/watchlists"
 import type {
@@ -35,6 +36,9 @@ type AlertStatusFilter = WatchlistContentAlertStatus | "all"
 type SeverityFilter = WatchlistContentAlertSeverity | "all"
 const ALERTS_PAGE_SIZE = 50
 const ALERTS_FILTER_DEBOUNCE_MS = 300
+const RULES_PARAMS = { page: 1, size: 100 }
+const EMPTY_RULES: WatchlistContentAlertRule[] = []
+const EMPTY_ALERTS: WatchlistContentAlert[] = []
 
 interface RuleFormState {
   id: number | null
@@ -138,13 +142,9 @@ const useDebouncedValue = <T,>(value: T, delayMs: number): T => {
 export const AlertsTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
+  const invalidateWatchlists = useInvalidateWatchlists()
 
-  const [rules, setRules] = useState<WatchlistContentAlertRule[]>([])
-  const [alerts, setAlerts] = useState<WatchlistContentAlert[]>([])
-  const [rulesLoading, setRulesLoading] = useState(false)
-  const [alertsLoading, setAlertsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [retryError, setRetryError] = useState<string | null>(null)
+  const [retryError, setRetryError] = useState<{ watchlistId: number; title: string } | null>(null)
   const [ruleFormOpen, setRuleFormOpen] = useState(false)
   const [ruleSaving, setRuleSaving] = useState(false)
   const [ruleForm, setRuleForm] = useState<RuleFormState>(DEFAULT_RULE_FORM)
@@ -155,76 +155,53 @@ export const AlertsTab: React.FC = () => {
   const [sourceFilterText, setSourceFilterText] = useState("")
   const [searchText, setSearchText] = useState("")
   const [alertsPage, setAlertsPage] = useState(1)
-  const [alertsTotal, setAlertsTotal] = useState(0)
   const [updatingAlertId, setUpdatingAlertId] = useState<number | null>(null)
   const debouncedSourceFilterText = useDebouncedValue(sourceFilterText, ALERTS_FILTER_DEBOUNCE_MS)
   const debouncedSearchText = useDebouncedValue(searchText, ALERTS_FILTER_DEBOUNCE_MS)
 
-  const loadRules = useCallback(async () => {
-    if (selectedWatchlistId == null) return true
-    setRulesLoading(true)
-    setError(null)
-    try {
-      const response = await fetchWatchlistContentAlertRules(selectedWatchlistId, { page: 1, size: 100 })
-      setRules(Array.isArray(response.items) ? response.items : [])
-      return true
-    } catch {
-      setError(t("watchlists:alerts.loadRulesError", "Failed to load content alert rules"))
-      return false
-    } finally {
-      setRulesLoading(false)
-    }
-  }, [selectedWatchlistId, t])
+  const alertParams = {
+    status: statusFilter === "all" ? undefined : statusFilter,
+    severity: severityFilter === "all" ? undefined : severityFilter,
+    rule_id: ruleFilter === "all" ? undefined : Number(ruleFilter),
+    source_id: toNumberFilter(debouncedSourceFilterText),
+    q: debouncedSearchText.trim() || undefined,
+    page: alertsPage,
+    size: ALERTS_PAGE_SIZE
+  }
+  const rulesQuery = useWatchlistsQuery(
+    "alert-rules",
+    { watchlist_id: selectedWatchlistId, ...RULES_PARAMS },
+    ({ signal }) => fetchWatchlistContentAlertRules(selectedWatchlistId!, RULES_PARAMS, signal),
+    { enabled: selectedWatchlistId != null }
+  )
+  const alertsQuery = useWatchlistsQuery(
+    "alerts",
+    { watchlist_id: selectedWatchlistId, ...alertParams },
+    ({ signal }) => fetchWatchlistContentAlerts(selectedWatchlistId!, alertParams, signal),
+    { enabled: selectedWatchlistId != null }
+  )
+  const { isFetching: rulesLoading, refetch: reloadRules } = rulesQuery
+  const { isFetching: alertsLoading, refetch: reloadAlerts } = alertsQuery
+  const rules = Array.isArray(rulesQuery.data?.items) ? rulesQuery.data.items : EMPTY_RULES
+  const alerts = Array.isArray(alertsQuery.data?.items) ? alertsQuery.data.items : EMPTY_ALERTS
+  const alertsTotal = Number(alertsQuery.data?.total || 0)
+  const error = alertsQuery.isError
+    ? t("watchlists:alerts.loadAlertsError", "Failed to load content alerts")
+    : rulesQuery.isError
+      ? t("watchlists:alerts.loadRulesError", "Failed to load content alert rules")
+      : null
 
-  const loadAlerts = useCallback(async () => {
-    if (selectedWatchlistId == null) return true
-    setAlertsLoading(true)
-    setError(null)
-    try {
-      const response = await fetchWatchlistContentAlerts(selectedWatchlistId, {
-        status: statusFilter === "all" ? undefined : statusFilter,
-        severity: severityFilter === "all" ? undefined : severityFilter,
-        rule_id: ruleFilter === "all" ? undefined : Number(ruleFilter),
-        source_id: toNumberFilter(debouncedSourceFilterText),
-        q: debouncedSearchText.trim() || undefined,
-        page: alertsPage,
-        size: ALERTS_PAGE_SIZE
-      })
-      setAlerts(Array.isArray(response.items) ? response.items : [])
-      setAlertsTotal(Number(response.total || 0))
-      return true
-    } catch {
-      setError(t("watchlists:alerts.loadAlertsError", "Failed to load content alerts"))
-      return false
-    } finally {
-      setAlertsLoading(false)
-    }
-  }, [alertsPage, debouncedSearchText, debouncedSourceFilterText, ruleFilter, selectedWatchlistId, severityFilter, statusFilter, t])
-
-  const retryFailedLoads = useCallback(() => {
-    if (error) setRetryError(error)
-    void Promise.all([
-      loadRules(),
-      loadAlerts()
-    ]).then(([rulesLoaded, alertsLoaded]) => {
-      if (rulesLoaded && alertsLoaded) {
-        setError(null)
-      }
-      setRetryError(null)
-    })
-  }, [error, loadAlerts, loadRules])
-
-  useEffect(() => {
-    void loadRules()
-  }, [loadRules])
+  const retryFailedLoads = async () => {
+    if (selectedWatchlistId == null || !error) return
+    const retrying = { watchlistId: selectedWatchlistId, title: error }
+    setRetryError(retrying)
+    await Promise.all([reloadRules(), reloadAlerts()])
+    setRetryError((current) => current === retrying ? null : current)
+  }
 
   useEffect(() => {
     setAlertsPage(1)
   }, [debouncedSearchText, debouncedSourceFilterText, ruleFilter, selectedWatchlistId, severityFilter, statusFilter])
-
-  useEffect(() => {
-    void loadAlerts()
-  }, [loadAlerts])
 
   const ruleOptions = useMemo(
     () => [
@@ -282,20 +259,19 @@ export const AlertsTab: React.FC = () => {
         await createWatchlistContentAlertRule(selectedWatchlistId, payload)
       }
       setRuleFormOpen(false)
-      await loadRules()
-      await loadAlerts()
+      await invalidateWatchlists("alert-rules", "alerts")
     } catch {
       setRuleFormError(t("watchlists:alerts.validation.saveFailed", "Failed to save content alert rule"))
     } finally {
       setRuleSaving(false)
     }
-  }, [loadAlerts, loadRules, ruleForm, selectedWatchlistId, t])
+  }, [invalidateWatchlists, ruleForm, selectedWatchlistId, t])
 
   const toggleRule = useCallback(async (rule: WatchlistContentAlertRule, enabled: boolean) => {
     if (selectedWatchlistId == null) return
     try {
       await updateWatchlistContentAlertRule(selectedWatchlistId, rule.id, { enabled })
-      await loadRules()
+      await invalidateWatchlists("alert-rules")
       message.success(
         t("watchlists:alerts.updateRuleSuccess", "Content alert rule updated.")
       )
@@ -305,7 +281,7 @@ export const AlertsTab: React.FC = () => {
         t("watchlists:alerts.updateRuleError", "Failed to update content alert rule.")
       )
     }
-  }, [loadRules, selectedWatchlistId, t])
+  }, [invalidateWatchlists, selectedWatchlistId, t])
 
   const deleteRule = useCallback(async (rule: WatchlistContentAlertRule) => {
     if (selectedWatchlistId == null) return
@@ -322,8 +298,7 @@ export const AlertsTab: React.FC = () => {
       onOk: async () => {
         try {
           await deleteWatchlistContentAlertRule(selectedWatchlistId, rule.id)
-          await loadRules()
-          await loadAlerts()
+          await invalidateWatchlists("alert-rules", "alerts")
           message.success(t("watchlists:alerts.deleteSuccess", "Content alert rule deleted."))
         } catch (err) {
           console.error("Failed to delete content alert rule:", err)
@@ -331,14 +306,15 @@ export const AlertsTab: React.FC = () => {
         }
       }
     })
-  }, [loadAlerts, loadRules, selectedWatchlistId, t])
+  }, [invalidateWatchlists, selectedWatchlistId, t])
 
   const updateAlertStatus = useCallback(async (alert: WatchlistContentAlert, status: WatchlistContentAlertStatus) => {
     if (selectedWatchlistId == null) return
     setUpdatingAlertId(alert.id)
     try {
       await updateWatchlistContentAlert(selectedWatchlistId, alert.id, { status })
-      await loadAlerts()
+      void invalidateWatchlists("items", "overview")
+      await invalidateWatchlists("alerts")
       message.success(t("watchlists:alerts.updateAlertSuccess", "Alert updated."))
     } catch (err) {
       console.error("Failed to update content alert:", err)
@@ -346,7 +322,7 @@ export const AlertsTab: React.FC = () => {
     } finally {
       setUpdatingAlertId(null)
     }
-  }, [loadAlerts, selectedWatchlistId, t])
+  }, [invalidateWatchlists, selectedWatchlistId, t])
 
   if (selectedWatchlistId == null) {
     return (
@@ -359,7 +335,9 @@ export const AlertsTab: React.FC = () => {
     )
   }
 
-  const visibleError = error ?? retryError
+  const visibleError = error ?? (retryError?.watchlistId === selectedWatchlistId && (rulesLoading || alertsLoading)
+    ? retryError.title
+    : null)
 
   return (
     <div className="space-y-4" data-testid="watchlists-alerts-tab">
@@ -380,7 +358,7 @@ export const AlertsTab: React.FC = () => {
           action={{
             label: t("common:refresh", "Refresh"),
             loading: rulesLoading || alertsLoading,
-            onClick: retryFailedLoads
+            onClick: () => void retryFailedLoads()
           }}
         />
       )}
@@ -399,7 +377,7 @@ export const AlertsTab: React.FC = () => {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button icon={<RefreshCw className="h-4 w-4" />} onClick={() => void loadRules()} loading={rulesLoading}>
+            <Button icon={<RefreshCw className="h-4 w-4" />} onClick={() => void reloadRules()} loading={rulesLoading}>
               {t("common:refresh", "Refresh")}
             </Button>
             <Button type="primary" icon={<Plus className="h-4 w-4" />} onClick={openCreateRule}>
@@ -556,7 +534,7 @@ export const AlertsTab: React.FC = () => {
               )}
             </p>
           </div>
-          <Button icon={<RefreshCw className="h-4 w-4" />} onClick={() => void loadAlerts()} loading={alertsLoading}>
+          <Button icon={<RefreshCw className="h-4 w-4" />} onClick={() => void reloadAlerts()} loading={alertsLoading}>
             {t("common:refresh", "Refresh")}
           </Button>
         </div>

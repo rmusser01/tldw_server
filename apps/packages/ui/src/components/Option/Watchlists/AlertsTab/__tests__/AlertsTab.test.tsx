@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -14,15 +15,14 @@ const mocks = vi.hoisted(() => ({
   selectedWatchlistId: 42
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (_key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
-      if (typeof defaultValue !== "string") return _key
-      if (!options) return defaultValue
-      return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
-    }
-  })
-}))
+vi.mock("react-i18next", () => {
+  const t = (key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
+    if (typeof defaultValue !== "string") return key
+    if (!options) return defaultValue
+    return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
+  }
+  return { useTranslation: () => ({ t }) }
+})
 
 vi.mock("antd", async () => {
   const actual = await vi.importActual<typeof import("antd")>("antd")
@@ -139,7 +139,7 @@ describe("AlertsTab", () => {
     render(<AlertsTab />)
 
     expect(await screen.findByText("Content alert rules")).toBeInTheDocument()
-    expect(mocks.fetchRules).toHaveBeenCalledWith(42, { page: 1, size: 100 })
+    expect(mocks.fetchRules).toHaveBeenCalledWith(42, { page: 1, size: 100 }, expect.any(AbortSignal))
     expect(mocks.fetchAlerts).toHaveBeenCalledWith(42, {
       status: "unread",
       severity: undefined,
@@ -147,7 +147,7 @@ describe("AlertsTab", () => {
       source_id: undefined,
       page: 1,
       size: 50
-    })
+    }, expect.any(AbortSignal))
     expect(screen.getByText("Alert inbox")).toBeInTheDocument()
     expect((await screen.findAllByText("Active exploitation")).length).toBeGreaterThan(0)
     expect(screen.getByText("CVE-2026-9999 active exploitation observed")).toBeInTheDocument()
@@ -173,6 +173,28 @@ describe("AlertsTab", () => {
 
     expect(screen.getByText("Name and pattern are required")).toBeInTheDocument()
     expect(mocks.createRule).not.toHaveBeenCalled()
+  })
+
+  it("keeps the current Watchlist inbox when an earlier Watchlist request resolves last", async () => {
+    let resolvePrevious!: (value: { items: Array<typeof alert>; total: number }) => void
+    const previousAlerts = new Promise<{ items: Array<typeof alert>; total: number }>((resolve) => {
+      resolvePrevious = resolve
+    })
+    const currentAlert = { ...alert, id: 100, watchlist_id: 43, title: "Current Watchlist alert" }
+    mocks.fetchAlerts.mockImplementation((watchlistId) =>
+      watchlistId === 42 ? previousAlerts : Promise.resolve({ items: [currentAlert], total: 1 })
+    )
+
+    const { rerender } = render(<AlertsTab />)
+    await waitFor(() => expect(mocks.fetchAlerts).toHaveBeenCalledWith(42, expect.anything(), expect.any(AbortSignal)))
+    mocks.selectedWatchlistId = 43
+    rerender(<AlertsTab />)
+    await screen.findByText(currentAlert.title)
+
+    await act(async () => resolvePrevious({ items: [alert], total: 1 }))
+
+    expect(screen.getByText(currentAlert.title)).toBeInTheDocument()
+    expect(screen.queryByText(alert.title)).toBeNull()
   })
 
   it("renders load errors with the design-system Alert primitive", async () => {
