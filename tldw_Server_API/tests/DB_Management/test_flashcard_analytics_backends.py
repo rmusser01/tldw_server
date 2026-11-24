@@ -59,8 +59,8 @@ def _seed_review(db, card_uuid, reviewed_at="2026-09-16T00:30:00Z", rating=3, an
 
 
 def _saved_card(db):
-    deck = db.add_deck("Rowan")
-    card = db.add_flashcard({"deck_id": deck, "front": "Marker?", "back": "Amber"})
+    deck = db.flashcard_store.add_deck("Rowan")
+    card = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Marker?", "back": "Amber"})
     return deck, card
 
 
@@ -100,12 +100,12 @@ def test_analytics_preserves_visibility_and_deleted_filters(analytics_db):
     db = analytics_db
     db.workspace_store.upsert_workspace("ws-rowan", "Workspace")
     global_deck, global_card = _saved_card(db)
-    other_deck = db.add_deck("Citrine")
-    workspace_deck = db.add_deck("Workspace deck", workspace_id="ws-rowan")
-    deleted_deck = db.add_deck("Deleted deck")
+    other_deck = db.flashcard_store.add_deck("Citrine")
+    workspace_deck = db.flashcard_store.add_deck("Workspace deck", workspace_id="ws-rowan")
+    deleted_deck = db.flashcard_store.add_deck("Deleted deck")
     cards = [global_card]
     for deck in [other_deck, workspace_deck, deleted_deck, global_deck]:
-        cards.append(db.add_flashcard({"deck_id": deck, "front": "Scope?", "back": "Fixture"}))
+        cards.append(db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Scope?", "back": "Fixture"}))
     for card in cards:
         _seed_review(db, card)
     # Seed historical deletion state without exercising independent delete endpoints.
@@ -119,7 +119,7 @@ def test_analytics_preserves_visibility_and_deleted_filters(analytics_db):
         ({"include_workspace_items": True}, {global_deck, other_deck, workspace_deck}),
     ]
     for filters, expected_decks in cases:
-        result = db.get_flashcard_analytics_summary(**filters)
+        result = db.flashcard_store.get_flashcard_analytics_summary(**filters)
         assert result["reviewed_today"] == len(expected_decks)
         assert result["study_streak_days"] == 1
         assert {row["deck_id"] for row in result["decks"]} == expected_decks
@@ -136,7 +136,7 @@ def test_postgres_streak_uses_utc_days_with_offset_input(pg_analytics, session_t
     raw = db._get_thread_connection()
     raw.execute("SELECT set_config('TimeZone', %s, false)", (session_timezone,))
     raw.commit()
-    result = db.get_flashcard_analytics_summary()
+    result = db.flashcard_store.get_flashcard_analytics_summary()
     assert result["reviewed_today"] == 1
     assert result["study_streak_days"] == 2
     assert raw.info.transaction_status.name == "IDLE"
@@ -158,12 +158,12 @@ def test_failed_owned_analytics_read_recovers_without_poisoning_queue(pg_analyti
     with monkeypatch.context() as patch:
         patch.setattr(db.backend, "execute", fail_selected_query)
         with pytest.raises(CharactersRAGDBError):
-            db.get_flashcard_analytics_summary()
+            db.flashcard_store.get_flashcard_analytics_summary()
     assert db._get_thread_connection().info.transaction_status.name == "IDLE"
-    assert db.get_flashcard_analytics_summary()["reviewed_today"] == 0
-    assert [row["uuid"] for row in db.list_flashcards(deck_id=deck)] == [card]
-    assert len(db.list_decks()) == 1
-    assert db.list_flashcard_review_sessions(status="completed") == []
+    assert db.flashcard_store.get_flashcard_analytics_summary()["reviewed_today"] == 0
+    assert [row["uuid"] for row in db.flashcard_store.list_flashcards(deck_id=deck)] == [card]
+    assert len(db.flashcard_store.list_decks()) == 1
+    assert db.flashcard_store.list_flashcard_review_sessions(status="completed") == []
 
 
 @pytest.mark.parametrize("explicit", [False, True], ids=["implicit-owner", "explicit-owner"])
@@ -176,7 +176,7 @@ def test_analytics_preserves_caller_writes(pg_analytics, explicit, commit):
     raw = db._get_thread_connection()
     with db.transaction() if explicit else nullcontext():
         db.execute_query("UPDATE decks SET name = ? WHERE id = ?", ("Pending", deck))
-        assert db.get_flashcard_analytics_summary()["decks"][0]["deck_name"] == "Pending"
+        assert db.flashcard_store.get_flashcard_analytics_summary()["decks"][0]["deck_name"] == "Pending"
         assert raw.info.transaction_status.name == "INTRANS"
         assert db.backend.execute("SELECT name FROM decks WHERE id = %s", (deck,)).scalar == "Rowan"
         if commit:
@@ -193,34 +193,34 @@ def test_analytics_preserves_caller_writes(pg_analytics, explicit, commit):
 def test_actual_review_metrics_match_scheduler_outcome(analytics_db, scheduler, queue, rating):
     """Hard is recall; Again while learning is incorrect without a mature lapse."""
     db = analytics_db
-    deck = db.add_deck("Recall metrics", scheduler_type=scheduler)
-    card = db.add_flashcard({
+    deck = db.flashcard_store.add_deck("Recall metrics", scheduler_type=scheduler)
+    card = db.flashcard_store.add_flashcard({
         "deck_id": deck, "front": "Recall?", "back": "Recorded outcome",
         "queue_state": queue, "interval_days": 10 if queue == "review" else 0,
         "repetitions": 3 if queue == "review" else 0,
         "last_reviewed_at": "2026-09-15T12:00:00Z" if queue == "review" else None,
         "due_at": "2026-09-16T12:00:00Z",
     })
-    updated = db.review_flashcard(card, rating, answer_time_ms=700)
-    review = db.get_latest_flashcard_review(card)
+    updated = db.flashcard_store.review_flashcard(card, rating, answer_time_ms=700)
+    review = db.flashcard_store.get_latest_flashcard_review(card)
     expected_lapse = rating == 0 and queue == "review"
     assert bool(review["was_lapse"]) is expected_lapse
     assert updated["lapses"] == int(expected_lapse)
-    summary = db.get_flashcard_analytics_summary(deck_id=deck)
+    summary = db.flashcard_store.get_flashcard_analytics_summary(deck_id=deck)
     assert summary["reviewed_today"] == 1
     assert summary["lapse_rate_today"] == (100.0 if expected_lapse else 0.0)
     assert summary["retention_rate_today"] == (0.0 if expected_lapse else 100.0)
     session_id = updated["review_session_id"]
     expected_correct = int(rating != 0)
-    session = db.get_flashcard_review_session(session_id)
+    session = db.flashcard_store.get_flashcard_review_session(session_id)
     assert session["correct_count"] == expected_correct
     with db.transaction() as conn:
         conn.execute(
             "UPDATE flashcard_review_sessions SET cards_reviewed = 99, correct_count = 99 WHERE id = ?",
             (session_id,),
         )
-    db.get_flashcard_review_session_rollup(session_id, repair_session_aggregates=True)
-    repaired = db.get_flashcard_review_session(session_id)
+    db.flashcard_store.get_flashcard_review_session_rollup(session_id, repair_session_aggregates=True)
+    repaired = db.flashcard_store.get_flashcard_review_session(session_id)
     assert (repaired["cards_reviewed"], repaired["correct_count"]) == (1, expected_correct)
 
 
@@ -230,7 +230,7 @@ def test_historical_metrics_trust_recorded_outcome(analytics_db, rating, stored_
     db = analytics_db
     _, card = _saved_card(db)
     _seed_review(db, card, rating=rating, was_lapse=stored_lapse)
-    summary = db.get_flashcard_analytics_summary()
+    summary = db.flashcard_store.get_flashcard_analytics_summary()
     assert summary["lapse_rate_today"] == (100.0 if stored_lapse else 0.0)
 
 
@@ -238,12 +238,12 @@ def test_repeated_scheduled_hard_reviews_preserve_recall_metrics(analytics_db):
     db = analytics_db
     _, card = _saved_card(db)
     for rating in [5, 3, 2, 2]:
-        updated = db.review_flashcard(card, rating)
-    summary = db.get_flashcard_analytics_summary()
+        updated = db.flashcard_store.review_flashcard(card, rating)
+    summary = db.flashcard_store.get_flashcard_analytics_summary()
     assert summary["reviewed_today"] == 4
     assert summary["lapse_rate_today"] == 0.0
     assert summary["retention_rate_today"] == 100.0
-    session = db.get_flashcard_review_session(updated["review_session_id"])
+    session = db.flashcard_store.get_flashcard_review_session(updated["review_session_id"])
     assert (session["cards_reviewed"], session["correct_count"]) == (4, 4)
 
 
@@ -251,13 +251,13 @@ def test_repeated_scheduled_hard_reviews_preserve_recall_metrics(analytics_db):
 def test_historical_session_reconstruction_matches_recorded_recall(analytics_db, rating, was_lapse, correct):
     db = analytics_db
     deck, card = _saved_card(db)
-    session = db.get_or_create_flashcard_review_session(
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck, review_mode="due", tag_filter=None, scope_key=f"due:deck:{deck}"
     )
     _seed_review(db, card, rating=rating, was_lapse=was_lapse)
     with db.transaction() as conn:
         conn.execute("UPDATE flashcard_reviews SET review_session_id = ?", (session["id"],))
-    rollup = db.get_flashcard_review_session_rollup(session["id"])
+    rollup = db.flashcard_store.get_flashcard_review_session_rollup(session["id"])
     assert (rollup["cards_reviewed"], rollup["correct_count"]) == (1, correct)
 
 
@@ -268,7 +268,7 @@ def test_lapse_metrics_keep_utc_day_boundaries(analytics_db):
     _seed_review(db, card, "2026-09-16T00:00:00Z", rating=2, was_lapse=False)
     _seed_review(db, card, "2026-09-16T23:59:59Z", rating=0, was_lapse=True)
     _seed_review(db, card, "2026-09-17T00:00:00Z", rating=0, was_lapse=True)
-    summary = db.get_flashcard_analytics_summary()
+    summary = db.flashcard_store.get_flashcard_analytics_summary()
     assert summary["reviewed_today"] == 2
     assert summary["lapse_rate_today"] == 50.0
 
@@ -276,14 +276,14 @@ def test_lapse_metrics_keep_utc_day_boundaries(analytics_db):
 def test_postgres_lapse_metrics_exclude_other_owner(pg_analytics, tmp_path):
     db = pg_analytics
     _, card = _saved_card(db)
-    db.review_flashcard(card, 2)
+    db.flashcard_store.review_flashcard(card, 2)
     other = CharactersRAGDB(tmp_path / "other-owner.db", client_id="2", backend=db.backend)
     try:
         _, other_card = _saved_card(other)
-        other.review_flashcard(other_card, 5)
-        other.review_flashcard(other_card, 0)
-        own_summary = db.get_flashcard_analytics_summary()
-        other_summary = other.get_flashcard_analytics_summary()
+        other.flashcard_store.review_flashcard(other_card, 5)
+        other.flashcard_store.review_flashcard(other_card, 0)
+        own_summary = db.flashcard_store.get_flashcard_analytics_summary()
+        other_summary = other.flashcard_store.get_flashcard_analytics_summary()
         assert (own_summary["reviewed_today"], own_summary["lapse_rate_today"]) == (1, 0.0)
         assert (other_summary["reviewed_today"], other_summary["lapse_rate_today"]) == (2, 50.0)
     finally:

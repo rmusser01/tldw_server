@@ -78,17 +78,17 @@ def test_actual_worker_persists_pack_in_each_content_schema(request, tmp_path, m
             )
         )
         with chacha_operation(independent=True):
-            pack = db.get_study_pack(result["pack_id"])
+            pack = db.flashcard_store.get_study_pack(result["pack_id"])
             assert pack["client_id"] == "2"
             assert pack["workspace_id"] is None
             assert pack["deck_id"] == result["deck_id"]
-            assert db.get_deck(result["deck_id"])["client_id"] == "2"
-            memberships = db.list_study_pack_cards(result["pack_id"])
+            assert db.flashcard_store.get_deck(result["deck_id"])["client_id"] == "2"
+            memberships = db.flashcard_store.list_study_pack_cards(result["pack_id"])
             assert len(memberships) == 1
-            card = db.get_flashcard(memberships[0]["flashcard_uuid"])
+            card = db.flashcard_store.get_flashcard(memberships[0]["flashcard_uuid"])
             assert card["back"] == "Twenty-seven."
             assert card["client_id"] == "2"
-            citations = db.list_flashcard_citations(card["uuid"])
+            citations = db.flashcard_store.list_flashcard_citations(card["uuid"])
             assert citations[0]["source_id"] == note_id
             assert citations[0]["client_id"] == "2"
             rows = [
@@ -136,18 +136,18 @@ def shared_store(request, tmp_path):
 
 
 def _create_graph(db):
-    deck = db.add_deck("Synthetic graph")
-    card = db.add_flashcard({"deck_id": deck, "front": "Synthetic front", "back": "Synthetic back"})
-    pack = db.create_study_pack(
+    deck = db.flashcard_store.add_deck("Synthetic graph")
+    card = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Synthetic front", "back": "Synthetic back"})
+    pack = db.flashcard_store.create_study_pack(
         title="Synthetic pack",
         workspace_id=None,
         deck_id=deck,
         source_bundle_json={"items": [{"source_type": "note", "source_id": "synthetic"}]},
         generation_options_json={"deck_mode": "new"},
     )
-    assert db.add_study_pack_cards(pack, [card]) == 1
+    assert db.flashcard_store.add_study_pack_cards(pack, [card]) == 1
     assert (
-        db.add_flashcard_citations(
+        db.flashcard_store.add_flashcard_citations(
             card,
             [
                 {
@@ -164,7 +164,7 @@ def _create_graph(db):
 
 def _create_suggestions(db):
     """Persist a snapshot and action reservation through the real database API."""
-    snapshot = db.create_suggestion_snapshot(
+    snapshot = db.flashcard_store.create_suggestion_snapshot(
         service="flashcards",
         activity_type="flashcard_review_session",
         anchor_type="flashcard_review_session",
@@ -178,9 +178,9 @@ def _create_suggestions(db):
         "target_type": "deck",
         "selection_fingerprint": "shared",
     }
-    db.create_suggestion_generation_link(**link, target_id="pending:shared")
-    assert db.get_suggestion_snapshot(snapshot)["client_id"] == "2"
-    assert db.find_suggestion_generation_link_by_fingerprint(**link)["target_id"] == "pending:shared"
+    db.flashcard_store.create_suggestion_generation_link(**link, target_id="pending:shared")
+    assert db.flashcard_store.get_suggestion_snapshot(snapshot)["client_id"] == "2"
+    assert db.flashcard_store.find_suggestion_generation_link_by_fingerprint(**link)["target_id"] == "pending:shared"
 
 
 def test_shared_sync_writes_remain_in_caller_rollback(shared_store):
@@ -217,8 +217,8 @@ def test_all_three_triggers_preserve_update_delete_payloads(shared_store):
     db = shared_store
     with chacha_operation(independent=True):
         pack, card = _create_graph(db)
-        membership = db.list_study_pack_cards(pack)[0]["id"]
-        citation = db.list_flashcard_citations(card)[0]["id"]
+        membership = db.flashcard_store.list_study_pack_cards(pack)[0]["id"]
+        citation = db.flashcard_store.list_flashcard_citations(card)[0]["id"]
         with db.transaction() as conn:
             conn.execute("UPDATE study_packs SET title=?, version=version+1 WHERE id=?", ("Updated pack", pack))
             conn.execute("UPDATE study_pack_cards SET version=version+1 WHERE id=?", (membership,))
@@ -226,8 +226,8 @@ def test_all_three_triggers_preserve_update_delete_payloads(shared_store):
                 "UPDATE flashcard_citations SET citation_text=?, version=version+1 WHERE id=?",
                 ("Updated citation", citation),
             )
-        assert db.soft_delete_study_pack(pack, expected_version=2)
-        assert db.replace_flashcard_citations(card, []) == 0
+        assert db.flashcard_store.soft_delete_study_pack(pack, expected_version=2)
+        assert db.flashcard_store.replace_flashcard_citations(card, []) == 0
         with db.transaction() as conn:
             conn.execute("UPDATE study_pack_cards SET deleted=?, version=version+1 WHERE id=?", (True, membership))
         rows = [
@@ -315,8 +315,8 @@ def test_upgrade_replaces_existing_v71_trigger_bodies(pg_database_config, tmp_pa
         )
         with chacha_operation(independent=True):
             pack, card = _create_graph(db)
-            assert db.get_study_pack(pack)["client_id"] == "2"
-            assert db.list_flashcard_citations(card)[0]["client_id"] == "2"
+            assert db.flashcard_store.get_study_pack(pack)["client_id"] == "2"
+            assert db.flashcard_store.list_flashcard_citations(card)[0]["client_id"] == "2"
             _create_suggestions(db)
     finally:
         db.close_all_connections()

@@ -120,8 +120,8 @@ def test_all_restore_writers_clear_redirect_before_later_delete(keywords, restor
             domain="notes.keyword", object_id=a["sync_id"], operation="upsert", payload={"keyword": "Restore A"}
         )
     else:
-        card = db.add_flashcard({"front": "Restore tag", "back": "Answer"})
-        assert db.set_flashcard_tags(card, ["Restore A"])
+        card = db.flashcard_store.add_flashcard({"front": "Restore tag", "back": "Answer"})
+        assert db.flashcard_store.set_flashcard_tags(card, ["Restore A"])
     restored = db.get_keyword_by_id(a["id"])
     assert restored["sync_id"] == a["sync_id"] and restored["version"] == 3
     assert restored.get("merged_into_sync_id") is None
@@ -372,11 +372,11 @@ def test_four_membership_families_and_redirect_are_atomic(keywords, monkeypatch,
     character = db.add_character_card({"name": "Four links character"})
     conversation = db.add_conversation({"character_id": character, "title": "Four links conversation"})
     collection = db.add_keyword_collection("Four links collection")
-    card = db.add_flashcard({"front": "Four links card", "back": "Answer"})
+    card = db.flashcard_store.add_flashcard({"front": "Four links card", "back": "Answer"})
     db.link_note_to_keyword(note, a["id"])
     db.keyword_store.link_conversation_to_keyword(conversation, a["id"])
     db.keyword_store.link_collection_to_keyword(collection, a["id"])
-    db.set_flashcard_tags(card, [a["keyword"]])
+    db.flashcard_store.set_flashcard_tags(card, [a["keyword"]])
     original = db.keyword_store._merge_keyword_links_for_table
     moved = []
 

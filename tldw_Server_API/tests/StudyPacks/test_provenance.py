@@ -51,8 +51,8 @@ def assistant_client(db: CharactersRAGDB):
 
 
 def _create_card(db: CharactersRAGDB, *, front: str = "What is slow start?") -> str:
-    deck_id = db.add_deck("Study Pack Provenance Deck", workspace_id="ws-1")
-    return db.add_flashcard(
+    deck_id = db.flashcard_store.add_deck("Study Pack Provenance Deck", workspace_id="ws-1")
+    return db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": front,
@@ -63,7 +63,7 @@ def _create_card(db: CharactersRAGDB, *, front: str = "What is slow start?") -> 
 
 
 def _create_pack(db: CharactersRAGDB, *, deck_id: int) -> int:
-    return db.create_study_pack(
+    return db.flashcard_store.create_study_pack(
         title="TCP Fundamentals",
         workspace_id="ws-1",
         deck_id=deck_id,
@@ -98,7 +98,7 @@ def test_persist_flashcard_citations_assigns_ordinal_zero_to_deterministic_prima
         ],
     )
 
-    citations = db.list_flashcard_citations(card_uuid)
+    citations = db.flashcard_store.list_flashcard_citations(card_uuid)
 
     assert [citation["ordinal"] for citation in citations] == [0, 1, 2]  # nosec B101
     assert citations[0]["source_type"] == "media"  # nosec B101
@@ -224,7 +224,7 @@ def test_persist_flashcard_citations_mirrors_only_primary_legacy_source_ref(db: 
         ],
     )
 
-    flashcard = db.get_flashcard(card_uuid)
+    flashcard = db.flashcard_store.get_flashcard(card_uuid)
 
     assert flashcard is not None  # nosec B101
     assert flashcard["source_ref_type"] == "note"  # nosec B101
@@ -261,9 +261,9 @@ def test_persist_flashcard_citations_replaces_existing_active_citation_set(db: C
         ],
     )
 
-    active_citations = db.list_flashcard_citations(card_uuid)
-    all_citations = db.list_flashcard_citations(card_uuid, include_deleted=True)
-    flashcard = db.get_flashcard(card_uuid)
+    active_citations = db.flashcard_store.list_flashcard_citations(card_uuid)
+    all_citations = db.flashcard_store.list_flashcard_citations(card_uuid, include_deleted=True)
+    flashcard = db.flashcard_store.get_flashcard(card_uuid)
 
     assert first["primary_citation"]["source_id"] == "media-initial"  # nosec B101
     assert second["primary_citation"]["source_id"] == "note-current"  # nosec B101
@@ -281,7 +281,7 @@ def test_persist_flashcard_citations_rolls_back_source_summary_when_insert_fails
 ):
     card_uuid = _create_card(db, front="What is selective acknowledgment?")
     store = _store(db)
-    flashcard_before = db.get_flashcard(card_uuid)
+    flashcard_before = db.flashcard_store.get_flashcard(card_uuid)
     assert flashcard_before is not None  # nosec B101
 
     original_execute_many = db.execute_many
@@ -305,9 +305,9 @@ def test_persist_flashcard_citations_rolls_back_source_summary_when_insert_fails
             ],
         )
 
-    flashcard_after = db.get_flashcard(card_uuid)
+    flashcard_after = db.flashcard_store.get_flashcard(card_uuid)
     assert flashcard_after is not None  # nosec B101
-    assert db.list_flashcard_citations(card_uuid) == []  # nosec B101
+    assert db.flashcard_store.list_flashcard_citations(card_uuid) == []  # nosec B101
     assert flashcard_after["source_ref_type"] == flashcard_before["source_ref_type"]  # nosec B101
     assert flashcard_after["source_ref_id"] == flashcard_before["source_ref_id"]  # nosec B101
 
@@ -315,10 +315,10 @@ def test_persist_flashcard_citations_rolls_back_source_summary_when_insert_fails
 def test_build_flashcard_assistant_context_includes_pack_and_provenance_payload(db: CharactersRAGDB):
     note_id = db.add_note("Slow Start", "Slow start expands the congestion window rapidly.")
     card_uuid = _create_card(db)
-    flashcard = db.get_flashcard(card_uuid)
+    flashcard = db.flashcard_store.get_flashcard(card_uuid)
     assert flashcard is not None  # nosec B101
     pack_id = _create_pack(db, deck_id=int(flashcard["deck_id"]))
-    db.add_study_pack_cards(pack_id, [card_uuid])
+    db.flashcard_store.add_study_pack_cards(pack_id, [card_uuid])
 
     _store(db).persist_flashcard_citations(
         card_uuid,

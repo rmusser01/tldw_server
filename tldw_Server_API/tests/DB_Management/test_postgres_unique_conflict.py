@@ -51,8 +51,8 @@ def _duplicate_deck_contract(db):
         duplicate = client.post("/flashcards/decks", json={"name": "Citrine", "description": "Replacement"})
         assert duplicate.status_code == 409, duplicate.text
         assert "Deck name already exists" in duplicate.json()["detail"]
-        assert db.get_deck(original["id"])["description"] == "Original"
-        assert len(db.list_decks()) == 1
+        assert db.flashcard_store.get_deck(original["id"])["description"] == "Original"
+        assert len(db.flashcard_store.list_decks()) == 1
         recovered = client.post("/flashcards/decks", json={"name": "New name"})
         assert recovered.status_code == 200, recovered.text
         assert recovered.json()["id"] != original["id"]
@@ -81,7 +81,7 @@ def test_postgres_other_constraint_failure_stays_500_and_rolls_back(pg_decks):
         assert failed.json()["detail"] == "Failed to create deck"
         recovered = client.post("/flashcards/decks", json={"name": "Allowed"})
         assert recovered.status_code == 200, recovered.text
-    assert [row["name"] for row in pg_decks.list_decks()] == ["Allowed"]
+    assert [row["name"] for row in pg_decks.flashcard_store.list_decks()] == ["Allowed"]
 
 
 @pytest.mark.integration

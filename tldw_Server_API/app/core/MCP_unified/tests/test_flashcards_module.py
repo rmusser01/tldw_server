@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 
 class FakeFlashcardsDB:
+    flashcard_store = property(lambda self: self)  # the fake defines the flashcard methods itself
     def __init__(self) -> None:
         self._deck_id = 0
         self.decks: Dict[int, Dict[str, Any]] = {}

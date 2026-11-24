@@ -1182,7 +1182,7 @@ class TestKeywordsAndCollections:
 class TestSyncLog:
     def test_sync_log_entry_on_create_deck_includes_scheduler_fields(self, db_instance: CharactersRAGDB):
         initial_log_max_id = db_instance.get_latest_sync_log_change_id()
-        deck_id = db_instance.add_deck(
+        deck_id = db_instance.flashcard_store.add_deck(
             "Sync FSRS Deck",
             scheduler_type="fsrs",
             scheduler_settings={"fsrs": {"target_retention": 0.88, "maximum_interval_days": 7300}},
@@ -1202,8 +1202,8 @@ class TestSyncLog:
         assert settings["fsrs"]["target_retention"] == pytest.approx(0.88)
 
     def test_sync_log_entry_on_fsrs_review_includes_scheduler_state(self, db_instance: CharactersRAGDB):
-        deck_id = db_instance.add_deck("Review Sync Deck", scheduler_type="fsrs")
-        card_uuid = db_instance.add_flashcard(
+        deck_id = db_instance.flashcard_store.add_deck("Review Sync Deck", scheduler_type="fsrs")
+        card_uuid = db_instance.flashcard_store.add_flashcard(
             {
                 "deck_id": deck_id,
                 "front": "Review sync",
@@ -1218,7 +1218,7 @@ class TestSyncLog:
         )
 
         latest_change_id = db_instance.get_latest_sync_log_change_id()
-        db_instance.review_flashcard(card_uuid, rating=3, answer_time_ms=1500)
+        db_instance.flashcard_store.review_flashcard(card_uuid, rating=3, answer_time_ms=1500)
 
         new_entries = db_instance.get_sync_log_entries(since_change_id=latest_change_id)
         update_log_entry = None

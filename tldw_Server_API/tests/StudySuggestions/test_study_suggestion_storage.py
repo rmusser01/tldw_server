@@ -37,7 +37,7 @@ def _admin_principal() -> AuthPrincipal:
 
 
 def test_create_suggestion_snapshot_defaults_to_active_status(db: CharactersRAGDB):
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -46,7 +46,7 @@ def test_create_suggestion_snapshot_defaults_to_active_status(db: CharactersRAGD
         payload_json={"summary": {"score": 7}, "topics": [{"display_label": "Renal basics"}]},
     )
 
-    row = db.get_suggestion_snapshot(snapshot_id)
+    row = db.flashcard_store.get_suggestion_snapshot(snapshot_id)
 
     assert row["service"] == "quiz"  # nosec B101
     assert row["status"] == "active"  # nosec B101
@@ -55,7 +55,7 @@ def test_create_suggestion_snapshot_defaults_to_active_status(db: CharactersRAGD
 
 def test_create_suggestion_snapshot_rejects_unknown_status(db: CharactersRAGDB):
     with pytest.raises(ValueError):
-        db.create_suggestion_snapshot(
+        db.flashcard_store.create_suggestion_snapshot(
             service="quiz",
             activity_type="quiz_attempt",
             anchor_type="quiz_attempt",
@@ -67,7 +67,7 @@ def test_create_suggestion_snapshot_rejects_unknown_status(db: CharactersRAGDB):
 
 
 def test_suggestion_snapshot_payload_defaults_to_permission_safe_fields_only(db: CharactersRAGDB):
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -93,7 +93,7 @@ def test_suggestion_snapshot_payload_defaults_to_permission_safe_fields_only(db:
         },
     )
 
-    row = db.get_suggestion_snapshot(snapshot_id)
+    row = db.flashcard_store.get_suggestion_snapshot(snapshot_id)
     payload = row["payload_json"]
 
     assert payload["summary"]["score"] == 7  # nosec B101
@@ -110,7 +110,7 @@ def test_suggestion_snapshot_payload_defaults_to_permission_safe_fields_only(db:
 
 
 def test_suggestion_snapshot_payload_preserves_v2_topic_identity_fields(db: CharactersRAGDB):
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -143,7 +143,7 @@ def test_suggestion_snapshot_payload_preserves_v2_topic_identity_fields(db: Char
         },
     )
 
-    row = db.get_suggestion_snapshot(snapshot_id)
+    row = db.flashcard_store.get_suggestion_snapshot(snapshot_id)
     topic = row["payload_json"]["topics"][0]
 
     assert topic["topic_key"] == "renal:renal-physiology"  # nosec B101
@@ -162,7 +162,7 @@ def test_suggestion_snapshot_payload_preserves_v2_topic_identity_fields(db: Char
 
 
 def test_suggestion_snapshot_user_selection_survives_refresh_lineage_without_resubmission(db: CharactersRAGDB):
-    original_id = db.create_suggestion_snapshot(
+    original_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -171,7 +171,7 @@ def test_suggestion_snapshot_user_selection_survives_refresh_lineage_without_res
         payload_json={"topics": [{"display_label": "Renal basics"}]},
         user_selection_json={"selected_topic_ids": ["topic-1"]},
     )
-    refreshed_id = db.create_suggestion_snapshot(
+    refreshed_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -181,8 +181,8 @@ def test_suggestion_snapshot_user_selection_survives_refresh_lineage_without_res
         refreshed_from_snapshot_id=original_id,
     )
 
-    refreshed = db.get_suggestion_snapshot(refreshed_id)
-    snapshots = db.list_suggestion_snapshots_for_anchor("quiz_attempt", 101)
+    refreshed = db.flashcard_store.get_suggestion_snapshot(refreshed_id)
+    snapshots = db.flashcard_store.list_suggestion_snapshots_for_anchor("quiz_attempt", 101)
 
     assert refreshed["refreshed_from_snapshot_id"] == original_id  # nosec B101
     assert refreshed["user_selection_json"] == {"selected_topic_ids": ["topic-1"]}  # nosec B101
@@ -191,7 +191,7 @@ def test_suggestion_snapshot_user_selection_survives_refresh_lineage_without_res
 
 def test_suggestion_snapshot_rejects_invalid_user_selection_json_string(db: CharactersRAGDB):
     with pytest.raises(InputError, match="user_selection_json"):
-        db.create_suggestion_snapshot(
+        db.flashcard_store.create_suggestion_snapshot(
             service="quiz",
             activity_type="quiz_attempt",
             anchor_type="quiz_attempt",
@@ -203,7 +203,7 @@ def test_suggestion_snapshot_rejects_invalid_user_selection_json_string(db: Char
 
 
 def test_suggestion_snapshot_rejects_refresh_reference_from_different_lineage(db: CharactersRAGDB):
-    original_id = db.create_suggestion_snapshot(
+    original_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -214,7 +214,7 @@ def test_suggestion_snapshot_rejects_refresh_reference_from_different_lineage(db
     )
 
     with pytest.raises(InputError, match="same suggestion lineage"):
-        db.create_suggestion_snapshot(
+        db.flashcard_store.create_suggestion_snapshot(
             service="quiz",
             activity_type="quiz_attempt",
             anchor_type="quiz_attempt",
@@ -226,7 +226,7 @@ def test_suggestion_snapshot_rejects_refresh_reference_from_different_lineage(db
 
 
 def test_generation_links_persist_one_row_per_snapshot_action_result(db: CharactersRAGDB):
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -235,14 +235,14 @@ def test_generation_links_persist_one_row_per_snapshot_action_result(db: Charact
         payload_json={"topics": [{"display_label": "Renal basics"}]},
     )
 
-    first_link_id = db.create_suggestion_generation_link(
+    first_link_id = db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
         target_id="quiz-55",
         selection_fingerprint="sel-1",
     )
-    second_link_id = db.create_suggestion_generation_link(
+    second_link_id = db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="flashcards",
         target_type="deck",
@@ -250,14 +250,14 @@ def test_generation_links_persist_one_row_per_snapshot_action_result(db: Charact
         selection_fingerprint="sel-2",
     )
 
-    first_row = db.find_suggestion_generation_link(
+    first_row = db.flashcard_store.find_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
         target_id="quiz-55",
         selection_fingerprint="sel-1",
     )
-    second_row = db.find_suggestion_generation_link(
+    second_row = db.flashcard_store.find_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="flashcards",
         target_type="deck",
@@ -276,8 +276,8 @@ def test_generation_links_persist_one_row_per_snapshot_action_result(db: Charact
 
 
 def test_flashcard_review_session_rollup_preserves_provenance_fields(db: CharactersRAGDB):
-    deck_id = db.add_deck("Grounded Deck", "desc")
-    session = db.get_or_create_flashcard_review_session(
+    deck_id = db.flashcard_store.add_deck("Grounded Deck", "desc")
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter="renal basics",
@@ -298,7 +298,7 @@ def test_flashcard_review_session_rollup_preserves_provenance_fields(db: Charact
         commit=True,
     )
 
-    rollup = db.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=False)
+    rollup = db.flashcard_store.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=False)
 
     assert rollup["study_pack_id"] == 44  # nosec B101
     assert rollup["source_bundle"] == [  # nosec B101
@@ -307,8 +307,8 @@ def test_flashcard_review_session_rollup_preserves_provenance_fields(db: Charact
 
 
 def test_flashcard_review_session_rollup_unwraps_study_pack_bundle_items_shape(db: CharactersRAGDB):
-    deck_id = db.add_deck("Packed Grounded Deck", "desc")
-    session = db.get_or_create_flashcard_review_session(
+    deck_id = db.flashcard_store.add_deck("Packed Grounded Deck", "desc")
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter="renal basics",
@@ -327,7 +327,7 @@ def test_flashcard_review_session_rollup_unwraps_study_pack_bundle_items_shape(d
         commit=True,
     )
 
-    rollup = db.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=False)
+    rollup = db.flashcard_store.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=False)
 
     assert rollup["source_bundle"] == [  # nosec B101
         {"source_type": "note", "source_id": "note-7", "label": "Renal basics"},
@@ -335,14 +335,14 @@ def test_flashcard_review_session_rollup_unwraps_study_pack_bundle_items_shape(d
 
 
 def test_get_flashcard_reviewed_cards_returns_ordered_card_metadata(db: CharactersRAGDB):
-    deck_id = db.add_deck("Reviewed Cards Deck", "desc")
-    session = db.get_or_create_flashcard_review_session(
+    deck_id = db.flashcard_store.add_deck("Reviewed Cards Deck", "desc")
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck_id,
         review_mode="due",
         tag_filter=None,
         scope_key=f"due:deck:{deck_id}",
     )
-    first_card = db.add_flashcard(
+    first_card = db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Front 1",
@@ -352,7 +352,7 @@ def test_get_flashcard_reviewed_cards_returns_ordered_card_metadata(db: Characte
             "source_ref_id": "note-7",
         }
     )
-    second_card = db.add_flashcard(
+    second_card = db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Front 2",
@@ -363,10 +363,10 @@ def test_get_flashcard_reviewed_cards_returns_ordered_card_metadata(db: Characte
         }
     )
 
-    db.review_flashcard(first_card, rating=4, answer_time_ms=500, review_session_id=int(session["id"]))
-    db.review_flashcard(second_card, rating=2, answer_time_ms=650, review_session_id=int(session["id"]))
+    db.flashcard_store.review_flashcard(first_card, rating=4, answer_time_ms=500, review_session_id=int(session["id"]))
+    db.flashcard_store.review_flashcard(second_card, rating=2, answer_time_ms=650, review_session_id=int(session["id"]))
 
-    reviewed_cards = db.get_flashcard_reviewed_cards(int(session["id"]))
+    reviewed_cards = db.flashcard_store.get_flashcard_reviewed_cards(int(session["id"]))
 
     assert [card["uuid"] for card in reviewed_cards] == [first_card, second_card]  # nosec B101
     assert reviewed_cards[0]["deck_name"] == "Reviewed Cards Deck"  # nosec B101
@@ -407,7 +407,7 @@ def test_refresh_snapshot_serializes_quiz_v2_topic_fields(db: CharactersRAGDB):
         anchor_id=int(attempt["id"]),
         principal=_admin_principal(),
     )
-    row = db.get_suggestion_snapshot(snapshot_id)
+    row = db.flashcard_store.get_suggestion_snapshot(snapshot_id)
     topic = row["payload_json"]["topics"][0]
 
     assert topic["topic_key"]  # nosec B101
@@ -453,7 +453,7 @@ def test_refresh_snapshot_serializes_semantic_canonical_label_for_alias_source_t
         anchor_id=int(attempt["id"]),
         principal=_admin_principal(),
     )
-    topic = db.get_suggestion_snapshot(snapshot_id)["payload_json"]["topics"][0]
+    topic = db.flashcard_store.get_suggestion_snapshot(snapshot_id)["payload_json"]["topics"][0]
 
     assert topic["topic_key"] == "renal:renal-physiology"  # nosec B101
     assert topic["canonical_label"] == "renal physiology"  # nosec B101
@@ -494,7 +494,7 @@ def test_quiz_snapshot_assigns_source_refs_only_to_matching_topics(db: Character
         anchor_id=int(attempt["id"]),
         principal=_admin_principal(),
     )
-    payload = db.get_suggestion_snapshot(snapshot_id)["payload_json"]
+    payload = db.flashcard_store.get_suggestion_snapshot(snapshot_id)["payload_json"]
     topics_by_label = {
         topic["display_label"]: topic
         for topic in payload["topics"]
@@ -506,7 +506,7 @@ def test_quiz_snapshot_assigns_source_refs_only_to_matching_topics(db: Character
 
 
 def test_suggestion_generation_link_duplicate_is_conflict_but_fk_failure_is_not(db: CharactersRAGDB):
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -515,7 +515,7 @@ def test_suggestion_generation_link_duplicate_is_conflict_but_fk_failure_is_not(
         payload_json={"topics": [{"display_label": "Renal basics"}]},
     )
 
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -524,7 +524,7 @@ def test_suggestion_generation_link_duplicate_is_conflict_but_fk_failure_is_not(
     )
 
     with pytest.raises(ConflictError, match="already exists"):
-        db.create_suggestion_generation_link(
+        db.flashcard_store.create_suggestion_generation_link(
             snapshot_id=snapshot_id,
             target_service="quiz",
             target_type="quiz",
@@ -533,7 +533,7 @@ def test_suggestion_generation_link_duplicate_is_conflict_but_fk_failure_is_not(
         )
 
     with pytest.raises(Exception) as exc_info:
-        db.create_suggestion_generation_link(
+        db.flashcard_store.create_suggestion_generation_link(
             snapshot_id=999999,
             target_service="quiz",
             target_type="quiz",
@@ -547,7 +547,7 @@ def test_suggestion_generation_link_duplicate_is_conflict_but_fk_failure_is_not(
 def test_suggestion_generation_link_duplicate_identity_ignores_target_id_for_active_rows(
     db: CharactersRAGDB,
 ):
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -556,7 +556,7 @@ def test_suggestion_generation_link_duplicate_identity_ignores_target_id_for_act
         payload_json={"topics": [{"display_label": "Renal basics"}]},
     )
 
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -565,7 +565,7 @@ def test_suggestion_generation_link_duplicate_identity_ignores_target_id_for_act
     )
 
     with pytest.raises(ConflictError, match="already exists"):
-        db.create_suggestion_generation_link(
+        db.flashcard_store.create_suggestion_generation_link(
             snapshot_id=snapshot_id,
             target_service="quiz",
             target_type="quiz",
@@ -577,7 +577,7 @@ def test_suggestion_generation_link_duplicate_identity_ignores_target_id_for_act
 def test_replace_suggestion_generation_link_returns_retained_link_id_when_updating_existing_row(
     db: CharactersRAGDB,
 ):
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -585,7 +585,7 @@ def test_replace_suggestion_generation_link_returns_retained_link_id_when_updati
         suggestion_type="study_suggestions",
         payload_json={"topics": [{"display_label": "Renal basics"}]},
     )
-    original_link_id = db.create_suggestion_generation_link(
+    original_link_id = db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -593,14 +593,14 @@ def test_replace_suggestion_generation_link_returns_retained_link_id_when_updati
         selection_fingerprint="sel-1",
     )
 
-    updated_link_id = db.replace_suggestion_generation_link(
+    updated_link_id = db.flashcard_store.replace_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
         target_id="quiz-99",
         selection_fingerprint="sel-1",
     )
-    row = db.find_suggestion_generation_link(
+    row = db.flashcard_store.find_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -616,7 +616,7 @@ def test_replace_suggestion_generation_link_returns_retained_link_id_when_updati
 def test_suggestion_generation_link_schema_dedupes_legacy_active_duplicates_before_unique_index(
     db: CharactersRAGDB,
 ):
-    snapshot_id = db.create_suggestion_snapshot(
+    snapshot_id = db.flashcard_store.create_suggestion_snapshot(
         service="quiz",
         activity_type="quiz_attempt",
         anchor_type="quiz_attempt",
@@ -625,7 +625,7 @@ def test_suggestion_generation_link_schema_dedupes_legacy_active_duplicates_befo
         payload_json={"topics": [{"display_label": "Renal basics"}]},
     )
 
-    db.create_suggestion_generation_link(
+    db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=snapshot_id,
         target_service="quiz",
         target_type="quiz",
@@ -694,7 +694,7 @@ def test_suggestion_generation_link_schema_dedupes_legacy_active_duplicates_befo
     assert [row["target_id"] for row in active_rows] == ["quiz-99"]  # nosec B101
 
     with pytest.raises(ConflictError, match="already exists"):
-        db.create_suggestion_generation_link(
+        db.flashcard_store.create_suggestion_generation_link(
             snapshot_id=snapshot_id,
             target_service="quiz",
             target_type="quiz",
@@ -764,7 +764,7 @@ def test_suggestion_storage_postgres_round_trip_and_integrity(pg_database_config
     db = CharactersRAGDB(db_path=":memory:", client_id="study-suggestion-pg", backend=backend)
 
     try:
-        snapshot_id = db.create_suggestion_snapshot(
+        snapshot_id = db.flashcard_store.create_suggestion_snapshot(
             service="quiz",
             activity_type="quiz_attempt",
             anchor_type="quiz_attempt",
@@ -774,11 +774,11 @@ def test_suggestion_storage_postgres_round_trip_and_integrity(pg_database_config
             user_selection_json={"selected_topic_ids": ["topic-1"]},
         )
 
-        row = db.get_suggestion_snapshot(snapshot_id)
+        row = db.flashcard_store.get_suggestion_snapshot(snapshot_id)
         assert row is not None  # nosec B101
         assert row["user_selection_json"] == {"selected_topic_ids": ["topic-1"]}  # nosec B101
 
-        db.create_suggestion_generation_link(
+        db.flashcard_store.create_suggestion_generation_link(
             snapshot_id=snapshot_id,
             target_service="quiz",
             target_type="quiz",
@@ -787,7 +787,7 @@ def test_suggestion_storage_postgres_round_trip_and_integrity(pg_database_config
         )
 
         with pytest.raises(ConflictError, match="already exists"):
-            db.create_suggestion_generation_link(
+            db.flashcard_store.create_suggestion_generation_link(
                 snapshot_id=snapshot_id,
                 target_service="quiz",
                 target_type="quiz",
@@ -796,7 +796,7 @@ def test_suggestion_storage_postgres_round_trip_and_integrity(pg_database_config
             )
 
         with pytest.raises(Exception) as exc_info:
-            db.create_suggestion_generation_link(
+            db.flashcard_store.create_suggestion_generation_link(
                 snapshot_id=999999,
                 target_service="quiz",
                 target_type="quiz",

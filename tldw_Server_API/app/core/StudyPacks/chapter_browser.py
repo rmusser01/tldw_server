@@ -75,7 +75,7 @@ def browse_deck_cards(
 
     matching_ids = [uuid for uuid, membership in memberships.items() if chapter_id is None or membership == chapter_id]
     window = matching_ids[offset:offset + limit]
-    cards = {row["uuid"]: row for row in db.get_flashcards_by_uuids(window) if row["deck_id"] == deck_id}
+    cards = {row["uuid"]: row for row in db.flashcard_store.get_flashcards_by_uuids(window) if row["deck_id"] == deck_id}
     return {
         "chapters": [chapters[key] for key in sorted(chapters, key=lambda key: key[:2])],
         "all_cards_count": len(memberships),

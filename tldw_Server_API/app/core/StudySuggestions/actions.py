@@ -348,7 +348,7 @@ def _titleize_label(value: object) -> str:
 
 
 def _get_flashcard_review_session(note_db: CharactersRAGDB, *, session_id: int) -> dict[str, Any] | None:
-    return note_db.get_flashcard_review_session(int(session_id))
+    return note_db.flashcard_store.get_flashcard_review_session(int(session_id))
 
 
 def build_follow_up_flashcard_deck_name(
@@ -375,7 +375,7 @@ def build_follow_up_flashcard_deck_name(
     suffix = 2
     max_attempts = 20
     for _ in range(max_attempts):
-        if note_db.get_deck_by_name(candidate) is None:
+        if note_db.flashcard_store.get_deck_by_name(candidate) is None:
             return candidate
         candidate = f"{base_name} ({suffix})"
         suffix += 1
@@ -429,7 +429,7 @@ def build_follow_up_flashcard_source_text(
         lines = ["Create focused follow-up flashcards from this review session."]
         deck_id = session.get("deck_id")
         if deck_id is not None:
-            deck = note_db.get_deck(int(deck_id))
+            deck = note_db.flashcard_store.get_deck(int(deck_id))
             if deck and deck.get("name"):
                 lines.append(f"Deck: {str(deck['name']).strip()}")
         if session.get("tag_filter"):
@@ -437,7 +437,7 @@ def build_follow_up_flashcard_source_text(
         if normalized_topics:
             lines.append(f"Focus topics: {', '.join(normalized_topics)}")
         if deck_id is not None:
-            cards = note_db.list_flashcards(
+            cards = note_db.flashcard_store.list_flashcards(
                 deck_id=int(deck_id),
                 tag=str(session.get("tag_filter") or "").strip() or None,
                 due_status="all",
@@ -510,7 +510,7 @@ def find_generation_link_by_fingerprint(
 ) -> dict[str, Any] | None:
     """Find an existing generation link by fingerprint without requiring the target id."""
 
-    return note_db.find_suggestion_generation_link_by_fingerprint(
+    return note_db.flashcard_store.find_suggestion_generation_link_by_fingerprint(
         snapshot_id=int(snapshot_id),
         target_service=_normalize_text(target_service),
         target_type=_normalize_text(target_type),
@@ -536,7 +536,7 @@ def reserve_generation_link(
 ) -> int:
     """Claim one in-progress generation slot for a selection fingerprint."""
 
-    return note_db.create_suggestion_generation_link(
+    return note_db.flashcard_store.create_suggestion_generation_link(
         snapshot_id=int(snapshot_id),
         target_service=_normalize_text(target_service),
         target_type=_normalize_text(target_type),
@@ -560,7 +560,7 @@ def finalize_generation_link(
     if not final_target_id:
         raise ValueError("final_target_id must not be empty")
 
-    updated = note_db.finalize_suggestion_generation_link(
+    updated = note_db.flashcard_store.finalize_suggestion_generation_link(
         snapshot_id=int(snapshot_id),
         target_service=_normalize_text(target_service),
         target_type=_normalize_text(target_type),
@@ -585,7 +585,7 @@ def release_generation_link_reservation(
 ) -> None:
     """Soft-delete an in-progress reservation after generation failure."""
 
-    note_db.release_suggestion_generation_link_reservation(
+    note_db.flashcard_store.release_suggestion_generation_link_reservation(
         snapshot_id=int(snapshot_id),
         target_service=_normalize_text(target_service),
         target_type=_normalize_text(target_type),
@@ -596,7 +596,7 @@ def release_generation_link_reservation(
 def soft_delete_deck(note_db: CharactersRAGDB, *, deck_id: int) -> None:
     """Best-effort cleanup for decks created during failed follow-up generation."""
 
-    note_db.soft_delete_deck_by_id(int(deck_id))
+    note_db.flashcard_store.soft_delete_deck_by_id(int(deck_id))
 
 
 def cleanup_generated_action_target(

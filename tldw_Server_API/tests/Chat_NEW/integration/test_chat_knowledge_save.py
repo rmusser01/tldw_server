@@ -127,7 +127,7 @@ def test_save_chat_knowledge_rolls_back_on_flashcard_error(
     def _failing_add_flashcard(card_data):
         raise RuntimeError("flashcard failure")
 
-    original_add_flashcard = chacha_db.add_flashcard
+    original_add_flashcard = chacha_db.flashcard_store.add_flashcard
     chacha_db.add_flashcard = _failing_add_flashcard  # type: ignore[assignment]
 
     try:

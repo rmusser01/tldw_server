@@ -38,8 +38,8 @@ def _client(db):
 
 
 def _saved_card(db):
-    deck = db.add_deck("Citrine")
-    card_uuid = db.add_flashcard({"deck_id": deck, "front": "Marker?", "back": "Amber", "notes": "Keep notes"})
+    deck = db.flashcard_store.add_deck("Citrine")
+    card_uuid = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Marker?", "back": "Amber", "notes": "Keep notes"})
     with db.transaction() as conn:
         conn.execute(
             """UPDATE flashcards
@@ -50,7 +50,7 @@ def _saved_card(db):
                 WHERE uuid = ?""",
             ('{"stability":12.5}', card_uuid),
         )
-    return db.get_flashcard(card_uuid)
+    return db.flashcard_store.get_flashcard(card_uuid)
 
 
 def _request(client, operation, card_uuid, version):
@@ -66,7 +66,7 @@ def test_delete_http_is_versioned_and_idempotent(lifecycle_db):
         deleted = _request(client, "delete", card["uuid"], card["version"])
         assert deleted.status_code == 200, deleted.text
         assert deleted.json() == {"deleted": True}
-        assert db.get_flashcard(card["uuid"]) is None
+        assert db.flashcard_store.get_flashcard(card["uuid"]) is None
         row = dict(
             db.execute_query("SELECT * FROM flashcards WHERE uuid = ?", (card["uuid"],), read_only=True).fetchone()
         )
@@ -95,8 +95,8 @@ def test_reset_restores_scheduling_defaults_and_preserves_content(lifecycle_db, 
             assert reset.status_code == 200, reset.text
             result = reset.json()
         else:
-            assert db.reset_flashcard_scheduling(card["uuid"])
-            result = db.get_flashcard(card["uuid"])
+            assert db.flashcard_store.reset_flashcard_scheduling(card["uuid"])
+            result = db.flashcard_store.get_flashcard(card["uuid"])
         assert result["version"] == card["version"] + 1
         assert result["ef"] == pytest.approx(2.5)
         for field in ("interval_days", "repetitions", "lapses"):
@@ -107,7 +107,7 @@ def test_reset_restores_scheduling_defaults_and_preserves_content(lifecycle_db, 
         assert result["due_at"] is not None
         for field in ("uuid", "deck_id", "front", "back", "notes"):
             assert result[field] == card[field]
-        assert db.get_flashcard(card["uuid"])["scheduler_state_json"] == "{}"
+        assert db.flashcard_store.get_flashcard(card["uuid"])["scheduler_state_json"] == "{}"
 
 
 def test_reset_http_still_requires_version_without_mutation(lifecycle_db):
@@ -115,7 +115,7 @@ def test_reset_http_still_requires_version_without_mutation(lifecycle_db):
     with _client(lifecycle_db) as client:
         response = client.post(f"/flashcards/{card['uuid']}/reset-scheduling", json={})
         assert response.status_code == 422, response.text
-    assert lifecycle_db.get_flashcard(card["uuid"]) == card
+    assert lifecycle_db.flashcard_store.get_flashcard(card["uuid"]) == card
 
 
 @pytest.mark.parametrize("operation", ["delete", "reset"])
@@ -133,21 +133,21 @@ def test_stale_lifecycle_version_returns_conflict_without_mutation(lifecycle_db,
         response = _request(client, operation, card["uuid"], card["version"] + 1)
         assert response.status_code == 409, response.text
         assert "Version mismatch" in response.json()["detail"]
-    assert lifecycle_db.get_flashcard(card["uuid"]) == card
+    assert lifecycle_db.flashcard_store.get_flashcard(card["uuid"]) == card
 
 
 @pytest.mark.parametrize("operation", ["delete", "reset"])
 def test_lifecycle_mutation_remains_owned_by_outer_transaction(lifecycle_db, operation):
     db = lifecycle_db
     card = _saved_card(db)
-    method = db.soft_delete_flashcard if operation == "delete" else db.reset_flashcard_scheduling
+    method = db.flashcard_store.soft_delete_flashcard if operation == "delete" else db.flashcard_store.reset_flashcard_scheduling
     with pytest.raises(RuntimeError, match="force caller rollback"):
         with db.transaction():
             assert method(card["uuid"], expected_version=card["version"])
-            changed = db.get_flashcard(card["uuid"])
+            changed = db.flashcard_store.get_flashcard(card["uuid"])
             if operation == "delete":
                 assert changed is None
             else:
                 assert changed["version"] == card["version"] + 1
             raise RuntimeError("force caller rollback")
-    assert db.get_flashcard(card["uuid"]) == card
+    assert db.flashcard_store.get_flashcard(card["uuid"]) == card

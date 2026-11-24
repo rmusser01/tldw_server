@@ -160,7 +160,7 @@ def _build_quiz_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) -> tu
 
 
 def _build_flashcard_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) -> tuple[str, str, dict[str, Any]]:
-    session_rollup = note_db.get_flashcard_review_session_rollup(int(anchor_id))
+    session_rollup = note_db.flashcard_store.get_flashcard_review_session_rollup(int(anchor_id))
     if not session_rollup:
         raise ConflictError("Flashcard review session not found", entity="flashcard_review_sessions", identifier=anchor_id)  # noqa: TRY003
 
@@ -169,14 +169,14 @@ def _build_flashcard_snapshot_payload(note_db: CharactersRAGDB, anchor_id: int) 
     }
     if session_rollup.get("study_pack_id") is not None:
         provenance["study_pack_id"] = session_rollup.get("study_pack_id")
-        study_pack = note_db.get_study_pack(int(session_rollup["study_pack_id"]))
+        study_pack = note_db.flashcard_store.get_study_pack(int(session_rollup["study_pack_id"]))
         if study_pack:
             provenance["study_pack"] = study_pack
     if session_rollup.get("deck_id") is not None:
-        deck = note_db.get_deck(int(session_rollup["deck_id"]))
+        deck = note_db.flashcard_store.get_deck(int(session_rollup["deck_id"]))
         if deck and deck.get("name"):
             provenance["deck_name"] = str(deck["name"])
-    reviewed_cards = note_db.get_flashcard_reviewed_cards(int(anchor_id))
+    reviewed_cards = note_db.flashcard_store.get_flashcard_reviewed_cards(int(anchor_id))
     if reviewed_cards:
         provenance["reviewed_cards"] = reviewed_cards
 
@@ -363,7 +363,7 @@ def get_anchor_status(
     """Resolve the current suggestion status for a concrete anchor."""
 
     anchor_id = int(anchor_id)
-    snapshots = note_db.list_suggestion_snapshots_for_anchor(anchor_type, anchor_id)
+    snapshots = note_db.flashcard_store.list_suggestion_snapshots_for_anchor(anchor_type, anchor_id)
     active_snapshot = next((row for row in snapshots if str(row.get("status") or "").strip().lower() == "active"), None)
     pending_job = _find_matching_job(
         job_manager=job_manager,
@@ -451,18 +451,18 @@ def _source_available_from_note_db(
     try:
         if normalized_source_type == "flashcard_deck":
             with contextlib.suppress(TypeError, ValueError):
-                deck = note_db.get_deck(int(normalized_source_id))
+                deck = note_db.flashcard_store.get_deck(int(normalized_source_id))
                 return bool(deck) and not bool(deck.get("deleted"))
             return False
         if normalized_source_type == "flashcard_card":
-            card = note_db.get_flashcard(normalized_source_id)
+            card = note_db.flashcard_store.get_flashcard(normalized_source_id)
             if not card:
                 return False
             deck_id = card.get("deck_id")
             if deck_id is None:
                 return True
             with contextlib.suppress(TypeError, ValueError):
-                deck = note_db.get_deck(int(deck_id))
+                deck = note_db.flashcard_store.get_deck(int(deck_id))
                 return bool(deck) and not bool(deck.get("deleted"))
             return False
         if normalized_source_type == "quiz":
@@ -549,7 +549,7 @@ def refresh_snapshot_for_anchor(
 
     _ = principal
     service, activity_type, payload = _build_snapshot_payload(note_db, anchor_type, int(anchor_id))
-    return note_db.create_suggestion_snapshot(
+    return note_db.flashcard_store.create_suggestion_snapshot(
         service=service,
         activity_type=activity_type,
         anchor_type=anchor_type,

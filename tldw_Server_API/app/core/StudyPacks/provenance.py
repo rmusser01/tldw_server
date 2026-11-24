@@ -293,7 +293,7 @@ class FlashcardProvenanceStore:
 
     def list_citations(self, flashcard_uuid: str) -> list[dict[str, Any]]:
         """Return persisted citations in API-friendly form."""
-        rows = self.db.list_flashcard_citations(flashcard_uuid)
+        rows = self.db.flashcard_store.list_flashcard_citations(flashcard_uuid)
         citations: list[dict[str, Any]] = []
         for index, row in enumerate(rows):
             normalized = _normalize_citation_row(row, fallback_ordinal=index)
@@ -311,7 +311,7 @@ class FlashcardProvenanceStore:
 
     def get_study_pack_summary(self, flashcard_uuid: str) -> dict[str, Any] | None:
         """Return the first active study-pack summary containing the flashcard."""
-        return self.db.get_study_pack_for_flashcard(flashcard_uuid)
+        return self.db.flashcard_store.get_study_pack_for_flashcard(flashcard_uuid)
 
     def read_flashcard_provenance(self, flashcard_uuid: str) -> dict[str, Any]:
         """Read persisted citations and derive primary/deep-dive selections."""
@@ -330,7 +330,7 @@ class FlashcardProvenanceStore:
         """Normalize and persist flashcard citations, then mirror the primary citation."""
         prepared = normalize_citations_for_persistence(citations)
         primary = select_primary_citation(prepared)
-        inserted = self.db.replace_flashcard_citations_and_source_reference_summary(
+        inserted = self.db.flashcard_store.replace_flashcard_citations_and_source_reference_summary(
             flashcard_uuid,
             prepared,
             source_ref_type=str(primary["source_type"]) if primary is not None else None,

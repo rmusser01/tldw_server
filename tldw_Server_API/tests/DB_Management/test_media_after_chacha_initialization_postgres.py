@@ -254,13 +254,13 @@ def test_actual_worker_keeps_pack_membership_citation_and_sync_owner(request, tm
             )
         )
         with chacha_operation(independent=True):
-            pack = db.get_study_pack(result["pack_id"])
+            pack = db.flashcard_store.get_study_pack(result["pack_id"])
             assert pack["client_id"] == "2" and pack["deck_id"] == result["deck_id"]
-            members = db.list_study_pack_cards(pack["id"])
+            members = db.flashcard_store.list_study_pack_cards(pack["id"])
             assert len(members) == 1
-            card = db.get_flashcard(members[0]["flashcard_uuid"])
+            card = db.flashcard_store.get_flashcard(members[0]["flashcard_uuid"])
             assert (card["client_id"], card["front"], card["back"]) == ("2", "Synthetic question", "Synthetic answer")
-            citation = db.list_flashcard_citations(card["uuid"])[0]
+            citation = db.flashcard_store.list_flashcard_citations(card["uuid"])[0]
             assert (citation["client_id"], citation["source_id"]) == ("2", note)
             for entity, expected_id in (
                 ("study_packs", pack["id"]),
@@ -288,9 +288,9 @@ def test_legacy_pack_rows_survive_media_normalization(pg_database_config, tmp_pa
         with chacha_operation(independent=True):
             after = db.get_sync_log_entries()
             assert [{key: row[key] for key in old} for row, old in zip(after, before, strict=True)] == before
-            assert db.get_study_pack(pack)["client_id"] == "2"
-            assert db.list_flashcard_citations(card)[0]["citation_text"] == "Synthetic"
-            assert db.soft_delete_study_pack(pack, expected_version=1)
+            assert db.flashcard_store.get_study_pack(pack)["client_id"] == "2"
+            assert db.flashcard_store.list_flashcard_citations(card)[0]["citation_text"] == "Synthetic"
+            assert db.flashcard_store.soft_delete_study_pack(pack, expected_version=1)
             assert db.get_sync_log_entries(entity_type="study_packs")[-1]["operation"] == "delete"
         current_table = _sync_shape(backend)["table"][0]
         assert {key: current_table[key] for key in ("oid", "relowner", "relacl")} == {

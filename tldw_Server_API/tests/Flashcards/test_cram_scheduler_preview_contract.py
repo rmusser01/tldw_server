@@ -50,9 +50,9 @@ def _minutes(body):
 )
 def test_cram_list_preview_matches_new_card_committed_schedule(cram_db, rating, label, preview, minutes):
     db = cram_db
-    deck = db.add_deck("Cram preview new card")
-    uuid = db.add_flashcard({"deck_id": deck, "front": "Question", "back": "Answer"})
-    before = db.get_flashcard(uuid)
+    deck = db.flashcard_store.add_deck("Cram preview new card")
+    uuid = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Question", "back": "Answer"})
+    before = db.flashcard_store.get_flashcard(uuid)
     db.close_connection()
     with _client(db) as client:
         listed = client.get(
@@ -65,8 +65,8 @@ def test_cram_list_preview_matches_new_card_committed_schedule(cram_db, rating, 
         card = listed.json()["items"][0]
         assert card["uuid"] == due.json()["card"]["uuid"] == uuid
         assert due.json()["card"]["next_intervals"][label] == preview
-        assert db.get_flashcard(uuid) == before
-        assert db.list_flashcard_review_sessions() == []
+        assert db.flashcard_store.get_flashcard(uuid) == before
+        assert db.flashcard_store.list_flashcard_review_sessions() == []
 
         # Inspect the actual saved schedule even while the old list projection
         # is wrong. Never retry a failed assertion by rating this card twice.
@@ -76,7 +76,7 @@ def test_cram_list_preview_matches_new_card_committed_schedule(cram_db, rating, 
         )
         assert response.status_code == 200, response.text
         assert _minutes(response.json()) == minutes
-        assert db.get_flashcard(uuid)["version"] == before["version"] + 1
+        assert db.flashcard_store.get_flashcard(uuid)["version"] == before["version"] + 1
         assert card["next_intervals"] == due.json()["card"]["next_intervals"]
         assert card["scheduler_type"] == "sm2_plus"
 
@@ -88,7 +88,7 @@ def test_cram_list_uses_each_decks_actual_scheduler_settings(cram_db, scheduler)
     settings = {"sm2_plus": {"new_steps_minutes": [2, 25]}}
     if scheduler == "fsrs":
         settings = {"fsrs": {"enable_fuzz": False, "target_retention": 0.85}}
-    deck = db.add_deck(
+    deck = db.flashcard_store.add_deck(
         "Configured preview", scheduler_type="fsrs" if scheduler == "fsrs" else "sm2_plus", scheduler_settings=settings
     )
     card_data = {"deck_id": deck, "front": "Configured question", "back": "Answer"}
@@ -100,15 +100,15 @@ def test_cram_list_uses_each_decks_actual_scheduler_settings(cram_db, scheduler)
             last_reviewed_at="2026-03-01T00:00:00Z",
             due_at="2026-03-13T00:00:00Z",
         )
-    uuid = db.add_flashcard(card_data)
-    before = db.get_flashcard(uuid)
+    uuid = db.flashcard_store.add_flashcard(card_data)
+    before = db.flashcard_store.get_flashcard(uuid)
     db.close_connection()
     with _client(db) as client:
         params = {"deck_id": deck, "include_scheduler_preview": True}
         listed = client.get("/api/v1/flashcards", params=params)
         due = client.get("/api/v1/flashcards/review/next", params={"deck_id": deck})
         assert listed.status_code == due.status_code == 200
-        assert db.get_flashcard(uuid) == before
+        assert db.flashcard_store.get_flashcard(uuid) == before
         actual = client.post("/api/v1/flashcards/review", json={"card_uuid": uuid, "rating": 3})
         assert actual.status_code == 200, actual.text
         if scheduler == "custom-sm2":
@@ -126,8 +126,8 @@ def test_cram_list_uses_each_decks_actual_scheduler_settings(cram_db, scheduler)
 @pytest.mark.parametrize("opt_in", [None, False])
 def test_ordinary_list_remains_unenriched_and_read_only(cram_db, opt_in):
     db = cram_db
-    uuid = db.add_flashcard({"front": "Ordinary list", "back": "Answer"})
-    before = db.get_flashcard(uuid)
+    uuid = db.flashcard_store.add_flashcard({"front": "Ordinary list", "back": "Answer"})
+    before = db.flashcard_store.get_flashcard(uuid)
     db.close_connection()
     with _client(db) as client:
         params = {} if opt_in is None else {"include_scheduler_preview": opt_in}
@@ -137,17 +137,17 @@ def test_ordinary_list_remains_unenriched_and_read_only(cram_db, opt_in):
     assert body["items"][0]["uuid"] == uuid
     assert body["items"][0]["scheduler_type"] is None
     assert body["items"][0]["next_intervals"] is None
-    assert db.get_flashcard(uuid) == before
-    assert db.list_flashcard_review_sessions() == []
+    assert db.flashcard_store.get_flashcard(uuid) == before
+    assert db.flashcard_store.list_flashcard_review_sessions() == []
 
 
 @pytest.mark.integration
 def test_preview_preserves_mixed_deck_page_and_reads_each_deck_once(cram_db, monkeypatch):
     db = cram_db
-    first = db.add_deck("Default steps")
-    second = db.add_deck("Custom steps", scheduler_settings={"sm2_plus": {"new_steps_minutes": [2, 25]}})
+    first = db.flashcard_store.add_deck("Default steps")
+    second = db.flashcard_store.add_deck("Custom steps", scheduler_settings={"sm2_plus": {"new_steps_minutes": [2, 25]}})
     uuids = [
-        db.add_flashcard(
+        db.flashcard_store.add_flashcard(
             {
                 "deck_id": deck,
                 "front": f"Card {index}",
@@ -157,8 +157,8 @@ def test_preview_preserves_mixed_deck_page_and_reads_each_deck_once(cram_db, mon
         )
         for index, deck in enumerate([first, first, first, second])
     ]
-    before = {uuid: db.get_flashcard(uuid) for uuid in uuids}
-    lookup = Mock(wraps=db.get_deck)
+    before = {uuid: db.flashcard_store.get_flashcard(uuid) for uuid in uuids}
+    lookup = Mock(wraps=db.flashcard_store.get_deck)
     monkeypatch.setattr(db, "get_deck", lookup)
     db.close_connection()
     with _client(db) as client:
@@ -173,8 +173,8 @@ def test_preview_preserves_mixed_deck_page_and_reads_each_deck_once(cram_db, mon
         key: value for key, value in ordinary.json().items() if key != "items"
     }
     assert [card["uuid"] for card in body["items"]] == uuids[1:]
-    assert {uuid: db.get_flashcard(uuid) for uuid in uuids} == before
-    assert db.list_flashcard_review_sessions() == []
+    assert {uuid: db.flashcard_store.get_flashcard(uuid) for uuid in uuids} == before
+    assert db.flashcard_store.list_flashcard_review_sessions() == []
     assert [card["next_intervals"]["good"] for card in body["items"]] == ["10 min", "10 min", "25 min"]
     assert [call.args for call in lookup.call_args_list] == [(first,), (second,)]
 
@@ -183,10 +183,10 @@ def test_preview_preserves_mixed_deck_page_and_reads_each_deck_once(cram_db, mon
 @pytest.mark.parametrize("failure", ["sm2-settings", "fsrs-settings", "database"])
 def test_preview_errors_do_not_change_ordinary_listing_or_card_state(cram_db, monkeypatch, failure):
     db = cram_db
-    deck = db.add_deck("Preview error")
-    uuid = db.add_flashcard({"deck_id": deck, "front": "Keep visible", "back": "Answer", "queue_state": "review"})
-    before = db.get_flashcard(uuid)
-    get_deck = db.get_deck
+    deck = db.flashcard_store.add_deck("Preview error")
+    uuid = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Keep visible", "back": "Answer", "queue_state": "review"})
+    before = db.flashcard_store.get_flashcard(uuid)
+    get_deck = db.flashcard_store.get_deck
 
     def fail_lookup(deck_id):
         if failure == "database":
@@ -210,8 +210,8 @@ def test_preview_errors_do_not_change_ordinary_listing_or_card_state(cram_db, mo
         preview = client.get("/api/v1/flashcards", params={"include_scheduler_preview": True})
     assert preview.status_code == (500 if failure == "database" else 400), preview.text
     assert isinstance(preview.json()["detail"], str)
-    assert db.get_flashcard(uuid) == before
-    assert db.list_flashcard_review_sessions() == []
+    assert db.flashcard_store.get_flashcard(uuid) == before
+    assert db.flashcard_store.list_flashcard_review_sessions() == []
 
 
 @pytest.mark.integration

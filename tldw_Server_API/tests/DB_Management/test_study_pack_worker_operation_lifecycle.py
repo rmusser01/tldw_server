@@ -193,11 +193,11 @@ def test_successful_jobs_persist_cards_and_reuse_cached_database(worker_db, monk
         assert len({result["pack_id"] for result in results}) == repetitions
         with chacha_operation(independent=True):
             for result in results:
-                saved = f.db.get_study_pack(int(result["pack_id"]))
+                saved = f.db.flashcard_store.get_study_pack(int(result["pack_id"]))
                 assert saved["deck_id"] == result["deck_id"]
-                memberships = f.db.list_study_pack_cards(int(result["pack_id"]))
+                memberships = f.db.flashcard_store.list_study_pack_cards(int(result["pack_id"]))
                 assert len(memberships) == 1
-                card = f.db.get_flashcard(memberships[0]["flashcard_uuid"])
+                card = f.db.flashcard_store.get_flashcard(memberships[0]["flashcard_uuid"])
                 assert card["back"] == "Twenty-seven."
 
     asyncio.run(run())

@@ -17,15 +17,15 @@ pytestmark = pytest.mark.integration
 
 
 def _seed(db):
-    deck = db.add_deck("Rowan")
-    card = db.add_flashcard({"deck_id": deck, "front": "Marker?", "back": "Amber", "tags": ["rowan"]})
-    second = db.add_flashcard({"deck_id": deck, "front": "Second?", "back": "East"})
-    template = db.add_flashcard_template(
+    deck = db.flashcard_store.add_deck("Rowan")
+    card = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Marker?", "back": "Amber", "tags": ["rowan"]})
+    second = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Second?", "back": "East"})
+    template = db.flashcard_store.add_flashcard_template(
         name="Basic", model_type="basic", front_template="Marker?", back_template="Amber"
     )
-    db.upsert_deck_share(deck, user_id=2, shared_by=1)
-    asset = db.add_flashcard_asset(image_bytes=b"fixture", mime_type="image/png")
-    session = db.get_or_create_flashcard_review_session(
+    db.flashcard_store.upsert_deck_share(deck, user_id=2, shared_by=1)
+    asset = db.flashcard_store.add_flashcard_asset(image_bytes=b"fixture", mime_type="image/png")
+    session = db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck, review_mode="cram", tag_filter=None, scope_key=f"cram:deck:{deck}"
     )
     with db.transaction() as conn:
@@ -137,32 +137,32 @@ READS = [
 def _read(f, operation):
     db = f.db
     calls = {
-        "decks": lambda: db.list_decks(),
-        "shared_decks": lambda: db.list_decks(shared_with_user_id=2),
-        "deck": lambda: db.get_deck(f.deck),
-        "deck_name": lambda: db.get_deck_by_name("Rowan"),
-        "deck_shares": lambda: db.list_deck_shares(f.deck),
-        "deck_share": lambda: db.get_deck_share(f.deck, user_id=2),
-        "template_count": lambda: db.count_flashcard_templates(),
-        "templates": lambda: db.list_flashcard_templates(),
-        "template": lambda: db.get_flashcard_template(f.template),
-        "cards": lambda: db.list_flashcards(deck_id=f.deck),
-        "card_count": lambda: db.count_flashcards(deck_id=f.deck),
-        "tags": lambda: db.list_flashcard_tag_suggestions(),
-        "uuids": lambda: db.get_flashcards_by_uuids([f.card]),
+        "decks": lambda: db.flashcard_store.list_decks(),
+        "shared_decks": lambda: db.flashcard_store.list_decks(shared_with_user_id=2),
+        "deck": lambda: db.flashcard_store.get_deck(f.deck),
+        "deck_name": lambda: db.flashcard_store.get_deck_by_name("Rowan"),
+        "deck_shares": lambda: db.flashcard_store.list_deck_shares(f.deck),
+        "deck_share": lambda: db.flashcard_store.get_deck_share(f.deck, user_id=2),
+        "template_count": lambda: db.flashcard_store.count_flashcard_templates(),
+        "templates": lambda: db.flashcard_store.list_flashcard_templates(),
+        "template": lambda: db.flashcard_store.get_flashcard_template(f.template),
+        "cards": lambda: db.flashcard_store.list_flashcards(deck_id=f.deck),
+        "card_count": lambda: db.flashcard_store.count_flashcards(deck_id=f.deck),
+        "tags": lambda: db.flashcard_store.list_flashcard_tag_suggestions(),
+        "uuids": lambda: db.flashcard_store.get_flashcards_by_uuids([f.card]),
         "next_review": lambda: db.get_next_review_card(deck_id=f.deck),
-        "sessions": lambda: db.list_flashcard_review_sessions(status="active"),
-        "session": lambda: db.get_flashcard_review_session(f.session),
-        "complete_session": lambda: db.mark_flashcard_review_session_completed(f.session),
-        "reviewed_cards": lambda: db.get_flashcard_reviewed_cards(f.session),
-        "latest_review": lambda: db.get_latest_flashcard_review(f.card),
-        "card": lambda: db.get_flashcard(f.card),
-        "asset": lambda: db.get_flashcard_asset(f.asset),
-        "missing_asset_content": lambda: db.get_flashcard_asset_content("missing"),
-        "populated_asset_content": lambda: db.get_flashcard_asset_content(f.asset),
-        "keywords": lambda: db.get_keywords_for_flashcard(f.card),
-        "citations": lambda: db.list_flashcard_citations(f.card),
-        "study_pack": lambda: db.get_study_pack_for_flashcard(f.card),
+        "sessions": lambda: db.flashcard_store.list_flashcard_review_sessions(status="active"),
+        "session": lambda: db.flashcard_store.get_flashcard_review_session(f.session),
+        "complete_session": lambda: db.flashcard_store.mark_flashcard_review_session_completed(f.session),
+        "reviewed_cards": lambda: db.flashcard_store.get_flashcard_reviewed_cards(f.session),
+        "latest_review": lambda: db.flashcard_store.get_latest_flashcard_review(f.card),
+        "card": lambda: db.flashcard_store.get_flashcard(f.card),
+        "asset": lambda: db.flashcard_store.get_flashcard_asset(f.asset),
+        "missing_asset_content": lambda: db.flashcard_store.get_flashcard_asset_content("missing"),
+        "populated_asset_content": lambda: db.flashcard_store.get_flashcard_asset_content(f.asset),
+        "keywords": lambda: db.flashcard_store.get_keywords_for_flashcard(f.card),
+        "citations": lambda: db.flashcard_store.list_flashcard_citations(f.card),
+        "study_pack": lambda: db.flashcard_store.get_study_pack_for_flashcard(f.card),
         "existing_thread": lambda: db.get_or_create_study_assistant_thread(
             context_type="flashcard", flashcard_uuid=f.card
         ),
@@ -195,10 +195,10 @@ def _read_chain(f):
     for scope in ("conversation", "workspace"):
         assert service.attachment(scope)["attachment"]["buddy_id"] == f.buddy
         assert service.activity(scope, limit=10, offset=0)["items"][0]["result"]["content"] == "Saved result"
-    assert f.db.get_flashcard(f.card)["back"] == "Amber"
-    assert len(f.db.list_decks()) == 1
-    assert f.db.count_flashcards(deck_id=f.deck) == 2
-    assert len(f.db.list_flashcards(deck_id=f.deck)) == 2
+    assert f.db.flashcard_store.get_flashcard(f.card)["back"] == "Amber"
+    assert len(f.db.flashcard_store.list_decks()) == 1
+    assert f.db.flashcard_store.count_flashcards(deck_id=f.deck) == 2
+    assert len(f.db.flashcard_store.list_flashcards(deck_id=f.deck)) == 2
     assert f.db.get_next_review_card(deck_id=f.deck)[1] == "new"
     assert build_flashcard_assistant_context(f.db, f.card)["history"][0]["content"] == "Explain"
 
@@ -236,7 +236,7 @@ def test_populated_buddy_target_read_then_cards_releases_transaction(pg_study, s
         assert service.attachment(scope)["attachment"]["buddy_id"] == f.buddy
     else:
         assert service.activity(scope, limit=10, offset=0)["items"][0]["result"]["content"] == "Saved result"
-    assert len(f.db.list_flashcards(deck_id=f.deck)) == 2
+    assert len(f.db.flashcard_store.list_flashcards(deck_id=f.deck)) == 2
     _assert_bootstrap_unblocked(f.db)
 
 
@@ -253,7 +253,7 @@ def test_first_study_read_in_explicit_scope_keeps_its_lock(pg_study, owner):
             if owner == "nested":
                 stack.enter_context(db.transaction())
         assert raw.info.transaction_status.name == "IDLE"
-        assert db.get_flashcard(f.card)["back"] == "Amber"
+        assert db.flashcard_store.get_flashcard(f.card)["back"] == "Amber"
         assert raw.info.transaction_status.name == "INTRANS"
         assert (
             db.backend.execute(
@@ -288,7 +288,7 @@ def test_real_buddy_study_chain_allows_replacement_initialization(pg_study, tmp_
     try:
         # Actual constructor/bootstrap, not a simulated readiness response.
         replacement = CharactersRAGDB(tmp_path / "replacement.db", client_id="1", backend=backend)
-        assert replacement.get_flashcard(f.card)["back"] == "Amber"
+        assert replacement.flashcard_store.get_flashcard(f.card)["back"] == "Amber"
     finally:
         if replacement is not None:
             replacement.close_connection()
@@ -354,7 +354,7 @@ def test_read_chain_preserves_generic_locking_function_and_write_cte(pg_study, q
 def test_failed_standalone_card_read_releases_aborted_transaction(pg_study):
     f, _ = pg_study
     with pytest.raises(CharactersRAGDBError):
-        f.db.list_flashcards(limit="invalid-integer")
+        f.db.flashcard_store.list_flashcards(limit="invalid-integer")
     assert f.db._get_thread_connection().info.transaction_status.name == "IDLE"
     _read_chain(f)
     _assert_bootstrap_unblocked(f.db)
@@ -372,6 +372,6 @@ def test_sqlite_read_inventory_and_chain_keep_behavior(tmp_path):
                 db.execute_query("UPDATE decks SET description=? WHERE id=?", ("Pending", f.deck))
                 _read_chain(f)
                 raise RuntimeError("rollback")
-        assert db.get_deck(f.deck)["description"] is None
+        assert db.flashcard_store.get_deck(f.deck)["description"] is None
     finally:
         db.close_connection()
