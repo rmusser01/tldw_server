@@ -531,3 +531,49 @@ def test_hoisted_helpers_are_methods_not_closures() -> None:
     assert set(HOISTED) <= methods
     module = parse_tree(RAG_SERVICE)[STATE_FILE]
     assert any(isinstance(n, ast.ClassDef) and n.name == "EarlyReturn" for n in module.body)
+
+
+# ---- import order (Task 5) ----------------------------------------------------------------------
+PKG_NAME = "tldw_Server_API.app.core.RAG.rag_service"
+UNIFIED_MODULE = f"{PKG_NAME}.unified_pipeline"
+
+
+def test_pipeline_modules_import_up_only_as_a_module() -> None:
+    """No pipeline module takes a name from ``unified_pipeline``; ``up.<name>`` is the only way (R4)."""
+    bad: list[str] = []
+    for path in sorted(PIPELINE_PKG.rglob("*.py")):
+        for n in ast.walk(parse_tree(RAG_SERVICE)[path]):
+            if isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[-1] == MODULE:
+                bad.append(f"{path.name}:{n.lineno}: from {'.' * n.level}{n.module} import ...")
+    assert bad == []
+
+
+def test_unified_pipeline_imports_pipeline_modules_as_modules() -> None:
+    """``from .pipeline import x`` in ``unified_pipeline.py`` binds modules, apart from ``RagRunConfig``."""
+    bad: list[str] = []
+    modules = {p.stem for p in PIPELINE_PKG.glob("*.py")}
+    for n in ast.walk(parse_tree(RAG_SERVICE)[PIPELINE_FILE]):
+        if not (isinstance(n, ast.ImportFrom) and n.level == 1 and (n.module or "").split(".")[0] == "pipeline"):
+            continue
+        for a in n.names:
+            if n.module == "pipeline":
+                ok = a.name in modules
+            else:
+                ok = n.module == "pipeline.run_config" and a.name == "RagRunConfig"
+            if not ok:
+                bad.append(f"{n.lineno}: from .{n.module} import {a.name}")
+    assert bad == []
+
+
+def test_pipeline_modules_import_in_either_order() -> None:
+    import subprocess
+    import sys
+
+    bad: list[str] = []
+    for first in ("run_state", "post_processing", "unified_pipeline"):
+        target = UNIFIED_MODULE if first == "unified_pipeline" else f"{PKG_NAME}.pipeline.{first}"
+        code = f"import importlib; importlib.import_module({target!r}); import {UNIFIED_MODULE} as up; up.unified_rag_pipeline"
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300, cwd=REPO_ROOT)  # nosec B603
+        if done.returncode:
+            bad.append(f"{first}: {done.stderr[-800:]}")
+    assert bad == []
