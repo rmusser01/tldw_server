@@ -61,4 +61,4 @@ runs:
           *) exit 2 ;;
         esac
         timeout --kill-after=15s "$budget" python -m Helper_Scripts.ci.outbound_check \
-          "$OUTBOUND_PROFILE" --report-dir "$RUNNER_TEMP/outbound-privacy"
+          "$OUTBOUND_PROFILE" --report-dir "$RUNNER_TEMP/outbound-privacy" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -46,6 +46,7 @@ def test_shipped_inventory_anchors_and_kokoro_identity():
     inventory = Inventory.load(ROOT / "Helper_Scripts/ci/outbound_inventory.json")
     assert inventory.require_asset("setup.kokoro", "kokoro.onnx", KOKORO).evidence == "declared"
     assert all((ROOT / item.source_path).is_file() for item in inventory.capabilities.values())
+    inventory.verify_exception_anchors(ROOT)
     inventory.check_origin("provider.openai", "https://api.openai.com/v1/chat/completions")
     for item in inventory.capabilities.values():
         assert all(".invalid" not in origin for origin in item.origins)
@@ -139,3 +140,21 @@ def test_exception_has_exact_owned_anchor_and_grants_no_destination_permission(l
         load(exceptions=[exception, exception | {"id": "legacy.other"}])
     with pytest.raises(InventoryError, match="invalid_source_anchor"):
         load(exceptions=[exception | {"symbol": "*"}])
+
+
+def test_exception_anchor_resolves_the_exact_declared_symbol(load, tmp_path):
+    source = tmp_path / "installer.py"
+    source.write_text(
+        "class Other:\n    async def download(self):\n        pass\n"
+        "class Client:\n    def other(self):\n        pass\n"
+    )
+    exception = {
+        "id": "legacy.calls", "source_path": "installer.py", "symbol": "Client.download",
+        "owner": "setup", "follow_up": "TASK-15634",
+    }
+    with pytest.raises(InventoryError, match="unknown_exception_anchor"):
+        load(exceptions=[exception]).verify_exception_anchors(tmp_path)
+    load(exceptions=[exception | {"symbol": "Other.download"}]).verify_exception_anchors(tmp_path)
+    source.unlink()
+    with pytest.raises(InventoryError, match="unknown_exception_anchor"):
+        load(exceptions=[exception]).verify_exception_anchors(tmp_path)

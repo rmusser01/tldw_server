@@ -4,6 +4,7 @@ import json
 
 import pytest
 from Helper_Scripts.ci import outbound_check as check
+from Helper_Scripts.ci import outbound_isolation as isolation
 
 
 def record(scenario):
@@ -85,18 +86,89 @@ def test_fail_closed_and_keep_raw_credentials_out_of_every_report(monkeypatch, t
     results = json.loads(report.read_text())["scenarios"]
     assert any(entry["status"] == "fail" for entry in results)
     assert "OUTBOUND_SECRET" not in report.read_text()
-    assert "private.invalid" not in capsys.readouterr().err
+    output = capsys.readouterr()
+    assert "private.invalid" not in output.out + output.err
 
 
-def test_pytest_evidence_requires_every_required_case_and_no_skip(tmp_path):
-    xml = tmp_path / "pytest.xml"
-    class_name = "tldw_Server_API.tests.CI.test_outbound_opt_in"
-    case_id = "test_real_download_and_provider_outbound_evidence[download-default]"
-    parent = '<testsuites><testsuite>{}</testsuite></testsuites>'
-    good = f'<testcase classname="{class_name}" name="{case_id}"/>'
-    skipped = f'<testcase classname="{class_name}" name="{case_id}"><skipped/></testcase>'
-    for cases in (skipped, "", good + good):
-        xml.write_text(parent.format(cases))
-        assert not check.pytest_evidence(xml, {(class_name, case_id)})
-    xml.write_text(parent.format(good))
-    assert check.pytest_evidence(xml, {(class_name, case_id)})
+def test_cli_reports_preflight_failure_separately_from_bad_result(monkeypatch, tmp_path, capsys):
+    def refused(_):
+        raise isolation.IsolationError("private fixture path")
+
+    def run_container(image, argv, report, *, timeout):
+        monkeypatch.setattr(isolation, "_preflight", refused)
+        monkeypatch.setattr(isolation, "CONTAINER_REPORT", str(report / "result.json"))
+        return isolation.main(["_inside", "/unused", "--", "-c"])
+
+    monkeypatch.setattr(check, "load_prepared_image", lambda root, target, path: target)
+    monkeypatch.setattr(check, "run_isolated", run_container)
+    assert check.main(["backend", "--report-dir", str(tmp_path)]) == 1
+    stdout = capsys.readouterr().out
+    assert "runner/container_preflight_failed" in stdout
+    assert "private fixture path" not in stdout
+
+
+@pytest.mark.parametrize("code", ["prepared_image_stale", "container_timeout"])
+def test_cli_preserves_safe_isolation_reason(monkeypatch, tmp_path, capsys, code):
+    def unavailable(*args, **kwargs):
+        raise isolation.IsolationError("https://private.invalid/OUTBOUND_SECRET", code=code)
+
+    monkeypatch.setattr(check, "load_prepared_image", unavailable)
+    assert check.main(["backend", "--report-dir", str(tmp_path)]) == 1
+    stdout = capsys.readouterr().out
+    assert f"runner/{code}" in stdout
+    assert "OUTBOUND_SECRET" not in stdout
+
+
+_OPT_IN_CASE = (
+    "tldw_Server_API.tests.CI.test_outbound_opt_in",
+    "test_real_download_and_provider_outbound_evidence[download-default]",
+)
+
+
+def _junit_report(path, overrides, extra=()):
+    cases = []
+    for module, name in sorted(check._REQUIRED_CASES):
+        child = overrides.get((module, name), "")
+        if child is not None:
+            cases.append(f'<testcase classname="{module}" name="{name}">{child}</testcase>')
+    path.write_text("<testsuites><testsuite>" + "".join(cases + list(extra)) + "</testsuite></testsuites>")
+
+
+@pytest.mark.parametrize(("child", "status", "reason"), [
+    ("<failure message='OUTBOUND_SECRET'/>", 1, "pytest_case_failed"),
+    ("<skipped/>", 0, "pytest_case_skipped"),
+    (None, 0, "pytest_case_missing"),
+])
+def test_pytest_evidence_identifies_the_affected_scenario_and_case(tmp_path, child, status, reason):
+    report = tmp_path / "pytest.xml"
+    _junit_report(report, {_OPT_IN_CASE: child})
+    results = check._pytest_scenarios(report, status)
+    assert results["inventory"] == record("inventory")
+    expected = {"component": "backend-opt-in", "reason": reason, "check": _OPT_IN_CASE[1]}
+    assert results["backend-opt-in"]["violations"] == [expected]
+    assert check.validate_result(
+        {"scenarios": list(results.values())}, ("inventory", "backend-opt-in")
+    ) == list(results.values())
+    assert "OUTBOUND_SECRET" not in json.dumps(results)
+
+
+def test_pytest_evidence_uses_only_allowlisted_case_or_file_ids(tmp_path):
+    report = tmp_path / "pytest.xml"
+    _junit_report(report, {}, extra=[
+        f'<testcase classname="{_OPT_IN_CASE[0]}" name="OUTBOUND_SECRET"><failure/></testcase>',
+    ])
+    result = check._pytest_scenarios(report, 1)["backend-opt-in"]
+    assert result["violations"] == [
+        {"component": "backend-opt-in", "reason": "pytest_case_failed", "check": "test_outbound_opt_in"}
+    ]
+    result["violations"][0]["check"] = "OUTBOUND_SECRET"
+    with pytest.raises(check.EvidenceError, match="invalid_scenario_evidence"):
+        check.validate_result({"scenarios": [result]}, ("backend-opt-in",))
+
+
+def test_pytest_evidence_rejects_duplicate_results(tmp_path):
+    report = tmp_path / "pytest.xml"
+    module, name = _OPT_IN_CASE
+    _junit_report(report, {}, extra=[f'<testcase classname="{module}" name="{name}"/>'])
+    results = check._pytest_scenarios(report, 0)
+    assert all(record["status"] == "fail" for record in results.values())

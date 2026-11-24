@@ -24,6 +24,7 @@ from pathlib import Path
 
 PROJECT_DIR = "/opt/outbound-project"
 CONTAINER_REPORT = "/outbound-report/result.json"
+CONTAINER_PREFLIGHT_FAILURE = {"preflight": "failed"}
 PREFLIGHT_ENV = "TLDW_OUTBOUND_PREFLIGHT"
 _USER = "10001:10001"
 _DOCKERFILE = "Dockerfiles/Dockerfile.outbound-check"
@@ -80,6 +81,10 @@ _CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 
 class IsolationError(RuntimeError):
     """A container or preparation result failed an isolation requirement."""
+
+    def __init__(self, message: str, *, code: str = "isolation_failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def _project_files(root: Path, target: str) -> Iterator[Path]:
@@ -240,11 +245,17 @@ def load_prepared_image(root: Path, target: str, report_dir: Path) -> str:
         fingerprint = item["source_fingerprint"]
         if not _IMAGE_ID.fullmatch(image_id):
             raise ValueError("bad image ID")
+    except FileNotFoundError as exc:
+        raise IsolationError(
+            f"missing outbound {target} preparation record", code="prepared_image_missing"
+        ) from exc
     except (OSError, TypeError, ValueError, KeyError) as exc:
-        raise IsolationError(f"missing or invalid outbound {target} preparation record") from exc
+        raise IsolationError(
+            f"invalid outbound {target} preparation record", code="prepared_image_invalid"
+        ) from exc
     root = root.resolve()
     if fingerprint != _source_fingerprint(root, _project_files(root, target)):
-        raise IsolationError(f"outbound {target} preparation record is stale")
+        raise IsolationError(f"outbound {target} preparation record is stale", code="prepared_image_stale")
     return image_id
 
 
@@ -368,7 +379,7 @@ def _report_bytes(data: bytes) -> bytes:
         if len(body) != entry.size or not isinstance(json.loads(body), dict):
             raise ValueError("unexpected report payload")
     except (tarfile.TarError, ValueError, OSError) as exc:
-        raise IsolationError("invalid outbound report archive or JSON") from exc
+        raise IsolationError("invalid outbound report archive or JSON", code="invalid_scenario_evidence") from exc
     return body
 
 
@@ -389,7 +400,7 @@ def _copy_report(container: str, target: Path, *, timeout: float) -> None:
             while len(data) <= _ARCHIVE_LIMIT:
                 readable, _, _ = select.select([child.stdout], [], [], max(0, end - time.monotonic()))
                 if not readable:
-                    raise IsolationError("outbound report copy timed out")
+                    raise IsolationError("outbound report copy timed out", code="container_timeout")
                 chunk = child.stdout.read1(min(65536, _ARCHIVE_LIMIT + 1 - len(data)))
                 if not chunk:
                     break
@@ -397,7 +408,7 @@ def _copy_report(container: str, target: Path, *, timeout: float) -> None:
             if len(data) > _ARCHIVE_LIMIT:
                 raise IsolationError("outbound report archive exceeds its size budget")
             if child.wait(timeout=max(0, end - time.monotonic())) != 0:
-                raise IsolationError("missing outbound container report")
+                raise IsolationError("missing outbound container report", code="container_report_missing")
         finally:
             if child.poll() is None:
                 child.kill()
@@ -467,7 +478,7 @@ def run_isolated(image_id: str, argv: Sequence[str], report_dir: Path, *, timeou
             _copy_report(container, report, timeout=15)
             return int(ended.stdout)
         except subprocess.TimeoutExpired as exc:
-            raise IsolationError("outbound container operation timed out") from exc
+            raise IsolationError("outbound container operation timed out", code="container_timeout") from exc
         finally:
             failed = sys.exc_info()[0] is not None
             try:
@@ -486,15 +497,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             _preflight(args[1])
         except (IsolationError, OSError, ValueError):
-            _write_json(
-                Path(CONTAINER_REPORT),
-                {
-                    "scenario": "containment-preflight",
-                    "status": "fail",
-                    "coverage": [],
-                    "violations": [{"component": "container", "decision": "preflight_failed"}],
-                },
-            )
+            _write_json(Path(CONTAINER_REPORT), CONTAINER_PREFLIGHT_FAILURE)
             return 1
         os.environ[PREFLIGHT_ENV] = "1"
         os.execv(sys.executable, [sys.executable, *args[3:]])  # nosec B606

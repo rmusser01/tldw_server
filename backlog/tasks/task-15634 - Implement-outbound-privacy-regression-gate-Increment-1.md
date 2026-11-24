@@ -1,7 +1,7 @@
 ---
 id: TASK-15634
 title: Implement outbound privacy regression gate Increment 1
-status: In Progress
+status: Done
 labels:
 - security
 - privacy
@@ -43,12 +43,13 @@ Stage 5: ran both image preparations and all seven scenarios from the final chec
 Pre-push review follow-up authorized. Verify three stages test-first: dedicated license-admitted CI jobs and browser path detection, Chromium worker WebSocket detection, and safe diagnostics plus exception anchor validation. ADR required: no new ADR. The follow-up implements the existing Increment 1 decisions in proposed ADR-097 and the linked implementation plan.
 Pre-push stage 1: auth, shared API and smoke inputs now trigger a dedicated browser job without selecting the frontend unit shards. Both dedicated runner jobs reclaim unused SDK space and record cold build time and lowest sampled Docker free disk. Required contexts fail for a selected job that fails, is cancelled or skips. Red run reproduced the missing flag and runner topology; 255 classifier and workflow contract tests passed with the fix, as did actionlint, Ruff and whitespace checks. Bandit found no new findings. Hosted x64 metrics await GitHub execution.
 Pre-push stage 2: Chromium’s bounded startup NetLog detects WebSocket attempts in both extension scenarios. A separate worker profile proves a denied hostname is recorded and the negative control stays outside the normal profile. The focused suite passed 45 tests. In disconnected Linux Chromium, the content script and three clean worker repeats passed. A separate injected startup WebSocket was rejected while the Playwright flow itself passed. One earlier run had incomplete native trace output and will be checked again in the full run. Ruff, Bandit and whitespace checks passed.
+Pre-push stage 3: the public report distinguishes missing, invalid and stale preparation, containment preflight, timeout and per-case failures using allowlisted diagnostic codes. GitHub displays the same redacted output. Reviewed Python exception anchors resolve by source and definition without imports. Negative tests reproduced each defect before the fix. The final focused run passed 425 tests. The exact checkout prepared both Linux arm64 images and passed all seven guarded scenarios in 243.79 seconds after preparation. Ruff, actionlint, Bandit baseline comparison and whitespace checks passed. Actual hosted x64 disk measurements and GitHub check results await the first branch run.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented and verified the versioned outbound inventory, isolated backend and browser fixtures, and matching local and required CI checks. Fixed unsolicited ONNX Runtime startup telemetry, DNS lookups for credential-free sample OpenAI endpoints, and the Research Workspace remote favicon. Exactly seven covered scenarios passed with no violations. Package and Git validation covers installer arguments and the selected vendor downloads use synthetic transports.
+Increment 1 ships the reviewed inventory, isolated backend and browser scenarios, and the existing required CI contexts. The pre-push fixes add dedicated admitted runners and browser input detection, capture worker WebSocket attempts before DNS, provide safe failure diagnostics, and validate the exact source anchors for reviewed exceptions. All seven local guarded scenarios passed from rebuilt Linux images. Hosted check results and disk timings are pending the first branch run.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

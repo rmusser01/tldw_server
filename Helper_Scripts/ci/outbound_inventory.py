@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import ipaddress
 import json
 import re
@@ -213,6 +214,25 @@ class Inventory:
             exceptions[entry.id] = entry
             anchors.add(anchor)
         return cls(MappingProxyType(capabilities), MappingProxyType(exceptions))
+
+    def verify_exception_anchors(self, project: Path) -> None:
+        """Resolve reviewed Python definitions without importing the listed files."""
+        root = project.resolve()
+        for entry in self.exceptions.values():
+            try:
+                source = (root / entry.source_path).resolve(strict=True)
+                if not source.is_relative_to(root) or source.suffix != ".py":
+                    raise ValueError
+                scope = ast.parse(source.read_bytes()).body
+                for part in entry.symbol.split("."):
+                    definition = next(
+                        node for node in scope
+                        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                        and node.name == part
+                    )
+                    scope = definition.body
+            except (OSError, SyntaxError, ValueError, StopIteration):
+                raise InventoryError("unknown_exception_anchor") from None
 
     def check_origin(self, capability: str, request_url: str) -> None:
         """Require a reviewed exact origin for the given capability."""

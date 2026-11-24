@@ -100,8 +100,12 @@ loopback provider fixtures. Custom OpenAI endpoints that require credentials
 skip DNS resolution while those credentials are missing.
 
 Each run writes a fresh `outbound-run-*/report.json` with the terminal status,
-coverage and redacted violation codes for each selected scenario. Missing tests,
-skips, incomplete evidence, and unexpected observed attempts fail the run.
+coverage and redacted violation codes for each selected scenario. The CI run
+summary includes the same decision codes and allowlisted test or source file
+identifiers where available. Preparation, containment preflight and timeouts have
+distinct codes. Missing tests, skips, incomplete evidence, and unexpected observed
+attempts fail the run. Reviewed exceptions are checked against the exact Python
+definitions at their source paths.
 The reports cover the exercised flows, instrumented Python DNS and connect calls,
 Playwright request events, and the browser process tree's traced Linux `connect`
 and `sendto` calls. The extension profiles use Chromium's private startup

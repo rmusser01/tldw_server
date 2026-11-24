@@ -84,8 +84,17 @@ def test_prepared_image_rejects_changed_worktree_sources(monkeypatch, tmp_path: 
     assert isolation.load_prepared_image(root, "backend", reports) == IMAGE_ID
 
     source.write_text("drifted", encoding="utf-8")
-    with pytest.raises(isolation.IsolationError, match="stale"):
+    with pytest.raises(isolation.IsolationError, match="stale") as raised:
         isolation.load_prepared_image(root, "backend", reports)
+    assert raised.value.code == "prepared_image_stale"
+
+
+def test_missing_preparation_record_has_a_specific_code(tmp_path: Path) -> None:
+    from Helper_Scripts.ci import outbound_isolation as isolation
+
+    with pytest.raises(isolation.IsolationError) as raised:
+        isolation.load_prepared_image(tmp_path, "backend", tmp_path)
+    assert raised.value.code == "prepared_image_missing"
 
 
 def _container_inspect() -> dict:
@@ -198,9 +207,10 @@ def test_timeout_removes_container_and_clears_stale_result(monkeypatch, tmp_path
         return subprocess.CompletedProcess(args, 0, output)
 
     monkeypatch.setattr(isolation, "_docker", docker)
-    with pytest.raises(isolation.IsolationError, match="timed out"):
+    with pytest.raises(isolation.IsolationError, match="timed out") as raised:
         isolation.run_isolated(IMAGE_ID, ["-m", "example"], tmp_path, timeout=2)
 
+    assert raised.value.code == "container_timeout"
     assert not stale.exists()
     assert calls == ["create", "inspect", "start", "wait", "rm"]
 

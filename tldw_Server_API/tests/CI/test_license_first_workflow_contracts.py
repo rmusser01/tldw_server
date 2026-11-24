@@ -89,7 +89,9 @@ def test_outbound_job_preserves_command_failure(tmp_path: Path, step_name: str, 
 
     python = tmp_path / "python"
     python.write_text(
-        f'#!/bin/sh\ncase "$*" in "{arguments} --report-dir "*) exit 37;; esac\nexit 99\n'
+        f'#!/bin/sh\ncase "$*" in "{arguments} --report-dir "*)\n'
+        '  printf "%s\\n" "inventory fail (runner/container_timeout)"\n'
+        '  exit 37;;\nesac\nexit 99\n'
     )
     python.chmod(0o700)
     timeout = tmp_path / "timeout"
@@ -113,6 +115,8 @@ def test_outbound_job_preserves_command_failure(tmp_path: Path, step_name: str, 
     if step_name == "Prepare outbound image":
         assert "Lowest sampled free disk" in summary.read_text()
         assert "18000 KiB" in summary.read_text()
+    else:
+        assert "inventory fail (runner/container_timeout)" in summary.read_text()
 
 
 ORDINARY_WORKFLOW_NAMES = (

@@ -14,6 +14,7 @@ from .outbound_backend_smoke import COVERAGE as BACKEND_COVERAGE
 from .outbound_browser_smoke import COVERAGE as BROWSER_COVERAGE
 from .outbound_browser_smoke import VIOLATION_CODES as BROWSER_VIOLATION_CODES
 from .outbound_isolation import (
+    CONTAINER_PREFLIGHT_FAILURE,
     CONTAINER_REPORT,
     IsolationError,
     assert_isolated_runtime,
@@ -26,6 +27,18 @@ SCENARIOS = {
     "backend": ("inventory", "backend-default", "backend-opt-in"),
     "browser": ("shipped-setup", "production-webui", "extension-worker", "extension-content-script"),
 }
+_PYTEST_GROUPS = ("inventory", "backend-opt-in")
+_PYTEST_CASE_REASONS = {
+    "failure": "pytest_case_failed",
+    "error": "pytest_case_failed",
+    "skipped": "pytest_case_skipped",
+    "missing": "pytest_case_missing",
+}
+_PYTEST_RUN_REASONS = {
+    "pytest_timed_out", "pytest_launch_failed", "pytest_evidence_missing",
+    "pytest_evidence_invalid", "pytest_nonzero_exit",
+}
+_MAX_VIOLATIONS = 16
 COVERAGE = {
     "inventory": ("reviewed-declarations", "direct-http-static-guard"),
     "backend-default": tuple(BACKEND_COVERAGE),
@@ -33,8 +46,11 @@ COVERAGE = {
     **{scenario: tuple(labels) for scenario, labels in BROWSER_COVERAGE.items()},
 }
 _FAILURES = {
-    "runner": {"isolation_failed", "nonzero_container_exit", "invalid_scenario_evidence"},
-    "inventory": {"required_pytest_failed"},
+    "runner": {
+        "isolation_failed", "nonzero_container_exit", "invalid_scenario_evidence",
+        "prepared_image_missing", "prepared_image_invalid", "prepared_image_stale",
+        "container_timeout", "container_report_missing", "container_preflight_failed",
+    },
     "backend": {
         "backend_child_failed", "backend_missing_shutdown_evidence", "backend_unexpected_network",
         "backend_import_outside_fixture", "backend_lifespan_failed", "backend_readiness_contract_failed",
@@ -44,14 +60,20 @@ _FAILURES = {
         "backend_note_write_failed", "backend_note_read_failed", "backend_note_persistence_failed",
         "backend_execution_failed",
     },
-    "backend-opt-in": {"required_pytest_failed"},
+    **dict.fromkeys(_PYTEST_GROUPS, _PYTEST_RUN_REASONS.union(_PYTEST_CASE_REASONS.values())),
     **dict.fromkeys(SCENARIOS["browser"], BROWSER_VIOLATION_CODES),
 }
-_TESTS = (
-    "CI/test_outbound_inventory.py", "lint/test_http_usage_guard.py", "CI/test_outbound_backend_smoke.py",
-    "CI/test_outbound_opt_in.py", "Setup/test_install_manager_dependencies.py",
-    "CI/test_outbound_check.py",
-)
+_TESTS = {
+    "CI/test_outbound_inventory.py": "inventory",
+    "lint/test_http_usage_guard.py": "inventory",
+    "CI/test_outbound_backend_smoke.py": "inventory",
+    "CI/test_outbound_check.py": "inventory",
+    "CI/test_outbound_opt_in.py": "backend-opt-in",
+    "Setup/test_install_manager_dependencies.py": "backend-opt-in",
+}
+_TEST_MODULE_GROUPS = {
+    f"tldw_Server_API.tests.{path.removesuffix('.py').replace('/', '.')}": group for path, group in _TESTS.items()
+}
 _OPT_IN_CASES = (
     "download-default", "download", "download-origin", "download-redirect", "download-file",
     "download-repository", "download-caught-dns", "provider", "provider-default", "provider-origin",
@@ -75,6 +97,11 @@ _REQUIRED_CASES = {
         for case in _OPT_IN_CASES
     }
 }
+_PYTEST_CHECKS = {
+    group: {module.rsplit(".", 1)[1] for module, owner in _TEST_MODULE_GROUPS.items() if owner == group}
+    | {name for module, name in _REQUIRED_CASES if _TEST_MODULE_GROUPS[module] == group}
+    for group in _PYTEST_GROUPS
+}
 _BACKEND_MODULE = "Helper_Scripts.ci.outbound_check"
 _BROWSER_MODULE = "Helper_Scripts.ci.outbound_browser_smoke"
 
@@ -83,14 +110,17 @@ class EvidenceError(ValueError):
     """Container evidence cannot be accepted or included in the public report."""
 
 
-def _valid_violation(value: object) -> bool:
-    if not isinstance(value, dict) or value.keys() != {"component", "reason"}:
+def _valid_violation(value: object, scenario: str) -> bool:
+    if not isinstance(value, dict) or value.keys() not in ({"component", "reason"}, {"component", "reason", "check"}):
         return False
     component, reason = value["component"], value["reason"]
-    return (
-        isinstance(component, str) and isinstance(reason, str)
-        and reason in _FAILURES.get(component, ())
-    )
+    owner = "backend" if scenario == "backend-default" else scenario
+    if component not in ("runner", owner) or not isinstance(reason, str) or reason not in _FAILURES[component]:
+        return False
+    if reason in _PYTEST_CASE_REASONS.values():
+        check = value.get("check")
+        return isinstance(check, str) and check in _PYTEST_CHECKS[component]
+    return "check" not in value
 
 
 def validate_result(payload: object, expected: tuple[str, ...]) -> list[dict]:
@@ -109,8 +139,8 @@ def validate_result(payload: object, expected: tuple[str, ...]) -> list[dict]:
             raise EvidenceError("invalid_scenario_evidence")
         if status == "pass" and coverage == list(COVERAGE[scenario]) and violations == []:
             by_scenario[scenario] = item
-        elif status == "fail" and coverage == [] and isinstance(violations, list) and 0 < len(violations) <= 16:
-            if not all(_valid_violation(value) for value in violations):
+        elif status == "fail" and coverage == [] and isinstance(violations, list) and 0 < len(violations) <= _MAX_VIOLATIONS:
+            if not all(_valid_violation(value, scenario) for value in violations):
                 raise EvidenceError("invalid_scenario_evidence")
             by_scenario[scenario] = item
         else:
@@ -131,29 +161,67 @@ def _write_report(path: Path, scenarios: list[dict]) -> None:
     path.write_text(json.dumps({"scenarios": scenarios}, indent=2) + "\n", encoding="utf-8")
 
 
-def pytest_evidence(path: Path, required: set[tuple[str, str]]) -> bool:
-    """Require every expected test and a clean exit for all reported test cases."""
+def _read_pytest_cases(path: Path) -> dict[tuple[str, str], str]:
     from defusedxml import ElementTree
     from defusedxml.common import DefusedXmlException
 
     try:
         if path.stat().st_size > 1024 * 1024:
-            return False
+            raise EvidenceError("pytest_evidence_invalid")
         root = ElementTree.parse(path).getroot()
+    except FileNotFoundError:
+        raise EvidenceError("pytest_evidence_missing") from None
     except (OSError, ElementTree.ParseError, DefusedXmlException):
-        return False
+        raise EvidenceError("pytest_evidence_invalid") from None
     if root.tag != "testsuites":
-        return False
-    seen = set()
+        raise EvidenceError("pytest_evidence_invalid")
+    cases = {}
     for case in root.findall("./testsuite/testcase"):
         name, class_name = case.get("name"), case.get("classname")
-        if not name or not class_name or len(case):
-            return False
+        outcome = case[0].tag if len(case) else "passed"
+        if (
+            not name or class_name not in _TEST_MODULE_GROUPS or len(case) > 1
+            or outcome not in {"passed", "failure", "error", "skipped"}
+        ):
+            raise EvidenceError("pytest_evidence_invalid")
         entry = (class_name, name)
-        if entry in seen:
-            return False
-        seen.add(entry)
-    return bool(seen) and required <= seen
+        if entry in cases:
+            raise EvidenceError("pytest_evidence_invalid")
+        cases[entry] = outcome
+    if not cases:
+        raise EvidenceError("pytest_evidence_invalid")
+    return cases
+
+
+def _pytest_run_failure(reason: str) -> dict[str, dict]:
+    return {group: _failure(group, group, reason) for group in _PYTEST_GROUPS}
+
+
+def _pytest_scenarios(path: Path, exit_code: int) -> dict[str, dict]:
+    """Require all selected tests and report only allowlisted failure identifiers."""
+    try:
+        cases = _read_pytest_cases(path)
+    except EvidenceError as exc:
+        return _pytest_run_failure(str(exc))
+    problems = {group: set() for group in _PYTEST_GROUPS}
+    for entry in cases.keys() | _REQUIRED_CASES:
+        outcome = cases.get(entry, "missing")
+        if outcome != "passed":
+            module, name = entry
+            hint = name if entry in _REQUIRED_CASES else module.rsplit(".", 1)[1]
+            problems[_TEST_MODULE_GROUPS[module]].add((_PYTEST_CASE_REASONS[outcome], hint))
+    if exit_code and not any(problems.values()):
+        return _pytest_run_failure("pytest_nonzero_exit")
+    return {
+        group: {
+            "scenario": group, "status": "fail", "coverage": [],
+            "violations": [
+                {"component": group, "reason": reason, "check": hint}
+                for reason, hint in sorted(rows)[:_MAX_VIOLATIONS]
+            ],
+        } if rows else _success(group)
+        for group, rows in problems.items()
+    }
 
 
 def _run_backend_inside() -> int:
@@ -179,13 +247,12 @@ def _run_backend_inside() -> int:
                 argv, cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL, timeout=120, check=False,
             )
-            passed = tests.returncode == 0 and pytest_evidence(unit_report, _REQUIRED_CASES)
-        except (OSError, subprocess.TimeoutExpired):
-            passed = False
-        cases = {
-            scenario: _success(scenario) if passed else _failure(scenario, scenario, "required_pytest_failed")
-            for scenario in ("inventory", "backend-opt-in")
-        }
+        except subprocess.TimeoutExpired:
+            cases = _pytest_run_failure("pytest_timed_out")
+        except OSError:
+            cases = _pytest_run_failure("pytest_launch_failed")
+        else:
+            cases = _pytest_scenarios(unit_report, tests.returncode)
         backend = work / "backend.json"
         run_backend_smoke(ROOT, backend)
         cases["backend-default"] = validate_result(json.loads(backend.read_text()), ("backend-default",))[0]
@@ -208,10 +275,15 @@ def _run_slice(target: str, report_dir: Path) -> list[dict]:
             result_path = work / "result.json"
             if result_path.stat().st_size > 256 * 1024:
                 raise EvidenceError("invalid_scenario_evidence")
-            result = validate_result(json.loads(result_path.read_text()), expected)
+            payload = json.loads(result_path.read_text())
+            if payload == CONTAINER_PREFLIGHT_FAILURE and exit_code == 1:
+                raise IsolationError("outbound container preflight failed", code="container_preflight_failed")
+            result = validate_result(payload, expected)
         if exit_code == 0 or any(item["status"] == "fail" for item in result):
             return result
         reason = "nonzero_container_exit"
+    except IsolationError as exc:
+        reason = exc.code if exc.code in _FAILURES["runner"] else "isolation_failed"
     except ValueError:
         reason = "invalid_scenario_evidence"
     # Raw child and Docker exceptions are never public evidence.
@@ -240,7 +312,10 @@ def main(argv: list[str] | None = None) -> int:
     path = output / "report.json"
     _write_report(path, records)
     for record in records:
-        reasons = ", ".join(item["reason"] for item in record["violations"])
+        reasons = ", ".join(
+            f"{item['component']}/{item['reason']}" + (f" [{item['check']}]" if "check" in item else "")
+            for item in record["violations"]
+        )
         print(f"{record['scenario']} {record['status']}" + (f" ({reasons})" if reasons else ""))
     print(f"Outbound privacy report {path}")
     return int(any(record["status"] != "pass" for record in records))

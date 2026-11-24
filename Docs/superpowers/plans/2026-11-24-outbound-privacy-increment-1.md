@@ -323,7 +323,7 @@ ADR check — proposed ADR-097 still governs the inventory and required checks. 
 | --- | --- | --- | --- |
 | 1. CI selection and runner capacity | Auth and other covered API changes select browser privacy. Both smokes use fresh admitted runners and their existing required checks report failures. CI records cold build time and available disk. | 255 classifier and workflow contract tests passed, including failure propagation. Actionlint and Ruff passed. Hosted cold-build measurements are pending. | Complete |
 | 2. Worker WebSockets | The packaged worker's hostname-based WebSocket attempt is observed before resolution. A positive fixture run stays green and its synthetic denied control is observed. | 45 focused tests passed. Offline Chromium passed the content script and three clean worker runs, and rejected an injected worker startup WebSocket. | Complete |
-| 3. Diagnostics and exception anchors | Reports identify the failing check with stable redacted data. Exception anchors resolve in the shipped source. | Negative evidence and inventory tests, both local selectors, and Bandit | In Progress |
+| 3. Diagnostics and exception anchors | Reports identify the failing check with stable redacted data. Exception anchors resolve in the shipped source. | 425 focused tests and all seven disconnected Docker scenarios passed from rebuilt images. Ruff and actionlint passed. Bandit found no new issues. | Complete |
 
 ## Handoff
 
