@@ -13,6 +13,7 @@ references:
 - Docs/ADR/049-chat-history-selection-ownership.md
 - Docs/superpowers/specs/2026-11-23-document-workspace-conversation-sync-design.md
 - Docs/ADR/098-document-workspace-chat-association.md
+- Docs/superpowers/plans/2026-11-24-document-workspace-conversation-sync.md
 ---
 
 ## Description
@@ -34,6 +35,7 @@ Let a signed-in user discover and resume the same document conversations from an
 Requested as a follow-up to the browser-scoped conversation tabs. Assess the server-owned document-to-chat association and migration behavior during design. ADR-049 governs owner-bound chat history. A durable server-side contract needs a separate ADR assessment.
 The approved first-release design covers same-server discovery and a per-chat Save to server action for existing browser-only conversations. The [design spec](../../Docs/superpowers/specs/2026-11-23-document-workspace-conversation-sync-design.md) and [proposed ADR-098](../../Docs/ADR/098-document-workspace-chat-association.md) are ready for review. ADR required: yes. ADR path: Docs/ADR/098-document-workspace-chat-association.md. The association is a durable Chat persistence and Media access contract.
 2026-11-24 design review checked the conversation-tabs branch and current Dev. Native history currently refuses document-grounded continuation. A synthetic schema check confirmed native import rejects browser-issued chat IDs and raw source rows. The revised design requires a qualified document-grounded send, stable import recovery with citation preservation, explicit confirmation for numeric-only legacy document links, and access checks at open and send. PR #3534 remains the Public Dev delivery dependency.
+The [implementation plan](../../Docs/superpowers/plans/2026-11-24-document-workspace-conversation-sync.md) is ready for review. The merge preview of Public Dev PR #3534 head 3dc7c90f3a and Dev ee06a040d7 has one conflict in translate.py. Preserve both the merged provider lookup and the tabs PR account check, then verify native document-grounded continuation before releasing sync. ADR-098 remains proposed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
