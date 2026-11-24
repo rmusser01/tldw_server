@@ -42,6 +42,12 @@ import type {
   ReferenceImageListResponse
 } from "../TldwApiClient"
 
+export type DocumentChatTarget = { mediaId: number; mediaUuid: string }
+
+export function documentChatQuery(target?: DocumentChatTarget) {
+  return target ? { document_media_id: target.mediaId, document_media_uuid: target.mediaUuid } : {}
+}
+
 type ChatDocumentDraftCreateResponse = {
   draft_id: string
   expires_at: string

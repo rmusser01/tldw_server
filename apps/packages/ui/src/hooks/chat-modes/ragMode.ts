@@ -278,8 +278,12 @@ type PreparedRagRetrieval = {
 
 const selectedSourceRetrievalCache = new WeakMap<object, PreparedRagRetrieval>()
 
-const hasSelectedMediaSources = (ctx: Pick<RagModeParams, "ragMediaIds">) =>
-  Array.isArray(ctx.ragMediaIds) && ctx.ragMediaIds.length > 0
+const selectedMediaIds = (ctx: ChatModeContext<RagModeParams>) =>
+  ctx.historyTurn?.owner.kind === "native" && ctx.historyTurn.owner.documentTarget
+    ? [ctx.historyTurn.owner.documentTarget.mediaId]
+    : ctx.ragMediaIds
+
+const hasSelectedMediaSources = (ctx: ChatModeContext<RagModeParams>) => Boolean(selectedMediaIds(ctx)?.length)
 
 const getRagDocuments = (ragRes: RagResponse | null | undefined) => {
   const docs = ragRes?.results || ragRes?.documents || ragRes?.docs || []
@@ -443,7 +447,7 @@ const buildRagOptions = async (
     ragOptions.sources = ctx.ragSources
   }
   if (hasSelectedMediaSources(ctx)) {
-    ragOptions.include_media_ids = ctx.ragMediaIds
+    ragOptions.include_media_ids = selectedMediaIds(ctx)
     ragOptions.sources = ["media_db"]
     // Explicit source selection is already the user's disambiguation context.
     // Backend intent routing can otherwise bypass retrieval and produce an

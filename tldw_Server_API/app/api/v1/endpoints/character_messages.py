@@ -22,6 +22,11 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.document_chat_scope import (
+    DocumentChatQuery,
+    document_chat_unavailable,
+    require_linked_document_chat,
+)
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 
 # Schemas
@@ -36,6 +41,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     RoleplayResumeUserAppendRequest,
     RoleplayResumeUserAppendResponse,
 )
+from tldw_Server_API.app.api.v1.schemas.document_chat_schemas import validate_document_chat_citations
 from tldw_Server_API.app.api.v1.utils.chat_message_images import (
     _detect_image_mime_type,
     format_message_content,
@@ -395,6 +401,7 @@ async def send_message(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    document: DocumentChatQuery = None,
 ):
     """
     Add a new message to a chat session.
@@ -417,6 +424,26 @@ async def send_message(
     """
     try:
         scope = _resolve_message_scope(scope_type, workspace_id)
+        citations = message_data.document_chat_sources_v1
+        if citations is not None and (document is None or message_data.tldw_history_admission_v1 is None):
+            raise HTTPException(422, detail="Document chat sources require a linked assistant reply")
+        document_metadata = None
+        if document:
+            if scope.scope_type != "global":
+                raise document_chat_unavailable()
+            require_linked_document_chat(db, target=document, chat_id=chat_id, owner_id=str(current_user.id))
+            if message_data.tldw_history_admission_v1 is None and (
+                message_data.tldw_history_selection_v1 is None or message_data.tldw_history_branch is not False
+            ):
+                raise HTTPException(422, detail="Document chat inputs require a current history selection")
+            if citations is not None:
+                try:
+                    document_metadata = {"document_chat_sources_v1": validate_document_chat_citations(
+                        citations, document.media_uuid,
+                    )}
+                except ValueError as exc:
+                    raise HTTPException(422, detail=str(exc)) from None
+        document_write = {"document_media_uuid": str(document.media_uuid)} if document else {}
         # Check rate limits (per-minute + per-chat message count)
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_message_send_rate(current_user.id)
@@ -528,6 +555,8 @@ async def send_message(
             message_data.tldw_history_existing_input_v1,
         ))
         sync_service = _active_message_sync_service(current_user, scope)
+        if document and sync_service is not None:
+            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
         if message_data.metadata_extra is not None and (scope.scope_type != "workspace" or sync_service is not None):
             raise HTTPException(400, detail="Recorded RAG references require an unsynced workspace assistant message.")
 
@@ -546,6 +575,8 @@ async def send_message(
                     "image_data": image_data, "image_mime_type": image_mime_type}
             if message_data.metadata_extra is not None:
                 data["extra_metadata"] = message_data.metadata_extra
+            if document_metadata:
+                data["extra_metadata"] = document_metadata
             if "parent_message_id" in message_data.model_fields_set:
                 data["parent_message_id"] = message_data.parent_message_id
             owner = native_history_owner_key(request, current_user.id)
@@ -568,6 +599,7 @@ async def send_message(
                             if message_data.tldw_history_edit_v1 is not None
                             else None
                         ),
+                        **document_write,
                     )
                     return admission["input_message_id"], admission
             elif message_data.tldw_history_admission_v1 is not None:
@@ -578,7 +610,7 @@ async def send_message(
 
                 def history_write() -> tuple[str, dict[str, Any] | None]:
                     return db.settle_history_admission(
-                        chat_id, reference, data, owner_client_id=owner_id, owner_key=owner), None
+                        chat_id, reference, data, owner_client_id=owner_id, owner_key=owner, **document_write), None
             else:
                 selection = message_data.tldw_history_existing_input_v1.model_dump(mode="json")
                 published_ids = [message_data.id]
@@ -595,6 +627,8 @@ async def send_message(
                         owner_id=owner_id, message_ids=published_ids, write=history_write)
             except HistorySelectionError as exc:
                 raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code, **exc.details}) from exc
+            except NotFoundError:
+                raise document_chat_unavailable() from None
             except SyncStoreError as sync_exc:
                 raise _message_sync_http_error(sync_exc) from sync_exc
         elif sync_service is not None:

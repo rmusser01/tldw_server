@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Query, Request
@@ -10,6 +10,7 @@ from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
 @dataclass(frozen=True)
@@ -53,3 +54,13 @@ async def _document_chat_query(
 
 
 DocumentChatQuery = Annotated[DocumentChatTarget | None, Depends(_document_chat_query)]
+
+
+def require_linked_document_chat(
+    db: CharactersRAGDB, *, target: DocumentChatTarget, chat_id: str, owner_id: str, conn: Any = None,
+) -> None:
+    """Verify the link under the same native transaction when opening history."""
+    if db.conversation_store.get_document_chat_link(
+        chat_id, owner_id=owner_id, media_uuid=str(target.media_uuid), conn=conn,
+    ) is None:
+        raise document_chat_unavailable()

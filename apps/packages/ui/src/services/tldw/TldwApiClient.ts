@@ -4858,10 +4858,11 @@ export class TldwApiClientBase {
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<ServerChatMessage> {
     const cid = String(chat_id)
-    const query = this.buildQuery(toChatScopeParams(options?.scope))
+    const query = this.buildQuery({ ...toChatScopeParams(options?.scope), ...documentChatQuery(options?.documentTarget) })
     const scopeFields = requestScopeFields(options?.requestScope)
     const res = await bgRequest<ServerChatMessage>({
       path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
@@ -5581,7 +5582,7 @@ export class TldwApiClientBase {
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { adminMethods } from "./domains/admin"
-import { mediaMethods } from "./domains/media"
+import { documentChatQuery, mediaMethods, type DocumentChatTarget } from "./domains/media"
 import { characterMethods } from "./domains/characters"
 import {
   chatRagMethods,

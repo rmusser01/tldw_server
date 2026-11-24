@@ -709,12 +709,14 @@ class ConversationStore:
             )
 
     def get_document_chat_link(
-        self, conversation_id: str, *, owner_id: str, media_uuid: str,
+        self, conversation_id: str, *, owner_id: str, media_uuid: str, conn: Any = None,
     ) -> dict[str, Any] | None:
         """Read a live link even before its first saved message."""
-        row = self._ctx.execute_query(
-            "SELECT link.* " + _LIVE_DOCUMENT_CHAT_JOIN + " AND c.id = ?",  # nosec B608 - fixed SQL fragments.
-            (owner_id, media_uuid, conversation_id), read_only=True,
+        lock = " FOR UPDATE OF c" if conn is not None and self._ctx.backend_type == BackendType.POSTGRESQL else ""
+        sql = "SELECT link.* " + _LIVE_DOCUMENT_CHAT_JOIN + " AND c.id = ?" + lock  # nosec B608 - fixed SQL fragments.
+        params = (owner_id, media_uuid, conversation_id)
+        row = (
+            conn.execute(sql, params) if conn is not None else self._ctx.execute_query(sql, params, read_only=True)
         ).fetchone()
         return dict(row) if row else None
 

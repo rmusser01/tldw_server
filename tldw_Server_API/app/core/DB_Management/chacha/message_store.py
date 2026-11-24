@@ -819,6 +819,7 @@ class MessageStore:
         conn: Any | None = None,
         history_branch: bool | None = None,
         history_edit: Mapping[str, Any] | None = None,
+        document_media_uuid: str | None = None,
     ) -> dict[str, Any]:
         """Atomically validate selected history and append one accepted current input.
 
@@ -842,6 +843,10 @@ class MessageStore:
         intent = self._history_intent_digest({"message": data, "history_edit": target} if target else data)
         with nullcontext(conn) if conn is not None else self._ctx.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
+            if document_media_uuid and not self._ctx.db.conversation_store.get_document_chat_link(
+                conversation_id, owner_id=owner_client_id, media_uuid=document_media_uuid, conn=active,
+            ):
+                raise NotFoundError("Document chat unavailable")
             existing = active.execute("SELECT history_admission_json FROM messages WHERE id = ?", (data["id"],)).fetchone()
             if existing is not None:
                 authority = json.loads(existing["history_admission_json"] or "null")
@@ -849,6 +854,7 @@ class MessageStore:
                     not isinstance(authority, dict)
                     or authority.get("intent_digest") != intent
                     or authority.get("selection") != body
+                    or authority.get("document_media_uuid") != document_media_uuid
                 ):
                     raise HistorySelectionError("message_id_conflict")
                 self._validate_history_parent(
@@ -899,6 +905,7 @@ class MessageStore:
                 "intent_digest": intent,
                 "storage_context_digest": fresh.storage_context_digest,
                 "scope": scope,
+                **({"document_media_uuid": document_media_uuid} if document_media_uuid else {}),
             }
             self._write_history_authority(active, mid, authority)
             authority["input_state_digest"] = self._history_message_state(
@@ -1203,6 +1210,7 @@ class MessageStore:
         owner_client_id: str,
         owner_key: str,
         conn: Any | None = None,
+        document_media_uuid: str | None = None,
     ) -> str:
         """Settle an assistant/tool result against its immutable accepted input."""
         from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionReferenceV1
@@ -1218,9 +1226,15 @@ class MessageStore:
         intent = self._history_intent_digest(data)
         with nullcontext(conn) if conn is not None else self._ctx.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
+            if document_media_uuid and not self._ctx.db.conversation_store.get_document_chat_link(
+                conversation_id, owner_id=owner_client_id, media_uuid=document_media_uuid, conn=active,
+            ):
+                raise NotFoundError("Document chat unavailable")
             authority = self._validate_history_parent(
                 conversation_id, binding, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
             )
+            if authority.get("document_media_uuid") != document_media_uuid:
+                raise NotFoundError("Document chat unavailable")
             existing = active.execute(
                 "SELECT history_admission_json, deleted, version FROM messages WHERE id = ?", (data["id"],)
             ).fetchone()

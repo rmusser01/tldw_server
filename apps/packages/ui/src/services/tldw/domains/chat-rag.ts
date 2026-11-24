@@ -14,6 +14,7 @@ import { bgRequest, bgStream, bgUpload } from '@/services/background-proxy'
 import { buildQuery } from '../client-utils'
 import { createJsonResponseLike } from '../json-response-like'
 import { appendPathQuery } from '../path-utils'
+import { documentChatQuery, type DocumentChatTarget } from "./media"
 import { captureChatRequestDebugSnapshot } from '../chat-request-debug'
 import type { TldwApiClientCore } from '../TldwApiClient'
 import type { ChatScope } from '@/types/chat-scope'
@@ -1457,6 +1458,7 @@ export const chatRagMethods = {
       signal?: AbortSignal
       requestScope: ServicePromptRequestScope
       includeNativeCompletion?: boolean
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<unknown> {
     const scoped = requestScopeFields(options.requestScope)
@@ -1465,6 +1467,7 @@ export const chatRagMethods = {
         `/api/v1/chat/conversations/${encodeURIComponent(chatId)}/history/selection`,
         buildQuery({
           ...toChatScopeParams(options.scope),
+          ...documentChatQuery(options.documentTarget),
           ...(options.includeNativeCompletion === true
             ? { include_native_completion: true, include_reasoning_history_support: true }
             : {})
@@ -1506,10 +1509,11 @@ export const chatRagMethods = {
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<ServerChatMessage> {
     const cid = String(chat_id)
-    const query = buildQuery(toChatScopeParams(options?.scope))
+    const query = buildQuery({ ...toChatScopeParams(options?.scope), ...documentChatQuery(options?.documentTarget) })
     const scopeFields = requestScopeFields(options?.requestScope)
     const selection = payload.tldw_history_selection_v1
     const submittedSelection =

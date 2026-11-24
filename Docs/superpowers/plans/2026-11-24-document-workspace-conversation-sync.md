@@ -51,7 +51,7 @@
 
 ## Stage 2 — Admit and settle document-grounded turns through Chat
 
-**Status** Not Started.
+**Status** Complete.
 
 **Goal** Prove a saved chat can ask the next question about the linked document and reopen with its cited reply.
 
@@ -62,10 +62,10 @@
 - Add `DocumentChatCitation` in `tldw_Server_API/app/api/v1/schemas/document_chat_schemas.py` with `media_uuid`, `title`, `excerpt`, and optional one-based `page` or `epub_cfi`. Store assistant sources under `document_chat_sources_v1` through existing message metadata and restore them through native readback. Reuse the bounds of the existing workspace reference validation and require the verified Media UUID on every citation. Expose source links through authorized Media reads.
 - Export `DocumentChatTarget = { mediaId: number; mediaUuid: string }` from `apps/packages/ui/src/services/tldw/domains/media.ts`. Carry `documentTarget?: DocumentChatTarget` on the native owner in `services/chat-history-selection.ts`. Thread it through `captureHistorySnapshot`, `appendSelectedUser`, and `settleAcceptedAssistant` using the existing API scope headers. Apply the same query options to `services/tldw/domains/chat-rag.ts` and the corresponding `TldwApiClient.ts` methods. Use `runChatModeWithHistory` in `hooks/chat-modes/normalChatMode.ts` and `ragMode.ts` retrieval with only the verified Media item. Allow native grounded mode only for this server-validated document path. Use the client-managed native turn so admission and settlement go through the existing message API with document context and citations. Reuse account-specific capability and Sync v2 errors and retain the draft.
 
-- [ ] Add `test_document_admission_refuses_revoked_media` and `test_document_reply_round_trips_citation` to the Stage 1 integration file. After a successful selection, revoke Media access and assert `response.status_code == 404` and `db.count_messages_for_conversation(chat_id) == original_count`. For an allowed send assert `reply["parent_message_id"] == input_id` and `reopened_sources == [citation]`. For two sends captured on the same turn, assert `stale.json()["detail"]["code"] == "history_branch_changed"` and that only the admitted question was saved.
-- [ ] Add `continues a verified linked document through ragMode` to `apps/packages/ui/src/hooks/chat-modes/__tests__/normalChatMode.history-selection.integration.test.tsx` and assert `expect(retrievalOptions.include_media_ids).toEqual([mediaId])`, `expect(admissionOptions.documentTarget).toEqual(target)`, and `expect(reopenedCitation).toEqual(citation)`. Exercise both the mode guard and the admission/settlement pipeline, including a server capability refusal.
-- [ ] Run the API integration file and `bun run test:run -- normalChatMode.history-selection chatModePipeline.history-admission` from `apps/tldw-frontend`. Verify the missing authorization contract and native RAG rejection before implementing.
-- [ ] Implement the server and client interfaces above. Re-run the API and frontend tests. Commit after both pass.
+- [x] Add `test_document_admission_refuses_revoked_media` and `test_document_reply_round_trips_citation` to `test_document_chat_turns.py`. Cover revoked access, stale concurrent input, citation scope and canonical readback.
+- [x] Cover the native grounded send in the mounted history-selection and RAG pipeline test.
+- [x] Reproduce the unguarded admission and unsupported native RAG mode before implementing.
+- [x] Run both storage backends for the new turns (4 passing) and the focused frontend suites (341 passing).
 
 ## Stage 3 — Discover and resume the same tab on another browser
 

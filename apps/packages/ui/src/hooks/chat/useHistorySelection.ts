@@ -71,6 +71,7 @@ export type HistorySelectionReference = HistoryBookmarkScope & {
 type HistoryLoadTarget = {
   historyId?: string | null
   serverChatId?: string | null
+  documentTarget?: import("@/services/tldw/domains/media").DocumentChatTarget
   temporary?: boolean
   scope?: ChatScope
   bindUnbound?: boolean
@@ -1161,6 +1162,7 @@ export function useHistorySelection(
           conversation_id: String(chatId),
           request_scope: requestScope,
           scope: target.scope,
+          ...(target.documentTarget ? { documentTarget: target.documentTarget } : {}),
           validate_lease: () => valid && isCurrent()
         }
         capturedOwner = owner
