@@ -104,7 +104,9 @@ coverage and redacted violation codes for each selected scenario. Missing tests,
 skips, incomplete evidence, and unexpected observed attempts fail the run.
 The reports cover the exercised flows, instrumented Python DNS and connect calls,
 Playwright request events, and the browser process tree's traced Linux `connect`
-and `sendto` calls. Chromium's known IPv6 route query is classified separately
+and `sendto` calls. The extension profiles use Chromium's private startup
+network log to detect WebSocket attempts before DNS. A second worker profile
+provides the denied-hostname control. Chromium's known IPv6 route query is classified separately
 only when a UDP `connect` returns `ENETUNREACH`. The container still has no
 external route. Package-index selection beyond explicit installer arguments,
 real CDN and provider behavior, other native socket calls, unexercised features,

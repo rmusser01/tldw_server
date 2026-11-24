@@ -49,6 +49,65 @@ def test_check_attempts_accepts_ipv4_mapped_fixture_address(tmp_path: Path):
     assert check_attempts(tmp_path / "browser", {18083}, required_port=18083) == set()
 
 
+def _write_netlog(path: Path, *urls: str) -> None:
+    path.write_text(json.dumps({
+        "constants": {
+            "logEventTypes": {"REQUEST_ALIVE": 1, "URL_REQUEST_START_JOB": 2},
+            "logEventPhase": {"PHASE_BEGIN": 1},
+        },
+        "events": [
+            {"type": 1, "phase": 1, "params": {"url": url}} for url in urls
+        ] + [{"type": 1, "phase": 2}],
+        "polledData": [],
+    }))
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("ws://127.0.0.1:18083/allowed", set()),
+        ("wss://opaque-destination.invalid/private?token=synthetic", {"unapproved_extension_websocket"}),
+        ("ws://127.0.0.1:18082/wrong-port", {"unapproved_extension_websocket"}),
+        ("wss://127.0.0.1:18083/wrong-protocol", {"unapproved_extension_websocket"}),
+        ("https://unrelated-browser-request.invalid", set()),
+    ],
+)
+def test_extension_observes_websocket_attempts_before_a_socket_connect(tmp_path, url, reason):
+    from Helper_Scripts.ci import outbound_browser_smoke as smoke
+
+    log = tmp_path / "network.json"
+    _write_netlog(log, url)
+    assert smoke.check_extension_websockets(log, 18083) == reason
+
+
+def test_control_socket_must_appear_in_its_own_profile(tmp_path):
+    from Helper_Scripts.ci import outbound_browser_smoke as smoke
+
+    log, control = tmp_path / "network.json", tmp_path / "control.json"
+    _write_netlog(log, "http://127.0.0.1:18083/")
+    _write_netlog(control, "ws://127.0.0.1:18083/")
+    assert smoke.check_extension_websockets(log, 18083, control=control) == {
+        "browser_netlog_missing_websocket_control"
+    }
+
+    _write_netlog(control, smoke.WEBSOCKET_CONTROL_URL)
+    assert smoke.check_extension_websockets(log, 18083, control=control) == set()
+
+    _write_netlog(log, smoke.WEBSOCKET_CONTROL_URL)
+    assert smoke.check_extension_websockets(log, 18083, control=control) == {
+        "unapproved_extension_websocket"
+    }
+
+
+@pytest.mark.parametrize("invalid", [b"", b"{", b" " * (4 * 1024 * 1024 + 1)], ids=["empty", "partial", "oversized"])
+def test_extension_netlog_must_be_complete_and_bounded(tmp_path, invalid):
+    from Helper_Scripts.ci import outbound_browser_smoke as smoke
+
+    log = tmp_path / "network.json"
+    log.write_bytes(invalid)
+    assert smoke.check_extension_websockets(log, 18083) == {"browser_netlog_incomplete"}
+
+
 def test_browser_result_requires_one_expected_pass_and_worker_evidence(tmp_path: Path):
     report, observer = tmp_path / "report", tmp_path / "observer"
     report.write_text(

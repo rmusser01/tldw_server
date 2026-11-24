@@ -34,7 +34,11 @@ async function listen(port: number, handler: RequestListener) {
   }
 }
 
-async function launch(profileRoot: string, apiFixture: boolean) {
+async function launch(
+  profileRoot: string,
+  apiFixture: boolean,
+  netLog = fixtureSetting("OUTBOUND_CHROMIUM_NETLOG")
+) {
   const built = path.resolve("build/chrome-mv3")
   const manifest = JSON.parse(await readFile(path.join(built, manifestFile), "utf8"))
   expect(manifest.manifest_version).toBe(3)
@@ -61,6 +65,8 @@ async function launch(profileRoot: string, apiFixture: boolean) {
     ignoreDefaultArgs: ["--disable-extensions"],
     args: [
       ...launchOptions.args,
+      `--log-net-log=${netLog}`,
+      "--net-log-max-size-mb=8",
       `--disable-extensions-except=${copy}`,
       `--load-extension=${copy}`,
       "--disable-crash-reporter",
@@ -89,6 +95,20 @@ async function launch(profileRoot: string, apiFixture: boolean) {
   } catch (error) {
     await context.close()
     throw error
+  }
+}
+
+async function checkWorkerWebSocketControl(profileRoot: string) {
+  const { context, worker } = await launch(profileRoot, true, fixtureSetting("OUTBOUND_WEBSOCKET_CONTROL_NETLOG"))
+  try {
+    const blocked = await worker.evaluate(url => new Promise<boolean>(resolve => {
+      const socket = new WebSocket(url)
+      socket.addEventListener("error", () => resolve(true), { once: true })
+      socket.addEventListener("open", () => resolve(false), { once: true })
+    }), fixtureSetting("OUTBOUND_WEBSOCKET_CONTROL_URL"))
+    expect(blocked, "synthetic worker socket should fail in the isolated browser").toBe(true)
+  } finally {
+    await context.close()
   }
 }
 
@@ -232,6 +252,7 @@ test("packaged worker uses the configured fixture", async ({}, testInfo) => {
     } finally {
       await recorder.finish()
     }
+    await checkWorkerWebSocketControl(testInfo.outputPath("websocket-control"))
   } finally {
     await close()
   }

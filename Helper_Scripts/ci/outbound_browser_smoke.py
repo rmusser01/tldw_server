@@ -20,6 +20,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from .outbound_inventory import origin_only
+
 API_PORT = 18081
 WEB_PORT = 18082
 EXTENSION_API_PORT = 18083
@@ -27,6 +29,9 @@ EXTENSION_PAGE_PORT = 18084
 UNAPPROVED_PORT = 18085
 COOKIE_NAME = "tldw_single_user_session"
 CHROMIUM_CACHE = Path("/opt/outbound-chromium")
+WEBSOCKET_CONTROL_URL = "wss://worker-websocket-probe.invalid/control"
+# Chromium rotates an 8 MiB capture. A lower ceiling rejects captures near rotation.
+_NETLOG_READ_LIMIT = 4 * 1024 * 1024
 SCENARIOS = {
     "shipped-setup": ("shipped setup saves a local setting", "tldw-frontend", API_PORT),
     "production-webui": ("production WebUI renders search results without external assets", "tldw-frontend", WEB_PORT),
@@ -56,6 +61,7 @@ COVERAGE = {
         "playwright-context-events",
         "chromium-platform-route-query",
         "chrome-mv3-worker",
+        "chromium-websocket-netlog",
     ],
     "extension-content-script": [
         "linux-container",
@@ -63,12 +69,15 @@ COVERAGE = {
         "playwright-context-events",
         "chromium-platform-route-query",
         "chrome-content-script",
+        "chromium-websocket-netlog",
     ],
 }
 VIOLATION_CODES = frozenset(
     {
         "backend_scenario_unavailable",
         "browser_isolation_unavailable",
+        "browser_netlog_incomplete",
+        "browser_netlog_missing_websocket_control",
         "browser_observer_incomplete",
         "browser_observer_missing_tripwire",
         "browser_observer_missing_worker",
@@ -82,6 +91,7 @@ VIOLATION_CODES = frozenset(
         "trace_incomplete",
         "trace_unclassified",
         "unapproved_browser_request",
+        "unapproved_extension_websocket",
         "unapproved_socket",
         "unapproved_unix_socket",
     }
@@ -180,6 +190,56 @@ def check_attempts(
             errors.add("trace_incomplete")
     if required_port is not None and required_port not in observed:
         errors.add("trace_incomplete")
+    return errors
+
+
+def _websocket_origin(url: str) -> str | None:
+    scheme, _, address = url.partition("://")
+    if scheme == "ws":
+        return origin_only(f"http://{address}")
+    if scheme == "wss":
+        return origin_only(f"https://{address}")
+    return None
+
+
+def _netlog_websocket_origins(path: Path) -> set[str]:
+    with path.open("rb") as stream:
+        content = stream.read(_NETLOG_READ_LIMIT + 1)
+    if len(content) > _NETLOG_READ_LIMIT:
+        raise ValueError("Chromium network log is too large")
+    data = json.loads(content)
+    constants = data["constants"]
+    types = constants["logEventTypes"]
+    starts = {types["REQUEST_ALIVE"], types["URL_REQUEST_START_JOB"]}
+    begin = constants["logEventPhase"]["PHASE_BEGIN"]
+    events = data["events"]
+    if "polledData" not in data or not isinstance(events, list) or not events:
+        raise ValueError("Chromium network log is incomplete")
+    origins = set()
+    for event in events:
+        if event["type"] in starts and event["phase"] == begin:
+            origin = _websocket_origin(event["params"]["url"])
+            if origin is not None:
+                origins.add(origin)
+    return origins
+
+
+def check_extension_websockets(log: Path, fixture_port: int, *, control: Path | None = None) -> set[str]:
+    """Check pre-resolution WebSocket origins and the separately captured worker control."""
+    fixture = f"http://127.0.0.1:{fixture_port}"
+    control_origin = _websocket_origin(WEBSOCKET_CONTROL_URL)
+    errors = set()
+    try:
+        unapproved = _netlog_websocket_origins(log) - {fixture}
+        if control is not None:
+            observed = _netlog_websocket_origins(control)
+            if control_origin not in observed:
+                errors.add("browser_netlog_missing_websocket_control")
+            unapproved.update(observed - {fixture, control_origin})
+        if unapproved:
+            errors.add("unapproved_extension_websocket")
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        errors.add("browser_netlog_incomplete")
     return errors
 
 
@@ -303,6 +363,8 @@ def _run_browser_test(root: Path, scratch: Path, env: dict[str, str], scenario: 
     suite_dir.mkdir()
     report = suite_dir / "playwright.json"
     observer = suite_dir / "observer.json"
+    netlog = suite_dir / "network.json"
+    control_netlog = suite_dir / "websocket-control.json"
     trace = suite_dir / "browser"
     wrapper = suite_dir / "trace-chromium"
     wrapper.write_text(
@@ -336,6 +398,9 @@ def _run_browser_test(root: Path, scratch: Path, env: dict[str, str], scenario: 
             {
                 **env,
                 "OUTBOUND_BROWSER_OBSERVER_FILE": str(observer),
+                "OUTBOUND_CHROMIUM_NETLOG": str(netlog),
+                "OUTBOUND_WEBSOCKET_CONTROL_NETLOG": str(control_netlog),
+                "OUTBOUND_WEBSOCKET_CONTROL_URL": WEBSOCKET_CONTROL_URL,
                 "OUTBOUND_CHROMIUM_TRACE": str(trace),
                 "OUTBOUND_CHROMIUM_WRAPPER": str(wrapper),
                 "OUTBOUND_STRACE": str(strace),
@@ -343,6 +408,9 @@ def _run_browser_test(root: Path, scratch: Path, env: dict[str, str], scenario: 
             stdout=output.fileno(),
         )
     reasons = check_attempts(trace, {port}, required_port=port, chromium=True)
+    if app == "extension":
+        control = control_netlog if scenario == "extension-worker" else None
+        reasons.update(check_extension_websockets(netlog, port, control=control))
     reasons.update(
         validate_browser_result(
             report,
