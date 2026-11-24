@@ -2072,6 +2072,7 @@ export type ApiPath =
   | "/api/v1/workspaces/{workspace_id}/operations/{operation_id}"
   | "/api/v1/workspaces/{workspace_id}/outputs"
   | "/api/v1/workspaces/{workspace_id}/outputs/{job_id}"
+  | "/api/v1/workspaces/{workspace_id}/research-runs"
   | "/api/v1/workspaces/{workspace_id}/roots"
   | "/api/v1/workspaces/{workspace_id}/roots/primary"
   | "/api/v1/workspaces/{workspace_id}/roots/primary/sandbox-volume"

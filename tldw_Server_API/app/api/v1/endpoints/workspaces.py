@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_use
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Workflows_DB_Deps import try_get_workflows_db_for_user
+from tldw_Server_API.app.api.v1.endpoints.workspace_research_runs import router as workspace_runs_router
 from tldw_Server_API.app.api.v1.endpoints.workspace_study_outputs import router as study_outputs_router
 from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
     ResearchWorkspaceOutputStatusResponse,
@@ -161,6 +162,7 @@ from tldw_Server_API.app.core.Workspaces.workspace_artifact_exports import (
 
 router = APIRouter()
 router.include_router(study_outputs_router)
+router.include_router(workspace_runs_router)
 
 WORKSPACE_ACTIVE_JOB_STATUSES = {"queued", "processing", "running", "retrying"}
 JOB_ERROR_CODE_ALLOWED_CHARS = frozenset(

@@ -28,6 +28,17 @@ All paths under `tldw_Server_API/` unless noted.
 5. Checkpoint approval validates the expected phase, applies typed patches (plan/sources/outline), and enqueues the next phase job; blocked control states refuse approval.
 6. Completion acks with worker+lease identity; leases renew through the renewal APIs; adaptive leases exist but only activate under their own enable flag.
 
+## Research Workspace launches
+
+The authenticated Workspace route verifies selected source association
+versions and the initiating artifact or message when one is supplied. It
+commits the native run, its first phase intent, and the workspace launch
+receipt in the same ResearchSessionsDB transaction. The Jobs dispatch key
+survives a lost launch response. The native detail and bundle routes project
+the authenticated launch origin for the owner. Selecting the Report in
+Chatbook is a later action. See
+[ADR-098](../ADR/098-research-workspace-run-origin.md).
+
 ## Discovery catalog
 
 `default_source_catalog()`: openalex (priority 10), semantic_scholar, crossref, arxiv (ingestable), pubmed, zenodo, figshare, osf — each with adapter, site hosts, full-text resolvability, ingestability, and trust notes. Selection enforces the max-sources cap; the discovery service fans out via the provider router, merges OpenAccess resolver candidates, sanitizes warnings, and persists request/response snapshots.

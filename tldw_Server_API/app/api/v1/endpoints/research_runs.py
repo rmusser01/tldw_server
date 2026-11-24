@@ -9,6 +9,8 @@ import os
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
 
+import tldw_Server_API.app.core.Workflows.research_wait_bridge as _research_wait_bridge
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_expected_user_if_present
 from tldw_Server_API.app.api.v1.schemas.research_runs_schemas import (
     ResearchArtifactResponse,
     ResearchCheckpointPatchApproveRequest,
@@ -16,8 +18,9 @@ from tldw_Server_API.app.api.v1.schemas.research_runs_schemas import (
     ResearchRunDeleteResponse,
     ResearchRunListItemResponse,
     ResearchRunResponse,
+    ResearchWorkspaceRunResponse,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.core.Research.service import ResearchService
 from tldw_Server_API.app.core.Research.streaming import (
     diff_stream_events,
     initial_stream_events,
@@ -25,10 +28,8 @@ from tldw_Server_API.app.core.Research.streaming import (
     persisted_event_to_stream_event,
     synthetic_terminal_payload,
 )
-from tldw_Server_API.app.core.Research.service import ResearchService
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.testing import is_test_mode
-import tldw_Server_API.app.core.Workflows.research_wait_bridge as _research_wait_bridge
 
 router = APIRouter(prefix="/research", tags=["research-runs"])
 _RESEARCH_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
@@ -98,12 +99,17 @@ async def list_research_runs(
     return [ResearchRunListItemResponse.model_validate(session) for session in sessions]
 
 
-@router.get("/runs/{session_id}", response_model=ResearchRunResponse, summary="Get a deep research run")
+@router.get(
+    "/runs/{session_id}",
+    response_model=ResearchWorkspaceRunResponse,
+    summary="Get a deep research run",
+    dependencies=[Depends(require_expected_user_if_present)],
+)
 async def get_research_run(
     session_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
     service: ResearchService = Depends(get_research_service),
-) -> ResearchRunResponse:
+) -> ResearchWorkspaceRunResponse:
     try:
         session = service.get_session(
             owner_user_id=str(current_user.id),
@@ -111,7 +117,7 @@ async def get_research_run(
         )
     except (KeyError, ValueError) as exc:
         _raise_research_http_error(exc)
-    return ResearchRunResponse.model_validate(session)
+    return ResearchWorkspaceRunResponse.model_validate(session)
 
 
 @router.delete("/runs/{session_id}", response_model=ResearchRunDeleteResponse, summary="Delete a deep research run")
@@ -380,7 +386,11 @@ async def cancel_research_run(
     return ResearchRunResponse.model_validate(session)
 
 
-@router.get("/runs/{session_id}/bundle", summary="Get the final deep research bundle")
+@router.get(
+    "/runs/{session_id}/bundle",
+    summary="Get the final deep research bundle",
+    dependencies=[Depends(require_expected_user_if_present)],
+)
 async def get_research_bundle(
     session_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),

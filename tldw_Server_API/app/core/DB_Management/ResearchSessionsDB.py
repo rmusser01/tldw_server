@@ -63,6 +63,7 @@ class ResearchSessionRow:
     completed_at: str | None
     chat_id: str | None = None
     phase_dispatch_json: dict[str, Any] = field(default_factory=dict)
+    workspace_launch: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,10 @@ class ResearchPhaseChangedError(ValueError):
     """A worker's captured phase no longer authorizes canonical publication."""
 
     retryable = False
+
+
+class ResearchWorkspaceLaunchConflict(ValueError):
+    """The same authenticated launch already has a different or deleted run."""
 
 
 class ResearchSessionsDB:
@@ -294,6 +299,18 @@ class ResearchSessionsDB:
                     updated_at TEXT NOT NULL,
                     delivered_at TEXT,
                     FOREIGN KEY(session_id) REFERENCES research_sessions(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS research_workspace_launches (
+                    owner_user_id TEXT NOT NULL,
+                    launch_id TEXT NOT NULL,
+                    request_digest TEXT NOT NULL CHECK(length(request_digest) = 64),
+                    session_id TEXT UNIQUE REFERENCES research_sessions(id) ON DELETE SET NULL,
+                    workspace_context_json TEXT CHECK(
+                        workspace_context_json IS NULL OR length(workspace_context_json) <= 65536
+                    ),
+                    PRIMARY KEY(owner_user_id, launch_id),
+                    CHECK(session_id IS NOT NULL OR workspace_context_json IS NULL)
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_research_sessions_owner
@@ -493,40 +510,119 @@ class ResearchSessionsDB:
         status: str = "queued",
         phase: str = "drafting_plan",
     ) -> ResearchSessionRow:
+        with self._connect() as conn:
+            return self._insert_session(
+                conn, owner_user_id=owner_user_id, query=query,
+                source_policy=source_policy, autonomy_mode=autonomy_mode,
+                limits_json=limits_json, provider_overrides_json=provider_overrides_json,
+                follow_up_json=follow_up_json, status=status, phase=phase,
+            )
+
+    @classmethod
+    def _insert_session(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        owner_user_id: str,
+        query: str,
+        source_policy: str,
+        autonomy_mode: str,
+        limits_json: dict[str, Any] | None = None,
+        provider_overrides_json: dict[str, Any] | None = None,
+        follow_up_json: dict[str, Any] | None = None,
+        status: str = "queued",
+        phase: str = "drafting_plan",
+        phase_dispatch_json: dict[str, Any] | None = None,
+    ) -> ResearchSessionRow:
         session_id = f"rs_{uuid.uuid4().hex[:12]}"
         now = _utc_now()
-        payload = json.dumps(limits_json or {}, sort_keys=True)
-        provider_payload = json.dumps(provider_overrides_json or {}, sort_keys=True)
-        follow_up_payload = json.dumps(follow_up_json or {}, sort_keys=True)
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO research_sessions (
-                    id, owner_user_id, status, phase, query, source_policy,
-                    autonomy_mode, limits_json, provider_overrides_json, follow_up_json,
-                    control_state, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    session_id,
-                    str(owner_user_id),
-                    status,
-                    phase,
-                    query,
-                    source_policy,
-                    autonomy_mode,
-                    payload,
-                    provider_payload,
-                    follow_up_payload,
-                    "running",
-                    now,
-                    now,
-                ),
-            )
-        session = self.get_session(session_id)
+        conn.execute(
+            """
+            INSERT INTO research_sessions (
+                id, owner_user_id, status, phase, query, source_policy,
+                autonomy_mode, limits_json, provider_overrides_json, follow_up_json,
+                control_state, created_at, updated_at, phase_dispatch_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id, str(owner_user_id), status, phase, query, source_policy,
+                autonomy_mode, json.dumps(limits_json or {}, sort_keys=True),
+                json.dumps(provider_overrides_json or {}, sort_keys=True),
+                json.dumps(follow_up_json or {}, sort_keys=True), "running", now, now,
+                json.dumps(phase_dispatch_json or {}, sort_keys=True, allow_nan=False),
+            ),
+        )
+        session = cls._session_from_row(conn.execute(
+            "SELECT * FROM research_sessions WHERE id = ?", (session_id,)
+        ).fetchone())
         if session is None:
             raise RuntimeError("failed_to_create_research_session")
         return session
+
+    @classmethod
+    def _lookup_workspace_launch(
+        cls, conn: sqlite3.Connection, owner_user_id: str, launch_id: str, request_digest: str
+    ) -> ResearchSessionRow | None:
+        row = conn.execute(
+            "SELECT session_id, request_digest FROM research_workspace_launches "
+            "WHERE owner_user_id = ? AND launch_id = ?",
+            (owner_user_id, launch_id),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["request_digest"] != request_digest:
+            raise ResearchWorkspaceLaunchConflict("This launch has a different saved request")
+        session = cls._session_from_row(conn.execute(
+            "SELECT * FROM research_sessions WHERE id = ? AND owner_user_id = ?",
+            (row["session_id"], owner_user_id),
+        ).fetchone())
+        if session is None:
+            raise ResearchWorkspaceLaunchConflict("The native research run was deleted")
+        return session
+
+    def find_workspace_launch(
+        self, owner_user_id: str, launch_id: str, request_digest: str
+    ) -> ResearchSessionRow | None:
+        """Resolve the native owner for this exact request, including after a restart."""
+        with self._connect() as conn:
+            return self._lookup_workspace_launch(conn, owner_user_id, launch_id, request_digest)
+
+    def create_workspace_session(
+        self,
+        *,
+        owner_user_id: str,
+        launch_id: str,
+        query: str,
+        request_digest: str,
+        workspace_context_json: str,
+        phase_dispatch: dict[str, Any],
+    ) -> ResearchSessionRow:
+        """Commit the run, its launch record, and initial dispatch in one transaction."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = self._lookup_workspace_launch(conn, owner_user_id, launch_id, request_digest)
+            if existing is not None:
+                return existing
+            session = self._insert_session(
+                conn, owner_user_id=owner_user_id, query=query,
+                source_policy="balanced", autonomy_mode="checkpointed", phase_dispatch_json=phase_dispatch,
+            )
+            conn.execute(
+                "INSERT INTO research_workspace_launches "
+                "(owner_user_id, launch_id, request_digest, session_id, workspace_context_json) VALUES (?, ?, ?, ?, ?)",
+                (owner_user_id, launch_id, request_digest, session.id, workspace_context_json),
+            )
+            return session
+
+    def get_workspace_launch(self, owner_user_id: str, session_id: str) -> dict[str, Any] | None:
+        """Read the launch for a current native run under its account."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT workspace_context_json FROM research_workspace_launches "
+                "WHERE session_id = ? AND owner_user_id = ?",
+                (session_id, owner_user_id),
+            ).fetchone()
+        return json.loads(row["workspace_context_json"]) if row else None
 
     def create_discovery_snapshot(
         self,
@@ -826,6 +922,10 @@ class ResearchSessionsDB:
 
     def delete_session_cascade(self, session_id: str) -> bool:
         with self._connect() as conn:
+            conn.execute(
+                "UPDATE research_workspace_launches SET workspace_context_json = NULL WHERE session_id = ?",
+                (session_id,),
+            )
             conn.execute(
                 "DELETE FROM research_chat_handoffs WHERE session_id = ?",
                 (session_id,),
