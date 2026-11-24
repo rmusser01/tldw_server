@@ -4,6 +4,18 @@ This page covers local WebUI development workflows that need more detail than th
 repo README. Keep feature-specific runbooks here when they affect repeatable
 frontend testing.
 
+## Shared UI typecheck
+
+After installing dependencies from `apps/`, run this from the repository root.
+
+```bash
+cd apps/packages/ui
+bun run typecheck
+```
+
+The check covers the full shared UI TypeScript project, including its tests.
+It uses the same 8 GiB Node heap allowance as the WebUI typecheck.
+
 ## Research Workspace UAT Harness
 
 Use this profile when validating `/research-workspace` against a running local
