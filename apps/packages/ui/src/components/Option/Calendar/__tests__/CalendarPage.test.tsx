@@ -33,7 +33,8 @@ vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
     mocks.useCanonicalConnectionConfig(...args)
 }))
 
-vi.mock("@/services/calendar", () => ({
+vi.mock("@/services/calendar", async (importOriginal) => ({
+  CALENDAR_SUPPORT_PATH: (await importOriginal<typeof import("@/services/calendar")>()).CALENDAR_SUPPORT_PATH,
   listCalendars: (...args: unknown[]) => mocks.listCalendars(...args),
   createCalendar: (...args: unknown[]) => mocks.createCalendar(...args),
   getCalendarAgenda: (...args: unknown[]) => mocks.getCalendarAgenda(...args),

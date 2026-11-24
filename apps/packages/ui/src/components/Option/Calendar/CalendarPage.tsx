@@ -8,6 +8,7 @@ import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConf
 import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
+  CALENDAR_SUPPORT_PATH,
   createCalendar,
   getCalendarAgenda,
   getCalendarWeek,
@@ -25,7 +26,6 @@ import { CalendarItemDrawer } from "./CalendarItemDrawer"
 import { CalendarSyncSettings } from "./CalendarSyncSettings"
 import { CalendarWeekView } from "./CalendarWeekView"
 
-const CALENDAR_SUPPORT_PATH = "/api/v1/calendar/calendars"
 const ALL_SOURCES: CalendarSourceFilter[] = ["local", "org", "provider", "linked"]
 const ALL_KINDS: CalendarKindFilter[] = ["event", "todo"]
 type CalendarViewMode = "agenda" | "week" | "sync"

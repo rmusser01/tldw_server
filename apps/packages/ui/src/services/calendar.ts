@@ -3,6 +3,7 @@
  */
 
 import { bgRequest } from "./background-proxy"
+import type { ClientPath } from "./tldw/openapi-guard"
 import { appendPathQuery, toAllowedPath } from "./tldw/path-utils"
 
 export type CalendarItemKind = "event" | "todo"
@@ -363,6 +364,7 @@ export interface CalendarSyncTriggerRequest {
 }
 
 const CALENDAR_BASE = "/api/v1/calendar"
+export const CALENDAR_SUPPORT_PATH = `${CALENDAR_BASE}/calendars` satisfies ClientPath
 const SECRET_KEYS = new Set(["password", "token", "access_token", "refresh_token", "client_secret"])
 
 const encodePathId = (id: string | number): string => {
@@ -457,14 +459,14 @@ const withoutSecrets = <T>(payload: T): T => {
 
 export async function listCalendars(): Promise<CalendarListResponse> {
   return await bgRequest<CalendarListResponse>({
-    path: toAllowedPath(`${CALENDAR_BASE}/calendars`),
+    path: CALENDAR_SUPPORT_PATH,
     method: "GET"
   })
 }
 
 export async function createCalendar(payload: CalendarCreateRequest): Promise<CalendarResponse> {
   return await bgRequest<CalendarResponse>({
-    path: toAllowedPath(`${CALENDAR_BASE}/calendars`),
+    path: CALENDAR_SUPPORT_PATH,
     method: "POST",
     body: payload
   })

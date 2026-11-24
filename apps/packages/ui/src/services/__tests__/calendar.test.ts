@@ -9,8 +9,10 @@ vi.mock("../background-proxy", () => ({
 }))
 
 import {
+  CALENDAR_SUPPORT_PATH,
   copyCalendarItemIntoTldw,
   createCalDavAccount,
+  createCalendar,
   createCalendarItem,
   updateCalendarLocalTags,
   createExternalCalendarBinding,
@@ -64,12 +66,27 @@ describe("calendar service contract", () => {
     const response = await listCalendars()
 
     expect(response.total).toBe(0)
+    expect(CALENDAR_SUPPORT_PATH).toBe("/api/v1/calendar/calendars")
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         method: "GET",
         path: "/api/v1/calendar/calendars"
       })
     )
+  })
+
+  it("creates calendars through the same collection endpoint", async () => {
+    const payload = { name: "Research", timezone: "Europe/Paris" }
+    mocks.bgRequest.mockResolvedValue({ id: 7, ...payload })
+
+    const response = await createCalendar(payload)
+
+    expect(response.id).toBe(7)
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      method: "POST",
+      path: "/api/v1/calendar/calendars",
+      body: payload
+    })
   })
 
   it("creates calendar items with the typed payload", async () => {
