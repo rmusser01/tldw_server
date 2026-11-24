@@ -350,6 +350,8 @@
   "core/RAG/rag_service/config.py": {"reads": 1, "import_time": 0, "reason": null},
   "core/RAG/rag_service/database_retrievers.py": {"reads": 3, "import_time": 3, "reason": null},
   "core/RAG/rag_service/payload_exemplars.py": {"reads": 2, "import_time": 0, "reason": null},
+  "core/RAG/rag_service/pipeline/query_prep.py": {"reads": 2, "import_time": 0, "reason": "TASK-13950.24 PR K: env reads moved from unified_pipeline.py"},
+  "core/RAG/rag_service/pipeline/research.py": {"reads": 1, "import_time": 0, "reason": "TASK-13950.24 PR K: env read moved from unified_pipeline.py"},
   "core/RAG/rag_service/pipeline/claims.py": {"reads": 2, "import_time": 0, "reason": "TASK-13950.24 PR F: RAG_NLI_MODEL(_PATH) reads moved from unified_pipeline.py"},
   "core/RAG/rag_service/pipeline/rerank.py": {"reads": 3, "import_time": 0, "reason": "TASK-13950.24 PR H: RAG_RERANK_CALIB_* and RAG_MIN_RELEVANCE_PROB reads moved from unified_pipeline.py"},
   "core/RAG/rag_service/pipeline/verification.py": {"reads": 1, "import_time": 0, "reason": "TASK-13950.24 PR F: RAG_ADAPTIVE_TIME_BUDGET_SEC read moved from unified_pipeline.py"},
