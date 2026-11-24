@@ -693,8 +693,55 @@ def _child_physical_publisher(
         result = _publish(io, generation) if stage == "final" else _chunk(io, generation)
         channel.send(("completed", result))
     finally:
-        db.close_connection()
+        db.close_all_connections()
         channel.close()
+
+
+@pytest.mark.parametrize("native_fork_db", ["postgres"], indirect=True)
+@pytest.mark.parametrize("stage", ["chunk", "final"])
+@pytest.mark.parametrize("connection_only", [False, True], ids=["owned-pool", "connection-only-control"])
+def test_physical_publisher_closes_only_its_owned_postgres_pool(
+    native_fork_db: CharactersRAGDB,
+    pg_database_config: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    connection_only: bool,
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2 import blob_store
+
+    db = native_fork_db
+    generation = _reserve(db)
+    io = _io(db, tmp_path, monkeypatch)
+    if stage == "final":
+        _chunk(io, generation)
+    database_type = CharactersRAGDB
+    children: list[CharactersRAGDB] = []
+
+    def capture_child(**kwargs: Any) -> CharactersRAGDB:
+        child_db = database_type(**kwargs)
+        children.append(child_db)
+        if connection_only:
+            monkeypatch.setattr(child_db, "close_all_connections", child_db.close_connection)
+        return child_db
+
+    monkeypatch.setitem(globals(), "CharactersRAGDB", capture_child)
+    # The helper normally mutates these only in a disposable spawned interpreter.
+    monkeypatch.setattr(blob_store, "_publish_native_file_at", blob_store._publish_native_file_at)
+    messages: list[tuple[str, Any]] = []
+    channel = SimpleNamespace(send=messages.append, recv=lambda: "publish", close=lambda: None)
+    try:
+        _child_physical_publisher(
+            db.db_path_str, str(tmp_path), generation, stage, False, pg_database_config, channel
+        )
+        assert [message[0] for message in messages] == ["ready", "paused", "completed"]
+        child_pool = children[0].backend.get_pool()
+        assert child_pool is not db.backend.get_pool()
+        assert not db.backend.get_pool()._pool.closed
+        assert child_pool._pool.closed is (not connection_only)
+    finally:
+        for child_db in children:
+            database_type.close_all_connections(child_db)
 
 
 @pytest.mark.parametrize("stage,outcome", [("chunk", "drain"), ("final", "drain"), ("chunk", "die"), ("final", "die")])
