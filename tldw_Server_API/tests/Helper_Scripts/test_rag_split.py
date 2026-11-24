@@ -235,7 +235,13 @@ def test_state_init_goes_right_after_the_first_statement_and_is_verified(tmp_pat
     head = t.text(FILE)
     assert head.index("cfg = Config()\n    state = _st.State(cfg)\n") < head.index("return query")
     assert t.run("verify") == 0, capsys.readouterr().out
-    _edit(t, FILE, "    state = _st.State(cfg)\n", "")
+    _edit(t, FILE, "    state = _st.State(cfg)\n", "    state = _st.State(cfg)\n    extra = 1\n")
+    assert t.run("verify") == 1
+    _edit(t, FILE, "    extra = 1\n", "")
+    assert t.run("verify") == 0
+    _edit(t, FILE, "_st.State(cfg)", "_st.Other(cfg)")
+    assert t.run("verify") == 1
+    _edit(t, FILE, "    state = _st.Other(cfg)\n", "")
     assert t.run("verify") == 1
 
 
@@ -580,18 +586,109 @@ def _git(*args: str, cwd: Path = REPO_ROOT) -> str:
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout  # noqa: S603, S607  # nosec B603 B607
 
 
+MANIFEST_GLOB = "Helper_Scripts/rag_split/manifests/*.py"
+
+
+def _chain(root: Path, merge_base: str) -> list[tuple[str, str, str | None]]:
+    """``[(manifest, base_ref, head_ref)]``: each manifest is checked against the tree it was built on.
+
+    Manifests added since ``merge_base`` run oldest first, by the commit that introduced each. Manifest i's base is
+    manifest i-1's head (the merge base for the first). Its head is the parent of manifest i+1's commit, so its own
+    fix commits count, or ``None`` (the working tree) for the last. Two manifests added in one commit are not
+    supported: the first one's head would predate its own changes.
+    """
+    added = _git("diff", "--name-only", "--diff-filter=A", merge_base, "--", MANIFEST_GLOB, cwd=root).split()
+    order = {c: i for i, c in enumerate(_git("rev-list", "--reverse", f"{merge_base}..HEAD", cwd=root).split())}
+
+    def introduced(name: str) -> str | None:
+        shas = _git("log", "--diff-filter=A", "--format=%H", f"{merge_base}..HEAD", "--", name, cwd=root).split()
+        return shas[-1] if shas else None  # None: not committed yet, so newest
+
+    intro = {n: introduced(n) for n in added}
+    ordered = sorted(added, key=lambda n: (order.get(intro[n] or "", len(order)), n))
+    steps, base = [], merge_base
+    for i, name in enumerate(ordered):
+        nxt = intro[ordered[i + 1]] if i + 1 < len(ordered) else None
+        head = f"{nxt}^" if nxt else None
+        steps.append((name, base, head))
+        base = head or base
+    return steps
+
+
+def _verify_chain(root: Path, merge_base: str) -> list[str]:
+    return [
+        name
+        for name, base, head in _chain(root, merge_base)
+        if rag_split.main(["verify", "--root", str(root), str(root / name), "--base", base, *(["--head", head] if head else [])]) != 0
+    ]
+
+
 def test_new_manifests_verify_against_the_pr_base() -> None:
-    """R16's proof, gated: every manifest this change adds verifies against the merge base."""
+    """R16's proof, gated: every manifest this change adds verifies against the tree it was built on (a stack of PRs included)."""
     base = os.environ.get("BACKLOG_TASK_FORMAT_BASE") or "origin/dev"
     try:
         merge_base = _git("merge-base", base, "HEAD").strip()
-        added = _git("diff", "--name-only", "--diff-filter=A", merge_base, "--", "Helper_Scripts/rag_split/manifests/*.py").split()
+        failed = _verify_chain(REPO_ROOT, merge_base)
     except (OSError, subprocess.CalledProcessError) as exc:
         if os.environ.get("BACKLOG_TASK_FORMAT_BASE"):
             raise
         pytest.skip(f"cannot diff against {base}; fetch it or set BACKLOG_TASK_FORMAT_BASE ({exc})")
-    for name in added:
-        assert rag_split.main(["verify", str(REPO_ROOT / name), "--base", merge_base]) == 0, name
+    assert failed == []
+
+
+def _manifest(root: Path, name: str, **manifest: object) -> None:
+    path = root / "Helper_Scripts" / "rag_split" / "manifests" / f"{name}.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"MANIFEST = {({'base': 't', 'file': FILE, 'func': 'pipe', 'pkg': 'pipeline', **manifest})!r}\n")
+
+
+def _stacked_repo(tmp: Path) -> tuple[Path, str]:
+    """A repo with two stacked changes: a adds ``rcfg``, then b adds ``state`` after it (b's base needs a)."""
+    def commit(msg: str) -> str:
+        _git("add", "-A", cwd=tmp)
+        _git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", msg, cwd=tmp)
+        return _git("rev-parse", "HEAD", cwd=tmp).strip()
+
+    _git("init", "-q", cwd=tmp)
+    (tmp / "mini").mkdir()
+    (tmp / FILE).write_text(BASE)
+    root_sha = commit("base")
+    _manifest(tmp, "ta", prologue="rcfg = Config()")
+    assert rag_split.main(["apply", "--root", str(tmp), str(tmp / "Helper_Scripts/rag_split/manifests/ta.py")]) == 0
+    commit("a")
+    _manifest(tmp, "tb", state_init="state = St(rcfg)")
+    assert rag_split.main(["apply", "--root", str(tmp), str(tmp / "Helper_Scripts/rag_split/manifests/tb.py")]) == 0
+    commit("b")
+    return tmp, root_sha
+
+
+def test_manifest_chain_verifies_each_manifest_against_the_tree_it_was_built_on(tmp_path: Path) -> None:
+    root, merge_base = _stacked_repo(tmp_path)
+    assert [n.rsplit("/", 1)[1] for n, _, _ in _chain(root, merge_base)] == ["ta.py", "tb.py"]
+    assert _verify_chain(root, merge_base) == []
+    # a flat verify of the first manifest against the merge base sees the second one's statement as an extra
+    first = str(root / "Helper_Scripts/rag_split/manifests/ta.py")
+    assert rag_split.main(["verify", "--root", str(root), first, "--base", merge_base]) == 1
+    # hand-breaking the second manifest is caught
+    _manifest(root, "tb", state_init="state = Other(rcfg)")
+    assert _verify_chain(root, merge_base) == ["Helper_Scripts/rag_split/manifests/tb.py"]
+
+
+def test_verify_head_reads_the_ref_not_the_working_tree(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    root, merge_base = _stacked_repo(tmp_path)
+    mf = str(root / "Helper_Scripts/rag_split/manifests/tb.py")
+    (root / FILE).write_text((root / FILE).read_text().replace("state = St(rcfg)\n", ""))
+    assert rag_split.main(["verify", "--root", str(root), mf, "--base", "HEAD~1"]) == 1
+    assert rag_split.main(["verify", "--root", str(root), mf, "--base", "HEAD~1", "--head", "HEAD"]) == 0
+    capsys.readouterr()
+    assert rag_split.main(["verify", "--root", str(root), mf, "--base", "HEAD~1", "--head", "nope"]) == 1
+
+
+def test_prologue_and_state_init_must_be_one_statement(tmp_path: Path) -> None:
+    for key in ("prologue", "state_init"):
+        t = Tree(tmp_path / key, **{key: "a = 1\nb = 2"})
+        with pytest.raises(rag_split.SplitError, match="exactly one statement"):
+            rag_split.load_manifest(t.manifest_path)
 
 
 def test_refuses_python_older_than_3_12(monkeypatch: pytest.MonkeyPatch) -> None:

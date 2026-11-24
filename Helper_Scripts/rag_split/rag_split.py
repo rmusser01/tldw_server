@@ -4,7 +4,7 @@ Stdlib only; needs Python 3.12 (exits 2 on anything older).
 
     python -m Helper_Scripts.rag_split.rag_split shared [--manifest M] [--hoist N1,N2] [--base REV | --base-dir DIR]
     python -m Helper_Scripts.rag_split.rag_split apply M
-    python -m Helper_Scripts.rag_split.rag_split verify M (--base REV | --base-dir DIR)
+    python -m Helper_Scripts.rag_split.rag_split verify M (--base REV | --base-dir DIR) [--head REF]
 
 A manifest (``Helper_Scripts/rag_split/manifests/t<NN>_<pr>.py``) holds one ``MANIFEST = {...}`` literal,
 read with ``ast.literal_eval`` and never imported. Keys (all optional but ``base``):
@@ -341,6 +341,9 @@ def load_manifest(path: Path) -> dict[str, Any]:
             unknown = set(m) - set(DEFAULTS)
             if unknown:
                 raise SplitError(f"{path}: unknown manifest keys {sorted(unknown)}")
+            for key in ("prologue", "state_init"):
+                if m[key] and len(ast.parse(m[key]).body) != 1:
+                    raise SplitError(f"{path}: {key} must be exactly one statement")
             return m
     raise SplitError(f"{path}: no MANIFEST literal")
 
@@ -1042,7 +1045,18 @@ def def_in(tree: ast.Module, name: str) -> Any:
     return next((n for n in tree.body if isinstance(n, DEFS) and n.name == name), None)
 
 
-def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, notes: list[str] | None = None) -> list[str]:
+def read_head(root: Path, rel: str | Path, head: str | None) -> str | None:
+    """The head file: the working tree, or ``git show <head>:<rel>`` when ``--head`` names a ref."""
+    if head is None:
+        p = root / rel
+        return p.read_text(encoding="utf-8") if p.exists() else None
+    r = subprocess.run(  # nosec B603 B607  # fixed git argv, no shell
+        ["git", "-C", str(root), "show", f"{head}:{Path(rel).as_posix()}"], capture_output=True, text=True
+    )
+    return r.stdout if r.returncode == 0 else None
+
+
+def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, notes: list[str] | None = None, head_ref: str | None = None) -> list[str]:
     rel = m["file"]
     text = read_base(root, rel, base, base_dir)
     if text is None:
@@ -1052,8 +1066,10 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
     if b.errors:
         return b.errors
     errs: list[str] = []
-    head_path = root / rel
-    head = ast.parse(head_path.read_text(encoding="utf-8"))
+    head_text = read_head(root, rel, head_ref)
+    if head_text is None:
+        return [f"{rel}: not found at the head"]
+    head = ast.parse(head_text)
     want = expected_module(m, src, b)
     if ast.dump(want) != ast.dump(head):  # V7
         if len(want.body) != len(head.body):
@@ -1065,14 +1081,17 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
             for w, h in zip(want.body, head.body):
                 if ast.dump(w) != ast.dump(h):
                     errs += diff_lines(f"{rel}: {getattr(w, 'name', type(w).__name__)} (line {getattr(w, 'lineno', '?')})", w, h)
-    pkg = root / pkg_rel(m)
-    cache: dict[str, ast.Module | None] = {}
+    pkg = pkg_rel(m)
+    cache: dict[str, str | None] = {}
+
+    def module_text(name: str) -> str | None:
+        if name not in cache:
+            cache[name] = read_head(root, pkg / f"{name}.py", head_ref)
+        return cache[name]
 
     def module(name: str) -> ast.Module | None:
-        if name not in cache:
-            p = pkg / f"{name}.py"
-            cache[name] = ast.parse(p.read_text(encoding="utf-8")) if p.exists() else None
-        return cache[name]
+        t = module_text(name)
+        return ast.parse(t) if t is not None else None
 
     for (mod, name), want_def in b.defs.items():
         tree = module(mod)
@@ -1098,17 +1117,17 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
     stdlib = {n: i for n, i in src.infos.items() if i.stdlib}
     mods = list(dict.fromkeys([x.module for x in b.moves] + (["run_state"] if m["hoist"] else [])))
     for name in mods:
-        p = pkg / f"{name}.py"
-        if p.exists():
-            errs += check_module(p, name, m, stdlib, {x.module for x in b.moves}, name == "run_state")
+        t = module_text(name)
+        if t is not None:
+            errs += check_module(t, name, m, stdlib, {x.module for x in b.moves}, name == "run_state")
     return errs
 
 
-def check_module(p: Path, name: str, m: dict, stdlib: dict[str, Info], modules: set[str], is_state: bool) -> list[str]:
+def check_module(text: str, name: str, m: dict, stdlib: dict[str, Info], modules: set[str], is_state: bool) -> list[str]:
     """V7/V9 for a stage module: only declared shapes at module level, one binding per name."""
     errs: list[str] = []
-    tree = ast.parse(p.read_text(encoding="utf-8"))
-    psrc = Src(p.read_text(encoding="utf-8"))
+    tree = ast.parse(text)
+    psrc = Src(text)
     label = f"{name}.py"
     bound: dict[str, int] = defaultdict(int)
 
@@ -1530,6 +1549,8 @@ def main(argv: list[str] | None = None) -> int:
             g = p.add_mutually_exclusive_group(required=name == "verify")
             g.add_argument("--base")
             g.add_argument("--base-dir")
+        if name == "verify":
+            p.add_argument("--head", help="read the head files from this git ref instead of the working tree")
     a = ap.parse_args(argv)
     root = Path(a.root)
     try:
@@ -1537,7 +1558,7 @@ def main(argv: list[str] | None = None) -> int:
             errs = run_apply(root, load_manifest(Path(a.manifest)))
         elif a.cmd == "verify":
             notes: list[str] = []
-            errs = run_verify(root, load_manifest(Path(a.manifest)), a.base, a.base_dir, notes)
+            errs = run_verify(root, load_manifest(Path(a.manifest)), a.base, a.base_dir, notes, a.head)
             for n in notes:
                 print(n)
             if not errs:
