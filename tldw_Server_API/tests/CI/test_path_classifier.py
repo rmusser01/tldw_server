@@ -202,3 +202,27 @@ def test_unrelated_backend_change_leaves_the_owner_isolation_job_off() -> None:
     flags = classify_paths(["tldw_Server_API/app/core/RAG/pipeline.py"])
     assert flags["backend_changed"] is True
     assert flags["chacha_owner_scope_changed"] is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
+        "tldw_Server_API/app/core/RAG/rag_schemas_unified.py",
+        "tldw_Server_API/app/api/v1/endpoints/rag_unified.py",
+        "tldw_Server_API/app/api/v1/schemas/rag_schemas_simple.py",
+        "tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py",
+        "tldw_Server_API/tests/RAG/test_unified_schema_and_pipeline.py",
+        "tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py",
+        "pyproject.toml",
+        ".github/workflows/backend-required.yml",
+    ),
+)
+def test_rag_pipeline_paths_enable_the_rag_job(path: str) -> None:
+    assert classify_paths([path])["rag_pipeline_changed"] is True
+
+
+def test_unrelated_backend_change_leaves_the_rag_job_off() -> None:
+    flags = classify_paths(["tldw_Server_API/app/core/Chat/chat_service.py"])
+    assert flags["backend_changed"] is True
+    assert flags["rag_pipeline_changed"] is False
