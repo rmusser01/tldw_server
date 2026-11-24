@@ -246,7 +246,11 @@ def test_default_configuration_is_read_once_on_factory_call(monkeypatch):
     assert calls == ["MCP-Model-Completion", "server"]
 
 
-@pytest.mark.parametrize("text", ["", "{}", "[]", "null", '{"accounting":{},"accounting":{}}', "x" * 65537])
+@pytest.mark.parametrize(
+    "text",
+    ["", "{}", "[]", "null", '{"accounting":{},"accounting":{}}', "x" * 65537],
+    ids=["empty-string", "empty-object", "empty-array", "null", "duplicate-key", "oversized"],
+)
 def test_bad_operator_json_is_unavailable_without_leak(monkeypatch, text):
     monkeypatch.setattr(api(), "get_config_section", lambda name: {"policy_json": text})
     port = api().build_tldw_model_completion_port(settings(), server_config_snapshot=config())
