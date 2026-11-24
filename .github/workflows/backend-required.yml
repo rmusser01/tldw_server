@@ -661,6 +661,16 @@ jobs:
             uv.lock
           extras: dev
 
+      - name: Prepare backend outbound privacy image
+        if: needs.changes.outputs.backend_changed == 'true'
+        timeout-minutes: 15
+        run: python -m Helper_Scripts.ci.outbound_isolation prepare backend --report-dir "$RUNNER_TEMP/outbound-privacy"
+
+      - name: Verify backend outbound privacy
+        if: needs.changes.outputs.backend_changed == 'true'
+        timeout-minutes: 5
+        run: python -m Helper_Scripts.ci.outbound_check backend --report-dir "$RUNNER_TEMP/outbound-privacy"
+
       - name: Test Auth PostgreSQL fixture teardown
         if: needs.changes.outputs.backend_changed == 'true'
         timeout-minutes: 3

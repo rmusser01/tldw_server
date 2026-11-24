@@ -895,6 +895,16 @@ jobs:
         working-directory: apps/extension
         run: bun run build:chrome:prod
 
+      - name: Prepare browser outbound privacy image
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        timeout-minutes: 25
+        run: python -m Helper_Scripts.ci.outbound_isolation prepare browser --report-dir "$RUNNER_TEMP/outbound-privacy"
+
+      - name: Verify browser outbound privacy
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        timeout-minutes: 8
+        run: python -m Helper_Scripts.ci.outbound_check browser --report-dir "$RUNNER_TEMP/outbound-privacy"
+
       - name: Run WebUI API-key persistence lifecycle
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend

@@ -58,6 +58,60 @@ ruff/mypy are reported for visibility but never fail the local run, matching the
 remote `lint` job's `continue-on-error`. The phases that actually gate a PR
 (compileall, guards, pytest) do fail the local run.
 
+## Outbound privacy checks
+
+Run from the repository root with the project virtual environment active and a
+Docker engine that runs Linux containers. On macOS, use a Linux container engine
+or a Linux VM with Docker. Build preparation needs access to the configured
+dependency and image registries. The smoke runs with loopback networking and a
+private filesystem inside each prebuilt container.
+
+Preparation reads the committed `tldw_Server_API/Config_Files/config.txt`
+defaults. A local edit to this file stops preparation before Docker can cache
+it. Test deliberate changes to the defaults from a commit that contains no
+credentials.
+
+```bash
+outbound_report_dir="$(mktemp -d)"
+python -m Helper_Scripts.ci.outbound_isolation prepare all --report-dir "$outbound_report_dir"
+python -m Helper_Scripts.ci.outbound_check all --report-dir "$outbound_report_dir"
+```
+
+Use `backend` or `browser` in both commands to run a slice. Reprepare that
+slice after changing source. `backend` verifies the reviewed inventory, fresh
+ASGI startup through shutdown, a first-run setup edit, a local note, and opted-in
+fixture dispatch through the Hugging Face SDK and OpenAI adapter. Installer
+package and Git checks verify selected command arguments. `browser` checks the
+shipped setup wizard, standalone production WebUI, and packaged Chrome worker and
+content script.
+
+The native trace detected ONNX Runtime's startup telemetry. The app sets
+`ORT_DISABLE_TELEMETRY=1` before importing the SDK unless the operator supplies
+an explicit value. The destination is documented in the reviewed inventory.
+The WebUI run also exercises the backend's model catalog against four named
+loopback provider fixtures. Custom OpenAI endpoints that require credentials
+skip DNS resolution while those credentials are missing.
+
+Each run writes a fresh `outbound-run-*/report.json` with the terminal status,
+coverage and redacted violation codes for each selected scenario. Missing tests,
+skips, incomplete evidence, and unexpected observed attempts fail the run.
+The reports cover the exercised flows, instrumented Python DNS and connect calls,
+Playwright request events, and the browser process tree's traced Linux `connect`
+and `sendto` calls. Chromium's known IPv6 route query is classified separately
+only when a UDP `connect` returns `ENETUNREACH`. The container still has no
+external route. Package-index selection beyond explicit installer arguments,
+real CDN and provider behavior, other native socket calls, unexercised features,
+and other platforms and browsers are outside this coverage.
+
+The pure checks also run without Docker:
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest --noconftest -o addopts='' -q \
+  tldw_Server_API/tests/CI/test_outbound_inventory.py \
+  tldw_Server_API/tests/CI/test_outbound_backend_smoke.py \
+  tldw_Server_API/tests/CI/test_outbound_check.py
+```
+
 ## Postgres / Redis dependent tests
 
 The runner honors the same environment the suite already uses:

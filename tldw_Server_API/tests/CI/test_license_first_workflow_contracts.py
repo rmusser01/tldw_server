@@ -25,6 +25,66 @@ EXPECTED_PERMISSIONS = {
     "pull-requests": "read",
     "statuses": "read",
 }
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "profile", "flag", "preceding_step", "build_timeout", "check_timeout"),
+    [
+        ("backend-required", "backend", "backend_changed", "Setup Python and dependencies", 15, 5),
+        ("frontend-required", "browser", "tldw_frontend_changed", "Build production Chrome extension", 25, 8),
+    ],
+)
+def test_required_outbound_privacy_fails_closed(
+    tmp_path: Path,
+    workflow_name: str,
+    profile: str,
+    flag: str,
+    preceding_step: str,
+    build_timeout: int,
+    check_timeout: int,
+) -> None:
+    """Require blocking preparation and verification on the admitted head."""
+    workflow = yaml.safe_load((REPO_ROOT / f".github/workflows/{workflow_name}.yml").read_text())
+    job = workflow["jobs"][workflow_name]
+    steps = job["steps"]
+    names = [step.get("name") for step in steps]
+    prepare_name = f"Prepare {profile} outbound privacy image"
+    check_name = f"Verify {profile} outbound privacy"
+    assert names.count(prepare_name) == names.count(check_name) == 1
+    assert "await_license" in job["needs"]
+    assert not job.get("continue-on-error", False)
+    assert (
+        names.index("Require the license audit to have passed")
+        < names.index("Checkout")
+        < names.index(preceding_step)
+        < names.index(prepare_name)
+        < names.index(check_name)
+    )
+    for name, command, timeout in (
+        (prepare_name, f"outbound_isolation prepare {profile}", build_timeout),
+        (check_name, f"outbound_check {profile}", check_timeout),
+    ):
+        step = steps[names.index(name)]
+        assert step["if"] == f"needs.changes.outputs.{flag} == 'true'"
+        assert not step.get("continue-on-error", False)
+        assert step["timeout-minutes"] == timeout
+        assert step["run"].strip() == (
+            f'python -m Helper_Scripts.ci.{command} --report-dir "$RUNNER_TEMP/outbound-privacy"'
+        )
+
+    python = tmp_path / "python"
+    python.write_text("#!/bin/sh\nexit 37\n")
+    python.chmod(0o700)
+    # The checked-in command receives a synthetic runner failure.
+    result = subprocess.run(  # nosec B603
+        ["/bin/bash", "-e", "-c", steps[names.index(check_name)]["run"]],
+        env={"PATH": str(tmp_path), "RUNNER_TEMP": str(tmp_path)},
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode == 37
+
+
 ORDINARY_WORKFLOW_NAMES = (
     "actionlint.yml",
     "backend-required.yml",

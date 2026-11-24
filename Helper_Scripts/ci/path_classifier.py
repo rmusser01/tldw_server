@@ -3,7 +3,24 @@ from __future__ import annotations
 from collections.abc import Iterable
 from fnmatch import fnmatch
 
+_OUTBOUND_SHARED_GLOBS = [
+    "Dockerfiles/Dockerfile.outbound-check",
+    "Helper_Scripts/ci/outbound_*",
+    "tldw_Server_API/tests/CI/test_outbound_*.py",
+    "tldw_Server_API/tests/helpers/offline_network.py",
+    "apps/mcp-unified/pyproject.toml",
+    "apps/mcp-unified/src/**",
+    "packages/tldw_profile_core/pyproject.toml",
+    "packages/tldw_profile_core/src/**",
+    "pyproject.toml",
+    "uv.lock",
+]
+
 BACKEND_GLOBS = [
+    *_OUTBOUND_SHARED_GLOBS,
+    "apps/extension/entrypoints/background.ts",
+    "apps/extension/wxt.config.ts",
+    "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/AddSourceModal.tsx",
     "apps/packages/api-types/**",
     "Helper_Scripts/export_openapi_schema.py",
     "tldw_Server_API/**",
@@ -12,9 +29,8 @@ BACKEND_GLOBS = [
     "Helper_Scripts/ci/path_classifier.py",
     "Helper_Scripts/ci/vitest_base_ratchet.py",
     "Helper_Scripts/rag_split/**",
+    "Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py",
     "tools/backlog-py/**",
-    "pyproject.toml",
-    "uv.lock",
     ".github/actions/**",
     ".github/workflows/**",
 ]
@@ -26,6 +42,29 @@ COVERAGE_GLOBS = [
 ]
 
 TLDW_FRONTEND_GLOBS = [
+    *_OUTBOUND_SHARED_GLOBS,
+    ".github/workflows/frontend-required.yml",
+    "apps/package.json",
+    "tldw_Server_API/Config_Files/.env.example",
+    "tldw_Server_API/Config_Files/config.txt",
+    "tldw_Server_API/app/Setup_UI/**",
+    "tldw_Server_API/app/api/v1/API_Deps/setup_deps.py",
+    "tldw_Server_API/app/api/v1/endpoints/control_plane.py",
+    "tldw_Server_API/app/api/v1/endpoints/llm_providers.py",
+    "tldw_Server_API/app/api/v1/endpoints/setup.py",
+    "tldw_Server_API/app/api/v1/schemas/setup_schemas.py",
+    "tldw_Server_API/app/core/LLM_Calls/provider_readiness.py",
+    "tldw_Server_API/app/core/Security/middleware.py",
+    "tldw_Server_API/app/core/Security/setup_*.py",
+    "tldw_Server_API/app/core/Setup/**",
+    "tldw_Server_API/app/core/startup_preflight.py",
+    "tldw_Server_API/app/__init__.py",
+    "tldw_Server_API/app/main.py",
+    "tldw_Server_API/app/services/readiness_service.py",
+    "tldw_Server_API/app/services/setup_mcp_tools_service.py",
+    "tldw_Server_API/app/services/startup_*.py",
+    "tldw_Server_API/app/static/setup/**",
+    "tldw_Server_API/scripts/run_server_guarded_mcp.py",
     "apps/packages/api-types/**",
     "apps/tldw-frontend/**",
     "apps/packages/ui/**",
