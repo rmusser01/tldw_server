@@ -94,6 +94,15 @@ const unreadIncrementForEvent = (event: NotificationStreamEvent): number => {
   return Number.isFinite(count) && count > 0 ? count : 0
 }
 
+// The stream sends an `event: heartbeat` on open and a `{"heartbeat": true}`
+// data frame every 10 s. Neither is a notification; buffering one would change
+// the context value and re-render every consumer.
+const isHeartbeat = (event: NotificationStreamEvent): boolean =>
+  event.event === "heartbeat" ||
+  (event.event === "message" &&
+    typeof event.payload === "object" && event.payload !== null &&
+    (event.payload as Record<string, unknown>).heartbeat === true)
+
 const readStoredOrgId = (): string | number | null => {
   const config = getEffectiveStoredTldwConfig()
   return typeof config?.orgId === "string" || typeof config?.orgId === "number"
@@ -319,7 +328,7 @@ export function NotificationLifecycleProvider({
           if (outcome !== "terminal") startPolling()
         },
         onEvent: (event) => {
-          if (!isCurrent()) return
+          if (!isCurrent() || isHeartbeat(event)) return
           updateCurrent(generation, (current) => {
             const sequence = current.eventSequence + 1
             return {

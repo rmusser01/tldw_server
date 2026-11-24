@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, within } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { describe, expect, it, vi } from "vitest"
 import { ReportEvidencePanel } from "../ReportEvidencePanel"
 import type { WatchlistOutputEvidenceResponse } from "@/types/watchlists"

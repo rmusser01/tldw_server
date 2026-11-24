@@ -127,8 +127,8 @@ def test_save_chat_knowledge_rolls_back_on_flashcard_error(
     def _failing_add_flashcard(card_data):
         raise RuntimeError("flashcard failure")
 
-    original_add_flashcard = chacha_db.add_flashcard
-    chacha_db.add_flashcard = _failing_add_flashcard  # type: ignore[assignment]
+    original_add_flashcard = chacha_db.flashcard_store.add_flashcard
+    chacha_db.flashcard_store.add_flashcard = _failing_add_flashcard  # type: ignore[assignment]
 
     try:
         payload = {
@@ -156,5 +156,5 @@ def test_save_chat_knowledge_rolls_back_on_flashcard_error(
         # Transaction should have rolled back the note insert.
         assert chacha_db.count_notes() == 0
     finally:
-        chacha_db.add_flashcard = original_add_flashcard  # type: ignore[assignment]
+        chacha_db.flashcard_store.add_flashcard = original_add_flashcard  # type: ignore[assignment]
         test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)

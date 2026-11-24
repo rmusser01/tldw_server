@@ -80,7 +80,7 @@ def test_receipt_admission_committing_before_closure_is_cascaded(
                 db.get_connection().set_trace_callback(None)
 
     monkeypatch.setattr(creation_db.conversation_store, "_recheck_receipt_admission", pause_admitted)
-    monkeypatch.setattr(closer, "_lock_native_workspace_delete", observe_close)
+    monkeypatch.setattr(closer.workspace_store, "_lock_native_workspace_delete", observe_close)
     with ThreadPoolExecutor(max_workers=2) as executor:
         accepting, deleting = executor.submit(run, 0), executor.submit(run, 1)
         try:

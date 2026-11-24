@@ -1,5 +1,6 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { OutputsTab } from "../OutputsTab"
 
@@ -87,8 +88,10 @@ vi.mock("@/utils/dateFormatters", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  recordWatchlistsOnboardingTelemetry: async () => undefined,
   createWatchlistOutput: (...args: any[]) => mocks.createWatchlistOutputMock(...args),
   fetchWatchlistJobs: (...args: any[]) => mocks.fetchWatchlistJobsMock(...args),
+  fetchWatchlists: async () => ({ items: [], total: 0 }),
   fetchWatchlistOutputs: (...args: any[]) => mocks.fetchWatchlistOutputsMock(...args),
   fetchWatchlistTemplates: (...args: any[]) => mocks.fetchWatchlistTemplatesMock(...args),
   downloadWatchlistOutput: (...args: any[]) => mocks.downloadWatchlistOutputMock(...args),
@@ -125,17 +128,12 @@ const buildOutput = (deliveryStatus: string) => ({
 })
 
 const baseState = (overrides: Record<string, unknown> = {}) => ({
-  outputs: [],
-  outputsLoading: false,
-  outputsTotal: 0,
   outputsPage: 1,
   outputsPageSize: 20,
   outputsJobFilter: null,
   outputsRunFilter: null,
   outputPreviewOpen: false,
   selectedOutputId: null,
-  setOutputs: vi.fn(),
-  setOutputsLoading: vi.fn(),
   setOutputsPage: vi.fn(),
   setOutputsPageSize: vi.fn(),
   setOutputsJobFilter: vi.fn(),
@@ -148,8 +146,8 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
 describe("OutputsTab accessibility live-region behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.storeStateRef.current = baseState({ outputs: [buildOutput("queued")], outputsTotal: 1 })
-    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.storeStateRef.current = baseState()
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: [buildOutput("queued")], total: 1, has_more: false })
     mocks.fetchWatchlistJobsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.fetchWatchlistTemplatesMock.mockResolvedValue({ items: [] })
     mocks.createWatchlistOutputMock.mockResolvedValue({})
@@ -158,17 +156,15 @@ describe("OutputsTab accessibility live-region behavior", () => {
   })
 
   it("announces delivery status changes in the SR live region", async () => {
-    const { rerender } = render(<OutputsTab />)
+    render(<OutputsTab />)
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).not.toBeDisabled())
     expect(screen.getByTestId("watchlists-outputs-live-region")).toHaveTextContent("")
     expect(screen.getByTestId("watchlists-outputs-live-region")).toHaveAttribute("role", "status")
     expect(screen.getByTestId("watchlists-outputs-live-region")).toHaveAttribute("aria-live", "polite")
     expect(screen.getByTestId("watchlists-outputs-live-region")).toHaveAttribute("aria-atomic", "true")
 
-    mocks.storeStateRef.current = baseState({
-      outputs: [buildOutput("sent")],
-      outputsTotal: 1
-    })
-    rerender(<OutputsTab />)
+    mocks.fetchWatchlistOutputsMock.mockResolvedValueOnce({ items: [buildOutput("sent")], total: 1, has_more: false })
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
 
     await waitFor(() => {
       expect(screen.getByTestId("watchlists-outputs-live-region")).toHaveTextContent(

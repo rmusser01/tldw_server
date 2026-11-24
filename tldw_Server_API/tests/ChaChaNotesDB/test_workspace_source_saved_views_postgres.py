@@ -359,8 +359,8 @@ def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
         detected_errors.append(type(exc))
         return original_detect(exc)
 
-    monkeypatch.setattr(db, "_find_workspace_source_saved_view_name_with_conn", stale_once)
-    monkeypatch.setattr(db, "_is_workspace_source_saved_view_postgres_unique_error", record_named_unique)
+    monkeypatch.setattr(db.workspace_store, "_find_workspace_source_saved_view_name_with_conn", stale_once)
+    monkeypatch.setattr(db.workspace_store, "_is_workspace_source_saved_view_postgres_unique_error", record_named_unique)
 
     try:
         with pytest.raises(CharactersRAGDBError) as exc_info:
@@ -498,7 +498,7 @@ def test_postgres_nested_duplicate_recovery_does_not_borrow_pool_capacity(
         original_disconnect(conn)
         disconnect_states.append((status_name, bool(conn.closed)))
 
-    monkeypatch.setattr(db, "_find_workspace_source_saved_view_name_with_conn", stale_preflight)
+    monkeypatch.setattr(db.workspace_store, "_find_workspace_source_saved_view_name_with_conn", stale_preflight)
     monkeypatch.setattr(backend.get_pool(), "get_connection", tracked_pool_get)
     monkeypatch.setattr(backend, "disconnect", tracked_disconnect)
 
@@ -658,7 +658,7 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
             first_done.set()
             assert allow_commit.wait(timeout=5)
 
-        monkeypatch.setattr(db, "_finish_native_workspace_delete", pause_after_final_transition)
+        monkeypatch.setattr(db.workspace_store, "_finish_native_workspace_delete", pause_after_final_transition)
 
     def mutate() -> None:
         try:

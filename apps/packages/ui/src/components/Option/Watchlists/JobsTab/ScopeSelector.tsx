@@ -4,10 +4,11 @@ import { Folder, Rss, Tags } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import {
   fetchWatchlistGroups,
-  fetchWatchlistSources,
   fetchWatchlistTags
 } from "@/services/watchlists"
-import type { JobScope, WatchlistGroup, WatchlistSource, WatchlistTag } from "@/types/watchlists"
+import type { JobScope } from "@/types/watchlists"
+import { useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
+import { useScopeSources } from "./useScopeSources"
 
 interface ScopeSelectorProps {
   value: JobScope
@@ -16,8 +17,7 @@ interface ScopeSelectorProps {
 }
 
 type ScopeMode = "sources" | "groups" | "tags"
-const SCOPE_SELECTOR_PAGE_SIZE = 200
-const SCOPE_SELECTOR_SOURCE_LIMIT = 500
+const CATALOG_PARAMS = { page: 1, size: 200 }
 
 export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
   value,
@@ -26,10 +26,9 @@ export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
 }) => {
   const { t } = useTranslation(["watchlists"])
 
-  const [sources, setSources] = useState<WatchlistSource[]>([])
-  const [groups, setGroups] = useState<WatchlistGroup[]>([])
-  const [tags, setTags] = useState<WatchlistTag[]>([])
-  const [loading, setLoading] = useState(false)
+  const { sources, loading: sourcesLoading } = useScopeSources(watchlistId)
+  const groupsQuery = useWatchlistsQuery("groups", CATALOG_PARAMS, ({ signal }) => fetchWatchlistGroups(CATALOG_PARAMS, signal))
+  const tagsQuery = useWatchlistsQuery("tags", CATALOG_PARAMS, ({ signal }) => fetchWatchlistTags(CATALOG_PARAMS, signal))
 
   // Determine active mode based on current value
   const getActiveMode = (): ScopeMode => {
@@ -40,58 +39,6 @@ export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
   }
 
   const [activeMode, setActiveMode] = useState<ScopeMode>(getActiveMode)
-
-  // Load data on mount
-  useEffect(() => {
-    let active = true
-
-    const fetchSourceOptions = async (): Promise<WatchlistSource[]> => {
-      const allSources: WatchlistSource[] = []
-      let page = 1
-
-      while (allSources.length < SCOPE_SELECTOR_SOURCE_LIMIT) {
-        const result = await fetchWatchlistSources({
-          watchlist_id: watchlistId ?? undefined,
-          page,
-          size: SCOPE_SELECTOR_PAGE_SIZE
-        })
-        const batch = Array.isArray(result.items) ? result.items : []
-        allSources.push(...batch)
-        const total = typeof result.total === "number" ? result.total : undefined
-
-        if (batch.length < SCOPE_SELECTOR_PAGE_SIZE) break
-        if (total != null && allSources.length >= total) break
-        page += 1
-      }
-
-      return allSources.slice(0, SCOPE_SELECTOR_SOURCE_LIMIT)
-    }
-
-    const loadData = async () => {
-      setLoading(true)
-      try {
-        const [sourcesRes, groupsRes, tagsRes] = await Promise.all([
-          fetchSourceOptions(),
-          fetchWatchlistGroups({ page: 1, size: 200 }),
-          fetchWatchlistTags({ page: 1, size: 200 })
-        ])
-        if (!active) return
-        setSources(sourcesRes)
-        setGroups(groupsRes.items || [])
-        setTags(tagsRes.items || [])
-      } catch (err) {
-        if (!active) return
-        console.error("Failed to load scope data:", err)
-      } finally {
-        if (active) setLoading(false)
-      }
-    }
-    loadData()
-
-    return () => {
-      active = false
-    }
-  }, [watchlistId])
 
   // Sync active tab when value changes
   useEffect(() => {
@@ -142,7 +89,7 @@ export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
           placeholder={t("watchlists:jobs.scope.selectSources", "Select feeds to include")}
           value={value.sources || []}
           onChange={handleSourcesChange}
-          loading={loading}
+          loading={sourcesLoading}
           className="w-full"
           optionFilterProp="label"
           options={sources.map((s) => ({
@@ -175,15 +122,15 @@ export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
           placeholder={t("watchlists:jobs.scope.selectGroups", "Select groups to include")}
           value={value.groups || []}
           onChange={handleGroupsChange}
-          loading={loading}
+          loading={groupsQuery.isFetching}
           className="w-full"
           optionFilterProp="label"
-          options={groups.map((g) => ({
+          options={(groupsQuery.data?.items ?? []).map((g) => ({
             label: g.name,
             value: g.id
           }))}
           tagRender={(props) => {
-            const group = groups.find((g) => g.id === props.value)
+            const group = groupsQuery.data?.items.find((g) => g.id === props.value)
             return (
               <Tag closable={props.closable} onClose={props.onClose} className="mr-1">
                 {group?.name || props.value}
@@ -207,10 +154,10 @@ export const ScopeSelector: React.FC<ScopeSelectorProps> = ({
           placeholder={t("watchlists:jobs.scope.selectTags", "Select tags to include")}
           value={value.tags || []}
           onChange={handleTagsChange}
-          loading={loading}
+          loading={tagsQuery.isFetching}
           className="w-full"
           optionFilterProp="label"
-          options={tags.map((t) => ({
+          options={(tagsQuery.data?.items ?? []).map((t) => ({
             label: t.name,
             value: t.name
           }))}

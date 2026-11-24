@@ -13,15 +13,25 @@ from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_auth_principal, get_request_user, require_expected_user_if_present
+import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
+import tldw_Server_API.app.core.Claims_Extraction.artifact_verification as _artifact_verification
+import tldw_Server_API.app.core.config as _config
+import tldw_Server_API.app.core.Flashcards.study_assistant as _study_assistant
+import tldw_Server_API.app.core.Workflows.adapters.content as _content
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    check_rate_limit,
+    get_auth_principal,
+    get_request_user,
+    require_expected_user_if_present,
+)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import (
     get_study_assistant_guidance,
     study_assistant_own_key,
 )
-from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
-from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Deck,
     DeckCreate,
@@ -66,16 +76,21 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantContextResponse,
     StudyAssistantRespondRequest,
     StudyAssistantRespondResponse,
+    StudyPackDeckCardsResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackCreateJobRequest,
     StudyPackJobAcceptedResponse,
     StudyPackJobListResponse,
     StudyPackJobStatusResponse,
+    StudyPackMediaSection,
+    StudyPackMediaSectionPreview,
     StudyPackSummaryResponse,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.permissions import FLASHCARDS_ADMIN
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
@@ -84,6 +99,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     ChatRateLimitError,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -91,6 +107,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.session import MediaDbSession
+from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, scoped_context
 from tldw_Server_API.app.core.Flashcards.apkg_exporter import export_apkg_from_rows
 from tldw_Server_API.app.core.Flashcards.apkg_importer import (
     APKGImportError,
@@ -121,6 +139,7 @@ from tldw_Server_API.app.core.Flashcards.structured_qa_import import parse_struc
 from tldw_Server_API.app.core.Flashcards.verification import build_flashcard_verification_units
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
+from tldw_Server_API.app.core.StudyPacks.chapter_browser import browse_deck_cards
 from tldw_Server_API.app.core.StudyPacks.jobs import (
     STUDY_PACKS_DOMAIN,
     STUDY_PACKS_JOB_TYPE,
@@ -128,6 +147,13 @@ from tldw_Server_API.app.core.StudyPacks.jobs import (
     extract_study_pack_source_items,
     study_pack_jobs_queue,
 )
+from tldw_Server_API.app.core.StudyPacks.media_sections import (
+    MAX_STUDY_PACK_PASSES,
+    plan_media_sections,
+    section_passages,
+)
+from tldw_Server_API.app.core.StudyPacks.source_resolver import StudySourceResolver, _max_evidence_chars_per_source
+from tldw_Server_API.app.core.StudyPacks.types import CHAPTER_ID_PATTERN, STUDY_PACK_FAILURE_MESSAGES
 from tldw_Server_API.app.core.StudySuggestions.jobs import (
     STUDY_SUGGESTIONS_DOMAIN,
     STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
@@ -139,12 +165,6 @@ from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_flashcard_asset_bytes,
     validate_uploaded_image_bytes,
 )
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
-import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
-import tldw_Server_API.app.core.Claims_Extraction.artifact_verification as _artifact_verification
-import tldw_Server_API.app.core.Flashcards.study_assistant as _study_assistant
-import tldw_Server_API.app.core.Workflows.adapters.content as _content
-import tldw_Server_API.app.core.config as _config
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 MAX_STUDY_PACK_JOBS_OFFSET = 10_000
@@ -402,7 +422,7 @@ def _study_pack_from_job_result(db: CharactersRAGDB, job: dict[str, Any]) -> dic
     pack_id = result.get("pack_id") if isinstance(result, dict) else None
     if pack_id is None:
         return None
-    pack = db.get_study_pack(int(pack_id))
+    pack = db.flashcard_store.get_study_pack(int(pack_id))
     return _serialize_study_pack(pack) if pack else None
 
 
@@ -413,6 +433,10 @@ def _public_study_pack_job_error(job: dict[str, Any]) -> str | None:
         return reason or "Study pack generation was cancelled."
     if raw_status not in {"failed", "quarantined"}:
         return None
+
+    message = STUDY_PACK_FAILURE_MESSAGES.get(str(job.get("error_code") or ""))
+    if message:
+        return message
 
     raw_error = str(job.get("last_error") or job.get("error_message") or "").strip()
     if raw_error:
@@ -485,7 +509,7 @@ def _validate_bulk_flashcard_field_lengths(data: dict[str, Any]) -> None:
 
 
 def _fetch_flashcard_or_404(card_uuid: str, db: CharactersRAGDB) -> dict:
-    card = db.get_flashcard(card_uuid)
+    card = db.flashcard_store.get_flashcard(card_uuid)
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
     return card
@@ -494,7 +518,7 @@ def _fetch_flashcard_or_404(card_uuid: str, db: CharactersRAGDB) -> dict:
 def _fetch_flashcard_template_or_404(template_id: int, db: CharactersRAGDB) -> FlashcardTemplate:
     """Return a validated flashcard template or raise a 404 when it does not exist."""
 
-    template = db.get_flashcard_template(template_id)
+    template = db.flashcard_store.get_flashcard_template(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Flashcard template not found")
     return FlashcardTemplate.model_validate(template)
@@ -591,14 +615,14 @@ def _prepare_flashcard_update(
     data = payload.model_dump(exclude_unset=True)
     expected_version = data.pop("expected_version", None)
     tags = data.pop("tags", None)
-    current = db.get_flashcard(card_uuid)
+    current = db.flashcard_store.get_flashcard(card_uuid)
     if not current:
         raise HTTPException(status_code=404, detail="Flashcard not found")
 
     if "deck_id" in data:
         deck_id = data.get("deck_id")
         if deck_id is not None:
-            deck = db.get_deck(int(deck_id))
+            deck = db.flashcard_store.get_deck(int(deck_id))
             if not deck or bool(deck.get("deleted")):
                 raise HTTPException(
                     status_code=400,
@@ -669,7 +693,7 @@ def _validate_flashcard_asset_refs(
             if asset_uuid in seen:
                 continue
             seen.add(asset_uuid)
-            asset = db.get_flashcard_asset(asset_uuid)
+            asset = db.flashcard_store.get_flashcard_asset(asset_uuid)
             if not asset:
                 invalid_fields.append(field_name)
                 problems.append(f"Unknown asset: {asset_uuid}")
@@ -692,11 +716,11 @@ def _validate_flashcard_asset_refs(
 
 
 def _reconcile_flashcard_assets_or_500(card_uuid: str, db: CharactersRAGDB) -> None:
-    card = db.get_flashcard(card_uuid)
+    card = db.flashcard_store.get_flashcard(card_uuid)
     if not card:
         raise HTTPException(status_code=404, detail="Flashcard not found")
     try:
-        db.reconcile_flashcard_asset_refs(
+        db.flashcard_store.reconcile_flashcard_asset_refs(
             card_uuid,
             front=card.get("front"),
             back=card.get("back"),
@@ -753,7 +777,7 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
         visibility = payload.visibility if "visibility" in payload.model_fields_set else None
         review_prompt_side = payload.review_prompt_side if "review_prompt_side" in payload.model_fields_set else None
         parent_deck_id = payload.parent_deck_id if "parent_deck_id" in payload.model_fields_set else ...
-        deck_id = db.add_deck(
+        deck_id = db.flashcard_store.add_deck(
             payload.name,
             payload.description,
             payload.scheduler_settings.model_dump() if payload.scheduler_settings else None,
@@ -764,7 +788,7 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
             review_prompt_side=review_prompt_side,
         )
         # Return the exact deck row by id
-        deck = db.get_deck(deck_id)
+        deck = db.flashcard_store.get_deck(deck_id)
         if deck:
             return deck
         # Fallback: minimal shape if retrieval failed (should not happen)
@@ -807,7 +831,7 @@ def list_decks(
     offset: int = Query(0, ge=0),
 ):
     try:
-        return db.list_decks(
+        return db.flashcard_store.list_decks(
             limit=limit,
             offset=offset,
             include_deleted=include_deleted,
@@ -835,7 +859,7 @@ def update_deck(
     try:
         if workspace_id is not ...:
             _ensure_workspace_exists(db, workspace_id)
-        ok = db.update_deck(
+        ok = db.flashcard_store.update_deck(
             deck_id,
             name=data.get("name"),
             description=data.get("description"),
@@ -849,7 +873,7 @@ def update_deck(
         )
         if not ok:
             raise HTTPException(status_code=404, detail="Deck not found or not updated")
-        deck = db.get_deck(deck_id)
+        deck = db.flashcard_store.get_deck(deck_id)
         if not deck:
             raise HTTPException(status_code=404, detail="Deck not found")
         return deck
@@ -872,10 +896,10 @@ def list_deck_shares(
 ) -> list[DeckShare]:
     """List all per-user share grants for a deck owned by the current user."""
     try:
-        deck = db.get_deck(deck_id)
+        deck = db.flashcard_store.get_deck(deck_id)
         if not deck or deck.get("deleted"):
             raise HTTPException(status_code=404, detail="Deck not found")
-        return [DeckShare.model_validate(item) for item in db.list_deck_shares(deck_id)]
+        return [DeckShare.model_validate(item) for item in db.flashcard_store.list_deck_shares(deck_id)]
     except HTTPException:
         raise
     except CharactersRAGDBError as exc:
@@ -896,11 +920,11 @@ def upsert_deck_share(
 ) -> DeckShare:
     """Create or update a user's share role for a deck owned by the current user."""
     try:
-        deck = db.get_deck(deck_id)
+        deck = db.flashcard_store.get_deck(deck_id)
         if not deck or deck.get("deleted"):
             raise HTTPException(status_code=404, detail="Deck not found")
         return DeckShare.model_validate(
-            db.upsert_deck_share(
+            db.flashcard_store.upsert_deck_share(
                 deck_id,
                 user_id=user_id,
                 role=payload.role,
@@ -927,10 +951,10 @@ def delete_deck_share(
 ) -> DeckShareDeleteResponse:
     """Remove a per-user share grant from a deck owned by the current user."""
     try:
-        deck = db.get_deck(deck_id)
+        deck = db.flashcard_store.get_deck(deck_id)
         if not deck or deck.get("deleted"):
             raise HTTPException(status_code=404, detail="Deck not found")
-        return DeckShareDeleteResponse(removed=db.delete_deck_share(deck_id, user_id=user_id))
+        return DeckShareDeleteResponse(removed=db.flashcard_store.delete_deck_share(deck_id, user_id=user_id))
     except HTTPException:
         raise
     except CharactersRAGDBError as exc:
@@ -944,10 +968,10 @@ def delete_deck(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> DeckDeleteResponse:
     try:
-        deck = db.get_deck(deck_id)
+        deck = db.flashcard_store.get_deck(deck_id)
         if not deck or deck.get("deleted"):
             raise HTTPException(status_code=404, detail="Deck not found")
-        db.soft_delete_deck_by_id(deck_id, expected_version=expected_version)
+        db.flashcard_store.soft_delete_deck_by_id(deck_id, expected_version=expected_version)
         return DeckDeleteResponse(deleted=True)
     except HTTPException:
         raise
@@ -974,7 +998,7 @@ async def upload_flashcard_asset(
     original_filename = file.filename or "image"
     alt_text = os.path.splitext(original_filename)[0] or "image"
     try:
-        asset_uuid = db.add_flashcard_asset(
+        asset_uuid = db.flashcard_store.add_flashcard_asset(
             image_bytes=file_bytes,
             mime_type=file.content_type or "application/octet-stream",
             original_filename=original_filename,
@@ -1013,10 +1037,10 @@ def get_flashcard_asset_content(
     asset_uuid: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ):
-    asset = db.get_flashcard_asset(asset_uuid)
+    asset = db.flashcard_store.get_flashcard_asset(asset_uuid)
     if not asset:
         raise HTTPException(status_code=404, detail="Flashcard asset not found")
-    content = db.get_flashcard_asset_content(asset_uuid)
+    content = db.flashcard_store.get_flashcard_asset_content(asset_uuid)
     if content is None:
         raise HTTPException(status_code=404, detail="Flashcard asset content not found")
     return Response(content=content, media_type=str(asset.get("mime_type") or "application/octet-stream"))
@@ -1035,7 +1059,7 @@ def create_flashcard(payload: FlashcardCreate, db: CharactersRAGDB = Depends(get
         # Validate deck_id if provided
         deck_id = data.get("deck_id")
         if deck_id is not None:
-            deck = db.get_deck(int(deck_id))
+            deck = db.flashcard_store.get_deck(int(deck_id))
             if not deck or bool(deck.get("deleted")):
                 raise HTTPException(
                     status_code=400,
@@ -1055,20 +1079,20 @@ def create_flashcard(payload: FlashcardCreate, db: CharactersRAGDB = Depends(get
         data["model_type"] = effective_model
         data["is_cloze"] = eff_is_cloze
         data["reverse"] = eff_reverse
-        card_uuid = db.add_flashcard(data)
+        card_uuid = db.flashcard_store.add_flashcard(data)
         # Link keyword tags if provided
         if tags:
             try:
-                db.set_flashcard_tags(card_uuid, tags)
+                db.flashcard_store.set_flashcard_tags(card_uuid, tags)
             except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as _e:
                 logger.warning(f"Failed to link tags->keywords on create: {_e}")
         # Return the created flashcard via direct fetch
-        card = db.get_flashcard(card_uuid)
+        card = db.flashcard_store.get_flashcard(card_uuid)
         if not card:
             raise HTTPException(status_code=500, detail="Failed to fetch created flashcard")
         if refs_by_field:
             _reconcile_flashcard_assets_or_500(card_uuid, db)
-            card = db.get_flashcard(card_uuid)
+            card = db.flashcard_store.get_flashcard(card_uuid)
             if not card:
                 raise HTTPException(status_code=500, detail="Failed to fetch created flashcard")
         return card
@@ -1110,7 +1134,7 @@ def create_flashcards_bulk(payload: list[FlashcardCreate], db: CharactersRAGDB =
         # Validate all referenced deck IDs before inserting; collect all invalids
         invalid_deck_ids: list[int] = []
         for did in deck_ids_to_validate:
-            d = db.get_deck(did)
+            d = db.flashcard_store.get_deck(did)
             if not d or bool(d.get("deleted")):
                 invalid_deck_ids.append(did)
         if invalid_deck_ids:
@@ -1122,25 +1146,25 @@ def create_flashcards_bulk(payload: list[FlashcardCreate], db: CharactersRAGDB =
                     "message": "Fix or remove invalid deck_id values and retry",
                 },
             )
-        uuids = db.add_flashcards_bulk(raw_list)
+        uuids = db.flashcard_store.add_flashcards_bulk(raw_list)
         # Link keyword tags for each created card
         for u, tags in zip(uuids, tag_lists):
             if tags:
                 try:
-                    db.set_flashcard_tags(u, tags)
+                    db.flashcard_store.set_flashcard_tags(u, tags)
                 except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as _e:
                     logger.warning(f"Failed to link tags for {u}: {_e}")
             _reconcile_flashcard_assets_or_500(u, db)
         # Fetch created cards precisely by uuid (order-preserving)
         try:
-            items = db.get_flashcards_by_uuids(uuids)
+            items = db.flashcard_store.get_flashcards_by_uuids(uuids)
             index = {c["uuid"]: c for c in items}
             for u in uuids:
                 if u in index:
                     card_dicts.append(index[u])
         except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
             for u in uuids:
-                c = db.get_flashcard(u)
+                c = db.flashcard_store.get_flashcard(u)
                 if c:
                     card_dicts.append(c)
         return {"items": card_dicts, "count": len(card_dicts)}
@@ -1161,7 +1185,7 @@ def update_flashcards_bulk(
                     **item.model_dump(exclude={"uuid"}, exclude_unset=True)
                 )
                 data, expected_version, tags = _prepare_flashcard_update(item.uuid, update_payload, db)
-                current = db.get_flashcard(item.uuid)
+                current = db.flashcard_store.get_flashcard(item.uuid)
                 if not current:
                     raise HTTPException(status_code=404, detail="Flashcard not found")
                 refs_by_field = _collect_flashcard_asset_refs_by_field(
@@ -1171,7 +1195,7 @@ def update_flashcards_bulk(
                     }
                 )
                 _validate_flashcard_asset_refs(refs_by_field, db, card_uuid=item.uuid)
-                ok = db.update_flashcard(item.uuid, data, expected_version, tags=tags)
+                ok = db.flashcard_store.update_flashcard(item.uuid, data, expected_version, tags=tags)
                 if not ok:
                     results.append(
                         FlashcardBulkUpdateResult(
@@ -1181,7 +1205,7 @@ def update_flashcards_bulk(
                         )
                     )
                     continue
-                card = db.get_flashcard(item.uuid)
+                card = db.flashcard_store.get_flashcard(item.uuid)
                 if not card:
                     results.append(
                         FlashcardBulkUpdateResult(
@@ -1193,7 +1217,7 @@ def update_flashcards_bulk(
                     continue
                 if refs_by_field:
                     _reconcile_flashcard_assets_or_500(item.uuid, db)
-                    card = db.get_flashcard(item.uuid)
+                    card = db.flashcard_store.get_flashcard(item.uuid)
                     if not card:
                         results.append(
                             FlashcardBulkUpdateResult(
@@ -1254,7 +1278,7 @@ def list_flashcards(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
     try:
-        items = db.list_flashcards(
+        items = db.flashcard_store.list_flashcards(
             deck_id=deck_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
@@ -1266,7 +1290,7 @@ def list_flashcards(
             offset=offset,
             order_by=order_by or 'due_at',
         )
-        total = db.count_flashcards(
+        total = db.flashcard_store.count_flashcards(
             deck_id=deck_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
@@ -1283,7 +1307,7 @@ def list_flashcards(
                 if card_deck_id is not None:
                     card_deck_id = int(card_deck_id)
                     if card_deck_id not in decks:
-                        decks[card_deck_id] = db.get_deck(card_deck_id)
+                        decks[card_deck_id] = db.flashcard_store.get_deck(card_deck_id)
                     deck = decks[card_deck_id]
                 _attach_scheduler_preview(card, deck)
         total_int = int(total)
@@ -1325,7 +1349,7 @@ def list_flashcard_tag_suggestions(
         A typed response containing matching tag suggestions and the number returned.
     """
     try:
-        items = db.list_flashcard_tag_suggestions(q=q, limit=limit)
+        items = db.flashcard_store.list_flashcard_tag_suggestions(q=q, limit=limit)
         return FlashcardTagSuggestionsResponse(items=items, count=len(items))
     except CharactersRAGDBError as exc:
         raise map_db_error_to_http(
@@ -1342,7 +1366,7 @@ def get_flashcard_analytics_summary(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ):
     try:
-        return db.get_flashcard_analytics_summary(
+        return db.flashcard_store.get_flashcard_analytics_summary(
             deck_id=deck_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
@@ -1369,7 +1393,7 @@ def get_flashcard(card_uuid: str, db: CharactersRAGDB = Depends(get_chacha_db_fo
 def update_flashcard(card_uuid: str, payload: FlashcardUpdate, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
         data, expected_version, tags = _prepare_flashcard_update(card_uuid, payload, db)
-        current = db.get_flashcard(card_uuid)
+        current = db.flashcard_store.get_flashcard(card_uuid)
         if not current:
             raise HTTPException(status_code=404, detail="Flashcard not found")
         refs_by_field = _collect_flashcard_asset_refs_by_field(
@@ -1379,12 +1403,12 @@ def update_flashcard(card_uuid: str, payload: FlashcardUpdate, db: CharactersRAG
             }
         )
         _validate_flashcard_asset_refs(refs_by_field, db, card_uuid=card_uuid)
-        ok = db.update_flashcard(card_uuid, data, expected_version, tags=tags)
+        ok = db.flashcard_store.update_flashcard(card_uuid, data, expected_version, tags=tags)
         if not ok:
             raise HTTPException(status_code=404, detail="Flashcard not found or not updated")
         if refs_by_field:
             _reconcile_flashcard_assets_or_500(card_uuid, db)
-        card = db.get_flashcard(card_uuid)
+        card = db.flashcard_store.get_flashcard(card_uuid)
         if not card:
             raise HTTPException(status_code=404, detail="Flashcard not found")
         return card
@@ -1397,7 +1421,7 @@ def update_flashcard(card_uuid: str, payload: FlashcardUpdate, db: CharactersRAG
 @router.delete("/{card_uuid}")
 def delete_flashcard(card_uuid: str, expected_version: int = Query(..., ge=1), db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
-        ok = db.soft_delete_flashcard(card_uuid, expected_version)
+        ok = db.flashcard_store.soft_delete_flashcard(card_uuid, expected_version)
         if not ok:
             raise HTTPException(status_code=404, detail="Flashcard not found or already deleted")
         return {"deleted": True}
@@ -1414,13 +1438,13 @@ def reset_flashcard_scheduling(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ):
     try:
-        ok = db.reset_flashcard_scheduling(
+        ok = db.flashcard_store.reset_flashcard_scheduling(
             card_uuid,
             expected_version=payload.expected_version,
         )
         if not ok:
             raise HTTPException(status_code=404, detail="Flashcard not found or not updated")
-        card = db.get_flashcard(card_uuid)
+        card = db.flashcard_store.get_flashcard(card_uuid)
         if not card:
             raise HTTPException(status_code=404, detail="Flashcard not found")
         return card
@@ -1436,8 +1460,8 @@ def reset_flashcard_scheduling(
 @router.put("/{card_uuid}/tags", response_model=Flashcard)
 def set_flashcard_tags(card_uuid: str, payload: FlashcardTagsUpdate, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
-        db.set_flashcard_tags(card_uuid, payload.tags)
-        card = db.get_flashcard(card_uuid)
+        db.flashcard_store.set_flashcard_tags(card_uuid, payload.tags)
+        card = db.flashcard_store.get_flashcard(card_uuid)
         return card
     except CharactersRAGDBError as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to set flashcard tags") from exc
@@ -1446,7 +1470,7 @@ def set_flashcard_tags(card_uuid: str, payload: FlashcardTagsUpdate, db: Charact
 @router.get("/{card_uuid}/tags")
 def get_flashcard_tags(card_uuid: str, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
-        kws = db.get_keywords_for_flashcard(card_uuid)
+        kws = db.flashcard_store.get_keywords_for_flashcard(card_uuid)
         return {"items": kws, "count": len(kws)}
     except CharactersRAGDBError as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to get flashcard tags") from exc
@@ -1550,12 +1574,12 @@ def import_flashcards(
         # Preload existing decks once
         existing_decks = {
             d.get('name'): d.get('id')
-            for d in db.list_decks(limit=10000, offset=0, include_deleted=False, include_workspace_items=True)
+            for d in db.flashcard_store.list_decks(limit=10000, offset=0, include_deleted=False, include_workspace_items=True)
         }
         default_deck_name = 'Default'
         # Ensure default deck exists in cache
         if default_deck_name not in existing_decks:
-            did = db.add_deck(default_deck_name, description=None)
+            did = db.flashcard_store.add_deck(default_deck_name, description=None)
             existing_decks[default_deck_name] = did
         decks_cache.update(existing_decks)
         created: list[dict] = []
@@ -1664,7 +1688,7 @@ def import_flashcards(
                 if eff_deck_name in existing_decks:
                     deck_id = existing_decks[eff_deck_name]
                 else:
-                    deck_id = db.add_deck(eff_deck_name, description=deck_desc)
+                    deck_id = db.flashcard_store.add_deck(eff_deck_name, description=deck_desc)
                     existing_decks[eff_deck_name] = deck_id
                 decks_cache[eff_deck_name] = deck_id
             # Parse tags from space-delimited
@@ -1693,11 +1717,11 @@ def import_flashcards(
                 data['extra'] = extra
             if eff_model_type == 'cloze':
                 data['is_cloze'] = True
-            uuid = db.add_flashcard(data)
+            uuid = db.flashcard_store.add_flashcard(data)
             created.append({'uuid': uuid, 'deck_id': deck_id})
             # Also ensure keyword links reflect tags
             if tags_list:
-                db.set_flashcard_tags(uuid, tags_list)
+                db.flashcard_store.set_flashcard_tags(uuid, tags_list)
             processed += 1
         return {'imported': len(created), 'items': created, 'errors': errors}
     except HTTPException:
@@ -1751,12 +1775,12 @@ async def import_flashcards_json(
         # Deck cache
         existing_decks = {
             d.get('name'): d.get('id')
-            for d in db.list_decks(limit=10000, offset=0, include_deleted=False, include_workspace_items=True)
+            for d in db.flashcard_store.list_decks(limit=10000, offset=0, include_deleted=False, include_workspace_items=True)
         }
         decks_cache: dict[str, int] = dict(existing_decks)
         default_deck_name = 'Default'
         if default_deck_name not in decks_cache:
-            did = db.add_deck(default_deck_name, description=None)
+            did = db.flashcard_store.add_deck(default_deck_name, description=None)
             decks_cache[default_deck_name] = did
             existing_decks[default_deck_name] = did
 
@@ -1815,7 +1839,7 @@ async def import_flashcards_json(
             if eff_deck in decks_cache:
                 deck_id = decks_cache[eff_deck]
             else:
-                deck_id = db.add_deck(eff_deck, description=deck_desc)
+                deck_id = db.flashcard_store.add_deck(eff_deck, description=deck_desc)
                 decks_cache[eff_deck] = deck_id
                 existing_decks[eff_deck] = deck_id
 
@@ -1844,10 +1868,10 @@ async def import_flashcards_json(
             if effective_is_cloze:
                 data['is_cloze'] = True
 
-            uuid = db.add_flashcard(data)
+            uuid = db.flashcard_store.add_flashcard(data)
             created.append({'uuid': uuid, 'deck_id': deck_id})
             if tags_list:
-                db.set_flashcard_tags(uuid, tags_list)
+                db.flashcard_store.set_flashcard_tags(uuid, tags_list)
             processed += 1
 
         return {'imported': len(created), 'items': created, 'errors': errors}
@@ -1896,7 +1920,7 @@ async def import_flashcards_apkg(
             if not is_valid:
                 raise APKGImportError(error_message or "Invalid APKG image media")
             try:
-                return db.add_flashcard_asset(
+                return db.flashcard_store.add_flashcard_asset(
                     image_bytes=content,
                     mime_type=mime_type,
                     original_filename=original_filename,
@@ -1917,11 +1941,11 @@ async def import_flashcards_apkg(
 
         existing_decks = {
             d.get("name"): d.get("id")
-            for d in db.list_decks(limit=10000, offset=0, include_deleted=False, include_workspace_items=True)
+            for d in db.flashcard_store.list_decks(limit=10000, offset=0, include_deleted=False, include_workspace_items=True)
         }
         decks_cache: dict[str, int] = dict(existing_decks)
         if "Default" not in decks_cache:
-            did = db.add_deck("Default", description=None)
+            did = db.flashcard_store.add_deck("Default", description=None)
             decks_cache["Default"] = did
             existing_decks["Default"] = did
 
@@ -1930,7 +1954,7 @@ async def import_flashcards_apkg(
             deck_name = str(row.get("deck_name") or "Default").strip() or "Default"
             deck_id = decks_cache.get(deck_name)
             if deck_id is None:
-                deck_id = db.add_deck(deck_name, description=None)
+                deck_id = db.flashcard_store.add_deck(deck_name, description=None)
                 decks_cache[deck_name] = deck_id
                 existing_decks[deck_name] = deck_id
 
@@ -1968,11 +1992,11 @@ async def import_flashcards_apkg(
                 "lapses": int(row.get("lapses") or 0),
                 "due_at": row.get("due_at"),
             }
-            uuid = db.add_flashcard(data)
+            uuid = db.flashcard_store.add_flashcard(data)
             if _collect_flashcard_asset_refs_by_field(data):
                 _reconcile_flashcard_assets_or_500(uuid, db)
             if tags_list:
-                db.set_flashcard_tags(uuid, tags_list)
+                db.flashcard_store.set_flashcard_tags(uuid, tags_list)
             created.append({"uuid": uuid, "deck_id": deck_id})
 
         return {"imported": len(created), "items": created, "errors": errors}
@@ -1990,11 +2014,11 @@ async def import_flashcards_apkg(
 @router.post("/review", response_model=FlashcardReviewResponse)
 def review_flashcard(payload: FlashcardReviewRequest, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
-        card = db.get_flashcard(payload.card_uuid)
+        card = db.flashcard_store.get_flashcard(payload.card_uuid)
         if not card:
             raise HTTPException(status_code=404, detail=f"Flashcard not found ({payload.card_uuid})")
         context = payload.review_context
-        updated = db.review_flashcard(
+        updated = db.flashcard_store.review_flashcard(
             payload.card_uuid,
             payload.rating,
             payload.answer_time_ms,
@@ -2024,7 +2048,7 @@ def list_review_sessions(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ):
     try:
-        return db.list_flashcard_review_sessions(
+        return db.flashcard_store.list_flashcard_review_sessions(
             deck_id=deck_id,
             scope_key=scope_key,
             status=status,
@@ -2042,7 +2066,7 @@ def end_review_session(
     jm: JobManager = Depends(get_job_manager),
 ):
     try:
-        session = db.mark_flashcard_review_session_completed(int(payload.review_session_id))
+        session = db.flashcard_store.mark_flashcard_review_session_completed(int(payload.review_session_id))
         _enqueue_study_suggestions_refresh(
             jm=jm,
             current_user=current_user,
@@ -2077,7 +2101,7 @@ def get_next_review_card(
         )
         if not card:
             return {"card": None, "selection_reason": "none"}
-        deck = db.get_deck(int(card["deck_id"])) if card.get("deck_id") is not None else None
+        deck = db.flashcard_store.get_deck(int(card["deck_id"])) if card.get("deck_id") is not None else None
         card = _attach_scheduler_preview(card, deck)
         return {"card": card, "selection_reason": selection_reason}
     except (SchedulerSettingsError, FsrsSettingsError) as e:
@@ -2277,6 +2301,49 @@ def delete_source_review_plan(
         ) from exc
 
 
+@router.get(
+    "/study-packs/media/{media_id}/sections",
+    response_model=StudyPackMediaSectionPreview,
+    dependencies=[Depends(check_rate_limit)],
+)
+def preview_study_pack_media_sections(
+    media_id: int,
+    media_db: MediaDbSession = Depends(get_media_db_for_user),
+    current_user: User = Depends(get_request_user),
+    request_scope: ScopeContext | None = Depends(get_scope),
+) -> StudyPackMediaSectionPreview:
+    """Show the saved source's chapter and section boundaries without returning its body."""
+    try:
+        # A preview must use the same media visibility as the queued owner job.
+        with scoped_context(
+            user_id=current_user.id,
+            is_admin=False,
+            session_role=request_scope.session_role if request_scope else None,
+        ):
+            resolver = StudySourceResolver(media_db=media_db, expand_whole_media=True)
+            (item,) = resolver.resolve([{"source_type": "media", "source_id": str(media_id)}]).items
+        limit = _max_evidence_chars_per_source()
+        revision, sections = plan_media_sections(item.evidence_text, limit)
+    except ValueError as exc:
+        missing = str(exc).endswith(" not found")
+        raise HTTPException(status_code=404 if missing else 422, detail=str(exc)) from exc
+
+    return StudyPackMediaSectionPreview(
+        revision=revision,
+        max_generation_passes=MAX_STUDY_PACK_PASSES,
+        pass_chars=limit,
+        sections=[
+            StudyPackMediaSection(
+                index=index,
+                title=section.title,
+                character_count=section.end - section.start,
+                generation_passes=sum(1 for _ in section_passages(item.evidence_text, section, limit)),
+            )
+            for index, section in enumerate(sections)
+        ],
+    )
+
+
 @router.post("/study-packs/jobs", response_model=StudyPackJobAcceptedResponse, status_code=202)
 def create_study_pack_job(
     payload: StudyPackCreateJobRequest,
@@ -2372,12 +2439,40 @@ async def get_study_pack_job_status(
     )
 
 
+@router.get(
+    "/study-packs/decks/{deck_id}/cards",
+    response_model=StudyPackDeckCardsResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
+def browse_study_pack_deck_cards(
+    deck_id: int,
+    chapter_id: str | None = Query(None, pattern=CHAPTER_ID_PATTERN),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> StudyPackDeckCardsResponse:
+    try:
+        deck = db.flashcard_store.get_deck(deck_id)
+        if deck is None or deck["deleted"]:
+            raise HTTPException(status_code=404, detail="Deck not found")
+        page = browse_deck_cards(db, deck_id, chapter_id=chapter_id, limit=limit, offset=offset)
+        return StudyPackDeckCardsResponse(
+            **page,
+            count=len(page["items"]),
+            pagination=build_offset_pagination_meta(
+                total=page["total"], limit=limit, offset=offset, count=len(page["items"]),
+            ),
+        )
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to browse the deck's cards") from exc
+
+
 @router.get("/study-packs/{pack_id}", response_model=StudyPackSummaryResponse)
 def get_study_pack_detail(
     pack_id: int,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ):
-    pack = db.get_study_pack(pack_id)
+    pack = db.flashcard_store.get_study_pack(pack_id)
     if not pack:
         raise HTTPException(status_code=404, detail="Study pack not found")
     return _serialize_study_pack(pack)
@@ -2390,7 +2485,7 @@ def regenerate_study_pack(
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
 ) -> StudyPackJobAcceptedResponse:
-    pack = db.get_study_pack(pack_id)
+    pack = db.flashcard_store.get_study_pack(pack_id)
     if not pack:
         raise HTTPException(status_code=404, detail="Study pack not found")
 
@@ -2685,7 +2780,7 @@ def export_flashcards(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
     try:
-        items = db.list_flashcards(
+        items = db.flashcard_store.list_flashcards(
             deck_id=deck_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
@@ -2741,10 +2836,10 @@ def export_flashcards(
             apkg_max_media_bytes = _get_flashcards_apkg_max_media_bytes()
 
             def asset_loader(asset_uuid: str) -> dict[str, Any]:
-                asset = db.get_flashcard_asset(asset_uuid)
+                asset = db.flashcard_store.get_flashcard_asset(asset_uuid)
                 if not asset:
                     raise ValueError(f"Managed flashcard asset not found: {asset_uuid}")
-                content = db.get_flashcard_asset_content(asset_uuid)
+                content = db.flashcard_store.get_flashcard_asset_content(asset_uuid)
                 if content is None:
                     raise ValueError(f"Managed flashcard asset content missing: {asset_uuid}")
                 return {
@@ -2763,7 +2858,7 @@ def export_flashcards(
                                      headers={"Content-Disposition": "attachment; filename=flashcards.apkg"})
         # default csv/tsv
         dlm = delimiter or '\t'
-        data = db.export_flashcards_csv(
+        data = db.flashcard_store.export_flashcards_csv(
             deck_id=deck_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
@@ -2791,7 +2886,7 @@ def create_flashcard_template(
     """Create a reusable flashcard authoring template for the current user."""
 
     try:
-        template_id = db.add_flashcard_template(**payload.model_dump())
+        template_id = db.flashcard_store.add_flashcard_template(**payload.model_dump())
         return _fetch_flashcard_template_or_404(template_id, db)
     except ConflictError as e:
         raise map_db_error_to_http(e) from e
@@ -2811,8 +2906,8 @@ def list_flashcard_templates(
     """List flashcard authoring templates for the current user."""
 
     try:
-        items = db.list_flashcard_templates(limit=limit, offset=offset)
-        total = db.count_flashcard_templates()
+        items = db.flashcard_store.list_flashcard_templates(limit=limit, offset=offset)
+        total = db.flashcard_store.count_flashcard_templates()
         return FlashcardTemplateListResponse(
             items=items,
             count=len(items),
@@ -2860,7 +2955,7 @@ def update_flashcard_template(
     try:
         data = payload.model_dump(exclude_unset=True)
         expected_version = data.pop("expected_version", None)
-        ok = db.update_flashcard_template(template_id, data, expected_version)
+        ok = db.flashcard_store.update_flashcard_template(template_id, data, expected_version)
         if not ok:
             raise HTTPException(status_code=404, detail="Flashcard template not found or not updated")
         return _fetch_flashcard_template_or_404(template_id, db)
@@ -2882,7 +2977,7 @@ def delete_flashcard_template(
     """Soft-delete a flashcard authoring template using optimistic locking."""
 
     try:
-        ok = db.soft_delete_flashcard_template(template_id, expected_version)
+        ok = db.flashcard_store.soft_delete_flashcard_template(template_id, expected_version)
         if not ok:
             raise HTTPException(status_code=404, detail="Flashcard template not found or already deleted")
         return {"deleted": True}

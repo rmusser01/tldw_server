@@ -14,6 +14,10 @@ describe("PlaygroundChat dynamic UI action bridge guard", () => {
     expect(source).toContain("window.confirm")
     expect(source).not.toContain("React.useCallback(async () => false")
     expect(source).toContain("resolvedDynamicUIAction")
+    // Single message rows reach it through their stable row callback
+    // (behaviour: PlaygroundChat.row-memo.test.tsx); compare clusters directly.
+    expect(source).toContain("dynamicUIAction: resolvedDynamicUIAction")
+    expect(source).toContain("onDynamicUIAction={rowCallbacks.dynamicUIAction}")
     expect(source).toContain("onDynamicUIAction={resolvedDynamicUIAction}")
   })
 })

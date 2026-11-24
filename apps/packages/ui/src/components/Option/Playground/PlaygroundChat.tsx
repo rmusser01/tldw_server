@@ -65,6 +65,8 @@ import { variantBranchCursor } from "@/utils/newest-leaf-path"
 import { isReplyRequestPending } from "@/hooks/chat/pending-reply"
 import { usePageAssist } from "@/context"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
+import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus"
+import { DEFAULT_TLDW_TTS_MODEL, DEFAULT_TTS_PROVIDER } from "@/services/tts"
 
 type TimelineBlock =
   | { kind: "single"; index: number }
@@ -261,6 +263,19 @@ export const PlaygroundChat = ({
   })
   const resolvedDynamicUIAction = onDynamicUIAction ?? bridgedDynamicUIAction
   const [openReasoning] = useStorage("openReasoning", false)
+  const [ttsProvider] = useStorage("ttsProvider", DEFAULT_TTS_PROVIDER)
+  const [tldwTtsModel] = useStorage("tldwTtsModel", DEFAULT_TLDW_TTS_MODEL)
+  // One audio status for all rows: a row-level hook gave every row its own
+  // polling audio-health observers.
+  const { healthState: audioHealthState, voicesAvailable: audioVoicesAvailable } = useTldwAudioStatus({
+    enabled: messages.length > 0,
+    requireVoices: ttsProvider === "tldw",
+    tldwTtsModel
+  })
+  const rowAudioStatus = React.useMemo(
+    () => ({ healthState: audioHealthState, voicesAvailable: audioVoicesAvailable }),
+    [audioHealthState, audioVoicesAvailable]
+  )
   const selectedAssistant = effectiveAssistantState?.mode === "plain"
     ? null
     : resolvedAssistantSelection
@@ -326,10 +341,11 @@ export const PlaygroundChat = ({
   const [conversationInstanceId, setConversationInstanceId] = React.useState(
     () => generateID()
   )
-  const [linkedResearchRunErrorCount, setLinkedResearchRunErrorCount] = React.useState(0)
   const previousMessageCount = React.useRef(messages.length)
-  const latestLinkedResearchSuccessAt = React.useRef(0)
-  const latestLinkedResearchErrorAt = React.useRef(0)
+  // Consecutive linked-research failures, counted from the query state in
+  // refetchInterval: reading dataUpdatedAt/errorUpdatedAt in render made every
+  // poll re-render this component and all its rows, even with unchanged runs.
+  const linkedResearchFailures = React.useRef({ errorUpdatedAt: 0, count: 0 })
 
   const linkedResearchRunsQuery = useQuery({
     queryKey: ["playground:chat-linked-research-runs", serverChatId],
@@ -343,9 +359,23 @@ export const PlaygroundChat = ({
     enabled: linkedResearchRunsEnabled,
     retry: false,
     refetchInterval: (query) => {
-      const data = query.state.data as { runs?: ChatLinkedResearchRun[] } | undefined
+      const { data, status, errorUpdatedAt } = query.state
+      const failures = linkedResearchFailures.current
+      if (!linkedResearchRunsEnabled) {
+        // Switched off: reset, and treat the error the query keeps as seen so
+        // switching back on does not count it again.
+        failures.errorUpdatedAt = errorUpdatedAt
+        failures.count = 0
+        return false
+      }
+      if (status === "success") {
+        failures.count = 0
+      } else if (status === "error" && errorUpdatedAt !== failures.errorUpdatedAt) {
+        failures.errorUpdatedAt = errorUpdatedAt
+        failures.count += 1
+      }
       const runs = Array.isArray(data?.runs) ? data.runs : []
-      return getChatLinkedResearchRefetchInterval(runs, linkedResearchRunErrorCount)
+      return getChatLinkedResearchRefetchInterval(runs, failures.count)
     }
   })
 
@@ -361,36 +391,6 @@ export const PlaygroundChat = ({
     previousMessageCount.current = messages.length
   }, [messages.length, serverChatId, stableHistoryId])
 
-  React.useEffect(() => {
-    if (!linkedResearchRunsEnabled) {
-      latestLinkedResearchSuccessAt.current = 0
-      latestLinkedResearchErrorAt.current = 0
-      setLinkedResearchRunErrorCount(0)
-    }
-  }, [linkedResearchRunsEnabled])
-
-  React.useEffect(() => {
-    if (
-      linkedResearchRunsQuery.isSuccess &&
-      linkedResearchRunsQuery.dataUpdatedAt > 0 &&
-      linkedResearchRunsQuery.dataUpdatedAt !== latestLinkedResearchSuccessAt.current
-    ) {
-      latestLinkedResearchSuccessAt.current = linkedResearchRunsQuery.dataUpdatedAt
-      latestLinkedResearchErrorAt.current = 0
-      setLinkedResearchRunErrorCount(0)
-    }
-  }, [linkedResearchRunsQuery.dataUpdatedAt, linkedResearchRunsQuery.isSuccess])
-
-  React.useEffect(() => {
-    if (
-      linkedResearchRunsQuery.isError &&
-      linkedResearchRunsQuery.errorUpdatedAt > 0 &&
-      linkedResearchRunsQuery.errorUpdatedAt !== latestLinkedResearchErrorAt.current
-    ) {
-      latestLinkedResearchErrorAt.current = linkedResearchRunsQuery.errorUpdatedAt
-      setLinkedResearchRunErrorCount((current) => current + 1)
-    }
-  }, [linkedResearchRunsQuery.errorUpdatedAt, linkedResearchRunsQuery.isError])
   const blocks = React.useMemo(() => buildBlocks(messages), [messages])
   const messageBlocks = React.useMemo(() => {
     const indices = new Map<number, number>()
@@ -1209,6 +1209,69 @@ export const PlaygroundChat = ({
     [historySelection, messages, setMessages]
   )
 
+  // Stable row callbacks, ported from the side panel's TASK-13521 pattern
+  // (Sidepanel/Chat/body.tsx). These actions are re-created every render, so
+  // rows get wrappers that keep one identity and call the latest committed
+  // render's action at call time with the same arguments, returning its
+  // result. Otherwise
+  // PlaygroundMessage's strict memo never holds and every re-render here
+  // re-renders every row.
+  const rowActions = {
+    editMessage,
+    deleteMessage,
+    toggleMessagePinned,
+    createChatBranch,
+    handleVariantSwipe,
+    regenerateLastMessage,
+    stopStreaming: stopStreamingFromUi,
+    runContinue,
+    runSteeredContinue,
+    regenerateImage: handleRegenerateGeneratedImage,
+    dynamicUIAction: resolvedDynamicUIAction
+  }
+  const latestRowActions = React.useRef(rowActions)
+  // Updated when a render commits, before any event can run, so a click never
+  // reaches the actions of a render that did not commit.
+  React.useLayoutEffect(() => {
+    latestRowActions.current = rowActions
+  })
+  const rowCallbacks = React.useMemo(() => ({
+    regenerate: (...args: Parameters<typeof regenerateLastMessage>) =>
+      latestRowActions.current.regenerateLastMessage(...args),
+    // The focus-handoff Stop, never the raw request abort (TASK-13570).
+    stopStreaming: (...args: Parameters<typeof stopStreamingFromUi>) =>
+      latestRowActions.current.stopStreaming(...args),
+    continueReply: () => latestRowActions.current.runContinue(),
+    steeredContinue: (...args: Parameters<typeof runSteeredContinue>) =>
+      latestRowActions.current.runSteeredContinue(...args),
+    regenerateImage: (payload: Parameters<typeof handleRegenerateGeneratedImage>[0]) => {
+      void latestRowActions.current.regenerateImage(payload)
+    },
+    dynamicUIAction: (payload: unknown) => latestRowActions.current.dynamicUIAction(payload)
+  }), [])
+  // Per-row handlers, interned by row index and rebuilt only when what they
+  // capture changes, so each acts on the row exactly as it was rendered.
+  // Keyed by index, the cache never outgrows the longest chat shown.
+  const rowHandlerCache = React.useRef(new Map<string, { deps: unknown[]; handler: unknown }>())
+  const internRowHandler = <T,>(key: string, deps: unknown[], create: () => T): T => {
+    const cached = rowHandlerCache.current.get(key)
+    if (cached && cached.deps.every((dep, i) => Object.is(dep, deps[i]))) return cached.handler as T
+    const handler = create()
+    rowHandlerCache.current.set(key, { deps, handler })
+    return handler
+  }
+  // Delete is callable and carries a `current` getter. PlaygroundMessage reads
+  // `.current` when its confirmation opens, so the confirmed delete runs the
+  // action that was live then, not one adopted later (TASK-13570); its
+  // result reaches the row either way.
+  const createRowDeleteSource = (index: number) => {
+    const resolve = () => {
+      const deleteNow = latestRowActions.current.deleteMessage
+      return () => deleteNow(index)
+    }
+    return Object.defineProperty(() => resolve()(), "current", { get: resolve })
+  }
+
   return (
     <>
       <div className="relative flex w-full flex-col items-center pt-1 pb-4 sm:pt-8">
@@ -1397,6 +1460,9 @@ export const PlaygroundChat = ({
         <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} log={{ label: t("playground:aria.chatTranscript", "Chat messages"), busy: streaming || requestPending }} renderBlock={(block, blockIndex) => {
           if (block.kind === "single") {
             const message = messages[block.index]
+            const rowIndex = block.index
+            const rowId = message.id
+            const rowIsBot = message.isBot
             const previousUserMessage = previousUserMessageByIndex.get(block.index) ?? null
             const resolvedMessageType = resolveMessageType(message, block.index)
             const isImageGenerationAssistantEvent =
@@ -1411,13 +1477,11 @@ export const PlaygroundChat = ({
                 images={message.images || EMPTY_IMAGES}
                 currentMessageIndex={block.index}
                 totalMessages={messages.length}
-                onRegenerate={regenerateLastMessage}
+                onRegenerate={rowCallbacks.regenerate}
                 regenerateDisabledReason={regenerateDisabledReason ?? savedReplyRegenerateUnavailableReason(savedReplyActions.regenerate, t)}
                 continueDisabledReason={regenerateDisabledReason}
                 savedStatusActions={savedStatusActions}
-                onRegenerateImage={(payload) => {
-                  void handleRegenerateGeneratedImage(payload)
-                }}
+                onRegenerateImage={rowCallbacks.regenerateImage}
                 onDeleteImage={handleDeleteGeneratedImage}
                 onSelectImageVariant={handleSelectGeneratedImageVariant}
                 onKeepImageVariant={handleKeepGeneratedImageVariant}
@@ -1426,26 +1490,26 @@ export const PlaygroundChat = ({
                 isProcessing={isProcessing}
                 isSearchingInternet={isSearchingInternet}
                 sources={message.sources}
-                onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
-                  return editMessage(
-                    block.index,
-                    value,
-                    !message.isBot,
-                    isSend,
-                    editIsCurrent,
-                    editOriginIsCurrent
-                  )
-                }}
-                onDeleteMessage={() => {
-                  return deleteMessage(block.index)
-                }}
-                onTogglePinned={() => {
-                  void toggleMessagePinned(block.index)
-                }}
-                onNewBranch={() => {
-                  void createChatBranch(message.id ?? "")
-                }}
+                onEditFormSubmit={internRowHandler(`edit:${rowIndex}`, [rowIsBot], () =>
+                  (value: string, isSend: boolean, editIsCurrent?: () => boolean, editOriginIsCurrent?: () => boolean) =>
+                    latestRowActions.current.editMessage(
+                      rowIndex,
+                      value,
+                      !rowIsBot,
+                      isSend,
+                      editIsCurrent,
+                      editOriginIsCurrent
+                    )
+                )}
+                onDeleteMessage={internRowHandler(`delete:${rowIndex}`, [], () => createRowDeleteSource(rowIndex))}
+                onTogglePinned={internRowHandler(`pin:${rowIndex}`, [], () => () => {
+                  void latestRowActions.current.toggleMessagePinned(rowIndex)
+                })}
+                onNewBranch={internRowHandler(`branch:${rowIndex}`, [rowId], () => () => {
+                  void latestRowActions.current.createChatBranch(rowId ?? "")
+                })}
                 isTTSEnabled={ttsEnabled}
+                audioStatus={rowAudioStatus}
                 generationInfo={message?.generationInfo}
                 toolCalls={message?.toolCalls}
                 toolResults={message?.toolResults}
@@ -1457,9 +1521,9 @@ export const PlaygroundChat = ({
                 modelName={message?.modelName}
                 createdAt={message?.createdAt}
                 temporaryChat={temporaryChat}
-                onStopStreaming={stopStreamingFromUi}
-                onContinue={savedReplyActions.continue ? undefined : runContinue}
-                onRunSteeredContinue={messageSteeringEnabled ? runSteeredContinue : undefined}
+                onStopStreaming={rowCallbacks.stopStreaming}
+                onContinue={savedReplyActions.continue ? undefined : rowCallbacks.continueReply}
+                onRunSteeredContinue={messageSteeringEnabled ? rowCallbacks.steeredContinue : undefined}
                 documents={message?.documents}
                 actionInfo={actionInfo}
                 serverChatId={serverChatId}
@@ -1468,7 +1532,7 @@ export const PlaygroundChat = ({
                 pinned={Boolean(message.pinned)}
                 metadataExtra={message.metadataExtra}
                 dynamicUISurface="web-chat"
-                onDynamicUIAction={resolvedDynamicUIAction}
+                onDynamicUIAction={rowCallbacks.dynamicUIAction}
                 researchActions={getRowResearchActions(message.id, message.metadataExtra)}
                 discoSkillComment={message.discoSkillComment}
                 historyId={stableHistoryId ?? undefined}
@@ -1496,8 +1560,8 @@ export const PlaygroundChat = ({
                 message_type={resolvedMessageType}
                 variants={message.variants}
                 activeVariantIndex={message.activeVariantIndex}
-                onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "prev")}
-                onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "next")}
+                onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : internRowHandler(`swipe-prev:${rowIndex}`, [rowId], () => () => latestRowActions.current.handleVariantSwipe(rowId, "prev"))}
+                onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : internRowHandler(`swipe-next:${rowIndex}`, [rowId], () => () => latestRowActions.current.handleVariantSwipe(rowId, "next"))}
                 messageSteeringMode={messageSteeringMode}
                 onMessageSteeringModeChange={messageSteeringEnabled ? setMessageSteeringMode : undefined}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}

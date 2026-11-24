@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({ bgRequest: vi.fn() }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: mocks.bgRequest }))
 vi.mock("@/services/tldw-server", () => ({ DEFAULT_TLDW_API_KEY: "default-key" }))
 vi.mock("@/services/api-send", () => ({ apiSend: vi.fn() }))
-vi.mock("@/store/connection", () => ({ useConnectionStore: { getState: () => ({ checkOnce: vi.fn() }) } }))
+vi.mock("@/store/connection", () => ({ useConnectionStore: Object.assign(() => false, { getState: () => ({ checkOnce: vi.fn() }) }) }))
 vi.mock("@/components/Common/ServerOverviewHint", () => ({ ServerOverviewHint: () => null }))
 vi.mock("../server-health-probe", () => ({ probeServerHealth: vi.fn() }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({

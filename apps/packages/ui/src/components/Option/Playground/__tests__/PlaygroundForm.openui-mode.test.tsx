@@ -447,12 +447,15 @@ vi.mock("~/store/webui", () => ({
 }))
 
 vi.mock("@/hooks/useConnectionState", () => ({
-  useConnectionState: () => ({
-    phase: "connected",
-    isConnected: true,
-    serverUrl: sourceFlow.config.serverUrl,
-    lastConfigUpdatedAt: 0
-  })
+  useConnectionState: (select?: (state: Record<string, unknown>) => unknown) => {
+    const state = {
+      phase: "connected",
+      isConnected: true,
+      serverUrl: sourceFlow.config.serverUrl,
+      lastConfigUpdatedAt: 0
+    }
+    return select ? select(state) : state
+  }
 }))
 
 vi.mock("@/types/connection", () => ({

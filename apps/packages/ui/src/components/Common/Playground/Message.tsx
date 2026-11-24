@@ -283,6 +283,11 @@ type Props = {
   hideContinue?: boolean
   onSourceClick?: (source: any) => void
   isTTSEnabled?: boolean
+  /**
+   * Audio status from the parent's one useTldwAudioStatus call. Without it the
+   * row runs its own, which polls the audio health endpoints once per row.
+   */
+  audioStatus?: Pick<ReturnType<typeof useTldwAudioStatus>, "healthState" | "voicesAvailable">
   generationInfo?: any
   isStreaming: boolean
   /**
@@ -507,11 +512,13 @@ const PlaygroundMessageImpl = (props: Props) => {
     (state) => state.updateSetting
   )
   const { cancel, isSpeaking, speak } = useTTS()
+  const ownAudioStatus = useTldwAudioStatus({
+    enabled: props.audioStatus === undefined,
+    requireVoices: ttsProvider === "tldw",
+    tldwTtsModel
+  })
   const { healthState: audioHealthState, voicesAvailable } =
-    useTldwAudioStatus({
-      requireVoices: ttsProvider === "tldw",
-      tldwTtsModel
-    })
+    props.audioStatus ?? ownAudioStatus
   const [isFeedbackOpen, setIsFeedbackOpen] = React.useState(false)
   const [isAvatarPreviewOpen, setIsAvatarPreviewOpen] = React.useState(false)
   const [compareVariantIndex, setCompareVariantIndex] = React.useState<

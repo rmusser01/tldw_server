@@ -17,7 +17,7 @@ def chacha_db(tmp_path):
 
 def test_add_flashcard_asset_round_trips_metadata_and_content(chacha_db):
     image_bytes = b"\x89PNG\r\n\x1a\nasset-bytes"
-    asset_uuid = chacha_db.add_flashcard_asset(
+    asset_uuid = chacha_db.flashcard_store.add_flashcard_asset(
         image_bytes=image_bytes,
         mime_type="image/png",
         original_filename="slide.png",
@@ -25,7 +25,7 @@ def test_add_flashcard_asset_round_trips_metadata_and_content(chacha_db):
         height=480,
     )
 
-    asset = chacha_db.get_flashcard_asset(asset_uuid)
+    asset = chacha_db.flashcard_store.get_flashcard_asset(asset_uuid)
 
     assert asset is not None
     assert asset["uuid"] == asset_uuid
@@ -36,23 +36,23 @@ def test_add_flashcard_asset_round_trips_metadata_and_content(chacha_db):
     assert asset["width"] == 640
     assert asset["height"] == 480
     assert asset["sha256"] == hashlib.sha256(image_bytes).hexdigest()
-    assert chacha_db.get_flashcard_asset_content(asset_uuid) == image_bytes
+    assert chacha_db.flashcard_store.get_flashcard_asset_content(asset_uuid) == image_bytes
 
 
 def test_reconcile_flashcard_asset_refs_attaches_and_detaches_assets(chacha_db):
-    deck_id = chacha_db.add_deck("Histology")
-    first_asset_uuid = chacha_db.add_flashcard_asset(
+    deck_id = chacha_db.flashcard_store.add_deck("Histology")
+    first_asset_uuid = chacha_db.flashcard_store.add_flashcard_asset(
         image_bytes=b"first-image",
         mime_type="image/png",
         original_filename="first.png",
     )
-    second_asset_uuid = chacha_db.add_flashcard_asset(
+    second_asset_uuid = chacha_db.flashcard_store.add_flashcard_asset(
         image_bytes=b"second-image",
         mime_type="image/png",
         original_filename="second.png",
     )
 
-    card_uuid = chacha_db.add_flashcard(
+    card_uuid = chacha_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": "Question",
@@ -62,7 +62,7 @@ def test_reconcile_flashcard_asset_refs_attaches_and_detaches_assets(chacha_db):
         }
     )
 
-    chacha_db.reconcile_flashcard_asset_refs(
+    chacha_db.flashcard_store.reconcile_flashcard_asset_refs(
         card_uuid,
         front=build_flashcard_asset_markdown(first_asset_uuid, "Front slide"),
         back="Back " + build_flashcard_asset_markdown(second_asset_uuid, "Back slide"),
@@ -70,12 +70,12 @@ def test_reconcile_flashcard_asset_refs_attaches_and_detaches_assets(chacha_db):
         notes="",
     )
 
-    first_asset = chacha_db.get_flashcard_asset(first_asset_uuid)
-    second_asset = chacha_db.get_flashcard_asset(second_asset_uuid)
+    first_asset = chacha_db.flashcard_store.get_flashcard_asset(first_asset_uuid)
+    second_asset = chacha_db.flashcard_store.get_flashcard_asset(second_asset_uuid)
     assert first_asset["card_uuid"] == card_uuid
     assert second_asset["card_uuid"] == card_uuid
 
-    chacha_db.reconcile_flashcard_asset_refs(
+    chacha_db.flashcard_store.reconcile_flashcard_asset_refs(
         card_uuid,
         front="Question only",
         back="Answer only",
@@ -83,20 +83,20 @@ def test_reconcile_flashcard_asset_refs_attaches_and_detaches_assets(chacha_db):
         notes="",
     )
 
-    first_asset = chacha_db.get_flashcard_asset(first_asset_uuid)
-    second_asset = chacha_db.get_flashcard_asset(second_asset_uuid)
+    first_asset = chacha_db.flashcard_store.get_flashcard_asset(first_asset_uuid)
+    second_asset = chacha_db.flashcard_store.get_flashcard_asset(second_asset_uuid)
     assert first_asset["card_uuid"] is None
     assert second_asset["card_uuid"] is None
 
 
 def test_flashcard_search_shadow_columns_strip_asset_refs(chacha_db):
-    asset_uuid = chacha_db.add_flashcard_asset(
+    asset_uuid = chacha_db.flashcard_store.add_flashcard_asset(
         image_bytes=b"searchable-image",
         mime_type="image/png",
         original_filename="search.png",
     )
-    deck_id = chacha_db.add_deck("Anatomy")
-    card_uuid = chacha_db.add_flashcard(
+    deck_id = chacha_db.flashcard_store.add_deck("Anatomy")
+    card_uuid = chacha_db.flashcard_store.add_flashcard(
         {
             "deck_id": deck_id,
             "front": f"Start {build_flashcard_asset_markdown(asset_uuid, 'Histology slide')} end",
@@ -118,12 +118,12 @@ def test_flashcard_search_shadow_columns_strip_asset_refs(chacha_db):
 
 
 def test_list_flashcards_search_matches_sanitized_alt_text(chacha_db):
-    asset_uuid = chacha_db.add_flashcard_asset(
+    asset_uuid = chacha_db.flashcard_store.add_flashcard_asset(
         image_bytes=b"fts-image",
         mime_type="image/png",
         original_filename="fts.png",
     )
-    card_uuid = chacha_db.add_flashcard(
+    card_uuid = chacha_db.flashcard_store.add_flashcard(
         {
             "front": build_flashcard_asset_markdown(asset_uuid, "renal cortex"),
             "back": "Kidney structure",
@@ -132,8 +132,8 @@ def test_list_flashcards_search_matches_sanitized_alt_text(chacha_db):
         }
     )
 
-    results = chacha_db.list_flashcards(q="renal")
-    total = chacha_db.count_flashcards(q="renal")
+    results = chacha_db.flashcard_store.list_flashcards(q="renal")
+    total = chacha_db.flashcard_store.count_flashcards(q="renal")
 
     assert total == 1
     assert [row["uuid"] for row in results] == [card_uuid]
@@ -141,7 +141,7 @@ def test_list_flashcards_search_matches_sanitized_alt_text(chacha_db):
 
 def test_list_flashcards_search_accepts_hyphenated_plain_text(chacha_db):
     """Hyphenated flashcard search terms are normalized without FTS5 syntax errors."""
-    card_uuid = chacha_db.add_flashcard(
+    card_uuid = chacha_db.flashcard_store.add_flashcard(
         {
             "front": "codex-flashcards-ux front",
             "back": "Regression coverage for FTS5 punctuation handling",
@@ -150,8 +150,8 @@ def test_list_flashcards_search_accepts_hyphenated_plain_text(chacha_db):
         }
     )
 
-    results = chacha_db.list_flashcards(q="codex-flashcards-ux")
-    total = chacha_db.count_flashcards(q="codex-flashcards-ux")
+    results = chacha_db.flashcard_store.list_flashcards(q="codex-flashcards-ux")
+    total = chacha_db.flashcard_store.count_flashcards(q="codex-flashcards-ux")
 
     assert total == 1
     assert [row["uuid"] for row in results] == [card_uuid]
@@ -159,7 +159,7 @@ def test_list_flashcards_search_accepts_hyphenated_plain_text(chacha_db):
 
 def test_list_flashcards_search_accepts_negative_hyphenated_terms(chacha_db):
     """Negative hyphenated flashcard search terms exclude matching cards safely."""
-    keep_uuid = chacha_db.add_flashcard(
+    keep_uuid = chacha_db.flashcard_store.add_flashcard(
         {
             "front": "codex-flashcards-ux clean",
             "back": "",
@@ -167,7 +167,7 @@ def test_list_flashcards_search_accepts_negative_hyphenated_terms(chacha_db):
             "extra": "",
         }
     )
-    chacha_db.add_flashcard(
+    chacha_db.flashcard_store.add_flashcard(
         {
             "front": "codex-flashcards-ux state-of-the-art",
             "back": "",
@@ -176,10 +176,10 @@ def test_list_flashcards_search_accepts_negative_hyphenated_terms(chacha_db):
         }
     )
 
-    results = chacha_db.list_flashcards(q="codex-flashcards-ux -state-of-the-art")
+    results = chacha_db.flashcard_store.list_flashcards(q="codex-flashcards-ux -state-of-the-art")
 
     assert [row["uuid"] for row in results] == [keep_uuid]
 
-    scoped_results = chacha_db.list_flashcards(q="codex-flashcards-ux -front:state-of-the-art")
+    scoped_results = chacha_db.flashcard_store.list_flashcards(q="codex-flashcards-ux -front:state-of-the-art")
 
     assert [row["uuid"] for row in scoped_results] == [keep_uuid]

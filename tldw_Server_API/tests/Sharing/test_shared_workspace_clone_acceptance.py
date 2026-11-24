@@ -465,7 +465,7 @@ async def test_fatal_publication_failure_is_cleaned_and_bounded(
         raise RuntimeError("private publication database detail")
 
     monkeypatch.setattr(
-        clone_harness.target,
+        clone_harness.target.workspace_store,
         "publish_clone_target",
         _fail_publication,
     )

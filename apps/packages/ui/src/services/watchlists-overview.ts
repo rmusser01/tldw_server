@@ -432,13 +432,14 @@ export const getOverviewTabBadges = (
 }
 
 export const fetchWatchlistsOverviewData = async (
-  params: FetchWatchlistsOverviewParams = {}
+  params: FetchWatchlistsOverviewParams = {},
+  signal?: AbortSignal
 ): Promise<WatchlistsOverviewData> => {
   const scopedParams = params.watchlist_id != null
     ? { watchlist_id: params.watchlist_id }
     : {}
   const unreadAlertsRequest = params.watchlist_id != null
-    ? fetchWatchlistContentAlerts(params.watchlist_id, { status: "unread", page: 1, size: 1 })
+    ? fetchWatchlistContentAlerts(params.watchlist_id, { status: "unread", page: 1, size: 1 }, signal)
     : Promise.resolve({ items: [], total: 0 })
   const [
     sourcesResult,
@@ -452,16 +453,16 @@ export const fetchWatchlistsOverviewData = async (
     outputsResult,
     latestBriefing
   ] = await Promise.all([
-    fetchAllPages((pageParams) => fetchWatchlistSources({ ...scopedParams, ...pageParams })),
-    fetchAllPages((pageParams) => fetchWatchlistJobs({ ...scopedParams, ...pageParams })),
-    fetchScrapedItems({ ...scopedParams, reviewed: false, page: 1, size: 1 }),
+    fetchAllPages((pageParams) => fetchWatchlistSources({ ...scopedParams, ...pageParams }, signal)),
+    fetchAllPages((pageParams) => fetchWatchlistJobs({ ...scopedParams, ...pageParams }, signal)),
+    fetchScrapedItems({ ...scopedParams, reviewed: false, page: 1, size: 1 }, signal),
     unreadAlertsRequest,
-    fetchWatchlistRuns({ ...scopedParams, q: "running", page: 1, size: 1 }),
-    fetchWatchlistRuns({ ...scopedParams, q: "pending", page: 1, size: 1 }),
-    fetchWatchlistRuns({ ...scopedParams, q: "failed", page: 1, size: 5 }),
-    fetchWatchlistRuns({ ...scopedParams, page: 1, size: 10 }),
-    fetchWatchlistOutputs({ ...scopedParams, page: 1, size: 100 }),
-    getLatestWatchlistBriefing(scopedParams)
+    fetchWatchlistRuns({ ...scopedParams, q: "running", page: 1, size: 1 }, signal),
+    fetchWatchlistRuns({ ...scopedParams, q: "pending", page: 1, size: 1 }, signal),
+    fetchWatchlistRuns({ ...scopedParams, q: "failed", page: 1, size: 5 }, signal),
+    fetchWatchlistRuns({ ...scopedParams, page: 1, size: 10 }, signal),
+    fetchWatchlistOutputs({ ...scopedParams, page: 1, size: 100 }, signal),
+    getLatestWatchlistBriefing(scopedParams, signal)
   ])
 
   let healthy = 0

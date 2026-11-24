@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunsTab } from "../RunsTab"
 
@@ -110,18 +111,12 @@ vi.mock("../RunDetailDrawer", () => ({
 }))
 
 const baseState = (overrides: Record<string, unknown> = {}) => ({
-  runs: [],
-  runsLoading: false,
-  runsTotal: 0,
   runsPage: 1,
   runsPageSize: 20,
   runsJobFilter: null,
   runsStatusFilter: null,
-  pollingActive: false,
   runDetailOpen: false,
   selectedRunId: null,
-  setRuns: vi.fn(),
-  setRunsLoading: vi.fn(),
   setRunsPage: vi.fn(),
   setRunsPageSize: vi.fn(),
   setRunsJobFilter: vi.fn(),
@@ -132,7 +127,6 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
   setPollingActive: vi.fn(),
   openRunDetail: vi.fn(),
   closeRunDetail: vi.fn(),
-  updateRunInList: vi.fn(),
   ...overrides,
 })
 
@@ -155,19 +149,22 @@ describe("RunsTab cancellation controls", () => {
       finished_at: null,
       stats: {}
     }
-    mocks.storeStateRef.current = baseState({
-      runs: [runningRun],
-      runsTotal: 1
-    })
     mocks.fetchWatchlistRunsMock.mockResolvedValue({
       items: [runningRun],
       total: 1,
       has_more: false
     })
-    mocks.cancelWatchlistRunMock.mockResolvedValue({
-      run_id: 101,
-      status: "cancelled",
-      cancelled: true
+    mocks.cancelWatchlistRunMock.mockImplementation(async () => {
+      mocks.fetchWatchlistRunsMock.mockResolvedValue({
+        items: [{ ...runningRun, status: "cancelled" }],
+        total: 1,
+        has_more: false
+      })
+      return {
+        run_id: 101,
+        status: "cancelled",
+        cancelled: true
+      }
     })
 
     render(<RunsTab />)
@@ -177,10 +174,7 @@ describe("RunsTab cancellation controls", () => {
 
     await waitFor(() => {
       expect(mocks.cancelWatchlistRunMock).toHaveBeenCalledWith(101)
-      expect(mocks.storeStateRef.current.updateRunInList).toHaveBeenCalledWith(
-        101,
-        expect.objectContaining({ status: "cancelled" })
-      )
+      expect(screen.queryByTestId("watchlists-run-cancel-101")).not.toBeInTheDocument()
       expect(mocks.messageSuccessMock).toHaveBeenCalledWith("Run cancelled")
     })
   })
@@ -194,10 +188,6 @@ describe("RunsTab cancellation controls", () => {
       finished_at: new Date().toISOString(),
       stats: {}
     }
-    mocks.storeStateRef.current = baseState({
-      runs: [completedRun],
-      runsTotal: 1
-    })
     mocks.fetchWatchlistRunsMock.mockResolvedValue({
       items: [completedRun],
       total: 1,
@@ -207,6 +197,7 @@ describe("RunsTab cancellation controls", () => {
     render(<RunsTab />)
 
     await waitFor(() => {
+      expect(screen.getByTestId("watchlists-run-open-outputs-202")).toBeInTheDocument()
       expect(screen.queryByTestId("watchlists-run-cancel-202")).not.toBeInTheDocument()
     })
   })
@@ -226,8 +217,6 @@ describe("RunsTab cancellation controls", () => {
       }
     }
     mocks.storeStateRef.current = baseState({
-      runs: [completedRun],
-      runsTotal: 1,
       setOutputsJobFilter,
       setOutputsRunFilter,
       setActiveTab

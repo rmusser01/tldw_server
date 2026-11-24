@@ -54,8 +54,8 @@ def _time(value):
 @pytest.mark.parametrize("mode", ["due", "cram"])
 def test_review_http_serializes_exact_committed_card_and_session(review_db, mode):
     db = review_db
-    deck = db.add_deck("Citrine review response")
-    card_uuid = db.add_flashcard(
+    deck = db.flashcard_store.add_deck("Citrine review response")
+    card_uuid = db.flashcard_store.add_flashcard(
         {
             "deck_id": deck,
             "front": "Meeting time?",
@@ -64,7 +64,7 @@ def test_review_http_serializes_exact_committed_card_and_session(review_db, mode
             "source_ref_id": "review-source",
         }
     )
-    before = db.get_flashcard(card_uuid)
+    before = db.flashcard_store.get_flashcard(card_uuid)
     db.close_connection()
     with _client(db) as client:
         response = client.post(
@@ -78,13 +78,13 @@ def test_review_http_serializes_exact_committed_card_and_session(review_db, mode
         )
         # A failed response is not permission to submit another rating. Inspect
         # the independent thread's committed state before the response assertion.
-        saved = db.get_flashcard(card_uuid)
+        saved = db.flashcard_store.get_flashcard(card_uuid)
         rows = _review_rows(db, card_uuid)
         assert saved["version"] == before["version"] + 1
         assert len(rows) == 1
         assert rows[0]["rating"] == 3
         assert rows[0]["answer_time_ms"] == 1200
-        session = db.get_flashcard_review_session(rows[0]["review_session_id"])
+        session = db.flashcard_store.get_flashcard_review_session(rows[0]["review_session_id"])
         assert session["cards_reviewed"] == 1
         assert session["status"] == "active"
         assert session["review_mode"] == mode
@@ -126,8 +126,8 @@ def test_review_http_serializes_exact_committed_card_and_session(review_db, mode
 @pytest.mark.parametrize("invalid", ["missing-card", "invalid-rating"])
 def test_rejected_review_http_does_not_create_review_or_session(review_db, invalid):
     db = review_db
-    card_uuid = db.add_flashcard({"front": "Question", "back": "Answer"})
-    before = db.get_flashcard(card_uuid)
+    card_uuid = db.flashcard_store.add_flashcard({"front": "Question", "back": "Answer"})
+    before = db.flashcard_store.get_flashcard(card_uuid)
     db.close_connection()
     with _client(db) as client:
         response = client.post(
@@ -139,8 +139,8 @@ def test_rejected_review_http_does_not_create_review_or_session(review_db, inval
         )
     assert response.status_code == (404 if invalid == "missing-card" else 422)
     assert _review_rows(db, card_uuid) == []
-    assert db.list_flashcard_review_sessions() == []
-    assert db.get_flashcard(card_uuid)["version"] == before["version"]
+    assert db.flashcard_store.list_flashcard_review_sessions() == []
+    assert db.flashcard_store.get_flashcard(card_uuid)["version"] == before["version"]
 
 
 def _response_payload():

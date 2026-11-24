@@ -293,7 +293,7 @@ def test_selection_errors_are_not_relabeled_as_default_unavailability(
         raise failure
 
     with monkeypatch.context() as patch:
-        patch.setattr(creation_db, getter, fail)
+        patch.setattr(creation_db.workspace_store if getter == "get_workspace" else creation_db, getter, fail)
         with pytest.raises(type(failure)) as error:
             _create(creation_db)
     assert error.value is failure

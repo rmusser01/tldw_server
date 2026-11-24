@@ -36,7 +36,7 @@ def suggestion_owners(request, tmp_path):
             media = MediaDatabase(tmp_path / "media.db", client_id="2", backend=backend)
         owner = CharactersRAGDB(tmp_path / "2.db", client_id="2", backend=backend)
         foreign = CharactersRAGDB(tmp_path / "3.db", client_id="3", backend=backend)
-        snapshot_id = owner.create_suggestion_snapshot(
+        snapshot_id = owner.flashcard_store.create_suggestion_snapshot(
             service="flashcards",
             activity_type="flashcard_review_session",
             anchor_type="flashcard_review_session",
@@ -44,7 +44,7 @@ def suggestion_owners(request, tmp_path):
             suggestion_type="study_suggestions",
             payload_json={"topics": [{"display_label": "Private citrine lesson"}]},
         )
-        owner.create_suggestion_generation_link(
+        owner.flashcard_store.create_suggestion_generation_link(
             snapshot_id=snapshot_id,
             target_service="flashcards",
             target_type="deck",
@@ -121,16 +121,16 @@ def test_foreign_suggestion_reads_and_writes_preserve_owner_data(suggestion_owne
     }
     with restricted(foreign):
         if operation == "get":
-            assert foreign.get_suggestion_snapshot(snapshot_id) is None
+            assert foreign.flashcard_store.get_suggestion_snapshot(snapshot_id) is None
         elif operation == "list":
-            assert foreign.list_suggestion_snapshots_for_anchor("flashcard_review_session", 101) == []
+            assert foreign.flashcard_store.list_suggestion_snapshots_for_anchor("flashcard_review_session", 101) == []
         elif operation == "find":
-            assert foreign.find_suggestion_generation_link(**link, target_id="pending:sel") is None
+            assert foreign.flashcard_store.find_suggestion_generation_link(**link, target_id="pending:sel") is None
         elif operation == "find_fingerprint":
-            assert foreign.find_suggestion_generation_link_by_fingerprint(**link) is None
+            assert foreign.flashcard_store.find_suggestion_generation_link_by_fingerprint(**link) is None
         elif operation == "refresh":
             with pytest.raises(ConflictError):
-                foreign.create_suggestion_snapshot(
+                foreign.flashcard_store.create_suggestion_snapshot(
                     service="flashcards",
                     activity_type="flashcard_review_session",
                     anchor_type="flashcard_review_session",
@@ -142,19 +142,19 @@ def test_foreign_suggestion_reads_and_writes_preserve_owner_data(suggestion_owne
         elif operation in {"create_link", "replace_link"}:
             error = InputError if foreign.backend_type is BackendType.POSTGRESQL else CharactersRAGDBError
             with pytest.raises(error):
-                getattr(foreign, f"{operation.split('_')[0]}_suggestion_generation_link")(
+                getattr(foreign.flashcard_store, f"{operation.split('_')[0]}_suggestion_generation_link")(
                     **{**link, "selection_fingerprint": "foreign"},
                     target_id="foreign-deck",
                 )
         elif operation == "finalize":
-            assert foreign.finalize_suggestion_generation_link(**link, final_target_id="foreign-deck") == 0
+            assert foreign.flashcard_store.finalize_suggestion_generation_link(**link, final_target_id="foreign-deck") == 0
         elif operation == "delete":
-            assert foreign.soft_delete_suggestion_generation_link(**link) == 0
+            assert foreign.flashcard_store.soft_delete_suggestion_generation_link(**link) == 0
         elif operation == "release":
-            foreign.release_suggestion_generation_link_reservation(**link)
+            foreign.flashcard_store.release_suggestion_generation_link_reservation(**link)
     with restricted(owner):
-        assert owner.get_suggestion_snapshot(snapshot_id)["client_id"] == "2"
-        saved = owner.find_suggestion_generation_link_by_fingerprint(**link)
+        assert owner.flashcard_store.get_suggestion_snapshot(snapshot_id)["client_id"] == "2"
+        saved = owner.flashcard_store.find_suggestion_generation_link_by_fingerprint(**link)
         assert saved is not None
         assert saved["target_id"] == "pending:sel"
         assert saved["client_id"] == "2"
@@ -169,7 +169,7 @@ def test_owned_snapshot_lineage_and_link_lifecycle(suggestion_owners):
         "selection_fingerprint": "sel",
     }
     with restricted(owner):
-        child = owner.create_suggestion_snapshot(
+        child = owner.flashcard_store.create_suggestion_snapshot(
             service="flashcards",
             activity_type="flashcard_review_session",
             anchor_type="flashcard_review_session",
@@ -178,13 +178,13 @@ def test_owned_snapshot_lineage_and_link_lifecycle(suggestion_owners):
             payload_json={},
             refreshed_from_snapshot_id=snapshot_id,
         )
-        assert owner.get_suggestion_snapshot(child)["refreshed_from_snapshot_id"] == snapshot_id
-        assert len(owner.list_suggestion_snapshots_for_anchor("flashcard_review_session", 101)) == 2
-        assert owner.finalize_suggestion_generation_link(**link, final_target_id="owned-deck") == 1
-        owner.replace_suggestion_generation_link(**link, target_id="replacement")
-        assert owner.find_suggestion_generation_link(**link, target_id="replacement") is not None
-        assert owner.soft_delete_suggestion_generation_link(**link) == 1
-        assert owner.find_suggestion_generation_link_by_fingerprint(**link) is None
+        assert owner.flashcard_store.get_suggestion_snapshot(child)["refreshed_from_snapshot_id"] == snapshot_id
+        assert len(owner.flashcard_store.list_suggestion_snapshots_for_anchor("flashcard_review_session", 101)) == 2
+        assert owner.flashcard_store.finalize_suggestion_generation_link(**link, final_target_id="owned-deck") == 1
+        owner.flashcard_store.replace_suggestion_generation_link(**link, target_id="replacement")
+        assert owner.flashcard_store.find_suggestion_generation_link(**link, target_id="replacement") is not None
+        assert owner.flashcard_store.soft_delete_suggestion_generation_link(**link) == 1
+        assert owner.flashcard_store.find_suggestion_generation_link_by_fingerprint(**link) is None
 
 
 def test_suggestion_http_owner_and_foreign_boundaries(suggestion_owners, tmp_path):
@@ -266,11 +266,11 @@ def test_legacy_links_require_both_owners_and_live_parent(suggestion_owners, mis
             if mismatch == "foreign-parent":
                 actor = foreign
     with restricted(actor):
-        assert actor.find_suggestion_generation_link(**link, target_id="pending:sel") is None
-        assert actor.find_suggestion_generation_link_by_fingerprint(**link) is None
-        assert actor.finalize_suggestion_generation_link(**link, final_target_id="changed") == 0
-        assert actor.soft_delete_suggestion_generation_link(**link) == 0
-        actor.release_suggestion_generation_link_reservation(**link)
+        assert actor.flashcard_store.find_suggestion_generation_link(**link, target_id="pending:sel") is None
+        assert actor.flashcard_store.find_suggestion_generation_link_by_fingerprint(**link) is None
+        assert actor.flashcard_store.finalize_suggestion_generation_link(**link, final_target_id="changed") == 0
+        assert actor.flashcard_store.soft_delete_suggestion_generation_link(**link) == 0
+        actor.flashcard_store.release_suggestion_generation_link_reservation(**link)
     row = owner.execute_query(
         "SELECT target_id, deleted FROM suggestion_generation_links WHERE snapshot_id = ?",
         (snapshot_id,),
@@ -284,7 +284,7 @@ def test_sqlite_snapshot_and_links_survive_device_identity_change(tmp_path):
     previous = CharactersRAGDB(path, client_id="study-suggestions-worker-2")
     current = CharactersRAGDB(path, client_id="2")
     try:
-        snapshot_id = previous.create_suggestion_snapshot(
+        snapshot_id = previous.flashcard_store.create_suggestion_snapshot(
             service="flashcards",
             activity_type="flashcard_review_session",
             anchor_type="flashcard_review_session",
@@ -298,10 +298,10 @@ def test_sqlite_snapshot_and_links_survive_device_identity_change(tmp_path):
             "target_type": "deck",
             "selection_fingerprint": "old",
         }
-        previous.create_suggestion_generation_link(**link, target_id="pending:old")
-        assert current.get_suggestion_snapshot(snapshot_id) is not None
-        assert current.finalize_suggestion_generation_link(**link, final_target_id="deck-1") == 1
-        assert current.find_suggestion_generation_link(**link, target_id="deck-1") is not None
+        previous.flashcard_store.create_suggestion_generation_link(**link, target_id="pending:old")
+        assert current.flashcard_store.get_suggestion_snapshot(snapshot_id) is not None
+        assert current.flashcard_store.finalize_suggestion_generation_link(**link, final_target_id="deck-1") == 1
+        assert current.flashcard_store.find_suggestion_generation_link(**link, target_id="deck-1") is not None
     finally:
         previous.close_all_connections()
         current.close_all_connections()
@@ -311,7 +311,7 @@ def test_shared_sync_events_preserve_suggestion_lifecycle_and_tenant(suggestion_
     """Real restricted writes keep atomic, tenant-scoped snapshot/link events."""
     owner, foreign, _, restricted = suggestion_owners
     with restricted(owner):
-        snapshot = owner.create_suggestion_snapshot(
+        snapshot = owner.flashcard_store.create_suggestion_snapshot(
             service="flashcards",
             activity_type="flashcard_review_session",
             anchor_type="flashcard_review_session",
@@ -325,9 +325,9 @@ def test_shared_sync_events_preserve_suggestion_lifecycle_and_tenant(suggestion_
             "target_type": "deck",
             "selection_fingerprint": "lifecycle",
         }
-        link_id = owner.create_suggestion_generation_link(**link, target_id="pending:lifecycle")
-        assert owner.finalize_suggestion_generation_link(**link, final_target_id="owned-deck") == 1
-        assert owner.soft_delete_suggestion_generation_link(**link) == 1
+        link_id = owner.flashcard_store.create_suggestion_generation_link(**link, target_id="pending:lifecycle")
+        assert owner.flashcard_store.finalize_suggestion_generation_link(**link, final_target_id="owned-deck") == 1
+        assert owner.flashcard_store.soft_delete_suggestion_generation_link(**link) == 1
         with owner.transaction() as conn:
             conn.execute(
                 "UPDATE suggestion_snapshots SET status=?, version=version+1 WHERE id=?", ("superseded", snapshot)

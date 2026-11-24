@@ -31,15 +31,15 @@ def tags_db(request, tmp_path):
 
 
 def _card(db, *, linked=False):
-    card = db.add_flashcard({"front": "Marker?", "back": "Amber"})
+    card = db.flashcard_store.add_flashcard({"front": "Marker?", "back": "Amber"})
     if linked:
         # Establish real existing links through the normal first-update path.
-        assert db.update_flashcard(card, {}, expected_version=1, tags=["Old", "Keep"])
+        assert db.flashcard_store.update_flashcard(card, {}, expected_version=1, tags=["Old", "Keep"])
     return card
 
 
 def _tags(db, card):
-    return sorted(row["keyword"] for row in db.get_keywords_for_flashcard(card))
+    return sorted(row["keyword"] for row in db.flashcard_store.get_keywords_for_flashcard(card))
 
 
 def test_http_create_with_tags_populates_actual_keyword_links(tags_db):
@@ -52,12 +52,12 @@ def test_http_create_with_tags_populates_actual_keyword_links(tags_db):
     assert result.status_code == 200, result.text
     card = result.json()["uuid"]
     assert _tags(tags_db, card) == ["Citrine"]
-    assert json.loads(tags_db.get_flashcard(card)["tags_json"]) == ["Citrine"]
+    assert json.loads(tags_db.flashcard_store.get_flashcard(card)["tags_json"]) == ["Citrine"]
 
 
 def test_http_patch_replaces_existing_keyword_links(tags_db):
     card = _card(tags_db, linked=True)
-    before = tags_db.get_flashcard(card)
+    before = tags_db.flashcard_store.get_flashcard(card)
     app = FastAPI()
     app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router)
@@ -66,7 +66,7 @@ def test_http_patch_replaces_existing_keyword_links(tags_db):
         result = client.patch(f"/flashcards/{card}", json={"expected_version": before["version"], "tags": ["New"]})
     assert result.status_code == 200, result.text
     assert _tags(tags_db, card) == ["New"]
-    assert json.loads(tags_db.get_flashcard(card)["tags_json"]) == ["New"]
+    assert json.loads(tags_db.flashcard_store.get_flashcard(card)["tags_json"]) == ["New"]
     assert result.json()["version"] == before["version"] + 1
 
 
@@ -74,7 +74,7 @@ def test_http_patch_replaces_existing_keyword_links(tags_db):
 def test_http_tag_replacement_updates_links_and_json_mirror(tags_db, linked):
     db = tags_db
     card = _card(db, linked=linked)
-    before = db.get_flashcard(card)
+    before = db.flashcard_store.get_flashcard(card)
     app = FastAPI()
     app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router)
@@ -84,39 +84,39 @@ def test_http_tag_replacement_updates_links_and_json_mirror(tags_db, linked):
     assert result.status_code == 200, result.text
     assert result.json()["version"] == before["version"] + 1
     assert _tags(db, card) == ["Keep", "New"]
-    assert json.loads(db.get_flashcard(card)["tags_json"]) == ["Keep", "New"]
-    assert db.get_flashcard(card)["front"] == before["front"]
-    assert db.get_flashcard(card)["back"] == before["back"]
+    assert json.loads(db.flashcard_store.get_flashcard(card)["tags_json"]) == ["Keep", "New"]
+    assert db.flashcard_store.get_flashcard(card)["front"] == before["front"]
+    assert db.flashcard_store.get_flashcard(card)["back"] == before["back"]
 
 
 @pytest.mark.parametrize("operation", ["setter", "update"])
 def test_existing_tag_links_can_be_cleared(tags_db, operation):
     db = tags_db
     card = _card(db, linked=True)
-    before = db.get_flashcard(card)
+    before = db.flashcard_store.get_flashcard(card)
     if operation == "setter":
-        assert db.set_flashcard_tags(card, [])
+        assert db.flashcard_store.set_flashcard_tags(card, [])
     else:
-        assert db.update_flashcard(card, {}, expected_version=before["version"], tags=[])
+        assert db.flashcard_store.update_flashcard(card, {}, expected_version=before["version"], tags=[])
     assert _tags(db, card) == []
-    assert json.loads(db.get_flashcard(card)["tags_json"]) == []
-    assert db.get_flashcard(card)["version"] == before["version"] + 1
+    assert json.loads(db.flashcard_store.get_flashcard(card)["tags_json"]) == []
+    assert db.flashcard_store.get_flashcard(card)["version"] == before["version"] + 1
 
 
 @pytest.mark.parametrize("operation", ["setter", "update"])
 def test_tag_mutation_remains_owned_by_outer_transaction(tags_db, operation):
     db = tags_db
     card = _card(db, linked=True)
-    before = db.get_flashcard(card)
+    before = db.flashcard_store.get_flashcard(card)
     with pytest.raises(RuntimeError, match="caller rollback"):
         with db.transaction():
             if operation == "setter":
-                assert db.set_flashcard_tags(card, ["Changed"])
+                assert db.flashcard_store.set_flashcard_tags(card, ["Changed"])
             else:
-                assert db.update_flashcard(card, {}, expected_version=before["version"], tags=["Changed"])
+                assert db.flashcard_store.update_flashcard(card, {}, expected_version=before["version"], tags=["Changed"])
             assert _tags(db, card) == ["Changed"]
             raise RuntimeError("caller rollback")
-    assert db.get_flashcard(card) == before
+    assert db.flashcard_store.get_flashcard(card) == before
     assert _tags(db, card) == ["Keep", "Old"]
 
 
@@ -125,7 +125,7 @@ def test_tag_setter_rejects_missing_or_deleted_card(tags_db, deleted):
     db = tags_db
     card = _card(db) if deleted else str(uuid.uuid4())
     if deleted:
-        assert db.soft_delete_flashcard(card, expected_version=1)
+        assert db.flashcard_store.soft_delete_flashcard(card, expected_version=1)
     with pytest.raises(CharactersRAGDBError, match="Flashcard not found or deleted"):
-        db.set_flashcard_tags(card, ["Unwanted"])
+        db.flashcard_store.set_flashcard_tags(card, ["Unwanted"])
     assert db.get_keyword_by_text("Unwanted") is None

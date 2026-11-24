@@ -271,7 +271,7 @@ def test_notes_sink_active_ready_sync_captures_source_folder_provenance(
     def _direct_source_folder_write(*args, **kwargs):
         raise AssertionError("active-ready Sync must not use the legacy direct path")
 
-    monkeypatch.setattr(notes_db, "sync_note_source_folders", _direct_source_folder_write)
+    monkeypatch.setattr(notes_db.workspace_store, "sync_note_source_folders", _direct_source_folder_write)
     result = notes_sink.apply_notes_change(
         notes_db,
         binding=None,

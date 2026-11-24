@@ -22,6 +22,7 @@ vi.mock("../schema", () => ({
     modelNickname: { name: "modelNickname" },
     sessionFiles: { name: "sessionFiles" },
     searchTokens: { name: "searchTokens" },
+    userSettings: { name: "userSettings" },
     transaction: (...args: unknown[]) => mocks.transaction(...args)
   }
 }))
@@ -59,7 +60,8 @@ describe("runChatPersistenceTransaction", () => {
         expect.objectContaining({ name: "messages" }),
         expect.objectContaining({ name: "modelNickname" }),
         expect.objectContaining({ name: "sessionFiles" }),
-        expect.objectContaining({ name: "searchTokens" })
+        expect.objectContaining({ name: "searchTokens" }),
+        expect.objectContaining({ name: "userSettings" })
       ],
       expect.any(Function)
     )

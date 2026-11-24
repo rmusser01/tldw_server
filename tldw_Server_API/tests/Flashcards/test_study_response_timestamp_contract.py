@@ -55,12 +55,12 @@ def _assert_timestamp_strings(row, fields):
 @pytest.mark.integration
 @pytest.mark.parametrize("operation", ["active", "completed", "end"])
 def test_review_session_http_lifecycle_preserves_timestamp_contract(study_db, study_client, operation):
-    deck = study_db.add_deck("Rowan")
-    session = study_db.get_or_create_flashcard_review_session(
+    deck = study_db.flashcard_store.add_deck("Rowan")
+    session = study_db.flashcard_store.get_or_create_flashcard_review_session(
         deck_id=deck, review_mode="cram", tag_filter=None, scope_key=f"cram:deck:{deck}"
     )
     if operation == "completed":
-        study_db.mark_flashcard_review_session_completed(session["id"])
+        study_db.flashcard_store.mark_flashcard_review_session_completed(session["id"])
     if operation == "end":
         response = study_client.post("/api/v1/flashcards/review-sessions/end", json={"review_session_id": session["id"]})
     else:
@@ -76,13 +76,13 @@ def test_review_session_http_lifecycle_preserves_timestamp_contract(study_db, st
         assert row["completed_at"] is None
     else:
         _assert_timestamp_strings(row, ["completed_at"])
-        assert study_db.get_flashcard_review_session(session["id"])["status"] == "completed"
+        assert study_db.flashcard_store.get_flashcard_review_session(session["id"])["status"] == "completed"
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("populated", [False, True], ids=["empty-thread", "populated-thread"])
 def test_assistant_context_http_preserves_thread_and_message_timestamps(study_db, study_client, populated):
-    card = study_db.add_flashcard({"front": "Marker?", "back": "Amber"})
+    card = study_db.flashcard_store.add_flashcard({"front": "Marker?", "back": "Amber"})
     thread = study_db.get_or_create_study_assistant_thread(context_type="flashcard", flashcard_uuid=card)
     if populated:
         study_db.append_study_assistant_message(

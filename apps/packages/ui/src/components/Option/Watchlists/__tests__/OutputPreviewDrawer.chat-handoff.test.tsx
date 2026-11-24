@@ -2,7 +2,8 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import userEvent from "@testing-library/user-event"
 import { OutputPreviewDrawer } from "../OutputsTab/OutputPreviewDrawer"
 import type { WatchlistOutput } from "@/types/watchlists"
@@ -131,7 +132,7 @@ describe("OutputPreviewDrawer chat handoff", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
+      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42, expect.any(AbortSignal))
     })
 
     const chatBtn = await screen.findByTestId("watchlists-output-chat-about")
@@ -168,7 +169,7 @@ describe("OutputPreviewDrawer chat handoff", () => {
 
     // Wait for content to load
     await waitFor(() => {
-      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
+      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42, expect.any(AbortSignal))
     })
 
     const chatBtn = await screen.findByTestId("watchlists-output-chat-about")
@@ -207,7 +208,7 @@ describe("OutputPreviewDrawer chat handoff", () => {
     )
 
     await waitFor(() => {
-      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
+      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42, expect.any(AbortSignal))
     })
 
     const chatBtn = await screen.findByTestId("watchlists-output-chat-about")

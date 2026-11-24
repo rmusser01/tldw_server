@@ -2,7 +2,8 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { OutputsTab } from "../OutputsTab"
 
 const mocks = vi.hoisted(() => ({
@@ -126,8 +127,10 @@ vi.mock("@/utils/dateFormatters", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  recordWatchlistsOnboardingTelemetry: async () => undefined,
   createWatchlistOutput: (...args: any[]) => mocks.createWatchlistOutputMock(...args),
   fetchWatchlistJobs: (...args: any[]) => mocks.fetchWatchlistJobsMock(...args),
+  fetchWatchlists: async () => ({ items: [], total: 0 }),
   fetchWatchlistOutputs: (...args: any[]) => mocks.fetchWatchlistOutputsMock(...args),
   fetchWatchlistTemplates: (...args: any[]) => mocks.fetchWatchlistTemplatesMock(...args),
   downloadWatchlistOutput: (...args: any[]) => mocks.downloadWatchlistOutputMock(...args),
@@ -167,17 +170,12 @@ const buildOutput = (overrides: Record<string, unknown> = {}) => ({
 })
 
 const baseState = (overrides: Record<string, unknown> = {}) => ({
-  outputs: [],
-  outputsLoading: false,
-  outputsTotal: 0,
   outputsPage: 1,
   outputsPageSize: 20,
   outputsJobFilter: null,
   outputsRunFilter: null,
   outputPreviewOpen: false,
   selectedOutputId: null,
-  setOutputs: vi.fn(),
-  setOutputsLoading: vi.fn(),
   setOutputsPage: vi.fn(),
   setOutputsPageSize: vi.fn(),
   setOutputsJobFilter: vi.fn(),
@@ -195,11 +193,8 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
 describe("OutputsTab regenerate modal", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.storeStateRef.current = baseState({
-      outputs: [buildOutput()],
-      outputsTotal: 1
-    })
-    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.storeStateRef.current = baseState()
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: [buildOutput()], total: 1, has_more: false })
     mocks.fetchWatchlistJobsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.fetchWatchlistTemplatesMock.mockResolvedValue({
       items: [
@@ -223,7 +218,7 @@ describe("OutputsTab regenerate modal", () => {
   it("hydrates template defaults in regenerate modal for text outputs", async () => {
     render(<OutputsTab />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Regenerate" }))
 
     await waitFor(() => {
       expect(mocks.fetchWatchlistTemplatesMock).toHaveBeenCalledTimes(1)
@@ -234,13 +229,13 @@ describe("OutputsTab regenerate modal", () => {
       "briefing_markdown"
     )
     expect(
-      screen.getByTestId("outputs-regenerate-template-version-select")
+      await screen.findByTestId("outputs-regenerate-template-version-select")
     ).toHaveAttribute("data-value", "4")
   })
 
   it("hides template overrides and submits constrained payload for audio outputs", async () => {
-    mocks.storeStateRef.current = baseState({
-      outputs: [
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({
+      items: [
         buildOutput({
           format: "mp3",
           type: "tts_audio",
@@ -251,12 +246,19 @@ describe("OutputsTab regenerate modal", () => {
           }
         })
       ],
-      outputsTotal: 1
+      total: 1,
+      has_more: false
     })
 
     render(<OutputsTab />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }))
+    const regenerate = await screen.findByRole("button", { name: "Regenerate" })
+    mocks.fetchWatchlistOutputsMock.mockImplementationOnce(() => new Promise(() => {}))
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(mocks.fetchWatchlistOutputsMock).toHaveBeenCalledTimes(2))
+    const refreshSignal = mocks.fetchWatchlistOutputsMock.mock.calls[1][1] as AbortSignal
+
+    fireEvent.click(regenerate)
 
     const modal = screen.getByTestId("antd-modal")
     expect(
@@ -270,6 +272,8 @@ describe("OutputsTab regenerate modal", () => {
 
     await waitFor(() => {
       expect(mocks.createWatchlistOutputMock).toHaveBeenCalledTimes(1)
+      expect(refreshSignal.aborted).toBe(true)
+      expect(mocks.fetchWatchlistOutputsMock).toHaveBeenCalledTimes(3)
     })
 
     expect(mocks.createWatchlistOutputMock).toHaveBeenCalledWith(
@@ -287,7 +291,7 @@ describe("OutputsTab regenerate modal", () => {
   it("restores focus to regenerate trigger when modal closes", async () => {
     render(<OutputsTab />)
 
-    const trigger = screen.getByRole("button", { name: "Regenerate" })
+    const trigger = await screen.findByRole("button", { name: "Regenerate" })
     trigger.focus()
     fireEvent.click(trigger)
 
@@ -310,8 +314,6 @@ describe("OutputsTab regenerate modal", () => {
     const openRunDetail = vi.fn()
     const openJobForm = vi.fn()
     mocks.storeStateRef.current = baseState({
-      outputs: [buildOutput()],
-      outputsTotal: 1,
       setActiveTab,
       setRunsJobFilter,
       setRunsStatusFilter,
@@ -321,7 +323,7 @@ describe("OutputsTab regenerate modal", () => {
 
     render(<OutputsTab />)
 
-    fireEvent.click(screen.getByTestId("watchlists-output-open-job-18"))
+    fireEvent.click(await screen.findByTestId("watchlists-output-open-job-18"))
     expect(setActiveTab).toHaveBeenCalledWith("jobs")
     expect(openJobForm).toHaveBeenCalledWith(4)
 
@@ -333,8 +335,8 @@ describe("OutputsTab regenerate modal", () => {
   })
 
   it("renders delivery state only when output metadata contains delivery statuses", async () => {
-    mocks.storeStateRef.current = baseState({
-      outputs: [
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({
+      items: [
         buildOutput({
           id: 18,
           metadata: {
@@ -349,12 +351,13 @@ describe("OutputsTab regenerate modal", () => {
           metadata: {}
         })
       ],
-      outputsTotal: 2
+      total: 2,
+      has_more: false
     })
 
     render(<OutputsTab />)
 
-    expect(screen.getByTestId("outputs-row-18")).toHaveTextContent("email Sent")
+    expect(await screen.findByTestId("outputs-row-18")).toHaveTextContent("email Sent")
     expect(screen.getByTestId("outputs-row-19")).toHaveTextContent("-")
   })
 })

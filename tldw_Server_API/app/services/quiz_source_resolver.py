@@ -162,11 +162,11 @@ def _resolve_flashcard_deck_source(
     max_chars_per_item: int,
 ) -> list[dict[str, Any]]:
     deck_id = _parse_positive_int(source_id, "flashcard_deck source_id")
-    deck = db.get_deck(deck_id)
+    deck = db.flashcard_store.get_deck(deck_id)
     if not deck:
         raise ValueError(f"Flashcard deck {deck_id} not found")
 
-    cards = db.list_flashcards(
+    cards = db.flashcard_store.list_flashcards(
         deck_id=deck_id,
         include_deleted=False,
         due_status="all",
@@ -204,7 +204,7 @@ def _resolve_flashcard_card_source(
     db: CharactersRAGDB,
     max_chars_per_item: int,
 ) -> list[dict[str, Any]]:
-    card = db.get_flashcard(source_id)
+    card = db.flashcard_store.get_flashcard(source_id)
     if not card:
         raise ValueError(f"Flashcard '{source_id}' not found")
 

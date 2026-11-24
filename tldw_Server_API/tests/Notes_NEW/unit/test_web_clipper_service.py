@@ -398,7 +398,7 @@ def test_save_clip_returns_partially_saved_when_workspace_creation_fails_after_n
     def _boom(*_args, **_kwargs):
         raise CharactersRAGDBError("workspace note persistence failed")
 
-    monkeypatch.setattr(clipper_db, "add_workspace_note", _boom)
+    monkeypatch.setattr(clipper_db.workspace_store, "add_workspace_note", _boom)
 
     result = service.save_clip(_save_request())
 
@@ -960,7 +960,7 @@ def test_capture_backend_workspace_failure_keeps_note_and_recovers_exact_retry(
         raise DatabaseError("workspace database temporarily unavailable")
 
     with monkeypatch.context() as patch:
-        patch.setattr(clipper_db, stage, fail)
+        patch.setattr(clipper_db.workspace_store, stage, fail)
         partial = service.save_clip(request)
     assert partial.note is not None
     assert partial.status in {"partially_saved", "saved_with_warnings"}

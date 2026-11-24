@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { JobsTab } from "../JobsTab"
 
@@ -235,7 +236,7 @@ describe("JobsTab constrained management", () => {
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Add Monitor" })).toBeInTheDocument()
 
-    const card = screen.getByTestId("watchlists-job-card-41")
+    const card = await screen.findByTestId("watchlists-job-card-41")
     expect(within(card).getByText("Healthcare ransomware monitor")).toBeInTheDocument()
     expect(within(card).getByText("Daily healthcare ransomware scan")).toBeInTheDocument()
     expect(within(card).getByText("0 9 * * *")).toBeInTheDocument()

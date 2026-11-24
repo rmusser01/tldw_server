@@ -27,18 +27,18 @@ def count_db(request, tmp_path):
 
 def test_empty_flashcard_count_is_zero(count_db):
     """An empty result is a valid count, not a mapping-index exception."""
-    assert count_db.count_flashcards() == 0
+    assert count_db.flashcard_store.count_flashcards() == 0
 
 
 @pytest.mark.parametrize("filtered", [False, True])
 def test_flashcard_count_matches_deck_filter(count_db, filtered):
     """Named aggregate access preserves both total and selected-deck counts."""
-    first_deck = count_db.add_deck("Citrine")
-    second_deck = count_db.add_deck("Rowan")
+    first_deck = count_db.flashcard_store.add_deck("Citrine")
+    second_deck = count_db.flashcard_store.add_deck("Rowan")
     for deck_id, front in [(first_deck, "Amber"), (first_deck, "Tuesday"), (second_deck, "East")]:
-        count_db.add_flashcard({"deck_id": deck_id, "front": front, "back": "Fixture"})
+        count_db.flashcard_store.add_flashcard({"deck_id": deck_id, "front": front, "back": "Fixture"})
     filters = {"deck_id": first_deck} if filtered else {}
-    assert count_db.count_flashcards(**filters) == (2 if filtered else 3)
+    assert count_db.flashcard_store.count_flashcards(**filters) == (2 if filtered else 3)
 
 
 def test_flashcard_asset_reconciliation_round_trips_real_rows(count_db):
@@ -46,33 +46,33 @@ def test_flashcard_asset_reconciliation_round_trips_real_rows(count_db):
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
     from tldw_Server_API.app.core.Flashcards.asset_refs import build_flashcard_asset_markdown
 
-    asset_uuid = count_db.add_flashcard_asset(
+    asset_uuid = count_db.flashcard_store.add_flashcard_asset(
         image_bytes=b"fixture-image", mime_type="image/png", original_filename="fixture.png"
     )
-    card_uuid = count_db.add_flashcard({"front": "Citrine", "back": "Amber"})
-    other_uuid = count_db.add_flashcard({"front": "Rowan", "back": "East"})
+    card_uuid = count_db.flashcard_store.add_flashcard({"front": "Citrine", "back": "Amber"})
+    other_uuid = count_db.flashcard_store.add_flashcard({"front": "Rowan", "back": "East"})
     reference = build_flashcard_asset_markdown(asset_uuid, "Fixture")
-    assert count_db.reconcile_flashcard_asset_refs(
+    assert count_db.flashcard_store.reconcile_flashcard_asset_refs(
         card_uuid, front=reference, back="Amber", extra="", notes=""
     ) == [asset_uuid]
-    assert count_db.get_flashcard_asset(asset_uuid)["card_uuid"] == card_uuid
+    assert count_db.flashcard_store.get_flashcard_asset(asset_uuid)["card_uuid"] == card_uuid
     with pytest.raises(ConflictError, match="different card"):
-        count_db.reconcile_flashcard_asset_refs(
+        count_db.flashcard_store.reconcile_flashcard_asset_refs(
             other_uuid, front=reference, back="East", extra="", notes=""
         )
-    count_db.reconcile_flashcard_asset_refs(
+    count_db.flashcard_store.reconcile_flashcard_asset_refs(
         card_uuid, front="Citrine", back="Amber", extra="", notes=""
     )
-    assert count_db.get_flashcard_asset(asset_uuid)["card_uuid"] is None
+    assert count_db.flashcard_store.get_flashcard_asset(asset_uuid)["card_uuid"] is None
 
 
 def test_flashcard_noop_update_preserves_version_guard(count_db):
     """An empty update checks the current version without modifying the card."""
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 
-    card_uuid = count_db.add_flashcard({"front": "Marker?", "back": "Amber"})
-    before = count_db.get_flashcard(card_uuid)
-    assert count_db.update_flashcard(card_uuid, {}, expected_version=1)
+    card_uuid = count_db.flashcard_store.add_flashcard({"front": "Marker?", "back": "Amber"})
+    before = count_db.flashcard_store.get_flashcard(card_uuid)
+    assert count_db.flashcard_store.update_flashcard(card_uuid, {}, expected_version=1)
     with pytest.raises(ConflictError, match="Version mismatch"):
-        count_db.update_flashcard(card_uuid, {}, expected_version=2)
-    assert count_db.get_flashcard(card_uuid) == before
+        count_db.flashcard_store.update_flashcard(card_uuid, {}, expected_version=2)
+    assert count_db.flashcard_store.get_flashcard(card_uuid) == before

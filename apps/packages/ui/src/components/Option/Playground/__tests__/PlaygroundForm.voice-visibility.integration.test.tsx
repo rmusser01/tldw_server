@@ -333,12 +333,13 @@ vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
   })
 }))
 
-vi.mock("@/hooks/useConnectionState", () => ({
-  useConnectionState: () => ({
-    phase: "connected",
-    isConnected: true
-  })
-}))
+vi.mock("@/hooks/useConnectionState", () => {
+  const state = { phase: "connected", isConnected: true }
+  return {
+    useConnectionState: (select?: (s: typeof state) => unknown) =>
+      select ? select(state) : state
+  }
+})
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({

@@ -27,7 +27,7 @@ def _temp_chacha_db():
 
 def test_flashcard_template_create_update_delete_round_trip():
     with _temp_chacha_db() as db:
-        template_id = db.add_flashcard_template(
+        template_id = db.flashcard_store.add_flashcard_template(
             name="Vocabulary Definition",
             model_type="basic",
             front_template="What does {{term}} mean?",
@@ -48,13 +48,13 @@ def test_flashcard_template_create_update_delete_round_trip():
             ],
         )
 
-        template = db.get_flashcard_template(template_id)
+        template = db.flashcard_store.get_flashcard_template(template_id)
         assert template is not None
         assert template["name"] == "Vocabulary Definition"
         assert template["model_type"] == "basic"
         assert template["placeholder_definitions"][0]["key"] == "term"
 
-        updated = db.update_flashcard_template(
+        updated = db.flashcard_store.update_flashcard_template(
             template_id,
             {
                 "name": "Vocabulary Definition v2",
@@ -65,21 +65,21 @@ def test_flashcard_template_create_update_delete_round_trip():
         )
         assert updated is True
 
-        renamed = db.get_flashcard_template(template_id)
+        renamed = db.flashcard_store.get_flashcard_template(template_id)
         assert renamed is not None
         assert renamed["name"] == "Vocabulary Definition v2"
         assert renamed["version"] == template["version"] + 1
 
-        deleted = db.soft_delete_flashcard_template(template_id, expected_version=renamed["version"])
+        deleted = db.flashcard_store.soft_delete_flashcard_template(template_id, expected_version=renamed["version"])
         assert deleted is True
-        assert db.get_flashcard_template(template_id) is None
-        assert db.soft_delete_flashcard_template(template_id, expected_version=renamed["version"] + 1) is False
+        assert db.flashcard_store.get_flashcard_template(template_id) is None
+        assert db.flashcard_store.soft_delete_flashcard_template(template_id, expected_version=renamed["version"] + 1) is False
 
 
 def test_flashcard_template_validation_requires_matching_placeholders():
     with _temp_chacha_db() as db:
         with pytest.raises(InputError):
-            db.add_flashcard_template(
+            db.flashcard_store.add_flashcard_template(
                 name="Broken",
                 model_type="basic",
                 front_template="What does {{term}} mean?",
@@ -126,9 +126,9 @@ def test_flashcard_template_queries_use_postgres_safe_deleted_clause(monkeypatch
         )
         monkeypatch.setattr(db, "execute_query", _fake_execute_query)
 
-        assert db.count_flashcard_templates() == 0
-        assert db.list_flashcard_templates() == []
-        assert db.get_flashcard_template(17) is None
+        assert db.flashcard_store.count_flashcard_templates() == 0
+        assert db.flashcard_store.list_flashcard_templates() == []
+        assert db.flashcard_store.get_flashcard_template(17) is None
 
         assert all("deleted = ?" in query for query, _params in captured)
         assert captured[0][1] == (False,)
@@ -139,7 +139,7 @@ def test_flashcard_template_queries_use_postgres_safe_deleted_clause(monkeypatch
 
 def test_flashcard_template_update_returns_false_for_deleted_template():
     with _temp_chacha_db() as db:
-        template_id = db.add_flashcard_template(
+        template_id = db.flashcard_store.add_flashcard_template(
             name="Delete then update",
             model_type="basic",
             front_template="What does {{term}} mean?",
@@ -159,12 +159,12 @@ def test_flashcard_template_update_returns_false_for_deleted_template():
                 },
             ],
         )
-        template = db.get_flashcard_template(template_id)
+        template = db.flashcard_store.get_flashcard_template(template_id)
         assert template is not None
-        assert db.soft_delete_flashcard_template(template_id, expected_version=template["version"]) is True
+        assert db.flashcard_store.soft_delete_flashcard_template(template_id, expected_version=template["version"]) is True
 
         assert (
-            db.update_flashcard_template(
+            db.flashcard_store.update_flashcard_template(
                 template_id,
                 {"name": "Should not update"},
                 expected_version=template["version"] + 1,
@@ -175,7 +175,7 @@ def test_flashcard_template_update_returns_false_for_deleted_template():
 
 def test_flashcard_template_empty_update_is_noop():
     with _temp_chacha_db() as db:
-        template_id = db.add_flashcard_template(
+        template_id = db.flashcard_store.add_flashcard_template(
             name="No-op update",
             model_type="basic",
             front_template="What does {{term}} mean?",
@@ -195,12 +195,12 @@ def test_flashcard_template_empty_update_is_noop():
                 },
             ],
         )
-        before = db.get_flashcard_template(template_id)
+        before = db.flashcard_store.get_flashcard_template(template_id)
         assert before is not None
 
-        assert db.update_flashcard_template(template_id, {}, expected_version=before["version"]) is True
+        assert db.flashcard_store.update_flashcard_template(template_id, {}, expected_version=before["version"]) is True
 
-        after = db.get_flashcard_template(template_id)
+        after = db.flashcard_store.get_flashcard_template(template_id)
         assert after is not None
         assert after["version"] == before["version"]
         assert after["last_modified"] == before["last_modified"]
@@ -218,7 +218,7 @@ def test_flashcard_template_serialize_logs_invalid_placeholder_json(monkeypatch)
             _capture_warning,
         )
 
-        serialized = db._serialize_flashcard_template_row(
+        serialized = db.flashcard_store._serialize_flashcard_template_row(
             {
                 "id": 17,
                 "name": "Broken JSON",
@@ -236,7 +236,7 @@ def test_flashcard_template_sync_log_tracks_create_update_and_delete():
     with _temp_chacha_db() as db:
         start_change_id = db.get_latest_sync_log_change_id()
 
-        template_id = db.add_flashcard_template(
+        template_id = db.flashcard_store.add_flashcard_template(
             name="Sync template",
             model_type="basic",
             front_template="What does {{term}} mean?",
@@ -256,16 +256,16 @@ def test_flashcard_template_sync_log_tracks_create_update_and_delete():
                 },
             ],
         )
-        created = db.get_flashcard_template(template_id)
+        created = db.flashcard_store.get_flashcard_template(template_id)
         assert created is not None
-        assert db.update_flashcard_template(
+        assert db.flashcard_store.update_flashcard_template(
             template_id,
             {"name": "Sync template updated"},
             expected_version=created["version"],
         )
-        updated = db.get_flashcard_template(template_id)
+        updated = db.flashcard_store.get_flashcard_template(template_id)
         assert updated is not None
-        assert db.soft_delete_flashcard_template(template_id, expected_version=updated["version"])
+        assert db.flashcard_store.soft_delete_flashcard_template(template_id, expected_version=updated["version"])
 
         entries = db.get_sync_log_entries(since_change_id=start_change_id)
         template_entries = [
@@ -335,7 +335,7 @@ def test_flashcard_template_delete_uses_version_in_update_query(monkeypatch):
 
         monkeypatch.setattr(db, "transaction", _fake_transaction)
 
-        assert db.soft_delete_flashcard_template(17, expected_version=4) is True
+        assert db.flashcard_store.soft_delete_flashcard_template(17, expected_version=4) is True
 
         update_query, update_params = next(
             (query, params)
@@ -363,16 +363,16 @@ def test_flashcard_template_restore_prefers_most_recent_deleted_row():
             },
         ]
 
-        first_id = db.add_flashcard_template(
+        first_id = db.flashcard_store.add_flashcard_template(
             name="Duplicate tombstone",
             model_type="basic",
             front_template="What does {{term}} mean?",
             back_template="{{definition}}",
             placeholder_definitions=placeholder_definitions,
         )
-        first = db.get_flashcard_template(first_id)
+        first = db.flashcard_store.get_flashcard_template(first_id)
         assert first is not None
-        assert db.soft_delete_flashcard_template(first_id, expected_version=first["version"]) is True
+        assert db.flashcard_store.soft_delete_flashcard_template(first_id, expected_version=first["version"]) is True
 
         now = db._get_current_utc_timestamp_iso()
         with db.transaction() as conn:
@@ -401,14 +401,14 @@ def test_flashcard_template_restore_prefers_most_recent_deleted_row():
             )
             second_id = int(cursor.lastrowid)
 
-        restored_id = db.add_flashcard_template(
+        restored_id = db.flashcard_store.add_flashcard_template(
             name="Duplicate tombstone",
             model_type="basic",
             front_template="Newest {{term}}",
             back_template="{{definition}}",
             placeholder_definitions=placeholder_definitions,
         )
-        restored = db.get_flashcard_template(restored_id)
+        restored = db.flashcard_store.get_flashcard_template(restored_id)
 
         assert restored_id == second_id
         assert restored is not None
@@ -425,4 +425,4 @@ def test_flashcard_template_delete_wraps_backend_database_errors(monkeypatch):
         monkeypatch.setattr(db, "transaction", _fake_transaction)
 
         with pytest.raises(CharactersRAGDBError, match="Failed to delete flashcard template: pg down"):
-            db.soft_delete_flashcard_template(17, expected_version=1)
+            db.flashcard_store.soft_delete_flashcard_template(17, expected_version=1)

@@ -53,7 +53,7 @@ CONTEXT_SURFACE = frozenset(
         "db", "backend", "backend_type", "client_id", "owner_user_id", "db_path_str", "is_memory_db",
         "code_schema_version", "postgres_schema_version", "schema_name",
         "transaction", "get_connection", "execute_query", "execute_many",
-        "run_sqlite_migration_step", "utc_now_iso", "new_uuid", "normalize_nullable_text", "map_table", "owner_filter",
+        "run_sqlite_migration_step", "connection_state", "utc_now_iso", "new_uuid", "normalize_nullable_text", "map_table", "owner_filter",
         "current_db_version", "prepare_statement",
         "keyword_link_filter", "require_owner_row", "case_insensitive_order_expression", "case_insensitive_order_clause",
         "unique_text_match_sql", "is_unique_violation", "chunk_list", "canonical_json_text_v61", "note_task_v60_hash",
@@ -138,6 +138,7 @@ def test_context_module_privates_are_pinned() -> None:
         "tldw_Server_API.app.core.DB_Management.chacha.postgres_schema",
         "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap",
         "tldw_Server_API.app.core.DB_Management.chacha.workspace_store",
+        "tldw_Server_API.app.core.DB_Management.chacha.flashcard_store",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.sqlite_steps",
         "tldw_Server_API.app.core.DB_Management.chacha.migrations.postgres_steps",
     ],
@@ -453,21 +454,31 @@ def test_postgres_init_repairs_legacy_markers_in_order() -> None:
     assert bridge.lineno < history.lineno < stamp.lineno  # nosec B101
 
 
-def test_facade_forwards_moving_names_at_call_time() -> None:
-    """PR I1: ``db.workspace_store.<m>`` reads ``db.<m>`` when called, so an instance patch of the DB stays live."""
+def test_workspace_methods_live_on_the_store() -> None:
+    """PR I2: the workspace bodies moved into ``WorkspaceStore``, which no longer forwards to the DB."""
+    import ast as _ast
+
     from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
 
-    db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db.workspace_store = WorkspaceStore(db.ctx)
-    patched = object()
-    db.get_workspace = patched  # type: ignore[method-assign]
-    assert db.workspace_store.get_workspace is patched  # nosec B101
+    manifest = _ast.literal_eval(
+        Path("Helper_Scripts/chacha_split/manifests/t10_workspace.py").read_text().split("MANIFEST = ", 1)[1]
+    )
+    names = manifest["names"]
+    assert [n for n in names if n in vars(CharactersRAGDB)] == []  # nosec B101
+    assert [n for n in names if n not in vars(WorkspaceStore)] == []  # nosec B101
+    assert not hasattr(WorkspaceStore, "__getattr__")  # nosec B101
 
 
-def test_facade_rejects_other_names() -> None:
-    from tldw_Server_API.app.core.DB_Management.chacha.workspace_store import WorkspaceStore
+def test_flashcard_methods_live_on_the_store() -> None:
+    """PR J2: the flashcard bodies moved into ``FlashcardStore``, which no longer forwards to the DB."""
+    import ast as _ast
 
-    db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db.workspace_store = WorkspaceStore(db.ctx)
-    with pytest.raises(AttributeError):
-        db.workspace_store.add_note  # noqa: B018
+    from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
+
+    manifest = _ast.literal_eval(
+        Path("Helper_Scripts/chacha_split/manifests/t12_flashcards.py").read_text().split("MANIFEST = ", 1)[1]
+    )
+    names = manifest["names"]
+    assert [n for n in names if n in vars(CharactersRAGDB)] == []  # nosec B101
+    assert [n for n in names if n not in vars(FlashcardStore)] == []  # nosec B101
+    assert not hasattr(FlashcardStore, "__getattr__")  # nosec B101

@@ -3,6 +3,7 @@ import { Button, Checkbox, Modal, Tag } from "antd"
 import { AlertCircle, Download, FileText, Headphones, Play, Pause, RotateCcw, ScrollText } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
+import { READY_STATE_LABEL, UNAVAILABLE_STATE_LABEL } from "@/design-system"
 import type {
   WatchlistBriefingProjection,
   WatchlistBriefingRetryStage,
@@ -171,8 +172,8 @@ const statusLabel = (status: string, t: TFunction): string => {
     not_started: ["notStarted", "Not started"],
     queued: ["queued", "Queued"],
     running: ["running", "Running"],
-    ready: ["ready", "Ready"],
-    completed: ["ready", "Ready"],
+    ready: ["ready", READY_STATE_LABEL],
+    completed: ["ready", READY_STATE_LABEL],
     failed: ["failed", "Failed"],
     skipped: ["notSelected", "Not selected"],
     cancelled: ["cancelled", "Cancelled"],
@@ -382,7 +383,7 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
       ? ["stale", "Stale"]
       : projectedAudio.superseded_by
         ? ["superseded", "Superseded"]
-        : ["unavailable", "Unavailable"]
+        : ["unavailable", UNAVAILABLE_STATE_LABEL]
     : null
   const textReady = Boolean(projection.output) || projection.stages.persist_text?.status === "ready"
   const overallArtifactStatus = audioUnavailable && textReady
@@ -714,11 +715,11 @@ export const LatestBriefing: React.FC<LatestBriefingProps> = ({
                 {audioFailedStage
                   ? t("watchlists:overview.latest.audioFailed", "Audio failed")
                   : audioUnavailable
-                    ? t("watchlists:overview.latest.status.unavailable", "Unavailable")
+                    ? t("watchlists:overview.latest.status.unavailable", UNAVAILABLE_STATE_LABEL)
                   : noncurrentAudioStatus
                     ? t(`watchlists:overview.latest.status.${noncurrentAudioStatus[0]}`, noncurrentAudioStatus[1])
                     : audioReady
-                    ? t("watchlists:overview.latest.ready", "Ready")
+                    ? t("watchlists:overview.latest.ready", READY_STATE_LABEL)
                     : statusLabel(projection.audio?.status || projection.stages.generate_audio?.status || "not_started", t)}
               </span>
             </div>

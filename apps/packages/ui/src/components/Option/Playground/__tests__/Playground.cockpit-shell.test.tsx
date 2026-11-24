@@ -104,7 +104,10 @@ const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
 const connectionState = vi.hoisted(() => ({ isConnected: true, phase: "connected" }))
-vi.mock("@/hooks/useConnectionState", () => ({ useConnectionState: () => connectionState }))
+vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionState: (select?: (state: typeof connectionState) => unknown) =>
+    select ? select(connectionState) : connectionState
+}))
 const recentChatState = vi.hoisted(() => ({
   enabled: false,
   recent: vi.fn(),

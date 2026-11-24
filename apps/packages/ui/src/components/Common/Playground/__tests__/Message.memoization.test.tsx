@@ -19,6 +19,13 @@ const highlightSpy = vi.hoisted(() =>
 // Per-row render counts for the 50-row memo test, keyed by the row marker we
 // smuggle through `generationInfo` (MessageActionsBar receives it verbatim).
 const actionBarRenderCounts = vi.hoisted(() => new Map<number, number>())
+const actionBarProps = vi.hoisted(() => ({ last: null as Record<string, unknown> | null }))
+const audioStatusMock = vi.hoisted(() =>
+  vi.fn((_options?: Record<string, unknown>) => ({
+    healthState: "ready",
+    voicesAvailable: true
+  }))
+)
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -119,8 +126,9 @@ vi.mock("@/components/Sidepanel/Chat/ToolCallBlock", () => ({
 // Render spy: MessageActionsBar is rendered synchronously for every
 // non-editing row, so counting its invocations counts committed row renders.
 vi.mock("../MessageActionsBar", () => ({
-  MessageActionsBar: ({ generationInfo }: { generationInfo?: any }) => {
-    const rowId = generationInfo?.rowId
+  MessageActionsBar: (props: { generationInfo?: any }) => {
+    actionBarProps.last = props
+    const rowId = props.generationInfo?.rowId
     if (typeof rowId === "number") {
       actionBarRenderCounts.set(
         rowId,
@@ -181,10 +189,7 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
 }))
 
 vi.mock("@/hooks/useTldwAudioStatus", () => ({
-  useTldwAudioStatus: () => ({
-    healthState: "ready",
-    voicesAvailable: true
-  })
+  useTldwAudioStatus: audioStatusMock
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -453,6 +458,41 @@ describe("PlaygroundMessage memoization (WP-02/WP-03/WP-09)", () => {
       "lorem ipsum dolor sit amet",
       "dolor"
     )
+  })
+})
+
+describe("PlaygroundMessage audio status (TASK-15623)", () => {
+  beforeEach(() => {
+    storageState.values.clear()
+    storageState.values.set("ttsProvider", "tldw")
+    audioStatusMock.mockClear()
+    actionBarProps.last = null
+  })
+
+  it("uses the parent's audio status and keeps its own audio hook disabled", () => {
+    render(
+      <PlaygroundMessage
+        {...buildRowProps(0, 1)}
+        audioStatus={{ healthState: "unhealthy", voicesAvailable: true }}
+      />
+    )
+
+    expect(audioStatusMock).toHaveBeenCalled()
+    for (const [options] of audioStatusMock.mock.calls) {
+      expect(options).toMatchObject({ enabled: false })
+    }
+    expect(actionBarProps.last?.ttsDisabledReason).toBe(
+      "Audio service is unhealthy. Check Settings → Health."
+    )
+  })
+
+  it("runs its own audio hook when no status is passed", () => {
+    render(<PlaygroundMessage {...buildRowProps(0, 1)} />)
+
+    expect(audioStatusMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true, requireVoices: true })
+    )
+    expect(actionBarProps.last?.ttsDisabledReason).toBeNull()
   })
 })
 

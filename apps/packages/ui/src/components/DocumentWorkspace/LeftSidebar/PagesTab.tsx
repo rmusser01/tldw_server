@@ -1,10 +1,11 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { Document, Page } from "react-pdf"
+import { Document } from "react-pdf"
 import { Empty, Skeleton } from "antd"
 import { Image as ImageIcon } from "lucide-react"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
+import { ReleasingPage } from "../DocumentViewer/PdfViewer/PdfPage"
 
 const MAX_THUMBNAILS = 24
 
@@ -176,7 +177,7 @@ export const PagesTab: React.FC = () => {
                               : "border-border hover:border-primary"
                           }`}
                         >
-                          <Page
+                          <ReleasingPage
                             pageNumber={pageNumber}
                             scale={0.25}
                             renderTextLayer={false}

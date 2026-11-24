@@ -84,6 +84,26 @@ def test_collision_name_is_listed_not_rewritten(tmp_path: Path, capsys: pytest.C
     assert "collision get_x" in capsys.readouterr().out
 
 
+def test_collision_name_is_rewritten_inside_the_class_only(tmp_path: Path) -> None:
+    root = _seed(tmp_path, {"tldw_Server_API/app/api/other.py": "class Other:\n    def get_x(self): ...\n", APP: "def f(db):\n    return db.get_x()\n"})
+    before = _text(root, APP)
+    assert _callers(root) == 0
+    assert "self.s_store.get_x()" in _text(root, DB)  # self in CharactersRAGDB can only be its own method
+    assert _text(root, APP) == before  # every other receiver keeps the collision skip
+
+
+def test_an_imported_module_is_not_a_db_receiver(tmp_path: Path) -> None:
+    root = _seed(
+        tmp_path,
+        {
+            "tldw_Server_API/app/api/mod.py": "def get_x(): ...\n",
+            APP: "from tldw_Server_API.app.api import mod as mod_alias\nimport json\n\n\ndef f(db):\n    return mod_alias.get_x(), db.get_x()\n",
+        },
+    )
+    assert _callers(root) == 0
+    assert "mod_alias.get_x(), db.s_store.get_x()" in _text(root, APP)
+
+
 def test_unusual_receiver_is_reported(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _seed(tmp_path)
     (root / APP).parent.mkdir(parents=True)
@@ -341,6 +361,120 @@ def test_store_fails_closed_on_an_unmapped_private(tmp_path: Path, capsys: pytes
     assert _store(root) == 1
     assert "_mystery" in capsys.readouterr().out
     assert _text(root, S_STORE) == before
+
+
+STATIC_DB = '''
+import re
+from typing import overload
+
+
+class CharactersRAGDB:
+    _LIMIT = 5
+    _KEY_RE = re.compile("k")
+
+    def keep(self):
+        return self._pure(1) + self._cm(2)
+
+    @overload
+    @staticmethod
+    def _pure(a: int) -> int: ...
+
+    @overload
+    @staticmethod
+    def _pure(a: str) -> str: ...
+
+    @staticmethod
+    def _pure(a):
+        return CharactersRAGDB._helper(a) + 1
+
+    @staticmethod
+    def _helper(a):
+        return a
+
+    @classmethod
+    def _cm(cls, a):
+        return cls._LIMIT + cls._helper(a) + len(cls._KEY_RE.pattern)
+'''
+STATIC_MANIFEST = MANIFEST_SRC.replace('"names": ["_moved"]', '"names": ["_pure", "_helper", "_cm"], "class_constants": ["_LIMIT", "_KEY_RE"]').replace(
+    '"renames": {"_renamed": "renamed"}', '"renames": {}'
+)
+
+
+def test_store_moves_statics_classmethods_overloads_and_class_constants(tmp_path: Path) -> None:
+    _seed(tmp_path, {S_STORE: STORE_MODULE, MANIFEST_PATH: STATIC_MANIFEST}, db=STATIC_DB)
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    assert _store(tmp_path) == 0
+    store = _text(tmp_path, S_STORE)
+    assert store.count("@overload") == 2 and store.count("def _pure") == 3  # the stub moves with its implementation
+    assert "SStore._helper(a)" in store  # a class reference to a moved static now names the store class
+    assert "@classmethod" in store and "cls._helper(a)" in store  # a classmethod stays one, and ``cls`` stays
+    assert "return _LIMIT + cls._helper(a) + len(_KEY_RE.pattern)" in store  # a constant is read by its module name
+    assert "\n_LIMIT = 5\n" in store and '_KEY_RE = re.compile("k")' in store  # class constants become module constants
+    db = _text(tmp_path, DB)
+    assert "_LIMIT" not in db and "_pure" not in db.split("def keep")[0] and "self.s_store._pure(1)" in db
+    assert _verify(tmp_path) == 0
+    assert diffpairs.main([str(tmp_path / MANIFEST_PATH), "--base", "HEAD", "--root", str(tmp_path)]) == 0
+
+
+def _static_tree(root: Path, db: str = STATIC_DB) -> Path:
+    _seed(root, {S_STORE: STORE_MODULE, MANIFEST_PATH: STATIC_MANIFEST}, db=db)
+    _git(root, "init", "-q")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    return root
+
+
+def _diffpairs(root: Path) -> int:
+    return diffpairs.main([str(root / MANIFEST_PATH), "--base", "HEAD", "--root", str(root)])
+
+
+def _edit_store(root: Path, old: str, new: str) -> None:
+    text = _text(root, S_STORE)
+    assert old in text
+    (root / S_STORE).write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "old, new, word",
+    [
+        ("cls._helper(a) + len", "cls._nope(a) + len", "_nope"),  # (a) cls.<name outside the group and the constants>
+        ("CharactersRAGDB._helper(a) + 1", "CharactersRAGDB._nope(a) + 1", "_nope"),  # (b) the class name, same
+        ("    @staticmethod\n    def _helper(a):", "    @functools.cache\n    @staticmethod\n    def _helper(a):", "decorator"),  # (e)
+    ],
+)
+def test_store_fails_closed_on_a_class_reference_or_decorator_outside_the_group(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], old: str, new: str, word: str
+) -> None:
+    root = _static_tree(tmp_path, STATIC_DB.replace(old, new))
+    assert _store(root) == 1
+    assert word in capsys.readouterr().out
+    assert "def _pure" not in _text(root, S_STORE)  # nothing was written
+
+
+def test_diffpairs_and_verify_reject_a_class_other_than_the_store_class(tmp_path: Path) -> None:  # (c)
+    root = _static_tree(tmp_path)
+    assert _store(root) == 0
+    _edit_store(root, "SStore._helper(a)", "Other._helper(a)")
+    assert _diffpairs(root) == 1
+    assert _verify(root) == 1
+
+
+def test_a_one_token_edit_to_a_moved_class_constant_fails_verify_and_diffpairs(tmp_path: Path) -> None:  # (d)
+    root = _static_tree(tmp_path)
+    assert _store(root) == 0
+    _edit_store(root, "_LIMIT = 5", "_LIMIT = 6")
+    assert _verify(root) == 1
+    assert _diffpairs(root) == 1
+
+
+def test_a_hand_edit_to_a_middle_overload_stub_fails_verify_and_diffpairs(tmp_path: Path) -> None:  # m1
+    root = _static_tree(tmp_path)
+    assert _store(root) == 0
+    _edit_store(root, "def _pure(a: str) -> str: ...", "def _pure(a: str) -> bytes: ...")
+    assert _verify(root) == 1
+    assert _diffpairs(root) == 1
 
 
 def test_verify_passes_on_tool_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

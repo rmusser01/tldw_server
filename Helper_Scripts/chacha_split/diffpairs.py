@@ -9,7 +9,8 @@ walks both trees in parallel. Only the header is normalized: the receiver parame
 
 The walk descends while node types, scalar fields and list lengths match. The first mismatch under a node is
 recorded as ``(unparse(old), unparse(new))`` and not descended into. A recorded pair is allowed when the old
-side is rooted at ``self``/``cls`` (an attribute, a call on one, or the bare name), or is a manifest rename.
+side is rooted at ``self``/``cls`` (an attribute, a call on one, or the bare name), is a manifest rename, or (store mode)
+is the bare ``CharactersRAGDB`` that became the store class.
 Any other pair, a changed literal, operator or control flow, exits 1. Exits 0 when every pair is allowed.
 In constants mode each constant's value is walked the same way, and any difference exits 1.
 """
@@ -47,11 +48,9 @@ def git_show(root: Path, ref: str, path: str) -> str:
     return result.stdout
 
 
-def find_def(body: list[ast.stmt], name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
-    for node in body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            return node
-    return None
+def find_defs(body: list[ast.stmt], name: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Every def of a name in source order: an ``@overload`` function has several."""
+    return [n for n in body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name]
 
 
 def normalized_base(node: ast.FunctionDef | ast.AsyncFunctionDef, functions_mode: bool) -> ast.FunctionDef | ast.AsyncFunctionDef:
@@ -102,8 +101,10 @@ def _root(text: str) -> str:
     return text
 
 
-def allowed(old: ast.AST, new: ast.AST, renames: dict[str, str]) -> bool:
+def allowed(old: ast.AST, new: ast.AST, renames: dict[str, str], store_class: str | None = None) -> bool:
     if _root(ast.unparse(old)) in {"self", "cls"}:
+        return True
+    if store_class and ast.unparse(old) == CLASS and ast.unparse(new) == store_class:  # ``CharactersRAGDB.<m>`` -> ``<Store>.<m>``
         return True
     return (
         isinstance(old, ast.Attribute)
@@ -125,7 +126,7 @@ def constant_value(body: list[ast.stmt], name: str) -> ast.expr | None:
 def check_constants(base_tree: ast.Module, base_class: ast.ClassDef, head_tree: ast.Module, manifest: dict, counts: Counter, bad: list[str]) -> int:
     """A moved constant keeps its value exactly: any differing node is disallowed (constants mode)."""
     checked = 0
-    for name in manifest["constants"]:
+    for name in [*manifest.get("constants", []), *manifest.get("class_constants", [])]:
         old = constant_value(base_class.body, name) or constant_value(base_tree.body, name)
         new = constant_value(head_tree.body, name)
         if old is None or new is None:
@@ -149,21 +150,21 @@ def check_manifest(root: Path, ref: str, manifest: dict, counts: Counter, bad: l
     if manifest.get("store_class"):
         head_body = next(n for n in head_tree.body if isinstance(n, ast.ClassDef) and n.name == manifest["store_class"]).body
     renames = manifest.get("renames", {})
-    checked = check_constants(base_tree, base_class, head_tree, manifest, counts, bad) if manifest["mode"] == "constants" else 0
+    checked = check_constants(base_tree, base_class, head_tree, manifest, counts, bad) if manifest["mode"] in {"constants", "store"} else 0
     for name in manifest["names"]:
-        old = find_def(base_class.body, name)
-        new = find_def(head_body, name)
-        if old is None or new is None:
-            bad.append(f"{name}: def missing in {'base' if old is None else 'head'}")
+        olds, news = find_defs(base_class.body, name), find_defs(head_body, name)
+        if not olds or not news or len(olds) != len(news):
+            bad.append(f"{name}: {len(olds)} defs in the base, {len(news)} in the head")
             continue
-        pairs: list[tuple[ast.AST, ast.AST]] = []
-        walk(normalized_base(old, functions_mode), new, pairs)
-        checked += 1
-        for a, b in pairs:
-            key = (ast.unparse(a), ast.unparse(b))
-            counts[key] += 1
-            if not allowed(a, b, renames):
-                bad.append(f"{name}: {key[0]!r} -> {key[1]!r}")
+        for old, new in zip(olds, news, strict=True):
+            pairs: list[tuple[ast.AST, ast.AST]] = []
+            walk(normalized_base(old, functions_mode), new, pairs)
+            checked += 1
+            for a, b in pairs:
+                key = (ast.unparse(a), ast.unparse(b))
+                counts[key] += 1
+                if not allowed(a, b, renames, manifest.get("store_class")):
+                    bad.append(f"{name}: {key[0]!r} -> {key[1]!r}")
     return checked
 
 

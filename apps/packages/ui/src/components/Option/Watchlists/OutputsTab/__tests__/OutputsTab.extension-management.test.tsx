@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { OutputsTab } from "../OutputsTab"
 
@@ -131,6 +132,7 @@ vi.mock("@/services/watchlists", () => ({
   downloadWatchlistOutput: (...args: unknown[]) => mocks.downloadWatchlistOutputMock(...args),
   downloadWatchlistOutputBinary: (...args: unknown[]) => mocks.downloadWatchlistOutputBinaryMock(...args),
   fetchWatchlistJobs: (...args: unknown[]) => mocks.fetchWatchlistJobsMock(...args),
+  fetchWatchlists: async () => ({ items: [watchlist], total: 1 }),
   fetchWatchlistOutputs: (...args: unknown[]) => mocks.fetchWatchlistOutputsMock(...args),
   fetchWatchlistTemplates: (...args: unknown[]) => mocks.fetchWatchlistTemplatesMock(...args),
   recordWatchlistsOnboardingTelemetry: vi.fn(() => Promise.resolve())
@@ -182,30 +184,24 @@ const buildOutput = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
+const watchlist = {
+  id: 42,
+  name: "Healthcare ransomware",
+  domain: "cti_osint",
+  status: "active",
+  priority: "critical",
+  tags: [],
+  created_at: "2026-05-15T00:00:00Z"
+}
+
 const baseState = (overrides: Record<string, unknown> = {}) => ({
-  watchlists: [
-    {
-      id: 42,
-      name: "Healthcare ransomware",
-      domain: "cti_osint",
-      status: "active",
-      priority: "critical",
-      tags: [],
-      created_at: "2026-05-15T00:00:00Z"
-    }
-  ],
   selectedWatchlistId: 42,
-  outputs: [buildOutput()],
-  outputsLoading: false,
-  outputsTotal: 1,
   outputsPage: 1,
   outputsPageSize: 20,
   outputsJobFilter: null,
   outputsRunFilter: null,
   outputPreviewOpen: false,
   selectedOutputId: null,
-  setOutputs: vi.fn(),
-  setOutputsLoading: vi.fn(),
   setOutputsPage: vi.fn(),
   setOutputsPageSize: vi.fn(),
   setOutputsJobFilter: vi.fn(),
@@ -246,7 +242,7 @@ describe("OutputsTab constrained management", () => {
     expect(screen.getByRole("button", { name: "Show advanced filters" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Create report" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Show failed only" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Show failed only" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Open failed runs" })).toBeInTheDocument()
 
     const card = screen.getByTestId("watchlists-output-card-18")
