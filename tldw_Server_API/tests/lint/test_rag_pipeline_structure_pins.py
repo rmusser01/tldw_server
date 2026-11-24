@@ -434,6 +434,21 @@ def test_state_slots_cover_every_state_attribute() -> None:
     assert bad == []
 
 
+def test_every_state_slot_is_read_or_written() -> None:
+    cls = _state_class()
+    slots = {
+        n
+        for s in cls.body
+        if isinstance(s, (ast.Assign, ast.AnnAssign))
+        for n in (ast.literal_eval(s.value) if any(isinstance(t, ast.Name) and t.id == "__slots__" for t in (s.targets if isinstance(s, ast.Assign) else [s.target])) else ())
+    }
+    used = set(_attrs_of(cls, "self"))
+    for path in [PIPELINE_FILE, *sorted(PIPELINE_PKG.rglob("*.py"))]:
+        used |= set(_attrs_of(parse_tree(RAG_SERVICE)[path], "state"))
+    # the 35 mutated parameters are set by ``__init__`` through ``setattr``
+    assert slots - used - MUTATED_PARAMS == set()
+
+
 def test_state_attribute_scan_sees_a_seeded_attribute() -> None:
     tree = ast.parse("state.a = 1\nprint(state.b)\ndel state.c\nother.d")
     assert set(_attrs_of(tree, "state")) == {"a", "b", "c"}
