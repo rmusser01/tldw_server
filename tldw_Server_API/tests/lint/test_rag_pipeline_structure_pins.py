@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import re
+import symtable
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -319,3 +320,105 @@ def test_rerun_chain_rewrite_reads_through_config_and_state() -> None:
     src = ast.parse("f(a=rcfg.retrieval.a, b=state.b, c=False if rcfg.cache.d else state.c)").body[0].value  # type: ignore[attr-defined]
     got = {k.arg: ast.unparse(_Chain().visit(k.value)) for k in src.keywords}
     assert got == {"a": "a", "b": "b", "c": "False if d else c"}
+
+
+# ---- the run configuration (Task 3) -----------------------------------------------------------
+
+FUNC = "unified_rag_pipeline"
+CONFIG_FILE = PIPELINE_PKG / "run_config.py"
+PROLOGUE = "rcfg = RagRunConfig.from_call_locals(locals())"
+# The 35 parameters the body assigns; they stay bare until Task 4 moves them into ``state``.
+MUTATED_PARAMS = frozenset(
+    {
+        "adaptive_time_budget_sec", "date_range", "enable_cache", "enable_date_filter", "enable_discussion_search",
+        "enable_hyde", "enable_multi_vector_passages", "enable_numeric_fidelity", "enable_parent_expansion",
+        "enable_reranking", "enable_web_fallback", "expand_query", "fts_level", "generation_prompt", "hybrid_alpha",
+        "hyde_model", "hyde_provider", "include_parent_document", "low_confidence_behavior", "media_db_path",
+        "mv_max_spans", "mv_span_chars", "mv_stride", "nli_model", "numeric_fidelity_behavior",
+        "parent_context_size", "parent_max_tokens", "query", "require_hard_citations", "reranking_strategy",
+        "resolved_request", "retrieval_plan", "sql_retriever", "strict_extractive", "top_k",
+    }
+)  # fmt: skip
+
+
+def _pipeline_fn() -> ast.AsyncFunctionDef:
+    tree = parse_tree(RAG_SERVICE)[PIPELINE_FILE]
+    return next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == FUNC)
+
+
+def _config_fields() -> dict[str, set[str]]:
+    """``{group: {field, ...}}`` read from ``run_config.py`` without importing it."""
+    classes = {n.name: n for n in parse_tree(RAG_SERVICE)[CONFIG_FILE].body if isinstance(n, ast.ClassDef)}
+
+    def names(cls: ast.ClassDef) -> list[tuple[str, str]]:
+        return [(s.target.id, ast.unparse(s.annotation)) for s in cls.body if isinstance(s, ast.AnnAssign) and isinstance(s.target, ast.Name)]
+
+    return {group: {f for f, _ in names(classes[cls])} for group, cls in names(classes["RagRunConfig"])}
+
+
+def test_config_is_built_first_from_the_call_locals() -> None:
+    body = _pipeline_fn().body
+    assert isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)  # the docstring
+    assert ast.dump(body[1]) == ast.dump(ast.parse(PROLOGUE).body[0])
+
+
+def _bare_parameter_reads(source: str, func: str, allowed: frozenset[str]) -> set[str]:
+    """Parameters of top-level ``func`` read by name, in its scope or any scope inside it, that are not in ``allowed``."""
+    top = symtable.symtable(source, "<pipeline>", "exec")
+    table = next(t for t in top.get_children() if t.get_name() == func)
+    params = set(table.get_parameters()) - allowed
+    out: set[str] = set()
+
+    def walk(t: symtable.SymbolTable, shadowed: frozenset[str]) -> None:
+        own: set[str] = set()
+        for name in params - shadowed:
+            try:
+                sym = t.lookup(name)
+            except KeyError:
+                continue
+            if t is table:
+                if sym.is_referenced():
+                    out.add(name)
+            elif sym.is_free():
+                out.add(name)
+            elif sym.is_local():
+                own.add(name)  # a nested scope's own binding hides the parameter from its children
+        for child in t.get_children():
+            walk(child, shadowed | own)
+
+    walk(table, frozenset())
+    return out
+
+
+def test_body_reads_read_only_parameters_through_rcfg() -> None:
+    fn = _pipeline_fn()
+    assert {a.arg for a in fn.args.args} >= MUTATED_PARAMS and len(MUTATED_PARAMS) == 35
+    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), FUNC, MUTATED_PARAMS) == set()
+
+
+def test_bare_read_scan_sees_a_seeded_read() -> None:
+    src = "async def f(a, b, c, **kwargs):\n    rcfg = g(locals())\n    return [a, lambda: b, kwargs]\n"
+    assert _bare_parameter_reads(src, "f", frozenset({"c"})) == {"a", "b", "kwargs"}
+    shadowed = "async def f(a, **kwargs):\n    def g(**kwargs):\n        return lambda: kwargs\n    return g\n"
+    assert _bare_parameter_reads(shadowed, "f", frozenset({"a"})) == set()
+
+
+def test_every_rcfg_read_names_a_config_field() -> None:
+    fields = _config_fields()
+    assert len(fields) == 17 and sum(len(v) for v in fields.values()) == 246
+    bad: list[str] = []
+    files = [PIPELINE_FILE, *sorted(p for p in PIPELINE_PKG.rglob("*.py") if p != CONFIG_FILE)]
+    for path in files:
+        tree = parse_tree(RAG_SERVICE)[path]
+        parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "rcfg"):
+                continue
+            outer = parents.get(n)
+            if n.attr not in fields:
+                bad.append(f"{path.name}:{n.lineno}: rcfg.{n.attr} is not a group")
+            elif not (isinstance(outer, ast.Attribute) and outer.value is n):
+                bad.append(f"{path.name}:{n.lineno}: rcfg.{n.attr} is not followed by a field")
+            elif outer.attr not in fields[n.attr]:
+                bad.append(f"{path.name}:{n.lineno}: rcfg.{n.attr}.{outer.attr} is not a field")
+    assert bad == []

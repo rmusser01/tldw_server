@@ -16,6 +16,8 @@ read with ``ast.literal_eval`` and never imported. Keys (all optional but ``base
     hoist        {closure name: method name}                 closure -> ``PipelineState`` method
     moves        [{"name", "module", "span": [a, b], "doc", "noqa": [line]}]
     cells        [[a, b]]                                    extra cells for ``shared``
+    prologue     "rcfg = ..."                                one statement inserted first in the function, after its docstring
+    imports      ["from .x import Y"]                        module-level imports added after the file's last import
     entry_split  true
     file, func, pkg    the pipeline file, function and package directory (defaults below; tests override)
 
@@ -69,6 +71,8 @@ DEFAULTS: dict[str, Any] = {
     "moves": [],
     "cells": [],
     "entry_split": False,
+    "prologue": "",
+    "imports": [],
 }
 NEW = object()  # a node the tool created: it carries no scope annotation
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -852,6 +856,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # V8: a name the manifest introduces must not already be used in the function.
     used = fn_names(fn)
     intro = {t.split(".")[0] for t in rewrite.values()} | ({"rcfg"} if hidden else set()) | ({"state"} if publish else set())
+    intro |= {"rcfg"} if m["prologue"] else set()
     intro |= ({"up"} if moves or hoist else set()) | ({"_run_state"} if hoist else set()) | {f"_{x.module}" for x in moves}
     out.errors += [f"V8: {n} is already a name in {fn.name}" for n in sorted(intro & used)]
 
@@ -962,6 +967,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
                 ):
                     n.func = ast.Name(mv.name, ast.Load())
 
+    if m["prologue"]:
+        fn.body.insert(docstring_len(fn), ast.parse(m["prologue"]).body[0])
     out.fn = fn
     if m["entry_split"]:
         body = fn.body
@@ -980,6 +987,11 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         fn.body = body[:i0] + [shim]
         out.entry = new
     return out
+
+
+def docstring_len(fn: Any) -> int:
+    b = fn.body
+    return 1 if b and isinstance(b[0], ast.Expr) and isinstance(getattr(b[0], "value", None), ast.Constant) and isinstance(b[0].value.value, str) else 0
 
 
 def free_locals(d: Any, key: Any) -> set[str]:
@@ -1001,8 +1013,8 @@ def expected_module(m: dict, src: Src, b: Built) -> ast.Module:
     mods = list(dict.fromkeys([x.module for x in b.moves] + (["run_state"] if m["hoist"] else [])))
     have = {ast.dump(s) for s in body}
     last = max((j for j, s in enumerate(body) if isinstance(s, (ast.Import, ast.ImportFrom))), default=-1)
-    add = [import_stmt(m, x) for x in mods if ast.dump(import_stmt(m, x)) not in have]
-    body[last + 1 : last + 1] = add
+    wanted = [ast.parse(x).body[0] for x in m["imports"]] + [import_stmt(m, x) for x in mods]
+    body[last + 1 : last + 1] = [s for s in wanted if ast.dump(s) not in have]
     return ast.Module(body=body, type_ignores=[])
 
 
@@ -1390,6 +1402,12 @@ def run_apply(root: Path, m: dict) -> list[str]:
     # the pipeline function itself
     f_lo, f_hi = stmt_start(fn), fn.end_lineno
     new_f = render(lines, cont, f_lo, f_hi, 0, edits, cuts)
+    if m["prologue"]:
+        f = ast.parse(new_f).body[0]
+        first = f.body[docstring_len(f)]
+        frows = new_f.split("\n")
+        frows[stmt_start(first) - 1 : stmt_start(first) - 1] = [" " * first.col_offset + m["prologue"], ""]
+        new_f = "\n".join(frows)
     if m["entry_split"]:
         new_f = split_entry(new_f)
     rows = rows_text[: f_lo - 1] + new_f.rstrip("\n").split("\n") + rows_text[f_hi:]
@@ -1397,7 +1415,8 @@ def run_apply(root: Path, m: dict) -> list[str]:
     mods = list(dict.fromkeys([x.module for x in moves] + (["run_state"] if m["hoist"] else [])))
     tree = ast.parse(new_text)
     have = {ast.dump(s) for s in tree.body}
-    imps = [f"from .{m['pkg']} import {x} as _{x}" for x in mods if ast.dump(import_stmt(m, x)) not in have]
+    imps = [x for x in m["imports"] if ast.dump(ast.parse(x).body[0]) not in have]
+    imps += [f"from .{m['pkg']} import {x} as _{x}" for x in mods if ast.dump(import_stmt(m, x)) not in have]
     if imps:
         rows = new_text.split("\n")
         at = last_import_row(tree)

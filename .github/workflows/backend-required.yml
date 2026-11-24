@@ -429,6 +429,7 @@ jobs:
             tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval_clarification_pipeline.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_endpoint_contract_cleanup.py \
+            tldw_Server_API/tests/RAG_NEW/unit/test_rag_pipeline_types.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_result_mapping_core.py \
@@ -488,6 +489,7 @@ jobs:
             tldw_Server_API/tests/RAG_NEW/unit/test_pre_retrieval_clarification_pipeline.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_endpoint_contract_cleanup.py \
+            tldw_Server_API/tests/RAG_NEW/unit/test_rag_pipeline_types.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_result_mapping_core.py \
