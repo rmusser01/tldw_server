@@ -8,10 +8,9 @@ import { ResearchWorkspace } from "../index"
 
 
 // Match the router context provided by both deployed shells.
-const render: typeof renderUI = (ui, options) =>
+const render = (ui: Parameters<typeof renderUI>[0]) =>
   renderUI(ui, {
-    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
-    ...options
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>
   })
 
 const testDirname = dirname(fileURLToPath(import.meta.url))

@@ -9,7 +9,7 @@ import {
 import React from "react"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Storage as PlasmoStorage } from "@plasmohq/storage"
+import { Storage as PlasmoStorage } from "../../../../../../../tldw-frontend/extension/shims/plasmo-storage"
 import { useStoreMessageOption } from "@/store/option"
 import {
   conversationDraftKey,
@@ -256,7 +256,7 @@ const mount = (
     },
     { initialProps: { surface } }
   )
-const fresh = (id: string, temporary = false): ChatDraftAddress => ({
+const fresh = (id: string, temporary = false): Extract<ChatDraftAddress, { kind: "fresh" }> => ({
   kind: "fresh",
   id,
   temporary,

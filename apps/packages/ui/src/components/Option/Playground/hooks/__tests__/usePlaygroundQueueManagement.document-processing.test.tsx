@@ -526,7 +526,7 @@ it("does not publish queued full settings or context after the model setter sync
   const deps = baseDeps({ uploadedFiles: [], setSelectedModel: core.setSelectedModel, setChatMode: core.setChatMode, setWebSearch: core.setWebSearch,
     setSelectedSystemPrompt: core.setSelectedSystemPrompt, setToolChoice: core.setToolChoice, setUseOCR: core.setUseOCR });
   renderHook(() => usePlaygroundQueueManagement(deps));
-  const replacement = { historyId: "replacement-full-queue", serverChatId: null, selectedModel: "replacement-model", chatMode: "rag", webSearch: true, selectedSystemPrompt: "REPLACEMENT SYSTEM PROMPT", toolChoice: "none" as const, useOCR: true };
+  const replacement = { historyId: "replacement-full-queue", serverChatId: null, selectedModel: "replacement-model", chatMode: "rag" as const, webSearch: true, selectedSystemPrompt: "REPLACEMENT SYSTEM PROMPT", toolChoice: "none" as const, useOCR: true };
   const unsubscribe = useStoreMessageOption.subscribe(state => {
     if (state.selectedModel !== "openai:gpt-4o-mini") return;
     unsubscribe(); state.startNewChatDraft(); useStoreMessageOption.setState(replacement);

@@ -196,15 +196,15 @@ describe("RunsTab benchmark run mode", () => {
     const input = container.querySelector(".ant-space-compact input") as HTMLInputElement
     expect(input).toHaveValue("run-idem-1")
     expect(screen.getByLabelText("Idempotency key")).toBe(input)
-    fireEvent.click(screen.getByRole("button", { name: "Regenerate", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }))
     await waitFor(() => expect(input).toHaveValue("run-idem-2"))
     fireEvent.change(input, { target: { value: "manual-run-key" } })
-    fireEvent.click(within(input.closest("form")!).getByRole("button", { name: "Start run", exact: true }))
+    fireEvent.click(within(input.closest("form")!).getByRole("button", { name: "Start run" }))
     await waitFor(() => expect(createRun).toHaveBeenCalledWith(expect.objectContaining({
       evalId: "eval-key", idempotencyKey: "manual-run-key",
     })))
     await waitFor(() => expect(input).toHaveValue("run-idem-3"))
-    fireEvent.click(within(input.closest("form")!).getByRole("button", { name: "Start run", exact: true }))
+    fireEvent.click(within(input.closest("form")!).getByRole("button", { name: "Start run" }))
     await waitFor(() => expect(createRun).toHaveBeenCalledTimes(2))
     expect(createRun.mock.calls.map(([request]) => request.idempotencyKey)).toEqual(["manual-run-key", "run-idem-3"])
   })
@@ -219,13 +219,13 @@ describe("RunsTab benchmark run mode", () => {
     render(<RunsTab />)
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }))
     const input = screen.getByLabelText("Idempotency key")
-    fireEvent.click(within(input.closest("form")!).getByRole("button", { name: "Start run", exact: true }))
+    fireEvent.click(within(input.closest("form")!).getByRole("button", { name: "Start run" }))
     await waitFor(() => expect(createRun).toHaveBeenCalledTimes(1))
     try {
       if (change === "manual edit") {
         fireEvent.change(input, { target: { value: "newer-manual-key" } })
       } else {
-        fireEvent.click(screen.getByRole("button", { name: "Regenerate", exact: true }))
+        fireEvent.click(screen.getByRole("button", { name: "Regenerate" }))
       }
       const newerKey = (input as HTMLInputElement).value
       expect(newerKey).not.toBe("run-idem-1")

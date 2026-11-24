@@ -79,7 +79,7 @@ const fixture = () => {
   }))
   let viewCurrent = true,
     sourceCurrent = true
-  const onSubmit = vi.fn(async () => ({ status: "submitted" as const }))
+  const onSubmit = vi.fn<Parameters<typeof createRegenerateLastMessage>[0]["onSubmit"]>(async () => ({ status: "submitted" }))
   const options = {
     historySelection: {
       getCurrent: () => state
@@ -172,7 +172,8 @@ describe("native Regenerate action intent", () => {
           id: "new",
           name: "You",
           isBot: false,
-          message: "New turn"
+          message: "New turn",
+          sources: []
         })
       else f.messages[boundary === "reply" ? 1 : 0].message = "Changed row"
       expect(await f.regenerate()).toMatchObject({

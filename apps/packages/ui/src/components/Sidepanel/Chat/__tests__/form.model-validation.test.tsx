@@ -290,10 +290,10 @@ describe("sidebar model validation", () => {
       await waitForCatalog();
       fireEvent.click(screen.getByTestId(id));
       expect(screen.getByLabelText("Message")).toHaveValue(message);
-      fireEvent.click(screen.getByRole("button", { name: "Character controls", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Character controls" }));
       fireEvent.click(screen.getByRole("button", { name: "Close character controls" }));
       expect(screen.getByLabelText("Message")).toHaveValue(message);
-      fireEvent.click(screen.getByRole("button", { name: "Send", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
       await waitFor(() => expect(mocks.send).toHaveBeenCalledExactlyOnceWith(message, "", undefined));
       expect(mocks.queue).not.toHaveBeenCalled();
     } finally { useConnectionStore.setState({ state: previous }); }

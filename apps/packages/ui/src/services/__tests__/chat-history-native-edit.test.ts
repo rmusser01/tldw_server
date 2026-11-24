@@ -32,7 +32,10 @@ const owner = () => ({
   },
   validate_lease: () => true
 })
-const capture = (version = 1, text = original): HistorySelectionCaptureV1 => {
+// Keep the simulated wire payload editable while each test arranges its response.
+type MutableCapture<T> = { -readonly [Key in keyof T]: MutableCapture<T[Key]> }
+
+const capture = (version = 1, text = original): MutableCapture<HistorySelectionCaptureV1> => {
   const nodes = [
     {
       id: "u",
@@ -481,14 +484,20 @@ describe("native leaf Delete authority", () => {
   })
   it("rejects a hidden descendant before a destructive request", async () => {
     const { native, source } = await setup()
-    const changed = structuredClone(source)
-    changed.snapshot.nodes.push({
-      id: "hidden",
-      revision: "hidden",
-      parent_id: "a",
-      role: "user",
-      settled: true
-    })
+    const originalCapture = structuredClone(source)
+    const changed: HistorySelectionCaptureV1 = {
+      ...originalCapture,
+      snapshot: {
+        ...originalCapture.snapshot,
+        nodes: [...originalCapture.snapshot.nodes, {
+          id: "hidden",
+          revision: "hidden",
+          parent_id: "a",
+          role: "user",
+          settled: true
+        }]
+      }
+    }
     await expect(
       service.deleteNativeHistoryMessage(native, changed, target)
     ).rejects.toThrow("message_has_descendants")
@@ -571,7 +580,7 @@ describe("native leaf Delete authority", () => {
     ).rejects.toBe(conflict)
     expect(io.remove).toHaveBeenCalledOnce()
   })
-  const refreshed = (source: HistorySelectionCaptureV1) => {
+  const refreshed = (source: ReturnType<typeof capture>) => {
     const result = structuredClone(source)
     result.view = {
       ...source.view,

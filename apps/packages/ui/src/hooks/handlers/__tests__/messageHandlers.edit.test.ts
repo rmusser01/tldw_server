@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ChatHistory, Message } from "@/store/option"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { NativeHistoryEditResend } from "@/types/chat-modes"
+import type { HistoryViewSelectionV1 } from "@/types/history-selection"
 const writes = vi.hoisted(() => vi.fn(async () => undefined))
 vi.mock("@/db/dexie/helpers", () => ({ updateMessageById: writes }))
 import { createEditMessage } from "../messageHandlers"
@@ -111,7 +114,7 @@ describe("current edit outcomes", () => {
     const setMessages = vi.fn()
     const setHistory = vi.fn()
     const edit = createEditMessage({
-      messages: [{ id: "u", name: "You", isBot: false, message: "Before" }],
+      messages: [{ id: "u", name: "You", isBot: false, sources: [], message: "Before" }],
       history: [],
       historyId: "chat",
       setMessages,
@@ -137,7 +140,7 @@ describe("current edit outcomes", () => {
     const setMessages = vi.fn()
     const setHistory = vi.fn()
     const edit = createEditMessage({
-      messages: [{ id: "u", name: "You", isBot: false, message: "Before" }],
+      messages: [{ id: "u", name: "You", isBot: false, sources: [], message: "Before" }],
       history: [],
       historyId: "chat",
       setMessages,
@@ -167,7 +170,7 @@ it("a retained edit cannot adopt a newer rendered view before writing", async ()
     return () => epoch === token
   }
   const edit = createEditMessage({
-    messages: [{ id: "same", name: "You", isBot: false, message: "Original" }],
+    messages: [{ id: "same", name: "You", isBot: false, sources: [], message: "Original" }],
     history: [],
     historyId: "same-chat",
     setMessages: vi.fn(),
@@ -191,7 +194,7 @@ it("an acknowledged edit preserves a row appended during the write", async () =>
     release = accept
   })
   const original = [
-    { id: "edited", name: "You", isBot: false, message: "Original" }
+    { id: "edited", name: "You", isBot: false, sources: [], message: "Original" }
   ]
   let live = original
   const setMessages = vi.fn((next) => {
@@ -212,7 +215,7 @@ it("an acknowledged edit preserves a row appended during the write", async () =>
   const attempt = edit(0, "Saved edit", true, false)
   live = [
     ...live,
-    { id: "new", name: "You", isBot: false, message: "Newer appended row" }
+    { id: "new", name: "You", isBot: false, sources: [], message: "Newer appended row" }
   ]
   release()
   expect(await attempt).toEqual({ status: "submitted" })
@@ -229,7 +232,7 @@ it("retirement during message publication prevents obsolete history publication"
   let current = true
   const setHistory = vi.fn()
   const edit = createEditMessage({
-    messages: [{ id: "u", name: "You", isBot: false, message: "Original" }],
+    messages: [{ id: "u", name: "You", isBot: false, sources: [], message: "Original" }],
     history: [],
     historyId: "chat",
     setMessages: () => {
@@ -248,40 +251,79 @@ it("retirement during message publication prevents obsolete history publication"
   expect(setHistory).not.toHaveBeenCalled()
 })
 
+// These handler tests only read the mounted selection. Native I/O is probed by the sender tests.
+const nativeEditSelection = (
+  target: Message,
+  revision = "u1",
+  conversationId = "chat",
+  selectionRevision = 1
+): HistorySelectionController => {
+  const view = {
+    owner_key: "owner",
+    conversation_id: conversationId,
+    view_session_id: "edit-test",
+    selection_revision: selectionRevision,
+    interpretation: { kind: "parent_graph_v1" },
+    cursor: { kind: "after_message", message_id: target.id! }
+  } satisfies HistoryViewSelectionV1
+  const row = { id: target.id!, revision, role: "user", parent_id: null, settled: true }
+  const storageDigest = "storage"
+  const getCurrent: HistorySelectionController["getCurrent"] = () => ({
+    status: "ready",
+    owner: {
+      kind: "native",
+      owner_key: view.owner_key,
+      conversation_id: conversationId,
+      request_scope: {
+        config: { serverUrl: "https://edit.test", authMode: "single-user" },
+        userId: null
+      },
+      validate_lease: () => true
+    },
+    view,
+    capture: {
+      status: "captured",
+      purpose: "send",
+      view,
+      rows: [row],
+      selected_content: [{ id: row.id, revision, message: target.message, images: target.images ?? [] }],
+      storage_context_digest: storageDigest,
+      snapshot: {
+        version: 1,
+        owner_key: view.owner_key,
+        conversation_id: conversationId,
+        fences: { conversation: "1", history: "1", settings: "1" },
+        nodes: [row],
+        source_digest: "source",
+        storage_context_digest: storageDigest,
+        interpretation_status: view.interpretation
+      }
+    },
+    settingsQualified: false,
+    bookmarkScope: null,
+    forkCandidate: null,
+    forkSettings: null,
+    error: null,
+    pending: null
+  })
+  return { getCurrent } as HistorySelectionController
+}
+
 it("native edit-resend submits a detached owned intent without editing or replacing originals", async () => {
   let release!: () => void
   const held = new Promise<void>((done) => {
     release = done
   })
   const original = [
-    { id: "user", name: "You", isBot: false, message: "Original  \n" }
+    { id: "user", name: "You", isBot: false, sources: [], message: "Original  \n" }
   ]
-  const state = {
-    status: "ready",
-    owner: {
-      kind: "native",
-      owner_key: "owner",
-      conversation_id: "native-chat"
-    },
-    view: {
-      owner_key: "owner",
-      conversation_id: "native-chat",
-      selection_revision: 4
-    },
-    capture: {
-      status: "captured",
-      snapshot: {
-        nodes: [{ id: "user", role: "user", revision: "canonical-revision" }]
-      }
-    }
-  }
   const setMessages = vi.fn()
   const setHistory = vi.fn()
   const mutate = vi.fn(async () => {})
   const isEditorCurrent = () => true
-  const onSubmit = vi.fn(async (_input) => {
+  const onSubmit = vi.fn(async (_input: { historyEditResend: NativeHistoryEditResend }) => {
     await held
-    return { status: "submitted" }
+    return { status: "submitted" as const }
   })
   const edit = createEditMessage({
     messages: original,
@@ -293,9 +335,9 @@ it("native edit-resend submits a detached owned intent without editing or replac
     mutate,
     onSubmit,
     validateBeforeSubmitFn: () => true,
-    historySelection: { getCurrent: () => state }
-  } as Parameters<typeof createEditMessage>[0])
-  const attempt = (edit as (...args: unknown[]) => Promise<unknown>)(
+    historySelection: nativeEditSelection(original[0], "canonical-revision", "native-chat", 4)
+  })
+  const attempt = edit(
     0,
     "Edited  \n",
     true,
@@ -336,29 +378,17 @@ it("native edit-resend submits a detached owned intent without editing or replac
 it.each(["images", "documents", "metadata"])(
   "native edit rejects displayed %s before discarding payload or dispatching",
   async (kind) => {
-    const target = {
+    const target: Message = {
       id: "user",
       name: "You",
       isBot: false,
+      sources: [],
       message: "Original",
       ...(kind === "images"
         ? { images: ["first", "second"] }
         : kind === "documents"
-          ? { documents: [{}] }
+          ? { documents: [{ type: "file" }] }
           : { metadataExtra: { tool_calls: [] } })
-    }
-    const state = {
-      status: "ready",
-      owner: { kind: "native" },
-      view: {
-        owner_key: "owner",
-        conversation_id: "chat",
-        selection_revision: 1
-      },
-      capture: {
-        status: "captured",
-        snapshot: { nodes: [{ id: "user", role: "user", revision: "u1" }] }
-      }
     }
     const onSubmit = vi.fn(),
       mutate = vi.fn(),
@@ -373,8 +403,8 @@ it.each(["images", "documents", "metadata"])(
       setMessages,
       setHistory,
       validateBeforeSubmitFn: () => true,
-      historySelection: { getCurrent: () => state }
-    } as Parameters<typeof createEditMessage>[0])
+      historySelection: nativeEditSelection(target)
+    })
     await expect(edit(0, "Edited", true, true, () => true)).rejects.toThrow(
       "unsupported_message_payload"
     )
@@ -387,21 +417,8 @@ it.each(["images", "documents", "metadata"])(
 
 it("native edit intent retires its editor and origin when the draft source is replaced", async () => {
   let sourceCurrent = true
-  const target = { id: "u", name: "You", isBot: false, message: "Original" }
-  const state = {
-    status: "ready",
-    owner: { kind: "native" },
-    view: {
-      owner_key: "owner",
-      conversation_id: "chat",
-      selection_revision: 1
-    },
-    capture: {
-      status: "captured",
-      snapshot: { nodes: [{ id: "u", role: "user", revision: "u1" }] }
-    }
-  }
-  const onSubmit = vi.fn(async () => ({ status: "submitted" as const }))
+  const target = { id: "u", name: "You", isBot: false, sources: [], message: "Original" }
+  const onSubmit = vi.fn(async (_input: { historyEditResend: NativeHistoryEditResend }) => ({ status: "submitted" as const }))
   const edit = createEditMessage({
     messages: [target],
     history: [],
@@ -412,10 +429,10 @@ it("native edit intent retires its editor and origin when the draft source is re
     validateBeforeSubmitFn: () => true,
     captureSourceFence: () => () => sourceCurrent,
     captureViewFence: () => () => true,
-    historySelection: { getCurrent: () => state }
-  } as Parameters<typeof createEditMessage>[0])
+    historySelection: nativeEditSelection(target)
+  })
   await edit(0, "Edited", true, true, () => true)
-  const intent = (onSubmit.mock.calls[0] as any)[0].historyEditResend
+  const intent = onSubmit.mock.calls[0][0].historyEditResend
   sourceCurrent = false
   expect(intent.isCurrent()).toBe(false)
   expect(intent.isOriginCurrent()).toBe(false)
@@ -432,21 +449,9 @@ it("native character edit admits matching backend sender-role metadata without r
     id: "u",
     name: "You",
     isBot: false,
+    sources: [],
     message: "Original",
     metadataExtra: { sender_role: "user" }
-  }
-  const state = {
-    status: "ready",
-    owner: { kind: "native" },
-    view: {
-      owner_key: "owner",
-      conversation_id: "chat",
-      selection_revision: 1
-    },
-    capture: {
-      status: "captured",
-      snapshot: { nodes: [{ id: "u", role: "user", revision: "u1" }] }
-    }
   }
   const onSubmit = vi.fn(async () => ({ status: "submitted" as const })),
     setMessages = vi.fn(),
@@ -459,8 +464,8 @@ it("native character edit admits matching backend sender-role metadata without r
     setMessages,
     setHistory,
     validateBeforeSubmitFn: () => true,
-    historySelection: { getCurrent: () => state }
-  } as Parameters<typeof createEditMessage>[0])
+    historySelection: nativeEditSelection(target)
+  })
   await expect(edit(0, "Edited", true, true, () => true)).resolves.toEqual({
     status: "submitted"
   })
@@ -483,7 +488,7 @@ it.each(["conflict", "unsupported"])(
       setHistory = vi.fn(),
       onSubmit = vi.fn()
     const edit = createEditMessage({
-      messages: [{ id: "u", isBot: false, name: "You", message: "Original" }],
+      messages: [{ id: "u", isBot: false, name: "You", sources: [], message: "Original" }],
       history: [],
       historyId: "chat",
       setMessages,

@@ -1,4 +1,4 @@
-import Dexie from "dexie"
+import Dexie, { type Version } from "dexie"
 import { describe, expect, it, vi } from "vitest"
 import { createMemoryDexie } from "@/components/Option/Playground/__tests__/harness/memory-dexie"
 
@@ -16,7 +16,7 @@ import { tokenizeSearchText } from "../search-tokenizer"
 import { PageAssistDexieDB } from "../schema"
 
 type VersionRecord = {
-  stores?: Record<string, string>
+  stores?: Parameters<Version["stores"]>[0]
   upgrade?: unknown
 }
 
@@ -29,26 +29,18 @@ const constructCapturing = () => {
     versionNumber: number
   ) {
     versionCalls.push(versionNumber)
-    const instance = original.call(this, versionNumber) as Dexie.Version & {
-      stores(stores: Record<string, string>): unknown
-      upgrade(handler: unknown): unknown
-    }
+    const instance: Version = original.call(this, versionNumber)
     const record = (records[versionNumber] ??= {})
-    // The wrapper must stay in the chain so both stores() and upgrade() are
-    // captured when the constructor chains them.
-    const wrapper = {
-      stores(payload: Record<string, string>) {
-        record.stores = payload
-        instance.stores(payload)
-        return wrapper
-      },
-      upgrade(handler: unknown) {
-        record.upgrade = handler
-        instance.upgrade(handler as never)
-        return wrapper
-      }
-    }
-    return wrapper as unknown as Dexie.Version
+    const { stores, upgrade } = instance
+    vi.spyOn(instance, "stores").mockImplementation((payload) => {
+      record.stores = payload
+      return stores.call(instance, payload)
+    })
+    vi.spyOn(instance, "upgrade").mockImplementation((handler) => {
+      record.upgrade = handler
+      return upgrade.call(instance, handler)
+    })
+    return instance
   })
   try {
     new PageAssistDexieDB()
