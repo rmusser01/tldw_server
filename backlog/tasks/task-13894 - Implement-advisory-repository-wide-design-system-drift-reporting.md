@@ -1,7 +1,7 @@
 ---
 id: TASK-13894
 title: Implement advisory repository-wide design-system drift reporting
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -38,12 +38,13 @@ PR #3294 follow-up verified: repaired ADR-079 link using an immutable repository
 2026-11-24 PR #3294 follow-up: rebased the existing commit series onto dev 0a5a41294a. Preserved proposed Docs/ADR/098-advisory-ui-design-drift-reporting.md and the published ADR mirror; updated the workflow test counters for current dev without changing required gates. Verified all 11 inline CodeRabbit findings and the additional summary provenance finding. Fixed effective JSX/JS/CSS and Tailwind resolution and made clean provenance depend on the bytes read, including pinned inputs absent from HEAD. Strengthened real-symlink and exact CLI status assertions. New behavior regressions were verified red/green. 208 verifier tests, 482 Docs/CI/Backlog tests, scoped TypeScript and ESLint passed. The previously failing ChatSidebar file passed all 40 tests under local coverage and is unchanged from dev. Bandit: 249 low findings vs 254 on dev, none on added lines. No browser/full backend suite run. The reviewer requested no new policy; ADR-098 remains proposed and advisory-only. PR remains unmerged; the requester waived the Change summary for this PR only.
 Final replay against dev b4a9550f76; the intervening upstream changes were unrelated RAG files. Independent integration review added three red/green cases for conditional style spreads, branch-specific values and JSX-only entity semantics. The final focused count is 211. The prior ChatSidebar coverage failure was not reproduced in the unchanged 40-test file.
 2026-11-24 pre-merge review: no new GitHub review threads or failed checks were found on b1dd7ba8cb; the frontend license audit was queued. Defensive CLI review reproduced three fixes: canonicalize existing output filenames before the tracked-file check, recognize a symlinked CLI entrypoint, and retain bounded diagnostics when publishing JSON fails. All 25 CLI tests passed after red/green regressions. Additional parser/token review fixes are in progress. No new ADR or enforcement policy; ADR-098 remains advisory.
+2026-11-24 pre-merge review completed: CLI case alias protection, symlink entrypoint, and error diagnostics; effective JSX and conditional class maps, template fragments, CSS property casing and image colors, HTML class whitespace, and TypeScript locations; text-only Tailwind authority and winning radius declarations. Regressions verified red/green. 232 focused verifier tests, 482 Docs/CI/Backlog tests, scoped tsc, pinned ESLint, Node syntax, and actionlint pass. Bandit: 249 total existing LOW assertions, zero on added lines, and no scan errors. Integrated report: 3,851 files, 2,239 token/radius findings, 1,951 layout candidates, zero operational errors. No new ADR; ADR-098 advisory scope unchanged. No full app/browser suite run because no runtime UI changed. Implementation is complete; hosted checks and landing are tracked separately in PR #3294 and TASK-45.44.16.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the nonblocking drift report in PR #3294. The branch was rebased onto dev b4a9550f76, ADR-098 and its published mirror were preserved, and all 12 reported findings were addressed. Local verification: 211 focused verifier tests, 482 Docs/CI/Backlog tests, and 40 isolated ChatSidebar coverage tests; scoped lint/TypeScript and no added-line Bandit findings. No runtime UI, required gate, product-state baseline, or lockfile changes. Hosted CI must run on the new PR head.
+Implemented the nonblocking design-system drift report in PR #3294. Addressed all 11 GitHub review threads and the summary finding, then fixed and regression-tested the additional CLI, parser, and token authority findings from the pre-merge review. The 232 focused and 482 Docs/CI/Backlog tests passed; lint, TypeScript, syntax, actionlint, and touched Python Bandit checks passed with no new findings. The report scanned all 3,851 files across four roots with no operational errors. Required gates, runtime UI, dependencies, and the state baseline are unchanged. Public delivery remains subject to hosted checks and the dev merge queue.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

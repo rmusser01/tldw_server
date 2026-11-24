@@ -68,6 +68,53 @@ describe("static drift token authority", () => {
     expect([...result.surfaces.webui.semanticColors]).toEqual(["primary", "surface", "surface-muted"])
   })
 
+  it.each([
+    ["", ["added", "primary-foreground", "text-only"]],
+    ["textColor: { primary: 'var(--color-primary)', direct: 'var(--color-danger)' },", ["direct", "text-only"]],
+  ])("reads the effective text-only palette with direct textColor %s", (direct, expected) => {
+    const result = buildTokenAuthority({ sources: sources({
+      [webConfig]: `module.exports = { theme: {
+        colors: { primary: { DEFAULT: 'var(--color-primary)', foreground: 'var(--color-danger)' } },
+        ${direct}
+        extend: {
+          colors: { added: 'var(--color-danger)' },
+          textColor: { primary: { DEFAULT: 'red' }, 'text-only': 'var(--color-danger)' }
+        }
+      } }`,
+    }) })
+    for (const surface of ["shared-ui", "webui", "extension"] as const) {
+      expect([...result.surfaces[surface].semanticColors]).toEqual(["added", "primary", "primary-foreground"])
+      expect(result.surfaces[surface].semanticTextColors).toEqual(new Set(expected))
+    }
+    expect(result.surfaces["admin-ui"].semanticTextColors).toBeUndefined()
+  })
+
+  it("accepts a static textColor-only theme and scopes its definition", () => {
+    const source = `module.exports = { theme: { textColor: { standalone: 'var(--color-primary)' } } }`
+    const result = buildTokenAuthority({ sources: sources({ [webConfig]: source }) })
+    expect(result.surfaces.webui.semanticTextColors).toEqual(new Set(["standalone"]))
+    expect(covered(result, webConfig, source.indexOf("textColor:"))).toBe(true)
+    expect(result.diagnostics.filter(diagnostic => diagnostic.severity === "error")).toEqual([])
+  })
+
+  it("reports unsupported textColor config without trusting the masked colors", () => {
+    const result = buildTokenAuthority({ sources: sources({
+      [webConfig]: `module.exports = { theme: {
+        colors: { generic: 'var(--color-primary)' }, textColor: loadTextColors(),
+        extend: { textColor: { broken: loadColor(), missing: 'var(--not-established)', safe: 'var(--color-danger)' } }
+      } }`,
+    }) })
+    expect(result.surfaces.webui.semanticColors).toEqual(new Set(["generic"]))
+    expect(result.surfaces.webui.semanticTextColors).toEqual(new Set(["safe"]))
+    expect(result.diagnostics.filter(diagnostic => diagnostic.code === "unsupported-config-expression"))
+      .toEqual([1, 2].map(() => expect.objectContaining({
+        path: webConfig, severity: "coverage", message: expect.stringContaining("textColor"),
+      })))
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      path: webConfig, code: "unresolved-semantic-variable", message: expect.stringContaining("missing"),
+    }))
+  })
+
   it("pins extension inheritance without executing require or unrelated code", () => {
     const result = buildTokenAuthority({ sources: sources({
       [webConfig]: `${fixtures[webConfig]}; throw new Error('must not run');`,
@@ -164,6 +211,18 @@ describe("static drift token authority", () => {
     for (const value of ["21px", "31px", "41px"]) {
       expect(result.surfaces.webui.radiusValues.has(value)).toBe(false)
     }
+    for (const match of source.matchAll(/--radius-sm:/g)) {
+      expect(covered(result, sharedCss, match.index!)).toBe(true)
+    }
+  })
+
+  it("uses only the winning radius declaration within each separate CSS rule", () => {
+    const source = `:root { --radius-sm: 31px; --radius-sm: 32px; }
+      .dark { --radius-sm: 41px !important; --radius-sm: 42px; }
+      @layer base { :root { --radius-sm: 51px; --radius-sm: 52px !important; --radius-sm: 53px !important; } }`
+    const result = buildTokenAuthority({ sources: sources({ [sharedCss]: source }) })
+    expect([...result.surfaces.webui.radiusValues].filter(value => /^[345]\dpx$/.test(value)))
+      .toEqual(["32px", "41px", "53px"])
     for (const match of source.matchAll(/--radius-sm:/g)) {
       expect(covered(result, sharedCss, match.index!)).toBe(true)
     }
@@ -365,5 +424,22 @@ describe("static drift token authority", () => {
     expect(result.surfaces.webui.radiusValues.has("6px")).toBe(true)
     expect(Object.isFrozen(REQUIRED_DEFINITION_PATHS)).toBe(true)
     expect(Object.isFrozen(TOKEN_SOURCE_PATHS)).toBe(true)
+  })
+
+  it("recognizes the checked-in text-on-tint declarations in both shared theme rules", () => {
+    const root = resolve(process.cwd(), "../../..")
+    const input = TOKEN_SOURCE_PATHS.map(path => ({ path, source: readFileSync(`${root}/${path}`, "utf8") }))
+    const css = input.find(({ path }) => path === sharedCss)!.source
+    const result = buildTokenAuthority({ sources: input })
+    for (const color of ["primary", "success", "warn", "danger"]) {
+      const variable = `--color-${color}-text`
+      expect(result.surfaces.webui.cssVariables.has(variable)).toBe(true)
+      expect(result.surfaces.webui.semanticTextColors?.has(color)).toBe(true)
+      const offsets = [...css.matchAll(new RegExp(`${variable}:`, "g"))].map(match => match.index)
+      expect(result.definitionScopes.filter(scope => scope.path === sharedCss && offsets.includes(scope.start))
+        .map(scope => scope.owner)).toEqual([":root", ".dark"])
+    }
+    const config = input.find(({ path }) => path === webConfig)!.source
+    expect(covered(result, webConfig, config.indexOf("textColor:"))).toBe(true)
   })
 })

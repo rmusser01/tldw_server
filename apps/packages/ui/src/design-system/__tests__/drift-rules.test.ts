@@ -96,6 +96,26 @@ function Badge({active}) { return <div className={cn(styles.base, styles.sizes.s
     expect(result.diagnostics).toEqual([])
   })
 
+  it.each(["clsx", "cn"])("uses effective conditional keys and omits statically falsy properties in %s", compose => {
+    const source = [
+      "const disabled = false",
+      'const base = {"bg-red-500": true, "border-black": true}',
+      'const View = ({active}) => <div className={COMPOSE({...base, ["bg-red-500"]: disabled, "bg-black": 0, "text-blue-500": "", "border-red-500": null, "ring-red-500": undefined, "text-white": active})} />'
+    ].join("\n").replace("COMPOSE", compose)
+    const result = analyze(source)
+    expect(result.findings.map(f => f.value)).toEqual(["border-black", "text-white"])
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("reports unknown conditional-map overwrites but keeps explicit later keys", () => {
+    const source = 'const View = ({flags}) => <div className={clsx({"bg-red-500": true, ...{...flags, "text-white": true}})} />'
+    const result = analyze(source)
+    expect(result.findings.map(f => f.value)).toEqual(["text-white"])
+    expect(result.diagnostics).toEqual([expect.objectContaining({
+      code: "dynamic-styling", column: source.indexOf("...flags") + 4
+    })])
+  })
+
   it("handles static conditionals, arrays and template fragments without joining interpolation gaps", () => {
     const source = 'function View({active, tone}) { return <div className={clsx(active ? "bg-red-500" : "text-white", ["w-[44px]"], `border-${tone}-500 bg-black`)} /> }'
     const result = analyze(source)
@@ -171,6 +191,14 @@ function Badge({active}) { return <div className={cn(styles.base, styles.sizes.s
     expect(result.diagnostics).toEqual([])
   })
 
+  it("uses the TypeScript source position for findings and parse errors after a bare carriage return", () => {
+    const source = 'const a = 0;\rconst View = () => <div className="text-white" />'
+    expect(analyze(source).findings).toEqual([expect.objectContaining({value: "text-white", line: 2, column: 36})])
+    expect(analyze("const a = 0;\rconst View =").diagnostics).toEqual([
+      expect.objectContaining({code: "parse-error", severity: "error", line: 2, column: 13})
+    ])
+  })
+
   it("resolves local style objects only when used as styles", () => {
     const result = analyze('const styles = {color: "red", width: 44} as const; const unused = {color: "blue"}; const View = () => <div style={styles} />')
     expect(result.findings.map(f => f.value)).toEqual(["red", "44px"])
@@ -216,10 +244,12 @@ function Badge({active}) { return <div className={cn(styles.base, styles.sizes.s
 
   it("decodes entities in quoted JSX attributes without cooking them as JavaScript strings", () => {
     const source = [
-      '<div className="p-2&#32;bg-red-500&#x20;&#116;ext-white&nbsp;[&amp;>div]:bg-black" />',
+      '<div className="p-2&#32;bg-red-500&#x20;&#116;ext-white [&amp;>div]:bg-black" />',
       '<div className={"p-2&#32;bg-red-500"} />',
       '<div className="p-2\\u0020text-white" />',
-      '<div className={"p-2\\u0020text-white"} />'
+      '<div className={"p-2\\u0020text-white"} />',
+      '<div className="text-white&nbsp;bg-red-500" />',
+      '<div className={"text-white\\u00a0bg-red-500"} />'
     ]
     const result = analyze(source.join(";\n"))
     expect(result.findings.map(f => [f.value, f.line, f.column])).toEqual([
@@ -231,10 +261,84 @@ function Badge({active}) { return <div className={cn(styles.base, styles.sizes.s
     expect(result.diagnostics).toEqual([])
   })
 
+  it("retains whitespace normalized by cn before the string reaches JSX", () => {
+    const result = analyze('<div className={cn("text-white\\u00a0bg-red-500")} />')
+    expect(result.findings.map(f => f.value)).toEqual(["text-white", "bg-red-500"])
+  })
+
   it("analyzes standalone template expressions without fabricating classes across gaps", () => {
     const result = analyze('function View({active, prefix}) { return <div className={`${active ? "bg-red-500" : "text-white"} ${prefix}bg-black`} /> }')
     expect(result.findings.map(f => f.value)).toEqual(["bg-red-500", "text-white"])
     expect(result.diagnostics).toHaveLength(1)
+  })
+
+  it("keeps complete utilities after a template interpolation inside a bracket or a quote", () => {
+    const source = [
+      'const First = ({tone}) => <div className={`bg-[${tone}] text-white w-[44px]`} />',
+      "const Second = () => <div className={`before:content-['${'bg-black'} text-blue-500'] bg-red-500`} />"
+    ].join("\n")
+    const result = analyze(source)
+    expect(result.findings.map(f => [f.value, f.line, f.column])).toEqual([
+      ["text-white", 1, source.split("\n")[0].indexOf("text-white") + 1],
+      ["w-[44px]", 1, source.split("\n")[0].indexOf("w-[44px]") + 1],
+      ["bg-red-500", 2, source.split("\n")[1].indexOf("bg-red-500") + 1]
+    ])
+    expect(result.diagnostics.map(d => [d.code, d.line])).toEqual([
+      ["dynamic-styling", 1], ["dynamic-styling", 2]
+    ])
+  })
+
+  it("analyzes only effective JSX styling props across static spreads and explicit attributes", () => {
+    const source = [
+      'const replacement = {className: "text-white", style: {color: "blue"}}',
+      'const View = () => <><div className={cn("bg-red-500")} style={{color: "red"}} {...replacement} />',
+      '<div {...{className: cn("bg-black"), style: {color: "green"}}} className="text-danger" style={{width: 44}} /></>'
+    ].join("\n")
+    const result = analyze(source)
+    expect(result.findings.map(f => [f.value, f.owner, f.line])).toEqual([
+      ["text-white", "replacement", 1], ["blue", "replacement", 1], ["44px", "View", 3]
+    ])
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("does not re-report an overwritten composition from a resolved JSX spread", () => {
+    const source = 'const original = {className: cn("bg-red-500")}; const View = () => <div {...original} className="text-white" />'
+    expect(analyze(source).findings.map(f => f.value)).toEqual(["text-white"])
+  })
+
+  it("reports uncertain JSX spread overwrites and retains proven later styling props", () => {
+    const source = 'const View = ({props}) => <div className="text-white" style={{color: "red"}} {...{...props, className: "bg-red-500"}} />'
+    const result = analyze(source)
+    expect(result.findings.map(f => f.value)).toEqual(["bg-red-500"])
+    expect(result.diagnostics).toEqual([expect.objectContaining({
+      code: "dynamic-styling", column: source.indexOf("...props") + 4
+    })])
+  })
+
+  it("matches CSS properties case-insensitively without folding custom variable names", () => {
+    const authority = fixtureAuthority()
+    authority.surfaces["shared-ui"].cssVariables.add("--Brand")
+    const result = analyze('.notice { COLOR: red; Background-Color: var(--Brand); WIDTH: 44px; --Brand: #fff; color: var(--brand); }', cssPath, authority)
+    expect(result.findings.map(f => [f.rule, f.value])).toEqual([
+      ["literal-color", "red"], ["layout-value", "44px"], ["literal-color", "#fff"]
+    ])
+    expect(result.diagnostics).toEqual([expect.objectContaining({code: "unresolved-variable", column: 90})])
+  })
+
+  it("finds colors in image-hinted utilities without inspecting URLs or custom paint names", () => {
+    const result = analyze('<div className="bg-[image:linear-gradient(red,blue)] bg-[image:url(https://red.test/#fff)] bg-[image:paint(red)]" />')
+    expect(result.findings.map(f => [f.rule, f.value])).toEqual([
+      ["literal-color", "bg-[image:linear-gradient(red,blue)]"]
+    ])
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("honors semantic text overrides only on text utilities", () => {
+    const authority = fixtureAuthority()
+    authority.surfaces["shared-ui"].semanticColors.add("blue-500")
+    Object.assign(authority.surfaces["shared-ui"], {semanticTextColors: new Set(["red-500"])})
+    const result = analyze('<div className="hover:text-red-500/50 bg-red-500 border-red-500 text-blue-500 bg-blue-500" />', path, authority)
+    expect(result.findings.map(f => f.value)).toEqual(["bg-red-500", "border-red-500", "text-blue-500"])
   })
 
   it("analyzes independent inline style value branches", () => {

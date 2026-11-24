@@ -457,3 +457,19 @@ verifier tests and 482 Docs/CI/Backlog tests
 passed. The previously failing ChatSidebar file passed all 40 tests under
 local coverage; it is unchanged from the rebased base. Scoped TypeScript
 and ESLint passed, and Bandit reported no findings on added lines.
+
+The pre-merge review fixed existing-file case aliases, symlinked CLI
+invocations, and missing diagnostics on report publication failure. Parser
+regressions cover effective JSX and class-map keys, template interpolation,
+CSS property casing and background-image colors, JSX class whitespace, and
+TypeScript source positions. Token authority now follows the effective Tailwind
+text palette and winning radius declarations within a rule. Unresolved
+spreads remain explicit coverage limitations. No new ADR, runtime styles, or
+required gates were needed.
+
+The integrated verifier passed 232 focused tests, scoped TypeScript and ESLint,
+Node syntax checks, and actionlint. The 482 Docs, CI, and Backlog tests passed,
+and Bandit found no issues on added Python lines. A local report completed on
+all 3,851 source files with 2,239 token/radius findings, 1,951 layout candidates,
+and no operational errors. Hosted CI and public delivery are tracked on
+[PR #3294](https://github.com/rmusser01/tldw_server/pull/3294).

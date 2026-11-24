@@ -6,7 +6,7 @@ import defaultTheme from "tailwindcss/defaultTheme.js"
 /** @typedef {{path: string, source: string}} Source */
 /** @typedef {{path: string, code: string, message: string, severity: "error" | "coverage", line?: number, column?: number}} Diagnostic */
 /** @typedef {{path: string, start: number, end: number, owner: string, kind: string}} Definition */
-/** @typedef {{semanticColors: Set<string>, cssVariables: Set<string>, radiusClasses: Set<string>, radiusValues: Set<string>, definitionPaths: string[]}} SurfaceAuthority */
+/** @typedef {{semanticColors: Set<string>, semanticTextColors?: Set<string>, cssVariables: Set<string>, radiusClasses: Set<string>, radiusValues: Set<string>, definitionPaths: string[]}} SurfaceAuthority */
 /** @typedef {{surfaces: Record<Surface, SurfaceAuthority>, definitionScopes: Definition[], diagnostics: Diagnostic[]}} Authority */
 
 const WEB_CONFIG = "apps/tldw-frontend/tailwind.config.js"
@@ -48,6 +48,7 @@ const SHARED_VARIABLES = new Set([
   "color-bg", "color-surface", "color-surface-2", "color-elevated", "color-primary",
   "color-primary-foreground", "color-primary-strong", "color-primary-strong-foreground",
   "color-accent", "color-success", "color-warn", "color-danger", "color-muted",
+  "color-primary-text", "color-success-text", "color-warn-text", "color-danger-text",
   "color-border", "color-border-strong", "color-text", "color-text-muted", "color-text-subtle", "color-focus",
   "state-ready", "state-unavailable", "state-setup-required", "state-auth-required", "state-permission-denied",
   "state-degraded", "state-retrying", "state-blocked", "state-empty", "state-loading", "state-error",
@@ -65,7 +66,7 @@ const ADMIN_VARIABLES = new Set([
   "chart-1", "chart-2", "radius",
 ].map(name => `--${name}`))
 const THEME_PROPERTIES = new Set([
-  "colors", "borderRadius", "fontFamily", "fontSize", "boxShadow", "backgroundImage", "maskImage", "keyframes", "animation",
+  "colors", "textColor", "borderRadius", "fontFamily", "fontSize", "boxShadow", "backgroundImage", "maskImage", "keyframes", "animation",
 ])
 
 /** Unwrap syntax only; never evaluate calls, getters, imports or computed keys. */
@@ -90,6 +91,7 @@ function unconditionalRule(rule) {
   return true
 }
 
+/** @returns {SurfaceAuthority} */
 function emptySurface() {
   return { semanticColors: new Set(), cssVariables: new Set(), radiusClasses: new Set(), radiusValues: new Set(), definitionPaths: [] }
 }
@@ -130,13 +132,19 @@ export function buildTokenAuthority({ sources }) {
       cssValues.set(path, values)
       try {
         const css = postcss.parse(source, { from: path })
-        css.walkDecls(decl => {
-          if (!allowed.has(decl.prop) || decl.parent.type !== "rule" ||
-            ![":root", ".dark"].includes(decl.parent.selector.trim())) return
-          if (!values.has(decl.prop)) values.set(decl.prop, new Set())
-          if (unconditionalRule(decl.parent)) values.get(decl.prop).add(decl.value)
-          const start = decl.source.start.offset
-          definitionScopes.push({ path, start, end: start + decl.toString().length, owner: decl.parent.selector, kind: "css-variable" })
+        css.walkRules(rule => {
+          if (![":root", ".dark"].includes(rule.selector.trim())) return
+          const winners = new Map()
+          rule.each(decl => {
+            if (decl.type !== "decl" || !allowed.has(decl.prop)) return
+            if (!values.has(decl.prop)) values.set(decl.prop, new Set())
+            if (decl.important || !winners.get(decl.prop)?.important) winners.set(decl.prop, decl)
+            const start = decl.source.start.offset
+            definitionScopes.push({ path, start, end: start + decl.toString().length, owner: rule.selector, kind: "css-variable" })
+          })
+          if (unconditionalRule(rule)) {
+            for (const [prop, decl] of winners) values.get(prop).add(decl.value)
+          }
         })
         if (!values.size) addDiagnostic(path, "missing-token-declarations",
           "Required stylesheet contains no recognized token declarations.", "error")
@@ -278,7 +286,8 @@ export function buildTokenAuthority({ sources }) {
     const unknown = { entries: new Map(), unknownKeys: true }
     const extendProp = theme.entries.get("extend")
     const extend = extendProp ? object(valueOf(extendProp), "theme.extend") ?? unknown : theme.unknownKeys ? unknown : empty
-    if (![theme, extend].some(({ entries }) => entries.has("colors") || entries.has("borderRadius"))) {
+    const scaleNames = ["colors", "textColor", "borderRadius"]
+    if (![theme, extend].some(({ entries }) => scaleNames.some(name => entries.has(name)))) {
       unavailable("Required Tailwind theme has no readable color or radius definition properties.")
       return null
     }
@@ -325,30 +334,31 @@ export function buildTokenAuthority({ sources }) {
       }
       return result
     }
-    let configuredEntries = 0
-    const readScale = (name, defaults) => {
-      const read = container => {
+    const readScale = (name, fallback = empty) => {
+      const read = (container, absent) => {
         const prop = container.entries.get(name)
-        return prop ? readValues(valueOf(prop), name) ?? unknown : container.unknownKeys ? unknown : empty
+        return prop ? readValues(valueOf(prop), name) ?? unknown : container.unknownKeys ? unknown : absent
       }
-      const merged = mergeValues(read(theme), read(extend))
-      const values = flatten(merged)
-      configuredEntries += values.size
-      return new Map([
-        ...(theme.entries.has(name) || merged.unknownKeys ? [] : defaults.filter(([key]) => !merged.entries.has(key))),
-        ...values,
-      ])
+      return mergeValues(read(theme, fallback), read(extend, empty))
     }
-    const colors = readScale("colors", [])
-    const radii = readScale("borderRadius", Object.entries(defaultTheme.borderRadius))
-    if (!configuredEntries) {
+    const colorScale = readScale("colors")
+    const colors = flatten(colorScale)
+    // Tailwind defaults textColor to the effective colors scale unless theme.textColor replaces it.
+    const textColors = [theme, extend].some(({ entries, unknownKeys }) => entries.has("textColor") || unknownKeys)
+      ? flatten(readScale("textColor", colorScale)) : undefined
+    const radiusScale = readScale("borderRadius")
+    const radii = flatten(radiusScale)
+    if (!colors.size && !textColors?.size && !radii.size) {
       unavailable("Required Tailwind theme contains no statically readable color or radius entries.")
       return null
     }
+    const radiusDefaults = theme.entries.has("borderRadius") || radiusScale.unknownKeys ? []
+      : Object.entries(defaultTheme.borderRadius).filter(([name]) => !radiusScale.entries.has(name))
     return {
       path: themeProp.getSourceFile().fileName,
       colors,
-      radii,
+      textColors,
+      radii: new Map([...radiusDefaults, ...radii]),
     }
   }
 
@@ -361,12 +371,18 @@ export function buildTokenAuthority({ sources }) {
     const values = cssValues.get(cssPath) ?? new Map()
     target.cssVariables = new Set([...values.keys()].sort())
     if (!config) return
-    for (const [name, value] of config.colors) {
-      const refs = variables(value)
-      if (refs.length && refs.every(ref => values.has(ref))) target.semanticColors.add(name)
-      else if (refs.length) addDiagnostic(config.path,
-        "unresolved-semantic-variable", `Color ${name} references a variable without an established declaration.`)
+    const semantic = colors => {
+      const names = []
+      for (const [name, value] of colors) {
+        const refs = variables(value)
+        if (refs.length && refs.every(ref => values.has(ref))) names.push(name)
+        else if (refs.length) addDiagnostic(config.path,
+          "unresolved-semantic-variable", `Color ${name} references a variable without an established declaration.`)
+      }
+      return new Set(names.sort())
     }
+    target.semanticColors = semantic(config.colors)
+    if (config.textColors) target.semanticTextColors = semantic(config.textColors)
     for (const [name, value] of config.radii) {
       target.radiusClasses.add(name === "" || name === "DEFAULT" ? "rounded" : `rounded-${name}`)
       target.radiusValues.add(value)
@@ -382,7 +398,7 @@ export function buildTokenAuthority({ sources }) {
       if (refs.length) addDiagnostic(config.path,
         "symbolic-radius", `Radius ${name || "DEFAULT"} remains symbolic; unresolved runtime values or unit comparisons require coverage review.`)
     }
-    for (const name of ["semanticColors", "radiusClasses", "radiusValues"]) target[name] = new Set([...target[name]].sort())
+    for (const name of ["radiusClasses", "radiusValues"]) target[name] = new Set([...target[name]].sort())
   }
   const sharedPaths = TOKEN_SOURCE_PATHS.filter(path => path !== EXT_CONFIG && path !== ADMIN_CONFIG && path !== ADMIN_CSS)
   fill("shared-ui", web, SHARED_CSS, sharedPaths)

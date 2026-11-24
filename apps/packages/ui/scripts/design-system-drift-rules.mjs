@@ -8,7 +8,7 @@ import { JSDOM } from "jsdom"
 /** @typedef {{path:string, start:number, end:number, owner:string, kind:string}} Definition */
 /** @typedef {{path:string, surface:Surface, line:number, column:number, rule:"literal-color"|"palette-color"|"custom-radius"|"layout-value", value:string, owner:string|null, classification:"token-review"|"radius-review"|"layout-review", reason:string, suggestion?:string}} Finding */
 /** @typedef {{findings:Finding[], definitions:Definition[], diagnostics:Diagnostic[]}} Analysis */
-/** @typedef {{surfaces:Record<Surface, {semanticColors:Set<string>, cssVariables:Set<string>, radiusClasses:Set<string>, radiusValues:Set<string>, definitionPaths:string[]}>, definitionScopes:Definition[], diagnostics:Diagnostic[]}} Authority */
+/** @typedef {{surfaces:Record<Surface, {semanticColors:Set<string>, semanticTextColors?:Set<string>, cssVariables:Set<string>, radiusClasses:Set<string>, radiusValues:Set<string>, definitionPaths:string[]}>, definitionScopes:Definition[], diagnostics:Diagnostic[]}} Authority */
 
 const colorProbe = new JSDOM("").window.document.createElement("span").style
 const jsxEntities = new Map()
@@ -26,6 +26,8 @@ const allowed = new Set([
 ])
 const colorFunctions = new Set(["rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color", "color-mix", "light-dark"])
 const compositions = new Set(["cn", "clsx", "classNames", "cva"])
+const jsxStylingProps = new Set(["className", "class", "style"])
+const classWhitespace = /[ \t\n\r\f]/
 const layoutProperty = /^(?:(?:min-|max-)?(?:width|height|inline-size|block-size)|(?:margin|padding|inset)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?|(?:row-|column-)?gap|top|right|bottom|left|z-index|grid-template(?:-columns|-rows|-areas)?)$/
 const radiusProperty = /^border-(?:(?:top-left|top-right|bottom-left|bottom-right|start-start|start-end|end-start|end-end)-)?radius$/
 const colorProperty = /^(?:color|background(?:-color|-image)?|(?:border(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?|outline|text-decoration|column-rule)(?:-color)?|(?:box|text)-shadow|fill|stroke|(?:caret|accent|stop|flood|lighting)-color|text-emphasis(?:-color)?)$/
@@ -98,9 +100,15 @@ export function analyzeDriftSource({ path, source, authority }) {
   /** @type {Analysis} */
   const result = { findings: [], definitions: [...definitions].sort((a, b) => a.start - b.start || a.end - b.end), diagnostics: [] }
   const seen = new Set()
+  const scriptKind = /\.(?:tsx|jsx|js)$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  const ast = path.endsWith(".css") ? null : ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind)
   const lineStarts = [0]
-  for (let i = 0; i < source.length; i++) if (source[i] === "\n") lineStarts.push(i + 1)
+  if (!ast) for (let i = 0; i < source.length; i++) if (source[i] === "\n") lineStarts.push(i + 1)
   function location(offset) {
+    if (ast) {
+      const { line, character } = ast.getLineAndCharacterOfPosition(offset)
+      return { line: line + 1, column: character + 1 }
+    }
     let low = 0
     let high = lineStarts.length
     while (low + 1 < high) {
@@ -175,7 +183,7 @@ export function analyzeDriftSource({ path, source, authority }) {
         }
         const name = word.toLowerCase()
         const body = value.slice(i + 1, end - 1)
-        if (name === "url") { i = end; continue }
+        if (name === "url" || name === "paint") { i = end; continue }
         if (name === "var") {
           const args = split(body, /,/)
           const variable = args[0]?.value.trim()
@@ -217,7 +225,7 @@ export function analyzeDriftSource({ path, source, authority }) {
   }
 
   function declaration(property, value, offset, owner, utility) {
-    property = kebab(property)
+    if (!property.startsWith("--")) property = property.toLowerCase()
     if (property.startsWith("--")) colorsIn(value, offset, owner, utility, false)
     else if (colorProperty.test(property)) colorsIn(value, offset, owner, utility)
     else if (radiusProperty.test(property)) radius(value, offset, owner, utility)
@@ -227,9 +235,9 @@ export function analyzeDriftSource({ path, source, authority }) {
     }
   }
 
-  function classes(value, offsetAt, owner, fragment = {}) {
-    for (const part of split(value)) {
-      if ((fragment.left && part.start === 0) || (fragment.right && part.end === value.length)) continue
+  function classes(value, offsetAt, owner, separators = classWhitespace, skip) {
+    for (const part of split(value, separators)) {
+      if (skip?.(part)) continue
       const raw = part.value
       const offset = offsetAt(part.start)
       const variants = split(raw, /:/)
@@ -258,12 +266,12 @@ export function analyzeDriftSource({ path, source, authority }) {
       const match = base.match(colorUtility)
       if (!match) continue
       const color = split(match[2], /\//)[0]?.value ?? ""
-      if (tokens.semanticColors.has(color) || allowed.has(color.toLowerCase())) continue
+      const semanticColors = match[1] === "text" ? tokens.semanticTextColors ?? tokens.semanticColors : tokens.semanticColors
+      if (semanticColors.has(color) || allowed.has(color.toLowerCase())) continue
       if (/^\[.*\]$/.test(color)) {
         let body = color.slice(1, -1).replace(/_/g, " ")
         const hint = body.match(/^([\w-]+):/)
-        if (hint && !["color", "length", "image", "position", "size", "number", "percentage"].includes(hint[1])) continue
-        if (hint && hint[1] !== "color") continue
+        if (hint && hint[1] !== "color" && hint[1] !== "image") continue
         if (hint) body = body.slice(hint[0].length)
         colorsIn(body, offset, owner, raw)
       } else if (color === "black" || color === "white" || /^([a-z]+)-(\d{2,3})$/.test(color) && Object.hasOwn(colors, color.replace(/-\d+$/, ""))) {
@@ -272,7 +280,7 @@ export function analyzeDriftSource({ path, source, authority }) {
     }
   }
 
-  if (path.endsWith(".css")) {
+  if (!ast) {
     try {
       const root = postcss.parse(source, { from: path })
       const cssOwner = node => {
@@ -291,8 +299,6 @@ export function analyzeDriftSource({ path, source, authority }) {
       result.diagnostics.push({ path, code: "parse-error", message: error.reason ?? "CSS parse failed.", severity: "error", line: error.line ?? 1, column: error.column ?? 1 })
     }
   } else {
-    const scriptKind = /\.(?:tsx|jsx|js)$/.test(path) ? ts.ScriptKind.TSX : ts.ScriptKind.TS
-    const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind)
     for (const error of ast.parseDiagnostics) diagnostic(error.start ?? 0, "parse-error", ts.flattenDiagnosticMessageText(error.messageText, " "), "error")
     if (ast.parseDiagnostics.length) return result
     const mutated = new Set()
@@ -311,7 +317,7 @@ export function analyzeDriftSource({ path, source, authority }) {
       return ts.isIdentifier(decl.name) && (decl.parent.flags & ts.NodeFlags.Const) ? decl.initializer : null
     }
     // Lexical lookup avoids confusing an API field with a class map or a shadowed prop.
-    function lookup(identifier) {
+    function lookup(identifier, fallback = null) {
       const name = identifier.text
       for (let scope = identifier.parent; scope; scope = scope.parent) {
         if (ts.isFunctionLike(scope) && scope.parameters.some(param => boundName(param.name, name))) return null
@@ -331,7 +337,7 @@ export function analyzeDriftSource({ path, source, authority }) {
           }
         }
       }
-      return null
+      return fallback
     }
     function boundName(node, name) {
       return ts.isIdentifier(node) ? node.text === name : node.elements.some(item => !ts.isOmittedExpression(item) && boundName(item.name, name))
@@ -340,7 +346,8 @@ export function analyzeDriftSource({ path, source, authority }) {
       node = unwrap(node)
       if (!node || visited.has(node)) return null
       if (ts.isIdentifier(node)) {
-        const next = lookup(node)
+        const next = lookup(node, false)
+        if (next === false) return node.text === "undefined" ? node : null
         if (!next || mutated.has(unwrap(next))) return null
         return resolve(next, new Set([...visited, node]))
       }
@@ -408,98 +415,134 @@ export function analyzeDriftSource({ path, source, authority }) {
     function unresolved(node, context) {
       diagnostic(node.getStart(ast), "dynamic-styling", `Unresolved ${context} expression; runtime styling is outside static coverage.`)
     }
-    function effectiveProperties(node, visited) {
+    const jsxPropertyMembers = new Set()
+
+    function effectiveProperties(node, visited, context = "class map") {
       const object = resolve(node, visited)
       const properties = new Map()
       let unknown = false
       if (!object || !ts.isObjectLiteralExpression(object)) {
-        unresolved(node, "class map spread")
+        unresolved(node, context + " spread")
         return { properties, unknown: true }
       }
       const nextVisited = new Set([...visited, object])
       for (const prop of object.properties) {
         if (ts.isSpreadAssignment(prop)) {
-          const spread = effectiveProperties(prop.expression, nextVisited)
+          const spread = effectiveProperties(prop.expression, nextVisited, context)
           // An unknown spread may replace any earlier key, including through nested spreads.
           if (spread.unknown) { properties.clear(); unknown = true }
           for (const [key, value] of spread.properties) properties.set(key, value)
-        } else if (prop.name.text === undefined) {
-          unresolved(prop.name, "class map key")
-          properties.clear()
-          unknown = true
-        } else properties.set(prop.name.text, prop)
+        } else {
+          const computed = ts.isComputedPropertyName(prop.name)
+          const key = computed ? unwrap(prop.name.expression) : prop.name
+          const name = !computed || ts.isStringLiteralLike(key) || ts.isNumericLiteral(key) ? key.text : undefined
+          if (name === undefined) {
+            unresolved(prop.name, context + " key")
+            properties.clear()
+            unknown = true
+          } else {
+            if (context === "JSX prop" && jsxStylingProps.has(name)) jsxPropertyMembers.add(prop)
+            properties.set(name, prop)
+          }
+        }
       }
       return { properties, unknown }
     }
-    function classExpression(node, visited = new Set(), mode = "classes") {
+    function staticallyFalsy(node, visited) {
+      const value = resolve(node, visited)
+      if (!value) return false
+      if (ts.isStringLiteralLike(value)) return value.text === ""
+      if (ts.isNumericLiteral(value)) return Number(value.text) === 0
+      if (ts.isBigIntLiteral(value)) return Number(value.text.slice(0, -1)) === 0
+      if (ts.isPrefixUnaryExpression(value) && (value.operator === ts.SyntaxKind.MinusToken || value.operator === ts.SyntaxKind.PlusToken) && (ts.isNumericLiteral(value.operand) || ts.isBigIntLiteral(value.operand))) return staticallyFalsy(value.operand, visited)
+      if (ts.isIdentifier(value) && value.text === "undefined") return true
+      return value.kind === ts.SyntaxKind.FalseKeyword || value.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(value)
+    }
+
+    function classExpression(node, visited = new Set(), mode = "classes", separators = classWhitespace) {
       node = unwrap(node)
       if (!node) return
       if (visited.has(node)) { unresolved(node, "class"); return }
       const nextVisited = new Set([...visited, node])
       if (ts.isStringLiteralLike(node)) {
         const text = stringContent(node)
-        classes(text.value, text.offsetAt, owner(node))
+        classes(text.value, text.offsetAt, owner(node), separators)
       } else if (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
         if (ts.isIdentifier(node) && node.text === "undefined") return
         const resolved = resolve(node, visited)
-        if (resolved && resolved !== node) classExpression(resolved, nextVisited, mode)
+        if (resolved && resolved !== node) classExpression(resolved, nextVisited, mode, separators)
         else unresolved(node, "class")
       } else if (ts.isCallExpression(node)) {
         const name = ts.isIdentifier(node.expression) ? node.expression.text : ""
         if (compositions.has(name)) {
           if (name === "cva") {
-            if (node.arguments[0]) classExpression(node.arguments[0], nextVisited)
-            if (node.arguments[1]) classExpression(node.arguments[1], nextVisited, "options")
-          } else for (const arg of node.arguments) classExpression(arg, nextVisited)
+            if (node.arguments[0]) classExpression(node.arguments[0], nextVisited, "classes", separators)
+            if (node.arguments[1]) classExpression(node.arguments[1], nextVisited, "options", separators)
+          } else {
+            // cn can normalize non-ASCII whitespace via tailwind-merge.
+            const whitespace = name === "cn" ? /\s/ : separators
+            for (const arg of node.arguments) classExpression(arg, nextVisited, "classes", whitespace)
+          }
         } else {
           const factory = ts.isIdentifier(node.expression) && resolve(node.expression, visited)
-          if (factory && ts.isCallExpression(factory) && ts.isIdentifier(factory.expression) && factory.expression.text === "cva") classExpression(factory, nextVisited)
+          if (factory && ts.isCallExpression(factory) && ts.isIdentifier(factory.expression) && factory.expression.text === "cva") classExpression(factory, nextVisited, "classes", separators)
           else unresolved(node, "class")
         }
       } else if (ts.isConditionalExpression(node)) {
-        classExpression(node.whenTrue, nextVisited, mode)
-        classExpression(node.whenFalse, nextVisited, mode)
+        classExpression(node.whenTrue, nextVisited, mode, separators)
+        classExpression(node.whenFalse, nextVisited, mode, separators)
       } else if (ts.isBinaryExpression(node) && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(node.operatorToken.kind)) {
-        if (node.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken) classExpression(node.left, nextVisited, mode)
-        classExpression(node.right, nextVisited, mode)
+        if (node.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken) classExpression(node.left, nextVisited, mode, separators)
+        classExpression(node.right, nextVisited, mode, separators)
       } else if (ts.isArrayLiteralExpression(node)) {
-        for (const element of node.elements) classExpression(element, nextVisited, mode)
+        for (const element of node.elements) classExpression(element, nextVisited, mode, separators)
       } else if (ts.isObjectLiteralExpression(node)) {
-        const properties = mode === "classes" ? node.properties : effectiveProperties(node, visited).properties.values()
-        for (const prop of properties) {
-          if (ts.isSpreadAssignment(prop)) { classExpression(prop.expression, nextVisited, mode); continue }
+        for (const [name, prop] of effectiveProperties(node, visited).properties) {
           if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop)) { unresolved(prop, "class map"); continue }
           const value = ts.isPropertyAssignment(prop) ? prop.initializer : prop.name
           if (mode === "options") {
-            if (prop.name.text === "variants") classExpression(value, nextVisited, "variants")
-            else if (prop.name.text === "compoundVariants") classExpression(value, nextVisited, "compound")
-            else if (ts.isComputedPropertyName(prop.name)) unresolved(prop.name, "class options key")
-          } else if (mode === "variants") classExpression(value, nextVisited, "variant-values")
-          else if (mode === "variant-values") classExpression(value, nextVisited)
+            if (name === "variants") classExpression(value, nextVisited, "variants", separators)
+            else if (name === "compoundVariants") classExpression(value, nextVisited, "compound", separators)
+          } else if (mode === "variants") classExpression(value, nextVisited, "variant-values", separators)
+          else if (mode === "variant-values") classExpression(value, nextVisited, "classes", separators)
           else if (mode === "compound") {
-            if (["class", "className"].includes(prop.name.text)) classExpression(value, nextVisited)
-            else if (ts.isComputedPropertyName(prop.name)) unresolved(prop.name, "compound class key")
-          } else if (ts.isComputedPropertyName(prop.name)) classExpression(prop.name.expression, nextVisited)
-          else {
-            const key = prop.name
-            if (ts.isStringLiteralLike(key)) classExpression(key, nextVisited)
-            else classes(key.text, i => key.getStart(ast) + i, owner(key))
+            if (name === "class" || name === "className") classExpression(value, nextVisited, "classes", separators)
+          } else if (!staticallyFalsy(value, nextVisited)) {
+            const key = ts.isComputedPropertyName(prop.name) ? unwrap(prop.name.expression) : prop.name
+            if (ts.isStringLiteralLike(key)) classExpression(key, nextVisited, "classes", separators)
+            else classes(name, i => key.getStart(ast) + i, owner(key), separators)
           }
         }
       } else if (ts.isTemplateExpression(node)) {
         const fragments = [node.head, ...node.templateSpans.map(span => span.literal)]
+        // Keep delimiter state across interpolation holes without treating their text as static.
+        const holes = new Map()
+        const offsets = []
+        let value = ""
         for (let i = 0; i < fragments.length; i++) {
+          if (i) {
+            holes.set(value.length, node.templateSpans[i - 1].expression)
+            value += "\0"
+            offsets.push(fragments[i].getStart(ast))
+          }
           const text = stringContent(fragments[i])
-          classes(text.value, text.offsetAt, owner(node), {left: i > 0, right: i < fragments.length - 1})
+          value += text.value
+          for (let j = 0; j < text.value.length; j++) offsets.push(text.offsetAt(j))
         }
-        let partial = false
-        for (let i = 0; i < node.templateSpans.length; i++) {
-          const before = stringContent(fragments[i]).value
-          const after = stringContent(fragments[i + 1]).value
-          if ((i === 0 && !before || /\s$/.test(before)) && (i === node.templateSpans.length - 1 && !after || /^\s/.test(after))) classExpression(node.templateSpans[i].expression, nextVisited)
-          else partial = true
-        }
-        if (partial) unresolved(node, "class template")
+        let standalone = 0
+        classes(value, index => offsets[index], owner(node), separators, part => {
+          for (let i = part.value.indexOf("\0"); i !== -1; i = part.value.indexOf("\0", i + 1)) {
+            const expression = holes.get(part.start + i)
+            if (!expression) continue
+            if (part.value.length === 1) {
+              standalone++
+              classExpression(expression, nextVisited, mode, separators)
+            }
+            return true
+          }
+          return false
+        })
+        if (standalone !== holes.size) unresolved(node, "class template")
       } else if (![ts.SyntaxKind.FalseKeyword, ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.NullKeyword, ts.SyntaxKind.NumericLiteral].includes(node.kind)) unresolved(node, "class")
     }
 
@@ -543,26 +586,55 @@ export function analyzeDriftSource({ path, source, authority }) {
         if (overwritten.has(name)) continue
         overwritten.add(name)
         if (!ts.isPropertyAssignment(prop)) { unresolved(prop, "style property"); continue }
-        const property = kebab(name)
+        const property = name.startsWith("--") ? name : kebab(name)
         if (!property.startsWith("--") && !colorProperty.test(property) && !radiusProperty.test(property) && !layoutProperty.test(property)) continue
         styleValue(prop.initializer, property, nextVisited)
       }
       return overwritten
     }
-    function visit(node) {
-      if (ts.isJsxAttribute(node)) {
-        const name = node.name.getText(ast)
-        if (name === "className" || name === "class") {
-          if (node.initializer && ts.isJsxExpression(node.initializer)) classExpression(node.initializer.expression)
-          else if (node.initializer) classExpression(node.initializer)
-        } else if (name === "style" && node.initializer) {
-          if (ts.isJsxExpression(node.initializer)) styleExpression(node.initializer.expression)
-          else unresolved(node.initializer, "style")
+    function jsxAttributes(node) {
+      const properties = new Map()
+      for (const prop of node.properties) {
+        if (ts.isJsxSpreadAttribute(prop)) {
+          const spread = effectiveProperties(prop.expression, new Set(), "JSX prop")
+          if (spread.unknown) properties.clear()
+          for (const [name, member] of spread.properties) {
+            if (jsxStylingProps.has(name)) properties.set(name, member)
+          }
+        } else {
+          const name = prop.name.getText(ast)
+          if (jsxStylingProps.has(name)) properties.set(name, prop)
         }
-      } else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && compositions.has(node.expression.text)) classExpression(node)
+      }
+      for (const [name, prop] of properties) {
+        let value
+        if (ts.isJsxAttribute(prop)) {
+          value = prop.initializer
+          if (value && ts.isJsxExpression(value)) value = value.expression
+          else if (value && name === "style") { unresolved(value, "style"); continue }
+        } else if (ts.isPropertyAssignment(prop)) value = prop.initializer
+        else if (ts.isShorthandPropertyAssignment(prop)) value = prop.name
+        else { unresolved(prop, "JSX prop"); continue }
+        if (name === "style") styleExpression(value)
+        else classExpression(value)
+      }
+    }
+    const compositionCalls = []
+    function visit(node) {
+      if (ts.isJsxAttributes(node)) jsxAttributes(node)
+      else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && compositions.has(node.expression.text)) compositionCalls.push(node)
       ts.forEachChild(node, visit)
     }
     visit(ast)
+    for (const call of compositionCalls) {
+      // Calls in JSX styling props are analyzed only if the prop survives overwrite resolution.
+      let parent = call.parent
+      for (; parent; parent = parent.parent) {
+        if (jsxPropertyMembers.has(parent) || ts.isJsxSpreadAttribute(parent) ||
+          ts.isJsxAttribute(parent) && jsxStylingProps.has(parent.name.getText(ast))) break
+      }
+      if (!parent) classExpression(call)
+    }
   }
   const compare = (a, b) => a.line - b.line || a.column - b.column || (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : 0)
   result.findings.sort(compare)
