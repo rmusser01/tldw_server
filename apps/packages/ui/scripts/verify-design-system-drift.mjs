@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises"
+import { realpathSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -69,14 +70,16 @@ async function safeSourceFile(repoRoot, relativePath) {
 async function validateOutput(repoRoot, outputPath) {
   const requested = path.resolve(repoRoot, outputPath)
   const parent = await fs.realpath(path.dirname(requested))
-  const output = path.join(parent, path.basename(requested))
+  let output = path.join(parent, path.basename(requested))
+  try {
+    const stat = await fs.lstat(output)
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Report output must be an ordinary file")
+    // Resolve the existing filename too: a case alias can name a tracked file.
+    output = await fs.realpath(output)
+  } catch (error) { if (error.code !== "ENOENT") throw error }
   for (const root of SOURCE_ROOTS) if (isWithin(output, path.join(repoRoot, root))) throw new Error("Report output must be outside source roots")
   const gitDirs = await Promise.all([git(repoRoot, ["rev-parse", "--absolute-git-dir"]), git(repoRoot, ["rev-parse", "--git-common-dir"])])
   if ([path.join(repoRoot, ".git"), ...gitDirs.map(dir => path.resolve(repoRoot, dir.trim()))].some(dir => isWithin(output, dir))) throw new Error("Report output must be outside Git metadata")
-  try {
-    const stat = await fs.lstat(requested)
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("Report output must be an ordinary file")
-  } catch (error) { if (error.code !== "ENOENT") throw error }
   const relative = path.relative(repoRoot, output).replaceAll(path.sep, "/")
   if (supportPaths.includes(relative) || REQUIRED_DEFINITION_PATHS.includes(relative)) throw new Error("Report output cannot overwrite reporter inputs")
   if (isWithin(output, repoRoot)) {
@@ -236,13 +239,22 @@ export async function runDriftReport({ repoRoot, outputPath }) {
   coverage.excluded = [...excluded].map(([reason, count]) => ({ reason, count }))
   const report = assembleDriftReport({ analyses, exceptions, coverage, provenance, diagnostics })
   // Replace the directory entry, never truncate an inode that may have other hard links.
-  const temporaryDirectory = await fs.mkdtemp(path.join(path.dirname(output), ".tldw-drift-"))
   try {
-    const temporaryPath = path.join(temporaryDirectory, "report.json")
-    await fs.writeFile(temporaryPath, JSON.stringify(report, null, 2) + "\n", { flag: "wx", mode: 0o600 })
-    await fs.rename(temporaryPath, output)
-  } finally {
-    await fs.rm(temporaryDirectory, { recursive: true, force: true })
+    const temporaryDirectory = await fs.mkdtemp(path.join(path.dirname(output), ".tldw-drift-"))
+    try {
+      const temporaryPath = path.join(temporaryDirectory, "report.json")
+      await fs.writeFile(temporaryPath, JSON.stringify(report, null, 2) + "\n", { flag: "wx", mode: 0o600 })
+      await fs.rename(temporaryPath, output)
+    } finally {
+      await fs.rm(temporaryDirectory, { recursive: true, force: true })
+    }
+  } catch (error) {
+    const shown = [...report.diagnostics].sort((a, b) => Number(b.severity === "error") - Number(a.severity === "error")).slice(0, 25)
+    const lines = [`Unable to write JSON report: ${error.message}`]
+    for (const diagnostic of shown) lines.push(`${diagnostic.severity} [${diagnostic.code}] ${JSON.stringify(diagnostic.path)}: ${JSON.stringify(diagnostic.message)}`)
+    const omitted = report.diagnostics.length - shown.length
+    if (omitted) lines.push(`${omitted} additional diagnostics omitted.`)
+    throw new Error(lines.join("\n"), { cause: error })
   }
   return { report, exitCode: report.status === "complete" ? 0 : 1 }
 }
@@ -261,7 +273,14 @@ async function main(args) {
   process.exitCode = exitCode
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
+function isCliEntrypoint(filename) {
+  if (!filename) return false
+  if (path.resolve(filename) === scriptPath) return true
+  try { return realpathSync(filename) === realpathSync(scriptPath) }
+  catch { return false }
+}
+
+if (isCliEntrypoint(process.argv[1])) {
   main(process.argv.slice(2)).catch(error => {
     console.error(`UI drift scan failed: ${error.message}`)
     process.exitCode = 1

@@ -155,6 +155,23 @@ describe("advisory drift CLI", () => {
     await expect(runDriftReport({ repoRoot: repo, outputPath: target })).rejects.toThrow(/output/i)
   })
 
+  it("rejects a case alias of a tracked output destination", async ({ skip }) => {
+    const target = "tracked-report.txt"
+    await write(target, "keep this content")
+    await git("add", "--", target)
+    const alias = path.join(repo, "TRACKED-REPORT.TXT")
+    const aliasesTarget = await fs.realpath(alias).then(
+      canonical => canonical === path.join(repo, target),
+      error => {
+        if (error.code === "ENOENT") return false
+        throw error
+      }
+    )
+    if (!aliasesTarget) skip("requires a case-insensitive filesystem")
+    await expect(runDriftReport({ repoRoot: repo, outputPath: alias })).rejects.toThrow(/tracked files/i)
+    expect(await fs.readFile(path.join(repo, target), "utf8")).toBe("keep this content")
+  })
+
   it("replaces a hard-linked report without truncating tracked content", async () => {
     await write("important.md", "keep this content")
     await git("add", "important.md")
@@ -190,6 +207,21 @@ describe("advisory drift CLI", () => {
     const { report, exitCode } = await scan()
     expect(exitCode).toBe(1)
     expect(report.status).toBe("incomplete")
+  })
+
+  it("includes collected diagnostics when report publication fails", async () => {
+    await fs.rm(path.join(repo, "admin-ui"), { recursive: true })
+    const publication = vi.spyOn(fs, "mkdtemp").mockRejectedValueOnce(new Error("output directory unavailable"))
+    try {
+      await expect(scan()).rejects.toThrow(/output directory unavailable[\s\S]*missing-root[\s\S]*admin-ui/)
+    } finally { publication.mockRestore() }
+  })
+
+  it("runs the CLI when invoked through a symlink", async () => {
+    const alias = path.join(repo, "linked-drift.mjs")
+    await fs.symlink(cli, alias)
+    await execFile(process.execPath, [alias, "--repo-root", repo, "--output", output])
+    expect(JSON.parse(await fs.readFile(output, "utf8")).status).toBe("complete")
   })
 
   it("uses actual subprocess exit codes and rejects unknown flags", async () => {

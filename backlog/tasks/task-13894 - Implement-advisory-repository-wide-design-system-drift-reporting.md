@@ -1,7 +1,7 @@
 ---
 id: TASK-13894
 title: Implement advisory repository-wide design-system drift reporting
-status: Done
+status: In Progress
 labels:
 - design-system
 - webui
@@ -37,6 +37,7 @@ PR #3294 review follow-up: no review threads or submitted reviews at inspection.
 PR #3294 follow-up verified: repaired ADR-079 link using an immutable repository-source URL (spec is intentionally outside the published site); regenerated the curated snapshot to add ADR-079 and its index entry. Reproduced missing tracked-file contract before the fix. Full Docs suite now passes: 212 tests, 10 existing warnings, including tracked snapshot parity and strict MkDocs build. Published ADR matches source byte-for-byte; staged whitespace check passes. Scope is three documentation files plus this task; no runtime, test, workflow, dependency or architecture changes. Bandit and app/browser suites not rerun for this documentation-only follow-up; earlier implementation security verification remains recorded. No submitted review threads existed; CodeRabbit only reported skipping this draft. Hosted CI must rerun after push; requester-authored Change summary remains required before merge.
 2026-11-24 PR #3294 follow-up: rebased the existing commit series onto dev 0a5a41294a. Preserved proposed Docs/ADR/098-advisory-ui-design-drift-reporting.md and the published ADR mirror; updated the workflow test counters for current dev without changing required gates. Verified all 11 inline CodeRabbit findings and the additional summary provenance finding. Fixed effective JSX/JS/CSS and Tailwind resolution and made clean provenance depend on the bytes read, including pinned inputs absent from HEAD. Strengthened real-symlink and exact CLI status assertions. New behavior regressions were verified red/green. 208 verifier tests, 482 Docs/CI/Backlog tests, scoped TypeScript and ESLint passed. The previously failing ChatSidebar file passed all 40 tests under local coverage and is unchanged from dev. Bandit: 249 low findings vs 254 on dev, none on added lines. No browser/full backend suite run. The reviewer requested no new policy; ADR-098 remains proposed and advisory-only. PR remains unmerged; the requester waived the Change summary for this PR only.
 Final replay against dev b4a9550f76; the intervening upstream changes were unrelated RAG files. Independent integration review added three red/green cases for conditional style spreads, branch-specific values and JSX-only entity semantics. The final focused count is 211. The prior ChatSidebar coverage failure was not reproduced in the unchanged 40-test file.
+2026-11-24 pre-merge review: no new GitHub review threads or failed checks were found on b1dd7ba8cb; the frontend license audit was queued. Defensive CLI review reproduced three fixes: canonicalize existing output filenames before the tracked-file check, recognize a symlinked CLI entrypoint, and retain bounded diagnostics when publishing JSON fails. All 25 CLI tests passed after red/green regressions. Additional parser/token review fixes are in progress. No new ADR or enforcement policy; ADR-098 remains advisory.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
