@@ -144,6 +144,7 @@ The database uses a schema version to manage evolution.
 *   `chacha/migrations/sqlite_steps.py` and `chacha/migrations/postgres_steps.py`: the migration steps, each `_migrate_from_v<N>_to_v<N+1>[_sqlite|_postgres](ctx, conn)`.
 *   `chacha/schema_bootstrap.py`: the bootstrap itself. `_initialize_schema_sqlite_legacy(ctx, *, target_version)` (the historical SQLite ladder, in one transaction), `_postgres_schema_is_current(ctx, conn)` and `_initialize_schema_postgres(ctx)`, plus `postgres_schema_migration`, which holds the PostgreSQL session advisory lock (30 s acquisition timeout) across the resumable migration commits. The bootstrap records its progress in the public `db.runtime_schema_version` (`None` until it has run).
 *   `chacha/context.py`: `ChaChaContext`, the curated, public view of the database (backend, owner, schema name and version, query helpers) that the modules above and the stores use instead of reaching into `CharactersRAGDB` privates.
+*   Stores: each domain's methods live on a store attribute and are called as `db.<store>.<method>`, for example `db.flashcard_store.add_flashcard(...)` or `db.workspace_store.get_workspace(...)`. `FlashcardStore` and `WorkspaceStore` hold their methods outright, so there is no `db.add_flashcard`. The other stores' methods are still re-attached to `CharactersRAGDB` as delegated names; new code calls the store, `tests/lint/test_charactersragdb_delegated_callers_ratchet.py` keeps the app's delegated-name call count from growing, and the names retire store by store (TASK-13950.146 to .152).
 
 **Version registries.** `sqlite_steps.SQLITE_STEPS` maps each SQLite source version (4..84) to a step name, and `postgres_steps.POSTGRES_STEPS` maps each PostgreSQL source version 72..90 to one. Values are names, resolved on their module at call time, so a single module patch (`monkeypatch.setattr(sqlite_steps, "_migrate_from_v49_to_v50", fake)`) reaches both the registry and the direct calls of the legacy ladders. `CharactersRAGDB._sqlite_linear_migration_steps()` binds each step to `db.ctx` with `chacha.migrations.bind`, and the PostgreSQL initializer loops over `POSTGRES_STEPS` for the v72 to v91 steps. The legacy PostgreSQL ladder stays inline in `_initialize_schema_postgres`: the SQL scripts for v4 to v53, the v54 to v70 steps (functions in `postgres_steps`), the v71 stamp (only while the schema is below v71), and the v72 stamp (while it is still below v72, outside the v71 gate). It runs for a new database and one below v71; a v71 or later schema takes the registry loop instead.
 
@@ -729,7 +730,7 @@ The library uses Loguru (`from loguru import logger`) for structured logging. Co
 
 ## 10. Flashcards & SRS (since V5)
 
-Key methods:
+Key methods, on `db.flashcard_store` (`chacha/flashcard_store.py`; they are not `CharactersRAGDB` methods):
 - `add_deck(name, description?) -> int`, `list_decks(...) -> List[dict]`
 - `add_flashcard(card_data) -> str`, `add_flashcards_bulk(cards) -> List[str]`
 - `list_flashcards(deck_id?, tag?, q?, due_status?, include_deleted?, limit, offset) -> List[dict]`
