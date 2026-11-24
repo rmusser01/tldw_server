@@ -18,6 +18,8 @@ from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
 from tldw_Server_API.app.api.v1.endpoints.users import (
     _USERS_AUDIT_EXCEPTIONS,
     _emit_user_profile_audit_event,
+    _notify_email_change,
+    _requested_email,
     _require_principal_active_verified,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -79,6 +81,8 @@ async def update_current_user_profile_v2(
             },
         )
 
+    if not payload.dry_run and "identity.email" in result.applied:
+        await _notify_email_change(http_request, user_context, _requested_email(payload))
     if not payload.dry_run:
         try:
             await _emit_user_profile_audit_event(

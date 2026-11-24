@@ -60,6 +60,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     StorageError,
     WeakPasswordError,
 )
+from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, fetch_password_hash
 from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_READ, SYSTEM_LOGS, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -302,6 +303,33 @@ async def _require_principal_active_verified(
     return user_context
 
 
+def _requested_email(payload: UserProfileUpdateRequest) -> str | None:
+    """Return the last ``identity.email`` value in a profile update, the one that is stored."""
+    values = [entry.value for entry in payload.updates if entry.key == "identity.email"]
+    return str(values[-1]) if values and values[-1] is not None else None
+
+
+async def _notify_email_change(
+    http_request: Request | None,
+    user_context: dict[str, Any],
+    new_email: str | None,
+) -> None:
+    """Notify the previous address when ``new_email`` differs from ``user_context["email"]``.
+
+    Call before ``user_context["email"]`` is overwritten; the notice goes out after commit.
+    """
+    old_email = str(user_context.get("email") or "").strip()
+    if not old_email or not new_email or new_email.strip().lower() == old_email.lower():
+        return
+    await _email_change.notify_previous_address(
+        user_id=int(user_context["id"]),
+        old_email=old_email,
+        new_email=new_email.strip().lower(),
+        username=str(user_context["username"]),
+        ip_address=resolve_client_ip(http_request) or "unknown",
+    )
+
+
 async def _emit_user_profile_audit_event(
     request: Request,
     *,
@@ -523,6 +551,8 @@ async def update_current_user_profile(
     response = _legacy_profile_command_response(result)
     if isinstance(response, JSONResponse):
         return response
+    if not payload.dry_run and "identity.email" in response.applied:
+        await _notify_email_change(http_request, user_context, _requested_email(payload))
     with contextlib.suppress(_USERS_AUDIT_EXCEPTIONS):
         if not payload.dry_run:
             await _emit_user_profile_audit_event(
@@ -589,6 +619,7 @@ async def update_user_profile(
     principal: AuthPrincipal = Depends(get_auth_principal),
     db=Depends(get_db_transaction),
     response: Response = None,
+    http_request: Request = None,
 ) -> DeprecatedUserResponse:
     """
     Deprecated: use /api/v1/users/me/profile.
@@ -651,6 +682,7 @@ async def update_user_profile(
                     detail="User not found",
                 ) from None
 
+            await _notify_email_change(http_request, user_context, request.email)
             updates_made = True
             user_context["email"] = request.email.lower()
             logger.info(f"Updated email for user {user_context['username']} (ID: {user_id})")

@@ -398,6 +398,44 @@ These codes can be used once each if you lose access to your authenticator app.
 Enabled from IP: {{ ip_address }}
 Time: {{ timestamp }}
 """
+    },
+    "email_changed": {
+        "subject": "Your {{ app_name }} email address was changed",
+        "html": """
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #17a2b8; color: white; padding: 20px; text-align: center; }
+        .content { background-color: #f8f9fa; padding: 30px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Your {{ app_name }} email address was changed</h1>
+        </div>
+        <div class="content">
+            <p>Hello {{ username }},</p>
+            <p>The email address on your {{ app_name }} account was changed to {{ new_email_masked }} at {{ timestamp }} from IP address {{ ip_address }}.</p>
+            <p>If you made this change, you do not need to do anything.</p>
+            <p>If you did not, sign in with your password, change your password, and change your email address back. If you cannot sign in, contact your administrator.</p>
+        </div>
+    </div>
+</body>
+</html>
+""",
+        "text": """
+Hello {{ username }},
+
+The email address on your {{ app_name }} account was changed to {{ new_email_masked }} at {{ timestamp }} from IP address {{ ip_address }}.
+
+If you made this change, you do not need to do anything.
+
+If you did not, sign in with your password, change your password, and change your email address back. If you cannot sign in, contact your administrator.
+"""
     }
 }
 
@@ -1093,6 +1131,29 @@ class EmailService:
         subject = Template(EMAIL_TEMPLATES["mfa_enabled"]["subject"]).render(**template_data)
 
         return await self.send_email(to_email, subject, html_body, text_body, _template="mfa_enabled")
+
+    async def send_email_changed_email(
+        self,
+        *,
+        to_email: str,
+        username: str,
+        new_email: str,
+        ip_address: str = "Unknown",
+    ) -> bool:
+        """Tell the previous address that the account's email changed; the new address is masked."""
+        local, _, domain = new_email.partition("@")
+        template_data = {
+            "app_name": self.app_name,
+            "username": username,
+            "new_email_masked": f"{local[:1] or '*'}***@{domain}",
+            "ip_address": ip_address,
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        }
+        templates = EMAIL_TEMPLATES["email_changed"]
+        html_body = Template(templates["html"]).render(**template_data)
+        text_body = Template(templates["text"]).render(**template_data)
+        subject = Template(templates["subject"]).render(**template_data)
+        return await self.send_email(to_email, subject, html_body, text_body, _template="email_changed")
 
 
 #######################################################################################################################

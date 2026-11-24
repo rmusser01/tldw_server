@@ -5,9 +5,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+import jinja2
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ import password_service, settings
+from tldw_Server_API.app.core.AuthNZ.email_service import get_email_service
+from tldw_Server_API.app.core.AuthNZ.transaction_hooks import defer_until_after_commit
+
+_NOTICE_NONCRITICAL_EXCEPTIONS = (OSError, RuntimeError, ValueError, TypeError, KeyError, jinja2.TemplateError)
 
 
 class EmailChangeRefused(Exception):
@@ -61,3 +66,25 @@ async def authorize_own_email_change(
             "current_password_invalid",
             "Current password is incorrect. If you sign in with SSO or an email link, use Forgot password to set one first.",
         )
+
+
+async def notify_previous_address(
+    *, user_id: int, old_email: str, new_email: str, username: str, ip_address: str
+) -> None:
+    """Send the email-changed notice to ``old_email`` once the request transaction commits.
+
+    A failed send is logged (user id only) and never fails the change.
+    """
+
+    async def _send() -> None:
+        try:
+            sent = await get_email_service().send_email_changed_email(
+                to_email=old_email, username=username, new_email=new_email, ip_address=ip_address
+            )
+        except _NOTICE_NONCRITICAL_EXCEPTIONS:
+            sent = False
+        if not sent:
+            logger.warning("Email-change notice to the previous address was not sent (user {})", user_id)
+
+    if not defer_until_after_commit(_send):
+        await _send()

@@ -66,6 +66,10 @@ class TestEmailTemplates:
         assert "html" in EMAIL_TEMPLATES["admin_reauth"]
         assert "text" in EMAIL_TEMPLATES["admin_reauth"]
 
+    def test_email_changed_template_exists(self):
+        """Email-changed notice template should be defined (TASK-15640)."""
+        assert "email_changed" in EMAIL_TEMPLATES
+
 
 class TestEmailServiceInitialization:
     """Tests for EmailService initialization."""
@@ -265,6 +269,24 @@ class TestTemplateEmailSending:
         assert "https://example.com/admin/reauth?token=reauth-token-123" in captured["html_body"]
         assert "https://example.com/admin/reauth?token=reauth-token-123" in captured["text_body"]
         assert captured["redact_mock_tokens"] == "True"
+
+    @pytest.mark.asyncio
+    async def test_send_email_changed_email_masks_the_new_address(self, email_service, monkeypatch):
+        sent: dict[str, object] = {}
+
+        async def _capture(to_email, subject, html_body, text_body=None, **kwargs):
+            sent.update(to=to_email, subject=subject, html=html_body, text=text_body, template=kwargs.get("_template"))
+            return True
+
+        monkeypatch.setattr(email_service, "send_email", _capture)
+        assert await email_service.send_email_changed_email(
+            to_email="old@example.org", username="owner", new_email="new.owner@example.org", ip_address="203.0.113.9"
+        ) is True
+        assert (sent["to"], sent["template"]) == ("old@example.org", "email_changed")
+        assert "email address was changed" in str(sent["subject"])
+        for body in (sent["html"], sent["text"]):
+            assert "n***@example.org" in body and "203.0.113.9" in body
+            assert "new.owner@example.org" not in body
 
     @pytest.mark.asyncio
     async def test_mock_admin_reauth_email_redacts_token_in_saved_mock_output(self, email_service, tmp_path):

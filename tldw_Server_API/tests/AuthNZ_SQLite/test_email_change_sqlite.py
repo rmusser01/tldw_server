@@ -251,3 +251,70 @@ async def test_single_user_mode_needs_no_password(monkeypatch):
         )
     finally:
         reset_settings()
+
+
+@pytest.fixture
+def sent_notices(owner_db, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import email_change
+
+    notices: list[dict] = []
+
+    class _Mail:
+        async def send_email_changed_email(self, **kwargs):
+            with sqlite3.connect(owner_db.pool.db_path) as conn:
+                committed = conn.execute("SELECT email FROM users WHERE id = ?", (owner_db.user_id,)).fetchone()[0]
+            notices.append({**kwargs, "committed_email": committed})
+            return True
+
+    monkeypatch.setattr(email_change, "get_email_service", lambda: _Mail())
+    return notices
+
+
+@pytest.mark.asyncio
+async def test_email_change_notifies_the_previous_address_after_commit(owner_db, email_api, sent_notices):
+    response = await email_api.put("/api/v1/users/me", json={"email": "new@example.com", "current_password": OWNER_PASSWORD})
+    assert response.status_code == 200, response.text
+    assert [(n["to_email"], n["new_email"], n["committed_email"]) for n in sent_notices] == [
+        (OWNER_EMAIL, "new@example.com", "new@example.com")
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/v1/users/me/profile", "/api/v2/users/me/profile"])
+async def test_profile_email_change_notifies_the_previous_address(owner_db, email_api, sent_notices, path):
+    response = await email_api.patch(path, json={**EMAIL_UPDATE, "current_password": OWNER_PASSWORD})
+    assert response.status_code == 200, response.text
+    assert [n["to_email"] for n in sent_notices] == [OWNER_EMAIL]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [EMAIL_UPDATE, {**EMAIL_UPDATE, "dry_run": True}, {"updates": [{"key": "identity.email", "value": OWNER_EMAIL.upper()}]}],
+    ids=["refused", "dry-run", "unchanged"],
+)
+async def test_no_notice_without_a_committed_change(owner_db, email_api, sent_notices, body):
+    await email_api.patch("/api/v1/users/me/profile", json=body)
+    assert sent_notices == []
+
+
+@pytest.mark.asyncio
+async def test_failed_notice_does_not_fail_the_change(owner_db, email_api, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import email_change
+
+    class _BrokenMail:
+        async def send_email_changed_email(self, **_kwargs):
+            raise OSError(f"smtp unreachable for {OWNER_EMAIL}")
+
+    monkeypatch.setattr(email_change, "get_email_service", lambda: _BrokenMail())
+    buffer = StringIO()
+    sink = logger.add(buffer, level="DEBUG")
+    try:
+        response = await email_api.put("/api/v1/users/me", json={"email": "new@example.com", "current_password": OWNER_PASSWORD})
+    finally:
+        logger.remove(sink)
+    assert response.status_code == 200, response.text
+    assert (await _columns(owner_db))[0] == "new@example.com"
+    warnings = [line for line in buffer.getvalue().splitlines() if "Email-change notice" in line]
+    assert len(warnings) == 1
+    assert OWNER_EMAIL not in warnings[0] and "new@example.com" not in warnings[0]
