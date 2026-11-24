@@ -359,11 +359,33 @@ def _resurrect(db: CharactersRAGDB, cid: str, writer: str, version: int, *, work
         assert db.restore_conversation(cid, version)
     else:
         assert db.upsert_conversation_from_sync(
-            conversation_id=cid, title="Resurrected", sync_client_id="other-device",
+            conversation_id=cid, title="Resurrected", sync_client_id=str(db.client_id),
             object_revision=version + 1, object_hash="h", assistant_kind="persona",
             assistant_id="persona-a", persona_memory_mode="read_only",
             scope_type="workspace", workspace_id=workspace,
         )
+
+
+@pytest.mark.parametrize("writer", ["restore", "sync"])
+def test_receipt_resurrection_preserves_committed_conversation_owner(
+    creation_db: CharactersRAGDB, db_factory: Callable[[], CharactersRAGDB], writer: str,
+) -> None:
+    """Resurrection must not replace the owner's row identity with a Sync device."""
+    first = _start(creation_db)
+    cid = first.conversation["id"]
+    creation_db.soft_delete_conversation(cid, 1)
+    observer = db_factory()
+    _resurrect(creation_db, cid, writer, 2)
+    with observer.transaction():
+        row = observer.get_conversation_by_id(cid, include_deleted=True)
+        assert row is not None
+        assert (row["client_id"], bool(row["deleted"]), row["version"], row["scope_type"], row["workspace_id"]) == (
+            "user-1", False, 3, "workspace", "ws",
+        )
+    receipt = _receipt(observer)
+    assert (receipt["owner_user_id"], receipt["conversation_id"], receipt["invalidated_at"]) == ("user-1", cid, None)
+    replay = _start(observer)
+    assert replay.replayed and replay.conversation["id"] == cid
 
 
 @pytest.mark.parametrize("writer", ["restore", "sync"])
