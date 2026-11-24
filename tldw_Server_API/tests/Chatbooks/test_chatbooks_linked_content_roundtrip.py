@@ -229,7 +229,9 @@ def test_note_links_survive_active_sync_capture(tmp_path, monkeypatch):
     note_path = tmp_path / "content/notes/note_source-note.md"
     note_path.parent.mkdir(parents=True)
     note_path.write_text(
-        "---\ntitle: Linked capture\nconversation_id: source-chat\nmessage_id: source-message\n---\n\n" + NOTE
+        "---\ntitle: Linked capture\nconversation_id: source-chat\nmessage_id: source-message\n---\n\n" + NOTE,
+        encoding="utf-8",
+        newline="\n",
     )
     status = ImportJob(job_id="note-capture", user_id="user-1", status=ImportStatus.IN_PROGRESS, chatbook_path="local")
     service._import_notes(
