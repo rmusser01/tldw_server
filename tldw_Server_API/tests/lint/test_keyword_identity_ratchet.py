@@ -107,7 +107,7 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py": 1,
     "tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py": 1,
     "tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py": 3,
-    "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": 1,
+    "tldw_Server_API/app/core/RAG/rag_service/pipeline/augment.py": 1,  # bump: moved from unified_pipeline.py (TASK-13950.24 PR I2); the gap-analysis keyword filter lowercases content/filter terms for substring matching, not keyword identity
     "tldw_Server_API/app/core/RAG/rag_service/utils.py": 1,
     "tldw_Server_API/app/core/Research/planner.py": 1,
     "tldw_Server_API/app/core/Sync/v2/notes_organization_coordinator.py": 3,
