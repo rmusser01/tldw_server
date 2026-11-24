@@ -216,6 +216,8 @@ def test_unrelated_backend_change_leaves_the_owner_isolation_job_off() -> None:
         "tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py",
         "pyproject.toml",
         ".github/workflows/backend-required.yml",
+        "Helper_Scripts/rag_split/rag_split.py",
+        "Helper_Scripts/rag_split/manifests/t03_c.py",
     ),
 )
 def test_rag_pipeline_paths_enable_the_rag_job(path: str) -> None:
@@ -226,3 +228,7 @@ def test_unrelated_backend_change_leaves_the_rag_job_off() -> None:
     flags = classify_paths(["tldw_Server_API/app/core/Chat/chat_service.py"])
     assert flags["backend_changed"] is True
     assert flags["rag_pipeline_changed"] is False
+
+
+def test_rag_split_tool_change_runs_backend_required() -> None:
+    assert classify_paths(["Helper_Scripts/rag_split/rag_split.py"])["backend_changed"] is True
