@@ -41,30 +41,27 @@ COVERAGE_GLOBS = [
     "uv.lock",
 ]
 
-TLDW_FRONTEND_GLOBS = [
+OUTBOUND_BROWSER_GLOBS = [
     *_OUTBOUND_SHARED_GLOBS,
+    ".github/actions/detect-required-gate-changes/action.yml",
+    ".github/actions/outbound-privacy/action.yml",
+    ".github/workflows/frontend-required.yml",
+    "Helper_Scripts/ci/emit_ci_gate_flags.py",
+    "Helper_Scripts/ci/path_classifier.py",
+    "tldw_Server_API/app/**",
+    "tldw_Server_API/Config_Files/**",
+    "tldw_Server_API/scripts/run_server_guarded_mcp.py",
+    "apps/package.json",
+    "apps/bun.lock",
+    "apps/patches/**",
+    "apps/packages/**",
+    "apps/tldw-frontend/**",
+    "apps/extension/**",
+]
+
+TLDW_FRONTEND_GLOBS = [
     ".github/workflows/frontend-required.yml",
     "apps/package.json",
-    "tldw_Server_API/Config_Files/.env.example",
-    "tldw_Server_API/Config_Files/config.txt",
-    "tldw_Server_API/app/Setup_UI/**",
-    "tldw_Server_API/app/api/v1/API_Deps/setup_deps.py",
-    "tldw_Server_API/app/api/v1/endpoints/control_plane.py",
-    "tldw_Server_API/app/api/v1/endpoints/llm_providers.py",
-    "tldw_Server_API/app/api/v1/endpoints/setup.py",
-    "tldw_Server_API/app/api/v1/schemas/setup_schemas.py",
-    "tldw_Server_API/app/core/LLM_Calls/provider_readiness.py",
-    "tldw_Server_API/app/core/Security/middleware.py",
-    "tldw_Server_API/app/core/Security/setup_*.py",
-    "tldw_Server_API/app/core/Setup/**",
-    "tldw_Server_API/app/core/startup_preflight.py",
-    "tldw_Server_API/app/__init__.py",
-    "tldw_Server_API/app/main.py",
-    "tldw_Server_API/app/services/readiness_service.py",
-    "tldw_Server_API/app/services/setup_mcp_tools_service.py",
-    "tldw_Server_API/app/services/startup_*.py",
-    "tldw_Server_API/app/static/setup/**",
-    "tldw_Server_API/scripts/run_server_guarded_mcp.py",
     "apps/packages/api-types/**",
     "apps/tldw-frontend/**",
     "apps/packages/ui/**",
@@ -262,6 +259,9 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         "backend_changed": backend_changed,
         "frontend_changed": frontend_changed,
         "tldw_frontend_changed": tldw_frontend_changed,
+        "outbound_browser_changed": any(
+            _matches_any(path, OUTBOUND_BROWSER_GLOBS) for path in normalized_paths
+        ),
         "family_guardrails_changed": family_guardrails_changed,
         "admin_ui_changed": admin_ui_changed,
         "e2e_changed": e2e_changed,

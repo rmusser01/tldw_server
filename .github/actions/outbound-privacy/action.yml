@@ -1,0 +1,64 @@
+name: Outbound privacy smoke
+description: Prepare the selected fixture image and run it with external networking disabled.
+
+inputs:
+  profile:
+    description: The backend or browser profile to verify.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+
+    - name: Reclaim unused runner SDKs
+      shell: bash
+      run: |
+        df -h /var/lib/docker
+        sudo rm -rf -- /usr/share/dotnet /usr/local/lib/android
+        df -h /var/lib/docker
+
+    - name: Prepare outbound image
+      shell: bash
+      env:
+        OUTBOUND_PROFILE: ${{ inputs.profile }}
+      run: |
+        case "$OUTBOUND_PROFILE" in
+          backend) budget=15m ;;
+          browser) budget=25m ;;
+          *) exit 2 ;;
+        esac
+        free_kib() { df -Pk /var/lib/docker | awk 'NR == 2 {print $4}'; }
+        samples=$(mktemp)
+        free_kib >"$samples"
+        started=$SECONDS
+        (while sleep 5; do free_kib; done) >>"$samples" 2>/dev/null &
+        sampler=$!
+        summarize_build() {
+          kill "$sampler" 2>/dev/null || true
+          wait "$sampler" 2>/dev/null || true
+          free_kib >>"$samples"
+          lowest=$(awk 'NR == 1 || $1 < min {min = $1} END {print min}' "$samples")
+          printf 'Cold %s image preparation took %s seconds. Lowest sampled free disk %s KiB.\n' \
+            "$OUTBOUND_PROFILE" "$((SECONDS - started))" "$lowest" | tee -a "$GITHUB_STEP_SUMMARY"
+          rm -f -- "$samples"
+        }
+        trap summarize_build EXIT
+        timeout --kill-after=15s "$budget" python -m Helper_Scripts.ci.outbound_isolation \
+          prepare "$OUTBOUND_PROFILE" --report-dir "$RUNNER_TEMP/outbound-privacy"
+
+    - name: Verify outbound privacy
+      shell: bash
+      env:
+        OUTBOUND_PROFILE: ${{ inputs.profile }}
+      run: |
+        case "$OUTBOUND_PROFILE" in
+          backend) budget=5m ;;
+          browser) budget=8m ;;
+          *) exit 2 ;;
+        esac
+        timeout --kill-after=15s "$budget" python -m Helper_Scripts.ci.outbound_check \
+          "$OUTBOUND_PROFILE" --report-dir "$RUNNER_TEMP/outbound-privacy"

@@ -541,10 +541,35 @@ jobs:
               sys.exit(1)
           PY
 
+  outbound-backend:
+    name: Backend outbound privacy
+    runs-on: ubuntu-latest
+    needs: [changes, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
+      ) &&
+      (
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.backend_changed == 'true'
+      )
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/outbound-privacy
+        with:
+          profile: backend
+
   backend-required:
     name: backend-required
     runs-on: ubuntu-latest
-    needs: [changes, await_license, non-utc-tests, chacha-owner-isolation, rag-pipeline]
+    needs: [changes, await_license, non-utc-tests, chacha-owner-isolation, rag-pipeline, outbound-backend]
     # Report failures for licensing or change detection instead of skipping the required check.
     if: >-
       always() && !cancelled() &&
@@ -583,6 +608,20 @@ jobs:
         run: |
           echo "::error::Change detection (the 'changes' job) ended as '${CHANGES_RESULT}', not 'success', so this gate cannot tell what the head changed and ran nothing. If its 'Check backlog task ids are unique' step failed, renumber the file it names; otherwise re-run the workflow."
           exit 1
+
+      - name: Require outbound privacy to have passed
+        shell: bash
+        env:
+          OUTBOUND_DUE: ${{ needs.changes.outputs.backend_changed }}
+          OUTBOUND_RESULT: ${{ needs.outbound-backend.result }}
+        run: |
+          case "$OUTBOUND_DUE:$OUTBOUND_RESULT" in
+            true:success|false:skipped) ;;
+            *)
+              echo "::error::Backend outbound privacy ended as '$OUTBOUND_RESULT' with backend_changed='$OUTBOUND_DUE'."
+              exit 1
+              ;;
+          esac
 
       - name: Require non-UTC timestamp tests to have passed
         env:
@@ -660,16 +699,6 @@ jobs:
             pyproject.toml
             uv.lock
           extras: dev
-
-      - name: Prepare backend outbound privacy image
-        if: needs.changes.outputs.backend_changed == 'true'
-        timeout-minutes: 15
-        run: python -m Helper_Scripts.ci.outbound_isolation prepare backend --report-dir "$RUNNER_TEMP/outbound-privacy"
-
-      - name: Verify backend outbound privacy
-        if: needs.changes.outputs.backend_changed == 'true'
-        timeout-minutes: 5
-        run: python -m Helper_Scripts.ci.outbound_check backend --report-dir "$RUNNER_TEMP/outbound-privacy"
 
       - name: Test Auth PostgreSQL fixture teardown
         if: needs.changes.outputs.backend_changed == 'true'

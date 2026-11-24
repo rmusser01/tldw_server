@@ -28,61 +28,91 @@ EXPECTED_PERMISSIONS = {
 
 
 @pytest.mark.parametrize(
-    ("workflow_name", "profile", "flag", "preceding_step", "build_timeout", "check_timeout"),
+    ("workflow_name", "profile", "flag"),
     [
-        ("backend-required", "backend", "backend_changed", "Setup Python and dependencies", 15, 5),
-        ("frontend-required", "browser", "tldw_frontend_changed", "Build production Chrome extension", 25, 8),
+        ("backend-required", "backend", "backend_changed"),
+        ("frontend-required", "browser", "outbound_browser_changed"),
     ],
 )
-def test_required_outbound_privacy_fails_closed(
-    tmp_path: Path,
-    workflow_name: str,
-    profile: str,
-    flag: str,
-    preceding_step: str,
-    build_timeout: int,
-    check_timeout: int,
-) -> None:
-    """Require blocking preparation and verification on the admitted head."""
-    workflow = yaml.safe_load((REPO_ROOT / f".github/workflows/{workflow_name}.yml").read_text())
-    job = workflow["jobs"][workflow_name]
-    steps = job["steps"]
-    names = [step.get("name") for step in steps]
-    prepare_name = f"Prepare {profile} outbound privacy image"
-    check_name = f"Verify {profile} outbound privacy"
-    assert names.count(prepare_name) == names.count(check_name) == 1
-    assert "await_license" in job["needs"]
+def test_required_outbound_privacy_fails_closed(workflow_name: str, profile: str, flag: str) -> None:
+    """The protected job requires the result of a fresh, license-admitted runner."""
+    jobs = yaml.safe_load((REPO_ROOT / f".github/workflows/{workflow_name}.yml").read_text())["jobs"]
+    worker_name = f"outbound-{profile}"
+    job = jobs.get(worker_name)
+    assert job is not None, "outbound preparation and verification need a dedicated runner"
+    assert worker_name in jobs[workflow_name]["needs"]
+    assert {"changes", "await_license"} <= set(job["needs"])
+    assert f"needs.changes.outputs.{flag} == 'true'" in job["if"]
+    assert job["runs-on"] == "ubuntu-latest"
     assert not job.get("continue-on-error", False)
-    assert (
-        names.index("Require the license audit to have passed")
-        < names.index("Checkout")
-        < names.index(preceding_step)
-        < names.index(prepare_name)
-        < names.index(check_name)
-    )
-    for name, command, timeout in (
-        (prepare_name, f"outbound_isolation prepare {profile}", build_timeout),
-        (check_name, f"outbound_check {profile}", check_timeout),
-    ):
-        step = steps[names.index(name)]
-        assert step["if"] == f"needs.changes.outputs.{flag} == 'true'"
-        assert not step.get("continue-on-error", False)
-        assert step["timeout-minutes"] == timeout
-        assert step["run"].strip() == (
-            f'python -m Helper_Scripts.ci.{command} --report-dir "$RUNNER_TEMP/outbound-privacy"'
+    checkout, smoke = job["steps"]
+    assert checkout["uses"] == CHECKOUT_ACTION
+    assert smoke["uses"] == "./.github/actions/outbound-privacy"
+    assert smoke["with"] == {"profile": profile}
+    assert not smoke.get("continue-on-error", False)
+    assert not smoke.get("if")
+
+    steps = jobs[workflow_name]["steps"]
+    rollup = next(step for step in steps if step.get("name") == "Require outbound privacy to have passed")
+    assert rollup["env"] == {
+        "OUTBOUND_DUE": "${{ needs.changes.outputs." + flag + " }}",
+        "OUTBOUND_RESULT": "${{ needs." + worker_name + ".result }}",
+    }
+    assert "if" not in rollup
+    for due, result, expected in [
+        ("true", "success", 0), ("false", "skipped", 0), ("true", "skipped", 1),
+        ("true", "cancelled", 1), ("true", "failure", 1), ("", "skipped", 1),
+    ]:
+        completed = subprocess.run(  # nosec B603
+            ["/bin/bash", "-e", "-c", rollup["run"]],
+            env={"OUTBOUND_DUE": due, "OUTBOUND_RESULT": result},
+            capture_output=True,
+            timeout=5,
+            check=False,
         )
+        assert completed.returncode == expected, (due, result)
+
+
+@pytest.mark.parametrize(
+    ("step_name", "arguments"),
+    [
+        ("Prepare outbound image", "-m Helper_Scripts.ci.outbound_isolation prepare browser"),
+        ("Verify outbound privacy", "-m Helper_Scripts.ci.outbound_check browser"),
+    ],
+)
+def test_outbound_job_preserves_command_failure(tmp_path: Path, step_name: str, arguments: str) -> None:
+    action = REPO_ROOT / ".github/actions/outbound-privacy/action.yml"
+    assert action.is_file(), "the fresh runners share the same measured smoke action"
+    steps = yaml.safe_load(action.read_text())["runs"]["steps"]
+    step = next(step for step in steps if step.get("name") == step_name)
+    assert not step.get("continue-on-error", False)
 
     python = tmp_path / "python"
-    python.write_text("#!/bin/sh\nexit 37\n")
+    python.write_text(
+        f'#!/bin/sh\ncase "$*" in "{arguments} --report-dir "*) exit 37;; esac\nexit 99\n'
+    )
     python.chmod(0o700)
-    # The checked-in command receives a synthetic runner failure.
+    timeout = tmp_path / "timeout"
+    timeout.write_text('#!/bin/sh\nshift 2\nexec "$@"\n')
+    timeout.chmod(0o700)
+    disk = tmp_path / "df"
+    disk.write_text("#!/bin/sh\nprintf 'header\\n/dev/sda 24000 6000 18000 25%% /\\n'\n")
+    disk.chmod(0o700)
+    summary = tmp_path / "summary"
     result = subprocess.run(  # nosec B603
-        ["/bin/bash", "-e", "-c", steps[names.index(check_name)]["run"]],
-        env={"PATH": str(tmp_path), "RUNNER_TEMP": str(tmp_path)},
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        env={
+            "PATH": f"{tmp_path}:{os.defpath}", "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_STEP_SUMMARY": str(summary), "OUTBOUND_PROFILE": "browser",
+        },
+        capture_output=True,
         timeout=5,
         check=False,
     )
     assert result.returncode == 37
+    if step_name == "Prepare outbound image":
+        assert "Lowest sampled free disk" in summary.read_text()
+        assert "18000 KiB" in summary.read_text()
 
 
 ORDINARY_WORKFLOW_NAMES = (
@@ -170,7 +200,10 @@ DIRECT_TRIGGER_DIGESTS = {
 }
 ORIGINAL_JOB_NAMES = {
     "actionlint.yml": ("actionlint",),
-    "backend-required.yml": ("changes", "non-utc-tests", "chacha-owner-isolation", "rag-pipeline", "backend-required", "queue-tick"),
+    "backend-required.yml": (
+        "changes", "non-utc-tests", "chacha-owner-isolation", "rag-pipeline",
+        "outbound-backend", "backend-required", "queue-tick",
+    ),
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
@@ -201,7 +234,7 @@ ORIGINAL_JOB_NAMES = {
     "frontend-e2e-tiers.yml": ("changes", "critical", "features", "admin", "ux-regression", "queue-tick"),
     "frontend-required.yml": (
         "changes", "frontend-unit-tests", "shared-ui-coverage",
-        "shared-ui-coverage-report", "frontend-required", "queue-tick",
+        "shared-ui-coverage-report", "outbound-browser", "frontend-required", "queue-tick",
     ),
     "frontend-ux-gates.yml": ("onboarding-gate", "smoke-gate"),
     "jobs-suite.yml": ("jobs-sqlite", "jobs-postgres", "jobs-postgres-coverage"),
@@ -229,11 +262,13 @@ ORIGINAL_DEPENDENCIES = {
     ("backend-required.yml", "non-utc-tests"): ("changes",),
     ("backend-required.yml", "chacha-owner-isolation"): ("changes",),
     ("backend-required.yml", "rag-pipeline"): ("changes",),
+    ("backend-required.yml", "outbound-backend"): ("changes",),
     ("backend-required.yml", "backend-required"): (
         "changes",
         "non-utc-tests",
         "chacha-owner-isolation",
         "rag-pipeline",
+        "outbound-backend",
     ),
     ("backend-required.yml", "queue-tick"): ("backend-required",),
     ("ci.yml", "full-suite-linux-312-shards"): ("lint", "syntax-check", "changes"),
@@ -263,9 +298,11 @@ ORIGINAL_DEPENDENCIES = {
     ("frontend-required.yml", "frontend-unit-tests"): ("changes",),
     ("frontend-required.yml", "shared-ui-coverage"): ("changes",),
     ("frontend-required.yml", "shared-ui-coverage-report"): ("changes", "shared-ui-coverage"),
+    ("frontend-required.yml", "outbound-browser"): ("changes",),
     ("frontend-required.yml", "frontend-required"): (
         "changes",
         "frontend-unit-tests",
+        "outbound-browser",
     ),
     ("frontend-required.yml", "queue-tick"): ("frontend-required",),
     ("jobs-suite.yml", "jobs-postgres"): ("jobs-sqlite",),
@@ -295,11 +332,13 @@ DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | LICENSE_RED_GATES | {
     ("backend-required.yml", "non-utc-tests"),
     ("backend-required.yml", "chacha-owner-isolation"),
     ("backend-required.yml", "rag-pipeline"),
+    ("backend-required.yml", "outbound-backend"),
     ("backend-required.yml", "backend-required"),
     ("frontend-e2e-tiers.yml", "critical"),
     ("frontend-e2e-tiers.yml", "features"),
     ("frontend-e2e-tiers.yml", "admin"),
     ("frontend-required.yml", "frontend-unit-tests"),
+    ("frontend-required.yml", "outbound-browser"),
     ("frontend-required.yml", "frontend-required"),
     ("security-required.yml", "security-required"),
 }
@@ -374,6 +413,7 @@ CHANGE_CLASSIFIER_OUTPUTS = {
         "backend_changed",
         "frontend_changed",
         "tldw_frontend_changed",
+        "outbound_browser_changed",
         "family_guardrails_changed",
         "admin_ui_changed",
         "e2e_changed",
@@ -820,6 +860,9 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "needs.changes.result == 'success' && "
                         "needs.changes.outputs.tldw_frontend_changed == 'true'"
                     )
+                elif job_name in {"outbound-backend", "outbound-browser"}:
+                    flag = "backend_changed" if backend_direct else "outbound_browser_changed"
+                    extra_condition = f"needs.changes.result == 'success' && needs.changes.outputs.{flag} == 'true'"
                 # The gates with a `changes` job carry no `needs.changes.result == 'success'`
                 # term (TASK-13462): they run whenever change detection was started and fail
                 # in a guard step if it did not succeed, instead of being skipped.
@@ -960,7 +1003,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 63
+    assert checkout_count == 65
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -1008,8 +1051,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 57
-    assert combined_text.count("github.event.pull_request.head.sha") == 58
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 58
+    assert combined_text.count("github.event.pull_request.head.sha") == 60
     # The backlog task ratchet still gets the PR base (TASK-13440).
     assert combined_text.count("github.event.pull_request.base.sha") == 6
     assert combined_text.count("needs.admission.outputs.base_sha") == 11

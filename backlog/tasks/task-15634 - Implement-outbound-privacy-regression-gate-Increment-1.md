@@ -1,7 +1,7 @@
 ---
 id: TASK-15634
 title: Implement outbound privacy regression gate Increment 1
-status: Done
+status: In Progress
 labels:
 - security
 - privacy
@@ -40,6 +40,8 @@ Stage 2: 39 harness and strict-guard tests passed after red runs, and the existi
 Stage 3: 77 tests passed in the isolated Linux backend image (Hugging Face Hub 1.33.0, zero skips). All 11 opt-in subprocess cases also passed with Hub 0.36.0 under macOS OS-level network denial in Python 3.12. The fixtures assert both the built-in and configured OpenAI destinations and leave HF_ENDPOINT unset on the successful Hub cases. Pip/uv and Git coverage is limited to exact argv dispatch. Ruff and Bandit passed.
 Stage 4: all four browser scenarios ran together in disconnected Linux Docker and passed with zero violations. Wizard persistence, quickstart WebUI cookie and bundled search icon, the packaged copilot worker POST and rendered reply, and independent content-script activation are proved. Added the app early ONNX telemetry opt-out after a native DNS attempt was reproduced and verified absent. The missing-credentials check now precedes DNS on sample OpenAI endpoints, verified by 63 provider-readiness tests. The WebUI models catalog uses four exact unavailable local provider fixtures. Only Chromium’s verified failed UDP IPv6 route query is classified as platform behavior; actual network traffic remains subject to the exact fixture rules. 18 harness tests, 35 Add Sources tests, both TypeScript checks, Ruff, Bandit, and whitespace checks passed.
 Stage 5: ran both image preparations and all seven scenarios from the final checkout in disconnected Linux Docker. Backend and browser independently passed serially in 93.26 and 86.29 seconds. The final harness and workflow suite passed 395 focused tests, and independent review reran 261 CI contract and runner tests. The workflow sentinel propagated a nonzero exit. Missing and stale preparation records failed closed. Report scans found no raw credentials or URLs. actionlint 1.7.12, Ruff on harness code, Bandit with no new findings, and git diff --check passed. GitHub-hosted timing awaits the first branch run.
+Pre-push review follow-up authorized. Verify three stages test-first: dedicated license-admitted CI jobs and browser path detection, Chromium worker WebSocket detection, and safe diagnostics plus exception anchor validation. ADR required: no new ADR. The follow-up implements the existing Increment 1 decisions in proposed ADR-097 and the linked implementation plan.
+Pre-push stage 1: auth, shared API and smoke inputs now trigger a dedicated browser job without selecting the frontend unit shards. Both dedicated runner jobs reclaim unused SDK space and record cold build time and lowest sampled Docker free disk. Required contexts fail for a selected job that fails, is cancelled or skips. Red run reproduced the missing flag and runner topology; 255 classifier and workflow contract tests passed with the fix, as did actionlint, Ruff and whitespace checks. Bandit found no new findings. Hosted x64 metrics await GitHub execution.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

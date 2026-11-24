@@ -250,6 +250,9 @@ def test_rag_split_tool_change_runs_backend_required() -> None:
         ("tldw_Server_API/app/api/v1/endpoints/setup.py", True, True),
         ("tldw_Server_API/app/api/v1/endpoints/control_plane.py", True, True),
         ("tldw_Server_API/app/api/v1/endpoints/llm_providers.py", True, True),
+        ("tldw_Server_API/app/api/v1/endpoints/auth.py", True, True),
+        ("tldw_Server_API/app/core/http_client.py", True, True),
+        ("tldw_Server_API/app/core/LLM_Calls/tokenizer_resolver.py", True, True),
         ("tldw_Server_API/app/core/LLM_Calls/provider_readiness.py", True, True),
         ("tldw_Server_API/app/services/readiness_service.py", True, True),
         ("tldw_Server_API/app/core/Security/middleware.py", True, True),
@@ -267,11 +270,25 @@ def test_rag_split_tool_change_runs_backend_required() -> None:
             True,
         ),
         ("apps/extension/playwright.outbound.config.ts", False, True),
+        ("apps/patches/jsdom@28.1.0.patch", False, True),
+        (".github/actions/outbound-privacy/action.yml", True, True),
+        (".github/actions/detect-required-gate-changes/action.yml", True, True),
+        ("Helper_Scripts/ci/path_classifier.py", True, True),
+        ("tldw_Server_API/tests/AuthNZ/test_auth.py", True, False),
         ("Docs/Development/Local-CI.md", False, False),
     ),
 )
 def test_outbound_check_paths_select_consuming_gate(path: str, backend: bool, browser: bool) -> None:
     flags = classify_paths([path])
     assert flags["backend_changed"] is backend
-    assert flags["tldw_frontend_changed"] is browser
-    assert flags["frontend_changed"] is browser
+    assert flags.get("outbound_browser_changed") is browser
+
+
+@pytest.mark.parametrize("path", [
+    "tldw_Server_API/app/api/v1/endpoints/auth.py",
+    "Helper_Scripts/ci/outbound_inventory.json",
+])
+def test_outbound_browser_inputs_do_not_trigger_frontend_shards(path: str) -> None:
+    flags = classify_paths([path])
+    assert flags.get("outbound_browser_changed") is True
+    assert flags["tldw_frontend_changed"] is False

@@ -85,6 +85,13 @@ package and Git checks verify selected command arguments. `browser` checks the
 shipped setup wizard, standalone production WebUI, and packaged Chrome worker and
 content script.
 
+In GitHub Actions each slice runs on a fresh Linux runner after license
+admission. `backend-required` uses the normal backend flag. `frontend-required`
+uses the browser privacy flag for changes to the API, app defaults, browser
+build inputs, or check code. Each required job checks the result of its privacy
+job. The preparation step records elapsed time and the lowest sampled free
+Docker disk space in the run summary.
+
 The native trace detected ONNX Runtime's startup telemetry. The app sets
 `ORT_DISABLE_TELEMETRY=1` before importing the SDK unless the operator supplies
 an explicit value. The destination is documented in the reviewed inventory.

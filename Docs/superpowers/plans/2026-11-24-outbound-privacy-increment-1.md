@@ -315,6 +315,16 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
   Document the portable pure unit tests and the option to use a Linux container engine or VM on macOS. Fixture verification checks selected URLs and exercised flows. Report other app, browser, platform and native paths as outside the proved coverage.
 - [x] Run both CI commands and `all` locally in the supported environment. Run the negative sentinel and a manifest-only change through the workflow contracts, verify actionlint and focused tests, and run `python -m bandit -r Helper_Scripts/ci/outbound_inventory.py Helper_Scripts/ci/outbound_backend_smoke.py Helper_Scripts/ci/outbound_browser_smoke.py Helper_Scripts/ci/outbound_isolation.py Helper_Scripts/ci/outbound_check.py tldw_Server_API/tests/helpers/offline_network.py`. Verify no report contains the raw synthetic secrets. Record evidence and any deliberate scope exclusions in TASK-15634. Commit as `ci: require the outbound privacy regression checks (TASK-15634)`.
 
+## Pre-push review follow-up
+
+ADR check — proposed ADR-097 still governs the inventory and required checks. These fixes implement that decision and require no new ADR.
+
+| Stage | Success criteria | Verification | Status |
+| --- | --- | --- | --- |
+| 1. CI selection and runner capacity | Auth and other covered API changes select browser privacy. Both smokes use fresh admitted runners and their existing required checks report failures. CI records cold build time and available disk. | 255 classifier and workflow contract tests passed, including failure propagation. Actionlint and Ruff passed. Hosted cold-build measurements are pending. | Complete |
+| 2. Worker WebSockets | The packaged worker's hostname-based WebSocket attempt is observed before resolution. A positive fixture run stays green and its synthetic denied control is observed. | Browser evidence tests and the disconnected Chromium run | In Progress |
+| 3. Diagnostics and exception anchors | Reports identify the failing check with stable redacted data. Exception anchors resolve in the shipped source. | Negative evidence and inventory tests, both local selectors, and Bandit | Not Started |
+
 ## Handoff
 
 Before marking TASK-15634 complete, confirm the four Backlog acceptance criteria against executed evidence. Stage 1 validates declarations, Stages 2 and 3 provide default and opted-in backend evidence, Stage 4 covers all three browser surfaces, and Stage 5 enforces the same runner in the required CI contexts. Capture transport or platform expansions as separate follow-up tasks. The implementation plan deliberately carries no strict-mode release claim.
