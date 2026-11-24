@@ -44,7 +44,7 @@ Original implementation and four remediation stages complete. PR review follow-u
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Isolated worktree on codex/acp-tool-result-experiment. Baseline: 40 ACP runner/adapter/caller tests pass. MCP task tools stalled; using official Backlog CLI. Task ID 13219 avoids the concurrently assigned RAG task 13218.
 
 Implemented result policy, runner/adapter integration, and replay harness. Initial focused suite: 70 passed; harness: 3 passed. Independent review identified malformed worker output, unbounded cancellation cleanup, and retained store after callback failure; all reproduced with failing tests and fixed (6 malformed-output tests and 4 lifecycle tests pass). Bandit on five touched runtime/script files reports zero findings. Final verification in progress.
@@ -64,7 +64,9 @@ CI shard fix verified: check_shard_coverage.py now reports new_uncovered=0; pars
 Confirmed Qodo runtime findings locally: a worker raising CancelledError escapes preparation; a 4 MiB NUL-heavy source rejected at the 32 KiB worker budget peaks at 93,973,055 temporary traced bytes and delays the first event-loop heartbeat by 156 ms. Add public behavior regressions before fixing. Documentation/type-hint feedback matches project guidance; use narrow central source-not-found and worker-cancelled exceptions while retaining existing ValueError handling compatibility.
 
 PR review follow-up complete: five new regression cases failed before implementation (worker-only cancellation at policy/run boundaries, temporary allocations for oversized source/question JSON, cancellation before worker dispatch); two additional cases preserve exact encoded sizes for escapes and Unicode. Incremental JSON construction stops at the byte limit and yields; early rejections keep full request bytes unknown. A cancelled child worker raises a central classifiable error and falls back, while caller/event cancellation propagates. Missing-source handles now raise a central ValueError-compatible exception. All new definitions have docstrings and parameter/return annotations, with explicit casts only for deliberately malformed provider fixtures. Final validation: 143 targeted ACP tests passed (4 warnings), Ruff passed on all nine PR Python files, format checks passed on the five new files, scoped mypy passed those five files, Bandit on four follow-up runtime/script paths found zero findings and zero scan errors, shard guard passed, and all nine fixture replay rows recovered expected evidence. Independent review passed 225 encoded-size boundary probes and cancellation race checks without actionable findings. Only task/docs changed after runtime verification. GitHub shard guard passed; remaining hosted checks continue on the PR. Removed the completed temporary follow-up plan.
-<!-- SECTION:NOTES:END -->
+Rebased PR #2932 onto dev at 6d31f3d1a7. Resolved the CI workflow conflict by using the new platform-acp shard on Ubuntu 3.12 and retaining explicit coverage for the three experiment test files in the other four full-suite matrices. Preserved the separate MCP in-app shards. Git range-diff confirmed the four remaining patches replayed identically. Canonicalized this task with backlog-py for the current format ratchet. Validation on Python 3.12: 335 focused ACP and CI contract tests passed, shard coverage had zero newly uncovered files, task format and ID checks passed, Ruff and scoped mypy passed, and Bandit reported zero findings or scan errors.
+ADR required: no. The experiment uses the existing injected caller and retains source text only for the current run. Provider-backed callers follow Docs/ADR/025-llm-provider-adapter-routing-and-overrides.md. Persisted ACP session ownership follows Docs/ADR/016-acp-session-and-orchestration-persistence.md.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

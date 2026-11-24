@@ -8,6 +8,8 @@ Extend the existing LLM-driven MCP runner with an opt-in policy at the boundary 
 
 Deterministic excerpts are the cheapest baseline. Worker mode selects server-numbered source segments; it does not author summaries or invent citations. This avoids unreliable model-generated character offsets. The final model can request exact surrounding text through a bounded, run-local `tldw_read_tool_result` tool.
 
+ADR required: no. The experiment uses the existing injected caller and retains text only for the current run. Provider-backed callers follow the gateway in [ADR-025](../ADR/025-llm-provider-adapter-routing-and-overrides.md). Persisted ACP session ownership follows [ADR-016](../ADR/016-acp-session-and-orchestration-persistence.md).
+
 ## Contracts
 
 - Default is `off`, with unchanged model history, tool schemas, and event payloads.
