@@ -41,9 +41,8 @@ async def test_rag_pipeline_ephemeral_ops_use_run_user_context(tmp_path, monkeyp
         _fake_create_from_settings_for_user,
     )
 
-    async def _fake_unified_rag_pipeline(*, query, **kwargs):
-        _ = query
-        pipeline_user_ids.append(str(kwargs.get("user_id")))
+    async def _fake_unified_rag_pipeline(rcfg):
+        pipeline_user_ids.append(str(rcfg.as_kwargs().get("user_id")))
         return {
             "documents": [{"id": "doc_1", "content": "context"}],
             "generated_answer": "answer",
@@ -51,7 +50,7 @@ async def test_rag_pipeline_ephemeral_ops_use_run_user_context(tmp_path, monkeyp
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Evaluations.eval_runner.unified_rag_pipeline",
+        "tldw_Server_API.app.core.Evaluations.eval_runner.run_rag_pipeline",
         _fake_unified_rag_pipeline,
     )
 

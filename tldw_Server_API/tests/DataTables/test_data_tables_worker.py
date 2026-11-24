@@ -356,11 +356,12 @@ async def test_rag_query_source_clamps_retrieval_and_snapshot(monkeypatch, tmp_p
         for idx in range(75)
     ]
 
-    async def fake_unified_rag_pipeline(**kwargs):
+    async def fake_unified_rag_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         captured.update(kwargs)
         return {"documents": documents}
 
-    monkeypatch.setattr(jobs_worker, "unified_rag_pipeline", fake_unified_rag_pipeline)
+    monkeypatch.setattr(jobs_worker, "run_rag_pipeline", fake_unified_rag_pipeline)
     monkeypatch.setattr(jobs_worker, "get_user_chacha_db_path", lambda _user_id: str(tmp_path / "chacha.db"))
 
     class MediaDbStub:

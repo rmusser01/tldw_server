@@ -113,10 +113,10 @@ class TestRAGSearchAdapter:
         """Test RAG search adapter with valid config."""
         from tldw_Server_API.app.core.Workflows.adapters.rag import run_rag_search_adapter
 
-        # Mock the unified_rag_pipeline
+        # Mock run_rag_pipeline
         mock_pipeline = AsyncMock(return_value=mock_rag_result)
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Workflows.adapters.rag.search.unified_rag_pipeline",
+            "tldw_Server_API.app.core.Workflows.adapters.rag.search.run_rag_pipeline",
             mock_pipeline,
         )
 
@@ -161,7 +161,7 @@ class TestRAGSearchAdapter:
             # Mock the pipeline to raise error on empty query
             mock_pipeline = AsyncMock(side_effect=ValueError("Empty query"))
             monkeypatch.setattr(
-                "tldw_Server_API.app.core.Workflows.adapters.rag.search.unified_rag_pipeline",
+                "tldw_Server_API.app.core.Workflows.adapters.rag.search.run_rag_pipeline",
                 mock_pipeline,
             )
 
@@ -179,7 +179,7 @@ class TestRAGSearchAdapter:
 
         mock_pipeline = AsyncMock(return_value=mock_rag_result)
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Workflows.adapters.rag.search.unified_rag_pipeline",
+            "tldw_Server_API.app.core.Workflows.adapters.rag.search.run_rag_pipeline",
             mock_pipeline,
         )
 
@@ -248,7 +248,7 @@ class TestRAGSearchAdapter:
 
         mock_pipeline = AsyncMock(return_value=mock_rag_result)
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Workflows.adapters.rag.search.unified_rag_pipeline",
+            "tldw_Server_API.app.core.Workflows.adapters.rag.search.run_rag_pipeline",
             mock_pipeline,
         )
 
@@ -268,7 +268,7 @@ class TestRAGSearchAdapter:
 
         await run_rag_search_adapter(config, base_context)
 
-        call_kwargs = mock_pipeline.call_args[1]
+        call_kwargs = mock_pipeline.call_args[0][0].as_kwargs()
         assert call_kwargs.get("enable_reranking") is True
         assert call_kwargs.get("enable_citations") is True
         assert call_kwargs.get("enable_generation") is True

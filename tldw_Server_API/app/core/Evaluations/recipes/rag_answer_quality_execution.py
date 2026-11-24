@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
 from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
 
 _DEFAULT_WEIGHTS = {
     "grounding": 0.4,
@@ -423,11 +423,11 @@ async def _run_live_retrieval_request(
     request_payload: dict[str, Any],
     user_id: str | None,
 ) -> dict[str, Any]:
-    response = await unified_rag_pipeline(
+    response = await run_rag_pipeline(RagRunConfig.from_kwargs(
         media_db_path=get_user_media_db_path(user_id) if user_id else None,
         notes_db_path=get_user_chacha_db_path(user_id) if user_id else None,
         **request_payload,
-    )
+    ))
     if hasattr(response, "model_dump"):
         return dict(response.model_dump(mode="json"))
     return dict(response)

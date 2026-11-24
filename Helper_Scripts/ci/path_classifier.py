@@ -111,6 +111,7 @@ _RAG_NEW_UNIT = [
     "test_rag_unified_search_agent_defaults",
     "test_retrieval_plan_usage",
     "test_retrieval",
+    "test_run_config_caller_equivalence",
     "test_search_depth_explicit_overrides",
     "test_slides_source_retrieval_hardening",
     "test_source_contract",

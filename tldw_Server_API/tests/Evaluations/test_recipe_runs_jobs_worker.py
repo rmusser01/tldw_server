@@ -556,7 +556,8 @@ def test_handle_recipe_run_job_executes_rag_answer_quality_live_mode_with_frozen
 
     captured_request: dict[str, Any] = {}
 
-    async def _fake_unified_rag_pipeline(**kwargs):
+    async def _fake_unified_rag_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         captured_request.update(kwargs)
         return {
             "documents": [
@@ -610,7 +611,7 @@ def test_handle_recipe_run_job_executes_rag_answer_quality_live_mode_with_frozen
             }
         }
 
-    monkeypatch.setattr(execution, "unified_rag_pipeline", _fake_unified_rag_pipeline)
+    monkeypatch.setattr(execution, "run_rag_pipeline", _fake_unified_rag_pipeline)
     monkeypatch.setattr(execution, "analyze", _fake_analyze)
     monkeypatch.setattr(execution, "run_geval", _fake_run_geval)
 
@@ -677,10 +678,11 @@ def test_handle_recipe_run_job_fails_rag_answer_quality_live_mode_when_baseline_
     import tldw_Server_API.app.core.Evaluations.recipe_runs_jobs_worker as worker
     import tldw_Server_API.app.core.Evaluations.recipes.rag_answer_quality_execution as execution
 
-    async def _unexpected_unified_rag_pipeline(**kwargs):
+    async def _unexpected_unified_rag_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         raise AssertionError(f"live retrieval should not execute when baseline resolution fails: {kwargs}")
 
-    monkeypatch.setattr(execution, "unified_rag_pipeline", _unexpected_unified_rag_pipeline)
+    monkeypatch.setattr(execution, "run_rag_pipeline", _unexpected_unified_rag_pipeline)
 
     with pytest.raises(RecipeRunJobError, match="retrieval_baseline_ref") as exc_info:
         worker.handle_recipe_run_job(

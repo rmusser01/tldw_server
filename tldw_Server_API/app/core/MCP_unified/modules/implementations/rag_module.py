@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
     rag_result_from_unified_search_result,
     rag_result_to_response,
 )
-from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
 from tldw_Server_API.app.core.Text2SQL.source_registry import normalize_sources_public
 
 from ..base import BaseModule, create_tool_definition
@@ -999,7 +999,7 @@ class RagModule(BaseModule):
             pipeline_kwargs.update(_mcp_safe_search_agent_overrides())
             pipeline_kwargs["enable_generation"] = tool_name == _TOOL_ANSWER
             pipeline_kwargs["include_sources"] = bool(request_metadata.get("include_documents", True))
-            result = await unified_rag_pipeline(**pipeline_kwargs)
+            result = await run_rag_pipeline(RagRunConfig.from_kwargs(**pipeline_kwargs))
             response = rag_result_to_response(rag_result_from_unified_search_result(result))
             payload = _compact_rag_response(
                 response,
