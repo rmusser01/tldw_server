@@ -11,17 +11,16 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
 
+import tldw_Server_API.app.api.v1.API_Deps.jobs_deps as _jobs_deps
+import tldw_Server_API.app.core.Sharing.workspace_deletion_hook as _workspace_deletion_hook
+import tldw_Server_API.app.core.Workspaces.service_capabilities as _service_capabilities
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Workflows_DB_Deps import try_get_workflows_db_for_user
-from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
-    WORKSPACES_DELETE_RATE_LIMIT,
-    WORKSPACES_READ_RATE_LIMIT,
-    WORKSPACES_WRITE_RATE_LIMIT,
-)
+from tldw_Server_API.app.api.v1.endpoints.workspace_study_outputs import router as study_outputs_router
 from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
     ResearchWorkspaceOutputStatusResponse,
     ResearchWorkspaceOutputSubmitRequest,
@@ -79,6 +78,11 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceUpsertRequest,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
+    WORKSPACES_DELETE_RATE_LIMIT,
+    WORKSPACES_READ_RATE_LIMIT,
+    WORKSPACES_WRITE_RATE_LIMIT,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -154,11 +158,9 @@ from tldw_Server_API.app.core.Workspaces.status_projection import (
 from tldw_Server_API.app.core.Workspaces.workspace_artifact_exports import (
     export_workspace_artifact_version,
 )
-import tldw_Server_API.app.api.v1.API_Deps.jobs_deps as _jobs_deps
-import tldw_Server_API.app.core.Sharing.workspace_deletion_hook as _workspace_deletion_hook
-import tldw_Server_API.app.core.Workspaces.service_capabilities as _service_capabilities
 
 router = APIRouter()
+router.include_router(study_outputs_router)
 
 WORKSPACE_ACTIVE_JOB_STATUSES = {"queued", "processing", "running", "retrying"}
 JOB_ERROR_CODE_ALLOWED_CHARS = frozenset(

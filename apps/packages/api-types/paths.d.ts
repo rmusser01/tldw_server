@@ -2086,6 +2086,8 @@ export type ApiPath =
   | "/api/v1/workspaces/{workspace_id}/sources/status"
   | "/api/v1/workspaces/{workspace_id}/sources/{source_id}"
   | "/api/v1/workspaces/{workspace_id}/sources/{source_id}/preview"
+  | "/api/v1/workspaces/{workspace_id}/study-outputs"
+  | "/api/v1/workspaces/{workspace_id}/study-outputs/{kind}/{owner_id}"
   | "/api/v1/writing/capabilities"
   | "/api/v1/writing/defaults"
   | "/api/v1/writing/detokenize"

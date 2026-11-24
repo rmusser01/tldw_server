@@ -328,6 +328,7 @@ FROZEN_SQLITE = [
     (83, '_migrate_from_v83_to_v84_sqlite'),
     (84, 'migrate_sqlite_transcripts'),
     (85, '_migrate_from_v85_to_v86_sqlite'),
+    (86, '_migrate_from_v86_to_v87_sqlite'),
 ]
 FROZEN_POSTGRES = [
     (72, '_migrate_from_v72_to_v73_postgres'),
@@ -350,6 +351,7 @@ FROZEN_POSTGRES = [
     (89, '_migrate_from_v89_to_v90_postgres'),
     (90, '_migrate_from_v90_to_v91_postgres'),
     (91, '_migrate_from_v91_to_v92_postgres'),
+    (92, '_migrate_from_v92_to_v93_postgres'),
 ]
 
 

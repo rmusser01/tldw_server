@@ -245,8 +245,9 @@ class FlashcardStore:
         parent_deck_id: Any = ...,
         visibility: str | None = None,
         review_prompt_side: str | None = None,
+        restore_deleted: bool = True,
     ) -> int:
-        """Create a deck and return its id."""
+        """Create a deck and return its id, optionally restoring a deleted name."""
         now = self._ctx.utc_now_iso()
         scheduler_type = _coerce_scheduler_type(scheduler_type)
         normalized_visibility = None if visibility is None else _normalize_deck_visibility(visibility)
@@ -271,11 +272,12 @@ class FlashcardStore:
                         parent_deck_id=parent_deck_id,
                     )
                 )
-                # Undelete if a deck with the same name exists but is deleted
-                deleted_row = conn.execute(
-                    "SELECT id, version FROM decks WHERE name = ? AND deleted = 1" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
-                    (name, *owner_params),
-                ).fetchone()
+                deleted_row = None
+                if restore_deleted:
+                    deleted_row = conn.execute(
+                        "SELECT id, version FROM decks WHERE name = ? AND deleted = 1" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (name, *owner_params),
+                    ).fetchone()
                 if deleted_row:
                     deck_id, current_version = int(deleted_row["id"]), int(deleted_row["version"])
                     if parent_deck_id is not ...:
