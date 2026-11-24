@@ -55,6 +55,25 @@ function frozenSource(rows: Message[]) {
   return Object.fromEntries(rows.map(row => [row.id, historyDigest(row)]))
 }
 
+/** Store the verified document identity on the same owned browser record. */
+export async function rememberDocumentChatMedia(
+  historyId: string, serverChatId: string | null, target: DocumentChatTarget,
+  requestScope: ServicePromptRequestScope, signal?: AbortSignal,
+): Promise<boolean> {
+  const changed = await db.chatHistories.where("id").equals(historyId).and(row =>
+    !signal?.aborted && row.doc_id === `document:${target.mediaId}` &&
+    row.server_scope_key === serverChatMirrorOwnerKey({ requestScope }) &&
+    (row.server_chat_id ?? null) === serverChatId &&
+    (!row.document_media_uuid || row.document_media_uuid === target.mediaUuid)
+  ).modify({ document_media_uuid: target.mediaUuid })
+  return changed > 0
+}
+
+export function documentChatImages(row: Message): string[] {
+  const images = row.images?.filter(Boolean) ?? []
+  return images.length ? images : row.image ? [row.image] : []
+}
+
 function convertMessage(
   row: Message, target: DocumentChatTarget, parents: ReadonlyMap<string, string | null>
 ): DocumentChatImportPayload["messages"][number] {
@@ -83,7 +102,7 @@ function convertMessage(
   return {
     id: row.id, parent_message_id: parents.get(row.id) ?? null, role: row.role,
     content: row.content, timestamp: new Date(row.createdAt).toISOString(),
-    images: row.images?.length ? row.images : row.image ? [row.image] : [],
+    images: documentChatImages(row),
     ...(row.role === "assistant" && Object.keys(metadata).length ? { metadata } : {}),
     ...(citations ? { document_chat_sources_v1: citations } : {})
   }

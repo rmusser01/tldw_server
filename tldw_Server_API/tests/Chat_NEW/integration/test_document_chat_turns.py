@@ -2,6 +2,7 @@
 
 from uuid import uuid4
 
+from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions, character_messages
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
 from tldw_Server_API.tests.Chat_NEW.integration.test_document_chat_links import (
     _attach,
@@ -48,6 +49,23 @@ def test_document_admission_refuses_revoked_media(document_api):
     assert response.status_code == 404, response.text
     assert _capture(client, headers, cid, params).status_code == 404
     assert db.count_messages_for_conversation(cid) == original_count
+
+
+def test_linked_chat_retains_authorized_read_access_with_sync_v2(document_api, monkeypatch):
+    client, db, media, headers, cid, params = _linked_chat(document_api)
+    monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *_: object())
+    monkeypatch.setattr(character_chat_sessions, "_active_chat_sync_service", lambda *_: object())
+    capture = _capture(client, headers, cid, params)
+    assert capture.status_code == 200, capture.text
+    captured = capture.json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "")["selection"]
+    response = _send(client, headers, cid, params, selection)
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "sync_owner_unsupported"
+    assert db.count_messages_for_conversation(cid) == 0
+    new_id = str(uuid4())
+    assert _create(client, headers, media[1]["uuid"], id=new_id).status_code == 409
+    assert db.get_conversation_by_id(new_id) is None
 
 
 def test_document_reply_round_trips_citation(document_api):

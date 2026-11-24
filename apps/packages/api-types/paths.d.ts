@@ -1014,6 +1014,8 @@ export type ApiPath =
   | "/api/v1/media/{media_id}/annotations"
   | "/api/v1/media/{media_id}/annotations/sync"
   | "/api/v1/media/{media_id}/annotations/{annotation_id}"
+  | "/api/v1/media/{media_id}/chat-conversations"
+  | "/api/v1/media/{media_id}/chat-conversations/{chat_id}"
   | "/api/v1/media/{media_id}/embeddings"
   | "/api/v1/media/{media_id}/embeddings/status"
   | "/api/v1/media/{media_id}/figures"

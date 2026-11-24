@@ -1,5 +1,6 @@
 import {
-  acknowledgeDocumentChatImport, reserveDocumentChatImport, verifyDocumentChatImport
+  acknowledgeDocumentChatImport, documentChatImages, rememberDocumentChatMedia, reserveDocumentChatImport,
+  verifyDocumentChatImport
 } from "@/db/dexie/document-chat-import"
 import type { HistoryInfo, Message } from "@/db/dexie/types"
 import { DOCUMENT_CHAT_SOURCES, projectDocumentChatCitations, readDocumentChatCitations } from "@/utils/document-chat-citations"
@@ -63,9 +64,11 @@ export async function linkExistingDocumentChat(
       : row.sources?.length ? projectDocumentChatCitations(row.sources, target) : null
     return (!row.sources?.length && !sources || Boolean(citations)) &&
       (match.parent_message_id ?? null) === (parent ? ids.get(parent) ?? parent : null) &&
-      JSON.stringify(row.images?.length ? row.images : row.image ? [row.image] : []) === JSON.stringify(match.images ?? []) &&
+      JSON.stringify(documentChatImages(row)) === JSON.stringify(match.images ?? []) &&
       JSON.stringify(citations) === JSON.stringify(readDocumentChatCitations(match.metadata_extra?.[DOCUMENT_CHAT_SOURCES], target))
   })
   await tldwClient.attachDocumentChat(target, chatId, chat.document_chat_record, options)
+  if (!history.document_media_uuid &&
+      !await rememberDocumentChatMedia(history.id, chatId, target, options.requestScope, options.signal)) return null
   return { id: chatId, fullySaved }
 }

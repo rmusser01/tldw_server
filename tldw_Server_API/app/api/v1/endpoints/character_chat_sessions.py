@@ -4713,6 +4713,8 @@ async def create_chat_session(
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_rate_limit(current_user.id, "chat_create")
         sync_service = _active_chat_sync_service(current_user, scope)
+        if document and sync_service is not None:
+            raise HTTPException(409, detail={"code": "sync_owner_unsupported", "message": "Document chats cannot be saved with this Sync v2 profile."})
         if client_chat_id is not None:
             create_fingerprint = conversation_create_fingerprint(
                 session_data.model_dump(mode="json", exclude_unset=True, exclude={"id"}),
@@ -4720,6 +4722,7 @@ async def create_chat_session(
                     "seed_first_message": seed_first_message,
                     "greeting_strategy": greeting_strategy,
                     "alternate_index": alternate_index,
+                    **({"document_media_uuid": str(document.media_uuid)} if document else {}),
                 },
             )
             # A replay is answered before quota checks: it creates nothing.

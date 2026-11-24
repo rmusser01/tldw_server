@@ -109,6 +109,20 @@ def test_document_link_rejects_replaced_record(document_api):
     assert _attach(client, headers, cid, replacement, media_uuid).status_code == 204
 
 
+def test_document_chat_create_replays_only_for_original_document(document_api):
+    client, _, media, headers = document_api
+    body = {"id": str(uuid4()), "title": "Question captured before a connection loss"}
+    first = _create(client, headers, media[1]["uuid"], **body)
+    replay = _create(client, headers, media[1]["uuid"], **body)
+    assert first.status_code == 201, first.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["document_chat_record"] == first.json()["document_chat_record"]
+    assert client.post(
+        "/api/v1/chats/", headers=headers, json=body,
+        params={"document_media_id": 2, "document_media_uuid": media[2]["uuid"]},
+    ).status_code == 409
+
+
 def test_document_link_does_not_cross_owners(document_api, monkeypatch):
     client, db, media, headers = document_api
     media_uuid = media[1]["uuid"]

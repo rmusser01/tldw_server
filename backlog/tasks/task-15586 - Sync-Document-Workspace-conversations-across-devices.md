@@ -24,9 +24,9 @@ Let a signed-in user discover and resume the same document conversations from an
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Browsers signed in to the same account can open the same document and find its synced conversations.
-- [ ] #2 Conversation discovery uses verified document access and chat ownership, including after switching accounts.
-- [ ] #3 Existing browser-scoped document conversations remain accessible as the association is reconciled across devices.
+- [x] #1 Browsers signed in to the same account can open the same document and find its synced conversations.
+- [x] #2 Conversation discovery uses verified document access and chat ownership, including after switching accounts.
+- [x] #3 Existing browser-scoped document conversations remain accessible as the association is reconciled across devices.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -40,19 +40,23 @@ Resolved the Translate import conflict in Dev PR #3534 at commit 76cc496428. Tra
 Stage 1 passed 39 integration and schema tests with PostgreSQL required. ChaCha binds chat links to the original native record under owner lock; authorized Media listing hides empty, deleted, and other-account chats.
 Stage 2 passed four native turn tests on SQLite and PostgreSQL and 341 focused frontend tests. A linked send rechecks Media access, refuses stale history, and preserves bounded source citations through native settlement and readback.
 Browser sidebar integration and per-chat browser save are implemented. 419 focused frontend tests and WebUI typechecking passed. The SQL-backed import replay tests passed on SQLite and PostgreSQL, including citation round-trip and the active Sync v2 refusal. Release qualification is running against real Chromium contexts and real PDF and EPUB files.
+Local release qualification passed in Chromium against real PDF and EPUB documents. Two independent sign-ins on one account discovered and continued the same chat, retained their local drafts, and reopened saved citations. A different account saw no private chat titles. The browser suite also verified explicit legacy confirmation and a first-chat create replay with the original server ID. Run with TLDW_E2E_DOCUMENT_CHAT_SYNC=1 against a disposable multi-user backend. The regular tier-2 CI job uses single-user auth.
+Final focused verification passed 74 SQLite and PostgreSQL API and import tests, 451 frontend tests, WebUI type checking, and the OpenAPI drift check. The backend cases include active Sync v2 admission and create refusal alongside an authorized read. Bandit found zero issues on changed production lines. Public Dev PR #3534 is the queued prerequisite, and release CI and deployment are pending.
+The final opt-in Chromium run passed all four cases without skips. After a lost create response, it replayed the original ID, proved that a refused first question left no discoverable chat, then verified that retry saved the question and published exactly one tab.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Document Workspace now discovers and continues native chats for the verified document and signed-in account. Existing browser histories can be saved individually and recover without creating duplicate server chats. Verified locally with real documents, both database backends, and an isolated multi-user browser run. Public Dev delivery is pending PR #3534.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

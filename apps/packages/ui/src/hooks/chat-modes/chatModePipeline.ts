@@ -742,6 +742,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     // Image preflight has dispatched its provider request; retrieval-only diagnostics have not.
     if (!isImageGenerationTurn && !preparationIsCurrent()) return chatSubmitSkipped("Conversation changed")
     if (preflight?.handled) {
+      if (mode.id === "rag" && historyTurn?.owner.kind === "native" && historyTurn.owner.documentTarget)
+        throw new Error(preflight.fullText)
       dispatched = isImageGenerationTurn
       fullText = preflight.fullText
       const sources = preflight.sources ?? []

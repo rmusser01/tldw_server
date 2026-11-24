@@ -439,6 +439,7 @@ const characterIdsMatch = (
 
 type UseChatActionsOptions = {
   historyDocumentId?: string
+  documentBrowserOnly?: boolean
   onDocumentHistorySaved?: (historyId: string) => Promise<void>
   capturePrivateScene?: (commandIsCurrent: () => boolean) => ReturnType<typeof captureActorSceneSend>
   t: TFunction
@@ -627,6 +628,7 @@ export const useChatActions = ({
   setVisualIdentityManualExpressionOverride,
   capturePrivateScene,
   historyDocumentId,
+  documentBrowserOnly = false,
   onDocumentHistorySaved
 }: UseChatActionsOptions) => {
   const defaultHistorySelection = useHistorySelectionContext()
@@ -3519,7 +3521,7 @@ export const useChatActions = ({
     historyRecoveryRetryIsCurrent,
     historyRecoveryRetrySystemPrompts,
     documentHistorySelection,
-    documentLocalOnly
+    documentLocalOnly = documentBrowserOnly
   }: {
     message: string
     image: string
@@ -3569,6 +3571,7 @@ export const useChatActions = ({
     documentLocalOnly?: boolean
   }, beginResponse: () => boolean): Promise<ChatSubmitResult> => {
     const historySelection = documentHistorySelection ?? defaultHistorySelection
+    const documentTurn = Boolean(historyDocumentId && capturePrivateScene)
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
     if (historyServerExistingInput && (compareModeActive || temporaryChat || isRegenerate || isContinue ||
         !historyServerExistingInput.isCurrent())) return chatSubmitFailed("unsupported_history_action_context")
@@ -3723,7 +3726,7 @@ export const useChatActions = ({
       requestOverrides,
       ragMediaIds
     })
-    const turnFileRetrievalEnabled = resolveTurnFileRetrievalEnabled({
+    const turnFileRetrievalEnabled = !documentTurn && resolveTurnFileRetrievalEnabled({
       requestOverrides,
       fileRetrievalEnabled
     })
@@ -3764,8 +3767,8 @@ export const useChatActions = ({
         routingSelectedAssistant
       )
     })
-    const turnResolvedSendMode =
-      getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
+    const turnResolvedSendMode = documentTurn ? "plain"
+      : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
       routingSelectedAssistant?.kind === "persona"
         ? "tracked_persona"
         : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
@@ -4032,6 +4035,9 @@ export const useChatActions = ({
         actorSceneSend,
         {
           ...(requestOverrides ?? {}),
+          // A first document send can bind a native chat before React rerenders.
+          ...(documentHistorySelection && serverChatIdOverride
+            ? { serverChatId: serverChatIdOverride, historyId: null } : {}),
           ...(!historySelection && !temporaryChat && !compareModeActive && (needsSavedNormalScope || turnResolvedSendMode === "tracked_persona" || (turnShouldUseRag && scope?.type === "workspace")) && !Object.prototype.hasOwnProperty.call(requestOverrides ?? {}, "historyId")
             ? { historyId: historyIdOverride ?? historyId } : {}),
           ragMediaIds: turnRagMediaIds,
@@ -4302,7 +4308,7 @@ export const useChatActions = ({
           ...alternateHistoryParams,
           actorSceneSend: workspaceServerChat.sceneSend,
           servicePromptSnapshot: turnServicePromptSnapshot,
-          ...(historyDocumentId && !chatModeParams.serverChatId ? { saveToDb: false } : {})
+          ...(documentLocalOnly || (historyDocumentId && !chatModeParams.serverChatId) ? { saveToDb: false } : {})
         }
         const scopedRagModeParams = workspaceServerChat.chatId
           ? {

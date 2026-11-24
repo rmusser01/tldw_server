@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { reserveDocumentChatImport, verifyDocumentChatImport } from "../document-chat-import"
+import { rememberDocumentChatMedia, reserveDocumentChatImport, verifyDocumentChatImport } from "../document-chat-import"
 import { serverChatMirrorOwnerKey } from "../server-chat-mirror"
 
 const local = vi.hoisted(() => {
@@ -10,7 +10,14 @@ const local = vi.hoisted(() => {
     rows, history, db: {
       chatHistories: {
         get: async () => structuredClone(history),
-        update: async (_key: string, patch: Record<string, unknown>) => Object.assign(history, structuredClone(patch))
+        update: async (_key: string, patch: Record<string, unknown>) => Object.assign(history, structuredClone(patch)),
+        where: () => ({ equals: (id: string) => ({ and: (accept: (row: Record<string, unknown>) => boolean) => ({
+          modify: async (patch: Record<string, unknown>) => {
+            if (id !== history.id || !accept(history)) return 0
+            Object.assign(history, structuredClone(patch))
+            return 1
+          }
+        }) }) })
       },
       messages: { where: () => ({ equals: () => ({ toArray: async () => structuredClone(rows) }) }) },
       transaction: (_mode: string, ...args: unknown[]) => {
@@ -35,7 +42,7 @@ describe("browser chat import reservation", () => {
       server_scope_key: serverChatMirrorOwnerKey({ requestScope: scope })
     })
     local.rows.push(
-      { id: "pa_q", history_id: historyId, role: "user", content: "Question", createdAt: 10 },
+      { id: "pa_q", history_id: historyId, role: "user", content: "Question", createdAt: 10, images: [""] },
       { id: "pa_a", history_id: historyId, role: "assistant", content: "Answer", parent_message_id: "pa_q", createdAt: 11, sources: [source] }
     )
     await expect(reserveDocumentChatImport(historyId, target, scope)).rejects.toThrow("Confirm this document")
@@ -45,6 +52,7 @@ describe("browser chat import reservation", () => {
       reserveDocumentChatImport(historyId, target, scope, true)
     ])
     expect(second.payload).toEqual(first.payload)
+    expect(first.payload.messages[0].images).toEqual([])
     expect(first.payload.messages[1].document_chat_sources_v1).toEqual([
       { media_uuid: target.mediaUuid, title: source.name, excerpt: source.pageContent }
     ])
@@ -54,5 +62,17 @@ describe("browser chat import reservation", () => {
     expect(await reserveDocumentChatImport(historyId, target, scope, true)).toEqual(first)
     expect(await verifyDocumentChatImport(historyId, target, scope, first)).toBe(false)
     expect(local.rows.at(-1)?.content).toBe("Kept on this browser")
+  })
+
+  it("stamps the confirmed document UUID only on the original owned mirror", async () => {
+    Object.assign(local.history, {
+      id: "pa_mirror", doc_id: "document:1", document_media_uuid: undefined, server_chat_id: "saved-chat",
+      server_scope_key: serverChatMirrorOwnerKey({ requestScope: scope })
+    })
+    await expect(rememberDocumentChatMedia("pa_mirror", "replacement", target, scope)).resolves.toBe(false)
+    await expect(rememberDocumentChatMedia("pa_mirror", "saved-chat", target, { ...scope, userId: "bob" })).resolves.toBe(false)
+    expect(local.history.document_media_uuid).toBeUndefined()
+    await expect(rememberDocumentChatMedia("pa_mirror", "saved-chat", target, scope)).resolves.toBe(true)
+    expect(await local.db.chatHistories.get()).toHaveProperty("document_media_uuid", target.mediaUuid)
   })
 })

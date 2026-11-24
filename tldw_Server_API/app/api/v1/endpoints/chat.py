@@ -8620,7 +8620,7 @@ async def capture_conversation_history(
     # their envelopes (character_messages.send_message). A chat bound to a character
     # takes server-settled turns (the server owns its input and result writes), which
     # that owner cannot use yet, so the handshake still refuses it, before any dispatch.
-    if (document or body.required_capability == "tldw_history_server_existing_input_v1"
+    if (body.required_capability == "tldw_history_server_existing_input_v1"
             or conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None):
         from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
 

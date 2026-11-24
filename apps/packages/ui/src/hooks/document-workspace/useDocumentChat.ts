@@ -23,15 +23,14 @@ import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
 import { PageAssistDatabase } from "@/db/dexie/chat"
 import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
-import { db } from "@/db/dexie/schema"
 import { tldwClient } from "@/services/tldw"
 import { hasDocumentChatSync } from "@/services/tldw/server-capabilities"
 import { useHistorySelection } from "@/hooks/chat/useHistorySelection"
 import type { DocumentChatPage, DocumentChatTarget } from "@/services/tldw/domains/media"
 import {
-  clearPendingDocumentChat, createLinkedDocumentChat, readPendingDocumentChats, readPendingDocumentDraft
+  createLinkedDocumentChat, readPendingDocumentChats, readPendingDocumentDraft, settleDocumentChatCreation
 } from "./document-chat-creation"
-import { DocumentChatReviewRequired, verifyDocumentChatImport } from "@/db/dexie/document-chat-import"
+import { DocumentChatReviewRequired, rememberDocumentChatMedia, verifyDocumentChatImport } from "@/db/dexie/document-chat-import"
 import { linkExistingDocumentChat, saveBrowserDocumentChat } from "./document-chat-save"
 
 type DocumentChatSession = Pick<
@@ -100,6 +99,7 @@ type Conversation = {
   browserOnly?: boolean
   recoveryPending?: boolean
   recoveryChatId?: string
+  recoveredInput?: string
   initialDraft?: boolean
   mediaUuid?: string
   mirrorId?: string
@@ -342,12 +342,25 @@ export function useDocumentChat(
   const applyNativeChat = useCallback((tab: Conversation) => {
     const capture = getNative().capture
     const display = capture?.status === "captured" ? formatSelectedHistory(capture) : { messages: [], history: [] }
+    if (tab.recoveredInput && display.messages[0]?.role === "user" && display.messages[0].message === tab.recoveredInput) {
+      if (tab.input === tab.recoveredInput) tab.input = ""
+      tab.recoveredInput = undefined
+    }
     applySession({
       ...createEmptySession(), ...display, isFirstMessage: display.messages.length === 0,
       serverChatId: tab.serverChatId ?? null, serverChatTitle: tab.title,
       serverChatMetaLoaded: true, serverChatLoadState: "loaded", selectedKnowledge: tab.knowledge
     })
   }, [applySession, getNative])
+
+  const openLinkedHistory = useCallback(async (
+    serverChatId: string, target: DocumentChatTarget, isCurrent: () => boolean,
+  ) => {
+    await loadNative({ serverChatId, documentTarget: target, documentRequestScope: requestScope, isCurrent })
+    const { status, capture } = getNative()
+    return isCurrent() && status === "ready" && capture?.status === "captured" &&
+      capture.snapshot.conversation_id === serverChatId
+  }, [getNative, loadNative, requestScope])
 
   const refreshServerChats = useCallback(async (selection: Selection) => {
     const { document: collection, controller } = selection
@@ -389,10 +402,20 @@ export function useDocumentChat(
           if (!current()) return
           if (!saved) continue
           if (!rows.has(saved.id)) rows.set(saved.id, { id: saved.id, title: tab.title, last_modified: "" })
-          if (saved.fullySaved && (selection.tab !== tab || selection.status === "loading")) {
+          if (saved.fullySaved) {
+            if (selection.tab === tab && selection.status === "ready") {
+              const ready = await openLinkedHistory(saved.id, documentTarget, () =>
+                selectionRef.current === selection && accountIsCurrent())
+              if (!current()) return
+              if (!ready) {
+                rows.delete(saved.id)
+                continue
+              }
+            }
             tab.browserCopyId = tab.historyId
             tab.historyId = null
             tab.serverChatId = saved.id
+            if (selection.tab === tab && selection.status === "ready") applyNativeChat(tab)
           }
         } catch {
           // A legacy copy stays available in its verified browser scope on a failed reconciliation.
@@ -408,7 +431,7 @@ export function useDocumentChat(
         tab.title = row.title
         tab.pendingFirstMessage = false
         if (tab.recoveryPending) {
-          clearPendingDocumentChat(documentTarget, options, tab.key)
+          void settleDocumentChatCreation(documentTarget, options, tab.key, row.id).catch(() => {})
           tab.recoveryPending = false
         }
         return tab
@@ -435,6 +458,7 @@ export function useDocumentChat(
       }
     } catch (error) {
       if (!current()) return
+      console.warn("Document conversations refresh failed:", error)
       const status = (error as { status?: number } | null)?.status
       collection.syncIssue = status === 403 || status === 404 ? "denied" : "unavailable"
       if (collection.syncIssue === "denied") {
@@ -447,7 +471,7 @@ export function useDocumentChat(
       }
     }
     if (current()) publish(selection)
-  }, [accountIsCurrent, applySession, documentTarget, operation.signal, publish, requestScope, resetNative])
+  }, [accountIsCurrent, applyNativeChat, applySession, documentTarget, openLinkedHistory, operation.signal, publish, requestScope, resetNative])
 
   const stashConversation = useCallback(() => {
     const selected = selectionRef.current
@@ -531,20 +555,28 @@ export function useDocumentChat(
           const ownedTabs = rows.filter(row => !collection.mediaUuid ||
             !row.document_media_uuid || row.document_media_uuid === collection.mediaUuid).map(row => makeConversation(row))
           collection.tabs.unshift(...ownedTabs)
-          if (documentTarget) {
-            const options = { requestScope }
-            for (const pending of readPendingDocumentChats(documentTarget, options)) {
-              const input = await readPendingDocumentDraft(pending.key, options)
-              if (!isCurrent()) return
-              if (collection.tabs.some(tab => tab.key === pending.key)) continue
-              collection.tabs.push({
-                ...makeConversation(), key: pending.key, input, recoveryPending: true,
-                recoveryChatId: pending.receipt?.id,
-                title: pending.receipt?.title ?? "Unconfirmed chat"
-              })
+          collection.loaded = true
+        }
+        // Media metadata can arrive after browser histories have already loaded.
+        if (documentTarget) {
+          const options = { requestScope }
+          for (const pending of readPendingDocumentChats(documentTarget, options)) {
+            if (collection.tabs.some(tab => tab.key === pending.key)) continue
+            const input = await readPendingDocumentDraft(pending.key, options)
+            if (!isCurrent()) return
+            const recovered = {
+              ...makeConversation(), key: pending.key, input, recoveryPending: true,
+              recoveredInput: input, recoveryChatId: pending.receipt?.id,
+              title: pending.receipt?.title ?? "Unconfirmed chat"
+            }
+            collection.tabs.push(recovered)
+            const selected = collection.selected
+            if (input && selected?.initialDraft && !selected.input && !selected.historyId && !selected.pending) {
+              collection.tabs = collection.tabs.filter(tab => tab !== selected)
+              collection.selected = recovered
+              selection.tab = recovered
             }
           }
-          collection.loaded = true
         }
         if (!tab) await refreshServerChats(selection)
         if (!isCurrent()) return
@@ -565,9 +597,7 @@ export function useDocumentChat(
             if (collection.syncIssue === "unavailable" && selected.session) applySession(selected.session)
             throw new Error("Document chat unavailable")
           }
-          const ready = await loadNative({
-            serverChatId: selected.serverChatId, documentTarget, documentRequestScope: requestScope, isCurrent,
-          })
+          const ready = await openLinkedHistory(selected.serverChatId, documentTarget, isCurrent)
           if (!isCurrent()) return
           if (!ready) {
             const error = getNative().error
@@ -619,7 +649,7 @@ export function useDocumentChat(
       }
     })()
   }, [accountIsCurrent, applySession, cache, ensureDocumentSources, operation, publish, requestScope,
-    restoreRagSources, setRagMediaIds, stashConversation, documentTarget, getNative, loadNative, ownerKey,
+    restoreRagSources, setRagMediaIds, stashConversation, documentTarget, getNative, openLinkedHistory, ownerKey,
     refreshServerChats, resetNative, applyNativeChat])
 
   useLayoutEffect(() => {
@@ -712,20 +742,22 @@ export function useDocumentChat(
       const history = await new PageAssistDatabase().getHistoryInfo(historyId)
       if (!history || !ownsHistory(history, historyDocumentId, requestScope) ||
           !accountIsCurrent() || cache.get(mediaId) !== document) return
-      if (document.mediaUuid && !history.document_media_uuid) {
-        await db.chatHistories.where("id").equals(history.id).and(row =>
-          accountIsCurrent() && ownsHistory(row, historyDocumentId, requestScope) && !row.document_media_uuid
-        ).modify({ document_media_uuid: document.mediaUuid })
+      if (document.mediaUuid && !history.document_media_uuid && await rememberDocumentChatMedia(
+        history.id, history.server_chat_id ?? null, { mediaId, mediaUuid: document.mediaUuid },
+        requestScope, operation.signal
+      )) {
+        activeTab.mediaUuid = document.mediaUuid
       }
       if (!accountIsCurrent() || cache.get(mediaId) !== document) return
       activeTab.historyId = history.id
+      activeTab.mediaUuid ??= history.document_media_uuid
       activeTab.title = history.title
       activeTab.session = undefined
       publish(selectionRef.current)
     } catch (error) {
       console.error("Failed to identify saved document chat:", error)
     }
-  }, [accountIsCurrent, activeTab, cache, document, historyDocumentId, mediaId, publish, requestScope])
+  }, [accountIsCurrent, activeTab, cache, document, historyDocumentId, mediaId, operation.signal, publish, requestScope])
 
   const prepareLinkedSend = useCallback(async (question: string, signal: AbortSignal) => {
     if (!active || !activeTab || !documentTarget || activeTab.historyId ||
@@ -733,24 +765,28 @@ export function useDocumentChat(
     const current = () => selectionRef.current === active && accountIsCurrent() && !signal.aborted
     if (!current() || document?.syncIssue) throw new Error("Document chat is unavailable. Retry when the server is reachable.")
     if (document?.sync !== "supported") return undefined
-    if (activeTab.serverChatId) return activeTab.serverChatId
+    if (activeTab.serverChatId) return { chatId: activeTab.serverChatId, firstInputAlreadySaved: false }
     const receipt = await createLinkedDocumentChat({
       key: activeTab.key, question, target: documentTarget, isCurrent: current,
       options: { requestScope, signal: AbortSignal.any([signal, active.controller.signal, operation.signal]) }
     })
     if (!current()) return undefined
-    const ready = await loadNative({ serverChatId: receipt.id, documentTarget, documentRequestScope: requestScope, isCurrent: () =>
-      selectionRef.current === active && accountIsCurrent()
-    })
+    const ready = await openLinkedHistory(receipt.id, documentTarget, () =>
+      selectionRef.current === active && accountIsCurrent())
     if (!ready || !current()) throw new Error("Could not open the saved conversation. Your draft is still available.")
     activeTab.serverChatId = receipt.id
     activeTab.title = receipt.title
     activeTab.pendingFirstMessage = true
     activeTab.recoveryPending = true
+    activeTab.recoveredInput ??= question
+    const capture = getNative().capture
+    const firstInputAlreadySaved = activeTab.recoveredInput === question && capture?.status === "captured" &&
+      capture.rows[0]?.role === "user" && capture.selected_content[0]?.message === question
     applyNativeChat(activeTab)
     publish(active)
-    return receipt.id
-  }, [accountIsCurrent, active, activeTab, applyNativeChat, document, documentTarget, loadNative, operation.signal, publish, requestScope])
+    return { chatId: receipt.id, firstInputAlreadySaved }
+  }, [accountIsCurrent, active, activeTab, applyNativeChat, document, documentTarget, getNative, openLinkedHistory,
+    operation.signal, publish, requestScope])
 
   const setBrowserOnly = useCallback((browserOnly: boolean) => {
     if (!active || !activeTab || selectionRef.current !== active || activeTab.serverChatId || activeTab.historyId ||
@@ -759,11 +795,29 @@ export function useDocumentChat(
     publish(active)
   }, [accountIsCurrent, active, activeTab, publish])
 
-  const refreshAfterSend = useCallback(async () => {
-    if (!active || !activeTab?.serverChatId || selectionRef.current !== active || !accountIsCurrent()) return
+  const refreshAfterSend = useCallback(async (reload = false) => {
+    if (!active || !activeTab?.serverChatId || !documentTarget || selectionRef.current !== active || !accountIsCurrent()) return
+    const current = () => selectionRef.current === active && accountIsCurrent()
+    if (reload) {
+      const ready = await openLinkedHistory(activeTab.serverChatId, documentTarget, current)
+      if (!current()) return
+      if (!ready) {
+        const denied = getNative().error === "document_chat_unavailable"
+        if (denied) {
+          active.document.tabs = active.document.tabs.filter(tab => tab !== activeTab)
+          activeTab.session = undefined
+          applySession(createEmptySession())
+        }
+        active.status = "error"
+        publish(active)
+        if (denied) await refreshServerChats(active)
+        return
+      }
+    }
     applyNativeChat(activeTab)
     await refreshServerChats(active)
-  }, [accountIsCurrent, active, activeTab, applyNativeChat, refreshServerChats])
+  }, [accountIsCurrent, active, activeTab, applyNativeChat, applySession, documentTarget, getNative, openLinkedHistory, publish,
+    refreshServerChats])
 
   const saveToServer = useCallback(async (confirmedLegacy = false) => {
     if (!active || !activeTab?.historyId || !documentTarget || document?.sync !== "supported" ||
@@ -812,7 +866,8 @@ export function useDocumentChat(
           await loadNative({ historyId, documentRequestScope: requestScope, isCurrent: current })
           if (!current()) return
         }
-        const code = (error as { detail?: { error_code?: string } } | null)?.detail?.error_code
+        const apiError = error as { detail?: { error_code?: string }; details?: { detail?: { error_code?: string } } } | null
+        const code = (apiError?.details?.detail ?? apiError?.detail)?.error_code
         const message = code === "sync_chat_import_unsupported"
           ? "Saving to the server is unavailable with this account’s Sync v2 profile. Your browser copy is still available."
           : error instanceof Error ? error.message : "Could not save this conversation. Retry to keep the same save."
@@ -872,6 +927,8 @@ export function useDocumentChat(
     isProcessing,
     isDocumentScoped,
     isChatReady,
+    canShowTranscript: Boolean(active && active.status !== "loading" &&
+      (!activeTab?.serverChatId || document?.syncIssue !== "denied")),
     historyDocumentId,
     isServerAvailable,
     ragEnabled,
