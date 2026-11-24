@@ -243,6 +243,7 @@ class ChatSessionListItem(BaseModel):
 class ChatSessionResponse(ChatSessionListItem):
     """Detailed chat session response with authoritative resume metadata."""
 
+    document_chat_record: str | None = Field(default=None, exclude_if=lambda value: value is None)
     behavior_snapshot: "BehaviorSnapshotStatus" = Field(
         default_factory=lambda: BehaviorSnapshotStatus(status="missing")
     )

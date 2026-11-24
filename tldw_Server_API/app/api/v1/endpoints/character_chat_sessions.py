@@ -49,6 +49,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.document_chat_scope import DocumentChatQuery, document_chat_unavailable
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
@@ -1991,6 +1992,7 @@ def _convert_db_conversation_to_response(
     user_id: str,
     settings: Optional[dict[str, Any]] = None,
     resume_state: Optional[dict[str, Any]] = None,
+    include_document_record: bool = False,
 ) -> ChatSessionResponse:
     """Convert database conversation to detail response model."""
     state = resume_state or {}
@@ -2011,6 +2013,7 @@ def _convert_db_conversation_to_response(
     effective = state.get("effective_completion")
     return ChatSessionResponse(
         **detail_fields,
+        document_chat_record=db.conversation_store.document_chat_record(conv_data) if include_document_record else None,
         resume_completion=(
             {"provider": effective["provider"], "model": effective["model"]}
             if state.get("resume_eligible") is True and isinstance(effective, dict)
@@ -4593,6 +4596,8 @@ async def _replay_client_chat(
     conversation: dict[str, Any],
     owner_id: str,
     response: Response,
+    *,
+    include_document_record: bool = False,
 ) -> ChatSessionResponse:
     """Answer a repeated client-id create, first publishing a chat whose Sync capture was lost."""
     if sync_service is not None:
@@ -4603,7 +4608,9 @@ async def _replay_client_chat(
             )
         except SyncStoreError as sync_exc:
             raise _chat_sync_http_error(sync_exc) from sync_exc
-    return _client_chat_replay_response(db, conversation, owner_id, response)
+    return _client_chat_replay_response(
+        db, conversation, owner_id, response, include_document_record=include_document_record,
+    )
 
 
 def _find_client_chat_replay(
@@ -4620,6 +4627,7 @@ def _find_client_chat_replay(
 
 def _client_chat_replay_response(
     db: CharactersRAGDB, conversation: dict[str, Any], owner_id: str, response: Response,
+    *, include_document_record: bool = False,
 ) -> ChatSessionResponse:
     """Return the current state of an already created chat as a 200 replay."""
     response.status_code = status.HTTP_200_OK
@@ -4629,6 +4637,7 @@ def _client_chat_replay_response(
         _attach_conversation_assistant_names(db, conversation, owner_id),
         resume_state=db.conversation_resume_store.get_roleplay_resume_state(conversation["id"]),
         db=db, user_id=owner_id,
+        include_document_record=include_document_record,
     )
 
 
@@ -4653,6 +4662,7 @@ async def create_chat_session(
     seed_first_message: bool = Query(False, description="If true, seed the chat with an initial assistant greeting"),
     greeting_strategy: Literal["default", "alternate_random", "alternate_index"] = Query("default", description="How to choose the initial assistant greeting when seeding"),
     alternate_index: Optional[int] = Query(None, ge=0, description="Index for alternate greeting when greeting_strategy=alternate_index"),
+    document: DocumentChatQuery = None,
 ):
     """
     Create a new chat session, optionally with a tracked character or persona identity.
@@ -4688,6 +4698,8 @@ async def create_chat_session(
     sync_service: SyncV2Service | None = None
     try:
         scope = _resolve_chat_scope(session_data.scope_type, session_data.workspace_id)
+        if document and scope.scope_type != "global":
+            raise document_chat_unavailable()
         from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
         from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
             create_workspace_persona_conversation,
@@ -4712,7 +4724,9 @@ async def create_chat_session(
             # A replay is answered before quota checks: it creates nothing.
             existing = _find_client_chat_replay(db, client_chat_id, owner_id, create_fingerprint)
             if existing is not None:
-                return await _replay_client_chat(db, sync_service, existing, owner_id, response)
+                return await _replay_client_chat(
+                    db, sync_service, existing, owner_id, response, include_document_record=document is not None,
+                )
         # Enforce per-user chat count limit (approximate by scanning conversations per character)
         try:
             # Use DB-layer count for efficiency/accuracy. The helper expects
@@ -5023,6 +5037,7 @@ async def create_chat_session(
             ),
             resume_state=db.conversation_resume_store.get_roleplay_resume_state(created_id),
             db=db, user_id=str(current_user.id),
+            include_document_record=document is not None,
         )
 
     except HTTPException:
@@ -5044,7 +5059,9 @@ async def create_chat_session(
         if existing is None:
             # Taken by a row the caller cannot see, such as another owner's under PostgreSQL RLS.
             raise _client_chat_id_http_error(CHAT_ID_CONFLICT, status.HTTP_409_CONFLICT) from None
-        return await _replay_client_chat(db, sync_service, existing, owner_id, response)
+        return await _replay_client_chat(
+            db, sync_service, existing, owner_id, response, include_document_record=document is not None,
+        )
     except InputError as e:
         logger.warning("Invalid chat-session creation input: {}", e)
         raise map_db_error_to_http(e) from e
@@ -5184,7 +5201,9 @@ def _resolve_chat_import_lineage(
     return lineage
 
 
-def _project_imported_chat(db: CharactersRAGDB, conversation_id: str, owner_id: str) -> ChatSessionResponse:
+def _project_imported_chat(
+    db: CharactersRAGDB, conversation_id: str, owner_id: str, include_document_record: bool = False,
+) -> ChatSessionResponse:
     """Return the current state of an imported chat."""
     conversation = db.get_conversation_by_id(conversation_id)
     if not conversation:
@@ -5196,6 +5215,7 @@ def _project_imported_chat(db: CharactersRAGDB, conversation_id: str, owner_id: 
         _attach_conversation_assistant_names(db, dict(conversation), owner_id),
         resume_state=db.conversation_resume_store.get_roleplay_resume_state(conversation_id),
         db=db, user_id=owner_id,
+        include_document_record=include_document_record,
     )
 
 
@@ -5204,6 +5224,7 @@ async def import_chat_session(
     response: Response,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
+    document: DocumentChatQuery = None,
 ) -> ChatSessionResponse:
     """Save a chat that exists only on a device to the signed-in account, losslessly (D7 P8).
 
@@ -5292,7 +5313,7 @@ async def import_chat_session(
             response.status_code = status.HTTP_200_OK
             response.headers["Idempotency-Replayed"] = "true"
             logger.debug("Replayed chat import {} for user {}", chat_id, owner_id)
-            return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
+            return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id, document is not None)
 
         try:
             chat_count = await run_in_threadpool(
@@ -5335,12 +5356,12 @@ async def import_chat_session(
                 raise conversation_import.chat_id_conflict() from None
             response.status_code = status.HTTP_200_OK
             response.headers["Idempotency-Replayed"] = "true"
-            return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
+            return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id, document is not None)
 
         logger.info(
             "Imported chat session {} with {} messages for user {}", chat_id, len(prepared.messages), owner_id
         )
-        return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id)
+        return await run_in_threadpool(_project_imported_chat, db, chat_id, owner_id, document is not None)
     except ChatImportError as error:
         raise HTTPException(status_code=error.status_code, detail=error.detail()) from None
     except HTTPException:
@@ -5613,7 +5634,8 @@ async def get_chat_session(
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    current_user: User = Depends(get_request_user)
+    current_user: User = Depends(get_request_user),
+    document: DocumentChatQuery = None,
 ):
     """
     Get details of a specific chat session.
@@ -5632,6 +5654,11 @@ async def get_chat_session(
     try:
         scope = _resolve_chat_scope(scope_type, workspace_id)
         conversation = db.get_conversation_by_id(chat_id)
+        if document and (
+            not conversation or str(conversation["client_id"]) != str(current_user.id)
+            or conversation["scope_type"] != "global" or scope.scope_type != "global"
+        ):
+            raise document_chat_unavailable()
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
         resume_state = db.conversation_resume_store.get_roleplay_resume_state(chat_id)
 
@@ -5650,6 +5677,7 @@ async def get_chat_session(
             settings=settings_payload,
             resume_state=resume_state,
             db=db, user_id=str(current_user.id),
+            include_document_record=document is not None,
         )
 
     except HTTPException:

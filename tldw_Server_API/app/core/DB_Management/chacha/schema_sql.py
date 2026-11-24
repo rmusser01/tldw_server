@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+DOCUMENT_CHAT_LINK_SCHEMA = (
+    """CREATE TABLE document_chat_links (
+        conversation_id TEXT PRIMARY KEY NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        source_incarnation_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        media_uuid TEXT NOT NULL
+    )""",
+    "CREATE INDEX idx_document_chat_links_owner_media ON document_chat_links(owner_id, media_uuid)",
+)
+
 # The persona older Sync v2 projections stored for a chat that named no assistant
 # (#3182). It never existed. This one definition serves the migration that clears it
 # from stored chats and the Sync materializer, which reads it in a payload as no assistant.

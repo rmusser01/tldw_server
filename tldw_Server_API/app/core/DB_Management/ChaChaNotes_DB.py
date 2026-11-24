@@ -1284,8 +1284,8 @@ class CharactersRAGDB:
             semantic_dataset_id: str | None = None,
         ) -> bool: ...
 
-    _CURRENT_SCHEMA_VERSION = 85  # Bounded durable Persona transcripts
-    _POSTGRES_SCHEMA_VERSION = 91
+    _CURRENT_SCHEMA_VERSION = 86  # Document Workspace conversation links
+    _POSTGRES_SCHEMA_VERSION = 92
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     runtime_schema_version: int | None = None  # the bootstrap writes it; a DB built without init reads None (R29)
     from tldw_Server_API.app.core.DB_Management.chacha.schema_sql import (  # noqa: F401

@@ -29,12 +29,12 @@
 
 ## Stage 1 — Integrate the tabs and add authorized chat links
 
-**Status** Not Started.
+**Status** Complete.
 
 **Goal** Resolve the tabs prerequisite and make owned, nonempty linked conversations discoverable through a paginated Media route.
 
-- [ ] Integrate [PR #3534](https://github.com/rmusser01/tldw_server/pull/3534) with current Dev in an isolated branch. The merge preview of tabs head `3dc7c90f3a` and Dev `ee06a040d7` reported one conflict in `tldw_Server_API/app/api/v1/endpoints/translate.py`. Keep Dev’s `resolve_provider_api_key_from_config` and preserve the PR’s `require_expected_user_if_present` dependency on the Translate route. Re-run the preview on the current heads. Keep the integration commit separate for the tabs PR and use the validated branch as the local sync baseline. Public Dev lands the tabs before the sync feature.
-- [ ] Verify the integrated baseline. From the repository root with `.venv` active, run `python -m pytest -q tldw_Server_API/tests/Translation tldw_Server_API/tests/Services/test_document_workspace_expected_actor.py`. From `apps/tldw-frontend`, run `bun run test:run -- useDocumentChat DocumentChat.test TextSelectionPopover`. The pass condition covers both provider selection and rejection after account switch, plus the existing tab and selection behavior.
+- [x] Integrate [PR #3534](https://github.com/rmusser01/tldw_server/pull/3534) with Dev in an isolated branch. The actual merge with Dev `6d31f3d1a7` resolved the single Translate conflict in `76cc496428`. It retained both the provider lookup and the expected-account check. GitHub reports the PR mergeable with auto-merge enabled.
+- [x] Verify the integrated baseline. The Translation and expected-actor suites passed 16 tests, and the Document Workspace chat and text selection suites passed 35 tests.
 
 **Files and interfaces**
 
@@ -44,10 +44,10 @@
 - Add `tldw_Server_API/app/api/v1/endpoints/media/document_chats.py` to the Media router modules. `GET /api/v1/media/{media_id}/chat-conversations` requires `media_uuid` and returns `{items: [{id, title, last_modified}], has_more}`. Default to `limit=50` and `offset=0` with maximum limit 100. `PUT /api/v1/media/{media_id}/chat-conversations/{chat_id}` takes `{media_uuid, document_chat_record}` and returns 204 for initial attach or exact replay. Return 404 for unavailable or replaced targets and a generic 409 for an owned live chat already linked to another document. Use the existing expected-user request dependency.
 - In `character_chat_sessions.py` accept paired `document_media_id` and `document_media_uuid` query parameters on the owner-authorized Chat detail, create, and import routes. Use the same access check when present. Add optional `document_chat_record` to `ChatSessionResponse` in `chat_session_schemas.py`. Compute it server-side from the native chat ID and stored incarnation. Return it for a verified document request and compare it inside the attach transaction.
 
-- [ ] Add `tldw_Server_API/tests/Chat_NEW/integration/test_document_chat_links.py`. Use the authenticated ChaCha fixtures in `test_history_selection_api.py`, request-scoped Media dependencies, and the SQLite/PostgreSQL fixture pattern in `tldw_Server_API/tests/DB_Management/test_history_selection_transactions.py`. In `test_document_link_replay_and_visibility` assert `first.status_code == replay.status_code == 204`, `empty.json()["items"] == []`, and `[row["id"] for row in after_first_message.json()["items"]] == [chat_id]`. In `test_document_link_rejects_replaced_record` assert `retry.status_code == 404` after recreating the native conversation under the same public ID. With a shared document, assert the second owner’s list excludes the first owner’s chat and direct attach returns 404. Cover 412 on expected-user mismatch, 409 for conflicting documents, and trash followed by restore of the original row.
-- [ ] Run `python -m pytest -q tldw_Server_API/tests/Chat_NEW/integration/test_document_chat_links.py` and confirm the missing route fails the list and attach tests.
-- [ ] Implement the named interfaces using one owner-scoped transaction for the link and native identity check. Resolve the authorized Media row before every list or attach. List only links with a live owned native chat and a saved message.
-- [ ] Re-run the API tests for SQLite and PostgreSQL. Commit the covered migration and route when both pass.
+- [x] Cover attach and replay, empty and paginated discovery, mismatched actors, two owners of a shared document, conflicting links, trash and restore, and a deleted chat ID reused by a new record.
+- [x] Reproduce the missing list route and record token in the SQLite test run.
+- [x] Verify the live Media row and persist one link per owned Chat record in SQLite schema 86 and PostgreSQL schema 92.
+- [x] Run the authenticated SQLite and PostgreSQL route tests and the migration registry tests. All 39 passed with PostgreSQL required.
 
 ## Stage 2 — Admit and settle document-grounded turns through Chat
 

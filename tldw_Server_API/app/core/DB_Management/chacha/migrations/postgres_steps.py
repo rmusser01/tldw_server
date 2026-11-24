@@ -2337,7 +2337,26 @@ def _migrate_from_v64_to_v65_postgres(ctx, conn: Any) -> None:
         )
 
 
-# Source schema version -> step name for the v72 to v91 upgrades, in order (R3, R12). The v5 to v71 ladder stays inline in
+def _migrate_from_v91_to_v92_postgres(ctx, conn: Any) -> None:
+    """Add Document Workspace chat links and force owner-only row access."""
+    for statement in (
+        *schema_sql.DOCUMENT_CHAT_LINK_SCHEMA,
+        "ALTER TABLE document_chat_links ENABLE ROW LEVEL SECURITY",
+        "ALTER TABLE document_chat_links FORCE ROW LEVEL SECURITY",
+        """CREATE POLICY document_chat_links_owner ON document_chat_links
+           USING (owner_id = current_setting('app.current_user_id', true))
+           WITH CHECK (owner_id = current_setting('app.current_user_id', true))""",
+    ):
+        ctx.backend.execute(statement, connection=conn)
+    ctx.backend.execute(
+        "UPDATE db_schema_version SET version = 92 WHERE schema_name = %s AND version = 91",
+        (ctx.schema_name,), connection=conn,
+    )
+    if postgres_schema._get_schema_version_postgres(ctx, conn) != 92:
+        raise SchemaError("Document chat links PostgreSQL migration failed version verification.")
+
+
+# Source schema version -> step name for the v72 to v92 upgrades, in order (R3, R12). The v5 to v71 ladder stays inline in
 # `_initialize_schema_postgres`. Names are resolved on this module at call time. Pinned by test_chacha_structure_pins.py
 # (FROZEN_POSTGRES). To add a migration: write `_migrate_from_v<N>_to_v<N+1>_postgres(ctx, conn)` here, add its key below, raise
 # `_POSTGRES_SCHEMA_VERSION` on CharactersRAGDB, and extend FROZEN_POSTGRES in the pins file.
@@ -2361,4 +2380,5 @@ POSTGRES_STEPS: dict[int, str] = {
     88: "_migrate_from_v88_to_v89_postgres",
     89: "_migrate_from_v89_to_v90_postgres",
     90: "_migrate_from_v90_to_v91_postgres",
+    91: "_migrate_from_v91_to_v92_postgres",
 }
