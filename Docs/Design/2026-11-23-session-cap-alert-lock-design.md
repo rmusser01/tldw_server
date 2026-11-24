@@ -107,9 +107,9 @@ Without this, an intruder with a session changes the email and then locks: every
 - **MFA:** the session row is created when MFA completes, not before; the MFA payload already carries the user id. There is no pending row and no new column, and someone holding only the password cannot sign the owner out. (Builder: confirm nothing else reads the placeholder row before removing it.)
 - **Per-install id:** the WebUI and the extension generate a random id once, keep it in localStorage, and send it on login and on the cookie mint. It is stored in `sessions.device_id` (single-user: `single-user-cookie:v1:<id>`, with validation changed from exact match to that prefix). It is a grouping hint only; a client that lies about it can only evict its own claimed group or fall through to the default rule.
 - **At the cap:** creating a session revokes live sessions until the new one fits, with `revoke_reason="session_cap"`. Sign-in is never refused because of the cap.
-- **Which session is evicted:** first the oldest live session with the **same `device_id`** as the new one; if there is none (or no id was sent), the oldest live session of the user by `created_at`. IP address and user agent are not used: they are spoofable and merge machines behind one NAT. Without the same-install rule, one browser that keeps dropping its cookie would evict every other browser within seconds; with it, that browser only replaces its own row.
+- **Which session is evicted:** first the least recently active live session in the **same group** as the new one; if there is none, the least recently active live session of the user (`COALESCE(last_activity, created_at)`, then `created_at`). A group is one `device_id`; sign-ins that send no id (scripts, the CLI wizard, the admin UI's login route, OIDC redirects) form one group of their own, so a script that logs in repeatedly replaces its own sessions before any browser's. Least-recently-active is used rather than oldest-created because refresh keeps a daily-used session alive indefinitely with its original creation time; evicting by creation time would sign out the most-used device first. IP address and user agent are not used: they are spoofable and merge machines behind one NAT. Without the group rule, one browser that keeps dropping its cookie would evict every other browser within seconds; with it, that browser only replaces its own row.
 - **Atomicity:** count, evict and insert run in one transaction per user. PostgreSQL takes a transaction-scoped advisory lock using the two-key namespaced form (as `user_provider_secrets_repo` does; the single-key space is shared with other code). SQLite uses its `BEGIN IMMEDIATE`. Eviction is done with statements inside that transaction, not by calling `revoke_session` (which opens its own). Token-blacklist entries for the evicted sessions are written after commit. The account-lock state is re-read inside this transaction (see section 3).
-- **Telling the evicted browser:** a request on a session revoked with `session_cap` gets 401 with code `session_replaced`, and the WebUI shows "You were signed out because your account was signed in on another device" on the sign-in page.
+- **Telling the evicted browser:** a multi-user request or refresh on a session revoked with `session_cap` gets 401 with code `session_replaced` (the reason is read from the token blacklist, so it survives the purge below), and the WebUI shows "You were signed out because your account was signed in on another device" on the sign-in page.
 - **Bounded storage:** rows revoked with `session_cap` are purged by cleanup after `max(1 hour, access-token lifetime)` instead of seven days.
 - **Single-user mode:** the same cap applies to cookie sessions. This is the fix for TASK-15628: a browser that drops its cookie holds one row (its own id), and other browser profiles keep theirs.
 
@@ -161,6 +161,8 @@ One helper in AuthNZ, `blocked_owner_ids()` / `owner_blocked(user_id)`: true whe
 
 ## Known limits
 
+- A single-user cookie session evicted by the cap gets a plain 401 and its browser silently signs in again; only multi-user sessions are told why.
+- Scripts that sign in with a password share the no-id group with OIDC sign-ins and the admin UI; scripts should use API keys.
 - A job that is already executing when the lock is set finishes; Jobs have no cooperative pause.
 - Not paused: the embeddings workers on Redis Streams, detached in-process tasks (evaluation runs, research, sandbox, persona, WebSub push ingestion), and direct per-user loops (claims-alert emails, WebSub renewal, metrics). Recorded as a follow-up task.
 - A lock does not close SSE streams or WebSockets that are already open; they end when they next authenticate or reconnect.
@@ -197,6 +199,7 @@ An independent reviewer checked the first draft against the code. What changed:
 - Tokens issued before an unlock are refused (`credentials_valid_after`); recent API keys stay suspended.
 - Unlock reuses magic link instead of a new token, endpoint and page; the pending-session column, the locked-by column and Redis key deletion were dropped.
 - Single-user `/login` no longer inserts a session row.
+- Second review round (2026-11-24): eviction is by least recent activity, not creation time; sign-ins without an install id form their own group; the eviction reason survives the row purge.
 - Background pause designed (PR 4), covering administrator deactivation as well.
 
 ## Left to the builder
