@@ -203,7 +203,8 @@ vi.mock("@/hooks/useConnectionState", async (original) => {
   const actual = await original<typeof import("@/hooks/useConnectionState")>()
   return {
     ...actual,
-    useConnectionState: () => connectionState
+    useConnectionState: (select?: (state: typeof connectionState) => unknown) =>
+      select ? select(connectionState) : connectionState
   }
 })
 

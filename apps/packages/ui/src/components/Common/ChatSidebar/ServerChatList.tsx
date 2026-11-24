@@ -122,7 +122,7 @@ export function ServerChatList({
     "playground",
     "dataTables"
   ])
-  const { isConnected } = useConnectionState()
+  const { isConnected } = useConnectionState((s) => ({ isConnected: s.isConnected }))
   const queryClient = useQueryClient()
   const confirmDanger = useConfirmDanger()
   // Move to Trash offers one inline Undo (XP-17, G07; #3101 decision 8).

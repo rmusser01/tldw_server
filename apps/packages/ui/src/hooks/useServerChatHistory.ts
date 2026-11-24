@@ -227,7 +227,7 @@ export const useServerChatHistory = (
   searchQuery: string,
   options?: UseServerChatHistoryOptions
 ) => {
-  const { isConnected } = useConnectionState()
+  const { isConnected } = useConnectionState((s) => ({ isConnected: s.isConnected }))
   const checkConnection = useConnectionStore((state) => state.checkOnce)
   const normalizedQuery = searchQuery.trim().toLowerCase()
   const mode = options?.mode ?? "overview"

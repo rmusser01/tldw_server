@@ -40,7 +40,8 @@ vi.mock("@/context/demo-mode", () => ({
 
 vi.mock("@/hooks/useConnectionState", () => ({
   useIsConnected: () => false,
-  useConnectionState: () => connection.state,
+  useConnectionState: (select?: (state: typeof connection.state) => unknown) =>
+    select ? select(connection.state) : connection.state,
 }));
 
 vi.mock("@/store/tutorials", () => ({

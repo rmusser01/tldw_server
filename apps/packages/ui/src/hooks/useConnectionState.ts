@@ -1,7 +1,23 @@
-import { useConnectionStore } from "@/store/connection"
-import { deriveConnectionUxState } from "@/types/connection"
+import { shallow } from "zustand/shallow"
 
-export const useConnectionState = () => useConnectionStore((s) => s.state)
+import { useConnectionStore } from "@/store/connection"
+import { deriveConnectionUxState, type ConnectionState } from "@/types/connection"
+
+/**
+ * Whole connection state, or a shallow-compared selection of it. Every health
+ * poll replaces the state object, so a caller that reads only a few fields
+ * should pass a selector to re-render only when those fields change.
+ * Return a flat object of primitives: only its top level is compared, so a
+ * nested object or array built in the selector re-renders on every store update.
+ */
+export function useConnectionState<T = ConnectionState>(
+  selector?: (state: ConnectionState) => T
+): T {
+  return useConnectionStore(
+    (s) => (selector ? selector(s.state) : (s.state as T)),
+    selector ? shallow : undefined
+  )
+}
 
 export const useConnectionPhase = () =>
   useConnectionStore((s) => s.state.phase)
@@ -22,14 +38,14 @@ export const useConnectionActions = () =>
     setDemoMode: s.setDemoMode,
     markFirstRunComplete: s.markFirstRunComplete,
     setUserPersona: s.setUserPersona
-  }))
+  }), shallow)
 
 export const useKnowledgeStatus = () =>
   useConnectionStore((s) => ({
     knowledgeStatus: s.state.knowledgeStatus,
     knowledgeLastCheckedAt: s.state.knowledgeLastCheckedAt,
     knowledgeError: s.state.knowledgeError
-  }))
+  }), shallow)
 
 export const useConnectionUxState = () =>
   useConnectionStore((s) => {
@@ -57,4 +73,4 @@ export const useConnectionUxState = () =>
       isChecking,
       isConfigOrError
     }
-  })
+  }, shallow)

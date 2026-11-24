@@ -25,7 +25,10 @@ vi.mock("@/context/demo-mode", () => ({
 
 vi.mock("@/hooks/useConnectionState", () => ({
   useIsConnected: () => true,
-  useConnectionState: () => ({ phase: "connected", isConnected: true }),
+  useConnectionState: (select?: (state: Record<string, unknown>) => unknown) => {
+    const state = { phase: "connected", isConnected: true };
+    return select ? select(state) : state;
+  },
 }));
 
 vi.mock("@/store/tutorials", () => ({
