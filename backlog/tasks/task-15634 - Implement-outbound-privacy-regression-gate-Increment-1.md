@@ -33,6 +33,7 @@ Deliver the reviewed product destination and asset inventory plus the required C
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: yes. Proposed ADR-097 covers the durable inventory and required CI rules for this increment. The linked plan documents the five test-first stages and the supported Linux validation profile.
 Plan verification on 2026-11-24: existing required-gate classifier and direct HTTP guard baseline passed 99 tests in a plugin-disabled run. Offline planning probes exercised the real download SDK fixture redirect on 0.36.0 and 1.33.0 and the real installer and provider adapter paths with synthetic transports. Linux namespace and production browser execution remain implementation acceptance checks.
+Requester-approved plan review amendments: use disposable Linux test containers with disabled external networking and no host service socket mounts, require stop-file ASGI shutdown and final evidence, specify runtime Next auth and full Chromium/cache settings, verify exact SDK repository identity and zero raw attempts in both opt-in children, and trigger required checks on both projected package source trees. ADR-097 remains the governing proposed decision. Verified document links, stage order, example syntax, and review-fix coverage. Container and browser preflights remain implementation acceptance checks. No runtime or workflow code changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

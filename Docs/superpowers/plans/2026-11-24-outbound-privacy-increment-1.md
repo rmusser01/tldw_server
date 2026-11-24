@@ -4,9 +4,9 @@
 
 **Goal:** Ship a reviewed product destination and asset inventory and a required CI and local check for the covered default and opted-in flows.
 
-**Architecture:** Validate declarations against code and fixture-backed dispatch. Exercise the default backend in a fresh guarded process, and the shipped wizard, production Next.js server, and packaged Chrome extension in a loopback-only Linux environment. Use the same local runner and pass/fail contract in the existing required CI contexts.
+**Architecture:** Validate declarations against code and fixture-backed dispatch. Exercise the default backend, opted-in dispatch, shipped wizard, production Next.js server, and packaged Chrome extension in disposable Linux containers with loopback networking and a private filesystem. Use the same local runner and pass/fail contract in the existing required CI contexts.
 
-**Tech stack:** Python and pytest, the existing Python socket guard, HTTPX and the Hugging Face SDK's supported test seams, Bun, Next.js, Chromium and Playwright, and Linux network namespaces.
+**Tech stack:** Python and pytest, the existing Python socket guard, HTTPX and the Hugging Face SDK's supported test seams, Bun, Next.js, Chromium and Playwright, and Docker for the test boundary.
 
 **Spec:** [Outbound destination inventory and privacy regression checks](../../Design/2026-11-24-outbound-destination-inventory-design.md), Increment 1.
 
@@ -20,6 +20,7 @@
 - Keep CI dependencies, developer installation, image pulls, browser installation, and artifact builds outside the guarded scenarios. App-invoked setup installs are in scope. Record their tested and untested boundaries separately.
 - Exercise defaults from tracked configuration, synthetic credentials, and temporary state. Clear ambient proxy, identity, database and test-mode settings from child processes. Keep guard and attempt recording active through shutdown. Avoid real external DNS, connections and downloads in the exercised tests.
 - Default scenarios allow only their named fixture endpoints, by loopback address and port. Fixture names may use a test-owned static mapping. A product declaration grants no exception in a default smoke. Observe selected external destinations in opted-in tests using a fake transport response before any real connection.
+- Guarded runs have no host service socket mounts, checkout bind mounts, forwarded agent sockets, inherited host socket descriptors, or published ports. Only the host-side runner talks to Docker. The isolated process sees image contents, container-local state, and Docker's generated host files.
 - A required scenario that is skipped, fails to start or shut down, or produces missing, malformed or incomplete evidence fails. Report the tested boundaries and limitations, including SDK/argv-only evidence, untested native and child paths, and browser/OS coverage.
 - Do not upload raw URL paths, request bodies, headers, environment, console dumps, browser traces, or raw syscall traces. Use a bounded, redacted report with scenario, component, capability or repository source hint, decision, and coverage.
 - Create tests first and observe the intended failure. Run the applicable focused suites, actionlint for workflow changes, Bandit on touched Python, and `git diff --check`. Use backlog-py for records. Commit each finished stage with TASK-15634. Preserve the required checks and license admission.
@@ -33,15 +34,16 @@
 | `tldw_Server_API/tests/helpers/offline_network.py` | Opt-in exact endpoint guard for this smoke, with the current pytest defaults preserved |
 | `Helper_Scripts/ci/outbound_backend_smoke.py` | Fresh isolated app launch, local setup/runtime assertions, process cleanup and report |
 | `tldw_Server_API/tests/CI/test_outbound_inventory.py`, `test_outbound_backend_smoke.py`, `test_outbound_opt_in.py`, `test_outbound_check.py` | Manifest, guard and subprocess contracts, SDK/provider dispatch fixtures, and runner evidence tests |
-| `Helper_Scripts/ci/outbound_isolation.py` and `outbound_browser_smoke.py` | Shared Linux launch boundary and browser process supervision/attempt evidence |
+| `Dockerfiles/Dockerfile.outbound-check` and `Helper_Scripts/ci/outbound_isolation.py` | Test-only images, source projection and shared container preparation, launch and preflight |
+| `Helper_Scripts/ci/outbound_browser_smoke.py` | Browser process supervision and attempt evidence inside the prepared image |
 | `apps/tldw-frontend/playwright.outbound.config.ts` and `apps/tldw-frontend/e2e/outbound-privacy.spec.ts` | Stable selection of the shipped wizard and Next.js scenarios |
 | `apps/extension/playwright.outbound.config.ts` and `apps/extension/tests/e2e/outbound-privacy.spec.ts` | Pristine manifest, live packaged worker and controlled content-script scenario |
 | `apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/AddSourceModal.tsx` and `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/AddSourceModal.stage2.intake.test.tsx` | Replace remote search-result favicons and keep a regression for the local icon |
 | `.github/workflows/backend-required.yml`, `.github/workflows/frontend-required.yml`, `Helper_Scripts/ci/path_classifier.py`, `tldw_Server_API/tests/CI/test_path_classifier.py`, `test_license_first_workflow_contracts.py`, `Docs/Development/Local-CI.md` | Required context wiring, trigger tests and local operating instructions |
 
-The stable entry point is `python -m Helper_Scripts.ci.outbound_check {backend,browser,all} --report-dir DIR` from the repo root with the project environment activated. CI calls the same backend and browser selectors that `all` invokes. Each selected scenario emits exactly one terminal record with `scenario`, `status` (`pass` or `fail`), `coverage`, and an array of already-redacted `violations`. Each violation has a component, stable reason code and optional public declaration ID or repository source hint. Reports are created in a fresh subdirectory per invocation. A fixture transport verification is evidence of destination selection.
+The stable entry point is `python -m Helper_Scripts.ci.outbound_check {backend,browser,all} --report-dir DIR` from the repo root with the project environment activated. Prepare the selected images first with `python -m Helper_Scripts.ci.outbound_isolation prepare {backend,browser,all} --report-dir DIR`. CI calls the same backend and browser selectors that `all` invokes. Each selected scenario emits exactly one terminal record with `scenario`, `status` (`pass` or `fail`), `coverage`, and an array of already-redacted `violations`. Each violation has a component, stable reason code and optional public declaration ID or repository source hint. Reports are created in a fresh subdirectory per invocation. A fixture transport verification is evidence of destination selection.
 
-Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. Browser scenario IDs are `shipped-setup`, `production-webui`, `extension-worker`, and `extension-content-script`. The runner maps executed test evidence to these IDs explicitly and reports namespace and observer coverage alongside the browser results.
+Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. Browser scenario IDs are `shipped-setup`, `production-webui`, `extension-worker`, and `extension-content-script`. The runner maps executed test evidence to these IDs explicitly and reports container isolation and observer coverage alongside the browser results.
 
 ## Stage 1 · Inventory and drift checks
 
@@ -98,12 +100,12 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
 
 ## Stage 2 · Guarded fresh backend and local setup
 
-- **Goal:** Run the real launcher with temporary state and prove that startup, setup and a representative local runtime action make no unapproved calls in the guarded boundary.
+- **Goal:** Exercise the production ASGI app and guarded WebSocket protocol with temporary state, validating startup, setup and a representative local runtime action within the guarded boundary.
 - **Success criteria:** A named fixture works, accepted DNS/dial endpoints are exact, and caught or shutdown-time violations fail the run.
 - **Tests:** `test_outbound_backend_smoke.py`, existing no-live-network fixture tests, and the child smoke.
 - **Status:** Not Started
 
-- [ ] Add strict-policy tests for numeric loopback on a listed port, another loopback port, an external numeric address, a synthetic external name already declared in the product inventory, a safe static alias, and an ambient machine/test DB hostname. Use `unittest.mock` around the real resolver or dial seam where needed, with no live network. Add a child test that catches a synthetic DNS failure and exits normally, and another that emits its violation during cleanup. Require the harness to fail both.
+- [ ] Add strict-policy tests for numeric loopback on a listed port, another loopback port, an external numeric address, a synthetic external name already declared in the product inventory, a safe static alias, and an ambient machine/test DB hostname. Use `unittest.mock` around the real resolver or dial seam where needed, with no live network. Add child tests for normal stop with a final marker, a caught synthetic DNS failure, and a violation emitted in ASGI shutdown. Require the latter two to fail even if the child exits zero. A missing marker after forced termination also fails.
 
   ```python
   with block_live_network(fixture_endpoints=frozenset({("127.0.0.1", port)})) as attempts:
@@ -114,16 +116,36 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
 
 - [ ] Run `python -m pytest -q tldw_Server_API/tests/CI/test_outbound_backend_smoke.py`. Expect the new fixture policy or child result contract to fail first.
 - [ ] Extend `block_live_network` with optional keyword-only `fixture_endpoints: frozenset[tuple[str, int]] | None = None` and `fixture_names: Mapping[str, str] | None = None`. Preserve existing behaviour when endpoints are omitted. In the explicit branch, match the registered numeric endpoint before a dial, resolve any registered alias locally with numeric-only resolution, and block all other lookups before system DNS. Include explicit handling of resolver calls with no service, Unix sockets and IPv6, and reject invalid or non-loopback fixture configuration. Preserve the existing `Attempts` interface for other tests. Serialize only its sanitized summary in this smoke.
-- [ ] Implement `prepare_project(root: Path, temp: Path) -> Path` and `run_backend_smoke(root: Path, report: Path) -> int` in `outbound_backend_smoke.py`. Use the tracked, non-symlink file projection pattern in `Helper_Scripts/benchmarks/workflows_websocket_load.py`, including the two local Python packages. Explicitly copy newly added guard/launcher files if they are not yet in the index. Use the projected working directory and import path, and assert that app config, keys and databases resolve within the temporary root. Set `TLDW_CONFIG_FILE`, `TLDW_ENV_FILE`, `TLDW_ENV_FILE_EXCLUSIVE`, `USER_DB_BASE_DIR`, `DATABASE_URL`, `JOBS_DB_PATH` and `TLDW_CONTENT_SQLITE_PATH` to fixture paths. Set temporary child home/cache directories and synthetic auth material. Do not inherit benchmark shortcuts such as `DISABLE_HEAVY_STARTUP`, or set `TEST_MODE`, `CI` or provider-network flags. Implement `write_redacted_child_evidence(report: Path, attempts: Attempts) -> None` locally. The child wraps the launcher before importing any app module:
+- [ ] Implement `prepare_project(root: Path, temp: Path) -> Path` in `outbound_isolation.py` for the host-side build context and `run_backend_smoke(root: Path, report: Path) -> int` in `outbound_backend_smoke.py` for the container. Use the tracked, non-symlink file projection pattern in `Helper_Scripts/benchmarks/workflows_websocket_load.py`, including both local Python packages and the tests. Include the newly added harness files explicitly during development. Exclude real dotenv files, keys, runtime databases, host socket files, and inherited cache contents. Copy the projected source into the image. Start a real writable fixture copy for each backend run and verify that imports, config, keys and databases resolve within it or its temporary state tree. Set `TLDW_CONFIG_FILE`, `TLDW_ENV_FILE`, `TLDW_ENV_FILE_EXCLUSIVE`, `USER_DB_BASE_DIR`, `DATABASE_URL`, `JOBS_DB_PATH` and `TLDW_CONTENT_SQLITE_PATH` to fixture paths. Set temporary child home/cache directories and synthetic auth material. Do not inherit benchmark shortcuts such as `DISABLE_HEAVY_STARTUP`, or set `TEST_MODE`, `CI` or provider-network flags.
+- [ ] In the smoke child, use `uvicorn.Server` with the deployed launcher's app and guarded WebSocket protocol, explicit `lifespan="on"`, one worker and no forwarded headers. Use the benchmark's stop-file monitor with the lifespan enabled. SIGTERM is reserved for timeout cleanup because Uvicorn can re-raise the signal after shutdown and skip the outer report writer. Implement `write_redacted_child_evidence(report: Path, attempts: Attempts) -> None` locally. The child enables the guard before importing the app or WebSocket protocol, then writes evidence after a normal lifespan exit:
 
   ```python
-  with block_live_network(fixture_endpoints=fixture_endpoints) as attempts:
-      from tldw_Server_API.scripts.run_server_guarded_mcp import main as serve
+  async def serve_until_stop(stop_file: Path) -> None:
+      from tldw_Server_API.scripts.run_server_guarded_mcp import GuardedSlidesWebSocketProtocol
+
+      server = uvicorn.Server(uvicorn.Config(
+          "tldw_Server_API.app.main:app", host="127.0.0.1", port=port,
+          workers=1, lifespan="on", proxy_headers=False,
+          ws=GuardedSlidesWebSocketProtocol, ws_per_message_deflate=False,
+      ))
+
+      async def monitor_stop() -> None:
+          while not stop_file.exists():
+              await asyncio.sleep(0.05)
+          server.should_exit = True
+
+      monitor = asyncio.create_task(monitor_stop())
       try:
-          serve(["--host", "127.0.0.1", "--port", str(port), "--workers", "1",
-                 "--no-proxy-headers"])
+          await server.serve()
+          if not server.started or server.lifespan.shutdown_failed or server.lifespan.error_occured:
+              raise RuntimeError("ASGI lifespan did not finish successfully")
       finally:
-          write_redacted_child_evidence(report, attempts)
+          monitor.cancel()
+          await asyncio.gather(monitor, return_exceptions=True)
+
+  with block_live_network(fixture_endpoints=fixture_endpoints) as attempts:
+      asyncio.run(serve_until_stop(stop_file))
+      write_redacted_child_evidence(report, attempts)
   ```
 
 - [ ] Poll `GET /internal/ready` with a bounded deadline and assert its readiness contract. Require `/` to redirect to `/setup`, and `GET /api/v1/setup/status` to show setup is required. Save local-only `POST /api/v1/setup/first-run/ingest-defaults` with the payload below and verify the acknowledged step with `GET /api/v1/setup/first-run/state`. Use the synthetic key to create an explicitly titled note at `POST /api/v1/notes/`, then read the same ID and content back. The explicit title avoids unrelated automatic LLM title generation.
@@ -132,8 +154,19 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
   {"allow_local_file_ingest": false, "chunking_profile": "balanced", "metadata_mode": "automatic", "allowed_local_roots": []}
   ```
 
-- [ ] Add `namespace_argv(argv: Sequence[str], *, uid: int, gid: int) -> list[str]` in `outbound_isolation.py` using the fixed Linux bootstrap spelled out in Stage 4. Launch the default smoke and its fixture runner in that namespace so traffic outside the Python recorder is contained. Test the invocation and privilege verification before using app fixtures. Use a fixed port within the private namespace and register it before starting the child. Make HTTP calls from the parent inside the namespace with proxy discovery disabled and no redirect to any other origin. Default startup awaits heavy initialization. If the app schedules deferred startup, wait on its actual completion signal before shutdown. Terminate gracefully with a deadline, kill and reap on timeout, and require the final child marker and zero unexpected attempts before reporting success. Validate cleanup in a failed scenario as well as success. Use the startup pattern from `minimal_env_smoke.py` without its reduced startup profile.
-- [ ] Run the strict guard, subprocess tests and existing fixture/launcher tests. Give the backend module a direct smoke entry point for this stage. Run `python -m Helper_Scripts.ci.outbound_backend_smoke --report-dir "$(mktemp -d)"` and inspect its terminal evidence. Run Bandit on changed Python. Commit as `test: exercise startup and setup with exact local fixture rules (TASK-15634)`.
+- [ ] Implement `run_isolated(image_id: str, argv: Sequence[str], report_dir: Path, *, timeout: float) -> int` in `outbound_isolation.py` and the backend target of `Dockerfiles/Dockerfile.outbound-check`. Build the prepared test image before running the checks. Start fixtures and app children in the same private container with a fixed fixture port. The host runner creates and verifies the container before starting it. Reuse the repository's `--network none` container precedent and do not mount any host directories or sockets:
+
+  ```bash
+  docker create --pull never --network none --cap-drop ALL \
+    --security-opt no-new-privileges --user 10001:10001 \
+    --entrypoint python "$outbound_image_id" \
+    -m Helper_Scripts.ci.outbound_backend_smoke --inside-container
+  ```
+
+  Provision UID 10001 and writable fixture/report directories in the test image. The inside-container command writes its final result to `/outbound-report/result.json`. Use only internally prepared image IDs and argv. Inspect for network mode `none`, no bind/volume mounts or published ports and the expected unprivileged user. Keep the container through exit so the host wrapper can extract just the single bounded sanitized report with `docker cp`, then remove that container in cleanup. Keep raw logs and traces private. Fail on timeout, failed preflight, missing evidence or nonzero exit. Never retry outside isolation.
+- [ ] Add a containment preflight before any required smoke. Bind a throwaway host-only filesystem Unix socket, prove a host client can reach it, and give the container the path as a string with no mount. Require the container connect to fail and require no accepted connection from that probe on the host. Repeat with a working in-container loopback fixture. Verify that no host resolver/IPC directories, agent sockets or Docker socket are mounted. Treat namespace and mount inspection as a necessary check and the synthetic fixture as a regression test for accidental host socket access.
+- [ ] Make HTTP calls from the scenario parent inside the container with proxies disabled and no redirect to any other origin. Default startup awaits heavy initialization. If the app schedules deferred startup, await its completion signal before writing the stop file. Require a normal child exit, a final marker written after lifespan shutdown, and zero unexpected attempts. Escalate to terminate/kill and reap only on timeout and fail that run. Validate cleanup on failure as well as success.
+- [ ] Run the strict guard, subprocess tests and existing fixture/launcher tests. Give the backend module a direct smoke entry point for this stage. Set `outbound_report_dir="$(mktemp -d)"`, prepare the backend target with `python -m Helper_Scripts.ci.outbound_isolation prepare backend --report-dir "$outbound_report_dir"`, then run `python -m Helper_Scripts.ci.outbound_backend_smoke --report-dir "$outbound_report_dir"`. Run Bandit on changed Python. Commit as `test: exercise startup and setup with exact local fixture rules (TASK-15634)`.
 
 ## Stage 3 · Opted-in download and provider evidence
 
@@ -142,8 +175,8 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
 - **Tests:** `test_outbound_opt_in.py`, `test_install_manager_dependencies.py`, and `test_openai_native_http.py`.
 - **Status:** Not Started
 
-- [ ] Add process-isolated tests in `tldw_Server_API/tests/CI/test_outbound_opt_in.py` for the Kokoro ONNX download, the same asset selecting an undeclared initial origin, the allowed fixture CDN responding with a second redirect to an undeclared origin, and a changed asset on the original host. Install the exact Python guard with zero allowed dials in the SDK child. In the negative cases assert the recorder's rejection and the expected install failure, not merely an HTTP exception.
-- [ ] Run `python -m pytest -q tldw_Server_API/tests/CI/test_outbound_opt_in.py`. Expect the transport or evidence assertions to fail before the fixture is implemented.
+- [ ] Add process-isolated tests in `tldw_Server_API/tests/CI/test_outbound_opt_in.py` for the Kokoro ONNX download, the same asset selecting an undeclared initial origin, the allowed fixture CDN responding with a second redirect to an undeclared origin, a changed file, and a swap to another repository with the same file and revision on the same host. In the negative cases assert the recorder's rejection and the expected install failure. Run both the download and provider children inside the prepared backend container with the Python guard active before app or SDK imports. Each uses zero allowed raw dials. After cleanup, independently assert zero raw DNS/dial attempts and verify the expected fixture transport events. Add a caught-attempt canary for each child that returns an otherwise valid fixture response and makes the check fail based on the recorded raw attempt.
+- [ ] In the prepared backend test container, run `python -m pytest -q tldw_Server_API/tests/CI/test_outbound_opt_in.py`. Expect the transport or evidence assertions to fail before the fixture is implemented. Use `run_isolated` from Stage 2 for direct container commands during development.
 - [ ] In the isolated fixture, call real `Setup.install_manager.execute_install_plan({"tts": [{"engine": "kokoro", "variants": ["onnx"]}]})`. Use a temporary model path and config/installer/cache state. Set `HF_HUB_DISABLE_XET=1` before SDK import, `HF_DEFAULT_REVISION` to a synthetic 40-hex revision, and `TLDW_SETUP_SKIP_PIP=1` for this download-only scenario. Check the shipped default identity with the unmodified declaration and apply the synthetic revision only to the fixture copy for the opted-in dispatch. Match repo/file/revision at the recording seam. The synthetic revision is per-test configuration, not a new shipped artifact pin.
 - [ ] Use `huggingface_hub.set_client_factory` and `httpx.MockTransport` where that SDK hook exists. For supported 0.x use `configure_http_backend` with a `requests.Session` and a fixture adapter mounted for HTTP(S). Clear SDK state by ending the child process. The handler records only origin and a public resource ID and rejects any unmatched request before a real transport exists. The 1.x handler has this shape (the 0.x adapter returns the corresponding `requests.Response`):
 
@@ -152,7 +185,8 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
       inventory.check_origin("setup.kokoro", str(request.url))
       observed.append((request.method, origin_only(str(request.url))))
       if request.method == "HEAD" and request.url.host == "huggingface.co":
-          assert request.url.path.endswith(f"/resolve/{revision}/onnx/model.onnx")
+          expected_path = f"/{expected.repository}/resolve/{expected.revision}/{expected.resource}"
+          assert request.url.path == expected_path
           return httpx.Response(302, headers={
               "Location": fixture_asset_url, "X-Repo-Commit": revision,
               "ETag": '"outbound-fixture"', "X-Linked-Size": "4",
@@ -165,10 +199,10 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
   ))
   ```
 
-  Preserve a redacted rejection event even when `check_origin` raises. In the redirect refusal case first let the SDK accept metadata from the original host, then respond to the allowed CDN GET with a redirect to `unlisted-cdn.invalid`. Observe and reject that attempted hop at the recording transport. Verify bytes on disk and a completed installer result in the successful case. Do not infer production CDN coverage from the fixture hostname.
+  Read `expected` from the reviewed asset declaration with the explicit fixture revision. Compare the real dispatcher arguments through `require_asset` before passing them to the SDK. Preserve a redacted rejection event on origin or identity mismatches. In the redirect refusal case first let the SDK accept metadata from the original host, then respond to the allowed CDN GET with a redirect to `unlisted-cdn.invalid`. Observe and reject that attempted hop at the recording transport. Verify bytes on disk and a completed installer result in the successful case. Report the fixture redirect separately from production CDN coverage.
 - [ ] Call `gateway.perform_chat_api_call` with `api_endpoint="openai"`, synthetic credentials, model `gpt-4o-mini`, and `app_config={"openai_api": {"api_base_url": "https://api.openai.com/v1"}}`. Seed the healthy override cache with `set_llm_provider_overrides_cache_for_tests({})` and a ready model inventory as in `tldw_Server_API/tests/LLM_Calls/test_adapter_provider_inventory_boundary.py`. Use the real registry and adapter. Inject a local recording HTTPX client at `openai_adapter.http_client_factory` and verify the exact `POST https://api.openai.com/v1/chat/completions` and returned synthetic completion. Do not replace the adapter or allow real API credentials. Drive one refused destination case at the recording seam as well.
 - [ ] Extend installer dispatch assertions in `tldw_Server_API/tests/Setup/test_install_manager_dependencies.py`. Feed the shipped selected entries through `_ensure_requirement`/the real install plan. Use the existing pip-version probe and `_run_subprocess` stubs to record the selected pip or uv argv and any explicitly configured test index. Assert version, CPU/GPU selection, fallback and VCS handling for covered entries. Record the OmniVoice `git clone` and sidecar pip argv through `_run_checked_command` in `Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py`. Compare argv resource identities to the manifest and classify the selected registry/downstream hosts as unverified when argv supplies insufficient evidence. Do not run package or Git commands here.
-- [ ] Run `python -m pytest -q tldw_Server_API/tests/CI/test_outbound_inventory.py tldw_Server_API/tests/CI/test_outbound_opt_in.py tldw_Server_API/tests/Setup/test_install_manager_dependencies.py tldw_Server_API/tests/LLM_Adapters/unit/test_openai_native_http.py`. Exercise the compatible SDK versions in isolated environments when both hooks are supported. Record which version produced each result; selecting no supported hook fails with a setup diagnostic. Run Bandit. Commit as `test: verify opted-in outbound dispatch without live services (TASK-15634)`.
+- [ ] In the prepared backend test container, run `python -m pytest -q tldw_Server_API/tests/CI/test_outbound_inventory.py tldw_Server_API/tests/CI/test_outbound_opt_in.py tldw_Server_API/tests/Setup/test_install_manager_dependencies.py tldw_Server_API/tests/LLM_Adapters/unit/test_openai_native_http.py`. Exercise the compatible SDK versions in isolated environments when both hooks are supported. Record which version produced each result. Selecting no supported hook fails with a setup diagnostic. Run Bandit. Commit as `test: verify opted-in outbound dispatch without live services (TASK-15634)`.
 
 ## Stage 4 · Shipped browser flows and local favicon
 
@@ -195,20 +229,10 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
   await expect(page.getByText("Configuration saved", { exact: false })).toBeVisible()
   ```
 
-  The parent reads the temporary configuration and confirms the new integer. Use the quickstart login flow in `e2e/login.spec.ts` for a real authenticated WebUI operation. Scope the search response handler to its exact local origin, path, and method. The guarded request log must include passive loads and redirected destinations. The parent monitors the Next.js process separately because same-origin rewrites don't appear as upstream requests in Playwright.
-- [ ] Add `apps/extension/tests/e2e/outbound-privacy.spec.ts` with tests named `packaged worker uses the configured fixture` and `content script activates on a local page`. Use `build/chrome-mv3`, a fresh persistent profile, and the worker request/response pattern in `background-proxy-api.spec.ts`. Demand a real local fixture chat POST plus a returned UI marker. On a local page with one textarea and a known request baseline, assert the readiness attribute `data-tldw-copilot-popup-ready` and visible `#tldw-copilot-popup-host` using the activation pattern in `copilot-popup.spec.ts`. Retain context-level request evidence and worker attribution for these exercised flows. Page-only listeners cannot cover the launch sequence.
-- [ ] Implement `run_browser_smoke(root: Path, report_dir: Path) -> int` in `outbound_browser_smoke.py`. Start Stage 2's shared Linux isolation before Next, the guarded backend, test fixtures, Playwright or Chromium. Use a fresh network namespace with loopback as its only interface, and run repo code as the caller's unprivileged UID. Use fixed distinct fixture ports. The quickstart API rewrite is baked into the build, so build with the same fixed API port the browser scenario uses. The shared `namespace_argv` uses these system-tool operations in order:
-
-  ```sh
-  # Run under the new namespace, during privileged setup only.
-  /usr/sbin/ip link set dev lo up
-  # Pass the original numeric UID and GID, then an absolute Python path and its argv.
-  exec /usr/bin/setpriv --reuid "$fixture_uid" --regid "$fixture_gid" \
-    --clear-groups --no-new-privs -- "$@"
-  ```
-
-  Use `sudo -n /usr/bin/unshare --net -- /bin/sh -c` with a fixed bootstrap command for those operations on the Ubuntu runner. Pass numeric IDs and the invocation as positional arguments. Provide the resolved preinstalled tool paths to the unprivileged runner after dropping privileges. Keep repo scripts, repo configuration, and user-controlled command text out of the privileged bootstrap. Validate isolation and the UID before the child starts product processes. On non-Linux hosts document a Linux VM with the same prerequisites. Fail with a prerequisite error if isolation is unavailable. The runner leaves host networking untouched.
-- [ ] Observe early socket attempts from the process tree, including the Next and Chromium launch paths, with scoped Linux `strace -ff -e trace=connect,sendto -s 0` plus application request events for origins and redirect attribution. Check each observed attempt against its scenario's exact fixtures. Parse only destination address, port and verdict from the private traces. Discard them after summarizing; do not attach raw traces or payloads. Require tracer exit and coverage markers for the fixture trees. Record which socket operations are observed and leave other native paths explicitly unverified. The namespace contains traffic that instrumentation cannot classify. Calibrate with a good fixture connection and a child that catches an attempted connection to an unlisted loopback port. Include a passive asset/worker observer tripwire using a safe synthetic origin. Give browser-owned traffic its own attribution where verifiable; no external origin becomes allowed through that label.
+  The parent reads the temporary configuration and confirms the new integer. Use the quickstart login flow in `e2e/login.spec.ts`. Require `GET /api/v1/auth/sessions` to return 200, assert that the session cookie is HttpOnly using the Playwright context, and confirm the synthetic API key is absent from browser-readable state before testing search. Scope the search response handler to its exact local origin, path, and method. The guarded request log must include passive loads and redirected destinations. The parent monitors Next.js separately because Playwright doesn't see the upstream leg of same-origin rewrites.
+- [ ] Add `apps/extension/tests/e2e/outbound-privacy.spec.ts` with tests named `packaged worker uses the configured fixture` and `content script activates on a local page`. Use `build/chrome-mv3`, a fresh persistent profile and explicit `channel: "chromium"` so the MV3 worker runs in full Chromium. Install Chromium during image preparation and set the same absolute `PLAYWRIGHT_BROWSERS_PATH=/opt/outbound-chromium` for the install and isolated runner. Verify that UID 10001 can read the cache and that the worker starts with `CI` unset. Use the worker request/response pattern in `background-proxy-api.spec.ts`. Demand a real local fixture chat POST plus a returned UI marker. On a local page with one textarea and a known request baseline, assert the readiness attribute `data-tldw-copilot-popup-ready` and visible `#tldw-copilot-popup-host` using the activation pattern in `copilot-popup.spec.ts`. Retain context-level request evidence and worker attribution for these flows. Page-only listeners cannot cover the launch sequence.
+- [ ] Extend the test Dockerfile with the browser target and implement `run_browser_smoke(root: Path, report_dir: Path) -> int` in `outbound_browser_smoke.py`. Use Stage 2's shared container boundary for Next, the guarded backend, test fixtures, Playwright and Chromium, from launch through shutdown. Put prepared browser artifacts and toolchains in the image. Use fixed distinct fixture ports and keep the quickstart API's baked and runtime port the same. Require a real child-process trace and a worker-start canary in the exact unprivileged image and runner profile before making the check required. If the observer can't run under the normal restricted container profile, fail preflight and resolve the observer choice during implementation. Do not grant broad privileges or switch to host networking or mounts to make the test pass.
+- [ ] Observe early socket attempts from the process tree, including the Next and Chromium launch paths, with scoped Linux `strace -ff -e trace=connect,sendto -s 0` plus application request events for origins and redirect attribution. Check each observed attempt against its scenario's exact fixtures. Treat host-service Unix socket attempts as violations, and allow fixture IPC only by its explicit local identity. Parse solely the destination and verdict in private traces. Discard them after summarizing. Require tracer exit and coverage markers for the fixture trees. Record the observed socket operations and scope unverified native paths explicitly. Calibrate with a good fixture connection and a child that catches an attempted connection to an unlisted loopback port. Include a passive asset/worker observer tripwire using a safe synthetic origin. Give browser-owned traffic its own attribution where verifiable; that label grants no external access.
 - [ ] Prepare and stage prebuilt artifacts before the run using the commands in Stage 5. In the isolated browser runner, invoke `bunx --no-install playwright test --config playwright.outbound.config.ts --workers=1 --retries=0 --reporter=json` once from each app and save results to separate private files. Verify Bun uses the preinstalled Playwright dependency. Confirm all four named tests execute, each trace is finalized, and no unexpected connection is present. Run the Add Source unit test and Bandit on the Python harness. Commit as `test: cover app browser egress in guarded smoke (TASK-15634)`.
 
 ## Stage 5 · Required CI gates and local command
@@ -218,36 +242,51 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
 - **Tests:** `test_outbound_check.py`, path classifier and workflow contract tests, and end-to-end runner verification.
 - **Status:** Not Started
 
-- [ ] Write `test_outbound_check.py` with cases for missing, duplicate, failed, skipped and malformed scenario records, runner startup failure, and one valid terminal result per selected scenario. Check that a transport exception containing a URL, query and synthetic credential cannot put those values in the report. Test backend/browser/all selection and propagation of nonzero child status. Add classifier and workflow tests before the wiring:
+- [ ] Write `test_outbound_check.py` with cases for missing, duplicate, failed, skipped and malformed scenario records, runner startup failure, and one valid terminal result per selected scenario. Check that a transport exception containing a URL, query and synthetic credential cannot put those values in the report. Test backend/browser/all selection and propagation of nonzero child status. Add classifier and workflow tests before the wiring, including a change contained to each projected package:
 
   ```python
   flags = classify_paths(["Helper_Scripts/ci/outbound_inventory.json"])
   assert flags["backend_changed"]
   assert flags["tldw_frontend_changed"]
+
+  for path in (
+      "apps/mcp-unified/src/mcp_unified/federation/http_transport.py",
+      "packages/tldw_profile_core/src/tldw_profile_core/__init__.py",
+  ):
+      flags = classify_paths([path])
+      assert flags["backend_changed"]
+      assert flags["tldw_frontend_changed"]
   ```
 
 - [ ] Run `python -m pytest -q tldw_Server_API/tests/CI/test_outbound_check.py tldw_Server_API/tests/CI/test_path_classifier.py tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py`. Expect the missing runner/trigger assertions to fail first.
-- [ ] Implement `main(argv: list[str] | None = None) -> int` in `outbound_check.py`. The backend selector runs `test_outbound_inventory.py`, `test_http_usage_guard.py`, `test_outbound_backend_smoke.py`, `test_outbound_opt_in.py`, `test_install_manager_dependencies.py` and `test_outbound_check.py` and invokes the guarded default backend child. Test runner orchestration with stubbed children. Validate pytest's expected executed results and reject required skips. The browser selector consumes the two built artifacts, invokes the browser runner and validates both Playwright JSON files against the four named tests. Use the existing `apps/tldw-frontend/scripts/assert-playwright-no-skips.mjs` and require exact scenario names and positive execution counts. The public command emits the summarized report and exits nonzero for any selected failure, missing test, missing marker, or capture failure.
-- [ ] Add `Helper_Scripts/ci/outbound_*` and the app-invoked installer paths used by the checks to `BACKEND_GLOBS`. Add matching outbound harness/manifest paths, the API-served wizard HTML and JS/CSS, setup endpoint and setup CSP files, relevant default config and build inputs to `TLDW_FRONTEND_GLOBS`. Shared UI and extension paths already match. Verify manifest-only, setup-only, installer-only, frontend-only and unrelated docs changes. Reuse these classifier outputs so the new steps interact correctly with the existing no-op and license paths.
-- [ ] Add backend smoke after dependency setup in `.github/workflows/backend-required.yml` using the normal backend path flag and a bounded step timeout. Put the browser step in `.github/workflows/frontend-required.yml` after the existing Node/Bun/Chromium install and production extension build. Add the standalone Next production build and staging from `frontend-ux-gates.yml` before starting the guard. Keep those prerequisites separate from the guarded command, and add no advisory/skippable shell wrapper. Preserve admitted head checkout and the required summary job. Contract tests must check that the runner is after license admission and an expected failure reaches the protected context.
+- [ ] Implement `main(argv: list[str] | None = None) -> int` in `outbound_check.py`. The backend selector runs `test_outbound_inventory.py`, `test_http_usage_guard.py`, `test_outbound_backend_smoke.py`, `test_outbound_opt_in.py`, `test_install_manager_dependencies.py` and `test_outbound_check.py` and invokes the guarded default backend child. Execute live app and opt-in fixture work inside the prepared backend container. Test host-side runner orchestration with stubbed children. Validate pytest's expected executed results and reject required skips. The browser selector consumes the prepared browser image, invokes the browser runner and validates both Playwright JSON files against the four named tests before emitting sanitized evidence. Use the existing `apps/tldw-frontend/scripts/assert-playwright-no-skips.mjs` and require exact scenario names and positive execution counts. The public command exits nonzero for any selected failure, missing test, missing marker, or capture failure.
+- [ ] Add `Helper_Scripts/ci/outbound_*`, `Dockerfiles/Dockerfile.outbound-check`, app-invoked installer paths used by the checks, `apps/mcp-unified/src/**`, and `packages/tldw_profile_core/src/**` to `BACKEND_GLOBS`. Add the same harness, Dockerfile and two package source paths to `TLDW_FRONTEND_GLOBS`. The browser smoke starts the same app. Include its launcher, control plane, shipped wizard HTML and JS/CSS, setup endpoint, setup CSP, relevant default config, and build inputs. Shared UI and extension paths already match. Verify package-only, manifest-only, setup-only, installer-only, frontend-only and unrelated docs changes. Reuse these classifier outputs so the new steps interact correctly with the existing no-op and license paths.
+- [ ] Add backend image preparation and smoke after required-job admission and dependency setup in `.github/workflows/backend-required.yml` using the normal backend path flag. Put matching browser steps in `.github/workflows/frontend-required.yml` under the main frontend flag. Build the standalone Next and extension artifacts into the browser image using the existing build recipes. Keep preparation and guarded run as separate bounded steps. Preserve admitted head checkout and the required summary job. Contract tests must check that the runner is after license admission and an expected failure reaches the protected context.
 
   ```yaml
+  - name: Prepare backend outbound privacy image
+    if: needs.changes.outputs.backend_changed == 'true'
+    run: python -m Helper_Scripts.ci.outbound_isolation prepare backend --report-dir "$RUNNER_TEMP/outbound-privacy"
   - name: Verify backend outbound privacy
     if: needs.changes.outputs.backend_changed == 'true'
     timeout-minutes: 5
-    run: python -m Helper_Scripts.ci.outbound_check backend --report-dir "$RUNNER_TEMP"
+    run: python -m Helper_Scripts.ci.outbound_check backend --report-dir "$RUNNER_TEMP/outbound-privacy"
+  - name: Prepare browser outbound privacy image
+    if: needs.changes.outputs.tldw_frontend_changed == 'true'
+    run: python -m Helper_Scripts.ci.outbound_isolation prepare browser --report-dir "$RUNNER_TEMP/outbound-privacy"
   - name: Verify browser outbound privacy
     if: needs.changes.outputs.tldw_frontend_changed == 'true'
     timeout-minutes: 8
-    run: python -m Helper_Scripts.ci.outbound_check browser --report-dir "$RUNNER_TEMP"
+    run: python -m Helper_Scripts.ci.outbound_check browser --report-dir "$RUNNER_TEMP/outbound-privacy"
   ```
 
-  Place only the corresponding step in each workflow. Use the runner's fresh report subdirectory for summary or upload so older artifacts can't be treated as current evidence. Measure the runtime in CI and adjust explicit budgets if necessary.
-- [ ] Use these local preparation commands on the documented Linux host after activating the existing Python dev environment. CI prepares the same artifacts with its pinned setup actions. It also installs the supported Hugging Face SDK for the fixture if the current dev setup doesn't supply it, and provisioning provides `iproute2`, `util-linux`, and `strace`. No package install belongs inside the guarded runner.
+  Place only the corresponding steps in each workflow. Keep the prepared image IDs alongside the host-side run configuration. Use the runner's fresh validated report subdirectory for summary or upload so older artifacts can't be treated as current evidence. Measure preparation and smoke runtimes in CI before enforcing the gate.
+- [ ] Implement `prepare` in `outbound_isolation.py`. Build the selected targets from the projected current checkout. Record each resulting image ID and source fingerprint separately from test evidence, and reject a missing or stale preparation record. Reuse the Python 3.12 dev setup for the backend target and the repo's Node/Bun and lockfile setup for the browser target. Include the supported Hugging Face SDK in the backend image and `strace` in the browser target. Run the following existing build operations in the browser image preparation steps, outside the guarded run:
 
   ```bash
   (cd apps && bun install --frozen-lockfile)
-  (cd apps/tldw-frontend && bunx playwright install --with-deps chromium)
+  (cd apps/tldw-frontend &&
+    PLAYWRIGHT_BROWSERS_PATH=/opt/outbound-chromium bunx --no-install playwright install --with-deps chromium)
   (cd apps/extension && bun run build:chrome:prod)
   (cd apps/tldw-frontend &&
     NEXT_TELEMETRY_DISABLED=1 NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart \
@@ -255,12 +294,18 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
     mkdir -p .next/standalone/apps/tldw-frontend/{public,.next/static} &&
     cp -R public/. .next/standalone/apps/tldw-frontend/public/ &&
     cp -R .next/static/. .next/standalone/apps/tldw-frontend/.next/static/)
+  ```
+
+  Assign `18081` to the API, `18082` to the standalone WebUI, `18083` to the extension API fixture and `18084` to the extension fixture page. Start Next as a new production process with `HOSTNAME=127.0.0.1`, `PORT=18082`, `NEXT_TELEMETRY_DISABLED=1`, `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart`, `AUTH_MODE=single_user`, `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1`, `TLDW_INTERNAL_API_ORIGIN=http://127.0.0.1:18081`, and the same synthetic `SINGLE_USER_API_KEY` as the isolated API. Keep a consistent session cookie name. Pass these to the Node child at runtime and keep the key out of public variables, builds and reports. Clear ambient auth and public backend settings. Use the staged standalone and packaged Chrome locations. The browser runner explicitly receives the same absolute `PLAYWRIGHT_BROWSERS_PATH` as preparation.
+- [ ] Update `Docs/Development/Local-CI.md` with the commands, Linux Docker prerequisites, meaning of the `backend` and `browser` slices, and how to read redacted reports. For a full local run after activating the project venv:
+
+  ```bash
   outbound_report_dir="$(mktemp -d)"
+  python -m Helper_Scripts.ci.outbound_isolation prepare all --report-dir "$outbound_report_dir"
   python -m Helper_Scripts.ci.outbound_check all --report-dir "$outbound_report_dir"
   ```
 
-  Assign `18081` to the API in the browser namespace, `18082` to the standalone WebUI, `18083` to the extension API fixture and `18084` to the extension fixture page. Launch Next with `HOSTNAME=127.0.0.1 PORT=18082`, telemetry disabled, and no inherited public backend or credential overrides. Avoid dev-server startup and any reuse of a running server. Use the existing CI build's staged standalone and packaged Chrome locations.
-- [ ] Update `Docs/Development/Local-CI.md` with the commands, required tools, meaning of `backend` and `browser` slices, and how to read redacted reports. Document the Linux prerequisites for the complete guarded runs, the portable pure unit tests, and the Linux VM option. Fixture verification checks selected URLs and exercised flows. Report other app, browser, platform and native paths as outside the proved coverage.
+  Document the portable pure unit tests and the option to use a Linux container engine or VM on macOS. Fixture verification checks selected URLs and exercised flows. Report other app, browser, platform and native paths as outside the proved coverage.
 - [ ] Run both CI commands and `all` locally in the supported environment. Run the negative sentinel and a manifest-only change through the workflow contracts, verify actionlint and focused tests, and run `python -m bandit -r Helper_Scripts/ci/outbound_inventory.py Helper_Scripts/ci/outbound_backend_smoke.py Helper_Scripts/ci/outbound_browser_smoke.py Helper_Scripts/ci/outbound_isolation.py Helper_Scripts/ci/outbound_check.py tldw_Server_API/tests/helpers/offline_network.py`. Verify no report contains the raw synthetic secrets. Record evidence and any deliberate scope exclusions in TASK-15634. Commit as `ci: require the outbound privacy regression checks (TASK-15634)`.
 
 ## Handoff
