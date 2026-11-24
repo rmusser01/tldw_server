@@ -11,6 +11,7 @@ BACKEND_GLOBS = [
     "Helper_Scripts/ci/merge_queue.py",
     "Helper_Scripts/ci/path_classifier.py",
     "Helper_Scripts/ci/vitest_base_ratchet.py",
+    "Helper_Scripts/rag_split/**",
     "tools/backlog-py/**",
     "pyproject.toml",
     "uv.lock",
@@ -79,6 +80,7 @@ RAG_PIPELINE_GLOBS = [
     "tldw_Server_API/tests/_plugins/postgres.py",
     ".github/workflows/backend-required.yml",
     "Helper_Scripts/ci/path_classifier.py",
+    "Helper_Scripts/rag_split/**",
     "pyproject.toml",
     "uv.lock",
 ]

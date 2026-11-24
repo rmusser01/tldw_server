@@ -100,7 +100,8 @@ class Scopes:
     def _child(self, stack: list, name: str, lineno: int) -> symtable.SymbolTable:
         parent = next(o for k, o in reversed(stack) if k == "tab")
         left = self._left.setdefault(id(parent), list(parent.get_children()))
-        # ponytail: matched by (name, lineno) in visit order; two lambdas on one line can swap.
+        if name == "lambda" and sum(1 for t in left if t.get_name() == name and t.get_lineno() == lineno) > 1:
+            raise SplitError(f"two lambdas share line {lineno}; symtable cannot tell them apart. Split the line.")
         for pick in (lambda t: t.get_name() == name and t.get_lineno() == lineno, lambda t: t.get_name() == name):
             for i, t in enumerate(left):
                 if pick(t):
@@ -367,6 +368,7 @@ class Move:
         self.a, self.b = spec["span"]
         self.doc: str | None = spec.get("doc")
         self.noqa: list[int] = list(spec.get("noqa", []))
+        self.allow_locals: bool = bool(spec.get("allow_locals", False))
         self.block: list[ast.stmt] = []
         self.members: list[ast.stmt] = []
         self.parent: Move | None = None
@@ -427,12 +429,28 @@ def plan_moves(src: Src, specs: list[dict], lines: list[str]) -> list[Move]:
     return moves
 
 
-def check_span(m: Move) -> list[str]:
-    """V1: whole statements, no return/yield/global/nonlocal, no break/continue leaving the span."""
+INTROSPECTION = {"locals", "vars", "globals"}
+
+
+def check_span(m: Move, notes: list[str] | None = None) -> list[str]:
+    """V1: whole statements, no return/yield/global/nonlocal, no break/continue leaving the span,
+    and no locals()/vars()/globals()/__name__/__file__ unless the move says ``allow_locals``."""
     errs = []
+    mine = lambda n: not any(c.a <= getattr(n, "lineno", m.a) <= c.b for c in m.children)  # noqa: E731
     for n in walk_own(m.members):
         if isinstance(n, (ast.Return, ast.Yield, ast.YieldFrom, ast.Global, ast.Nonlocal)):
             errs.append(f"V1: {m.name}: contains {type(n).__name__.lower()} at line {n.lineno}")
+        what = None
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in INTROSPECTION and getattr(n.func, "_r", NEW) is None:
+            what = f"{n.func.id}()"
+        elif isinstance(n, ast.Name) and n.id in ("__name__", "__file__") and isinstance(n.ctx, ast.Load):
+            what = n.id
+        if what and mine(n):
+            if m.allow_locals:
+                if notes is not None:
+                    notes.append(f"note: {m.name}: allow_locals, uses {what} at line {n.lineno}")
+            else:
+                errs.append(f"V1: {m.name}: uses {what} at line {n.lineno}; it reads a different scope after the move")
 
     def scan(block: list[ast.stmt], in_loop: bool) -> None:
         for s in block:
@@ -492,6 +510,22 @@ class Cells:
                     r.add(p)
             self.bound.append(b)
             self.refs.append(r)
+        # A name whose every binding is the same import is idempotent: a moved span that imports it
+        # itself sees the same module, however many cells re-import it (the `sgl` / `_re` shape).
+        imp: dict[str, set[Info]] = defaultdict(set)
+        other: set[str] = set(self.params)
+        for i in range(n + 1):
+            for x in self.nodes[i]:
+                if isinstance(x, (ast.Import, ast.ImportFrom)):
+                    for al, res in zip(x.names, x._rs):  # type: ignore[attr-defined]
+                        if res is key:
+                            info = Info("import", al.name, al.name, al.asname, 0) if isinstance(x, ast.Import) else Info("from", x.module or "", al.name, al.asname, x.level)
+                            imp[_bound(al)].add(info)
+                elif isinstance(x, ast.Name) and is_f(x, key) and isinstance(x.ctx, ast.Store):
+                    other.add(x.id)
+                elif (isinstance(x, ast.ExceptHandler) and x.name or isinstance(x, SCOPE_NODES) and getattr(x, "name", None)) and is_f(x, key):
+                    other.add(x.name)
+        self.idem = {k for k, v in imp.items() if len(v) == 1 and k not in other}
 
     def _visit(self, s: ast.stmt, cur: int, span_of: dict[int, int]) -> None:
         c = span_of.get(id(s), cur)
@@ -635,7 +669,7 @@ class Cells:
         for j in range(n):
             for name in self.live[j]:
                 for i in range(n):
-                    if i != j and name in self.bound[i]:
+                    if i != j and name in self.bound[i] and not (name in self.idem and name in self.bound[j]):
                         out[name].append(f"bound in {self.labels[i]}, live-in at {self.labels[j]}")
         for c in range(n):
             for d in (x for x in self.nodes[c] if isinstance(x, DEFS) and is_f(x, self.key)):
@@ -645,7 +679,7 @@ class Cells:
                     if not others:
                         continue
                     later = any(ln > d.lineno for o in others for ln in self.bound[o].get(name, []))
-                    if name in self.def_a.get(id(d), ()) and not later:
+                    if name in self.def_a.get(id(d), ()) and (not later or name in self.idem):
                         continue
                     out[name].append(f"captured by {d.name} in {self.labels[c]}, referenced in {self.labels[others[0]]}")
         return {k: v for k, v in out.items() if k not in ("rcfg", "state")}
@@ -790,7 +824,7 @@ def spans_for_cells(m: dict, src: Src) -> list[tuple[str, list[ast.stmt]]]:
     return spans
 
 
-def build(m: dict, src: Src, lines: list[str]) -> Built:
+def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -> Built:
     """Apply the manifest to the base *as an AST*. This is the verify side's expectation."""
     out = Built()
     fn, key = src.fn, src.key
@@ -849,7 +883,7 @@ def build(m: dict, src: Src, lines: list[str]) -> Built:
         if any(isinstance(x, ast.Nonlocal) and any(n2 not in rewrite for n2 in x.names) for x in ast.walk(d)):
             out.errors.append(f"V6: {name} has a nonlocal outside rewrite")
     for mv in moves:
-        out.errors += check_span(mv)
+        out.errors += check_span(mv, notes)
     if out.errors:
         return out
 
@@ -978,13 +1012,13 @@ def def_in(tree: ast.Module, name: str) -> Any:
     return next((n for n in tree.body if isinstance(n, DEFS) and n.name == name), None)
 
 
-def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None) -> list[str]:
+def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, notes: list[str] | None = None) -> list[str]:
     rel = m["file"]
     text = read_base(root, rel, base, base_dir)
     if text is None:
         return [f"{rel}: not found at the base"]
     src = Src(text, m["func"])
-    b = build(m, src, text.split("\n"))
+    b = build(m, src, text.split("\n"), notes)
     if b.errors:
         return b.errors
     errs: list[str] = []
@@ -1030,18 +1064,68 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None) -> l
                 errs.append(f"run_state.py: no method {STATE_CLASS}.{method}")
             elif ast.dump(want_def) != ast.dump(got):
                 errs += diff_lines(f"run_state.py: {method}", want_def, got)
-    # V9: stdlib names read in a pipeline module are bound there exactly as in the base
+    # V9 and the module-shape checks, for every touched pipeline module
     stdlib = {n: i for n, i in src.infos.items() if i.stdlib}
-    for name in list(dict.fromkeys([x.module for x in b.moves] + (["run_state"] if m["hoist"] else []))):
+    mods = list(dict.fromkeys([x.module for x in b.moves] + (["run_state"] if m["hoist"] else [])))
+    for name in mods:
         p = pkg / f"{name}.py"
-        if not p.exists():
+        if p.exists():
+            errs += check_module(p, name, m, stdlib, {x.module for x in b.moves}, name == "run_state")
+    return errs
+
+
+def check_module(p: Path, name: str, m: dict, stdlib: dict[str, Info], modules: set[str], is_state: bool) -> list[str]:
+    """V7/V9 for a stage module: only declared shapes at module level, one binding per name."""
+    errs: list[str] = []
+    tree = ast.parse(p.read_text(encoding="utf-8"))
+    psrc = Src(p.read_text(encoding="utf-8"))
+    label = f"{name}.py"
+    bound: dict[str, int] = defaultdict(int)
+
+    def bind(n: str) -> None:
+        bound[n] += 1
+
+    for i, st in enumerate(tree.body):
+        if i == 0 and isinstance(st, ast.Expr) and isinstance(getattr(st, "value", None), ast.Constant) and isinstance(st.value.value, str):
             continue
-        ptext = p.read_text(encoding="utf-8")
-        psrc = Src(ptext)
-        for n in sorted({x.id for x in ast.walk(psrc.tree) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load) and getattr(x, "_r", NEW) is None}):
-            if n in stdlib and psrc.infos.get(n) != stdlib[n]:
-                got_i = psrc.infos.get(n)
-                errs.append(f"V9: {name}.py reads {n}, bound there as {got_i.line() if got_i else 'nothing'}; unified_pipeline binds it as {stdlib[n].line()}")
+        if isinstance(st, (ast.Import, ast.ImportFrom)):
+            for al in st.names:
+                bind(_bound(al))
+        elif isinstance(st, ast.If) and isinstance(st.test, ast.Name) and st.test.id == "TYPE_CHECKING" and not st.orelse and all(isinstance(x, (ast.Import, ast.ImportFrom)) for x in st.body):
+            for x in st.body:
+                for al in x.names:  # type: ignore[attr-defined]
+                    bind(_bound(al))
+        elif isinstance(st, DEFS) or (is_state and isinstance(st, ast.ClassDef)):
+            bind(st.name)
+            if isinstance(st, ast.ClassDef):
+                seen: dict[str, int] = defaultdict(int)
+                for x in st.body:
+                    if isinstance(x, DEFS):
+                        seen[x.name] += 1
+                errs += [f"{label}: {st.name}.{k} is defined {v} times" for k, v in seen.items() if v > 1]
+        else:
+            errs.append(f"{label}: line {st.lineno}: a module-level {type(st).__name__} is not allowed in a stage module")
+    errs += [f"{label}: {k} is bound {v} times at module level" for k, v in bound.items() if v > 1]
+    for n in stdlib:
+        got = psrc.infos.get(n)
+        if bound.get(n) and got != stdlib[n]:
+            errs.append(f"V9: {label} binds {n} as {got.line() if got else 'a non-import'}; unified_pipeline binds it as {stdlib[n].line()}")
+    for n in sorted({x.id for x in ast.walk(psrc.tree) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load) and getattr(x, "_r", NEW) is None}):
+        if n in stdlib and psrc.infos.get(n) != stdlib[n] and not bound.get(n):
+            errs.append(f"V9: {label} reads {n}, bound there as nothing; unified_pipeline binds it as {stdlib[n].line()}")
+    parts = m["file"][:-3].split("/")
+    want = {"up": Info("from", ".".join(parts[:-1]), parts[-1], "up", 0)}
+    if not is_state:
+        want["RagRunConfig"] = Info("from", "run_config", "RagRunConfig", None, 1)
+    for c in modules - {name}:
+        want[f"_{c}"] = Info("from", "", c, f"_{c}", 1)
+    for n, info in want.items():
+        got = psrc.infos.get(n)
+        if got is not None and got != info:
+            errs.append(f"{label}: {n} is bound as {got.line()}, expected {info.line()}")
+    uses_up = any(isinstance(x, ast.Name) and x.id == "up" for x in ast.walk(psrc.tree))
+    if uses_up and "up" not in psrc.infos:
+        errs.append(f"{label}: reads up but does not import it")
     return errs
 
 
@@ -1409,7 +1493,10 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "apply":
             errs = run_apply(root, load_manifest(Path(a.manifest)))
         elif a.cmd == "verify":
-            errs = run_verify(root, load_manifest(Path(a.manifest)), a.base, a.base_dir)
+            notes: list[str] = []
+            errs = run_verify(root, load_manifest(Path(a.manifest)), a.base, a.base_dir, notes)
+            for n in notes:
+                print(n)
             if not errs:
                 print("0 differences")
         else:

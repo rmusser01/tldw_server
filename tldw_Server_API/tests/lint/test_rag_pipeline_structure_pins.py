@@ -42,7 +42,7 @@ KNOWN_TARGETS = {
 }
 MODULE = "unified_pipeline"
 STRING_TARGET = re.compile(r"(?:^|\.)unified_pipeline\.(\w+)")
-PATCHERS = {"patch", "setattr"}
+PATCHERS = {"patch", "setattr", "delattr"}
 RERUN_CALLERS = {"unified_batch_pipeline", "simple_search", "advanced_search"}
 
 # The 79 keywords of the adaptive rerun call in unified_rag_pipeline, in order (dev 5033a7689b).
@@ -296,7 +296,7 @@ def _rerun_calls() -> list[ast.Call]:
             calls += [
                 n
                 for n in ast.walk(top)
-                if isinstance(n, ast.Call) and ast.unparse(n.func) in ("unified_rag_pipeline", "up.unified_rag_pipeline")
+                if isinstance(n, ast.Call) and _call_name(n.func) == "unified_rag_pipeline"
             ]
     return calls
 

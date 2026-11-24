@@ -347,7 +347,7 @@ def test_shared_keeps_a_closure_local_rebound_only_before_its_def(tmp_path: Path
         """
     )
     assert _shared(tmp_path / "a", src, [[2, 3]], capsys) == ""
-    late = src.replace("    return analyze()", "    import os as sgl\n    return analyze()")
+    late = src.replace("    return analyze()", "    sgl = None\n    return analyze()")
     out = _shared(tmp_path / "b", late, [[4, 6]], capsys)
     assert "sgl: captured by analyze in 4-6" in out
 
@@ -419,6 +419,104 @@ def test_entry_split_moves_the_body_behind_a_shim(tmp_path: Path) -> None:
     assert t.run("verify") == 0
     _edit(t, FILE, "x = await go(rcfg)", "x = await go(None)")
     assert t.run("verify") == 1
+
+
+def test_verify_rejects_a_shadowing_duplicate_def(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = _applied(tmp_path)
+    capsys.readouterr()
+    path = t.head / PKG / "stage_a.py"
+    path.write_text(path.read_text() + "\n\ndef step_one(rcfg, state):\n    state.first = 'EVIL'\n")
+    assert t.run("verify") == 1
+    assert "step_one" in capsys.readouterr().out
+
+
+def test_verify_rejects_a_stdlib_name_rebound_by_assignment(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = _applied(tmp_path)
+    capsys.readouterr()
+    path = t.head / PKG / "stage_a.py"
+    path.write_text(path.read_text().replace("\n\ndef step_one", "\n\ndatetime = object()\n\n\ndef step_one", 1))
+    assert t.run("verify") == 1
+    assert "module-level" in capsys.readouterr().out
+
+
+def test_verify_rejects_a_rebound_up_import(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = _applied(tmp_path)
+    capsys.readouterr()
+    _edit(t, f"{PKG}/stage_b.py", "from mini import unified_pipeline as up", "import os as up")
+    assert t.run("verify") == 1
+    assert "up is bound as" in capsys.readouterr().out
+
+
+def test_verify_rejects_extra_module_level_code(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = _applied(tmp_path)
+    capsys.readouterr()
+    path = t.head / PKG / "stage_a.py"
+    path.write_text(path.read_text() + "\nimport sys\nsys.setrecursionlimit(50)\n")
+    assert t.run("verify") == 1
+    assert "not allowed in a stage module" in capsys.readouterr().out
+
+
+IMPORT_SRC = textwrap.dedent(
+    """\
+    async def pipe(a):
+        def critique():
+            import json as sgl
+            return sgl.dumps(a)
+
+        try:
+            x = critique()
+            import json as sgl
+            y = sgl.dumps(x)
+            z = y
+        finally:
+            pass
+        return z
+    """
+)
+
+
+def test_a_name_that_is_only_ever_the_same_import_does_not_cross(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    """The `sgl` shape: a closure in the rest captures an import that a later span repeats."""
+    src = IMPORT_SRC.replace("    def critique():\n        import json as sgl\n", "    import json as sgl\n\n    def critique():\n")
+    t = Tree(tmp_path, src, rewrite={"x": "state.x", "y": "state.y", "z": "state.z"}, moves=[{"name": "m", "module": "mod", "span": [8, 10]}])
+    assert t.run("shared", "--base-dir", str(t.base)) == 0
+    assert "sgl" not in capsys.readouterr().out
+    # a second, different binding of the name makes it cross again
+    diff = src.replace("        y = sgl.dumps(x)", "        sgl = None\n        y = 1")
+    t2 = Tree(tmp_path / "d", diff, rewrite={"x": "state.x", "y": "state.y", "z": "state.z"}, moves=[{"name": "m", "module": "mod", "span": [8, 11]}])
+    assert t2.run("shared", "--base-dir", str(t2.base)) == 0
+    assert "sgl" in capsys.readouterr().out
+
+
+INTRO_SRC = textwrap.dedent(
+    """\
+    def pipe():
+        first = 1
+        seen = "first" in locals()
+        return seen
+    """
+)
+
+
+def test_locals_in_a_span_is_a_v1_error_unless_allowed(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    mv = {"name": "m", "module": "mod", "span": [2, 3]}
+    rw = {"first": "state.first", "seen": "state.seen"}
+    t = Tree(tmp_path / "a", INTRO_SRC, rewrite=rw, moves=[mv])
+    assert t.run("verify") == 1
+    assert "locals()" in capsys.readouterr().out
+    ok = Tree(tmp_path / "b", INTRO_SRC, rewrite=rw, moves=[{**mv, "allow_locals": True}])
+    assert ok.run("apply") == 0
+    assert ok.run("verify") == 0
+    assert "allow_locals, uses locals()" in capsys.readouterr().out
+    name_src = "def pipe():\n    a = __name__\n    return 1\n"
+    n = Tree(tmp_path / "c", name_src, rewrite={"a": "state.a"}, moves=[{"name": "m", "module": "mod", "span": [2, 2]}])
+    assert n.run("verify") == 1
+    assert "__name__" in capsys.readouterr().out
+
+
+def test_two_lambdas_on_one_line_fail_closed(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    with pytest.raises(rag_split.SplitError):
+        rag_split.Src("def pipe(a):\n    f, g = (lambda: a), (lambda: 1)\n", "pipe")
 
 
 def _git(*args: str, cwd: Path = REPO_ROOT) -> str:
