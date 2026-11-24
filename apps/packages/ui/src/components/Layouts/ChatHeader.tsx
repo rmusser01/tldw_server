@@ -616,7 +616,11 @@ export function ChatHeader({
       <Tooltip title={shortcutsToggleLabel}>
         <button
           type="button"
-          onClick={() => onToggleShortcuts(!shortcutsExpanded)}
+          onClick={(event) => {
+            // Pointer activation does not focus buttons in every browser.
+            event.currentTarget.focus()
+            onToggleShortcuts(!shortcutsExpanded)
+          }}
           aria-label={shortcutsToggleLabel}
           aria-expanded={shortcutsExpanded}
           className={navigationActionClass}

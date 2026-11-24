@@ -25,6 +25,7 @@ The conversation header moved Home and page navigation into More in PR #3311. Re
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reuse the existing House and Signpost controls in both header layouts. Test direct activation and keyboard focus, then verify narrow and wide browser layouts. Existing header placement is a UI choice and does not require an ADR.
 The new component test reproduced missing Companion Home before the fix. After the fix 78 header and launcher tests and scoped ESLint passed. Six local Chromium checks exercised both buttons at 320, 390 and 1440 pixels in light and dark themes, including Home navigation and Escape focus return. The 320px cockpit starter/composer smoke passed. The broader header matrix timed out clicking the keyboard-shortcuts entry in More with local Webpack dependencies. A fresh unchanged-base run also positioned that entry offscreen before opening the launcher. Bandit is inapplicable to the TypeScript-only change. No public or hosted rollout.
+Independent review found pointer activation could leave the launcher without its Show pages button as a return target. The shared control now focuses that button before toggling the existing launcher. Both header variants fail the new no-native-focus tests without the fix and pass with it. The final focused shared and WebUI selections passed 348 and 179 tests respectively.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

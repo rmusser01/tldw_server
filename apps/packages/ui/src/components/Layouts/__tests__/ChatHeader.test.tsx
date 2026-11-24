@@ -96,6 +96,16 @@ describe("ChatHeader shortcut toggle", () => {
     )
   })
 
+  it.each([true, false])("provides the launcher a focus return target when clicking without native focus (conversation header=%s)", (showChatTitle) => {
+    const activeOnToggle = vi.fn(() => document.activeElement)
+    render(<ChatHeader {...createProps({ onToggleShortcuts: activeOnToggle })} showChatTitle={showChatTitle} />)
+
+    const trigger = screen.getByRole("button", { name: "Show pages" })
+    fireEvent.click(trigger)
+
+    expect(activeOnToggle).toHaveReturnedWith(trigger)
+  })
+
   // AX-15 (#3124): the sidebar toggle only flipped its label.
   it.each([
     [false, "true", "Collapse sidebar"],
