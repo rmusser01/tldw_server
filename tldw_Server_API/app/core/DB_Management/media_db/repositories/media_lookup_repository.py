@@ -7,6 +7,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
     media_owner_identity,
@@ -33,16 +34,57 @@ class MediaLookupRepository:
 
     @staticmethod
     def _parse_safe_metadata(raw_value: Any) -> dict[str, Any] | None:
-        """Normalize latest-version safe_metadata JSON for source-list consumers."""
+        """Decode safe metadata stored as a JSON object."""
         if isinstance(raw_value, dict):
             return dict(raw_value)
         if not isinstance(raw_value, str) or not raw_value.strip():
             return None
         try:
             parsed = json.loads(raw_value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RecursionError):
             return None
         return parsed if isinstance(parsed, dict) else None
+
+    def local_upload_id_by_source_hash(
+        self,
+        url: str,
+        source_hash: str,
+        *,
+        source_hash_column_available: bool,
+    ) -> int | None:
+        """Find an active local upload, consulting version metadata only for legacy rows."""
+        db = self.session
+        media_filter = "m.url = ? AND m.is_trash = 0 AND m.deleted = 0"
+        params = (url,)
+        if getattr(db, "backend_type", None) == BackendType.POSTGRESQL:
+            media_filter += (
+                " AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?"
+                " AND m.system_operation_id IS NULL"
+            )
+            params += (media_owner_identity(db.client_id),)
+
+        if source_hash_column_available:
+            query = "SELECT m.id FROM Media m WHERE "
+            query += media_filter
+            query += " AND m.source_hash = ? LIMIT 1"
+            row = db.execute_query(query, (*params, source_hash)).fetchone()
+            if row is not None:
+                return row["id"]
+            media_filter += " AND m.source_hash IS NULL"
+
+        query = """
+            SELECT m.id, dv.safe_metadata
+            FROM Media m
+            JOIN DocumentVersions dv ON dv.media_id = m.id
+            WHERE dv.deleted = 0 AND dv.safe_metadata IS NOT NULL AND
+        """
+        query += media_filter
+        cursor = db.execute_query(query, params)
+        while (version := cursor.fetchone()) is not None:
+            metadata = self._parse_safe_metadata(version["safe_metadata"])
+            if metadata is not None and metadata.get("source_hash") == source_hash:
+                return version["id"]
+        return None
 
     def by_id(
         self,

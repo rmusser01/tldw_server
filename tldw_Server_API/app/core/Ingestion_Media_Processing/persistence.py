@@ -51,6 +51,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_files_repository import MediaFilesRepository
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_lookup_repository import MediaLookupRepository
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_persisted_content import (
     read_persisted_email_content,
 )
@@ -1264,7 +1265,8 @@ def _compute_source_hash_safe(
         return None, None
 
 
-def _media_has_source_hash_column(db: MediaDatabase) -> bool:
+def _media_has_source_hash_column(db: MediaDatabase) -> bool | None:
+    """Return None when schema inspection cannot confirm which columns exist."""
     for table_name in ("Media", "media"):
         try:
             columns = {col.get("name", "").lower() for col in db.backend.get_table_info(table_name)}
@@ -1272,7 +1274,7 @@ def _media_has_source_hash_column(db: MediaDatabase) -> bool:
                 return "source_hash" in columns
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
             continue
-    return False
+    return None
 
 
 def _allowed_url_extensions(media_type: str, form_data: Any) -> set[str] | None:
@@ -4336,82 +4338,30 @@ async def process_batch_media(
 
         if not getattr(form_data, "overwrite_existing", False) and str(media_type) in ["video", "audio"]:
             try:
-                url_clause, url_params = _build_url_match_clause(
-                    url_dedupe_candidates,
-                    column="url",
-                )
-                url_clause_alias, url_params_alias = _build_url_match_clause(
-                    url_dedupe_candidates,
-                    column="m.url",
-                )
                 if source_hash and not is_url:
 
                     def _source_hash_precheck(
                         db: MediaDatabase,
                         *,
-                        source_hash=source_hash,
-                        url_clause=url_clause,
-                        url_clause_alias=url_clause_alias,
-                        url_params=url_params,
-                        url_params_alias=url_params_alias,
-                    ) -> Any:
+                        source_hash: str = source_hash,
+                        url: str = identifier_for_check,
+                    ) -> int | None:
                         nonlocal source_hash_column_available
-                        owner_clause = (
-                            "AND COALESCE(CAST(m.owner_user_id AS TEXT),m.client_id) = ? AND m.system_operation_id IS NULL"
-                            if getattr(db, "backend_type", None) == BackendType.POSTGRESQL
-                            else ""
-                        )
-                        owner_params = (media_owner_identity(db.client_id),) if owner_clause else ()
                         if source_hash_column_available is None:
                             source_hash_column_available = _media_has_source_hash_column(db)
-                        existing_record = None
-                        if source_hash_column_available:
-                            pre_check_query_template = """
-                                SELECT m.id
-                                FROM Media m
-                                WHERE {url_clause}
-                                  AND source_hash = ?
-                                  AND is_trash = 0
-                                  AND deleted = 0
-                                {owner_clause}
-                                LIMIT 1
-                            """
-                            pre_check_query = pre_check_query_template.format(url_clause=url_clause, owner_clause=owner_clause)  # nosec B608
-                            cursor = db.execute_query(
-                                pre_check_query,
-                                (*url_params, source_hash, *owner_params),
-                            )
-                            existing_record = cursor.fetchone()
-                        if not existing_record:
-                            pre_check_query_template = """
-                                SELECT m.id
-                                FROM Media m
-                                JOIN DocumentVersions dv ON dv.media_id = m.id
-                                WHERE {url_clause_alias}
-                                  AND m.is_trash = 0
-                                  AND m.deleted = 0
-                                  AND dv.deleted = 0
-                                  AND dv.safe_metadata LIKE ?
-                                {owner_clause}
-                                LIMIT 1
-                            """
-                            pre_check_query = pre_check_query_template.format(url_clause_alias=url_clause_alias, owner_clause=owner_clause)  # nosec B608
-                            hash_fragment = f'%"source_hash":"{source_hash}"%'
-                            cursor = db.execute_query(
-                                pre_check_query,
-                                (*url_params_alias, hash_fragment, *owner_params),
-                            )
-                            existing_record = cursor.fetchone()
-                        return existing_record
+                        return MediaLookupRepository(db).local_upload_id_by_source_hash(
+                            url,
+                            source_hash,
+                            source_hash_column_available=source_hash_column_available is not False,
+                        )
 
-                    existing_record = _with_media_db_session(
+                    existing_id = _with_media_db_session(
                         db_path=db_path,
                         client_id=client_id,
                         operation=_source_hash_precheck,
                     )
 
-                    if existing_record:
-                        existing_id = existing_record["id"]
+                    if existing_id is not None:
                         should_process = False
                         reason = (
                             f"Media exists (ID: {existing_id}) with the same filename "
@@ -4425,6 +4375,7 @@ async def process_batch_media(
                     should_process = True
                     reason = "Local file pre-check skipped (no source hash available)."
                 else:
+                    url_clause, url_params = _build_url_match_clause(url_dedupe_candidates)
 
                     def _url_precheck(db: MediaDatabase, *, url_clause=url_clause, url_params=url_params) -> Any:
                         owner_clause = (
