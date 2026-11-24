@@ -3,8 +3,6 @@
 import asyncio
 import contextlib
 import functools
-import os
-import signal
 import sys
 from unittest.mock import MagicMock, call, patch
 
@@ -270,11 +268,14 @@ async def _ingest_with_fake_yt_dlp(script: str, timeout_seconds: int, context=No
 
 def _stop(download: SubprocessTask) -> bool:
     """Kill the download if it is still running (dev leaves it), and say whether it was there to kill."""
-    try:
-        os.kill(download.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return False
-    return True
+    proc = download.proc
+    if proc is None:
+        raise ValueError("Download fixture has no owned process")
+    was_running = proc.poll() is None
+    if was_running:
+        proc.kill()
+        proc.wait(timeout=5)
+    return was_running
 
 
 async def test_media_ingest_returns_only_after_yt_dlp_has_exited(tmp_path, monkeypatch) -> None:
