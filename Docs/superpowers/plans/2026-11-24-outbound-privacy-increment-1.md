@@ -50,7 +50,8 @@ Backend scenario IDs are `inventory`, `backend-default`, and `backend-opt-in`. B
 - **Goal:** Supply a small reviewed inventory with checks against the actual resource selection used in the targeted flows.
 - **Success criteria:** Missing, duplicate, malformed or silently changed declarations fail. Declarations and transport-backed evidence have distinct meanings.
 - **Tests:** `test_outbound_inventory.py` and the existing direct HTTP guard.
-- **Status:** Not Started
+- **Status:** Complete
+- **Verification:** The new suite failed at collection without the validator, then passed with the existing direct HTTP guard (73 tests). Bandit and the whitespace check passed.
 
 - [ ] Add `test_outbound_inventory.py` with a minimal schema fixture and cases for unknown keys, duplicate capability/asset keys, missing enabling condition, default-port normalization, different schemes and ports, userinfo/path/query in an origin declaration, and a changed asset under an unchanged ID and origin. The following is the core comparison contract:
 

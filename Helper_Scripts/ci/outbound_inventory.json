@@ -1,0 +1,281 @@
+{
+  "version": 1,
+  "capabilities": [
+    {
+      "id": "setup.kokoro",
+      "kind": "builtin",
+      "component": "setup-installer",
+      "source_path": "tldw_Server_API/app/core/Setup/install_manager.py",
+      "purpose": "Download the selected Kokoro ONNX model",
+      "phase": "setup",
+      "enabled_when": "An operator chooses Kokoro ONNX",
+      "origins": [
+        "https://huggingface.co"
+      ],
+      "assets": [
+        {
+          "id": "kokoro.onnx",
+          "identity": {
+            "source": "huggingface",
+            "repository": "onnx-community/Kokoro-82M-v1.0-ONNX-timestamped",
+            "resource": "onnx/model.onnx",
+            "revision": null
+          },
+          "evidence": "declared"
+        }
+      ]
+    },
+    {
+      "id": "setup.python-packages",
+      "kind": "builtin",
+      "component": "setup-installer",
+      "source_path": "tldw_Server_API/app/core/Setup/install_manager.py",
+      "purpose": "Install selected speech dependencies. Package indexes and transitive downloads depend on the installer environment",
+      "phase": "setup",
+      "enabled_when": "An operator installs the respective speech backend",
+      "origins": [
+        "https://github.com"
+      ],
+      "assets": [
+        {
+          "id": "kokoro",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "kokoro>=0.1.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "kokoro-onnx",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "kokoro-onnx>=0.3.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "onnxruntime",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "onnxruntime>=1.16.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "onnxruntime-gpu",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "onnxruntime-gpu>=1.16.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "phonemizer",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "phonemizer>=3.2.1",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "espeak-phonemizer",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "espeak-phonemizer>=1.0.1",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "huggingface-hub",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "huggingface_hub>=0.23.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "higgs-audio",
+          "identity": {
+            "source": "git",
+            "repository": "boson-ai/higgs-audio",
+            "resource": "git+https://github.com/boson-ai/higgs-audio.git",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "vibevoice",
+          "identity": {
+            "source": "git",
+            "repository": "vibevoice-community/VibeVoice",
+            "resource": "git+https://github.com/vibevoice-community/VibeVoice.git",
+            "revision": null
+          },
+          "evidence": "declared"
+        }
+      ]
+    },
+    {
+      "id": "setup.omnivoice",
+      "kind": "builtin",
+      "component": "setup-sidecar",
+      "source_path": "Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py",
+      "purpose": "Clone and provision the OmniVoice sidecar. Package indexes and transitive downloads depend on the installer environment",
+      "phase": "setup",
+      "enabled_when": "An operator installs the optional OmniVoice sidecar",
+      "origins": [
+        "https://github.com"
+      ],
+      "assets": [
+        {
+          "id": "omnivoice.repo",
+          "identity": {
+            "source": "git",
+            "repository": "k2-fsa/OmniVoice",
+            "resource": "https://github.com/k2-fsa/OmniVoice",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "pip",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "pip",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "fastapi",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "fastapi>=0.110.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "uvicorn",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "uvicorn>=0.30.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "httpx",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "httpx>=0.27.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "pydantic",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "pydantic>=2.7.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        },
+        {
+          "id": "loguru",
+          "identity": {
+            "source": "pip",
+            "repository": null,
+            "resource": "loguru>=0.7.0",
+            "revision": null
+          },
+          "evidence": "declared"
+        }
+      ]
+    },
+    {
+      "id": "provider.openai",
+      "kind": "builtin",
+      "component": "llm-provider",
+      "source_path": "tldw_Server_API/app/core/LLM_Calls/providers/openai_adapter.py",
+      "purpose": "Send a configured chat request to OpenAI",
+      "phase": "runtime",
+      "enabled_when": "The caller selects the OpenAI provider with its standard API origin",
+      "origins": [
+        "https://api.openai.com"
+      ],
+      "assets": []
+    },
+    {
+      "id": "webui.research-sources",
+      "kind": "user-directed",
+      "component": "webui",
+      "source_path": "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/AddSourceModal.tsx",
+      "purpose": "Open or import a selected source from Research Workspace",
+      "phase": "runtime",
+      "enabled_when": "A user selects a web source",
+      "origins": [],
+      "assets": []
+    },
+    {
+      "id": "extension.github-api",
+      "kind": "builtin",
+      "component": "extension",
+      "source_path": "apps/extension/wxt.config.ts",
+      "purpose": "Declare access to the GitHub API in the packaged extension manifest",
+      "phase": "runtime",
+      "enabled_when": "The packaged Chrome extension grants this origin permission",
+      "origins": [
+        "https://api.github.com"
+      ],
+      "assets": []
+    },
+    {
+      "id": "extension.configured-api",
+      "kind": "user-directed",
+      "component": "extension",
+      "source_path": "apps/extension/entrypoints/background.ts",
+      "purpose": "Use the configured tldw server from the extension worker",
+      "phase": "runtime",
+      "enabled_when": "A user configures a server and sends a request",
+      "origins": [],
+      "assets": []
+    }
+  ],
+  "exceptions": [
+    {
+      "id": "installer.package-launcher",
+      "source_path": "tldw_Server_API/app/core/Setup/install_manager.py",
+      "symbol": "_run_subprocess",
+      "owner": "setup-installer",
+      "follow_up": "TASK-15634"
+    },
+    {
+      "id": "installer.sidecar-launcher",
+      "source_path": "Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py",
+      "symbol": "_run_checked_command",
+      "owner": "setup-sidecar",
+      "follow_up": "TASK-15634"
+    }
+  ]
+}
