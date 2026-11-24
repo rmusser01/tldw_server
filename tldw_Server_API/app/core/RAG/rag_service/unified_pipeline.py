@@ -2375,7 +2375,13 @@ async def unified_rag_pipeline(
 
 async def run_rag_pipeline(rcfg: RagRunConfig) -> UnifiedPipelineResult:
     state = _run_state.PipelineState(rcfg)
+    try:
+        return await _run_stages(rcfg, state)
+    finally:
+        state.release()  # break the state <-> published-closure cycle (the result does not alias state)
 
+
+async def _run_stages(rcfg: RagRunConfig, state: "_run_state.PipelineState") -> UnifiedPipelineResult:
     _prepare.prepare_request(rcfg, state)
 
     # Basic input validation (short-circuit before heavier setup)

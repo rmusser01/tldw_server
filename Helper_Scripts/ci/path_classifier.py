@@ -95,6 +95,7 @@ _RAG_NEW_UNIT = [
     "test_learned_fusion_simple",
     "test_pipeline_generation_controls",
     "test_pipeline_post_verification_metadata",
+    "test_pipeline_state_release",
     "test_pipeline_two_tier_gate",
     "test_post_retrieval_coordinator",
     "test_post_verifier",

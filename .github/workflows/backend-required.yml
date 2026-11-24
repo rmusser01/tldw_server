@@ -422,6 +422,7 @@ jobs:
             tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_generation_controls.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_post_verification_metadata.py \
+            tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_state_release.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_two_tier_gate.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_post_retrieval_coordinator.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py \
@@ -483,6 +484,7 @@ jobs:
             tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_generation_controls.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_post_verification_metadata.py \
+            tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_state_release.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_two_tier_gate.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_post_retrieval_coordinator.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_post_verifier.py \
