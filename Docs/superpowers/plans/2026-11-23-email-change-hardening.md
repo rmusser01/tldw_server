@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Precondition: the coordinator merges the design branch `docs/session-cap-alert-lock-design` (the spec, TASK-15632, this plan and the session-cap plan) to `dev` before execution starts. Branch from `origin/dev` after that merge.
-- Spec values: the **current password** is required **in the same request**; the old address goes to `users.previous_email` with `users.email_changed_at`; a notice goes to the **old address**; the both-addresses window is **7 days**; **admin email changes are unchanged**: `PUT /api/v1/admin/users/{id}` and `POST /api/v1/admin/users/profile/bulk` stay password-less for every target, the admin's own account included (admin sessions are outside this threat model; see "Decisions" for the exact behaviour of each admin path).
+- Spec values: the **current password** is required **in the same request**; the old address goes to `users.previous_email` with `users.email_changed_at`; a notice goes to the **old address**; the both-addresses window is **7 days**; **admin changes of another user's email are unchanged** (admin sessions are outside this threat model; "Decisions" and Deviation 5 give the exact behaviour of each admin path).
 - Refusals are HTTP 403 with exactly these codes: `current_password_required`, `current_password_invalid`, `email_change_requires_admin`.
 - Branch: `git -C /Users/macbook-dev/Documents/GitHub/tldw_server worktree add .claude/worktrees/email-change-hardening -b feat/task-15633-email-change-hardening origin/dev`. Work only in that worktree. One PR, base `dev`. Never `git stash`, never `--no-verify`, never arm auto-merge.
 - Backlog first (Task 1 step 1) with the repo tool and explicit id `TASK-15633`. Edit the task only with `PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd "$PWD" task edit TASK-15633 ...`. Stage task files with `git add -A backlog/tasks`. The ADR assessment goes in the task notes.
@@ -21,7 +21,7 @@
   `zsh ~/.cache/claude-tools/disk_guard.zsh "$TMPDIR/ech-<n>" -- /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -p no:cacheprovider --basetemp "$TMPDIR/ech-<n>" <files> -q`
   Below, `PYTEST <files>` means this command with a fresh `<n>`.
 - PostgreSQL tests use the existing `isolated_test_environment` (or `test_db_pool`) fixtures of `tldw_Server_API/tests/AuthNZ/conftest.py`; never create a database yourself. A Postgres test reported SKIPPED locally is recorded as skipped, not as passed.
-- Frontend: no change. No WebUI or extension caller sends `email` to these endpoints (checked: `apps/packages/ui/src`, `apps/tldw-frontend`, `apps/extension`). If that changes, frontend tests run as `cd apps/packages/ui && bunx vitest run <files> --maxWorkers=2`, one vitest process at a time.
+- Frontend: no change. No WebUI, extension or admin UI caller sends `email` to these endpoints (checked: `apps/packages/ui/src`, `apps/tldw-frontend`, `apps/extension`, and top-level `admin-ui/`, which only reads `GET /users/me` and changes emails through admin `PUT /admin/users/{id}` at `admin-ui/lib/api-client.ts:708`). If that changes, frontend tests run as `cd apps/packages/ui && bunx vitest run <files> --maxWorkers=2`, one vitest process at a time.
 - No raw SQL outside `core/DB_Management/` and `core/AuthNZ/` repo modules (tests are exempt). Loguru only. Never log passwords, tokens or email addresses; log the user id.
 - Lint ratchets in `tldw_Server_API/tests/lint` must stay green. In particular: tests patch `core.AuthNZ.email_change` or other core/service modules, never new attributes on `api/*/endpoints` modules (endpoint monkeypatch ratchet). Add no new import statement from `services` to `api`, or from `DB_Management` to another core package. Exception tuples are named `*_NONCRITICAL_EXCEPTIONS` and never contain `BaseException` or `CancelledError`. No bare `except Exception`.
 - This plan edits no mirrored doc. If you edit one (`Docs/ADR`, `Docs/Operations/Env_Vars.md`, guides), run `Helper_Scripts/refresh_docs_published.sh` and commit the `Docs/Published` diff in the same PR.
@@ -50,6 +50,7 @@
 | `tldw_Server_API/app/core/UserProfiles/update_service.py` | Own `identity.email` edits go through `update_user_email` |
 | `tldw_Server_API/app/core/Chatbooks/chatbook_service.py` | Account restore no longer writes `identity.email` |
 | `tldw_Server_API/app/core/AuthNZ/email_change.py` (new) | Password check and the after-commit notice |
+| `tldw_Server_API/app/core/AuthNZ/password_service.py` | Two-column read of email and password hash on the caller's connection |
 | `tldw_Server_API/app/core/UserProfiles/contracts.py`, `command_service.py` | `current_password` on the command; the gate |
 | `tldw_Server_API/app/api/v1/schemas/auth_schemas.py`, `user_profile_schemas.py` | `current_password` request field |
 | `tldw_Server_API/app/api/v1/endpoints/users.py`, `app/api/v2/endpoints/user_profiles.py`, `app/services/admin_profiles_service.py` | Pass the password; send the notice |
@@ -62,14 +63,14 @@
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/AuthNZ/migrations.py:6584` (registry) and after `:6596` (new function)
-- Modify: `tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py:1437` (end of `_CREATE_AUTHNZ_CORE_TABLES`)
+- Modify: `tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py` (new helper next to `ensure_authnz_core_tables_pg`, called after `ensure_postgres_session_last_activity(conn)` at `:3694`)
 - Modify: `tldw_Server_API/app/core/DB_Management/postgres_auth_catalog.py:19-46` (`_USERS_COLUMNS`), `:600-618` (timestamp branch of `_column_type_allowed`)
 - Modify: `tldw_Server_API/tests/AuthNZ/conftest.py:749` and `:1539` (both PostgreSQL `users` DDLs)
 - Modify: `tldw_Server_API/tests/AuthNZ/unit/test_mcp_discovery_migration.py:41,97`
-- Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py` (create), `tldw_Server_API/tests/AuthNZ/unit/test_pg_migrations_authnz_core.py`, `tldw_Server_API/tests/AuthNZ/unit/test_postgres_runtime_checks.py`
+- Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py` (create), `tldw_Server_API/tests/AuthNZ/unit/test_pg_migrations_authnz_core.py`, `tldw_Server_API/tests/AuthNZ/unit/test_postgres_runtime_checks.py`, `tldw_Server_API/tests/AuthNZ/integration/test_postgres_runtime_schema.py:430-489` (`test_nonowner_startup_refuses_required_drift_without_repair`)
 
 **Interfaces:**
-- Produces: `migration_108_add_users_email_change_columns(conn: sqlite3.Connection) -> None`; columns `users.previous_email` (SQLite `TEXT`, PostgreSQL `VARCHAR(255)`, nullable) and `users.email_changed_at` (SQLite `TIMESTAMP`, PostgreSQL `TIMESTAMPTZ`, nullable).
+- Produces: `migration_108_add_users_email_change_columns(conn: sqlite3.Connection) -> None`; `pg_migrations_extra._ensure_users_email_change_columns(conn: Any) -> None`; columns `users.previous_email` (SQLite `TEXT`, PostgreSQL `VARCHAR(255)`, nullable) and `users.email_changed_at` (SQLite `TIMESTAMP`, PostgreSQL `TIMESTAMPTZ`, nullable).
 
 - [ ] **Step 1: Create the worktree and the Backlog task**
 
@@ -145,37 +146,58 @@ def test_migration_108_skips_without_users_table(tmp_path) -> None:
     assert "users" not in tables
 ```
 
-In `tldw_Server_API/tests/AuthNZ/unit/test_pg_migrations_authnz_core.py` add:
+In `tldw_Server_API/tests/AuthNZ/unit/test_pg_migrations_authnz_core.py` add (the ALTER runs only for a missing column, so a normal start never takes the `ACCESS EXCLUSIVE` lock on `users`):
 
 ```python
-def test_core_bootstrap_adds_users_email_change_columns() -> None:
+_ADD_PREVIOUS = "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS previous_email VARCHAR(255)"
+_ADD_CHANGED_AT = "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email_changed_at TIMESTAMPTZ"
+
+
+class _ColumnProbeConnection:
+    def __init__(self, existing: set[str]) -> None:
+        self.existing = existing
+        self.executed: list[str] = []
+
+    async def fetchval(self, query: str, column: str) -> bool:
+        assert "information_schema.columns" in query
+        return column in self.existing
+
+    async def execute(self, query: str) -> None:
+        self.executed.append(query)
+
+
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        (set(), [_ADD_PREVIOUS, _ADD_CHANGED_AT]),
+        ({"previous_email"}, [_ADD_CHANGED_AT]),
+        ({"previous_email", "email_changed_at"}, []),
+    ],
+    ids=["fresh", "half-migrated", "migrated"],
+)
+def test_users_email_change_columns_are_altered_only_when_missing(existing, expected) -> None:
     from tldw_Server_API.app.core.AuthNZ import pg_migrations_extra
 
-    statements = [sql for sql, _params in pg_migrations_extra._CREATE_AUTHNZ_CORE_TABLES]
-    assert "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS previous_email VARCHAR(255)" in statements
-    assert "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email_changed_at TIMESTAMPTZ" in statements
+    conn = _ColumnProbeConnection(existing)
+    asyncio.run(pg_migrations_extra._ensure_users_email_change_columns(conn))
+    assert conn.executed == expected
 ```
 
-In `tldw_Server_API/tests/AuthNZ/unit/test_postgres_runtime_checks.py` add three rows to the parametrize list of `test_serving_types_preserve_legacy_families_without_truthy_text_flags`: `("email_changed_at", "timestamptz", True)`, `("email_changed_at", "text", False)`, `("previous_email", "varchar", True)`; and add:
+In `tldw_Server_API/tests/AuthNZ/unit/test_postgres_runtime_checks.py` add three rows to the parametrize list of `test_serving_types_preserve_legacy_families_without_truthy_text_flags`: `("email_changed_at", "timestamptz", True)`, `("email_changed_at", "text", False)`, `("previous_email", "varchar", True)`.
 
-```python
-def test_users_serving_schema_requires_email_change_columns() -> None:
-    from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import _USERS_COLUMNS
-
-    assert {"previous_email", "email_changed_at"} <= _USERS_COLUMNS
-```
+In `tldw_Server_API/tests/AuthNZ/integration/test_postgres_runtime_schema.py::test_nonowner_startup_refuses_required_drift_without_repair` add the drift `("ALTER TABLE public.users DROP COLUMN previous_email", "AUTHNZ_CORE_SCHEMA_NOT_READY")` with id `"user-previous-email"` (proves non-owner serving requires the column).
 
 In `tldw_Server_API/tests/AuthNZ/unit/test_mcp_discovery_migration.py` change line 41 to `assert versions[-8:] == [101, 102, 103, 104, 105, 106, 107, 108]` and line 97 to `== 108` (keep the `# nosec B101` comments, updating "105-107" to "105-108").
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
 Run: `PYTEST tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py tldw_Server_API/tests/AuthNZ/unit/test_pg_migrations_authnz_core.py tldw_Server_API/tests/AuthNZ/unit/test_postgres_runtime_checks.py tldw_Server_API/tests/AuthNZ/unit/test_mcp_discovery_migration.py`
-Expected: FAIL — `AttributeError: ... migration_108_add_users_email_change_columns`, the two ALTER statements missing, `email_changed_at`/`timestamptz` not allowed, versions end at 107.
+Expected: FAIL — `AttributeError` for `migration_108_add_users_email_change_columns` and `_ensure_users_email_change_columns`, `email_changed_at`/`timestamptz` not allowed, versions end at 107.
 
 - [ ] **Step 4: Implement**
 
 - `migrations.py`: `migration_108_add_users_email_change_columns(conn)` copies migration 107: first `if not _sqlite_table_exists(conn, "users"): logger.info("Migration 108: users table not present; skipping"); return` (synthetic test databases reach the latest version without `users`; see migration 100 at `:6669` and the migration 101 docstring), then read `PRAGMA table_info(users)`, `ALTER TABLE users ADD COLUMN previous_email TEXT` and `ALTER TABLE users ADD COLUMN email_changed_at TIMESTAMP` when missing, one `logger.info`. Register `Migration(108, "Add users.previous_email and users.email_changed_at", migration_108_add_users_email_change_columns)` after 107. If origin/dev already has a 108 at branch time, take the next free number and adjust the Step 2 version test.
-- `pg_migrations_extra.py`: append `("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS previous_email VARCHAR(255)", ())` and `("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email_changed_at TIMESTAMPTZ", ())` to `_CREATE_AUTHNZ_CORE_TABLES`. Do not touch the bootstrap `CREATE TABLE public.users` in `Databases/Postgres/Schema/postgresql_users.sql`: the write guard accepts only its exact canonical column set (`profile_user_write_guard.py:48-77`).
+- `pg_migrations_extra.py`: `_ensure_users_email_change_columns(conn)` walks a constant tuple of `(column, alter_statement)` pairs holding exactly the two Step 2 statements. For each column it runs `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name = $1)` with `fetchval` (the same probe style as the `registration_codes.uses` check at `:3695-3702`) and executes the ALTER only when the result is not `True`; `IF NOT EXISTS` stays for two owners starting at once. Call it in `ensure_authnz_core_tables_pg` right after `await ensure_postgres_session_last_activity(conn)`. The existing `_StubPostgresPool` tests keep passing: its `fetchval` answers `True`, so nothing is altered. Do not touch the bootstrap `CREATE TABLE public.users` in `Databases/Postgres/Schema/postgresql_users.sql`: the write guard accepts only its exact canonical column set (`profile_user_write_guard.py:48-77`).
 - `postgres_auth_catalog.py`: add both names to `_USERS_COLUMNS`; add `"email_changed_at"` to the timestamp set in `_column_type_allowed`.
 - `tests/AuthNZ/conftest.py`: in both `CREATE TABLE IF NOT EXISTS users` blocks, change `password_changed_at TIMESTAMP` to `password_changed_at TIMESTAMP,` and add `previous_email VARCHAR(255),` and `email_changed_at TIMESTAMPTZ`.
 
@@ -187,7 +209,7 @@ Then the synthetic-database migration tests that run every migration on a databa
 Expected: PASS.
 Then the real PostgreSQL owner-migration and non-owner serving path:
 `PYTEST tldw_Server_API/tests/AuthNZ/integration/test_postgres_runtime_schema.py -k "serves_without_owner_authority or startup"`
-Expected: PASS (proves the ALTERs pass the write guard and the restricted role then finds the columns).
+Expected: PASS (the ALTERs pass the write guard, the restricted role finds the columns, and `[user-previous-email]` refuses startup without them).
 
 - [ ] **Step 6: Commit**
 
@@ -196,7 +218,8 @@ git add -A backlog/tasks
 git add tldw_Server_API/app/core/AuthNZ/migrations.py tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py \
   tldw_Server_API/app/core/DB_Management/postgres_auth_catalog.py tldw_Server_API/tests/AuthNZ/conftest.py \
   tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py tldw_Server_API/tests/AuthNZ/unit/test_pg_migrations_authnz_core.py \
-  tldw_Server_API/tests/AuthNZ/unit/test_postgres_runtime_checks.py tldw_Server_API/tests/AuthNZ/unit/test_mcp_discovery_migration.py
+  tldw_Server_API/tests/AuthNZ/unit/test_postgres_runtime_checks.py tldw_Server_API/tests/AuthNZ/unit/test_mcp_discovery_migration.py \
+  tldw_Server_API/tests/AuthNZ/integration/test_postgres_runtime_schema.py
 git commit -m "feat(authnz): add users.previous_email and users.email_changed_at (TASK-15633)" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
@@ -275,8 +298,8 @@ async def test_change_after_seven_days_records_the_immediately_previous_address(
 
 
 @pytest.mark.asyncio
-async def test_same_address_changes_nothing(owner_db):
-    result = await _change(owner_db, OWNER_EMAIL)
+async def test_same_address_in_any_case_changes_nothing(owner_db):
+    result = await _change(owner_db, OWNER_EMAIL.upper())
     assert result.affected_user_ids == ()
     assert await _columns(owner_db) == (OWNER_EMAIL, None, None)
 
@@ -322,7 +345,7 @@ In `tldw_Server_API/tests/UserProfile/test_user_profile_legacy_me_update.py::tes
         (
             "UPDATE public.users SET email = $1, previous_email = CASE WHEN previous_email IS NOT NULL"
             " AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' THEN previous_email ELSE email END,"
-            " email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND email <> $3",
+            " email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND LOWER(email) <> LOWER($3)",
             "updated@example.com",
             1,
             "updated@example.com",
@@ -367,12 +390,12 @@ Expected: FAIL — `previous_email` is `None` after a change; `_update_own_email
 
 ```sql
 -- sqlite
-UPDATE users SET email = ?, previous_email = CASE WHEN previous_email IS NOT NULL AND email_changed_at > datetime('now', '-7 days') THEN previous_email ELSE email END, email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND email <> ?
+UPDATE users SET email = ?, previous_email = CASE WHEN previous_email IS NOT NULL AND email_changed_at > datetime('now', '-7 days') THEN previous_email ELSE email END, email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND LOWER(email) <> LOWER(?)
 -- postgres
-UPDATE users SET email = $1, previous_email = CASE WHEN previous_email IS NOT NULL AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' THEN previous_email ELSE email END, email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND email <> $3
+UPDATE users SET email = $1, previous_email = CASE WHEN previous_email IS NOT NULL AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' THEN previous_email ELSE email END, email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND LOWER(email) <> LOWER($3)
 ```
-  Docstring: within 7 days of the last change the original previous address is kept, so repeated changes cannot push the owner's address out (PR 3 sends lock mail to it).
-- `update_service.py`: import `update_user_email`; add `_update_own_email` next to `_update_user_field`: `await anchor.capture()`, call `update_user_email(db_conn, backend=anchor.gateway.backend, user_id=user_id, email=email, gateway=anchor.gateway, ownership=UserVersionOwnership.CALLER_OWNS_ANCHOR)`, `anchor.mark_changed()` when `affected_user_ids` is non-empty, and the same bound `logger.error` + re-raise as `_update_user_field` (operation `update_own_email`, user id only). In the `identity.email` branch call `_update_own_email` when `updated_by == user_id`, else the existing `_update_user_field(..., "email", ...)` (admin edits of another user are unchanged).
+  Docstring: an address equal in any letter case is no change; within 7 days of the last change the original previous address is kept, so repeated changes cannot push the owner's address out (PR 3 sends lock mail to it).
+- `update_service.py`: import `update_user_email`; add `_update_own_email` next to `_update_user_field`: `await anchor.capture()`, call `update_user_email(db_conn, backend=anchor.gateway.backend, user_id=user_id, email=email, gateway=anchor.gateway, ownership=UserVersionOwnership.CALLER_OWNS_ANCHOR)`, `anchor.mark_changed()` when `affected_user_ids` is non-empty. No `try`/`except`: errors propagate to the request transaction as they would anyway. In the `identity.email` branch call `_update_own_email` when `updated_by == user_id`, else the existing `_update_user_field(..., "email", ...)` (admin edits of another user are unchanged).
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -437,17 +460,19 @@ git commit -m "fix(chatbooks): account restore never changes the sign-in email (
 
 **Files:**
 - Create: `tldw_Server_API/app/core/AuthNZ/email_change.py`
+- Modify: `tldw_Server_API/app/core/AuthNZ/password_service.py:506-522` (sibling of `fetch_password_hash`)
 - Modify: `tldw_Server_API/app/api/v1/schemas/auth_schemas.py:94-112` (`UpdateProfileRequest`), `tldw_Server_API/app/api/v1/schemas/user_profile_schemas.py:173-181` (`UserProfileUpdateRequest`)
 - Modify: `tldw_Server_API/app/core/UserProfiles/contracts.py:49-59`, `tldw_Server_API/app/core/UserProfiles/command_service.py:126`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/users.py:481-534` (PATCH), `:584-665` (PUT); `tldw_Server_API/app/api/v2/endpoints/user_profiles.py:58-66`; `tldw_Server_API/app/services/admin_profiles_service.py:809-819`
 - Modify: `apps/packages/api-types/openapi.fingerprint.json` (regenerated)
-- Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py`, `tldw_Server_API/tests/UserProfile/test_profile_command_service.py`, `tldw_Server_API/tests/UserProfile/test_profile_contracts.py`, `tldw_Server_API/tests/UserProfile/test_admin_profiles_service_update.py`, `tldw_Server_API/tests/AuthNZ/integration/test_user_endpoints_integration.py`, `tldw_Server_API/tests/AuthNZ/unit/test_user_endpoints.py`, `tldw_Server_API/tests/AuthNZ/property/test_user_endpoints_property.py`
+- Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_email_change_sqlite.py`, `tldw_Server_API/tests/UserProfile/test_profile_command_service.py`, `tldw_Server_API/tests/UserProfile/test_profile_contracts.py`, `tldw_Server_API/tests/UserProfile/test_admin_profiles_service_update.py`, `tldw_Server_API/tests/AuthNZ/integration/test_user_endpoints_integration.py`, `tldw_Server_API/tests/AuthNZ/unit/test_user_endpoints.py`, `tldw_Server_API/tests/AuthNZ/property/test_user_endpoints_property.py`, `tldw_Server_API/tests/AuthNZ_Postgres/test_profile_update_pool_capacity_pg.py`
 
 **Interfaces:**
-- Consumes: Task 2 writer (unchanged call sites).
+- Consumes: Task 2 writer (unchanged call sites); `update_service._is_postgres_backend_for_pool(db_pool: Any) -> bool`.
 - Produces:
   - `email_change.EmailChangeRefused(Exception)` with `__init__(self, code: str, detail: str)` and attributes `code`, `detail`.
-  - `async email_change.authorize_own_email_change(*, user_id: int, new_email: str, current_password: str | None) -> None` — raises `EmailChangeRefused`; returns when allowed.
+  - `async email_change.authorize_own_email_change(*, db_conn: Any, is_postgres: bool, user_id: int, new_emails: Sequence[str], current_password: str | None) -> None` — raises `EmailChangeRefused`; returns when allowed. It reads only on `db_conn` (profile updates must fit in their existing PostgreSQL transaction slot). `new_emails` holds every `identity.email` value in the request.
+  - `async password_service.fetch_email_and_password_hash(db_connection: Any, user_id: int, *, is_postgres: bool) -> tuple[str | None, str | None]` — `(email, password_hash)`, `(None, None)` when the row is missing.
   - `ProfileUpdateCommand.current_password: str | None = field(default=None, repr=False, compare=False)`.
   - `current_password: SecretStr | None = Field(None, description=...)` on `UpdateProfileRequest` and `UserProfileUpdateRequest`.
 
@@ -551,6 +576,19 @@ async def test_unchanged_address_in_other_case_needs_no_password(owner_db, email
 
 
 @pytest.mark.asyncio
+async def test_any_changed_identity_email_in_the_request_needs_the_password(owner_db, email_api):
+    body = {
+        "updates": [
+            {"key": "identity.email", "value": "new@example.test"},
+            {"key": "identity.email", "value": OWNER_EMAIL},
+        ]
+    }
+    response = await email_api.patch("/api/v1/users/me/profile", json=body)
+    assert (response.status_code, response.json()["error_code"]) == (403, "current_password_required")
+    assert await _columns(owner_db) == (OWNER_EMAIL, None, None)
+
+
+@pytest.mark.asyncio
 async def test_dry_run_email_change_needs_no_password(owner_db, email_api):
     response = await email_api.patch("/api/v1/users/me/profile", json={**EMAIL_UPDATE, "dry_run": True})
     assert response.status_code == 200, response.text
@@ -564,10 +602,49 @@ async def test_single_user_mode_needs_no_password(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     reset_settings()
     try:
-        await email_change.authorize_own_email_change(user_id=1, new_email="new@example.test", current_password=None)
+        # db_conn=None: single-user mode must decide without reading anything.
+        await email_change.authorize_own_email_change(
+            db_conn=None, is_postgres=False, user_id=1, new_emails=("new@example.test",), current_password=None
+        )
     finally:
         reset_settings()
 ```
+
+In `tldw_Server_API/tests/AuthNZ_Postgres/test_profile_update_pool_capacity_pg.py`, extract the seed block of the existing test into `async def _seed_user(test_db_pool, username: str, password_hash: str) -> int` (email `f"{username}@example.test"`; the existing test calls it with `"profile-capacity", "unused-test-hash"`), then add:
+
+```python
+@pytest.mark.asyncio
+async def test_own_email_change_completes_when_other_pool_slots_are_busy(test_db_pool) -> None:
+    """The password check reads on the request's own connection, never a second pool slot."""
+    user_id = await _seed_user(test_db_pool, "email-capacity", hash_password("Capacity-Pass-2026!"))
+    async with AsyncExitStack() as slots:
+        connection = await slots.enter_async_context(test_db_pool.acquire())
+        for _ in range(test_db_pool.pool.get_max_size() - 1):
+            await slots.enter_async_context(test_db_pool.acquire())
+        async with connection.transaction():
+            result = await asyncio.wait_for(
+                ProfileCommandService(db_pool=test_db_pool).apply(
+                    ProfileUpdateCommand(
+                        actor_user_id=user_id,
+                        target_user_id=user_id,
+                        updates=(("identity.email", "email-capacity-new@example.test"),),
+                        roles=frozenset({"user"}),
+                        dry_run=False,
+                        current_password="Capacity-Pass-2026!",
+                    ),
+                    db_conn=connection,
+                    scope=None,
+                ),
+                timeout=5,
+            )
+            assert result.applied == ("identity.email",)
+            row = await connection.fetchrow("SELECT email, previous_email FROM users WHERE id = $1", user_id)
+            assert (row["email"], row["previous_email"]) == (
+                "email-capacity-new@example.test",
+                "email-capacity@example.test",
+            )
+```
+(`hash_password` from `tldw_Server_API.app.core.AuthNZ.password_service`; `test_db_pool` runs in multi-user mode, so the check really reads.)
 
 In `tldw_Server_API/tests/UserProfile/test_profile_command_service.py` (uses the file's `_ProfileService`, `_Planner`, `_Executor`):
 
@@ -639,10 +716,12 @@ Expected: FAIL — changes succeed without a password; `email_change` and `curre
 
 - [ ] **Step 3: Implement `core/AuthNZ/email_change.py`**
 
+First add `fetch_email_and_password_hash` to `password_service.py` beside `fetch_password_hash`, same shape with two columns: PostgreSQL `fetchrow("SELECT email, password_hash FROM users WHERE id = $1", user_id)`, SQLite `execute("SELECT email, password_hash FROM users WHERE id = ?", (user_id,))` then `fetchone()`, accepting dict or tuple rows like the existing helper.
+
 `authorize_own_email_change`, in this order:
 1. `settings.is_single_user_mode()` → return without reading anything (the API key is the only credential there and no lock exists).
-2. `user = await (await AuthnzUsersRepo.from_pool()).get_user_by_id(user_id) or {}` (a vanished row fails closed below).
-3. `new_email.strip().lower() == str(user.get("email") or "").strip().lower()` → return (no change, no password).
+2. `email, password_hash = await fetch_email_and_password_hash(db_conn, user_id, is_postgres=is_postgres)`: one read on the caller's connection, never `AuthnzUsersRepo.from_pool()`, which would need a second pool slot inside `ProfileCommandService.apply`. A missing row gives `(None, None)` and fails closed below.
+3. Every value in `new_emails`, stripped and lower-cased, equals `(email or "").strip().lower()` → return (no change, no password). One differing value is enough to require the password, because the executor applies every update in order.
 4. Empty or missing `password_hash` → `EmailChangeRefused("email_change_requires_admin", "This account has no password. Ask an administrator to change its email address.")`.
 5. No `current_password` → `EmailChangeRefused("current_password_required", "Enter your current password to change your email address.")`.
 6. `password_service.verify_password(current_password, password_hash)[0]` is false → `EmailChangeRefused("current_password_invalid", "Current password is incorrect. If you sign in with SSO or an email link, use Forgot password to set one first.")`.
@@ -652,10 +731,10 @@ Every refusal logs `logger.info("Self-service email change refused for user {}: 
 
 - `UpdateProfileRequest` and `UserProfileUpdateRequest`: `current_password: Optional[SecretStr] = Field(None, description="Your current password. Required when the request changes your own email address (multi-user mode).")`. Add `"current_password"` to the `UpdateProfileRequest` example.
 - `contracts.ProfileUpdateCommand`: the field from Interfaces, last.
-- `command_service.py`: `from tldw_Server_API.app.core.AuthNZ import email_change as _email_change` (module attribute, so tests can patch it). Module-level `async def _own_email_change_refusal(command: ProfileUpdateCommand) -> LegacyProfileCommandResult | None`: when `command.actor_user_id == command.target_user_id` and an `identity.email` update is present, await `_email_change.authorize_own_email_change(user_id=command.target_user_id, new_email=str(<last identity.email value>), current_password=command.current_password)`; on `EmailChangeRefused` return `LegacyProfileCommandResult(status_code=403, error_code=exc.code, detail=exc.detail, skipped=({"key": "identity.email", "message": exc.code},))`. In `apply`, call it immediately before `executor_kwargs` (after the dry-run return and the version lock) and return the refusal if any. Dry runs therefore need no password.
+- `command_service.py`: `from tldw_Server_API.app.core.AuthNZ import email_change as _email_change` (module attribute, so tests can patch it). Extend the existing `update_service` import statement with `_is_postgres_backend_for_pool`. Module-level `async def _own_email_change_refusal(command: ProfileUpdateCommand, *, db_conn: Any, is_postgres: bool) -> LegacyProfileCommandResult | None`: when `command.actor_user_id == command.target_user_id` and the command holds at least one `identity.email` update, await `_email_change.authorize_own_email_change(db_conn=db_conn, is_postgres=is_postgres, user_id=command.target_user_id, new_emails=tuple(str(value) for key, value in command.updates if key == "identity.email"), current_password=command.current_password)`; on `EmailChangeRefused` return `LegacyProfileCommandResult(status_code=403, error_code=exc.code, detail=exc.detail, skipped=({"key": "identity.email", "message": exc.code},))`. In `apply`, call it with `db_conn=db_conn, is_postgres=_is_postgres_backend_for_pool(self._db_pool)` immediately before `executor_kwargs` (after the dry-run return and the version lock) and return the refusal if any. Dry runs therefore need no password.
 - `users.py` PATCH `/me/profile` and v2 `PATCH /users/me/profile`: pass `current_password=payload.current_password.get_secret_value() if payload.current_password else None` into `ProfileUpdateCommand`.
-- `admin_profiles_service.update_user_profile`: pass the same expression into its `ProfileUpdateCommand` (an admin changing their own email is a self-service change; others' emails never reach the gate). Inline `get_secret_value()`; do not import `admin_schemas.unwrap_optional_secret`, which strips whitespace and would add a services-to-api import.
-- `users.py` PUT `/me`: `import tldw_Server_API.app.core.AuthNZ.email_change as _email_change` beside the other module aliases. Keep the existing `request.email != user_context.get("email")` check (same address → 400 "No updates provided"). Inside the existing `try`, before `update_user_email`, await `_email_change.authorize_own_email_change(user_id=user_id, new_email=request.email, current_password=<same expression on request.current_password>)`; on `EmailChangeRefused` return `_profile_error_response(status_code=403, error_code=exc.code, detail=exc.detail, errors=[UserProfileErrorDetail(key="email", message=exc.code)])`. `EmailChangeRefused` subclasses `Exception` directly so `_USERS_ENDPOINT_EXCEPTIONS` never turns it into a 500.
+- `admin_profiles_service.update_user_profile`: pass the same expression into its `ProfileUpdateCommand` (an admin changing their own email here is a self-service change, Deviation 5; others' emails never reach the gate). Inline `get_secret_value()`; do not import `admin_schemas.unwrap_optional_secret`, which strips whitespace and would add a services-to-api import.
+- `users.py` PUT `/me`: `import tldw_Server_API.app.core.AuthNZ.email_change as _email_change` beside the other module aliases. Make the existing same-address check case-insensitive like the writer: `request.email.lower() != str(user_context.get("email") or "").lower()` (same address → 400 "No updates provided", as today). Compute `is_pg = await _database.is_postgres_backend()` before the check instead of inside it. Inside the existing `try`, before `update_user_email`, await `_email_change.authorize_own_email_change(db_conn=db, is_postgres=is_pg, user_id=user_id, new_emails=(request.email,), current_password=<same expression on request.current_password>)`; on `EmailChangeRefused` return `_profile_error_response(status_code=403, error_code=exc.code, detail=exc.detail, errors=[UserProfileErrorDetail(key="email", message=exc.code)])`. `EmailChangeRefused` subclasses `Exception` directly so `_USERS_ENDPOINT_EXCEPTIONS` never turns it into a 500.
 
 - [ ] **Step 5: Regenerate the OpenAPI fingerprint**
 
@@ -669,13 +748,14 @@ Expected: the check exits 0; only `openapi.fingerprint.json` changed (no new pat
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run the Step 2 command, then `PYTEST tldw_Server_API/tests/AuthNZ/unit/test_user_endpoints.py tldw_Server_API/tests/AuthNZ/property/test_user_endpoints_property.py tldw_Server_API/tests/UserProfile/test_user_profile_legacy_me_update.py tldw_Server_API/tests/UserProfile/test_stage2_caller_characterization.py tldw_Server_API/tests/UserProfile/test_user_profile_updates.py tldw_Server_API/tests/UserProfile/test_user_profile_v2_contract.py tldw_Server_API/tests/UserProfile/test_user_profile_legacy_contract_characterization.py`
+Run the Step 2 command, then `PYTEST tldw_Server_API/tests/AuthNZ_Postgres/test_profile_update_pool_capacity_pg.py tldw_Server_API/tests/AuthNZ/unit/test_user_endpoints.py tldw_Server_API/tests/AuthNZ/property/test_user_endpoints_property.py tldw_Server_API/tests/UserProfile/test_user_profile_legacy_me_update.py tldw_Server_API/tests/UserProfile/test_stage2_caller_characterization.py tldw_Server_API/tests/UserProfile/test_user_profile_updates.py tldw_Server_API/tests/UserProfile/test_user_profile_v2_contract.py tldw_Server_API/tests/UserProfile/test_user_profile_legacy_contract_characterization.py`
 Expected: PASS (Postgres-backed ones may SKIP locally; record which).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/AuthNZ/email_change.py tldw_Server_API/app/api/v1/schemas/auth_schemas.py \
+git add tldw_Server_API/app/core/AuthNZ/email_change.py tldw_Server_API/app/core/AuthNZ/password_service.py \
+  tldw_Server_API/tests/AuthNZ_Postgres/test_profile_update_pool_capacity_pg.py tldw_Server_API/app/api/v1/schemas/auth_schemas.py \
   tldw_Server_API/app/api/v1/schemas/user_profile_schemas.py tldw_Server_API/app/core/UserProfiles/contracts.py \
   tldw_Server_API/app/core/UserProfiles/command_service.py tldw_Server_API/app/api/v1/endpoints/users.py \
   tldw_Server_API/app/api/v2/endpoints/user_profiles.py tldw_Server_API/app/services/admin_profiles_service.py \
@@ -822,7 +902,7 @@ If you did not, sign in with your password, change your password, and change you
 - `users.py`: `_requested_email` and `_notify_email_change` per Interfaces. `_notify_email_change` returns unless `new_email` differs (stripped, case-insensitive) from `user_context["email"]`; otherwise it awaits `_email_change.notify_previous_address(user_id=int(user_context["id"]), old_email=..., new_email=new_email.strip().lower(), username=str(user_context["username"]), ip_address=resolve_client_ip(http_request) or "unknown")` (`from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip`).
   - PUT `/me`: add `http_request: Request = None` (the handler's existing `response: Response = None` pattern) and call `_notify_email_change(http_request, user_context, request.email)` after `update_user_email` succeeds and before `user_context["email"]` is overwritten.
   - v1 PATCH `/me/profile`: after the `JSONResponse` early return, when `not payload.dry_run and "identity.email" in response.applied`, call `_notify_email_change(http_request, user_context, _requested_email(payload))`.
-  - v2: import both helpers from `users.py` (it already imports private helpers from there); the same call with `result.applied`, before building the response.
+  - v2: add `_requested_email` and `_notify_email_change` to the existing `from tldw_Server_API.app.api.v1.endpoints.users import (...)` statement (`user_profiles.py:18-22`). Do not add a second import statement: `layering_baseline.txt` allows `api.v2.endpoints.user_profiles -> api.v1.endpoints.users: 1`. Then the same call with `result.applied`, before building the response.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -844,34 +924,39 @@ git commit -m "feat(authnz): notify the previous address after an email change (
 - [ ] **Step 1: Run every test that touches the changed surfaces**
 
 ```bash
-git grep -l -E "identity\.email|/api/v1/users/me['\"]|/users/me/profile|update_user_email|_restore_account_state_payloads|_CREATE_AUTHNZ_CORE_TABLES|_USERS_COLUMNS|get_authnz_migrations|apply_authnz_migrations|ensure_authnz_tables|EMAIL_TEMPLATES" -- tldw_Server_API/tests
+git grep -l -E "identity\.email|/api/v1/users/me['\"]|/users/me/profile|update_user_email|_restore_account_state_payloads|_CREATE_AUTHNZ_CORE_TABLES|ensure_authnz_core_tables_pg|_USERS_COLUMNS|get_authnz_migrations|apply_authnz_migrations|ensure_authnz_tables|ProfileCommandService|fetch_password_hash|EMAIL_TEMPLATES" -- tldw_Server_API/tests
 ```
 Run `PYTEST` over every file listed. Expected: PASS; list any SKIPPED Postgres tests in the task notes. A failure is compared against `origin/dev` before it is called pre-existing.
 
 - [ ] **Step 2: Lint ratchets, ruff, OpenAPI drift**
 
 ```bash
+PY=/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python
 PYTEST tldw_Server_API/tests/lint
-/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m ruff check $(git diff --name-only origin/dev...HEAD -- '*.py' 'Helper_Scripts/*.py')
-/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json --check-paths apps/packages/api-types/paths.d.ts
+for f in $(git diff --name-only --diff-filter=A origin/dev...HEAD -- '*.py'); do $PY -m ruff check "$f"; done
+for f in $(git diff --name-only --diff-filter=M origin/dev...HEAD -- '*.py'); do
+  diff <(git show "origin/dev:$f" | $PY -m ruff check --statistics --stdin-filename "$f" -) <($PY -m ruff check --statistics "$f") >/dev/null || echo "NEW RUFF FINDINGS: $f"
+done
+$PY Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json --check-paths apps/packages/api-types/paths.d.ts
 ```
-Expected: all pass. Bandit is not installed in the venv: record "bandit: environment skip" in the DoD note unless it is available.
+Expected: lint ratchets pass; no new ruff findings (new files report none; no `NEW RUFF FINDINGS` line; explicit paths bypass the config's `tests` exclude and several touched files already have findings on dev, so only new ones count); the OpenAPI check exits 0. Bandit is not installed in the venv: record "bandit: environment skip" in the DoD note unless it is available.
 
 - [ ] **Step 3: File the rate-limit follow-up**
 
 ```bash
 PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd "$PWD" task create \
-  "Per-user rate limit on password-checked endpoints" -l authnz,security \
-  -d "A wrong current password is answered without any per-user limit on PUT /api/v1/users/me, PATCH /api/v1/users/me/profile (email change, TASK-15633) and POST /api/v1/users/change-password, so a signed-in session can guess the password. Add a per-user limit on failed password checks shared by these endpoints." \
+  "Per-user rate limits on password-checked endpoints and self-service email changes" -l authnz,security \
+  -d "A wrong current password is answered without any per-user limit on PUT /api/v1/users/me, PATCH /api/v1/users/me/profile (email change, TASK-15633) and POST /api/v1/users/change-password, so a signed-in session can guess the password. Successful self-service email changes are not limited either, and each one mails the previous address: an account can set its email to someone else's address and change it away again, repeatedly, to flood that inbox. Add a per-user limit on failed password checks shared by these endpoints, and a per-user cap on successful self-service email changes." \
   --ac "Repeated wrong current passwords on these endpoints are refused after a per-user limit, on SQLite and PostgreSQL" \
   --ac "The limit does not lock the account or affect sign-in" \
+  --ac "A per-user cap on successful self-service email changes (e.g. 5 per 24 h) on PUT /users/me and PATCH v1/v2 users/me/profile" \
   --id TASK-15634
 git add -A backlog/tasks
 ```
 
 - [ ] **Step 4: Close out the Backlog task**
 
-`task edit TASK-15633 --check-ac 1 ... --check-ac 6 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --append-notes "<tests run, skips, bandit note>" --final-summary "<what changed>"`, then `git add -A backlog/tasks` and commit with the trailer.
+`task edit TASK-15633 -s Done --check-ac 1 ... --check-ac 6 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --check-dod 6 --append-notes "<tests run, Postgres skips, bandit note, known limits>" --final-summary "<what changed>"`, then `git add -A backlog/tasks` and commit with the trailer. The six DoD items come from `backlog/config.yml:15`; #6 is "Known skips or blockers documented". `Done` is set in the PR branch, as recent tasks do (TASK-15582 closed in its own PR), so it lands with the merge.
 
 - [ ] **Step 5: Open the PR**
 
@@ -894,8 +979,9 @@ Run the clean-subagent review and wait for green CI. No auto-merge.
 
 1. **Four self-service paths, not two.** A user's own session changes the email through `PUT /api/v1/users/me`, `PATCH /api/v1/users/me/profile`, `PATCH /api/v2/users/me/profile` (same `ProfileCommandService` as v1), and the account restore of a chatbook import (`ChatbookService._restore_account_state_payloads`, `chatbook_service.py:3635-3639`, no password at all). The gate sits in `ProfileCommandService.apply` (v1, v2) plus the PUT handler; chatbook restore stops writing the email (Task 3). Three admin paths also change emails: `PUT /api/v1/admin/users/{id}`, `PATCH /api/v1/admin/users/{id}/profile` and `POST /api/v1/admin/users/profile/bulk`; their behaviour is listed under Decisions.
 2. **"No password (SSO only)" is not what the code stores.** OIDC JIT provisioning (`auth.py:895`) and first magic-link sign-in (`auth.py:3143`) create accounts with a random generated password the user never sees. Only an empty `password_hash` (the single-user bootstrap row, `initialize.py:913`; `admin_rbac.py:666,682`) can be recognised. Those accounts get `email_change_requires_admin`. JIT and magic-link accounts get `current_password_invalid` and can set a password with "Forgot password" first, which mails the current address.
-3. **PostgreSQL columns come from the owner migration, not the users DDL.** The write guard accepts only the canonical `CREATE TABLE public.users` column set (`profile_user_write_guard.py:48-77,879-886`). Both columns are therefore added by `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `_CREATE_AUTHNZ_CORE_TABLES`. They are required by the non-owner serving check, so a non-owner PostgreSQL deployment must run the owner migration (initialize) before the new version serves. That is the repo's existing rule for schema changes.
+3. **PostgreSQL columns come from the owner migration, not the users DDL.** The write guard accepts only the canonical `CREATE TABLE public.users` column set (`profile_user_write_guard.py:48-77,879-886`). Both columns are therefore added by `_ensure_users_email_change_columns`, called from `ensure_authnz_core_tables_pg`, which probes `information_schema.columns` and alters only a missing column. They are required by the non-owner serving check, so a non-owner PostgreSQL deployment must run the owner migration (initialize) before the new version serves. That is the repo's existing rule for schema changes.
 4. **The 7-day both-addresses rule is not consumed in PR 0.** No lock or unlock mail exists yet. PR 0 stores the data; PR 3 sends to `previous_email` as well when `email_changed_at` is less than 7 days old. That applies to the `account_locked` mail from `POST /api/v1/auth/account/lock` and to the locked-account branches of the magic-link request and forgot-password.
+5. **One admin path asks for a password.** The spec says admin email changes are unchanged. `PATCH /api/v1/admin/users/{id}/profile` with the admin's own id goes through `ProfileCommandService` with actor == target, so the shared gate applies: it needs `current_password` (passed through by `admin_profiles_service.update_user_profile`), records the previous address, and sends no notice. Every other admin change, of any user, is unchanged.
 
 ## Decisions the spec left open
 
@@ -906,14 +992,16 @@ Run the clean-subagent review and wait for green CI. No auto-merge.
 - Admin sessions are outside this threat model. Exact behaviour of the admin paths:
   - `PUT /api/v1/admin/users/{id}` (`admin_users_service.py:395-402`), any target including the admin's own account: no password, no previous address, no notice. Code unchanged.
   - `POST /api/v1/admin/users/profile/bulk` (`admin_profiles_service.py:934-975`, calls `UserProfileUpdateService.apply_updates` directly, never the command service): no password for any target. For another user: no previous address, no notice. For the admin's own row (`updated_by == user_id`) the previous address and change time **are** recorded, but there is no password and no notice. This is the simplest result of the Task 2 rule and is stated in the PR body.
-  - `PATCH /api/v1/admin/users/{id}/profile` for another user: no password, no previous address, no notice. For the admin's own id it goes through `ProfileCommandService` with actor == target, so it needs `current_password` (passed through), records the previous address, and sends no notice.
+  - `PATCH /api/v1/admin/users/{id}/profile` for another user: no password, no previous address, no notice. For the admin's own id, see Deviation 5.
   - On both profile paths `identity.email` is only editable when the admin principal also holds the `user` role (catalog `editable_by: [user]`); otherwise the key is refused as `forbidden`, as today.
 - The notice goes to the old address only, after the transaction commits, best effort. It shows the masked new address, UTC time and IP, and what to do. It does not mention the 7-day rule until PR 3 makes it true.
 - `is_verified` is left as is on change. Resetting it would lock the user out of every endpoint guarded by `_require_active_verified_user`.
 - Chatbook export still includes the email; restore ignores it.
-- No per-user limit on wrong passwords in this PR: a signed-in session can keep guessing through `PUT /api/v1/users/me` and `PATCH /api/v1/users/me/profile`, as it already can through `POST /api/v1/users/change-password`. Follow-up TASK-15634 (filed in Task 6) adds a per-user limit for all password-checked endpoints.
+- No per-user limit on wrong passwords or on successful email changes in this PR: a signed-in session can keep guessing through `PUT /api/v1/users/me` and `PATCH /api/v1/users/me/profile`, as it already can through `POST /api/v1/users/change-password`. Follow-up TASK-15634 (filed in Task 6) adds a per-user limit for all password-checked endpoints and a cap on successful self-service email changes.
 - `email_service.py` already logs recipient addresses (`:642`, `:834`, `:838`). That is pre-existing and out of scope; the new code logs user ids only.
 
 ## Known limits
 
 - With a stolen password, a change made inside the 7-day window after the owner's own change keeps the older previous address. Example: the owner changes Z to A, then the intruder changes A to B within 7 days. The result is `email = B`, `previous_email = Z`, so A (the owner's current mailbox) gets only the change notice and no later lock mail. One `previous_email` column cannot fix this; PR 3 or a later change would need a short history of addresses.
+- The old-address notice can be used to flood someone's inbox. The new address is not verified, so any account owner can set their email to another person's (unused) address and change it away again; each change away mails that person, with no limit (`PUT /api/v1/users/me`, `PATCH /api/v1/users/me/profile` and v2). TASK-15634 adds a per-user cap on successful self-service email changes.
+- Sending lock mail to both addresses for 7 days lets the owner learn of a takeover, but does not by itself let the owner recover when the intruder has also changed the password. PR 3 must decide whether a link sent to `previous_email` within 7 days may restore that address, or whether forgot-password within 7 days also mails `previous_email`.

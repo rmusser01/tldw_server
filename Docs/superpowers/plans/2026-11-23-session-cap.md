@@ -2,9 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bound every user to `MAX_SESSIONS_PER_USER` (default 4) live AuthNZ sessions in both auth modes and on SQLite and PostgreSQL. A new sign-in replaces the oldest session from the same browser install first, then the user's oldest session. Sign-in is never refused because of the cap.
+**Goal:** Bound every user to `MAX_SESSIONS_PER_USER` (default 4) live AuthNZ sessions in both auth modes and on SQLite and PostgreSQL. A new sign-in replaces the least recently active session from the same browser install first, then the user's least recently active session. Sign-ins without an install id form one group. Sign-in is never refused because of the cap.
 
-**Architecture:** One repo method counts, evicts and inserts inside a single per-user-serialized transaction (a PostgreSQL two-key advisory lock, or SQLite `BEGIN IMMEDIATE`). Every `SessionManager.create_session` call goes through it. One "live" predicate, `is_active AND NOT is_revoked AND COALESCE(refresh_expires_at, expires_at) > now`, drives the cap, the session listing and cleanup. A random per-install id, sent by the WebUI and the extension in the `X-TLDW-Device-Id` header, is stored in `sessions.device_id` and used only to group a browser's own sessions for eviction. A request on a cap-evicted session gets 401 with code `session_replaced`, and the WebUI sign-in page explains it.
+**Architecture:**
+- One repo method counts, evicts and inserts inside a single per-user-serialized transaction (a PostgreSQL two-key advisory lock, or SQLite `BEGIN IMMEDIATE`). Eviction is one `UPDATE … RETURNING` statement. Every `SessionManager.create_session` call goes through it.
+- One "live" predicate, `is_active AND NOT is_revoked AND COALESCE(refresh_expires_at, expires_at) > now`, drives the cap, the session listing and cleanup.
+- A random per-install id, sent by the WebUI and the extension in the `X-TLDW-Device-Id` header, is stored in `sessions.device_id`. It is used only to group a browser's own sessions for eviction.
+- A JWT or refresh request on a cap-evicted session gets 401 with code `session_replaced`, and the WebUI sign-in page explains it. Single-user cookie sessions get a plain 401 and silently re-mint.
 
 **Tech Stack:** FastAPI, asyncpg / aiosqlite through `AuthNZ/database.py` `DatabasePool`, pydantic-settings, loguru, pytest. On the frontend: TypeScript, Next.js pages router, vitest + Testing Library.
 
@@ -12,13 +16,10 @@
 
 ## Global Constraints
 
-- **Preconditions:** both of these must be merged into `dev` first. Then create branch `feat/session-cap-15628` from a fresh `origin/dev` in a worktree.
-  - PR #3578 (TASK-15627, branch `fix/runtime-signin-retry-storm`). It adds the TASK-15628 file and rewrites `bootstrapCookieSession` in `runtime-bootstrap.ts`.
-  - The design branch `docs/session-cap-alert-lock-design`: the spec, TASK-15632 and both plans. The coordinator merges it.
+- **Precondition:** the design branch `docs/session-cap-alert-lock-design` (PR #3582: the spec, TASK-15632 and both plans) is merged into `dev`; the coordinator merges it. Then create branch `feat/session-cap-15628` from a fresh `origin/dev` in a worktree.
 - **Function-size ratchet** (`tldw_Server_API/tests/lint/function_size_baseline.json`, threshold 300):
   - `auth:login` is at its ceiling of 454 and must not grow; Task 3 removes more lines than it adds.
   - `User_DB_Handling:verify_jwt_and_fetch_user` is at its ceiling of 436, so Task 4 keeps it net-zero.
-  - `auth_principal_resolver:get_auth_principal` is at 301 of its 314 ceiling.
   - New functions stay at or under 300 lines.
 - Open one PR with base `dev` (`gh pr create --base dev`). It closes Backlog task TASK-15628.
 - Edit the backlog only with `PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd <worktree> task edit TASK-15628 ...`. Stage the result with `git add -A backlog/tasks`.
@@ -34,7 +35,7 @@
   - revoke reason `session_cap`
   - 401 code `session_replaced`
   - single-user device tag `single-user-cookie:v1:<id>`
-  - eviction order: oldest live session with the same `device_id`, then the user's oldest live session by `created_at` (ties broken by `id`)
+  - eviction order: live sessions with the same `device_id` first, where a missing id is its own group; then least recently active by `COALESCE(last_activity, created_at)`; ties broken by `created_at`, then `id`
   - cap-evicted rows purged after `max(1 hour, ACCESS_TOKEN_EXPIRE_MINUTES)`
   - UI copy "You were signed out because your account was signed in on another device."
 - Mirrored docs (`Docs/ADR/*`, `Docs/Operations/Env_Vars.md`): run `Helper_Scripts/refresh_docs_published.sh` and commit the `Docs/Published` diff in the same commit as the source edit.
@@ -46,17 +47,17 @@
 ## Review Focus
 
 1. **Backlog of storm rows.** The TASK-15627 storm made about 37 rows a minute, each live for 30 days, so an install can hold tens of thousands of live `single-user-cookie:v1` rows. That install signs in once. Expected:
-   - one creation evicts down to the cap with one SELECT and one UPDATE, with no per-row loop or per-row transaction;
+   - one creation evicts down to the cap with one count and one `UPDATE … RETURNING`, with no per-row loop or per-row transaction;
    - no statement binds one variable per victim (SQLite fails above 32,766 variables, asyncpg at 32,767);
-   - the sign-in succeeds.
+   - the sign-in succeeds in under 5 s, which is SQLite's busy timeout.
 
-   Pinned by Task 2 `test_cap_backlog_is_evicted_in_one_creation` and its `_postgres` twin, which seed 33,000 rows.
+   Pinned by Task 2 `test_cap_backlog_is_evicted_in_one_creation` and its `_postgres` twin. Both seed 33,000 rows and time the capped insert.
 2. **`MAX_SESSIONS_PER_USER=1`.** Each sign-in replaces the previous session and is never refused. Pinned by Task 2 `test_cap_of_one_replaces_the_only_session`.
 3. **Malformed or hostile `X-TLDW-Device-Id`.** Examples: 65 characters, spaces, a colon, the literal `single-user-cookie:v1`. Expected: treated as absent, never stored, never forwarded by the Next proxy. Pinned by Task 3 `test_request_device_id_accepts_only_safe_ids` and Task 5 "drops a malformed install id".
 4. **Browser storage or `crypto.randomUUID` unavailable.** Storage can be blocked (private window, storage disabled), and `randomUUID` is missing on plain-HTTP origins other than localhost. Expected:
    - sign-in never fails because of the id;
    - with `randomUUID` missing, the id falls back to `crypto.getRandomValues` hex;
-   - with no storage and no `crypto`, no header is sent. Multi-user then evicts by the default rule. A single-user mint joins the bare `single-user-cookie:v1` group (Deviation 9).
+   - with no storage and no `crypto`, no header is sent, and the sign-in joins the header-less group (Deviation 9) in either mode.
 
    Pinned by Task 5 "omits the header when storage is unavailable" and "falls back to getRandomValues".
 5. **MFA login started before the deploy and completed after it.** The cached payload still carries `session_id`. Expected: completion creates its own row and ignores the stale id; the old placeholder expires with the MFA TTL. Pinned by Task 3's update to `test_mfa_login_completes_tokens[True]`.
@@ -192,7 +193,8 @@ Expected: PASS. The PostgreSQL tests run and are not skipped.
 git add tldw_Server_API/app/core/AuthNZ/repos/sessions_repo.py tldw_Server_API/app/core/AuthNZ/session_manager.py \
   tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_sqlite.py tldw_Server_API/tests/AuthNZ/integration/test_session_cap_postgres.py \
   tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_sessions_repo_sqlite.py
-git commit -m "fix(authnz): count a session live until its refresh token expires (TASK-15628)"
+git commit -m "fix(authnz): count a session live until its refresh token expires (TASK-15628)" \
+  -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -212,7 +214,8 @@ git commit -m "fix(authnz): count a session live until its refresh token expires
 **Interfaces:**
 - Consumes: the live predicate and `SESSION_CAP_REVOKE_REASON` (Task 1).
 - Produces:
-  - `Settings.MAX_SESSIONS_PER_USER: int = Field(default=4, ge=1, description="Live signed-in sessions per user; creating one more revokes the oldest")`
+  - `Settings.MAX_SESSIONS_PER_USER: int = Field(default=4, ge=1, description="Live signed-in sessions per user; creating one more revokes the least recently active")`
+  - `SESSION_CAP_LOCK_NAMESPACE = "authnz_sessions_cap"`, exported from `sessions_repo.py`. PR 3's lock transaction takes the same per-user advisory lock.
   - The capped insert, which returns the new id and the evicted rows. Each evicted row is a dict with `id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at`, normalised with `_normalize_session_details`.
     ```python
     AuthnzSessionsRepo.create_session_record_with_cap(
@@ -245,6 +248,7 @@ def test_max_sessions_per_user_below_one_is_rejected(value):
   - `manager` is `SessionManager(db_pool=pool)`.
   - `_create(manager, uid, device=None)` calls `manager.create_session` with fresh `temp_access_*` / `temp_refresh_*` tokens.
   - `live_ids(uid)` is the set of ids from `get_active_sessions_for_user`.
+  - With no activity, the least recently active session is the oldest one, so `test_fifth_session_evicts_the_oldest` still holds.
 
 ```python
 async def test_fifth_session_evicts_the_oldest(authnz_sqlite):
@@ -253,6 +257,19 @@ async def test_fifth_session_evicts_the_oldest(authnz_sqlite):
     assert live_ids(uid) == set(ids[1:])
     assert row(ids[0]).revoke_reason == "session_cap" and not row(ids[0]).is_active
     assert other in live_ids(other_uid)
+
+async def test_cap_evicts_the_least_recently_active_session(authnz_sqlite):
+    ids = [await _create(manager, uid) for _ in range(4)]
+    # backdate created_at and last_activity of all four by 2 h, then set last_activity of ids[0] to now
+    new = await _create(manager, uid)
+    assert live_ids(uid) == {ids[0], ids[2], ids[3], new}   # ids[1] was the least recently active
+
+async def test_headerless_logins_replace_each_other_before_browsers(authnz_sqlite):
+    a, b, c = [await _create(manager, uid, d) for d in ("dev-aaaaaaaa", "dev-bbbbbbbb", "dev-cccccccc")]
+    for _ in range(3):
+        await _create(manager, uid)                         # no install id
+    rows = await repo.get_active_sessions_for_user(uid)
+    assert Counter(r["device_id"] for r in rows) == {"dev-aaaaaaaa": 1, "dev-bbbbbbbb": 1, "dev-cccccccc": 1, None: 1}
 
 async def test_same_device_id_replaces_only_its_own_row(authnz_sqlite):
     a, b, c = [await _create(manager, uid, d) for d in ("dev-aaaaaaaa", "dev-bbbbbbbb", "dev-cccccccc")]
@@ -276,7 +293,9 @@ async def test_concurrent_creates_at_the_cap_never_exceed_it(authnz_sqlite):
 async def test_cap_backlog_is_evicted_in_one_creation(authnz_sqlite):
     # 33,000 live rows (more than SQLite's 32,766-variable limit), device_id "single-user-cookie:v1".
     # Seed with one INSERT ... SELECT over a recursive CTE counter, with unique token_hash/refresh_token_hash.
+    started = time.monotonic()
     new_id = await _create(manager, uid)
+    assert time.monotonic() - started < 5   # SQLite busy_timeout; a per-row loop cannot pass
     assert len(live_ids(uid)) == 4 and new_id in live_ids(uid)
 
 async def test_cap_of_one_replaces_the_only_session(authnz_sqlite, monkeypatch):
@@ -295,7 +314,7 @@ async def test_evicted_tokens_are_blacklisted_after_commit(authnz_sqlite, monkey
   - `test_fifth_session_evicts_the_oldest_postgres`: the same assertions as the SQLite test.
   - `test_concurrent_creates_at_the_cap_never_exceed_it_postgres`: seed 4, run `asyncio.gather` over 6 `create_session_record_with_cap` calls, then `len(live) == 4`.
   - `test_expired_refresh_rows_do_not_count_toward_the_cap_postgres`.
-  - `test_cap_backlog_is_evicted_in_one_creation_postgres`: seed 33,000 live rows (more than asyncpg's 32,767-argument limit) with one `INSERT … SELECT … FROM generate_series(1, 33000)`, then one capped insert, then `len(live) == 4`.
+  - `test_cap_backlog_is_evicted_in_one_creation_postgres`: seed 33,000 live rows (more than asyncpg's 32,767-argument limit) with one `INSERT … SELECT … FROM generate_series(1, 33000)`. Then one capped insert that completes in under 5 s, then `len(live) == 4`.
 
 - [ ] **Step 4: Run the tests and confirm they fail**
 
@@ -311,26 +330,43 @@ Expected: FAIL. `MAX_SESSIONS_PER_USER` does not exist, `create_session_record_w
    - The PostgreSQL advisory lock serializes correctly only under READ COMMITTED. That is the server default, and `DatabasePool.transaction()` uses it (`conn.transaction()` with no isolation argument). Do not raise the isolation level.
 
    Inside the transaction:
-   1. On PostgreSQL only, the first statement is `await acquire_schema_lock(conn.execute, "authnz_sessions_cap", str(user_id))` from `tldw_Server_API/app/core/DB_Management/backends/postgresql_locks.py`. It takes the two-key `pg_advisory_xact_lock(hashtext($1), hashtext($2))`; `AuthNZ/repos/token_blacklist_repo.py:11` already imports it.
+   1. On PostgreSQL only, the first statement is `await acquire_schema_lock(conn.execute, SESSION_CAP_LOCK_NAMESPACE, str(user_id))` from `tldw_Server_API/app/core/DB_Management/backends/postgresql_locks.py`. It takes the two-key `pg_advisory_xact_lock(hashtext($1), hashtext($2))`; `AuthNZ/repos/token_blacklist_repo.py:11` already imports it.
    2. Count the user's live rows.
-   3. If `excess = live - (max_live_sessions - 1)` is greater than 0:
-      - The victim order is `ORDER BY CASE WHEN device_id = ? THEN 0 ELSE 1 END, created_at, id LIMIT ?`. There is no same-device preference when `device_id` is None.
-      - Read the victims' details (`id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at`) with one SELECT: the live rows of `user_id` in that order and limit.
-      - Revoke them with one UPDATE that binds no per-victim values: `UPDATE sessions SET is_active = <false>, is_revoked = <true>, revoked_at = <now>, revoked_by = NULL, revoke_reason = 'session_cap' WHERE id IN (SELECT id FROM sessions WHERE user_id = ? AND <live> ORDER BY <same order> LIMIT ?)`. It runs after the detail SELECT in the same transaction, so both statements see the same rows. On PostgreSQL, `WHERE id = ANY($1::int[])` with the selected ids as one array parameter is also acceptable.
+   3. If `excess = live - (max_live_sessions - 1)` is greater than 0, evict with one statement on both backends. It binds no per-victim values, and because it selects and updates in one statement, no other writer can change which rows it picks:
+      ```sql
+      UPDATE sessions
+         SET is_active = <false>, is_revoked = <true>, revoked_at = <now>,
+             revoked_by = NULL, revoke_reason = 'session_cap'
+       WHERE id IN (SELECT id FROM sessions
+                     WHERE user_id = ? AND <live>
+                     ORDER BY <same-group>,
+                              COALESCE(last_activity, created_at), created_at, id
+                     LIMIT ?)
+      RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at
+      ```
+      - `<same-group>` is `CASE WHEN device_id IS ? THEN 0 ELSE 1 END` on SQLite and `CASE WHEN device_id IS NOT DISTINCT FROM $n THEN 0 ELSE 1 END` on PostgreSQL. A None install id therefore groups the header-less rows.
+      - SQLite `RETURNING` has precedent in `generated_files_repo.py` and `backup_schedules_repo.py`.
+      - Normalise the returned rows with `_normalize_session_details`.
       - Do not call `revoke_session_record`.
    4. Insert the new row with `_insert_session_row`.
-   5. Return `(new_id, victim_details)`.
+   5. Return `(new_id, evicted_rows)`.
 4. In `SessionManager.create_session`, call the capped method with `max_live_sessions=self.settings.MAX_SESSIONS_PER_USER`. After the transaction returns, if `evicted`:
    - `await self._blacklist_session_tokens(evicted, reason=SESSION_CAP_REVOKE_REASON, revoked_by=None)`
-   - log the evicted count. The log carries no ids when `PII_REDACT_LOGS` is set.
-   - Do not clear the Redis cache. `validate_session` always re-reads the row by id with `is_active`, and `_clear_user_sessions_cache` scans every user's `session:*` keys.
-5. Add to `Docs/Operations/Env_Vars.md` after the `REFRESH_TOKEN_EXPIRE_DAYS` line: ``- `MAX_SESSIONS_PER_USER`: Live signed-in sessions per user (default 4, minimum 1). One more sign-in revokes the oldest session of the same browser install, else the user's oldest; sign-in is never refused. API keys are not sessions.``
+   - `log_counter("auth_session_cap_evicted", value=len(evicted))`
+   - log the evicted count. The log carries no tokens, and no ids when `PII_REDACT_LOGS` is set.
+   - Do not clear the Redis cache. `validate_session` always re-reads the row by id with `is_active`, and `_clear_user_sessions_cache` scans every user's `session:*` keys. Evicted `session:<hash>` keys expire on their own TTL.
+5. Add to `Docs/Operations/Env_Vars.md` after the `REFRESH_TOKEN_EXPIRE_DAYS` line: ``- `MAX_SESSIONS_PER_USER`: Live signed-in sessions per user (default 4, minimum 1). One more sign-in revokes the least recently active session of the same browser install, else the user's least recently active session; sign-in is never refused. API keys are not sessions. Sign-ins that send no install id (scripts, the CLI wizard, the admin-ui login route, OIDC redirects) share one group and replace each other first, so scripts should use API keys.``
 6. Run `Helper_Scripts/refresh_docs_published.sh`.
 
-- [ ] **Step 6: Run the tests and confirm they pass**
+- [ ] **Step 6: Run the tests and confirm they pass, then sweep for tests that outgrow the cap**
 
-Run: the Step 4 command, plus `tldw_Server_API/tests/lint/test_env_vars_docs_ratchet.py tldw_Server_API/tests/Docs tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_sessions_repo_sqlite.py tldw_Server_API/tests/AuthNZ/integration/test_authnz_sessions_repo_postgres.py tldw_Server_API/tests/AuthNZ/unit/test_session_revocation_blacklist.py tldw_Server_API/tests/AuthNZ/unit/test_session_refresh_cache.py`
-Expected: PASS. The PostgreSQL tests are not skipped.
+1. Run: the Step 4 command, plus `tldw_Server_API/tests/lint/test_env_vars_docs_ratchet.py tldw_Server_API/tests/Docs tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_sessions_repo_sqlite.py tldw_Server_API/tests/AuthNZ/integration/test_authnz_sessions_repo_postgres.py tldw_Server_API/tests/AuthNZ/unit/test_session_revocation_blacklist.py tldw_Server_API/tests/AuthNZ/unit/test_session_refresh_cache.py`
+   Expected: PASS. The PostgreSQL tests are not skipped.
+2. The cap flips a global default, so sweep every test that touches session creation. Run each file from this list, about 20 per `run_py` call:
+   `git grep -l -e 'auth/login' -e '\.create_session(' -e 'single-user/session' -e 'magic-link/verify' -e 'mfa/login' -e 'auth/refresh' -e 'get_active_sessions' -e 'get_user_sessions' -e 'cleanup_expired_sessions' -e 'single-user-cookie' -- 'tldw_Server_API/tests/**/test_*.py' | grep -v -e /TTS/ -e /Sandbox/ -e /Agent_Client_Protocol/ -e /Persona/`
+   - Expected: PASS.
+   - For any failure, re-run the same test id in one reusable trial worktree on `origin/dev` before calling it pre-existing.
+   - A test that signs one user in more than four times and then reuses an early token is a real behaviour change: fix the test to use a fresh token, or set `MAX_SESSIONS_PER_USER` in that test.
 
 - [ ] **Step 7: Commit**
 
@@ -339,7 +375,8 @@ git add tldw_Server_API/app/core/AuthNZ/settings.py tldw_Server_API/app/core/Aut
   tldw_Server_API/app/core/AuthNZ/session_manager.py tldw_Server_API/tests/AuthNZ/unit/test_session_cap_settings.py \
   tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_sqlite.py tldw_Server_API/tests/AuthNZ/integration/test_session_cap_postgres.py \
   Docs/Operations/Env_Vars.md Docs/Published
-git commit -m "feat(authnz): cap live sessions per user and evict same-install first (TASK-15628)"
+git commit -m "feat(authnz): cap live sessions per user and evict same-install first (TASK-15628)" \
+  -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -507,32 +544,32 @@ Expected: PASS.
 ```bash
 git add tldw_Server_API/app/core/AuthNZ/session_manager.py tldw_Server_API/app/core/AuthNZ/single_user_session.py \
   tldw_Server_API/app/api/v1/endpoints/auth.py tldw_Server_API/tests/AuthNZ tldw_Server_API/tests/AuthNZ_SQLite
-git commit -m "feat(authnz): group sessions by install id, no row before MFA or for single-user /login (TASK-15628)"
+git commit -m "feat(authnz): group sessions by install id, no row before MFA or for single-user /login (TASK-15628)" \
+  -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 4: 401 `session_replaced` for cap-evicted sessions
+### Task 4: 401 `session_replaced` for cap-evicted JWT sessions
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/AuthNZ/exceptions.py:62-69`. Add `SessionReplacedError` after `InvalidTokenError`.
-- Modify: `tldw_Server_API/app/core/AuthNZ/repos/sessions_repo.py`. Add the new lookup after `has_revoked_session_for_token_hash_candidates` (lines 453-537).
+- Modify: `tldw_Server_API/app/core/AuthNZ/repos/token_blacklist_repo.py`. Add the jti lookup after `get_active_expiry_for_jti` (lines 211-250).
+- Modify: `tldw_Server_API/app/core/AuthNZ/repos/sessions_repo.py`. Add the row lookup after `has_revoked_session_for_token_hash_candidates` (lines 453-537).
 - Modify: `tldw_Server_API/app/core/AuthNZ/session_manager.py`. Add `session_replaced_http_exception` at module level, and `get_revoke_reason` and `revoked_token_exception` next to `is_token_blacklisted` (lines 1598-1667).
-- Modify: `tldw_Server_API/app/core/AuthNZ/single_user_session.py`
-- Modify: `tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py:585-595`
-- Modify: `tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py:349-375`
+- Modify: `tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py:588-590`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/auth.py:2372-2382` and `:2535-2549` (refresh)
-- Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_http_sqlite.py`, `tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py`
+- Test: `tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_http_sqlite.py`, `tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_sqlite.py`
 
 **Interfaces:**
-- Consumes: `SESSION_CAP_REVOKE_REASON` (Task 1), the cap (Task 2), the HTTP fixtures (Task 3).
+- Consumes: `SESSION_CAP_REVOKE_REASON` (Task 1), the cap and its blacklist writes (Task 2), and the HTTP fixtures (Task 3).
 - Produces:
   - `class SessionReplacedError(InvalidTokenError)`
-  - `AuthnzSessionsRepo.fetch_revoke_reason_for_token_hash_candidates(token_hash_candidates: list[str]) -> str | None`: the `revoke_reason` of a revoked row whose `token_hash` or `refresh_token_hash` matches.
+  - `AuthnzTokenBlacklistRepo.get_reason_for_jti(jti: str) -> str | None`. It returns the `reason` stored for that jti. Task 2's `_blacklist_session_tokens` call writes `session_cap` there for both jtis of an evicted session, and the row outlives the purged session row.
+  - `AuthnzSessionsRepo.fetch_revoke_reason_for_token_hash_candidates(token_hash_candidates: list[str]) -> str | None`. It returns the `revoke_reason` of a revoked row whose `token_hash` or `refresh_token_hash` matches. This is the fallback for victims evicted before their jtis were set.
   - `session_replaced_http_exception() -> HTTPException` in `session_manager.py`. It returns `HTTPException(401, detail={"code": "session_replaced", "message": "You were signed out because your account was signed in on another device."}, headers={"WWW-Authenticate": "Bearer"})`.
-  - `SessionManager.get_revoke_reason(self, token: str) -> Optional[str]`: returns None on any lookup error.
-  - `SessionManager.revoked_token_exception(self, token: str, default: HTTPException) -> HTTPException`: returns `session_replaced_http_exception()` when the reason is `session_cap`, else `default`.
-  - `async def cookie_session_was_replaced(request: Any, manager: Any | None = None) -> bool` in `single_user_session.py`
+  - `SessionManager.get_revoke_reason(self, token: str) -> Optional[str]`. It reads the jti from `_get_unverified_claims(token)` and checks `get_reason_for_jti` first, then the sessions row by `_token_hash_candidates(token)`. It returns None on any lookup error.
+  - `SessionManager.revoked_token_exception(self, token: str, default: HTTPException) -> HTTPException`. It returns `session_replaced_http_exception()` when the reason is `session_cap`, else `default`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -545,10 +582,13 @@ async def test_fifth_login_evicts_oldest_and_its_token_gets_session_replaced(mul
     assert r.status_code == 401 and r.json()["detail"]["code"] == "session_replaced"
     assert len(client.get("/api/v1/auth/sessions", headers=bearer(fifth)).json()) == 4
 
-async def test_evicted_refresh_token_gets_session_replaced(multi_user_client):
+async def test_evicted_refresh_token_gets_session_replaced_after_purge(multi_user_client):
     first = _login(client, pw)
     for _ in range(4):
         _login(client, pw)
+    # backdate the evicted row's revoked_at by 2 h, then purge it
+    await AuthnzSessionsRepo(pool).cleanup_expired_sessions(session_cap_retention=timedelta(hours=1))
+    assert evicted_row_is_gone()
     r = client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]})
     assert r.status_code == 401 and r.json()["detail"]["code"] == "session_replaced"
 
@@ -559,42 +599,40 @@ async def test_logged_out_token_keeps_generic_401(multi_user_client):
     assert r.status_code == 401 and r.json()["detail"] == "Could not validate credentials"
 ```
 
-2. In `test_single_user_cookie_session.py`:
+2. In `test_session_cap_sqlite.py`. Temp tokens carry no jti, so the lookup must fall back to the session row:
 
 ```python
-def test_cap_evicted_cookie_gets_session_replaced(single_user_cookie_client):
-    # mint install-aaaaaaaa and keep its cookie; mint four more installs, clearing cookies each time
-    client.cookies.clear()
-    client.cookies.set("tldw_single_user_session", a_cookie)
-    r = client.get("/api/v1/auth/sessions")
-    assert r.status_code == 401 and r.json()["detail"]["code"] == "session_replaced"
+async def test_revoke_reason_falls_back_to_the_session_row(authnz_sqlite):
+    first = await manager.create_session(user_id=uid, access_token="temp_access_first", refresh_token="temp_refresh_first")
+    for _ in range(4):
+        await _create(manager, uid)
+    assert await manager.get_revoke_reason("temp_access_first") == "session_cap"
 ```
 
 - [ ] **Step 2: Run the tests and confirm they fail**
 
-Run: `run_py t4-red tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_http_sqlite.py tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py`
-Expected: FAIL. The detail is the string "Could not validate credentials", "Invalid or expired refresh token", or "Not authenticated…".
+Run: `run_py t4-red tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_http_sqlite.py tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_sqlite.py`
+Expected: FAIL. The detail is the string "Could not validate credentials" or "Invalid or expired refresh token", and `get_revoke_reason` does not exist.
 
 - [ ] **Step 3: Implement**
 
-1. The new repo lookup and `get_revoke_reason`, which uses `_token_hash_candidates(token)`.
-2. `cookie_session_was_replaced(request, manager)` reads the cookie, returns False when there is none, and compares `get_revoke_reason(cookie)` with `SESSION_CAP_REVOKE_REASON`.
-3. In `verify_jwt_and_fetch_user`, replace only the `raise credentials_exception` inside the blacklist branch (line 590) with `raise await session_manager.revoked_token_exception(token, credentials_exception)`. This keeps the function net-zero against its 436-line ceiling.
-4. In `get_auth_principal`, the no-credentials branch: before the generic 401, `if await cookie_session_was_replaced(request): raise session_replaced_http_exception()`. That is two lines, within its 314 ceiling.
-5. In `/auth/refresh`, in the blacklist branch: if the reason is `session_cap`, raise `SessionReplacedError()`. In the `except (TokenExpiredError, InvalidTokenError)` handler, `if isinstance(e, SessionReplacedError): raise session_replaced_http_exception() from e` comes before the generic 401.
-6. The reason is looked up only on these failure paths, so the success path gets no new queries.
+1. Add the two repo lookups, `get_revoke_reason`, `revoked_token_exception` and `session_replaced_http_exception`.
+2. In `verify_jwt_and_fetch_user`, replace only the `raise credentials_exception` inside the blacklist branch (line 590) with `raise await session_manager.revoked_token_exception(token, credentials_exception)`. This keeps the function net-zero against its 436-line ceiling.
+3. In `/auth/refresh`, in the blacklist branch: if `get_revoke_reason(payload.refresh_token)` is `session_cap`, raise `SessionReplacedError()`. In the `except (TokenExpiredError, InvalidTokenError)` handler, `if isinstance(e, SessionReplacedError): raise session_replaced_http_exception() from e` comes before the generic 401.
+4. The reason is looked up only on these failure paths, so the success path gets no new queries. Single-user cookie requests are not touched: they keep a plain 401 (Deviation 11).
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-Run: the Step 2 command, plus `tldw_Server_API/tests/AuthNZ/unit/test_auth_endpoints_extended.py tldw_Server_API/tests/AuthNZ/unit/test_user_db_handling_jwt_membership.py tldw_Server_API/tests/AuthNZ/unit/test_auth_principal_service_and_single_user_tokens.py tldw_Server_API/tests/AuthNZ_Unit/test_auth_refresh_sqlite_connection_scope.py tldw_Server_API/tests/lint/test_function_size_ratchet.py`
+Run: the Step 2 command, plus `tldw_Server_API/tests/AuthNZ/unit/test_auth_endpoints_extended.py tldw_Server_API/tests/AuthNZ/unit/test_user_db_handling_jwt_membership.py tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_token_blacklist_repo_sqlite.py tldw_Server_API/tests/AuthNZ_Unit/test_auth_refresh_sqlite_connection_scope.py tldw_Server_API/tests/lint/test_function_size_ratchet.py`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/AuthNZ tldw_Server_API/app/api/v1/endpoints/auth.py \
-  tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_http_sqlite.py tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py
-git commit -m "feat(authnz): answer a cap-evicted session with 401 session_replaced (TASK-15628)"
+  tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_http_sqlite.py tldw_Server_API/tests/AuthNZ_SQLite/test_session_cap_sqlite.py
+git commit -m "feat(authnz): answer a cap-evicted JWT session with 401 session_replaced (TASK-15628)" \
+  -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -610,7 +648,9 @@ git commit -m "feat(authnz): answer a cap-evicted session with 401 session_repla
   - `performTokenRefresh` 401 branch (lines 359-370)
 - Modify: `apps/packages/ui/src/services/tldw/auth-refresh-error.ts:4-17`
 - Modify: `apps/packages/ui/src/services/background-proxy.ts:755-758`, the 401 branch of `refreshAuthDirect`
-- Modify: `apps/tldw-frontend/extension/shims/runtime-bootstrap.ts`, the POST in `bootstrapCookieSession` (after #3578)
+- Modify: `apps/tldw-frontend/extension/shims/runtime-bootstrap.ts`:
+  - the POST in `bootstrapCookieSession` (line 342)
+  - the unguarded `globalThis.crypto.randomUUID()` at line 480. It throws on plain-HTTP LAN origins.
 - Modify: `apps/tldw-frontend/pages/api/_tldw-webui/session.ts:98-104`
 - Modify: `apps/tldw-frontend/routes/login.tsx`, `SelfHostLogin` (lines 30-123)
 - Test (create): `apps/packages/ui/src/services/tldw/__tests__/session-identity.test.ts`, `apps/packages/ui/src/services/tldw/__tests__/TldwAuth.session-identity.test.ts`. Copy the `vi.mock` preamble of `TldwAuth.refresh.test.ts` and add `invalidateRefreshSession` to the `tldwClient` mock.
@@ -620,10 +660,8 @@ git commit -m "feat(authnz): answer a cap-evicted session with 401 session_repla
 - Consumes: the backend header name `X-TLDW-Device-Id` and id format `^[A-Za-z0-9_-]{8,64}$` (Task 3), and the 401 body `{"detail": {"code": "session_replaced", ...}}` (Task 4).
 - Produces (`session-identity.ts`; storage keys `tldw:install-id` and `tldw:session-replaced`; every storage access wrapped in try/catch):
   - `INSTALL_ID_HEADER = "X-TLDW-Device-Id"`
-  - `getInstallIdHeaders(): Record<string, string>`. The whole body sits in one try/catch, because sign-in must never fail because of the id.
-    - It creates the id once with `crypto.randomUUID()`.
-    - When `randomUUID` is absent (plain-HTTP origins other than localhost), it falls back to 16 bytes of `crypto.getRandomValues` as hex, following `generateSessionId` in `apps/tldw-frontend/lib/session.ts:126-145`.
-    - It returns `{}` when neither is available or storage throws.
+  - `createRandomId(): string | null`. It returns `crypto.randomUUID()`; when `randomUUID` is absent (plain-HTTP origins other than localhost), 16 bytes of `crypto.getRandomValues` as hex, following `generateSessionId` in `apps/tldw-frontend/lib/session.ts:126-145`; and `null` when neither exists or either throws.
+  - `getInstallIdHeaders(): Record<string, string>`. It creates the id once with `createRandomId()` and stores it. The whole body sits in one try/catch, because sign-in must never fail because of the id. It returns `{}` when there is no id or storage throws.
   - `noteSessionReplaced(error: unknown): void`: records the notice only when `status === 401` and `(error.details?.detail ?? error.detail)?.code === "session_replaced"`.
   - `hasSessionReplacedNotice(): boolean`
   - `clearSessionReplacedNotice(): void`
@@ -700,6 +738,11 @@ it("sends the per-install id on the cookie mint", async () => {
   const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/_tldw-webui/session")!
   expect(init.headers["X-TLDW-Device-Id"]).toBe(localStorage.getItem("tldw:install-id"))
 })
+it("publishes the cookie-session config when randomUUID is missing", async () => {
+  vi.stubGlobal("crypto", { getRandomValues: (a: Uint8Array) => a.fill(171) })
+  // drive the existing successful cookie bootstrap case
+  expect(storedCookieSessionConfig().verificationRevision).toBe("ab".repeat(16))
+})
 
 // login-page.test.tsx
 it("explains a sign-out caused by a newer sign-in", async () => {
@@ -726,42 +769,48 @@ Expected: FAIL. The `session-identity` module is missing, and no header or notic
 
 1. `session-identity.ts` as specified in Interfaces, including the try/catch and the `getRandomValues` fallback.
 2. `TldwAuth.login` and `verifyMagicLink`: spread `getInstallIdHeaders()` into the request headers. `publishLogin` calls `clearSessionReplacedNotice()`. The 401 branch of `performTokenRefresh` calls `noteSessionReplaced(error)` before it invalidates the session.
-3. The 401 branch of `refreshAuthDirect` calls `noteSessionReplaced(error)`.
-4. In `runtime-bootstrap.ts`, the mint POST gets `headers: getInstallIdHeaders()`.
+3. The 401 branch of `refreshAuthDirect` calls `noteSessionReplaced(error)` **before** `invalidateRefreshSessionIfCurrent`, because the invalidation triggers the push to `/login`.
+4. In `runtime-bootstrap.ts`, the mint POST gets `headers: getInstallIdHeaders()`, and line 480 becomes `verificationRevision: createRandomId() ?? String(Date.now())`. It is a revision marker, not a secret.
 5. The Next proxy copies `req.headers['x-tldw-device-id']` to `X-TLDW-Device-Id` only when it is a string that matches `/^[A-Za-z0-9_-]{8,64}$/`.
 6. `SelfHostLogin` reads `hasSessionReplacedNotice()` in a `useState` initializer. It must be a read, not a consume, so React StrictMode cannot lose it. When true, it renders `SESSION_REPLACED_MESSAGE` in a `role="status"` paragraph above the form. The notice is cleared by the next successful login.
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-Run: the two commands from Step 2, plus the existing suites one at a time:
+Run: the two commands from Step 2, plus these, one at a time:
 - `cd apps/packages/ui && bunx vitest run src/services/tldw/__tests__ src/services/__tests__/background-proxy.test.ts src/services/__tests__/tldw-auth.refresh-rotation.test.ts --maxWorkers=2`
 - `cd apps/tldw-frontend && bunx vitest run __tests__/extension __tests__/pages __tests__/navigation/login-page.test.tsx --maxWorkers=2`
-- `bun run --cwd apps/packages/ui tsc --noEmit`
+- The checks CI runs, from `.github/workflows/frontend-required.yml:836-865`, all from `apps/tldw-frontend`:
+  - `bun run lint`
+  - `bun run typecheck --incremental false`
+  - `node scripts/check-shared-hooks.mjs`
+  - `bun scripts/check-ui-import-cycles.mjs`
+  - `bunx tsc --project tsconfig.strict.json`
 
-Expected: PASS, with no type errors.
+Expected: PASS, with no lint, type or import-cycle errors.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/services apps/tldw-frontend/extension/shims/runtime-bootstrap.ts \
   apps/tldw-frontend/pages/api/_tldw-webui/session.ts apps/tldw-frontend/routes/login.tsx apps/tldw-frontend/__tests__
-git commit -m "feat(webui): send a per-install id on sign-in and explain a replaced session (TASK-15628)"
+git commit -m "feat(webui): send a per-install id on sign-in and explain a replaced session (TASK-15628)" \
+  -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 6: ADR, backlog, full verification, PR
+### Task 6: ADR, follow-up task, backlog, full verification, PR
 
 **Files:**
-- Create: `Docs/ADR/098-per-user-session-cap.md`. The number is confirmed in Step 1.
+- Create: `Docs/ADR/<NNN>-per-user-session-cap.md`. `<NNN>` is resolved in Step 1 and used everywhere below.
 - Modify: `Docs/ADR/README.md`. Append one index row after the last row.
 - Modify: `Docs/Published/ADR/*` via the refresh script
-- Modify: `backlog/tasks/task-15628 - …md`, through the backlog tool only
+- Modify: `backlog/tasks/task-15628 - …md`, and create TASK-15635, through the backlog tool only
 
 **Interfaces:**
 - Consumes: everything above. Produces documentation only.
 
-- [ ] **Step 1: Confirm the ADR number**
+- [ ] **Step 1: Resolve `<NNN>`**
 
 Run:
 ```bash
@@ -769,30 +818,35 @@ git ls-tree --name-only origin/dev Docs/ADR/ | grep -oE '/[0-9]{3}-' | sort -u |
 gh pr list --state open --limit 300 --json number,files \
   -q '.[] | .number as $n | .files[].path | select(test("^Docs/ADR/[0-9]{3}-")) | "\($n) \(.)"' | sort -k2 | tail -5
 ```
-Expected: the highest claimed number is `097`, held by #3437 and #3071 as of 2026-11-23. Use the next free number; the file names in this task assume 098.
+Expected: the next number that neither `dev` nor an open PR claims. On 2026-11-24 that is 099: 097 is claimed by #3437 and #3071, 098 by #3294.
 
 - [ ] **Step 2: Write the ADR** from `Docs/ADR/000-template.md`.
-  - Header: `Status: Accepted`, `Backfilled from: not backfilled`, decision owner "repository owner (design approval 2026-11-23)", related tasks TASK-15628 and TASK-15632, related spec/plan paths.
-  - **Decision (one sentence):** every AuthNZ session row is created through one per-user-serialized, capped insert that keeps at most `MAX_SESSIONS_PER_USER` (default 4) live sessions. It revokes (does not delete) the oldest live session of the same client install first, then the user's oldest. Sign-in is never refused.
+  - Header: `Status: Accepted`, `Backfilled from: not backfilled`, decision owner "repository owner (design approval 2026-11-23, eviction order revised 2026-11-24)", related tasks TASK-15628 and TASK-15632, related spec/plan paths.
+  - **Decision (one sentence):** every AuthNZ session row is created through one per-user-serialized, capped insert that keeps at most `MAX_SESSIONS_PER_USER` (default 4) live sessions. It revokes (does not delete) the least recently active live session of the same client install first (sign-ins without an install id are one group), then the user's least recently active session. Sign-in is never refused.
   - **Context:** the 2026-11-23 storm (a new 30-day row about every 1.7 s), no bound anywhere in AuthNZ, and single-user mode where every browser looked identical.
   - **Alternatives table:**
     - refuse sign-in at the cap: rejected because it can lock the owner out;
     - short-lived mint, extended on first use: TASK-15628 option (b), which does not bound live rows from a fast client;
     - group by IP or user agent: spoofable, and merges machines behind one NAT;
+    - evict the oldest created: signs out a long-lived, actively used browser before an abandoned newer one;
     - delete instead of revoke: the evicted client could not be told why;
     - a single-key advisory lock: the key space is shared with other code;
     - per-row `revoke_session` calls: each opens its own transaction, so the cap would not be atomic.
   - **Consequences:**
     - The live predicate `COALESCE(refresh_expires_at, expires_at) > now` is shared by the cap, the listing, `require_online` and cleanup.
     - An idle session now stays refreshable for the full `REFRESH_TOKEN_EXPIRE_DAYS`. Before this change, cleanup deleted the row about 1 day after the access token expired, which ended the session early.
-    - Evicted clients get 401 `session_replaced`.
+    - `require_online` changes in two ways:
+      - it treats a multi-user session as online for as long as it is refreshable, up to `REFRESH_TOKEN_EXPIRE_DAYS`;
+      - a single-user account that only called `/login` no longer counts as online.
+    - Evicted JWT clients get 401 `session_replaced`, read from the `token_blacklist` reason, which outlives the purged session row. Single-user cookie sessions get a plain 401 and re-mint.
     - Cap rows are purged after `max(1 h, access-token lifetime)`.
-    - The install id is a grouping hint only.
+    - `token_blacklist` is never purged today (`TokenBlacklist.cleanup_expired` has no caller). TASK-15635 schedules that purge.
+    - The install id is a grouping hint only. Scripts should use API keys: password-login clients without an id (the CLI wizard, the admin-ui login route, OIDC redirects) share slots with each other.
     - The MFA row is created at completion.
     - Single-user `/login` creates no row.
     - API keys are not sessions.
     - Test suites that sign one user in from more than four parallel workers must raise `MAX_SESSIONS_PER_USER` in that suite's backend env.
-  - Add the README index row `| [ADR-098](098-per-user-session-cap.md) | Accepted | Cap live sessions per user; evict same-install first; never refuse sign-in. |`.
+  - Add the README index row `| [ADR-<NNN>](<NNN>-per-user-session-cap.md) | Accepted | Cap live sessions per user; evict the least recently active, same install first; never refuse sign-in. |`.
   - The account-lock rule from spec section 3 gets its own ADR with PR 3.
 
 - [ ] **Step 3: Mirror the docs and check them**
@@ -800,29 +854,30 @@ Expected: the highest claimed number is `097`, held by #3437 and #3071 as of 202
 Run: `Helper_Scripts/refresh_docs_published.sh && run_py t6-docs tldw_Server_API/tests/Docs`
 Expected: PASS, including `test_adr_number_identifies_one_document_in_each_catalog`.
 
-- [ ] **Step 4: Update the backlog task**
+- [ ] **Step 4: Update the backlog**
 
-Run: `PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd "$PWD" task edit TASK-15628 --status Done --check-ac 1 --check-ac 2 --check-ac 3 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 5 --check-dod 6 --final-summary "<what shipped: cap 4 via MAX_SESSIONS_PER_USER, same-install eviction, live predicate, session_replaced, MFA row at completion, single-user /login no row; tests SQLite+PG; ADR-098>" --append-notes "Design: Docs/Design/2026-11-23-session-cap-alert-lock-design.md section 1; plan: Docs/superpowers/plans/2026-11-23-session-cap.md"`
-Then: `git add -A backlog/tasks`
-Expected: the file shows status Done with every AC checked. DoD #4 (Bandit) is checked in Step 6.
+Run, with `BL='PYTHONPATH=tools/backlog-py/src /Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m backlog_py --cwd "$PWD"'`:
+1. `$BL task create "Schedule the token_blacklist purge in authnz_scheduler" --id TASK-15635 -s "To Do" -l authnz,security -d "TokenBlacklist.cleanup_expired (token_blacklist.py:535) has no caller, so token_blacklist grows without bound; the session cap (TASK-15628) writes two rows per evicted JWT session. Schedule it in services/authnz_scheduler.py next to the session cleanup." --ac "The purge runs on the authnz scheduler on SQLite and PostgreSQL" --ac "Rows are deleted only after their expires_at"`
+2. `$BL task edit TASK-15628 --status Done --check-ac 1 --check-ac 2 --check-ac 3 --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 5 --check-dod 6 --final-summary "<what shipped: cap 4 via MAX_SESSIONS_PER_USER, least-recently-active eviction with same-install and header-less groups, live predicate, session_replaced, MFA row at completion, single-user /login no row; tests SQLite+PG; ADR-<NNN>; follow-up TASK-15635>" --append-notes "Design: Docs/Design/2026-11-23-session-cap-alert-lock-design.md section 1; plan: Docs/superpowers/plans/2026-11-23-session-cap.md"`
+3. `git add -A backlog/tasks`
+
+Expected: TASK-15628 shows status Done with every AC checked, and TASK-15635 exists. DoD #4 (Bandit) is checked in Step 6.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add Docs/ADR Docs/Published && git add -A backlog/tasks
-git commit -m "docs(adr): ADR-098 per-user session cap; close TASK-15628"
+git commit -m "docs(adr): ADR-<NNN> per-user session cap; close TASK-15628, file TASK-15635" \
+  -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 6: Run the full verification**
 
-1. Run every test file that touches session creation, listing, cleanup or the single-user cookie, in batches of about 20 files per `run_py` call. Get the list with:
-   `git grep -l -e 'auth/login' -e '\.create_session(' -e 'single-user/session' -e 'magic-link/verify' -e 'mfa/login' -e 'auth/refresh' -e 'get_active_sessions' -e 'get_user_sessions' -e 'cleanup_expired_sessions' -e 'single-user-cookie' -- 'tldw_Server_API/tests/**/test_*.py' | grep -v -e /TTS/ -e /Sandbox/ -e /Agent_Client_Protocol/ -e /Persona/`
-   Also run `tldw_Server_API/tests/AuthNZ_SQLite tldw_Server_API/tests/AuthNZ_Unit tldw_Server_API/tests/lint tldw_Server_API/tests/Collections/test_reading_digests.py`. The lint directory includes `test_function_size_ratchet.py` and `test_env_vars_docs_ratchet.py`.
-   - Expected: PASS.
-   - For any failure, re-run the same test id in one reusable trial worktree on `origin/dev` before calling it pre-existing.
-   - A test that signs one user in more than four times and then reuses the first token is a real behaviour change: fix the test to use a fresh token, or set `MAX_SESSIONS_PER_USER` in that test.
-2. Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/AuthNZ/session_manager.py tldw_Server_API/app/core/AuthNZ/repos/sessions_repo.py tldw_Server_API/app/core/AuthNZ/single_user_session.py tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py tldw_Server_API/app/api/v1/endpoints/auth.py -f json -o "$TMPDIR/bandit_task15628.json"`. Expected: no new findings in the changed lines. Then run `task edit TASK-15628 --check-dod 4` with the backlog tool and commit the backlog change.
-3. Lint: `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/ruff check <touched .py files>`. Expected: clean.
+1. Run `run_py t6-all` over the Task 2 Step 6 sweep list plus `tldw_Server_API/tests/AuthNZ_SQLite tldw_Server_API/tests/AuthNZ_Unit tldw_Server_API/tests/lint tldw_Server_API/tests/Collections/test_reading_digests.py`, in batches of about 20 files. Expected: PASS. Before calling any failure pre-existing, baseline it on `origin/dev`.
+2. Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/AuthNZ/session_manager.py tldw_Server_API/app/core/AuthNZ/repos/sessions_repo.py tldw_Server_API/app/core/AuthNZ/repos/token_blacklist_repo.py tldw_Server_API/app/core/AuthNZ/single_user_session.py tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py tldw_Server_API/app/api/v1/endpoints/auth.py -f json -o "$TMPDIR/bandit_task15628.json"`. Bandit is not installed in that venv today (`No module named bandit`): if the import fails, record "Bandit: environment skip, runs in CI" in the task notes instead of installing anything.
+   - Expected: no new findings in the changed lines.
+   - Then run `$BL task edit TASK-15628 --check-dod 4` and commit the backlog change, with the same `-m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"` trailer.
+3. Lint: `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/ruff check <touched .py files>`. Expected: no new findings. Explicit paths bypass the `tests` exclude and some touched files already have findings on dev, so new files must be clean and each changed file is compared with `git show origin/dev:<f> | ruff check --stdin-filename <f> -`.
 
 - [ ] **Step 7: Decide the E2E session budget before pushing**
 
@@ -830,15 +885,21 @@ Read the two Playwright suites that sign one user in repeatedly. For each, count
 - **`apps/tldw-frontend/e2e/single-user-cookie-lifecycle.spec.ts`.** The suite is `test.describe.serial`, with one worker. Its backend env is the spec's own `backendEnvironment` (line 55), not `webServerEnv` in `apps/tldw-frontend/playwright.config.ts`, which configures the Next server.
   - It relaunches persistent profiles, which keep one install id.
   - It also mints directly with the API key and no header, which puts those rows in the bare-tag group.
-- **admin-ui real-backend.** `admin-ui/playwright.config.ts` sets no `workers`, so Playwright uses its default of half the cores. The seeded users (`_ADMIN_USERNAME` and the others in `admin_e2e_support_service.py`) get a session from `bootstrap-jwt-session` in global setup and sign in through `/api/auth/login` in each test. The backend env is `buildBackendEnv` in `admin-ui/tests/e2e/real-backend/helpers/backend-lifecycle.ts:55`.
+- **admin-ui real-backend.** `admin-ui/playwright.config.ts` sets no `workers`, so Playwright uses its default of half the cores. The seeded users (`_ADMIN_USERNAME` and the others in `admin_e2e_support_service.py`) get a session from `bootstrap-jwt-session` in global setup and sign in, with no install id, through `/api/auth/login` in each test. The backend env is `buildBackendEnv` in `admin-ui/tests/e2e/real-backend/helpers/backend-lifecycle.ts:55`.
 
 Expected: a written decision for each suite, recorded in the PR body. Either "fits within 4", or the suite's own backend env sets `MAX_SESSIONS_PER_USER` to the counted need, committed in this PR. Never change the default cap.
 
 - [ ] **Step 8: Push and open the PR**
 
 1. `git push -u origin feat/session-cap-15628`, then `gh pr create --base dev`.
-   - Title: `feat(authnz): cap live sessions per user, same-install eviction (TASK-15628)`.
-   - Body: summary, test evidence (including whether the PostgreSQL tests ran), the E2E decision from Step 7, the "Deviations from spec" list below, and the attribution line from the session reminder.
+   - Title: `feat(authnz): cap live sessions per user, least-recently-active eviction (TASK-15628)`.
+   - Body:
+     - summary
+     - the `require_online` change (ADR Consequences)
+     - test evidence, including whether the PostgreSQL tests ran
+     - the E2E decision from Step 7
+     - the "Deviations from spec" list below
+     - the attribution line from the session reminder
 2. Run the clean-subagent code review.
 3. After CI, diff the Frontend E2E journeys and the admin-ui real-backend runs against a recent `dev` run.
 4. Merge directly when CLEAN. Never use auto-merge.
@@ -852,22 +913,24 @@ Expected: a written decision for each suite, recorded in the PR body. Either "fi
   - live predicate and its callers: Task 1 (schedulers, admin listing, profile security) and Task 3 (`/auth/sessions` and `/users/sessions` list and revoke)
   - what counts as a session (single-user `/login` and MFA): Task 3
   - per-install id: Tasks 3 and 5
-  - eviction at the cap, the eviction rule and atomicity: Task 2
+  - eviction at the cap, the eviction rule (least recently active, same-install and header-less groups) and atomicity: Task 2
   - `session_replaced` and the WebUI message: Tasks 4 and 5
-  - bounded storage: Task 1
+  - bounded storage: Task 1, with TASK-15635 for `token_blacklist`
   - single-user mode (TASK-15628): Tasks 2 and 3
   - ADR: Task 6
-  - lock re-read: not planned. PR 3 adds it inside the cap transaction, right after the lock.
+  - lock re-read: not planned. PR 3 adds it inside the cap transaction, right after the lock, under `SESSION_CAP_LOCK_NAMESPACE`.
 - **Required tests:**
-  - 5th sign-in evicts the oldest: `test_fifth_session_evicts_the_oldest` (+`_postgres`, + HTTP)
-  - same device replaces only its own row: `test_same_device_id_replaces_only_its_own_row`, `test_same_install_login_replaces_only_its_own_session`, cookie `test_install_that_drops_its_cookie_replaces_only_its_own_session`
+  - 5th sign-in evicts the oldest: `test_fifth_session_evicts_the_oldest` (+`_postgres`, + HTTP), and `test_cap_evicts_the_least_recently_active_session`
+  - same device replaces only its own row: `test_same_device_id_replaces_only_its_own_row`, `test_same_install_login_replaces_only_its_own_session`, cookie `test_install_that_drops_its_cookie_replaces_only_its_own_session`, `test_headerless_logins_replace_each_other_before_browsers`
   - concurrent sign-ins at the cap: `test_concurrent_creates_at_the_cap_never_exceed_it` (+`_postgres`)
   - expired-refresh rows do not count: `test_expired_refresh_rows_do_not_count_toward_the_cap` (+`_postgres`)
-  - evicted session gets 401 `session_replaced`: JWT, refresh and cookie tests in Task 4
+  - evicted session gets 401 `session_replaced`: the JWT and refresh-after-purge tests in Task 4
   - single-user `/login` inserts no row: `test_single_user_login_inserts_no_session_row`
   - purge after `max(1 h, access lifetime)`: `test_cleanup_purges_cap_evicted_rows_after_retention`
   - a value below 1 is rejected: `test_max_sessions_per_user_below_one_is_rejected`
-- **Type consistency:** these names are used identically everywhere: `SESSION_CAP_REVOKE_REASON`, `create_session_record_with_cap`, `request_device_id`, `DEVICE_ID_HEADER`, `is_single_user_cookie_device`, `get_revoke_reason`, `revoked_token_exception`, `session_replaced_http_exception`, `cookie_session_was_replaced`, `getInstallIdHeaders`, `noteSessionReplaced`, `hasSessionReplacedNotice`, `clearSessionReplacedNotice`.
+- **Type consistency:** these names are used identically everywhere:
+  - backend: `SESSION_CAP_REVOKE_REASON`, `SESSION_CAP_LOCK_NAMESPACE`, `create_session_record_with_cap`, `request_device_id`, `DEVICE_ID_HEADER`, `is_single_user_cookie_device`, `get_reason_for_jti`, `fetch_revoke_reason_for_token_hash_candidates`, `get_revoke_reason`, `revoked_token_exception`, `session_replaced_http_exception`
+  - frontend: `createRandomId`, `getInstallIdHeaders`, `noteSessionReplaced`, `hasSessionReplacedNotice`, `clearSessionReplacedNotice`
 
 ## Decisions the spec left open
 
@@ -875,30 +938,52 @@ Expected: a written decision for each suite, recorded in the PR body. Either "fi
 2. **Listing `expires_at`:** `get_active_sessions_for_user` reports `expires_at` as the session end, `COALESCE(refresh_expires_at, expires_at)`. Otherwise live idle sessions would list a past expiry. This matches `SessionResponse.expires_at` ("Session expiration time").
 3. **Cleanup grace:** cleanup keeps today's 1-day grace, now measured on the same session-end expression.
 4. **Purge retention:** computed as `max(60, ACCESS_TOKEN_EXPIRE_MINUTES)` minutes, from the JWT access lifetime also for cookie sessions. The cookie's 30-day life would defeat the bound.
-5. **Eviction details:** `revoked_by` is NULL for cap evictions. Ties break by `id`. The Redis session cache is not cleared on eviction, because validation always re-reads the row.
+5. **Eviction details:**
+   - Activity is `COALESCE(last_activity, created_at)`. `last_activity` is bumped by refresh and by cookie validation; plain JWT requests do not bump it.
+   - Ties break by `created_at`, then `id`.
+   - `revoked_by` is NULL for cap evictions.
+   - Each eviction emits `log_counter("auth_session_cap_evicted")`.
+   - The Redis session cache is not cleared, because validation always re-reads the row.
 6. **Uncapped insert:** `create_session_record` stays as the uncapped insert that the repo tests use. App code reaches only `create_session_record_with_cap` through `SessionManager.create_session`.
-7. **`mfa_login`:** reuses `_issue_multi_user_tokens` instead of keeping a duplicated token-issuing block. The row takes the IP, user agent and install id of the `/mfa/login` request; the cached payload must not carry client data (an existing test asserts this).
-8. **The notice:**
+7. **`mfa_login`:**
+   - It reuses `_issue_multi_user_tokens` instead of keeping a duplicated token-issuing block.
+   - The row takes the IP, user agent and install id of the `/mfa/login` request; the cached payload must not carry client data (an existing test asserts this).
+   - The challenge is single-use through `consume_ephemeral_value`.
+8. **The `session_replaced` reason:** read from the `token_blacklist` reason for the token's jti first, then from the session row. The blacklist row outlives the purged session row.
+9. **The notice:**
    - stored in localStorage (`tldw:session-replaced`), shown on the sign-in page, cleared by the next successful sign-in
-   - recorded from both web refresh paths (`TldwAuth.performTokenRefresh`, `refreshAuthDirect`)
+   - recorded from both web refresh paths, before the session is invalidated (`TldwAuth.performTokenRefresh`, `refreshAuthDirect`)
    - not recorded by the extension's background worker refresh, which has no sign-in page
-9. **E2E suites:** a suite that signs one seeded user in from more than four parallel workers raises `MAX_SESSIONS_PER_USER` in its own backend env.
+10. **E2E suites:** decided before pushing (Task 6 Step 7). A suite that needs more than four live sessions for one user raises `MAX_SESSIONS_PER_USER` in its own backend env.
 
 ## Deviations from spec
 
-1. **TASK-15628 is not on `dev` yet.** It exists only on the open PR #3578 branch, which also rewrites `runtime-bootstrap.ts`. This plan's branch must start after #3578 merges.
-2. **ADR number.** The spec says "the next free ADR number". On `origin/dev` that is 097, but open PRs #3437 and #3071 already add `Docs/ADR/097-*.md`, and `test_adr_number_identifies_one_document_in_each_catalog` forbids duplicates. Use 098 (re-checked in Task 6 Step 1).
-3. **ADR scope.** The spec envisions one ADR covering both the cap and the locked-account state. `Docs/ADR/README.md` rule 5 says "one decision per ADR", so the PR 1 ADR records the cap only, and the lock gets its own ADR with PR 3.
-4. **More listing callers than the spec names.** The spec lists three (`require_online` in the workflows scheduler, the admin listing, the `/users/sessions` aliases). The code also has:
+1. **ADR number.** The spec says "the next free ADR number". `dev` ends at 096, but open PRs claim 097 (#3437, #3071) and 098 (#3294), and `test_adr_number_identifies_one_document_in_each_catalog` forbids duplicates. The plan writes `<NNN>`, resolved in Task 6 Step 1; currently 099.
+2. **ADR scope.** The spec envisions one ADR covering both the cap and the locked-account state. `Docs/ADR/README.md` rule 5 says "one decision per ADR", so the PR 1 ADR records the cap only, and the lock gets its own ADR with PR 3.
+3. **More listing callers than the spec names.** The spec lists three (`require_online` in the workflows scheduler, the admin listing, the `/users/sessions` aliases). The code also has:
    - `/auth/sessions` list and revoke-one (`auth.py:2175`, `:2216`)
    - `require_online` in `services/reading_digest_scheduler.py:284`
    - `UserProfileService.build_security` (`core/UserProfiles/service.py:822`)
 
    All of them get tests.
-5. **The listing had no expiry predicate.** Today's `get_active_sessions_for_user` filters on `is_active` only. It still lists expired rows until cleanup deletes them, so the new predicate adds an expiry check rather than changing one. One effect: `require_online` now treats any session with a valid refresh token (up to 7 days idle) as online.
-6. **Revoked sessions never raise `SessionRevokedException`.** `validate_session` never raises it for a revoked row (`session_manager.py:1245`): `fetch_session_for_validation_*` filters `is_active`, so revoked rows come back as None. `session_replaced` therefore needs an explicit `revoke_reason` lookup on the failure path, for both the JWT and the cookie paths.
-7. **`session_replaced` on refresh too.** The spec says "a request". The plan also returns it from `POST /auth/refresh`, because that is the call through which the WebUI learns its session is gone. WebSocket cookie auth (`websocket_session_auth.py`) keeps its generic close.
+4. **The listing had no expiry predicate.** Today's `get_active_sessions_for_user` filters on `is_active` only, so the new predicate adds an expiry check rather than changing one.
+5. **"Active" counters are not changed.** `repos/monitoring_repo.py:176-186` and `services/admin_system_service.py:173,200` keep counting active sessions by access-token validity, so their numbers can differ from the live predicate.
+6. **Revoked sessions never raise `SessionRevokedException`.** `validate_session` never raises it for a revoked row (`session_manager.py:1245`): `fetch_session_for_validation_*` filters `is_active`, so revoked rows come back as None. `session_replaced` therefore needs an explicit reason lookup on the failure path.
+7. **`session_replaced` on refresh too.** The spec says "a request". The plan also returns it from `POST /auth/refresh`, because that is the call through which the WebUI learns its session is gone.
 8. **MFA on SQLite.** The spec's constraint says MFA exists only on PostgreSQL, but `tests/AuthNZ_SQLite/test_mfa_login_sqlite.py` runs MFA on SQLite, so the MFA change is tested there. Removing the placeholder is safe. Only `mfa_login` reads its id (through the cached payload); no failure path revokes it; three unit tests in `test_auth_endpoints_extended.py` assert the old shape and are updated. The WebUI has no MFA UI.
-9. **Single-user mint without an install id.** The row is stored and grouped under the bare `single-user-cookie:v1` tag. Header-less mints therefore replace each other before they touch browsers that sent an id, instead of the spec's "no id → user's oldest". This is simpler (no extra parameter) and stricter for TASK-15628. The bundled WebUI always sends the header.
-10. **OIDC callback.** It is a browser redirect, so it carries no install id and evicts by the default rule.
-11. **Known limit: single-user cookie mode never shows the notice.** The spec says the WebUI shows it on the sign-in page. But in single-user mode, `/login` redirects to settings, and the notice is recorded only from the multi-user refresh paths. A cap-evicted browser re-mints its cookie with the API key on its next bootstrap. The backend still answers that browser's requests with 401 `session_replaced` until then.
+9. **A missing install id is its own group in both modes.** The spec says "no id → the user's oldest". Instead, header-less sign-ins replace each other first, before any browser that sent an id:
+   - in single-user mode, rows tagged with the bare `single-user-cookie:v1`;
+   - in multi-user mode, rows with `device_id IS NULL`.
+
+   Scripts should use API keys, because password-login clients without an id (the CLI wizard, the admin-ui login route, OIDC redirects) share slots with each other. The bundled WebUI and extension always send the header.
+10. **OIDC callback.** It is a browser redirect, so it carries no install id and joins the header-less group.
+11. **Single-user cookie sessions get a plain 401 and silently re-mint.** They never see `session_replaced` or the notice:
+    - in single-user mode `/login` redirects to settings;
+    - no client reads the code on that path;
+    - the lines would sit under `get_auth_principal`'s ceiling, which PR 3 needs.
+12. **Known limits:**
+    - The hosted `/api/auth/login` proxy lives outside this repo and may drop the install-id header. Hosted sign-ins would then join the header-less group.
+    - Redis `session:<hash>` keys of evicted sessions are left to expire. Correctness is unaffected, because validation re-reads the row.
+13. **Rollback.** Reverting this PR has two visible effects:
+    - The old validator requires the exact tag, so it stops accepting `single-user-cookie:v1:<id>` cookies, and each browser re-mints once.
+    - MFA logins in flight fail with 400, because their cached payload has no `session_id`; the user signs in again.

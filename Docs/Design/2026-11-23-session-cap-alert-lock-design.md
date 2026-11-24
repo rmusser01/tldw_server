@@ -170,6 +170,8 @@ One helper in AuthNZ, `blocked_owner_ids()` / `owner_blocked(user_id)`: true whe
 - The alert is in-app. A user with no other signed-in browser sees it on their next sign-in, not before.
 - Any signed-in browser session can lock, including an intruder's. The cost to the owner is one email round trip. Requiring the password first was rejected: the password may be what leaked.
 - Only one previous email address is kept. If the owner changes their email and an intruder holding the password changes it again within 7 days, lock mail goes to the oldest and the newest address; the one in between gets only the change notice.
+- **Decision owed when PR 3 is planned:** if an intruder holding the password changes both the email and the password, the lock mail reaches the owner's previous address for 7 days, but the unlock link then also reaches the intruder and the owner cannot change the email back without the new password. PR 3 must decide whether a link sent to the previous address within 7 days may restore that address, or whether forgot-password within 7 days also mails the previous address. Either choice briefly gives the holder of the old mailbox power over the account.
+- The notice to the old address can be abused to mail a third party (set an account's email to their address, then change it away). Bounded by the follow-up rate-limit task (TASK-15634).
 - Administrators can still change their own email through the admin endpoints without a password; admin sessions are outside this threat model.
 - Org and team API keys owned by a locked user stop working for the whole team until unlock.
 - Magic link has no MFA step for ordinary sign-in today (only the unlock path gets one here). Existing gap, separate task.
