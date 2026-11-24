@@ -2,7 +2,7 @@
 
 This document gives new contributors a fast, opinionated tour of how tldw_server is structured and how the main pieces fit together at runtime. It complements the top-level `README.md` (high-level overview) and `Docs/Code_Documentation/Code_Map.md` (detailed code map).
 
-Start with the [C4 architecture reference](./Architecture/c4.md) to see the system boundaries and follow a request into FastAPI, the end-user WebUI or the standalone Admin Panel. Use the [subsystem index](./Architecture/README.md) to find the module guide and source entry points for a change.
+Start with the [C4 architecture reference](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/c4.md) to see the system boundaries and follow a request into FastAPI, the end-user WebUI or the standalone Admin Panel. Use the [subsystem index](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/README.md) to find the module guide and source entry points for a change.
 
 - High-level intro and mental model
 - Repository and directory layout
@@ -217,9 +217,9 @@ This section highlights common flows a new contributor will likely touch.
 
 ### 5.2 Chat with Retrieval
 
-1. In the WebUI's RAG mode, the [client](../apps/packages/ui/src/hooks/chat-modes/ragMode.ts) calls `POST /api/v1/rag/search`. The [retrieval pipeline](./Architecture/rag.md) resolves and ranks sources.
+1. In the WebUI's RAG mode, the [client](https://github.com/rmusser01/tldw_server/blob/dev/apps/packages/ui/src/hooks/chat-modes/ragMode.ts) calls `POST /api/v1/rag/search`. The [retrieval pipeline](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/rag.md) resolves and ranks sources.
 2. The client builds a grounded prompt from the returned sources and calls `POST /api/v1/chat/completions`.
-3. The [chat pipeline](./Architecture/chat-character.md) assembles the completion request and calls the configured provider through the [LLM gateway](./Architecture/llm-providers.md). Chat can stream the response back to the client.
+3. The [chat pipeline](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/chat-character.md) assembles the completion request and calls the configured provider through the [LLM gateway](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/llm-providers.md). Chat can stream the response back to the client.
 
 
 ### 5.3 Audio STT/TTS and Streaming
