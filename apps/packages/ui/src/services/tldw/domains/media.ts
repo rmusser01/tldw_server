@@ -1,5 +1,6 @@
 import { bgRequest, bgUpload } from "@/services/background-proxy"
 import type { DocumentUploadPreflightResponse } from "@/services/chat-document-processing"
+import type { DocumentChatImportPayload } from "@/db/dexie/document-chat-import"
 import {
   type ApiMediaCollection,
   type ApiMediaCollectionItem,
@@ -43,6 +44,16 @@ import type {
 } from "../TldwApiClient"
 
 export type DocumentChatTarget = { mediaId: number; mediaUuid: string }
+export type DocumentChatPage = {
+  items: Array<{ id: string; title: string | null; last_modified: string }>
+  has_more: boolean
+}
+export type DocumentChatRequestOptions = {
+  requestScope: ServicePromptRequestScope
+  signal?: AbortSignal
+  limit?: number
+  offset?: number
+}
 
 export function documentChatQuery(target?: DocumentChatTarget) {
   return target ? { document_media_id: target.mediaId, document_media_uuid: target.mediaUuid } : {}
@@ -120,6 +131,42 @@ export interface MediaDocumentVersion {
 }
 
 export const mediaMethods = {
+  async importDocumentChat(
+    target: DocumentChatTarget, payload: DocumentChatImportPayload, options: DocumentChatRequestOptions
+  ): Promise<{ id: string; document_chat_record?: string }> {
+    const scope = requestScopeFields(options.requestScope)
+    return bgRequest({
+      path: `/api/v1/chats/import${buildQuery(documentChatQuery(target))}` as AllowedPath,
+      method: "POST",
+      ...scope,
+      headers: { "Content-Type": "application/json", ...scope.headers },
+      body: payload,
+      abortSignal: options.signal
+    })
+  },
+  async listDocumentChats(target: DocumentChatTarget, options: DocumentChatRequestOptions): Promise<DocumentChatPage> {
+    const query = buildQuery({ media_uuid: target.mediaUuid, limit: options.limit, offset: options.offset })
+    return bgRequest({
+      path: `/api/v1/media/${target.mediaId}/chat-conversations${query}` as AllowedPath,
+      method: "GET",
+      ...requestScopeFields(options.requestScope),
+      abortSignal: options.signal
+    })
+  },
+
+  async attachDocumentChat(
+    target: DocumentChatTarget, chatId: string, record: string, options: DocumentChatRequestOptions
+  ): Promise<void> {
+    const scope = requestScopeFields(options.requestScope)
+    await bgRequest<unknown>({
+      path: `/api/v1/media/${target.mediaId}/chat-conversations/${encodeURIComponent(chatId)}` as AllowedPath,
+      method: "PUT",
+      ...scope,
+      headers: { "Content-Type": "application/json", ...scope.headers },
+      body: { media_uuid: target.mediaUuid, document_chat_record: record },
+      abortSignal: options.signal
+    })
+  },
   async listMediaDocumentVersions(
     mediaId: number,
     options?: ScopedRequestOptions,

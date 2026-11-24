@@ -6,6 +6,8 @@ from tldw_Server_API.app.core.Chat.history_selection import resolve_history_sele
 from tldw_Server_API.tests.Chat_NEW.integration.test_document_chat_links import (
     _attach,
     _create,
+)
+from tldw_Server_API.tests.Chat_NEW.integration.test_document_chat_links import (
     document_api as document_api,
 )
 

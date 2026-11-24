@@ -169,6 +169,7 @@ class VersionDetailResponse(BaseModel):
 class MediaDetailResponse(BaseModel):
     """Response model for retrieving a single media item's details (GET /{media_id})."""
     media_id: int = Field(..., description="Unique identifier for the media item.", json_schema_extra={"example": 123})
+    uuid: str | None = Field(default=None, exclude_if=lambda value: value is None, description="Stable Media identity.")
     source: MediaSourceDetail = Field(..., description="Details about the original source.")
     processing: MediaProcessingDetail = Field(..., description="Details about the processing applied.")
     content: MediaContentDetail = Field(..., description="Details about the extracted content.")

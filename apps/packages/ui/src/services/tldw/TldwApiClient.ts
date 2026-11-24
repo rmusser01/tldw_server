@@ -1145,6 +1145,7 @@ export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
 
 export interface ServerChatSummary extends RoleplayResumeMetadata {
   id: string
+  document_chat_record?: string
   title: string
   created_at: string
   updated_at?: string | null
@@ -4410,6 +4411,7 @@ export class TldwApiClientBase {
       seedFirstMessage?: boolean
       greetingStrategy?: "default" | "alternate_random" | "alternate_index"
       alternateIndex?: number
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<ServerChatSummary> {
     return chatRagMethods.createChat.call(this as unknown as TldwApiClientCore, payload, options)
@@ -4443,7 +4445,7 @@ export class TldwApiClientBase {
 
   async getChat(
     chat_id: string | number,
-    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean; documentTarget?: DocumentChatTarget } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     return chatRagMethods.getChat.call(this as unknown as TldwApiClientCore, chat_id, options)
   }

@@ -72,6 +72,7 @@ type HistoryLoadTarget = {
   historyId?: string | null
   serverChatId?: string | null
   documentTarget?: import("@/services/tldw/domains/media").DocumentChatTarget
+  documentRequestScope?: ServicePromptRequestScope
   temporary?: boolean
   scope?: ChatScope
   bindUnbound?: boolean
@@ -1121,7 +1122,7 @@ export function useHistorySelection(
         // verified. Failed preflight cleans B's subscriptions and leaves A usable.
         if (target.onDeviceScope) releaseCandidateLease = releaseLease
         else releaseOwnerLease.current = releaseLease
-        const requestScope = await resolveServicePromptScope({
+        const requestScope = target.documentRequestScope ?? await resolveServicePromptScope({
           signal: operation.signal
         })
         if (!valid || operation.epoch !== epoch.current || !isCurrent()) return false

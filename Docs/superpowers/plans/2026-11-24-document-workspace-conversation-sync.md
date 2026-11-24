@@ -69,7 +69,7 @@
 
 ## Stage 3 — Discover and resume the same tab on another browser
 
-**Status** Not Started.
+**Status** Complete.
 
 **Goal** Server history and local tabs work together without losing drafts or carrying state across accounts.
 
@@ -82,7 +82,7 @@
 
 ## Stage 4 — Save existing chats one at a time
 
-**Status** Not Started.
+**Status** Complete.
 
 **Goal** Link verified server-backed histories and promote eligible browser-only histories without data loss or duplicate copies.
 
@@ -96,10 +96,10 @@
 
 ## Stage 5 — Verify the release path
 
-**Status** Not Started.
+**Status** In Progress.
 
 **Goal** Confirm the actual two-device path, including document mode, native retention, and account isolation.
 
 - [ ] Add `apps/tldw-frontend/e2e/workflows/tier-2-features/document-workspace-chat-sync.spec.ts` using `DocumentWorkspacePage` and the existing auth fixtures. Use `tldw_Server_API/tests/Media_Ingestion_Modification/test_media/sample.pdf` and `sample.epub` against a real test backend with a deterministic model response. Create two independent browser contexts for one account and a third for a different account. Assert the same saved tab and citation open after foreground refresh, the existing draft survives, a follow-up question uses document content, and the other account sees no private chat titles. Test a per-chat legacy save and an unconfirmed first message.
-- [ ] Run `bun run e2e:pw e2e/workflows/tier-2-features/document-workspace-chat-sync.spec.ts --project=chromium` from `apps/tldw-frontend` against the test backend. Pass means the PDF and EPUB cases execute with zero skipped tests. Verify native, active Sync v2, and older-server behavior according to their capabilities.
+- [ ] Run `bun run e2e:pw e2e/workflows/tier-2-features/document-workspace-chat-sync.spec.ts --project=tier-2` from `apps/tldw-frontend` against the test backend. The Chromium tier-2 project includes this directory. Pass means the PDF and EPUB cases execute with zero skipped tests. Verify native, active Sync v2, and older-server behavior according to their capabilities.
 - [ ] Generate the API contract with `bun run generate` in `apps/packages/api-types` with the Python venv active. Commit `paths.d.ts` and `openapi.fingerprint.json`. Run `make openapi-drift-check`, the focused Python and frontend suites above, and Bandit on the touched Python modules in that venv. Record CI and two-browser evidence in TASK-15586 using backlog-py before marking its acceptance criteria complete.

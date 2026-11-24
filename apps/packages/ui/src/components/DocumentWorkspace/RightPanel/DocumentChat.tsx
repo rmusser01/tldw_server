@@ -1,7 +1,7 @@
-import React, { useState, useRef, useCallback, Suspense, useLayoutEffect, useId } from "react"
+import React, { useState, useRef, useCallback, Suspense, useLayoutEffect, useId, useMemo } from "react"
 import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
-import { Empty, Spin, Switch, Tooltip } from "antd"
+import { Empty, Modal, Spin, Switch, Tooltip } from "antd"
 import {
   SendHorizontal,
   Plus,
@@ -16,7 +16,9 @@ import { useDocumentChat, type DocumentChatCache } from "@/hooks/document-worksp
 import { useDocumentMetadata } from "@/hooks/document-workspace/useDocumentMetadata"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { markChatTurnStoppedByUser } from "@/hooks/chat/abort-turn-cleanup"
+import { chatSubmitFailed } from "@/hooks/chat/chat-action-utils"
 import { SuggestedQuestions } from "./SuggestedQuestions"
+import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
 
 const PlaygroundMessage = React.lazy(() =>
   import("@/components/Common/Playground/Message").then((m) => ({
@@ -52,7 +54,12 @@ export const DocumentChat: React.FC<{
     (s) => s.activeDocumentType
   )
 
-  // Use the document chat hook to scope RAG
+  const { data: documentMetadata, isLoading: documentLoading } = useDocumentMetadata(activeDocumentId, operation)
+  const mediaUuid = documentMetadata?.uuid
+  const documentTarget = useMemo(() => activeDocumentId != null && mediaUuid
+    ? { mediaId: activeDocumentId, mediaUuid }
+    : undefined, [activeDocumentId, mediaUuid])
+
   const {
     messages,
     streaming,
@@ -70,10 +77,25 @@ export const DocumentChat: React.FC<{
     selectConversation,
     retryConversation,
     onHistorySaved,
+    nativeHistory,
+    linkedServerChatId,
+    syncSupported,
+    syncIssue,
+    browserOnly,
+    canChooseSaveMode,
+    setBrowserOnly,
+    prepareLinkedSend,
+    refreshAfterSend,
+    canSaveToServer,
+    saveNeedsConfirmation,
+    saveNeedsReview,
+    saveFeedback,
+    savingToServer,
+    saveToServer,
     trackTurn,
     ragEnabled,
     setRagEnabled
-  } = useDocumentChat(activeDocumentId, operation, workspaceConversations)
+  } = useDocumentChat(activeDocumentId, operation, workspaceConversations, documentTarget)
 
   // Get full message option for onSubmit and other actions
   const {
@@ -89,15 +111,13 @@ export const DocumentChat: React.FC<{
     actionInfo,
     selectedModel
   } = useMessageOption({
-    hydrateServerChat: isChatReady,
+    hydrateServerChat: isChatReady && !linkedServerChatId,
     capturePrivateScene,
     historyDocumentId,
     onDocumentHistorySaved: onHistorySaved
   })
   const waitingForChatDetails = isChatReady && Boolean(serverChatId) && !serverChatMetaLoaded
-  const canSend = isChatReady && !waitingForChatDetails
-
-  const { data: documentMetadata } = useDocumentMetadata(activeDocumentId)
+  const canSend = isChatReady && !documentLoading && !waitingForChatDetails && !(linkedServerChatId && temporaryChat)
 
   const isResearchPaper = React.useMemo(() => {
     if (activeDocumentType !== "pdf") return false
@@ -176,9 +196,35 @@ export const DocumentChat: React.FC<{
     }
   }, [canSend, trackTurn])
 
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [confirmSave, setConfirmSave] = useState(false)
+  useLayoutEffect(() => {
+    setSendError(null)
+    setConfirmSave(false)
+  }, [activeConversationKey])
+
   const submitQuestion = useCallback((question: string, isContinue = false) =>
-    runTurn(controller => onSubmit({ message: question, image: "", controller, isContinue })),
-  [onSubmit, runTurn])
+    runTurn(async controller => {
+      setSendError(null)
+      try {
+        const chatId = syncSupported || syncIssue === "unavailable"
+          ? await prepareLinkedSend(question, controller.signal) : undefined
+        if (!operation.isCurrent() || controller.signal.aborted) return
+        const result = await onSubmit({
+          message: question, image: "", controller, isContinue,
+          ...(chatId ? { serverChatIdOverride: chatId, documentHistorySelection: nativeHistory } : {}),
+          ...(syncSupported && !chatId ? { documentLocalOnly: true } : {})
+        })
+        if (chatId && result?.status === "submitted") await refreshAfterSend?.()
+        return result
+      } catch (error) {
+        if (!operation.isCurrent() || controller.signal.aborted) return
+        const message = error instanceof Error ? error.message : t("option:documentWorkspace.chatDetailsError", "Could not load chat details.")
+        setSendError(message)
+        return chatSubmitFailed(message)
+      }
+    }),
+  [nativeHistory, onSubmit, operation, prepareLinkedSend, refreshAfterSend, runTurn, syncIssue, syncSupported, t])
 
   // Handle sending a message
   const handleSend = useCallback(async () => {
@@ -192,12 +238,9 @@ export const DocumentChat: React.FC<{
       setSuggestionsCollapsed(true)
     }
 
-    setInputValue("")
-
     const result = await submitQuestion(trimmedMessage)
-    if (result?.status === "failed" && result.restoreDraft && result.restoreDraftIsCurrent?.() !== false) {
-      setInputValue(current => current || inputValue)
-    }
+    if (result?.status === "submitted" || (result?.status === "skipped" && result.questionKept))
+      setInputValue(current => current === inputValue ? "" : current)
   }, [
     canSend,
     hasSelectedModel,
@@ -485,7 +528,28 @@ export const DocumentChat: React.FC<{
           )}
         </div>
 
+        {saveNeedsReview && <HistorySelectionReview selection={nativeHistory} />}
+        <Modal
+          title={t("option:documentWorkspace.confirmChatDocument", "Confirm this document")}
+          open={confirmSave}
+          onCancel={() => setConfirmSave(false)}
+          onOk={() => {
+            setConfirmSave(false)
+            void saveToServer(true)
+          }}
+          okText={t("option:documentWorkspace.saveToServer", "Save to server")}>
+          <p>{t("option:documentWorkspace.confirmChatSaveBody", {
+            defaultValue: 'Save this conversation with “{{title}}”?',
+            title: documentMetadata?.title
+          })}</p>
+        </Modal>
         <div className="border-t border-border p-3">
+          {saveFeedback && <p role="status" className="mb-2 text-xs text-text-muted">{saveFeedback}</p>}
+          {(sendError || syncIssue === "unavailable") && (
+            <p role="status" className="mb-2 text-xs text-text-muted">
+              {sendError ?? t("option:documentWorkspace.chatSyncUnavailable", "Server conversations are temporarily unavailable.")}
+            </p>
+          )}
           {waitingForChatDetails && (
             serverChatLoadState === "failed" ? (
               <div className="mb-2 flex items-center justify-between gap-2 text-xs">
@@ -517,6 +581,24 @@ export const DocumentChat: React.FC<{
               />
               <span>{useDocumentLabel}</span>
             </div>
+            {canChooseSaveMode && !temporaryChat && (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={!browserOnly} onChange={event => setBrowserOnly(!event.target.checked)} />
+                {t("option:documentWorkspace.saveToServer", "Save to server")}
+              </label>
+            )}
+            {canSaveToServer && (
+              <button
+                type="button"
+                className="rounded border border-border px-2 py-1 text-text hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                disabled={savingToServer || streaming || isProcessing}
+                onClick={() => {
+                  if (saveNeedsConfirmation) setConfirmSave(true)
+                  else void saveToServer()
+                }}>
+                {savingToServer ? t("common:saving", "Saving…") : t("option:documentWorkspace.saveToServer", "Save to server")}
+              </button>
+            )}
             {!hasSelectedModel && (
               <span className="text-warning">
                 {t(

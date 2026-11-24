@@ -364,6 +364,7 @@ export const chatRagMethods = {
     return {
       ...readRoleplayResumeMetadata(input),
       id: String(input?.id ?? ""),
+      ...(typeof input?.document_chat_record === "string" ? { document_chat_record: input.document_chat_record } : {}),
       title: String(input?.title || ""),
       created_at,
       updated_at: updated_at ? String(updated_at) : null,
@@ -785,6 +786,7 @@ export const chatRagMethods = {
       seedFirstMessage?: boolean
       greetingStrategy?: "default" | "alternate_random" | "alternate_index"
       alternateIndex?: number
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<ServerChatSummary> {
     if (options?.alternateIndex != null &&
@@ -795,7 +797,8 @@ export const chatRagMethods = {
     const query = buildQuery({
       seed_first_message: options?.seedFirstMessage,
       greeting_strategy: options?.greetingStrategy,
-      alternate_index: options?.alternateIndex
+      alternate_index: options?.alternateIndex,
+      ...documentChatQuery(options?.documentTarget)
     })
     const res = await bgRequest<any>({
       path: appendPathQuery("/api/v1/chats/", query),
@@ -885,13 +888,13 @@ export const chatRagMethods = {
   async getChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean; documentTarget?: DocumentChatTarget } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const requiredMetadata = [...(options?.requiredMetadata ?? [])]
     options?.signal?.throwIfAborted()
-    const query = buildQuery(toChatScopeParams(options?.scope))
+    const query = buildQuery({ ...toChatScopeParams(options?.scope), ...documentChatQuery(options?.documentTarget) })
     const res = await bgRequest<any>({
       ...scopeFields,
       ...(options?.signal ? { abortSignal: options.signal } : {}),

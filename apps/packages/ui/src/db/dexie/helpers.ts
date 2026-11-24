@@ -60,7 +60,8 @@ export const saveHistory = async (
   message_source?: "copilot" | "web-ui" | "branch" | "server",
   doc_id?: string,
   server_chat_id?: string,
-  requestScope?: ServicePromptSnapshot["requestScope"]
+  requestScope?: ServicePromptSnapshot["requestScope"],
+  documentMediaUuid?: string
 ) => {
   const id = generateID()
   const createdAt = Date.now()
@@ -71,6 +72,7 @@ export const saveHistory = async (
     is_rag: is_rag || false,
     message_source,
     doc_id,
+    ...(documentMediaUuid ? { document_media_uuid: documentMediaUuid } : {}),
     server_chat_id,
     ...(requestScope ? { server_scope_key: serverChatMirrorOwnerKey({ requestScope }) } : {})
   }

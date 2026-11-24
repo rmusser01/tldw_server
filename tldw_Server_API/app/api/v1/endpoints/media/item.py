@@ -4,7 +4,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission, User, get_request_user, rbac_rate_limit, require_expected_user_if_present,
+)
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
@@ -44,6 +46,7 @@ router = APIRouter(tags=["Media Management"])
     "/{media_id:int}",
     status_code=status.HTTP_200_OK,
     summary="Get Media Item Details",
+    dependencies=[Depends(require_expected_user_if_present)],
     responses={
         status.HTTP_304_NOT_MODIFIED: {
             "description": "Media item not modified (ETag match).",

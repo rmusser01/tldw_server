@@ -39,6 +39,7 @@ The [implementation plan](../../Docs/superpowers/plans/2026-11-24-document-works
 Resolved the Translate import conflict in Dev PR #3534 at commit 76cc496428. Translation and account-scope tests passed (16 backend), along with the tabs and text selection regression suite (35 frontend). The sync branch uses that verified merge as its baseline.
 Stage 1 passed 39 integration and schema tests with PostgreSQL required. ChaCha binds chat links to the original native record under owner lock; authorized Media listing hides empty, deleted, and other-account chats.
 Stage 2 passed four native turn tests on SQLite and PostgreSQL and 341 focused frontend tests. A linked send rechecks Media access, refuses stale history, and preserves bounded source citations through native settlement and readback.
+Browser sidebar integration and per-chat browser save are implemented. 419 focused frontend tests and WebUI typechecking passed. The SQL-backed import replay tests passed on SQLite and PostgreSQL, including citation round-trip and the active Sync v2 refusal. Release qualification is running against real Chromium contexts and real PDF and EPUB files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

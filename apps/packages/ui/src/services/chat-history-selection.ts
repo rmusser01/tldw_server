@@ -353,8 +353,9 @@ export const captureHistorySnapshot = async (
     )
   } catch (error) {
     assertOwnerLease(owner, { signal })
-    if ((owner.documentTarget ? [405, 501] : [404, 405, 501]).includes(Number((error as { status?: unknown } | null)?.status)) ||
-        (requiredCapability && Number((error as { status?: unknown } | null)?.status) === 422))
+    const status = Number((error as { status?: unknown } | null)?.status)
+    if (owner.documentTarget && [403, 404].includes(status)) fail("document_chat_unavailable")
+    if ([404, 405, 501].includes(status) || (requiredCapability && status === 422))
       fail("unsupported_history_capability")
     throw error
   }

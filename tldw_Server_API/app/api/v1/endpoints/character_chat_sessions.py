@@ -66,6 +66,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
     ConversationScopeParams,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_import_schemas import ChatImportRequest
+from tldw_Server_API.app.api.v1.schemas.document_chat_schemas import validate_document_chat_citations
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     AssistantOverlaySettings,
     AuthorNoteInfoResponse,
@@ -5298,13 +5299,28 @@ async def import_chat_session(
             raise ChatImportError(
                 "message_limit_exceeded", error.status_code, str(error.detail), limit=limits.max_messages_per_chat
             ) from None
+        request_body = import_data.model_dump()
+        for source, message in zip(import_data.messages, request_body["messages"], strict=True):
+            if source.document_chat_sources_v1 is None:
+                continue
+            if document is None or source.role != "assistant":
+                raise ChatImportError(
+                    "invalid_document_chat_sources", 422, "Document sources require a document-scoped assistant reply."
+                )
+            try:
+                message["document_chat_sources_v1"] = validate_document_chat_citations(
+                    source.document_chat_sources_v1, document.media_uuid,
+                )
+            except ValueError as error:
+                raise ChatImportError("invalid_document_chat_sources", 422, str(error)) from None
         prepared = await run_in_threadpool(
             conversation_import.prepare_chat_import,
-            import_data.model_dump(),
+            request_body,
             limits=_chat_import_limits(),
             now=datetime.now(timezone.utc),
             inspect_image=_chat_import_image_inspector(),
             content_length=_content_length_for_guardrails,
+            **({"document_media_uuid": str(document.media_uuid)} if document else {}),
         )
         chat_id = prepared.conversation_id
 
