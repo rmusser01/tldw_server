@@ -1,10 +1,41 @@
 import React, { useCallback, useState, useRef, useEffect } from "react"
-import { Page } from "react-pdf"
+import { Page, type PageProps } from "react-pdf"
 import { Spin } from "antd"
 import { PageNoteButton } from "../PageNoteButton"
 
 // Note: react-pdf text/annotation layer styles should be imported at the app level
 // In Next.js: add to pages/_app.tsx or use next.config.js transpilePackages
+
+type LoadedPage = Parameters<NonNullable<PageProps["onLoadSuccess"]>>[0]
+
+/**
+ * react-pdf's <Page>, releasing pdf.js's per-page render data.
+ *
+ * pdf.js keeps a page's operator list and decoded images on its PDFPageProxy
+ * until cleanup() runs (by itself only for images over 10 MB), and react-pdf
+ * calls cleanup() only before its next draw of the page. So every page ever
+ * viewed stayed decoded until the document closed, ~10 MB per scanned page.
+ * That next draw discards the data anyway, so release it as soon as the canvas
+ * is painted, and on unmount for a render cancelled mid-paint. cleanup() is
+ * public pdf.js API and defers itself while any render of the page is running;
+ * a later render() of the page cancels that deferred release. On unmount
+ * mid-render the release therefore lands up to ~5 s later, through pdf.js's own
+ * delayed-cleanup timer once the cancelled render or its operator list settles.
+ */
+export const ReleasingPage: React.FC<PageProps> = ({ onLoadSuccess, onRenderSuccess, ...props }) => {
+  const loadedPageRef = useRef<LoadedPage | null>(null)
+  useEffect(() => () => {
+    loadedPageRef.current?.cleanup()
+    loadedPageRef.current = null
+  }, [props.pageNumber])
+  return (
+    <Page
+      {...props}
+      onLoadSuccess={page => { loadedPageRef.current = page; onLoadSuccess?.(page) }}
+      onRenderSuccess={page => { page.cleanup(); onRenderSuccess?.(page) }}
+    />
+  )
+}
 
 interface PdfPageProps {
   pageNumber: number
@@ -65,7 +96,7 @@ export const PdfPage: React.FC<PdfPageProps> = ({
       {visible && !hidePageNote && !loading && (
         <PageNoteButton pageNumber={pageNumber} />
       )}
-      {visible && <Page
+      {visible && <ReleasingPage
         pageNumber={pageNumber}
         scale={scale}
         onRenderSuccess={handleRenderSuccess}
