@@ -39,6 +39,7 @@ ADR required: no. The change restores conformance to the existing toolchain and 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed 234 ignored role query options and updated typed fixtures for real chat, history, knowledge, and service contracts. The worker preserves the exact stored refresh identity and validates hosted targets when storage is empty. TypeScript and Vitest share React Router resolution. A clean frozen Bun install resolved both Tailwind and the shared UI to PostCSS 8.5.9. ADR required: no. The existing frontend contracts and dependency tooling govern this repair.
 The full shared UI command checked 9,614 files with zero diagnostics. WebUI typecheck, extension compile, and scoped ESLint passed. Across the 171-file run and focused rerun, all 6,197 affected cases passed. One existing dialog focus assertion failed in the combined run and passed with the entire 44-case suite in isolation. Eight router and stylesheet suites also passed. This TypeScript-only patch uses the frontend lint and test gates. Bandit applies to Python.
+The independent Superpowers review identified a stale Tailwind PostCSS link after a Bun 1.3.2 lockfile update. A forced frozen install rebuilt both links to the same PostCSS 8.5.9 module and preserved the lockfile. The frontend development guide records the verified recovery. A fresh full typecheck passed across 9,614 files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
