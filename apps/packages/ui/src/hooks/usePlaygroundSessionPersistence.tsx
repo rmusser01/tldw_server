@@ -99,7 +99,10 @@ export function usePlaygroundSessionPersistence() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isRestoringRef = useRef<{ isCurrent: () => boolean } | null>(null)
   const initialRestoreSettledRef = useRef(false)
-  const { serverUrl, lastConfigUpdatedAt } = useConnectionState()
+  const { serverUrl, lastConfigUpdatedAt } = useConnectionState((s) => ({
+    serverUrl: s.serverUrl,
+    lastConfigUpdatedAt: s.lastConfigUpdatedAt
+  }))
 
   // Session store
   const sessionStore = usePlaygroundSessionStore()

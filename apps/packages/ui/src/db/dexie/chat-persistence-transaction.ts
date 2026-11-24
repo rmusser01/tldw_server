@@ -60,7 +60,9 @@ export const runChatPersistenceTransaction = async <T>(
   try {
     const result = await db.transaction(
       "rw",
-      [db.chatHistories, db.messages, db.modelNickname, db.sessionFiles, db.searchTokens],
+      // Superset of every nested transaction an operation opens: continue saves
+      // reach withLocalMessageMutation (userSettings) via updateMessage.
+      [db.chatHistories, db.messages, db.modelNickname, db.sessionFiles, db.searchTokens, db.userSettings],
       async (transaction) => {
         activeTransaction = transaction
         throwIfAborted(signal, shouldAbortForScopeChange, validateLease)

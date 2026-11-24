@@ -1359,7 +1359,7 @@ def test_convert_remediation_questions_creates_new_deck_with_scheduler_settings(
 
     assert response.status_code == 200
     payload = response.json()
-    created_deck = quizzes_db.get_deck(payload["target_deck"]["id"])
+    created_deck = quizzes_db.flashcard_store.get_deck(payload["target_deck"]["id"])
     assert created_deck is not None
     assert created_deck["review_prompt_side"] == "back"
     assert created_deck["scheduler_type"] == "fsrs"
@@ -1396,8 +1396,8 @@ def test_convert_remediation_questions_preserves_orientation_when_omitted_and_al
     quizzes_db: CharactersRAGDB,
 ):
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
-    deck_id = quizzes_db.add_deck("Quiz Orientation Deck", review_prompt_side="back")
-    quizzes_db.soft_delete_deck_by_id(deck_id)
+    deck_id = quizzes_db.flashcard_store.add_deck("Quiz Orientation Deck", review_prompt_side="back")
+    quizzes_db.flashcard_store.soft_delete_deck_by_id(deck_id)
 
     omitted_response = client_with_quizzes_db.post(
         f"/api/v1/quizzes/attempts/{attempt_id}/remediation-conversions/convert",
@@ -1409,11 +1409,11 @@ def test_convert_remediation_questions_preserves_orientation_when_omitted_and_al
         headers=AUTH_HEADERS,
     )
     assert omitted_response.status_code == 200
-    omitted_deck = quizzes_db.get_deck(deck_id)
+    omitted_deck = quizzes_db.flashcard_store.get_deck(deck_id)
     assert omitted_deck is not None
     assert omitted_deck["review_prompt_side"] == "back"
 
-    quizzes_db.soft_delete_deck_by_id(deck_id)
+    quizzes_db.flashcard_store.soft_delete_deck_by_id(deck_id)
     attempt_id_front, question_ids_front = _create_attempt_with_missed_questions(quizzes_db)
     explicit_front_response = client_with_quizzes_db.post(
         f"/api/v1/quizzes/attempts/{attempt_id_front}/remediation-conversions/convert",
@@ -1426,7 +1426,7 @@ def test_convert_remediation_questions_preserves_orientation_when_omitted_and_al
         headers=AUTH_HEADERS,
     )
     assert explicit_front_response.status_code == 200
-    explicit_front_deck = quizzes_db.get_deck(deck_id)
+    explicit_front_deck = quizzes_db.flashcard_store.get_deck(deck_id)
     assert explicit_front_deck is not None
     assert explicit_front_deck["review_prompt_side"] == "front"
 
@@ -1436,7 +1436,7 @@ def test_convert_remediation_questions_returns_mixed_results_without_replace_act
     quizzes_db: CharactersRAGDB,
 ):
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
     quizzes_db.convert_quiz_remediation_questions(
         attempt_id=attempt_id,
         question_ids=[question_ids[0]],
@@ -1467,7 +1467,7 @@ def test_convert_remediation_questions_replace_active_returns_superseded_and_cre
     quizzes_db: CharactersRAGDB,
 ):
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
     quizzes_db.convert_quiz_remediation_questions(
         attempt_id=attempt_id,
         question_ids=[question_ids[0]],
@@ -1506,7 +1506,7 @@ def test_convert_remediation_questions_returns_409_for_conflict(
     monkeypatch,
 ):
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
 
     def raise_conflict(**_kwargs):
         raise ConflictError("Active remediation conversion already exists.")
@@ -1533,7 +1533,7 @@ def test_convert_remediation_questions_returns_400_for_input_error(
     monkeypatch,
 ):
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
 
     def raise_input_error(**_kwargs):
         raise InputError("invalid remediation request")
@@ -1560,7 +1560,7 @@ def test_convert_remediation_questions_returns_500_for_db_error(
     monkeypatch,
 ):
     attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
 
     def raise_db_error(**_kwargs):
         raise CharactersRAGDBError("remediation backend unavailable")
@@ -1667,12 +1667,12 @@ def test_get_attempt_remediation_conversions_marks_orphaned_linked_flashcards(
         replace_active=False,
     )
     flashcard_uuid = conversion_payload["created_flashcard_uuids"][0]
-    flashcard = quizzes_db.get_flashcard(flashcard_uuid)
+    flashcard = quizzes_db.flashcard_store.get_flashcard(flashcard_uuid)
     assert flashcard is not None
-    quizzes_db.soft_delete_flashcard(flashcard_uuid, expected_version=int(flashcard["version"]))
+    quizzes_db.flashcard_store.soft_delete_flashcard(flashcard_uuid, expected_version=int(flashcard["version"]))
 
     batch_lookup_calls: list[list[str]] = []
-    original_batch_lookup = quizzes_db.get_flashcards_by_uuids
+    original_batch_lookup = quizzes_db.flashcard_store.get_flashcards_by_uuids
 
     def track_batch_lookup(uuids: list[str]):
         batch_lookup_calls.append(list(uuids))
@@ -1681,8 +1681,8 @@ def test_get_attempt_remediation_conversions_marks_orphaned_linked_flashcards(
     def fail_single_lookup(_uuid: str):
         raise AssertionError("Expected remediation orphan detection to use batch flashcard lookup.")
 
-    monkeypatch.setattr(quizzes_db, "get_flashcards_by_uuids", track_batch_lookup)
-    monkeypatch.setattr(quizzes_db, "get_flashcard", fail_single_lookup)
+    monkeypatch.setattr(quizzes_db.flashcard_store, "get_flashcards_by_uuids", track_batch_lookup)
+    monkeypatch.setattr(quizzes_db.flashcard_store, "get_flashcard", fail_single_lookup)
 
     response = client_with_quizzes_db.get(
         f"/api/v1/quizzes/attempts/{attempt_id}/remediation-conversions",

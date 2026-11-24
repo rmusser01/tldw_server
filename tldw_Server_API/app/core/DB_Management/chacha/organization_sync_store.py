@@ -1165,7 +1165,7 @@ class NotesOrganizationSyncStore:
                 )
             return
 
-        folder_key = self._db._note_folder_path_key(str(folder["path"]))
+        folder_key = self._db.note_folder_path_key(str(folder["path"]))
         if not folder_key:
             raise InputError("Folder source provenance path is invalid")
         now = self._db._get_current_utc_timestamp_iso()

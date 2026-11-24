@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { JobFormModal } from "../JobFormModal"
 
 const servicesMock = vi.hoisted(() => ({
@@ -154,6 +155,21 @@ describe("JobFormModal template source options", () => {
       total: 0,
       ingestable: 0,
       filtered: 0
+    })
+  })
+
+  it("loads the scope summary catalog within API page limits", async () => {
+    render(<JobFormModal open watchlistId={17} onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalledWith(
+        { watchlist_id: 17, page: 1, size: 200 },
+        expect.any(AbortSignal)
+      )
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalledWith(
+        { page: 1, size: 200 },
+        expect.any(AbortSignal)
+      )
     })
   })
 

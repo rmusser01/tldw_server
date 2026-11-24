@@ -56,6 +56,7 @@ import {
   SourceReviewDuePanel
 } from "../components"
 import { RecentStudySessions } from "../components/RecentStudySessions"
+import { StudyPackCardBrowser } from "../components/StudyPackCardBrowser"
 import { calculateIntervals } from "../utils/calculateIntervals"
 import {
   formatFlashcardLongDateTime,
@@ -172,6 +173,9 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const [reviewedCount, setReviewedCount] = React.useState(0)
   const [localOverrideCard, setLocalOverrideCard] = React.useState<Flashcard | null>(null)
   const [editDrawerOpen, setEditDrawerOpen] = React.useState(false)
+  const [browseDeckId, setBrowseDeckId] = React.useState<number | null>(null)
+  const closeCardBrowser = React.useCallback(() => setBrowseDeckId(null), [])
+  const browseOpen = isActive && reviewDeckId != null && browseDeckId === reviewDeckId
   const [showRatingRationale, setShowRatingRationale] = React.useState(false)
   const [reviewMode, setReviewMode] = React.useState<"due" | "cram">("due")
   const [cramTag, setCramTag] = React.useState("")
@@ -1071,9 +1075,14 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     setShowAnswer(false)
     setAssistantOpen(false)
     setEditDrawerOpen(false)
+    setBrowseDeckId(null)
     if (undoTimeoutRef.current) window.clearTimeout(undoTimeoutRef.current)
     if (undoIntervalRef.current) window.clearInterval(undoIntervalRef.current)
   }, [reviewScopeKey, reviewRun.authorityRevision])
+
+  React.useEffect(() => {
+    if (!isActive) closeCardBrowser()
+  }, [closeCardBrowser, isActive])
 
   React.useEffect(() => {
     if (reviewOverrideCard) {
@@ -1083,7 +1092,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
   // Keyboard shortcuts for review
   useFlashcardShortcuts({
-    enabled: isActive && !!activeCard,
+    enabled: isActive && !!activeCard && !browseOpen,
     showingAnswer: showAnswer,
     onFlip: handleShowAnswer,
     onRate: onSubmitReview,
@@ -1126,6 +1135,16 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
             value: d.id
           }))}
         />
+        {isActive && reviewDeckId != null ? (
+          <Button
+            onClick={() => setBrowseDeckId(reviewDeckId)}
+            onKeyDown={(event) => {
+              if (event.key === " ") event.stopPropagation()
+            }}
+          >
+            {t("option:flashcards.studyPackBrowseCards", { defaultValue: "Browse cards" })}
+          </Button>
+        ) : null}
         <Segmented
           value={reviewMode}
           onChange={(value) => {
@@ -1206,6 +1225,13 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           </Button>
         )}
       </div>
+
+      <StudyPackCardBrowser
+        deckId={reviewDeckId}
+        deckName={currentDeckName}
+        open={browseOpen}
+        onClose={closeCardBrowser}
+      />
 
       {onSourceReviewGenerate && onSourceReviewQuiz ? (
         <SourceReviewDuePanel

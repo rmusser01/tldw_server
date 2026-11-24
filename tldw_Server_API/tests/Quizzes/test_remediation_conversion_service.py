@@ -115,7 +115,7 @@ def test_convert_quiz_remediation_questions_rejects_incomplete_attempt(quizzes_d
 
 def test_convert_quiz_remediation_questions_rejects_question_ids_not_in_attempt(quizzes_db: CharactersRAGDB):
     attempt_id, _quiz_id, missed_question_id, _correct_question_id = _create_attempt_with_one_miss_and_one_correct(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
 
     with pytest.raises(InputError):
         quizzes_db.convert_quiz_remediation_questions(
@@ -128,7 +128,7 @@ def test_convert_quiz_remediation_questions_rejects_question_ids_not_in_attempt(
 
 def test_convert_quiz_remediation_questions_rejects_correct_answers(quizzes_db: CharactersRAGDB):
     attempt_id, _quiz_id, _missed_question_id, correct_question_id = _create_attempt_with_one_miss_and_one_correct(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
 
     with pytest.raises(InputError):
         quizzes_db.convert_quiz_remediation_questions(
@@ -155,7 +155,7 @@ def test_convert_quiz_remediation_questions_creates_new_deck_when_requested(quiz
     assert payload["results"][0]["status"] == "created"
     assert payload["results"][0]["conversion"]["status"] == "active"
     assert payload["created_flashcard_uuids"]
-    assert quizzes_db.count_flashcards(deck_id=payload["target_deck"]["id"]) == 1
+    assert quizzes_db.flashcard_store.count_flashcards(deck_id=payload["target_deck"]["id"]) == 1
 
 
 def test_convert_quiz_remediation_questions_creates_fsrs_deck_when_requested(quizzes_db: CharactersRAGDB):
@@ -187,7 +187,7 @@ def test_convert_quiz_remediation_questions_creates_fsrs_deck_when_requested(qui
         replace_active=False,
     )
 
-    created_deck = quizzes_db.get_deck(payload["target_deck"]["id"])
+    created_deck = quizzes_db.flashcard_store.get_deck(payload["target_deck"]["id"])
     assert created_deck is not None
     assert created_deck["scheduler_type"] == "fsrs"
     scheduler_settings = json.loads(created_deck["scheduler_settings_json"])
@@ -199,7 +199,7 @@ def test_convert_quiz_remediation_questions_preserves_dedupe_across_duplicate_mi
     quizzes_db: CharactersRAGDB,
 ):
     attempt_id, _quiz_id, question_ids = _create_duplicate_missed_attempt(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
 
     payload = quizzes_db.convert_quiz_remediation_questions(
         attempt_id=attempt_id,
@@ -213,14 +213,14 @@ def test_convert_quiz_remediation_questions_preserves_dedupe_across_duplicate_mi
     assert payload["results"][1]["status"] == "created"
     assert payload["results"][0]["flashcard_uuids"] == payload["results"][1]["flashcard_uuids"]
     assert len(payload["created_flashcard_uuids"]) == 1
-    assert quizzes_db.count_flashcards(deck_id=deck_id) == 1
+    assert quizzes_db.flashcard_store.count_flashcards(deck_id=deck_id) == 1
 
 
 def test_convert_quiz_remediation_questions_replace_active_supersedes_old_row(
     quizzes_db: CharactersRAGDB,
 ):
     attempt_id, _quiz_id, missed_question_id, _correct_question_id = _create_attempt_with_one_miss_and_one_correct(quizzes_db)
-    deck_id = quizzes_db.add_deck("Renal Deck")
+    deck_id = quizzes_db.flashcard_store.add_deck("Renal Deck")
 
     initial = quizzes_db.convert_quiz_remediation_questions(
         attempt_id=attempt_id,
@@ -302,8 +302,8 @@ def test_convert_quiz_remediation_questions_translates_unique_violation_to_confl
             ],
         ),
     )
-    monkeypatch.setattr(quizzes_db, "get_deck", lambda deck_id: {"id": deck_id, "name": "Target Deck", "deleted": False})
-    monkeypatch.setattr(quizzes_db, "add_flashcards_bulk", lambda payloads: ["fc-race-1"])
+    monkeypatch.setattr(quizzes_db.flashcard_store, "get_deck", lambda deck_id: {"id": deck_id, "name": "Target Deck", "deleted": False})
+    monkeypatch.setattr(quizzes_db.flashcard_store, "add_flashcards_bulk", lambda payloads: ["fc-race-1"])
     monkeypatch.setattr(quizzes_db, "transaction", lambda: _FakeTransaction())
 
     with pytest.raises(ConflictError):
@@ -320,7 +320,7 @@ def test_replace_remediation_missing_generated_id_restores_cards_and_prior_activ
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     attempt_id, _quiz_id, question_id, _correct_id = _create_attempt_with_one_miss_and_one_correct(quizzes_db)
-    deck_id = quizzes_db.add_deck("Rollback target")
+    deck_id = quizzes_db.flashcard_store.add_deck("Rollback target")
     quizzes_db.convert_quiz_remediation_questions(
         attempt_id=attempt_id,
         question_ids=[question_id],

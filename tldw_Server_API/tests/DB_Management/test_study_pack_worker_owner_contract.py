@@ -50,10 +50,10 @@ def _restricted_source_receipt(backend, db, note_id):
             else:
                 assert bundle.items[0].evidence_text == EVIDENCE
                 resolved = True
-            deck_id = db.add_deck("Restricted-role generated output")
-            card_id = db.add_flashcard({"deck_id": deck_id, "front": "Restricted front", "back": "Restricted back"})
-            deck_owner = db.get_deck(deck_id)["client_id"]
-            card_owner = db.get_flashcard(card_id)["client_id"]
+            deck_id = db.flashcard_store.add_deck("Restricted-role generated output")
+            card_id = db.flashcard_store.add_flashcard({"deck_id": deck_id, "front": "Restricted front", "back": "Restricted back"})
+            deck_owner = db.flashcard_store.get_deck(deck_id)["client_id"]
+            card_owner = db.flashcard_store.get_flashcard(card_id)["client_id"]
         return {
             "roleFlags": flags,
             "scope": scope,
@@ -101,7 +101,7 @@ def test_worker_preserves_canonical_owner(request, tmp_path, monkeypatch, kind, 
     legacy_deck = None
     if kind == "sqlite":
         legacy = db_module.CharactersRAGDB(tmp_path / "2" / "ChaChaNotes.db", client_id="study-pack-worker-2")
-        legacy_deck = legacy.add_deck("Historical worker label")
+        legacy_deck = legacy.flashcard_store.add_deck("Historical worker label")
         legacy.close_connection()
 
     async def model(self, *, system_prompt, user_prompt):
@@ -156,7 +156,7 @@ def test_worker_preserves_canonical_owner(request, tmp_path, monkeypatch, kind, 
             stored_cards = seed.execute_query(
                 "SELECT client_id FROM flashcards WHERE deck_id=?", (result["deck_id"],), read_only=True
             ).fetchall()
-            visible = seed.get_deck(result["deck_id"])
+            visible = seed.flashcard_store.get_deck(result["deck_id"])
         receipt = {
             "backend": kind,
             "warm": warm,
@@ -175,7 +175,7 @@ def test_worker_preserves_canonical_owner(request, tmp_path, monkeypatch, kind, 
             assert receipt["restrictedSource"]["cardOwner"] == "2", receipt
         else:
             with chacha_operation(independent=True):
-                historical = seed.get_deck(legacy_deck)
+                historical = seed.flashcard_store.get_deck(legacy_deck)
                 assert historical["name"] == "Historical worker label"
                 assert historical["client_id"] == "study-pack-worker-2"
         assert receipt["workerClientId"] == "2", receipt

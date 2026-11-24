@@ -81,9 +81,10 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Character_Chat/modules/persona_exemplar_selector.py": 1,
     "tldw_Server_API/app/core/Character_Chat/world_book_manager.py": 2,
     "tldw_Server_API/app/core/Chat/conversation_enrichment.py": 4,
-    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": 2,
+    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": 1,
     "tldw_Server_API/app/core/DB_Management/chacha/character_store.py": 4,
     "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py": 1,
+    "tldw_Server_API/app/core/DB_Management/chacha/flashcard_store.py": 1,  # bump: moved from ChaChaNotes_DB (TASK-13950.22 T13)
     "tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py": 5,
     "tldw_Server_API/app/core/DB_Management/chacha/note_semantic_store.py": 1,
     "tldw_Server_API/app/core/DB_Management/chacha/note_store.py": 1,  # "tag:" prefix check in _normalize_graph_tag_filter, not identity
@@ -106,7 +107,7 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py": 1,
     "tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py": 1,
     "tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py": 3,
-    "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": 1,
+    "tldw_Server_API/app/core/RAG/rag_service/pipeline/augment.py": 1,  # bump: moved from unified_pipeline.py (TASK-13950.24 PR I2); the gap-analysis keyword filter lowercases content/filter terms for substring matching, not keyword identity
     "tldw_Server_API/app/core/RAG/rag_service/utils.py": 1,
     "tldw_Server_API/app/core/Research/planner.py": 1,
     "tldw_Server_API/app/core/Sync/v2/notes_organization_coordinator.py": 3,

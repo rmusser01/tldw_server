@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesTab } from "../SourcesTab"
 
@@ -132,6 +133,7 @@ vi.mock("@/utils/dateFormatters", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  getWatchlistSettings: vi.fn().mockResolvedValue({ forums_enabled: false }),
   checkWatchlistSourcesNow: (...args: any[]) => mocks.checkWatchlistSourcesNowMock(...args),
   createWatchlistSource: (...args: any[]) => mocks.createWatchlistSourceMock(...args),
   deleteWatchlistSource: (...args: any[]) => mocks.deleteWatchlistSourceMock(...args),
@@ -232,6 +234,21 @@ describe("SourcesTab load-error retry", () => {
 
     await waitFor(() => {
       expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it("shares a feed request between readers of the same watchlist page", async () => {
+    mocks.storeStateRef.current = baseState({ selectedWatchlistId: 7 })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+
+    render(<><SourcesTab /><SourcesTab /></>)
+
+    await waitFor(() => {
+      expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledTimes(1)
+      expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith(
+        expect.objectContaining({ watchlist_id: 7, page: 1, size: 20 }),
+        expect.any(AbortSignal)
+      )
     })
   })
 

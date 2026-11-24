@@ -3,6 +3,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha.flashcard_store import FlashcardStore
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -44,6 +45,7 @@ def test_deck_parent_cycle_check_locks_parent_chain_for_postgres(
         property(lambda _self: backend_type),
     )
     db = object.__new__(CharactersRAGDB)
+    db.flashcard_store = FlashcardStore(db.ctx)
     db.client_id = "hierarchy-owner"
     conn = _RecordingConnection(
         [
@@ -53,7 +55,7 @@ def test_deck_parent_cycle_check_locks_parent_chain_for_postgres(
         ]
     )
 
-    assert db._validate_deck_parent_locked(conn, deck_id=1, parent_deck_id=2) == 2
+    assert db.flashcard_store._validate_deck_parent_locked(conn, deck_id=1, parent_deck_id=2) == 2
 
     assert len(conn.queries) == 3
     if expects_lock:

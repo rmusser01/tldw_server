@@ -1,17 +1,16 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsHealthBar } from "../WatchlistsHealthBar"
+import { render } from "./render-with-watchlists-query"
 import type { WatchlistsOverviewData } from "@/services/watchlists-overview"
 
 const healthBarMocks = vi.hoisted(() => ({
   fetchOverviewMock: vi.fn(),
-  setOverviewHealth: vi.fn(),
-  setActiveTab: vi.fn(),
-  overviewHealth: null as WatchlistsOverviewData["health"] | null
+  setActiveTab: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -46,9 +45,7 @@ vi.mock("@/services/watchlists-overview", () => ({
 vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      setOverviewHealth: healthBarMocks.setOverviewHealth,
-      setActiveTab: healthBarMocks.setActiveTab,
-      overviewHealth: healthBarMocks.overviewHealth
+      setActiveTab: healthBarMocks.setActiveTab
     })
 }))
 
@@ -119,8 +116,17 @@ const buildOverviewData = (
 describe("WatchlistsHealthBar", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    healthBarMocks.overviewHealth = null
     healthBarMocks.fetchOverviewMock.mockResolvedValue(buildOverviewData())
+  })
+
+  it("shares one request between health views and refreshes on a principal change", async () => {
+    render(<><WatchlistsHealthBar /><WatchlistsHealthBar /></>)
+
+    expect(await screen.findAllByText("No watchlist data yet")).toHaveLength(2)
+    expect(healthBarMocks.fetchOverviewMock).toHaveBeenCalledTimes(1)
+
+    act(() => { window.dispatchEvent(new Event("tldw:auth-principal-changed")) })
+    await waitFor(() => expect(healthBarMocks.fetchOverviewMock).toHaveBeenCalledTimes(2))
   })
 
   it("turns the empty health summary into concrete setup actions", async () => {
@@ -160,7 +166,7 @@ describe("WatchlistsHealthBar", () => {
   })
 
   it("places failed run recovery next to the Activity health state", async () => {
-    healthBarMocks.overviewHealth = buildHealth({
+    const health = buildHealth({
       statuses: {
         sources: "healthy",
         jobs: "healthy",
@@ -182,6 +188,7 @@ describe("WatchlistsHealthBar", () => {
     })
     healthBarMocks.fetchOverviewMock.mockResolvedValue(
       buildOverviewData({
+        health,
         sources: {
           total: 3,
           healthy: 3,

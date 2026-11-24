@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { OutputsTab } from "../OutputsTab"
 
@@ -104,8 +105,10 @@ vi.mock("@/utils/dateFormatters", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  recordWatchlistsOnboardingTelemetry: async () => undefined,
   createWatchlistOutput: (...args: any[]) => mocks.createWatchlistOutputMock(...args),
   fetchWatchlistJobs: (...args: any[]) => mocks.fetchWatchlistJobsMock(...args),
+  fetchWatchlists: async () => ({ items: [watchlist], total: 1 }),
   fetchWatchlistOutputs: (...args: any[]) => mocks.fetchWatchlistOutputsMock(...args),
   fetchWatchlistTemplates: (...args: any[]) => mocks.fetchWatchlistTemplatesMock(...args),
   downloadWatchlistOutput: (...args: any[]) => mocks.downloadWatchlistOutputMock(...args),
@@ -157,30 +160,24 @@ const buildOutput = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
+const watchlist = {
+  id: 42,
+  name: "Healthcare ransomware",
+  domain: "cti_osint",
+  status: "active",
+  priority: "critical",
+  tags: [],
+  created_at: "2026-05-15T00:00:00Z"
+}
+
 const baseState = (overrides: Record<string, unknown> = {}) => ({
-  watchlists: [
-    {
-      id: 42,
-      name: "Healthcare ransomware",
-      domain: "cti_osint",
-      status: "active",
-      priority: "critical",
-      tags: [],
-      created_at: "2026-05-15T00:00:00Z"
-    }
-  ],
   selectedWatchlistId: 42,
-  outputs: [],
-  outputsLoading: false,
-  outputsTotal: 0,
   outputsPage: 1,
   outputsPageSize: 20,
   outputsJobFilter: null,
   outputsRunFilter: null,
   outputPreviewOpen: false,
   selectedOutputId: null,
-  setOutputs: vi.fn(),
-  setOutputsLoading: vi.fn(),
   setOutputsPage: vi.fn(),
   setOutputsPageSize: vi.fn(),
   setOutputsJobFilter: vi.fn(),
@@ -198,11 +195,8 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
 describe("OutputsTab defensible reports UI", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.storeStateRef.current = baseState({
-      outputs: [buildOutput()],
-      outputsTotal: 1
-    })
-    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.storeStateRef.current = baseState()
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: [buildOutput()], total: 1, has_more: false })
     mocks.fetchWatchlistJobsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.fetchWatchlistTemplatesMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.createWatchlistOutputMock.mockResolvedValue({ id: 999 })
@@ -211,7 +205,7 @@ describe("OutputsTab defensible reports UI", () => {
   it("shows readiness, evidence availability, source count, and alert count in Reports rows", async () => {
     render(<OutputsTab />)
 
-    expect(screen.getByText("CTI Evidence Report")).toBeInTheDocument()
+    expect(await screen.findByText("CTI Evidence Report")).toBeInTheDocument()
     expect(screen.getByText("Ready")).toBeInTheDocument()
     expect(screen.getByText("Evidence snapshot")).toBeInTheDocument()
     expect(screen.getByText("2 sources")).toBeInTheDocument()
@@ -221,24 +215,21 @@ describe("OutputsTab defensible reports UI", () => {
   it("opens the report builder from the Reports toolbar", async () => {
     render(<OutputsTab />)
 
+    await screen.findByText("CTI Evidence Report")
     fireEvent.click(screen.getByRole("button", { name: "Create report" }))
 
-    expect(await screen.findByTestId("report-builder-open")).toHaveTextContent(
-      "Builder for Healthcare ransomware"
-    )
+    expect(await screen.findByText("Builder for Healthcare ransomware")).toBeInTheDocument()
   })
 
   it("keeps evidence access tied to the selected output preview", async () => {
     const openOutputPreview = vi.fn()
     mocks.storeStateRef.current = baseState({
-      outputs: [buildOutput()],
-      outputsTotal: 1,
       openOutputPreview
     })
 
     render(<OutputsTab />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Preview" }))
     expect(openOutputPreview).toHaveBeenCalledWith(18)
   })
 })

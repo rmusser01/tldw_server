@@ -31,8 +31,8 @@ tldw_Server_API/app/core/Jobs/operations/postgres/lifecycle.py::acquire_job if o
 tldw_Server_API/app/core/Jobs/operations/sqlite/lifecycle.py::_candidate_sql if owner_user_id
 tldw_Server_API/app/core/Jobs/operations/sqlite/lifecycle.py::_candidate_sql if owner_user_id #2
 tldw_Server_API/app/core/Jobs/operations/sqlite/lifecycle.py::acquire_job if owner_user_id
+tldw_Server_API/app/core/RAG/rag_service/pipeline/query_prep.py::run_query_expansion if user_id
 tldw_Server_API/app/core/RAG/rag_service/security_filters.py::SecurityAuditor.get_audit_trail if user_id
-tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py::unified_rag_pipeline if user_id
 tldw_Server_API/app/core/Sandbox/store.py::PostgresStore.count_runs if user_id
 tldw_Server_API/app/core/Sandbox/store.py::PostgresStore.list_runs if user_id
 tldw_Server_API/app/core/Sandbox/store.py::SQLiteStore.count_runs if user_id

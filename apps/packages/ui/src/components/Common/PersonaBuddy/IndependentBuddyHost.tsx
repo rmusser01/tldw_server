@@ -618,7 +618,12 @@ export const IndependentBuddyHost = ({
 }) => {
   const { demoEnabled } = useSafeDemoMode()
   const { config, loading } = useCanonicalConnectionConfig()
-  const connection = useConnectionState()
+  const connection = useConnectionState((s) => ({
+    isConnected: s.isConnected,
+    phase: s.phase,
+    mode: s.mode,
+    offlineBypass: s.offlineBypass
+  }))
   // Authentication changes create a new ephemeral UI lifetime. No credential or
   // conversation identity is written to localStorage or exposed in a React key.
   const identity = [

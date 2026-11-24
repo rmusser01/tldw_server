@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, screen } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 
@@ -198,6 +199,10 @@ vi.mock("@/utils/watchlists-onboarding-telemetry", () => ({
     mocks.trackWatchlistsOnboardingTelemetryMock(...args)
 }))
 
+vi.mock("@/services/watchlists-overview", () => ({
+  fetchWatchlistsOverviewData: async () => ({ health: null })
+}))
+
 vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -278,10 +283,10 @@ describe("WatchlistsPlaygroundPage experimental IA", () => {
     ).__TLDW_WATCHLISTS_IA_EXPERIMENT_ROLLOUT_PERCENT__
   })
 
-  it("shows task-centered primary tabs and exposes implementation tabs via More views", () => {
+  it("shows task-centered primary tabs and exposes implementation tabs via More views", async () => {
     render(<WatchlistsPlaygroundPage />)
 
-    expect(screen.getByTestId("watchlists-tab-overview")).toBeInTheDocument()
+    expect(await screen.findByTestId("watchlists-tab-overview")).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-tab-sources")).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-tab-items")).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-tab-outputs")).toBeInTheDocument()
@@ -299,12 +304,12 @@ describe("WatchlistsPlaygroundPage experimental IA", () => {
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("runs")
   })
 
-  it("keeps hidden tabs reachable when currently selected", () => {
+  it("keeps hidden tabs reachable when currently selected", async () => {
     mocks.state.activeTab = "templates"
 
     render(<WatchlistsPlaygroundPage />)
 
-    expect(screen.getByTestId("watchlists-tab-templates")).toBeInTheDocument()
+    expect(await screen.findByTestId("watchlists-tab-templates")).toBeInTheDocument()
   })
 
   it("routes task views to user outcomes and keeps legacy tabs mapped to the active task", () => {
@@ -362,7 +367,7 @@ describe("WatchlistsPlaygroundPage experimental IA", () => {
     expect(mocks.recordWatchlistsIaExperimentTelemetryMock).toHaveBeenCalled()
   })
 
-  it("can opt into the full tab map and records baseline telemetry when experiment is disabled", () => {
+  it("can opt into the full tab map and records baseline telemetry when experiment is disabled", async () => {
     ;(window as { __TLDW_WATCHLISTS_IA_EXPERIMENT__?: unknown }).__TLDW_WATCHLISTS_IA_EXPERIMENT__ = false
 
     render(<WatchlistsPlaygroundPage />)
@@ -370,9 +375,9 @@ describe("WatchlistsPlaygroundPage experimental IA", () => {
     fireEvent.click(screen.getByTestId("watchlists-help-icon"))
     fireEvent.click(screen.getByTestId("watchlists-show-all-views-toggle"))
 
-    expect(screen.getByTestId("watchlists-tab-jobs")).toBeInTheDocument()
+    expect(await screen.findByTestId("watchlists-tab-jobs")).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-tab-items")).toBeInTheDocument()
-    expect(screen.getByTestId("watchlists-tab-templates")).toBeInTheDocument()
+    expect(await screen.findByTestId("watchlists-tab-templates")).toBeInTheDocument()
     expect(screen.queryByTestId("watchlists-experimental-tab-jobs")).not.toBeInTheDocument()
     const payload = JSON.parse(localStorage.getItem(IA_STORAGE_KEY) || "{}")
     expect(payload.variant).toBe("baseline")

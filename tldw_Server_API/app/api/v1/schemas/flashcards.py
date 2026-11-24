@@ -411,6 +411,18 @@ class FlashcardListResponse(BaseModel):
         return _default_offset_pagination_aliases(self)
 
 
+class StudyPackChapterSet(BaseModel):
+    id: str
+    title: str
+    source_id: str
+    source_title: str
+    card_count: int
+
+
+class StudyPackDeckCardsResponse(FlashcardListResponse):
+    chapters: list[StudyPackChapterSet]
+    all_cards_count: int
+
 class FlashcardBulkCreateResponse(BaseModel):
     items: list[Flashcard]
     count: int

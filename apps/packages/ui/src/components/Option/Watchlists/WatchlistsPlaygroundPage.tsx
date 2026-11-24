@@ -23,6 +23,13 @@ import {
 import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useServerOnline } from "@/hooks/useServerOnline"
+import {
+  useInvalidateWatchlists,
+  useIsCurrentWatchlistsAccount,
+  useSetWatchlistsQueryData,
+  useWatchlistsAccountGeneration,
+  useWatchlistsQuery
+} from "@/hooks/useWatchlistsQuery"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
 import { downloadBlob } from "@/utils/download-blob"
@@ -40,9 +47,11 @@ import {
   updateWatchlistJob,
   updateWatchlistSource
 } from "@/services/watchlists"
+import { fetchWatchlistsOverviewData } from "@/services/watchlists-overview"
 import { useWatchlistsStore } from "@/store/watchlists"
 import { useTutorialStore } from "@/store/tutorials"
 import type {
+  PaginatedResponse,
   WatchlistContainer,
   WatchlistDomain,
   WatchlistJobCreate,
@@ -88,6 +97,8 @@ import { resolvePreferredWatchlistId } from "./watchlist-selection"
 import { restoreFocusToElement } from "./shared/focus-management"
 
 const RUN_NOTIFICATIONS_POLL_MS = 15_000
+const WATCHLISTS_PAGE = { page: 1, size: 100 }
+const EMPTY_WATCHLISTS: WatchlistContainer[] = []
 const RUN_NOTIFICATIONS_PAGE_SIZE = 25
 const RUN_NOTIFICATIONS_REDUCED_PAGE_SIZE = 10
 const RUN_NOTIFICATIONS_MIN_POLL_MS = 100
@@ -428,36 +439,50 @@ const InlineSecondarySection: React.FC<{
   </div>
 )
 
-export const WatchlistsPlaygroundPage: React.FC = () => {
+export const WatchlistsPlaygroundPage: React.FC = () => (
+  <WatchlistsPage key={useWatchlistsAccountGeneration()} />
+)
+
+const WatchlistsPage: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const isOnline = useServerOnline()
   const notification = useAntdNotification()
 
   const activeTab = useWatchlistsStore((s) => s.activeTab)
-  const overviewHealth = useWatchlistsStore((s) => s.overviewHealth)
   const runsPollingActive = useWatchlistsStore((s) => s.pollingActive)
-  const watchlists = useWatchlistsStore((s) => s.watchlists)
-  const watchlistsLoading = useWatchlistsStore((s) => s.watchlistsLoading)
-  const watchlistsError = useWatchlistsStore((s) => s.watchlistsError)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
+  const containersQuery = useWatchlistsQuery("containers", WATCHLISTS_PAGE,
+    ({ signal }) => fetchWatchlists(WATCHLISTS_PAGE, signal))
+  const watchlists = Array.isArray(containersQuery.data?.items) ? containersQuery.data.items : EMPTY_WATCHLISTS
+  const watchlistsLoading = containersQuery.isLoading
+  const watchlistsError = containersQuery.isError
+    ? t("watchlists:containers.fetchError", "Failed to load Watchlists")
+    : null
+  const globalOverview = useWatchlistsQuery("overview", {}, ({ signal }) => fetchWatchlistsOverviewData({}, signal), {
+    enabled: watchlists.some((watchlist) => watchlist.id === selectedWatchlistId)
+  })
+  const scopedOverview = useWatchlistsQuery("overview", { watchlist_id: selectedWatchlistId },
+    ({ signal }) => fetchWatchlistsOverviewData({ watchlist_id: selectedWatchlistId ?? undefined }, signal), { enabled: false })
+  const overviewHealth = (activeTab === "overview" ? scopedOverview.data?.health : undefined) ??
+    globalOverview.data?.health
+  const setQueryData = useSetWatchlistsQueryData()
+  const invalidate = useInvalidateWatchlists()
+  const isCurrentAccount = useIsCurrentWatchlistsAccount()
   const setActiveTab = useWatchlistsStore((s) => s.setActiveTab)
   const openRunDetail = useWatchlistsStore((s) => s.openRunDetail)
   const openSourceForm = useWatchlistsStore((s) => s.openSourceForm)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
-  const setWatchlists = useWatchlistsStore((s) => s.setWatchlists)
-  const setWatchlistsLoading = useWatchlistsStore((s) => s.setWatchlistsLoading)
-  const setWatchlistsError = useWatchlistsStore((s) => s.setWatchlistsError)
   const setSelectedWatchlistId = useWatchlistsStore((s) => s.setSelectedWatchlistId)
-  const addWatchlist = useWatchlistsStore((s) => s.addWatchlist)
-  const updateWatchlistInList = useWatchlistsStore((s) => s.updateWatchlistInList)
   const resetStore = useWatchlistsStore((s) => s.resetStore)
   const activeTutorialId = useTutorialStore((s) => s.activeTutorialId)
   const watchlistsBasicsTutorialActive = activeTutorialId === "watchlists-basics"
   const runStatusRef = useRef<Map<number, string>>(new Map())
   const notifiedRunStatesRef = useRef<Set<string>>(new Set())
   const initializedRunPollingRef = useRef(false)
-  const runNotificationsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const runNotificationsPollingInFlightRef = useRef(false)
+  const lastNotificationReadRef = useRef(0)
+  const runNotificationKeysRef = useRef(new Set<string>())
+  const notificationRef = useRef(notification)
+  notificationRef.current = notification
   const sessionStartedAtMsRef = useRef<number>(Date.now())
   const [guidedTourState, setGuidedTourState] = React.useState<GuidedTourState>(() => readGuidedTourState())
   const [guidedTourOpen, setGuidedTourOpen] = React.useState(false)
@@ -486,9 +511,6 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [watchlistFormSaving, setWatchlistFormSaving] = React.useState(false)
   const [watchlistForm, setWatchlistForm] = React.useState<WatchlistFormState>(WATCHLIST_FORM_DEFAULTS)
   const { isConstrained } = useWatchlistsViewport()
-  const selectedWatchlistIdRef = useRef<number | null>(selectedWatchlistId)
-  const loadWatchlistsRequestRef = useRef(0)
-  selectedWatchlistIdRef.current = selectedWatchlistId
 
   const closeHelpThen = useCallback((action: () => void) => {
     pendingHelpActionRef.current = action
@@ -509,38 +531,24 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     [selectedWatchlistId, watchlists]
   )
 
-  const loadWatchlists = useCallback(async () => {
-    const requestId = loadWatchlistsRequestRef.current + 1
-    loadWatchlistsRequestRef.current = requestId
-    const isLatestRequest = () => loadWatchlistsRequestRef.current === requestId
-
-    setWatchlistsLoading(true)
-    setWatchlistsError(null)
-    try {
-      const response = await fetchWatchlists({ page: 1, size: 100 })
-      if (!isLatestRequest()) return
-      const items = Array.isArray(response.items) ? response.items : []
-      const nextSelectedWatchlistId = resolvePreferredWatchlistId(items, selectedWatchlistIdRef.current)
-      setWatchlists(items, nextSelectedWatchlistId)
-    } catch (err) {
-      if (!isLatestRequest()) return
-      console.error("Failed to load Watchlists:", err)
-      setWatchlistsError(t("watchlists:containers.fetchError", "Failed to load Watchlists"))
-    } finally {
-      if (isLatestRequest()) {
-        setWatchlistsLoading(false)
-      }
-    }
-  }, [
-    setWatchlists,
-    setWatchlistsError,
-    setWatchlistsLoading,
-    t
-  ])
-
   useEffect(() => {
-    void loadWatchlists()
-  }, [loadWatchlists])
+    if (!containersQuery.data) return
+    const nextId = resolvePreferredWatchlistId(watchlists, selectedWatchlistId)
+    if (nextId !== selectedWatchlistId) setSelectedWatchlistId(nextId)
+  }, [containersQuery.data, selectedWatchlistId, setSelectedWatchlistId, watchlists])
+
+  const cacheWatchlist = useCallback((watchlist: WatchlistContainer) => {
+    if (!isCurrentAccount()) return
+    setQueryData<PaginatedResponse<WatchlistContainer>>("containers", WATCHLISTS_PAGE, (current) => {
+      if (!current || !Array.isArray(current.items)) return { items: [watchlist], total: 1 }
+      const exists = current.items.some(item => item.id === watchlist.id)
+      return exists
+        ? { ...current, items: current.items.map(item => item.id === watchlist.id ? watchlist : item) }
+        : { ...current, items: [watchlist, ...current.items], total: current.total + 1 }
+    })
+    setSelectedWatchlistId(watchlist.id)
+    void invalidate("containers", "overview")
+  }, [invalidate, isCurrentAccount, setQueryData, setSelectedWatchlistId])
 
   const openCreateWatchlistForm = useCallback(() => {
     setSetupWizardOpen(true)
@@ -582,8 +590,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     try {
       if (watchlistFormMode === "edit" && selectedWatchlist) {
         const updated = await updateWatchlist(selectedWatchlist.id, payload)
-        updateWatchlistInList(updated.id, updated)
-        setSelectedWatchlistId(updated.id)
+        if (!isCurrentAccount()) return
+        cacheWatchlist(updated)
         notification.success({
           message: t("watchlists:containers.updated", "Watchlist updated"),
           placement: "bottomRight",
@@ -591,8 +599,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         })
       } else {
         const created = await createWatchlist(payload)
-        addWatchlist(created)
-        setSelectedWatchlistId(created.id)
+        if (!isCurrentAccount()) return
+        cacheWatchlist(created)
         notification.success({
           message: t("watchlists:containers.created", "Watchlist created"),
           placement: "bottomRight",
@@ -601,6 +609,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       }
       setWatchlistFormOpen(false)
     } catch (err) {
+      if (!isCurrentAccount()) return
       console.error("Failed to save Watchlist:", err)
       notification.error({
         message: t("watchlists:containers.saveError", "Failed to save Watchlist"),
@@ -611,12 +620,11 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       setWatchlistFormSaving(false)
     }
   }, [
-    addWatchlist,
+    cacheWatchlist,
+    isCurrentAccount,
     notification,
     selectedWatchlist,
-    setSelectedWatchlistId,
     t,
-    updateWatchlistInList,
     watchlistForm,
     watchlistFormMode
   ])
@@ -669,8 +677,9 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   ) => updateWatchlistJob(jobId, job), [])
 
   const completeSetupWizard = useCallback((result: WatchlistSetupCompleteResult) => {
-    addWatchlist(result.watchlist)
-    setSelectedWatchlistId(result.watchlist.id)
+    if (!isCurrentAccount()) return
+    cacheWatchlist(result.watchlist)
+    void invalidate("sources", "jobs", "runs", "items", "outputs")
     setActiveTab(SETUP_DESTINATION_TAB[result.destination])
     setSetupWizardOpen(false)
     notification.success({
@@ -678,7 +687,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       placement: "bottomRight",
       duration: 5
     })
-  }, [addWatchlist, notification, setActiveTab, setSelectedWatchlistId, t])
+  }, [cacheWatchlist, invalidate, isCurrentAccount, notification, setActiveTab, t])
 
   const toggleShowAllViews = useCallback(() => {
     setShowAllViews((prev) => {
@@ -738,9 +747,12 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     })
   }, [closeHelpThen, navigateToTab])
 
-  // Refresh key — incrementing forces tab components to remount and refetch
+  // Reset the current view and refresh the cached data it reads.
   const [refreshKey, setRefreshKey] = React.useState(0)
-  const triggerRefresh = useCallback(() => setRefreshKey((k) => k + 1), [])
+  const triggerRefresh = useCallback(() => {
+    void invalidate()
+    setRefreshKey((k) => k + 1)
+  }, [invalidate])
 
   const exportSourcesFromPalette = useCallback(async () => {
     try {
@@ -1227,15 +1239,25 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   useWatchlistsKeyboardShortcuts(keyboardShortcutActions, isOnline)
 
   const openRunFromNotification = useCallback((runId: number, key: string) => {
+    if (!isCurrentAccount()) return
     notification.destroy(key)
     navigateToTab("runs")
     openRunDetail(runId)
-  }, [notification, openRunDetail, navigateToTab])
+  }, [isCurrentAccount, notification, openRunDetail, navigateToTab])
 
   const openRunsTabFromNotification = useCallback((key: string) => {
+    if (!isCurrentAccount()) return
     notification.destroy(key)
     navigateToTab("runs")
-  }, [notification, navigateToTab])
+  }, [isCurrentAccount, notification, navigateToTab])
+
+  useEffect(() => {
+    const keys = runNotificationKeysRef.current
+    return () => {
+      for (const key of keys) notificationRef.current.destroy(key)
+      keys.clear()
+    }
+  }, [])
 
   const runNotificationsPollPlan = React.useMemo(() => {
     const basePollMs = resolveRunNotificationsPollMs()
@@ -1273,16 +1295,19 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         })
 
     const onRetryRun = async () => {
-      if (!run.job_id) return
+      if (!run.job_id || !isCurrentAccount()) return
       try {
         notification.destroy(key)
         await triggerWatchlistRun(run.job_id)
+        if (!isCurrentAccount()) return
+        void invalidate("runs", "overview")
         notification.success({
           message: t("watchlists:notifications.retryTriggered", "Retry started"),
           placement: "bottomRight",
           duration: 5
         })
       } catch {
+        if (!isCurrentAccount()) return
         notification.error({
           message: t("watchlists:notifications.retryFailed", "Failed to retry run"),
           placement: "bottomRight",
@@ -1291,6 +1316,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       }
     }
 
+    runNotificationKeysRef.current.add(key)
     notification[kind === "failed" ? "error" : "success"]({
       key,
       message: messageText,
@@ -1327,7 +1353,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         </div>
       )
     })
-  }, [notification, openRunFromNotification, t])
+  }, [invalidate, isCurrentAccount, notification, openRunFromNotification, t])
 
   const showGroupedRunNotification = useCallback(
     (group: { kind: "completed" | "failed" | "stalled"; count: number; deepLinkRunId: number; hint: string | null }) => {
@@ -1368,6 +1394,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                 count: group.count
               })
 
+      runNotificationKeysRef.current.add(key)
       notification[mode]({
         key,
         message: messageText,
@@ -1406,138 +1433,128 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     [notification, openRunFromNotification, openRunsTabFromNotification, t]
   )
 
-  const pollRunNotifications = useCallback(async () => {
-    if (selectedWatchlistId == null) return
-    if (runNotificationsPollingInFlightRef.current) return
-    runNotificationsPollingInFlightRef.current = true
-    try {
-      const response = await fetchWatchlistRuns({
-        watchlist_id: selectedWatchlistId ?? undefined,
-        page: 1,
-        size: runNotificationsPollPlan.pageSize
+  const notificationRunParams = {
+    watchlist_id: selectedWatchlistId ?? undefined,
+    page: 1,
+    size: runNotificationsPollPlan.pageSize
+  }
+  const notificationsEnabled = runNotificationsPollPlan.enabled && selectedWatchlist != null
+  const { data: notificationRuns, dataUpdatedAt: notificationRunsUpdatedAt } = useWatchlistsQuery(
+    "runs", notificationRunParams, ({ signal }) => fetchWatchlistRuns(notificationRunParams, signal), {
+      enabled: notificationsEnabled,
+      refetchInterval: notificationsEnabled ? runNotificationsPollPlan.intervalMs : false,
+      refetchIntervalInBackground: true
+    }
+  )
+
+  useEffect(() => {
+    runStatusRef.current.clear()
+    notifiedRunStatesRef.current.clear()
+    initializedRunPollingRef.current = false
+    lastNotificationReadRef.current = 0
+    sessionStartedAtMsRef.current = Date.now()
+  }, [selectedWatchlistId])
+
+  useEffect(() => {
+    if (!notificationsEnabled || !notificationRuns || notificationRunsUpdatedAt === lastNotificationReadRef.current) return
+    lastNotificationReadRef.current = notificationRunsUpdatedAt
+    const response = notificationRuns
+    const nextRuns = Array.isArray(response.items) ? response.items : []
+    const firstSuccessfulRun = nextRuns.find((run) =>
+      SUCCESSFUL_RUN_STATUSES.has(String(run.status || "").toLowerCase())
+    )
+    if (firstSuccessfulRun) {
+      void trackWatchlistsOnboardingTelemetry({
+        type: "first_run_succeeded",
+        runId: firstSuccessfulRun.id
       })
-      const nextRuns = Array.isArray(response.items) ? response.items : []
-      const firstSuccessfulRun = nextRuns.find((run) =>
-        SUCCESSFUL_RUN_STATUSES.has(String(run.status || "").toLowerCase())
-      )
-      if (firstSuccessfulRun) {
-        void trackWatchlistsOnboardingTelemetry({
-          type: "first_run_succeeded",
-          runId: firstSuccessfulRun.id
+    }
+    const previousStatusMap = runStatusRef.current
+    const nextStatusMap = new Map<number, string>()
+    const initialized = initializedRunPollingRef.current
+    const nowMs = Date.now()
+    const runById = new Map<number, WatchlistRun>()
+    const candidateEvents: Array<{
+      eventKey: string
+      kind: "completed" | "failed" | "stalled"
+      runId: number
+      hint?: string | null
+    }> = []
+
+    nextRuns.forEach((run) => {
+      runById.set(run.id, run)
+      nextStatusMap.set(run.id, String(run.status || ""))
+      const previousStatus = previousStatusMap.get(run.id)
+
+      const transition = resolveRunTransitionNotification(previousStatus, run, t)
+      if (initialized && transition) {
+        candidateEvents.push({
+          eventKey: buildRunStateNotificationKey(run.id, run.status),
+          kind: transition.kind,
+          runId: run.id,
+          hint: transition.hint || null
         })
       }
-      const previousStatusMap = runStatusRef.current
-      const nextStatusMap = new Map<number, string>()
-      const initialized = initializedRunPollingRef.current
-      const nowMs = Date.now()
-      const runById = new Map<number, WatchlistRun>()
-      const candidateEvents: Array<{
-        eventKey: string
-        kind: "completed" | "failed" | "stalled"
-        runId: number
-        hint?: string | null
-      }> = []
 
-      nextRuns.forEach((run) => {
-        runById.set(run.id, run)
-        nextStatusMap.set(run.id, String(run.status || ""))
-        const previousStatus = previousStatusMap.get(run.id)
+      if (
+        initialized &&
+        !previousStatus &&
+        shouldNotifyNewTerminalRun(run, sessionStartedAtMsRef.current)
+      ) {
+        const status = String(run.status || "").toLowerCase()
+        const kind = status === "failed" ? "failed" : "completed"
+        const hint = kind === "failed" ? getRunFailureHint(run.error_msg, t) : null
+        candidateEvents.push({
+          eventKey: buildRunStateNotificationKey(run.id, run.status),
+          kind,
+          runId: run.id,
+          hint
+        })
+      }
 
-        const transition = resolveRunTransitionNotification(previousStatus, run, t)
-        if (initialized && transition) {
-          candidateEvents.push({
-            eventKey: buildRunStateNotificationKey(run.id, run.status),
-            kind: transition.kind,
-            runId: run.id,
-            hint: transition.hint || null
-          })
+      if (initialized) {
+        const stalled = resolveStalledRunNotification(
+          run,
+          nowMs,
+          RUN_STALLED_THRESHOLD_MS,
+          t
+        )
+        if (stalled) {
+          candidateEvents.push(stalled)
         }
+      }
+    })
 
-        if (
-          initialized &&
-          !previousStatus &&
-          shouldNotifyNewTerminalRun(run, sessionStartedAtMsRef.current)
-        ) {
-          const status = String(run.status || "").toLowerCase()
-          const kind = status === "failed" ? "failed" : "completed"
-          const hint = kind === "failed" ? getRunFailureHint(run.error_msg, t) : null
-          candidateEvents.push({
-            eventKey: buildRunStateNotificationKey(run.id, run.status),
-            kind,
-            runId: run.id,
-            hint
-          })
-        }
+    const freshEvents = dedupeRunNotificationEvents(
+      candidateEvents,
+      notifiedRunStatesRef.current
+    )
+    const groupedEvents = groupRunNotificationEvents(freshEvents).filter((group) =>
+      runNotificationsPollPlan.suppressCompleted ? group.kind !== "completed" : true
+    )
 
-        if (initialized) {
-          const stalled = resolveStalledRunNotification(
-            run,
-            nowMs,
-            RUN_STALLED_THRESHOLD_MS,
-            t
-          )
-          if (stalled) {
-            candidateEvents.push(stalled)
-          }
-        }
-      })
+    groupedEvents.forEach((group) => {
+      if (group.count === 1 && group.kind !== "stalled") {
+        const run = runById.get(group.deepLinkRunId)
+        if (!run) return
+        const event = freshEvents.find((entry) => entry.eventKey === group.eventKeys[0])
+        showRunNotification(run, group.kind, event?.hint || group.hint)
+        return
+      }
+      showGroupedRunNotification(group)
+    })
 
-      const freshEvents = dedupeRunNotificationEvents(
-        candidateEvents,
-        notifiedRunStatesRef.current
-      )
-      const groupedEvents = groupRunNotificationEvents(freshEvents).filter((group) =>
-        runNotificationsPollPlan.suppressCompleted ? group.kind !== "completed" : true
-      )
-
-      groupedEvents.forEach((group) => {
-        if (group.count === 1 && group.kind !== "stalled") {
-          const run = runById.get(group.deepLinkRunId)
-          if (!run) return
-          const event = freshEvents.find((entry) => entry.eventKey === group.eventKeys[0])
-          showRunNotification(run, group.kind, event?.hint || group.hint)
-          return
-        }
-        showGroupedRunNotification(group)
-      })
-
-      runStatusRef.current = nextStatusMap
-      initializedRunPollingRef.current = true
-    } catch (err) {
-      console.debug("Watchlists run notification polling failed:", err)
-    } finally {
-      runNotificationsPollingInFlightRef.current = false
-    }
+    runStatusRef.current = nextStatusMap
+    initializedRunPollingRef.current = true
   }, [
-    runNotificationsPollPlan.pageSize,
+    notificationRuns,
+    notificationRunsUpdatedAt,
+    notificationsEnabled,
     runNotificationsPollPlan.suppressCompleted,
-    selectedWatchlistId,
     showGroupedRunNotification,
     showRunNotification,
     t
   ])
-
-  useEffect(() => {
-    if (!runNotificationsPollPlan.enabled) {
-      if (runNotificationsTimerRef.current) {
-        clearInterval(runNotificationsTimerRef.current)
-        runNotificationsTimerRef.current = null
-      }
-      return
-    }
-    const pollIntervalMs = runNotificationsPollPlan.intervalMs
-    void pollRunNotifications()
-    runNotificationsTimerRef.current = setInterval(() => {
-      void pollRunNotifications()
-    }, pollIntervalMs)
-    return () => {
-      if (runNotificationsTimerRef.current) {
-        clearInterval(runNotificationsTimerRef.current)
-        runNotificationsTimerRef.current = null
-      }
-      runNotificationsPollingInFlightRef.current = false
-    }
-  }, [pollRunNotifications, runNotificationsPollPlan.enabled, runNotificationsPollPlan.intervalMs])
 
   const overviewBadges = overviewHealth?.tabBadges || {
     sources: 0,
@@ -1977,7 +1994,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           title={t("watchlists:containers.errorTitle", "Watchlists unavailable")}
           action={{
             label: t("watchlists:errors.retry", "Retry"),
-            onClick: () => void loadWatchlists()
+            onClick: () => void containersQuery.refetch()
           }}
         >
           {watchlistsError}

@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import * as backgroundProxy from "@/services/background-proxy"
 import { ReviewTab } from "../ReviewTab"
 import {
   useDecksQuery,
@@ -176,6 +178,9 @@ const makeCard = (overrides: Partial<Record<string, unknown>> = {}) => ({
   ...overrides
 })
 
+const revision = "a".repeat(64)
+const firstChapter = `1:0:${revision}`
+
 describe("ReviewTab orientation", () => {
   const reviewMutateAsync = vi.fn()
   let currentDecks: Array<ReturnType<typeof makeDeck>>
@@ -241,7 +246,7 @@ describe("ReviewTab orientation", () => {
     vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
   })
 
-  const renderReviewTab = (props?: Partial<React.ComponentProps<typeof ReviewTab>>) =>
+  const renderReviewTab = (props?: Partial<React.ComponentProps<typeof ReviewTab>>, queryClient?: QueryClient) =>
     render(
       <ReviewTab
         onNavigateToCreate={() => {}}
@@ -250,8 +255,138 @@ describe("ReviewTab orientation", () => {
         onReviewDeckChange={() => {}}
         isActive
         {...props}
+      />,
+      { wrapper: queryClient ? ({ children }) => (
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        ) : undefined }
+    )
+
+  const renderCardBrowser = () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return renderReviewTab({ reviewDeckId: 1 }, queryClient)
+  }
+
+  it("browses All cards and pages a chapter's cards without starting review", async () => {
+    const chapters = [
+      { id: firstChapter, title: "Cell structure", source_id: "1", source_title: "Biology", card_count: 21 },
+      { id: `1:1:${revision}`, title: "Metabolism", source_id: "1", source_title: "Biology", card_count: 1 },
+      { id: `2:0:${revision}`, title: "Digestion", source_id: "2", source_title: "Physiology", card_count: 1 }
+    ]
+    const request = vi.spyOn(backgroundProxy, "bgRequest")
+      .mockResolvedValueOnce({
+        chapters, all_cards_count: 23, count: 20, total: 23,
+        items: [makeCard({ uuid: "all", front: "Unsorted question", back: "Unsorted answer" })]
+      })
+      .mockResolvedValueOnce({
+        chapters, all_cards_count: 23, count: 20, total: 21,
+        items: [makeCard({ uuid: "first", front: "First chapter question", back: "First chapter answer" })]
+      })
+      .mockResolvedValueOnce({
+        chapters, all_cards_count: 23, count: 1, total: 21,
+        items: [makeCard({ uuid: "later", front: "Later chapter question", back: "Later chapter answer" })]
+      })
+    renderCardBrowser()
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse cards" }))
+    const drawer = within(await screen.findByRole("dialog", { name: "Browse cards" }))
+    const filter = await drawer.findByRole("combobox", { name: "Card set" })
+    expect(within(filter).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "All cards (23)", "Biology · Cell structure (21)", "Biology · Metabolism (1)", "Physiology · Digestion (1)"
+    ])
+    expect(filter).toHaveValue("")
+    await waitFor(() => expect(drawer.getByText("Unsorted question")).toBeVisible())
+    expect(drawer.getByText("Unsorted answer")).toBeVisible()
+    expect(request).toHaveBeenNthCalledWith(1, {
+      method: "GET",
+      path: "/api/v1/flashcards/study-packs/decks/1/cards?limit=20&offset=0",
+      abortSignal: expect.any(AbortSignal)
+    })
+
+    fireEvent.change(filter, { target: { value: firstChapter } })
+    await waitFor(() => expect(drawer.getByText("First chapter question")).toBeVisible())
+    expect(drawer.queryByText("Unsorted question")).not.toBeInTheDocument()
+    fireEvent.click(drawer.getByRole("button", { name: "Next" }))
+    await waitFor(() => expect(drawer.getByText("Later chapter question")).toBeVisible())
+    expect(request).toHaveBeenLastCalledWith({
+      method: "GET",
+      path: `/api/v1/flashcards/study-packs/decks/1/cards?chapter_id=1%3A0%3A${revision}&limit=20&offset=20`,
+      abortSignal: expect.any(AbortSignal)
+    })
+    expect(drawer.getByRole("button", { name: "Next" })).toBeDisabled()
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    expect(useFlashcardShortcuts).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }))
+  })
+
+  it("keeps All cards available when the selected chapter disappears", async () => {
+    vi.spyOn(backgroundProxy, "bgRequest")
+      .mockResolvedValueOnce({
+        chapters: [{ id: firstChapter, title: "Cell structure", source_id: "1", card_count: 1 }],
+        all_cards_count: 2, count: 2, total: 2, items: [makeCard()]
+      })
+      .mockResolvedValueOnce({ chapters: [], all_cards_count: 1, count: 0, total: 0, items: [] })
+      .mockResolvedValueOnce({
+        chapters: [], all_cards_count: 1, count: 1, total: 1,
+        items: [makeCard({ uuid: "remaining", front: "Remaining question" })]
+      })
+    renderCardBrowser()
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse cards" }))
+    const drawer = within(await screen.findByRole("dialog", { name: "Browse cards" }))
+    const filter = await drawer.findByRole("combobox", { name: "Card set" })
+    fireEvent.change(filter, { target: { value: firstChapter } })
+    expect(await drawer.findByRole("option", { name: "Chapter unavailable" })).toBeInTheDocument()
+    expect(filter).toHaveValue(firstChapter)
+    fireEvent.change(filter, { target: { value: "" } })
+    await waitFor(() => expect(drawer.getByText("Remaining question")).toBeVisible())
+  })
+
+  it("aborts browsing and removes deck content when the account changes", async () => {
+    const request = vi.spyOn(backgroundProxy, "bgRequest")
+      .mockImplementationOnce(() => new Promise(() => {}))
+    renderCardBrowser()
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse cards" }))
+    await screen.findByRole("dialog", { name: "Browse cards" })
+    await waitFor(() => expect(request).toHaveBeenCalledOnce())
+    const signal = request.mock.calls[0][0].abortSignal
+    expect(signal?.aborted).toBe(false)
+    fireEvent(window, new Event("tldw:auth-principal-changed"))
+
+    expect(signal?.aborted).toBe(true)
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Browse cards" })).not.toBeInTheDocument())
+  })
+
+  it("aborts the old deck page and starts with All cards in the new deck", async () => {
+    const request = vi.spyOn(backgroundProxy, "bgRequest")
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce({
+        chapters: [], all_cards_count: 1, count: 1, total: 1,
+        items: [makeCard({ uuid: "new-deck", deck_id: 2, front: "Physics question" })]
+      })
+    const { rerender } = renderCardBrowser()
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse cards" }))
+    await waitFor(() => expect(request).toHaveBeenCalledOnce())
+    const signal = request.mock.calls[0][0].abortSignal
+    rerender(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={2}
+        onReviewDeckChange={() => {}}
+        isActive
       />
     )
+    expect(signal?.aborted).toBe(true)
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Browse cards" })).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: "Browse cards" }))
+    const drawer = within(await screen.findByRole("dialog", { name: "Browse cards" }))
+    await waitFor(() => expect(drawer.getByText("Physics question")).toBeVisible())
+    expect(drawer.getByRole("combobox", { name: "Card set" })).toHaveValue("")
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({
+      path: "/api/v1/flashcards/study-packs/decks/2/cards?limit=20&offset=0"
+    }))
+  })
 
   it("shows the front as the prompt by default", async () => {
     renderReviewTab()

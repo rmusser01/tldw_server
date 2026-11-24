@@ -106,11 +106,13 @@ export interface FetchWatchlistsParams {
 }
 
 export const fetchWatchlists = async (
-  params?: FetchWatchlistsParams
+  params?: FetchWatchlistsParams,
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistContainer>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistContainer>>({
     path: `/api/v1/watchlists${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -212,11 +214,13 @@ export interface ContentAlertRuleDeleteResponse {
 
 export const fetchWatchlistContentAlertRules = async (
   watchlistId: number,
-  params?: FetchContentAlertRulesParams
+  params?: FetchContentAlertRulesParams,
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistContentAlertRule>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistContentAlertRule>>({
     path: `/api/v1/watchlists/${watchlistId}/content-alert-rules${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -256,11 +260,13 @@ export const deleteWatchlistContentAlertRule = async (
 
 export const fetchWatchlistContentAlerts = async (
   watchlistId: number,
-  params?: FetchContentAlertsParams
+  params?: FetchContentAlertsParams,
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistContentAlert>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistContentAlert>>({
     path: `/api/v1/watchlists/${watchlistId}/alerts${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -292,11 +298,13 @@ export const updateWatchlistContentAlert = async (
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const fetchWatchlistSources = async (
-  params?: FetchSourcesParams
+  params?: FetchSourcesParams,
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistSource>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistSource>>({
     path: `/api/v1/watchlists/sources${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -389,11 +397,13 @@ export const exportOpml = async (params?: {
 
 export const getSourceSeenStats = async (
   sourceId: number,
-  params?: { target_user_id?: number; keys_limit?: number }
+  params?: { target_user_id?: number; keys_limit?: number },
+  signal?: AbortSignal
 ): Promise<SourceSeenStats> => {
   const qs = buildQuery(params || {})
   return bgRequest<SourceSeenStats>({
     path: `/api/v1/watchlists/sources/${sourceId}/seen${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -454,11 +464,13 @@ export const testWatchlistSourceDraft = async (
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const fetchWatchlistGroups = async (
-  params?: { q?: string; page?: number; size?: number }
+  params?: { q?: string; page?: number; size?: number },
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistGroup>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistGroup>>({
     path: `/api/v1/watchlists/groups${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -496,11 +508,13 @@ export const deleteWatchlistGroup = async (groupId: number): Promise<void> => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const fetchWatchlistTags = async (
-  params?: { q?: string; page?: number; size?: number }
+  params?: { q?: string; page?: number; size?: number },
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistTag>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistTag>>({
     path: `/api/v1/watchlists/tags${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -521,18 +535,21 @@ export interface JobDeleteResponse extends ReversibleDeleteResponse {
 }
 
 export const fetchWatchlistJobs = async (
-  params?: FetchJobsParams
+  params?: FetchJobsParams,
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistJob>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistJob>>({
     path: `/api/v1/watchlists/jobs${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
 
-export const getWatchlistJob = async (jobId: number): Promise<WatchlistJob> => {
+export const getWatchlistJob = async (jobId: number, signal?: AbortSignal): Promise<WatchlistJob> => {
   return bgRequest<WatchlistJob>({
     path: `/api/v1/watchlists/jobs/${jobId}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -584,11 +601,13 @@ export const previewWatchlistSchedule = async (
 
 export const previewWatchlistJob = async (
   jobId: number,
-  params?: { limit?: number; per_source?: number }
+  params?: { limit?: number; per_source?: number },
+  signal?: AbortSignal
 ): Promise<JobPreviewResult> => {
   const qs = buildQuery(params || {})
   return bgRequest<JobPreviewResult>({
     path: `/api/v1/watchlists/jobs/${jobId}/preview${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "POST"
   })
 }
@@ -668,22 +687,26 @@ export interface ExportRunsCsvParams extends FetchRunsParams {
 }
 
 export const fetchWatchlistRuns = async (
-  params?: FetchRunsParams
+  params?: FetchRunsParams,
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistRun>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistRun>>({
     path: `/api/v1/watchlists/runs${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
 
 export const fetchJobRuns = async (
   jobId: number,
-  params?: { page?: number; size?: number }
+  params?: { page?: number; size?: number },
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistRun>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistRun>>({
     path: `/api/v1/watchlists/jobs/${jobId}/runs${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -695,28 +718,33 @@ export const getWatchlistRun = async (runId: number): Promise<WatchlistRun> => {
   })
 }
 
-export const getRunDetails = async (runId: number): Promise<RunDetailResponse> => {
+export const getRunDetails = async (runId: number, signal?: AbortSignal): Promise<RunDetailResponse> => {
   return bgRequest<RunDetailResponse>({
     path: `/api/v1/watchlists/runs/${runId}/details?include_tallies=true` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
 
 export const getWatchlistRunAudio = async (
-  runId: number
+  runId: number,
+  signal?: AbortSignal
 ): Promise<WatchlistRunAudioStatus> => {
   return bgRequest<WatchlistRunAudioStatus>({
     path: `/api/v1/watchlists/runs/${runId}/audio` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
 
 export const getLatestWatchlistBriefing = async (
-  params: { watchlist_id?: number } = {}
+  params: { watchlist_id?: number } = {},
+  signal?: AbortSignal
 ): Promise<WatchlistBriefingProjection | null> => {
   try {
     return await bgRequest<WatchlistBriefingProjection>({
       path: `/api/v1/watchlists/briefings/latest${buildQuery(params)}`,
+      ...(signal && { abortSignal: signal }),
       method: "GET"
     })
   } catch (error) {
@@ -844,11 +872,13 @@ export interface FetchItemsParams extends ScrapedItemAlertFilterParams {
 }
 
 export const fetchScrapedItems = async (
-  params?: FetchItemsParams
+  params?: FetchItemsParams,
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<ScrapedItem>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<ScrapedItem>>({
     path: `/api/v1/watchlists/items${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -868,11 +898,13 @@ export interface FetchItemSmartCountsParams extends ScrapedItemAlertFilterParams
 }
 
 export const fetchScrapedItemSmartCounts = async (
-  params?: FetchItemSmartCountsParams
+  params?: FetchItemSmartCountsParams,
+  signal?: AbortSignal
 ): Promise<ScrapedItemSmartCounts> => {
   const qs = buildQuery(params || {})
   return bgRequest<ScrapedItemSmartCounts>({
     path: `/api/v1/watchlists/items/smart-counts${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -906,10 +938,12 @@ export const batchUpdateScrapedItems = async (
 }
 
 export const fetchWatchlistItemViews = async (
-  watchlistId: number
+  watchlistId: number,
+  signal?: AbortSignal
 ): Promise<{ items: WatchlistItemSavedView[] }> => {
   return bgRequest<{ items: WatchlistItemSavedView[] }>({
     path: `/api/v1/watchlists/${watchlistId}/item-views` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -947,9 +981,10 @@ export const deleteWatchlistItemView = async (
   })
 }
 
-export const fetchWatchlistOutputPresets = async (): Promise<{ items: WatchlistOutputPreset[] }> => {
+export const fetchWatchlistOutputPresets = async (signal?: AbortSignal): Promise<{ items: WatchlistOutputPreset[] }> => {
   return bgRequest<{ items: WatchlistOutputPreset[] }>({
     path: "/api/v1/watchlists/job-output-presets" as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -1015,11 +1050,13 @@ export interface FetchOutputsParams {
 }
 
 export const fetchWatchlistOutputs = async (
-  params?: FetchOutputsParams
+  params?: FetchOutputsParams,
+  signal?: AbortSignal
 ): Promise<PaginatedResponse<WatchlistOutput>> => {
   const qs = buildQuery(params || {})
   return bgRequest<PaginatedResponse<WatchlistOutput>>({
     path: `/api/v1/watchlists/outputs${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -1041,9 +1078,10 @@ export const createWatchlistOutput = async (
   })
 }
 
-export const downloadWatchlistOutput = async (outputId: number): Promise<string> => {
+export const downloadWatchlistOutput = async (outputId: number, signal?: AbortSignal): Promise<string> => {
   return bgRequest<string>({
     path: `/api/v1/watchlists/outputs/${outputId}/download` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -1057,10 +1095,12 @@ export const downloadWatchlistOutputBinary = async (outputId: number): Promise<A
 }
 
 export const getWatchlistOutputEvidence = async (
-  outputId: number
+  outputId: number,
+  signal?: AbortSignal
 ): Promise<WatchlistOutputEvidenceResponse> => {
   return bgRequest<WatchlistOutputEvidenceResponse>({
     path: `/api/v1/watchlists/outputs/${outputId}/evidence` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -1086,11 +1126,13 @@ export interface JobOutputTemplateSummary {
 }
 
 export const fetchJobOutputTemplates = async (
-  params?: { q?: string; limit?: number; offset?: number }
+  params?: { q?: string; limit?: number; offset?: number },
+  signal?: AbortSignal
 ): Promise<{ items: JobOutputTemplateSummary[]; total: number }> => {
   const qs = buildQuery(params || {})
   const data = await bgRequest<{ items?: Array<Record<string, unknown>>; total?: number }>({
     path: `/api/v1/outputs/templates${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
   const items = Array.isArray(data?.items)
@@ -1109,29 +1151,34 @@ export const fetchJobOutputTemplates = async (
   }
 }
 
-export const fetchWatchlistTemplates = async (): Promise<{ items: WatchlistTemplate[] }> => {
+export const fetchWatchlistTemplates = async (signal?: AbortSignal): Promise<{ items: WatchlistTemplate[] }> => {
   return bgRequest<{ items: WatchlistTemplate[] }>({
     path: "/api/v1/watchlists/templates",
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
 
 export const getWatchlistTemplate = async (
   templateName: string,
-  options?: { version?: number }
+  options?: { version?: number },
+  signal?: AbortSignal
 ): Promise<WatchlistTemplate> => {
   const qs = buildQuery(options || {})
   return bgRequest<WatchlistTemplate>({
     path: `/api/v1/watchlists/templates/${encodeURIComponent(templateName)}${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
 
 export const getWatchlistTemplateVersions = async (
-  templateName: string
+  templateName: string,
+  signal?: AbortSignal
 ): Promise<{ items: WatchlistTemplateVersionSummary[] }> => {
   return bgRequest<{ items: WatchlistTemplateVersionSummary[] }>({
     path: `/api/v1/watchlists/templates/${encodeURIComponent(templateName)}/versions` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -1157,9 +1204,10 @@ export const deleteWatchlistTemplate = async (templateName: string): Promise<voi
 // Settings API
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const getWatchlistSettings = async (): Promise<WatchlistSettings> => {
+export const getWatchlistSettings = async (signal?: AbortSignal): Promise<WatchlistSettings> => {
   return bgRequest<WatchlistSettings>({
     path: "/api/v1/watchlists/settings",
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }
@@ -1222,10 +1270,12 @@ export const fetchWatchlistsIaExperimentTelemetrySummary = async (params?: {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const fetchJobClaimClusters = async (
-  jobId: number
+  jobId: number,
+  signal?: AbortSignal
 ): Promise<WatchlistClusterSubscription[]> => {
   const response = await bgRequest<{ clusters: WatchlistClusterSubscription[] }>({
     path: `/api/v1/watchlists/${jobId}/clusters` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
   return response.clusters
@@ -1259,10 +1309,11 @@ export const fetchClaimClusters = async (params?: {
   since?: string
   min_size?: number
   watchlisted?: boolean
-}): Promise<ClaimCluster[]> => {
+}, signal?: AbortSignal): Promise<ClaimCluster[]> => {
   const qs = buildQuery(params || {})
   return bgRequest<ClaimCluster[]>({
     path: `/api/v1/claims/clusters${qs}` as any,
+    ...(signal && { abortSignal: signal }),
     method: "GET"
   })
 }

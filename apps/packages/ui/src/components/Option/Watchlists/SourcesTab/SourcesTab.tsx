@@ -33,6 +33,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
+import { useFetchWatchlistsQuery, useInvalidateWatchlists, useIsCurrentWatchlistsAccount, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   checkWatchlistSourcesNow,
@@ -44,14 +45,17 @@ import {
   fetchWatchlistSources,
   fetchWatchlistGroups,
   fetchWatchlistTags,
+  getWatchlistSettings,
   restoreWatchlistSource,
   updateWatchlistSource
 } from "@/services/watchlists"
 import type {
   SourceSeenStats,
+  WatchlistGroup,
   WatchlistJob,
   WatchlistSource,
   WatchlistSourceCreate,
+  WatchlistTag,
   SourceType
 } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
@@ -90,6 +94,10 @@ const SOURCE_TYPE_COLORS: Record<SourceType, string> = {
   forum: "purple"
 }
 type SourceHealthSnapshot = Pick<SourceSeenStats, "defer_until" | "consec_not_modified">
+const EMPTY_SOURCES: WatchlistSource[] = []
+const EMPTY_GROUPS: WatchlistGroup[] = []
+const EMPTY_TAGS: WatchlistTag[] = []
+const CATALOG_PARAMS = { page: 1, size: 200 }
 const CLIENT_FILTER_PAGE_SIZE = 200
 const CLIENT_FILTER_MAX_ITEMS = 1000
 const SOURCE_USAGE_LOOKUP_PAGE_SIZE = 200
@@ -141,16 +149,9 @@ export const SourcesTab: React.FC = () => {
   const { isConstrained } = useWatchlistsViewport()
 
   // Store state
-  const sources = useWatchlistsStore((s) => s.sources)
-  const sourcesLoading = useWatchlistsStore((s) => s.sourcesLoading)
-  const sourcesTotal = useWatchlistsStore((s) => s.sourcesTotal)
   const sourcesSearch = useWatchlistsStore((s) => s.sourcesSearch)
   const sourcesPage = useWatchlistsStore((s) => s.sourcesPage)
   const sourcesPageSize = useWatchlistsStore((s) => s.sourcesPageSize)
-  const tags = useWatchlistsStore((s) => s.tags)
-  const groups = useWatchlistsStore((s) => s.groups)
-  const settings = useWatchlistsStore((s) => s.settings)
-  const groupsLoading = useWatchlistsStore((s) => s.groupsLoading)
   const selectedGroupId = useWatchlistsStore((s) => s.selectedGroupId)
   const selectedTagName = useWatchlistsStore((s) => s.selectedTagName)
   const sourceFormOpen = useWatchlistsStore((s) => s.sourceFormOpen)
@@ -158,22 +159,14 @@ export const SourcesTab: React.FC = () => {
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   // Store actions
-  const setSources = useWatchlistsStore((s) => s.setSources)
-  const setSourcesLoading = useWatchlistsStore((s) => s.setSourcesLoading)
   const setSourcesSearch = useWatchlistsStore((s) => s.setSourcesSearch)
   const setSourcesPage = useWatchlistsStore((s) => s.setSourcesPage)
   const setSourcesPageSize = useWatchlistsStore((s) => s.setSourcesPageSize)
-  const setTags = useWatchlistsStore((s) => s.setTags)
-  const setGroups = useWatchlistsStore((s) => s.setGroups)
-  const setGroupsLoading = useWatchlistsStore((s) => s.setGroupsLoading)
   const setActiveTab = useWatchlistsStore((s) => s.setActiveTab)
   const setSelectedGroupId = useWatchlistsStore((s) => s.setSelectedGroupId)
   const setSelectedTagName = useWatchlistsStore((s) => s.setSelectedTagName)
   const openSourceForm = useWatchlistsStore((s) => s.openSourceForm)
   const closeSourceForm = useWatchlistsStore((s) => s.closeSourceForm)
-  const addSource = useWatchlistsStore((s) => s.addSource)
-  const updateSourceInList = useWatchlistsStore((s) => s.updateSourceInList)
-  const removeSource = useWatchlistsStore((s) => s.removeSource)
 
   // Local state
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string | null>(
@@ -186,12 +179,89 @@ export const SourcesTab: React.FC = () => {
   const [checkingSourceIds, setCheckingSourceIds] = useState<number[]>([])
   const [importOpen, setImportOpen] = useState(false)
   const [seenDrawerSourceId, setSeenDrawerSourceId] = useState<number | null>(null)
-  const [sourceHealthById, setSourceHealthById] = useState<Record<number, SourceHealthSnapshot>>({})
-  const [sourcesLoadError, setSourcesLoadError] = useState<ReturnType<typeof mapWatchlistsError> | null>(null)
   const [showAdvancedColumns, setShowAdvancedColumns] = useState<boolean>(() => {
     const stored = readStoredDisclosureState(SOURCES_ADVANCED_COLUMNS_STORAGE_KEY)
     return stored ?? false
   })
+  const invalidateWatchlists = useInvalidateWatchlists()
+  const isCurrentAccount = useIsCurrentWatchlistsAccount()
+  const fetchWatchlistsQuery = useFetchWatchlistsQuery()
+  const refreshSourceCatalog = useCallback(
+    () => invalidateWatchlists("sources", "source-seen", "groups", "tags", "job-preview", "overview"),
+    [invalidateWatchlists]
+  )
+  const sourceFilters = {
+    watchlist_id: selectedWatchlistId ?? undefined,
+    q: sourcesSearch || undefined,
+    tags: selectedTagName ? [selectedTagName] : undefined,
+    groups: selectedGroupId != null ? [selectedGroupId] : undefined
+  }
+  const sourceParams = { ...sourceFilters, page: sourcesPage, size: sourcesPageSize }
+  const sourcesQuery = useWatchlistsQuery(
+    "sources",
+    selectedTypeFilter ? { ...sourceParams, sourceType: selectedTypeFilter } : sourceParams,
+    async ({ signal }) => {
+      if (!selectedTypeFilter) return fetchWatchlistSources(sourceParams, signal)
+
+      const items: WatchlistSource[] = []
+      for (let page = 1; items.length < CLIENT_FILTER_MAX_ITEMS; page += 1) {
+        const result = await fetchWatchlistSources({
+          ...sourceFilters,
+          page,
+          size: CLIENT_FILTER_PAGE_SIZE
+        }, signal)
+        const batch = Array.isArray(result.items) ? result.items : []
+        items.push(...batch)
+        if (items.length >= result.total || batch.length < CLIENT_FILTER_PAGE_SIZE) break
+      }
+      const matching = items.filter((source) => source.source_type === selectedTypeFilter)
+      return {
+        items: matching.slice((sourcesPage - 1) * sourcesPageSize, sourcesPage * sourcesPageSize),
+        total: matching.length
+      }
+    }
+  )
+  const sources = Array.isArray(sourcesQuery.data?.items) ? sourcesQuery.data.items : EMPTY_SOURCES
+  const sourcesLoading = sourcesQuery.isFetching
+  const sourcesTotal = sourcesQuery.data?.total ?? sources.length
+  const sourcesLoadError = sourcesQuery.error
+    ? mapWatchlistsError(sourcesQuery.error, {
+        t,
+        context: t("watchlists:sources.title", "Feeds"),
+        fallbackMessage: t("watchlists:sources.fetchError", "Failed to load feeds")
+      })
+    : null
+  const refreshSources = () => void invalidateWatchlists("sources", "source-seen")
+
+  const groupsQuery = useWatchlistsQuery("groups", CATALOG_PARAMS, ({ signal }) => fetchWatchlistGroups(CATALOG_PARAMS, signal))
+  const groups = Array.isArray(groupsQuery.data?.items) ? groupsQuery.data.items : EMPTY_GROUPS
+  const groupsLoading = groupsQuery.isFetching
+  const { data: tagsPage } = useWatchlistsQuery("tags", CATALOG_PARAMS, ({ signal }) => fetchWatchlistTags(CATALOG_PARAMS, signal))
+  const tags = Array.isArray(tagsPage?.items) ? tagsPage.items : EMPTY_TAGS
+  const { data: settings } = useWatchlistsQuery("settings", {}, ({ signal }) => getWatchlistSettings(signal))
+
+  const sourceIds = sources.map((source) => source.id)
+  const healthParams = { keys_limit: 1 }
+  const { data: sourceHealthById } = useWatchlistsQuery(
+    "source-seen",
+    { sourceIds, ...healthParams },
+    async ({ signal }) => {
+      const results = await Promise.allSettled(
+        sourceIds.map((id) => getSourceSeenStats(id, healthParams, signal))
+      )
+      const health: Record<number, SourceHealthSnapshot> = {}
+      results.forEach((result, index) => {
+        if (result.status !== "fulfilled") return
+        health[sourceIds[index]] = {
+          defer_until: result.value.defer_until,
+          consec_not_modified: result.value.consec_not_modified
+        }
+      })
+      return health
+    },
+    { enabled: sourceIds.length > 0 }
+  )
+
   const selectedSources = useMemo(
     () => sources.filter((source) => selectedRowKeys.includes(source.id)),
     [sources, selectedRowKeys]
@@ -223,137 +293,6 @@ export const SourcesTab: React.FC = () => {
   })
   const tableEmptyDescription = getSourcesTableEmptyDescription(hasActiveFilters)
 
-  const loadSourceHealth = useCallback(async (items: WatchlistSource[]) => {
-    if (!Array.isArray(items) || items.length === 0) {
-      setSourceHealthById({})
-      return
-    }
-
-    const results = await Promise.allSettled(
-      items.map((source) => getSourceSeenStats(source.id, { keys_limit: 1 }))
-    )
-
-    const next: Record<number, SourceHealthSnapshot> = {}
-    results.forEach((result, index) => {
-      if (result.status !== "fulfilled") return
-      next[items[index].id] = {
-        defer_until: result.value.defer_until,
-        consec_not_modified: result.value.consec_not_modified
-      }
-    })
-
-    setSourceHealthById(next)
-  }, [])
-
-  // Fetch sources
-  const loadSources = useCallback(async () => {
-    setSourcesLoading(true)
-    try {
-      const useClientFilter = Boolean(selectedTypeFilter)
-      const baseParams = {
-        watchlist_id: selectedWatchlistId ?? undefined,
-        q: sourcesSearch || undefined,
-        tags: selectedTagName ? [selectedTagName] : undefined,
-        groups: selectedGroupId != null ? [selectedGroupId] : undefined
-      }
-      let items: WatchlistSource[] = []
-      let total = 0
-
-      if (useClientFilter) {
-        let page = 1
-        while (items.length < CLIENT_FILTER_MAX_ITEMS) {
-          const result = await fetchWatchlistSources({
-            ...baseParams,
-            page,
-            size: CLIENT_FILTER_PAGE_SIZE
-          })
-          const batch = Array.isArray(result.items) ? result.items : []
-          if (page === 1) total = result.total || batch.length
-          items = items.concat(batch)
-          if (items.length >= total || batch.length < CLIENT_FILTER_PAGE_SIZE) {
-            break
-          }
-          page += 1
-        }
-      } else {
-        const result = await fetchWatchlistSources({
-          ...baseParams,
-          page: sourcesPage,
-          size: sourcesPageSize
-        })
-        items = Array.isArray(result.items) ? result.items : []
-        total = result.total || items.length
-      }
-
-      if (selectedTypeFilter) {
-        items = items.filter((source) => source.source_type === selectedTypeFilter)
-      }
-
-      total = useClientFilter ? items.length : total
-      const pagedItems = useClientFilter
-        ? items.slice((sourcesPage - 1) * sourcesPageSize, sourcesPage * sourcesPageSize)
-        : items
-
-      setSources(pagedItems, total)
-      setSourcesLoadError(null)
-      void loadSourceHealth(pagedItems)
-    } catch (err) {
-      console.error("Failed to fetch sources:", err)
-      setSourcesLoadError(
-        mapWatchlistsError(err, {
-          t,
-          context: t("watchlists:sources.title", "Feeds"),
-          fallbackMessage: t("watchlists:sources.fetchError", "Failed to load feeds")
-        })
-      )
-    } finally {
-      setSourcesLoading(false)
-    }
-  }, [
-    sourcesSearch,
-    selectedTagName,
-    selectedTypeFilter,
-    selectedGroupId,
-    selectedWatchlistId,
-    sourcesPage,
-    sourcesPageSize,
-    setSources,
-    setSourcesLoading,
-    loadSourceHealth,
-    t
-  ])
-
-  // Fetch tags
-  const loadTags = useCallback(async () => {
-    try {
-      const result = await fetchWatchlistTags({ page: 1, size: 200 })
-      setTags(Array.isArray(result.items) ? result.items : [])
-    } catch (err) {
-      console.error("Failed to fetch tags:", err)
-      setTags([])
-    }
-  }, [setTags])
-
-  const loadGroups = useCallback(async () => {
-    setGroupsLoading(true)
-    try {
-      const result = await fetchWatchlistGroups({ page: 1, size: 200 })
-      setGroups(Array.isArray(result.items) ? result.items : [])
-    } catch (err) {
-      console.error("Failed to fetch groups:", err)
-      setGroups([])
-    } finally {
-      setGroupsLoading(false)
-    }
-  }, [setGroups, setGroupsLoading])
-
-  // Initial load
-  useEffect(() => {
-    loadSources()
-    loadTags()
-    loadGroups()
-  }, [loadSources, loadTags, loadGroups])
-
   useEffect(() => {
     if (selectedRowKeys.length === 0 && bulkMoveTargetValue !== null) {
       setBulkMoveTargetValue(null)
@@ -367,10 +306,10 @@ export const SourcesTab: React.FC = () => {
   // Handle toggle active
   const handleToggleActive = async (source: WatchlistSource) => {
     try {
-      const updated = await updateWatchlistSource(source.id, {
+      await updateWatchlistSource(source.id, {
         active: !source.active
       })
-      updateSourceInList(source.id, updated)
+      void invalidateWatchlists("sources", "job-preview", "overview")
       message.success(
         source.active
           ? t("watchlists:sources.disabled", "Source disabled")
@@ -382,36 +321,31 @@ export const SourcesTab: React.FC = () => {
     }
   }
 
-  const loadJobsForSourceUsageCheck = useCallback(async () => {
-    const allJobs: WatchlistJob[] = []
-    let page = 1
-
-    while (page <= SOURCE_USAGE_LOOKUP_MAX_PAGES) {
-      const response = await fetchWatchlistJobs({
-        watchlist_id: selectedWatchlistId ?? undefined,
-        page,
-        size: SOURCE_USAGE_LOOKUP_PAGE_SIZE
-      })
-      const pageItems = Array.isArray(response.items) ? response.items : []
-      allJobs.push(...pageItems)
-      if (
-        pageItems.length < SOURCE_USAGE_LOOKUP_PAGE_SIZE ||
-        allJobs.length >= Number(response.total || 0)
-      ) {
-        break
-      }
-      page += 1
+  const loadJobsForSourceUsageCheck = useCallback(() => {
+    const params = {
+      watchlist_id: selectedWatchlistId ?? undefined,
+      size: SOURCE_USAGE_LOOKUP_PAGE_SIZE
     }
-
-    return allJobs
-  }, [selectedWatchlistId])
+    return fetchWatchlistsQuery("jobs", { ...params, maxPages: SOURCE_USAGE_LOOKUP_MAX_PAGES }, async ({ signal }) => {
+      const allJobs: WatchlistJob[] = []
+      for (let page = 1; page <= SOURCE_USAGE_LOOKUP_MAX_PAGES; page += 1) {
+        const response = await fetchWatchlistJobs({ ...params, page }, signal)
+        const pageItems = Array.isArray(response.items) ? response.items : []
+        allJobs.push(...pageItems)
+        if (pageItems.length < params.size || allJobs.length >= Number(response.total || 0)) break
+      }
+      return allJobs
+    })
+  }, [fetchWatchlistsQuery, selectedWatchlistId])
 
   // Handle delete
   const handleDelete = async (sourceId: number) => {
+    if (!isCurrentAccount()) return
     const deletedSource = sources.find((source) => source.id === sourceId)
     try {
       const deleteResult = await deleteWatchlistSource(sourceId)
-      removeSource(sourceId)
+      if (!isCurrentAccount()) return
+      void refreshSourceCatalog()
       if (!deletedSource) {
         message.success(t("watchlists:sources.deleted", "Feed deleted"))
         return
@@ -429,10 +363,8 @@ export const SourcesTab: React.FC = () => {
           { seconds: undoWindowSeconds }
         ),
         duration: undoWindowSeconds,
-        onDismiss: () => {
-          void loadSources()
-        },
         onUndo: async () => {
+          if (!isCurrentAccount()) throw new DOMException("Watchlists account changed", "AbortError")
           try {
             await restoreWatchlistSource(toSourceRestoreId(deletedSource))
           } catch (restoreErr) {
@@ -447,7 +379,7 @@ export const SourcesTab: React.FC = () => {
             })
             throw new Error(restoreError.description)
           } finally {
-            await loadSources()
+            await refreshSourceCatalog()
           }
         }
       })
@@ -463,6 +395,7 @@ export const SourcesTab: React.FC = () => {
       const jobs = await loadJobsForSourceUsageCheck()
       activeUsage = findActiveSourceUsage(jobs, source.id)
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return
       console.error("Failed to check source usage:", err)
       message.warning(
         t(
@@ -472,6 +405,7 @@ export const SourcesTab: React.FC = () => {
       )
     }
 
+    if (!isCurrentAccount()) return
     const usageCount = activeUsage.length
     Modal.confirm({
       title: usageCount > 0
@@ -528,10 +462,10 @@ export const SourcesTab: React.FC = () => {
       okButtonProps: { danger: true },
       onOk: () => handleDelete(source.id)
     })
-  }, [handleDelete, loadJobsForSourceUsageCheck, t])
+  }, [handleDelete, isCurrentAccount, loadJobsForSourceUsageCheck, t])
 
   const handleBulkToggle = async (active: boolean) => {
-    if (selectedSources.length === 0) return
+    if (!isCurrentAccount() || selectedSources.length === 0) return
     const toggledSources = [...selectedSources]
     setBulkWorking(true)
     try {
@@ -545,7 +479,6 @@ export const SourcesTab: React.FC = () => {
       results.forEach((result, idx) => {
         if (result.status === "fulfilled") {
           const source = toggledSources[idx]
-          updateSourceInList(source.id, result.value)
           previouslyToggledSources.push(source)
           successCount += 1
         }
@@ -553,6 +486,7 @@ export const SourcesTab: React.FC = () => {
       const failedCount = toggledSources.length - successCount
 
       if (successCount > 0) {
+        void refreshSourceCatalog()
         showUndoNotification({
           title: t(
             "watchlists:sources.undoBulkToggleTitle",
@@ -565,10 +499,8 @@ export const SourcesTab: React.FC = () => {
             { seconds: SOURCE_DELETE_UNDO_WINDOW_SECONDS }
           ),
           duration: SOURCE_DELETE_UNDO_WINDOW_SECONDS,
-          onDismiss: () => {
-            void loadSources()
-          },
           onUndo: async () => {
+            if (!isCurrentAccount()) throw new DOMException("Watchlists account changed", "AbortError")
             const restoreResults = await Promise.allSettled(
               previouslyToggledSources.map((source) =>
                 updateWatchlistSource(source.id, { active: source.active })
@@ -576,15 +508,15 @@ export const SourcesTab: React.FC = () => {
             )
             let restoredCount = 0
             let restoreFailures = 0
-            restoreResults.forEach((result, idx) => {
+            restoreResults.forEach((result) => {
               if (result.status === "fulfilled") {
-                updateSourceInList(previouslyToggledSources[idx].id, result.value)
                 restoredCount += 1
               } else {
                 restoreFailures += 1
               }
             })
 
+            await refreshSourceCatalog()
             if (restoreFailures > 0) {
               throw new Error(
                 t(
@@ -625,7 +557,7 @@ export const SourcesTab: React.FC = () => {
   }
 
   const handleBulkDelete = async () => {
-    if (selectedSources.length === 0) return
+    if (!isCurrentAccount() || selectedSources.length === 0) return
     const deletedSources = [...selectedSources]
     setBulkWorking(true)
     try {
@@ -638,7 +570,6 @@ export const SourcesTab: React.FC = () => {
       results.forEach((result, idx) => {
         if (result.status === "fulfilled") {
           const removedSource = deletedSources[idx]
-          removeSource(removedSource.id)
           removedSources.push(removedSource)
           successfulDeletePayloads.push(result.value)
           successCount += 1
@@ -647,6 +578,7 @@ export const SourcesTab: React.FC = () => {
       const failedCount = deletedSources.length - successCount
 
       if (successCount > 0) {
+        void refreshSourceCatalog()
         const undoWindow = resolveBulkSourceUndoWindow(
           successfulDeletePayloads,
           SOURCE_DELETE_UNDO_WINDOW_SECONDS
@@ -671,15 +603,13 @@ export const SourcesTab: React.FC = () => {
           ),
           description: `${undoDescription}${variableWindowHint}`,
           duration: undoWindow.seconds,
-          onDismiss: () => {
-            void loadSources()
-          },
           onUndo: async () => {
+            if (!isCurrentAccount()) throw new DOMException("Watchlists account changed", "AbortError")
             const restoreSummary = await restoreDeletedSources(
               removedSources,
               restoreWatchlistSource
             )
-            await loadSources()
+            await refreshSourceCatalog()
             if (restoreSummary.failed > 0) {
               throw new Error(
                 t(
@@ -745,7 +675,7 @@ export const SourcesTab: React.FC = () => {
   }, [selectedSourceSummary, selectedSources, t])
 
   const requestBulkDelete = useCallback(async () => {
-    if (selectedSources.length === 0) return
+    if (!isCurrentAccount() || selectedSources.length === 0) return
 
     const selectedIds = selectedSources.map((source) => source.id)
     let usageMap = new Map<number, Array<{ id: number; name: string }>>()
@@ -754,6 +684,7 @@ export const SourcesTab: React.FC = () => {
       const jobs = await loadJobsForSourceUsageCheck()
       usageMap = mapActiveSourceUsage(jobs, selectedIds)
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return
       console.error("Failed to check selected source usage:", err)
       message.warning(
         t(
@@ -763,6 +694,7 @@ export const SourcesTab: React.FC = () => {
       )
     }
 
+    if (!isCurrentAccount()) return
     const impactedSourcesCount = selectedIds.filter((id) => (usageMap.get(id)?.length ?? 0) > 0).length
     const impactedJobs = Array.from(
       new Map(
@@ -830,10 +762,10 @@ export const SourcesTab: React.FC = () => {
       okButtonProps: { danger: true },
       onOk: () => handleBulkDelete()
     })
-  }, [handleBulkDelete, loadJobsForSourceUsageCheck, selectedSourceSummary, selectedSources, t])
+  }, [handleBulkDelete, isCurrentAccount, loadJobsForSourceUsageCheck, selectedSourceSummary, selectedSources, t])
 
   const handleBulkMoveToGroup = useCallback(async (targetGroupId: number | null) => {
-    if (selectedSources.length === 0) return
+    if (!isCurrentAccount() || selectedSources.length === 0) return
     const movedSources = [...selectedSources]
     const previousGroupIdsBySourceId = new Map<number, number[]>()
     movedSources.forEach((source) => {
@@ -855,13 +787,13 @@ export const SourcesTab: React.FC = () => {
       results.forEach((result, idx) => {
         if (result.status !== "fulfilled") return
         const source = movedSources[idx]
-        updateSourceInList(source.id, result.value)
         updatedSources.push(source)
         successCount += 1
       })
       const failedCount = movedSources.length - successCount
 
       if (successCount > 0) {
+        void refreshSourceCatalog()
         showUndoNotification({
           title: t("watchlists:sources.undoBulkMoveTitle", "Moved {{count}} feeds", {
             count: successCount
@@ -872,10 +804,8 @@ export const SourcesTab: React.FC = () => {
             { seconds: SOURCE_DELETE_UNDO_WINDOW_SECONDS }
           ),
           duration: SOURCE_DELETE_UNDO_WINDOW_SECONDS,
-          onDismiss: () => {
-            void loadSources()
-          },
           onUndo: async () => {
+            if (!isCurrentAccount()) throw new DOMException("Watchlists account changed", "AbortError")
             const restoreResults = await Promise.allSettled(
               updatedSources.map((source) =>
                 updateWatchlistSource(source.id, {
@@ -885,14 +815,14 @@ export const SourcesTab: React.FC = () => {
             )
             let restoredCount = 0
             let restoreFailures = 0
-            restoreResults.forEach((result, idx) => {
+            restoreResults.forEach((result) => {
               if (result.status === "fulfilled") {
-                updateSourceInList(updatedSources[idx].id, result.value)
                 restoredCount += 1
               } else {
                 restoreFailures += 1
               }
             })
+            await refreshSourceCatalog()
             if (restoreFailures > 0) {
               throw new Error(
                 t(
@@ -930,7 +860,7 @@ export const SourcesTab: React.FC = () => {
       setSelectedRowKeys([])
       setBulkMoveTargetValue(null)
     }
-  }, [loadSources, selectedSources, showUndoNotification, t, updateSourceInList])
+  }, [isCurrentAccount, refreshSourceCatalog, selectedSources, showUndoNotification, t])
 
   const requestBulkMoveToGroup = useCallback(() => {
     if (selectedSources.length === 0 || bulkMoveTargetValue == null) return
@@ -974,7 +904,7 @@ export const SourcesTab: React.FC = () => {
 
   const executeCheckNow = useCallback(async (sourceIds: number[]) => {
     const normalizedIds = normalizeSourceIds(sourceIds)
-    if (normalizedIds.length === 0) return
+    if (!isCurrentAccount() || normalizedIds.length === 0) return
 
     setCheckingSourceIds((prev) => Array.from(new Set([...prev, ...normalizedIds])))
     try {
@@ -1033,14 +963,14 @@ export const SourcesTab: React.FC = () => {
         message.error(t("watchlists:sources.checkNowError", "Failed to check selected sources"))
       }
 
-      await loadSources()
+      await invalidateWatchlists("sources", "source-seen", "job-preview", "runs", "items", "outputs", "overview")
     } catch (err) {
       console.error("Failed to check sources now:", err)
       message.error(t("watchlists:sources.checkNowError", "Failed to check selected sources"))
     } finally {
       setCheckingSourceIds((prev) => prev.filter((id) => !normalizedIds.includes(id)))
     }
-  }, [loadSources, setActiveTab, t])
+  }, [invalidateWatchlists, isCurrentAccount, setActiveTab, t])
 
   const requestCheckNow = useCallback((sourceIds: number[]) => {
     const normalizedIds = normalizeSourceIds(sourceIds)
@@ -1104,12 +1034,12 @@ export const SourcesTab: React.FC = () => {
     }
   ) => {
     try {
+      if (!isCurrentAccount()) return
       if (sourceFormEditId) {
-        const updated = await updateWatchlistSource(sourceFormEditId, values)
-        updateSourceInList(sourceFormEditId, updated)
+        await updateWatchlistSource(sourceFormEditId, values)
         message.success(t("watchlists:sources.updated", "Source updated"))
       } else {
-        const created = await createWatchlistSource({
+        await createWatchlistSource({
           ...values,
           ...(sourceCloneDraft
             ? {
@@ -1121,7 +1051,6 @@ export const SourcesTab: React.FC = () => {
                 watchlist_id: selectedWatchlistId ?? undefined
               })
         })
-        addSource(created)
         message.success(
           sourceCloneDraft
             ? t(
@@ -1132,7 +1061,7 @@ export const SourcesTab: React.FC = () => {
         )
       }
       handleCloseSourceForm()
-      loadTags() // Refresh tags in case new ones were added
+      void refreshSourceCatalog()
     } catch (err) {
       console.error("Failed to save source:", err)
       message.error(t("watchlists:sources.saveError", "Failed to save source"))
@@ -1266,7 +1195,7 @@ export const SourcesTab: React.FC = () => {
       width: 300,
       render: (_, record) => {
         const statusVisual = getSourceStatusVisual(record.status, record.active)
-        const health = sourceHealthById[record.id]
+        const health = sourceHealthById?.[record.id]
         const deferUntil = health?.defer_until
         const consecutiveNotModified = health?.consec_not_modified ?? 0
         const hasBackoff = typeof deferUntil === "string" && deferUntil.length > 0
@@ -1418,7 +1347,7 @@ export const SourcesTab: React.FC = () => {
 
   const renderSourceStatus = (source: WatchlistSource) => {
     const statusVisual = getSourceStatusVisual(source.status, source.active)
-    const health = sourceHealthById[source.id]
+    const health = sourceHealthById?.[source.id]
     const deferUntil = health?.defer_until
     const consecutiveNotModified = health?.consec_not_modified ?? 0
     const hasBackoff = typeof deferUntil === "string" && deferUntil.length > 0
@@ -1619,7 +1548,7 @@ export const SourcesTab: React.FC = () => {
             placeholder={t("watchlists:sources.searchPlaceholder", "Search sources...")}
             value={sourcesSearch}
             onChange={(e) => setSourcesSearch(e.target.value)}
-            onSearch={loadSources}
+            onSearch={refreshSources}
             allowClear
             className="w-64"
           />
@@ -1662,7 +1591,7 @@ export const SourcesTab: React.FC = () => {
           </Button>
           <Button
             icon={<RefreshCw className="h-4 w-4" />}
-            onClick={loadSources}
+            onClick={refreshSources}
             loading={sourcesLoading}
           >
             {t("common:refresh", "Refresh")}
@@ -1709,7 +1638,7 @@ export const SourcesTab: React.FC = () => {
           action={(
             <Button
               size="small"
-              onClick={() => void loadSources()}
+              onClick={() => void sourcesQuery.refetch()}
               loading={sourcesLoading}
             >
               {t("watchlists:errors.retry", "Retry")}
@@ -1831,7 +1760,7 @@ export const SourcesTab: React.FC = () => {
               selectedGroupId={selectedGroupId}
               loading={groupsLoading}
               onSelect={setSelectedGroupId}
-              onRefresh={loadGroups}
+              onRefresh={() => void refreshSourceCatalog()}
             />
           </div>
 
@@ -1899,11 +1828,7 @@ export const SourcesTab: React.FC = () => {
         tags={tags}
         defaultGroupId={selectedGroupId}
         watchlistId={selectedWatchlistId}
-        onImported={() => {
-          loadSources()
-          loadTags()
-          loadGroups()
-        }}
+        onImported={() => void refreshSourceCatalog()}
       />
 
       <SourceSeenDrawer

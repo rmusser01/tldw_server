@@ -527,36 +527,36 @@ def test_reverse_inference_model_type_and_flag(tmp_path):
     db = CharactersRAGDB(str(db_path), client_id="test")
     try:
         # Case 1: model_type basic_reverse only
-        uuid1 = db.add_flashcard({
+        uuid1 = db.flashcard_store.add_flashcard({
             "deck_id": None,
             "front": "Q1",
             "back": "A1",
             "model_type": "basic_reverse",
         })
-        card1 = db.get_flashcard(uuid1)
+        card1 = db.flashcard_store.get_flashcard(uuid1)
         assert card1["model_type"] == "basic_reverse"
         assert bool(card1["reverse"]) is True
 
         # Case 2: reverse flag only
-        uuid2 = db.add_flashcard({
+        uuid2 = db.flashcard_store.add_flashcard({
             "deck_id": None,
             "front": "Q2",
             "back": "A2",
             "reverse": True,
         })
-        card2 = db.get_flashcard(uuid2)
+        card2 = db.flashcard_store.get_flashcard(uuid2)
         assert card2["model_type"] == "basic_reverse"
         assert bool(card2["reverse"]) is True
 
         # Case 3: cloze ignores reverse for model_type
-        uuid3 = db.add_flashcard({
+        uuid3 = db.flashcard_store.add_flashcard({
             "deck_id": None,
             "front": "This is {{c1::cloze}}",
             "back": "",
             "is_cloze": True,
             "reverse": True,
         })
-        card3 = db.get_flashcard(uuid3)
+        card3 = db.flashcard_store.get_flashcard(uuid3)
         assert card3["model_type"] == "cloze"
         # reverse may be stored but exporter uses it only for basic
         assert bool(card3["reverse"]) is True

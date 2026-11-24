@@ -25,7 +25,7 @@ vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
 vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { logout: mocks.logout, testApiKey: mocks.testApiKey } }))
 vi.mock("@/services/tldw-server", () => ({ DEFAULT_TLDW_API_KEY: "default-key" }))
 vi.mock("@/services/api-send", () => ({ apiSend: vi.fn() }))
-vi.mock("@/store/connection", () => ({ useConnectionStore: { getState: () => ({ checkOnce: vi.fn() }) } }))
+vi.mock("@/store/connection", () => ({ useConnectionStore: Object.assign(() => false, { getState: () => ({ checkOnce: vi.fn() }) }) }))
 vi.mock("@/components/Common/ServerOverviewHint", () => ({ ServerOverviewHint: () => null }))
 vi.mock("../server-health-probe", () => ({ probeServerHealth: vi.fn() }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({

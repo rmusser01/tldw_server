@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, waitFor } from "@testing-library/react"
+import { waitFor } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
@@ -175,6 +176,10 @@ vi.mock("@/services/watchlists", () => ({
   fetchWatchlists: (...args: unknown[]) => mocks.fetchWatchlistsMock(...args),
   updateWatchlist: (...args: unknown[]) => mocks.updateWatchlistMock(...args),
   fetchWatchlistRuns: (...args: unknown[]) => mocks.fetchWatchlistRunsMock(...args)
+}))
+
+vi.mock("@/services/watchlists-overview", () => ({
+  fetchWatchlistsOverviewData: async () => ({ health: null })
 }))
 
 vi.mock("@/store/watchlists", () => ({

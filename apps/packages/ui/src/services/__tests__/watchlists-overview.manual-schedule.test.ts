@@ -64,7 +64,7 @@ describe("Watchlist overview schedule attention", () => {
       expect(result.health.statuses.jobs).toBe("healthy")
       expect(result.systemHealth).toBe("healthy")
       expect(result.items.unread).toBe(50)
-      expect(api.fetchWatchlistJobs).toHaveBeenCalledWith({ watchlist_id: 4, page: 1, size: 200 })
+      expect(api.fetchWatchlistJobs).toHaveBeenCalledWith({ watchlist_id: 4, page: 1, size: 200 }, undefined)
     }
   )
 

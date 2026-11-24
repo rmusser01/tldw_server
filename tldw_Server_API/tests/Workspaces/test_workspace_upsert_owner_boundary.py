@@ -97,7 +97,7 @@ def test_visible_create_race_returns_existing_workspace(tmp_path, monkeypatch):
     db = CharactersRAGDB(tmp_path / "race.db", client_id="1")
     try:
         before = db.workspace_store.upsert_workspace("raced-id", "Existing")
-        original = db.get_workspace
+        original = db.workspace_store.get_workspace
         reads = 0
 
         def first_read_misses(workspace_id, **kwargs):
@@ -105,7 +105,7 @@ def test_visible_create_race_returns_existing_workspace(tmp_path, monkeypatch):
             reads += 1
             return None if reads == 1 else original(workspace_id, **kwargs)
 
-        monkeypatch.setattr(db, "get_workspace", first_read_misses)
+        monkeypatch.setattr(db.workspace_store, "get_workspace", first_read_misses)
         assert db.workspace_store.upsert_workspace("raced-id", "Losing insert") == before  # nosec B101 - pytest real unique-insert race recovery oracle.
     finally:
         db.close_all_connections()

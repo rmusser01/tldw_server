@@ -2,7 +2,8 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { ItemsTab } from "../ItemsTab"
 import { useWatchlistsStore } from "@/store/watchlists"
 import type { ScrapedItem } from "@/types/watchlists"
@@ -83,8 +84,13 @@ vi.mock("antd", async () => {
 })
 
 vi.mock("@/services/watchlists", () => ({
-  batchUpdateScrapedItems: (...args: unknown[]) =>
-    serviceMocks.batchUpdateScrapedItems(...args),
+  batchUpdateScrapedItems: async (...args: unknown[]) => {
+    const result = await serviceMocks.batchUpdateScrapedItems(...args)
+    for (const id of result.changed_ids ?? []) {
+      itemUpdates.set(id, { ...itemUpdates.get(id), reviewed: true })
+    }
+    return result
+  },
   createWatchlistItemView: (...args: unknown[]) =>
     serviceMocks.createWatchlistItemView(...args),
   createWatchlistOutput: (...args: unknown[]) => serviceMocks.createWatchlistOutput(...args),
@@ -99,8 +105,14 @@ vi.mock("@/services/watchlists", () => ({
   fetchScrapedItems: (...args: unknown[]) => serviceMocks.fetchScrapedItems(...args),
   updateWatchlistItemView: (...args: unknown[]) =>
     serviceMocks.updateWatchlistItemView(...args),
-  updateScrapedItem: (...args: unknown[]) => serviceMocks.updateScrapedItem(...args)
+  updateScrapedItem: async (id: number, updates: Partial<ScrapedItem>) => {
+    const result = await serviceMocks.updateScrapedItem(id, updates)
+    itemUpdates.set(id, { ...itemUpdates.get(id), ...updates })
+    return result
+  }
 }))
+
+const itemUpdates = new Map<number, Partial<ScrapedItem>>()
 
 const makeItems = (): ScrapedItem[] => ([
   {
@@ -160,7 +172,7 @@ const createDeferred = <TValue,>() => {
 
 const setupFetchScrapedItemsMock = (listItems = makeItems()) => {
   ;(serviceMocks.fetchScrapedItems as Mock).mockImplementation(async (params?: Record<string, unknown>) => {
-    const filteredItems = listItems.filter((item) => {
+    const filteredItems = listItems.map((item) => ({ ...item, ...itemUpdates.get(item.id) })).filter((item) => {
       if (
         typeof params?.run_id === "number" &&
         Number.isInteger(params.run_id) &&
@@ -241,6 +253,7 @@ const expectAllFilteredBatchPayload = (expectedScope: Record<string, unknown>) =
 describe("ItemsTab batch throughput controls", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    itemUpdates.clear()
     window.localStorage.clear()
     useWatchlistsStore.getState().resetStore()
     useWatchlistsStore.getState().setSelectedWatchlistId(42)
@@ -416,15 +429,14 @@ describe("ItemsTab batch throughput controls", () => {
     window.localStorage.setItem(ITEMS_PAGE_SIZE_STORAGE_KEY, "50")
     render(<ItemsTab />)
 
-    await waitFor(() => {
-      expect(serviceMocks.fetchScrapedItems).toHaveBeenCalled()
-    })
+    await screen.findByTestId("watchlists-item-row-101")
 
     expect(serviceMocks.fetchScrapedItems).toHaveBeenCalledWith(
       expect.objectContaining({
         page: 1,
         size: 50
-      })
+      }),
+      expect.any(AbortSignal)
     )
 
     fireEvent.click(screen.getByTestId("watchlists-items-mark-page"))
@@ -458,7 +470,8 @@ describe("ItemsTab batch throughput controls", () => {
         expect.objectContaining({
           page: 1,
           size: 20
-        })
+        }),
+        expect.any(AbortSignal)
       )
     })
 
@@ -702,6 +715,26 @@ describe("ItemsTab batch throughput controls", () => {
     })
   })
 
+  it("refreshes a previously opened unread feed after marking an update reviewed", async () => {
+    render(<ItemsTab />)
+    await screen.findByTestId("watchlists-item-row-101")
+
+    fireEvent.click(screen.getByTestId("watchlists-items-smart-feed-unread"))
+    await screen.findByTestId("watchlists-item-row-101")
+    fireEvent.click(screen.getByTestId("watchlists-items-smart-feed-all"))
+    fireEvent.click(screen.getByRole("button", { name: "Open update: Item One" }))
+    fireEvent.click(screen.getByRole("button", { name: "Mark as reviewed" }))
+    await waitFor(() =>
+      expect(screen.getByTestId("watchlists-item-row-review-state-101")).toHaveTextContent("Reviewed")
+    )
+
+    fireEvent.click(screen.getByTestId("watchlists-items-smart-feed-unread"))
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-item-row-102")).toBeInTheDocument()
+      expect(screen.queryByTestId("watchlists-item-row-101")).toBeNull()
+    })
+  })
+
   it("surfaces alert-match context and filters updates by alert presence", async () => {
     setupFetchScrapedItemsMock([
       {
@@ -764,11 +797,12 @@ describe("ItemsTab batch throughput controls", () => {
         expect.objectContaining({
           has_alert: true,
           include_alert_summary: true
-        })
+        }),
+        expect.any(AbortSignal)
       )
     })
 
-    fireEvent.click(screen.getByTestId("watchlists-item-open-alerts"))
+    fireEvent.click(await screen.findByTestId("watchlists-item-open-alerts"))
     expect(useWatchlistsStore.getState().activeTab).toBe("alerts")
   })
 
@@ -835,7 +869,8 @@ describe("ItemsTab batch throughput controls", () => {
       expect.objectContaining({
         sort: "created_desc",
         include_alert_summary: true
-      })
+      }),
+      expect.any(AbortSignal)
     )
 
     const sortSelect = screen.getByTestId("watchlists-items-sort-select")
@@ -847,10 +882,11 @@ describe("ItemsTab batch throughput controls", () => {
         expect.objectContaining({
           sort: "unread_first",
           include_alert_summary: true
-        })
+        }),
+        expect.any(AbortSignal)
       )
+      expect(orderedRowIds()).toEqual([201, 202, 203])
     })
-    expect(orderedRowIds()).toEqual([201, 202, 203])
     expect(window.localStorage.getItem(ITEMS_SORT_MODE_STORAGE_KEY)).toBe("unreadFirst")
 
     fireEvent.mouseDown(sortSelect)
@@ -861,10 +897,11 @@ describe("ItemsTab batch throughput controls", () => {
         expect.objectContaining({
           sort: "created_asc",
           include_alert_summary: true
-        })
+        }),
+        expect.any(AbortSignal)
       )
+      expect(orderedRowIds()).toEqual([201, 202, 203])
     })
-    expect(orderedRowIds()).toEqual([201, 202, 203])
     expect(window.localStorage.getItem(ITEMS_SORT_MODE_STORAGE_KEY)).toBe("oldest")
   })
 
@@ -901,7 +938,9 @@ describe("ItemsTab batch throughput controls", () => {
       )
     })
 
-    expect(screen.getByTestId("watchlists-item-row-review-state-101")).toHaveTextContent("Reviewed")
+    await waitFor(() =>
+      expect(screen.getByTestId("watchlists-item-row-review-state-101")).toHaveTextContent("Reviewed")
+    )
     expect(screen.getByTestId("watchlists-item-row-review-state-102")).toHaveTextContent("Unread")
     expect(screen.getByTestId("watchlists-items-batch-retry-failed")).toHaveTextContent(
       "Retry 1 failed"
@@ -1419,7 +1458,9 @@ describe("ItemsTab batch throughput controls", () => {
     expect(uiMocks.messageWarning).toHaveBeenCalledWith(
       "Marked 1 selected item as reviewed; 1 failed."
     )
-    expect(screen.getByTestId("watchlists-item-row-review-state-101")).toHaveTextContent("Reviewed")
+    await waitFor(() =>
+      expect(screen.getByTestId("watchlists-item-row-review-state-101")).toHaveTextContent("Reviewed")
+    )
     expect(screen.getByTestId("watchlists-item-row-review-state-102")).toHaveTextContent("Unread")
     expect(screen.getByTestId("watchlists-items-selected-count")).toHaveTextContent("1 selected")
   })

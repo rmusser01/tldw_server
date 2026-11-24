@@ -151,7 +151,7 @@ def test_knowledge_save_excludes_reasoning_and_saves_completed_card(tmp_path, ma
         saved = response.json()
         assert db.get_note_by_id(saved["note_id"])["content"] == "The garden has seven raised beds."
         if make_flashcard:
-            card = db.get_flashcard(saved["flashcard_id"])
+            card = db.flashcard_store.get_flashcard(saved["flashcard_id"])
             assert card["front"] == "How many raised beds does the garden have?"
             assert card["back"] == "Seven raised beds."
             assert card["conversation_id"] == conv_id
@@ -220,7 +220,7 @@ def test_legacy_knowledge_save_uses_owned_parent_question_and_public_excerpt(tmp
         })
         assert response.status_code == 201, response.text
         saved = response.json()
-        card = db.get_flashcard(saved["flashcard_id"])
+        card = db.flashcard_store.get_flashcard(saved["flashcard_id"])
         assert card["front"] == "How many raised beds does the garden have?"
         assert card["back"] == "The garden has seven raised beds."
         assert card["conversation_id"] == conv_id
@@ -256,7 +256,7 @@ def test_legacy_knowledge_save_rejects_ungrounded_turn_before_writes(tmp_path, q
         })
         assert response.status_code == 422, response.text
         assert db.count_notes() == 0
-        assert db.list_flashcards() == []
+        assert db.flashcard_store.list_flashcards() == []
     finally:
         db.close_connection()
 
@@ -314,6 +314,6 @@ def test_legacy_knowledge_save_rejects_foreign_parent_before_writes(
         )
         assert response.status_code == 403, response.text
         assert db.count_notes() == 0
-        assert db.list_flashcards() == []
+        assert db.flashcard_store.list_flashcards() == []
     finally:
         db.close_connection()

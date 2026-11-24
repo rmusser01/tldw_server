@@ -78,8 +78,8 @@ def _create_shared_source(
     source_type: str,
 ) -> tuple[dict[str, str], str]:
     if source_type == "flashcard_deck":
-        deck_id = db.add_deck(name="Anticoagulation")
-        card_uuid = db.add_flashcard(
+        deck_id = db.flashcard_store.add_deck(name="Anticoagulation")
+        card_uuid = db.flashcard_store.add_flashcard(
             {
                 "deck_id": deck_id,
                 "front": "Warfarin monitoring",
@@ -88,7 +88,7 @@ def _create_shared_source(
         )
         return {"source_type": source_type, "source_id": str(deck_id)}, card_uuid
     if source_type == "flashcard_card":
-        card_uuid = db.add_flashcard(
+        card_uuid = db.flashcard_store.add_flashcard(
             {
                 "front": "Warfarin monitoring",
                 "back": "Regular INR monitoring is required.",

@@ -2,7 +2,8 @@
 
 import React from "react"
 import axe from "axe-core"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 import {
@@ -283,6 +284,10 @@ vi.mock("@/utils/watchlists-onboarding-telemetry", () => ({
     mocks.trackWatchlistsOnboardingTelemetryMock(...args)
 }))
 
+vi.mock("@/services/watchlists-overview", () => ({
+  fetchWatchlistsOverviewData: async () => ({ health: mocks.state.overviewHealth })
+}))
+
 vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -420,11 +425,11 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
     }
   })
 
-  it("renders the full tab map and quick-action labels when show-all-views is enabled", () => {
+  it("renders the full tab map and quick-action labels when show-all-views is enabled", async () => {
     localStorage.setItem("watchlists:show-all-views:v1", "true")
     render(<WatchlistsPlaygroundPage />)
 
-    expect(screen.getByTestId("watchlists-tab-sources")).toHaveTextContent("Feeds")
+    expect(await screen.findByTestId("watchlists-tab-sources")).toHaveTextContent("Feeds")
     expect(screen.getByTestId("watchlists-tab-jobs")).toHaveTextContent("Monitors")
     expect(screen.getByTestId("watchlists-tab-runs")).toHaveTextContent("Activity")
     expect(screen.getByTestId("watchlists-tab-items")).toHaveTextContent("Updates")
@@ -604,7 +609,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
 
     const { container } = render(<WatchlistsPlaygroundPage />)
 
-    expect(screen.getByLabelText("3 attention items")).toBeInTheDocument()
+    expect(await screen.findByLabelText("3 attention items")).toBeInTheDocument()
     expect(screen.getByLabelText("2 attention items")).toBeInTheDocument()
     expect(screen.getByLabelText("1 attention items")).toBeInTheDocument()
 

@@ -14,7 +14,7 @@ vi.mock("@/utils/safe-storage", async importOriginal => {
   return { ...actual, createSafeStorage: (options = {}) => actual.createSafeStorage({ ...options, allCopied: true }) }
 })
 vi.mock("@/services/api-send", () => ({ apiSend: vi.fn() }))
-vi.mock("@/store/connection", () => ({ useConnectionStore: { getState: () => ({ checkOnce: vi.fn() }) } }))
+vi.mock("@/store/connection", () => ({ useConnectionStore: Object.assign(() => false, { getState: () => ({ checkOnce: vi.fn() }) }) }))
 vi.mock("@/components/Common/ServerOverviewHint", () => ({ ServerOverviewHint: () => null }))
 vi.mock("../server-health-probe", () => ({ probeServerHealth: vi.fn().mockResolvedValue({ ok: true, status: 200 }) }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({

@@ -2885,6 +2885,12 @@
   "tldw_loginRequired_description": {
     "message": "Please login with your tldw_server credentials"
   },
+  "tldw_cookieNotKept_title": {
+    "message": "The sign-in cookie was not kept or not accepted"
+  },
+  "tldw_cookieNotKept_description": {
+    "message": "Automatic sign-in stopped. Enter your API key below to connect. Only if you reach tldw solely over http://localhost or http://127.0.0.1, you can instead restart the server with SESSION_COOKIE_SECURE=0 (it applies to the whole server) and reload this page."
+  },
   "tldw_loggedIn_title": {
     "message": "Logged In"
   },

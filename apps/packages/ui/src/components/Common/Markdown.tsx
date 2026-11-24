@@ -2,9 +2,12 @@ import "katex/dist/katex.min.css"
 
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
-import ReactMarkdown from "react-markdown"
+import ReactMarkdown, {
+  type Components,
+  type ExtraProps
+} from "react-markdown"
 import rehypeKatex from "rehype-katex"
-import { Highlight } from "prism-react-renderer"
+import { Highlight, type PrismTheme } from "prism-react-renderer"
 
 import "property-information"
 import React from "react"
@@ -43,9 +46,9 @@ const INLINE_CODE_CLASSES =
   "not-prose rounded bg-surface2 px-1 py-0.5 font-mono text-[0.9em] font-normal"
 
 const MANAGED_ASSET_MARKER = "flashcard-asset://"
-// Plugin arrays are module-level constants: react-markdown memoizes its
-// unified processor on these identities, so inline arrays rebuilt the
-// processor on every render of every message (TASK-13511).
+// react-markdown 10 does not memoize: it rebuilds its unified processor and
+// re-parses the message on every render, whatever these identities are. The
+// `Markdown` export is wrapped in React.memo so unchanged messages skip that.
 const REMARK_PLUGINS = [remarkGfm, remarkMath]
 const REHYPE_PLUGINS = [rehypeKatex]
 const SAFE_URL_PROTOCOL = /^(https?:|mailto:|tel:|blob:)/i
@@ -163,7 +166,7 @@ const collectClosedMermaidFenceSources = (
   return sources
 }
 
-export function Markdown({
+function MarkdownContent({
   message,
   className = "prose break-words dark:prose-invert prose-p:leading-relaxed prose-pre:p-0 dark:prose-dark",
   searchQuery,
@@ -179,7 +182,7 @@ export function Markdown({
   message: string
   className?: string
   searchQuery?: string
-  codeBlockVariant?: "default" | "plain" | "compact" | "github"
+  codeBlockVariant?: CodeBlockVariant
   allowExternalImages?: boolean
   richTextModeOverride?: ChatRichTextMode
   headingAnchorIds?: string[]
@@ -298,35 +301,7 @@ export function Markdown({
       chatRichQuoteTextColorRaw
     ]
   )
-  const paragraphClass =
-    codeBlockVariant === "plain" ||
-    codeBlockVariant === "compact" ||
-    codeBlockVariant === "github"
-      ? "mb-2 last:mb-0 whitespace-pre-wrap"
-      : "mb-2 last:mb-0"
-  const renderHighlightedChildren = React.useCallback(
-    (children: React.ReactNode): React.ReactNode => {
-      if (!searchQuery) return children
-      return React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return highlightText(child, searchQuery)
-        }
-        if (React.isValidElement(child) && child.props?.children) {
-          const nextChildren = renderHighlightedChildren(child.props.children)
-          if (nextChildren === child.props.children) return child
-          return React.cloneElement(child, { ...child.props }, nextChildren)
-        }
-        return child
-      })
-    },
-    [searchQuery],
-  )
   const processedMessage = React.useMemo(() => preprocessLaTeX(message), [message])
-  const nextHeadingAnchorProps = React.useCallback(() => {
-    const anchorId = headingAnchorIds?.[headingIndexRef.current]
-    headingIndexRef.current += 1
-    return anchorId ? { "data-section-anchor": anchorId, id: anchorId } : {}
-  }, [headingAnchorIds])
   const stCompatHtml = React.useMemo(() => {
     if (richTextMode !== "st_compat") return ""
     return renderStCompatMarkdownToHtml(
@@ -346,6 +321,41 @@ export function Markdown({
     [enableMermaidDiagrams, processedMessage]
   )
   const shouldUseComponentMermaid = closedMermaidFenceSources.length > 0
+  const autoCodeTheme = React.useSyncExternalStore(
+    subscribeToPageTheme,
+    readAutoCodeTheme,
+    readAutoCodeTheme
+  )
+  const renderContext = React.useMemo<MarkdownRenderContextValue>(
+    () => ({
+      allowExternalImages: resolvedAllowExternalImages,
+      artifactContextId,
+      autoCodeTheme,
+      blockIndexRef,
+      closedMermaidFenceSources,
+      codeBlockVariant,
+      codeTheme,
+      enableCodeArtifactActions,
+      enableMermaidArtifactActions,
+      enableMermaidDiagrams,
+      headingAnchorIds,
+      headingIndexRef,
+      searchQuery
+    }),
+    [
+      artifactContextId,
+      autoCodeTheme,
+      closedMermaidFenceSources,
+      codeBlockVariant,
+      codeTheme,
+      enableCodeArtifactActions,
+      enableMermaidArtifactActions,
+      enableMermaidDiagrams,
+      headingAnchorIds,
+      resolvedAllowExternalImages,
+      searchQuery
+    ]
+  )
 
   if (
     richTextMode === "st_compat" &&
@@ -368,253 +378,377 @@ export function Markdown({
       className={`${resolvedClassName} ${RICH_TEXT_ELEMENT_STYLE_CLASS}`}
       style={richTextStyleVars as React.CSSProperties}
     >
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={REHYPE_PLUGINS}
-        urlTransform={transformMarkdownUrl}
-        components={{
-          pre({ children, ...props }) {
-            const childArray = React.Children.toArray(children)
-            const codeChild = childArray.find((child) => {
-              if (!React.isValidElement(child)) return false
-              const element = child as React.ReactElement
-              const className = element.props?.className as string | undefined
-              const nodeTag = element.props?.node?.tagName
-              return Boolean(className || nodeTag === "code")
-            }) as React.ReactElement | undefined
-
-            if (!codeChild) {
-              return <pre {...props}>{children}</pre>
-            }
-
-            const codeClassName = codeChild.props?.className as string | undefined
-            const match = /language-([^\s]+)/.exec(codeClassName || "")
-            const blockIndex = blockIndexRef.current++
-            const value = String(codeChild.props?.children ?? "")
-              .replace(/\r\n?/g, "\n")
-              .replace(/\n$/, "")
-            const rawLanguage = match ? match[1] : ""
-            const normalizedLanguage = normalizeLanguage(rawLanguage)
-            const nodePosition = codeChild.props?.node?.position
-            const startLine = Number(nodePosition?.start?.line)
-            const endLine = Number(nodePosition?.end?.line)
-            const hasNodeLinePosition =
-              Number.isFinite(startLine) && Number.isFinite(endLine)
-            const closedMermaidFenceIndex = closedMermaidFenceSources.findIndex(
-              (fence) => {
-                if (fence.source !== value) return false
-                if (hasNodeLinePosition) {
-                  return (
-                    fence.openingLine === startLine &&
-                    fence.closingLine === endLine
-                  )
-                }
-                return fence.blockIndex === blockIndex
-              }
-            )
-            const matchedMermaidFence =
-              closedMermaidFenceIndex === -1
-                ? undefined
-                : closedMermaidFenceSources[closedMermaidFenceIndex]
-
-            if (
-              enableMermaidDiagrams &&
-              rawLanguage.trim().toLowerCase() === "mermaid" &&
-              normalizedLanguage === "mermaid" &&
-              matchedMermaidFence
-            ) {
-              return (
-                <MermaidDiagramBlock
-                  artifactContextId={artifactContextId}
-                  blockIndex={matchedMermaidFence.blockIndex}
-                  enableArtifactAction={enableMermaidArtifactActions}
-                  source={value}
-                />
-              )
-            }
-
-            if (codeBlockVariant === "plain") {
-              return <div className="my-2 rounded-lg border border-border bg-surface2/70 px-3 py-2 text-xs font-mono leading-relaxed text-text whitespace-pre overflow-x-auto">{value}</div>
-            }
-            if (codeBlockVariant === "compact") {
-              const highlightLanguage = rawLanguage ? normalizedLanguage : "plaintext"
-              return (
-                <div data-code-block className={`not-prose my-2 rounded-lg border border-border bg-surface2/70 ${CODE_BLOCK_GROUP_CLASS}`}>
-                  <CodeBlockToolbar language={highlightLanguage} value={value} />
-                  <div className="overflow-x-auto px-3 py-2">
-                    <Highlight code={value} language={safeLanguage(highlightLanguage)} theme={resolveTheme(codeTheme || "dracula")}>
-                      {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
-                        <pre
-                          className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
-                          style={{
-                            ...style,
-                            backgroundColor: "transparent",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {tokens.map((line, i) => {
-                            const { key: _lineKey, ...lineProps } = getLineProps({
-                              line,
-                              key: i
-                            })
-                            return (
-                              <div key={i} {...lineProps}>
-                                {line.map((token, key) => {
-                                  const { key: _tokenKey, ...tokenProps } =
-                                    getTokenProps({ token, key })
-                                  return <span key={key} {...tokenProps} />
-                                })}
-                              </div>
-                            )
-                          })}
-                        </pre>
-                      )}
-                    </Highlight>
-                  </div>
-                </div>
-              )
-            }
-            if (codeBlockVariant === "github") {
-              return (
-                <div data-code-block className={`not-prose my-2 rounded-md border border-border/80 bg-surface2/70 ${CODE_BLOCK_GROUP_CLASS}`}>
-                  <CodeBlockToolbar language={normalizedLanguage} value={value} />
-                  <div className="overflow-x-auto px-4 py-3">
-                    <Highlight
-                      code={value}
-                      language={safeLanguage(normalizedLanguage)}
-                      theme={resolveTheme("auto")}
-                    >
-                      {({
-                        className: highlightClassName,
-                        style,
-                        tokens,
-                        getLineProps,
-                        getTokenProps
-                      }) => (
-                        <pre
-                          className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
-                          style={{
-                            ...style,
-                            backgroundColor: "transparent",
-                            fontFamily: "var(--font-mono)"
-                          }}
-                        >
-                          {tokens.map((line, i) => {
-                            const { key: _lineKey, ...lineProps } = getLineProps({
-                              line,
-                              key: i
-                            })
-                            return (
-                              <div key={i} {...lineProps}>
-                                {line.map((token, key) => {
-                                  const { key: _tokenKey, ...tokenProps } =
-                                    getTokenProps({ token, key })
-                                  return <span key={key} {...tokenProps} />
-                                })}
-                              </div>
-                            )
-                          })}
-                        </pre>
-                      )}
-                    </Highlight>
-                  </div>
-                </div>
-              )
-            }
-            return (
-              <CodeBlock
-                language={match ? match[1] : ""}
-                value={value}
-                blockIndex={blockIndex}
-                enableArtifactAction={enableCodeArtifactActions}
-              />
-            )
-          },
-          code({ className, children, ...props }) {
-            // Inline code (fenced blocks are handled by `pre` above).
-            const mergedClassName = className
-              ? `${className} ${INLINE_CODE_CLASSES}`
-              : INLINE_CODE_CLASSES
-            return (
-              <code className={mergedClassName} {...props}>
-                {children}
-              </code>
-            )
-          },
-          a({ ...props }) {
-            return (
-              <a target="_blank" rel="noopener noreferrer" className="text-primary text-sm hover:underline" {...props}>
-                {props.children}
-              </a>
-            )
-          },
-          img({ src, alt }) {
-            const resolvedSrc = typeof src === "string" ? src : ""
-            const managedAssetUuid = parseManagedAssetReference(resolvedSrc)
-            const isExternal = /^https?:\/\//i.test(resolvedSrc) || /^\/\/[^/]/.test(resolvedSrc)
-            const isAllowed = !isExternal || resolvedAllowExternalImages
-            if (!resolvedSrc) return null
-            if (managedAssetUuid) {
-              return <ManagedMarkdownImage assetUuid={managedAssetUuid} alt={alt || ""} />
-            }
-            if (!isAllowed) {
-              return (
-                <span className="inline-flex items-center gap-2 rounded-md border border-border bg-surface2 px-2 py-1 text-[11px] text-text-muted">
-                  <span>{alt ? `Image: ${alt}` : "External image blocked"}</span>
-                  <a href={resolvedSrc} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                    Open
-                  </a>
-                </span>
-              )
-            }
-            return <img src={resolvedSrc} alt={alt || ""} loading="lazy" referrerPolicy="no-referrer" className="my-2 max-w-full rounded-md border border-border" />
-          },
-          table({ children }) {
-            // TableBlock renders the <table> itself (AX-10).
-            return <TableBlock>{children}</TableBlock>
-          },
-          p({ children, className, ...props }) {
-            const content = renderHighlightedChildren(children)
-            const mergedClassName = [paragraphClass, className].filter(Boolean).join(" ")
-            return (
-              <p className={mergedClassName} {...props}>
-                {content}
-              </p>
-            )
-          },
-          li({ children, ...props }) {
-            return <li {...props}>{renderHighlightedChildren(children)}</li>
-          },
-          td({ children, ...props }) {
-            return <td {...props}>{renderHighlightedChildren(children)}</td>
-          },
-          th({ children, ...props }) {
-            return <th {...props}>{renderHighlightedChildren(children)}</th>
-          },
-          h1({ children, ...props }) {
-            return <h1 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h1>
-          },
-          h2({ children, ...props }) {
-            return <h2 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h2>
-          },
-          h3({ children, ...props }) {
-            return <h3 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h3>
-          },
-          h4({ children, ...props }) {
-            return <h4 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h4>
-          },
-          h5({ children, ...props }) {
-            return <h5 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h5>
-          },
-          h6({ children, ...props }) {
-            return <h6 {...props} {...nextHeadingAnchorProps()}>{renderHighlightedChildren(children)}</h6>
-          },
-        }}
-      >
-        {processedMessage}
-      </ReactMarkdown>
+      <MarkdownRenderContext.Provider value={renderContext}>
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={REHYPE_PLUGINS}
+          urlTransform={transformMarkdownUrl}
+          components={MARKDOWN_COMPONENTS}
+        >
+          {processedMessage}
+        </ReactMarkdown>
+      </MarkdownRenderContext.Provider>
     </div>
   )
 }
+
+type CodeBlockVariant = "default" | "plain" | "compact" | "github"
+
+type MarkdownRenderContextValue = {
+  allowExternalImages: boolean
+  artifactContextId?: string
+  /**
+   * The page theme's code colours. Changing it re-renders every code block,
+   * including CodeBlock, which resolves its own theme from the page.
+   */
+  autoCodeTheme: PrismTheme
+  blockIndexRef: React.MutableRefObject<number>
+  closedMermaidFenceSources: ClosedMermaidFenceSource[]
+  codeBlockVariant: CodeBlockVariant
+  codeTheme: string
+  enableCodeArtifactActions: boolean
+  enableMermaidArtifactActions: boolean
+  enableMermaidDiagrams: boolean
+  headingAnchorIds?: string[]
+  headingIndexRef: React.MutableRefObject<number>
+  searchQuery?: string
+}
+
+const MarkdownRenderContext =
+  React.createContext<MarkdownRenderContextValue | null>(null)
+
+const useMarkdownRenderContext = (): MarkdownRenderContextValue => {
+  const value = React.useContext(MarkdownRenderContext)
+  if (!value) {
+    throw new Error(
+      "Markdown tag components must render inside <Markdown>, which provides their context."
+    )
+  }
+  return value
+}
+
+// resolveTheme("auto") reads the <html> theme class and the OS colour scheme.
+// Markdown is memoized, so it subscribes to both: otherwise a theme switch
+// leaves existing code blocks in the old colours until their message changes.
+// ponytail: one observer per Markdown instance; share a module-level one if
+// very long chats make that measurable.
+const subscribeToPageTheme = (onChange: () => void) => {
+  if (typeof document === "undefined") return () => {}
+  const observer =
+    typeof MutationObserver === "undefined"
+      ? null
+      : new MutationObserver(onChange)
+  observer?.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"]
+  })
+  const colorScheme =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null
+  colorScheme?.addEventListener?.("change", onChange)
+  return () => {
+    observer?.disconnect()
+    colorScheme?.removeEventListener?.("change", onChange)
+  }
+}
+
+// Returns one of two module constants, so the snapshot is stable.
+const readAutoCodeTheme = () => resolveTheme("auto")
+
+const renderHighlightedChildren = (
+  children: React.ReactNode,
+  searchQuery: string | undefined
+): React.ReactNode => {
+  if (!searchQuery) return children
+  return React.Children.map(children, (child) => {
+    if (typeof child === "string") {
+      return highlightText(child, searchQuery)
+    }
+    if (React.isValidElement(child) && child.props?.children) {
+      const nextChildren = renderHighlightedChildren(
+        child.props.children,
+        searchQuery
+      )
+      if (nextChildren === child.props.children) return child
+      return React.cloneElement(child, { ...child.props }, nextChildren)
+    }
+    return child
+  })
+}
+
+const createHeading = (Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") =>
+  function MarkdownHeading({
+    children,
+    ...props
+  }: React.ComponentProps<"h1"> & ExtraProps) {
+    const { headingAnchorIds, headingIndexRef, searchQuery } =
+      useMarkdownRenderContext()
+    const anchorId = headingAnchorIds?.[headingIndexRef.current]
+    headingIndexRef.current += 1
+    const anchorProps = anchorId
+      ? { "data-section-anchor": anchorId, id: anchorId }
+      : {}
+    return <Tag {...props} {...anchorProps}>{renderHighlightedChildren(children, searchQuery)}</Tag>
+  }
+
+// Tag components live at module level so their identity never changes.
+// react-markdown uses them as element types; new functions on every render
+// made React unmount and remount the whole message (TASK-15622). Values that
+// change per instance or per message reach them through MarkdownRenderContext.
+const MARKDOWN_COMPONENTS: Components = {
+  pre: function MarkdownPre({ children, ...props }) {
+    const {
+      artifactContextId,
+      autoCodeTheme,
+      blockIndexRef,
+      closedMermaidFenceSources,
+      codeBlockVariant,
+      codeTheme,
+      enableCodeArtifactActions,
+      enableMermaidArtifactActions,
+      enableMermaidDiagrams
+    } = useMarkdownRenderContext()
+    const childArray = React.Children.toArray(children)
+    const codeChild = childArray.find((child) => {
+      if (!React.isValidElement(child)) return false
+      const element = child as React.ReactElement
+      const className = element.props?.className as string | undefined
+      const nodeTag = element.props?.node?.tagName
+      return Boolean(className || nodeTag === "code")
+    }) as React.ReactElement | undefined
+
+    if (!codeChild) {
+      return <pre {...props}>{children}</pre>
+    }
+
+    const codeClassName = codeChild.props?.className as string | undefined
+    const match = /language-([^\s]+)/.exec(codeClassName || "")
+    const blockIndex = blockIndexRef.current++
+    const value = String(codeChild.props?.children ?? "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\n$/, "")
+    const rawLanguage = match ? match[1] : ""
+    const normalizedLanguage = normalizeLanguage(rawLanguage)
+    const nodePosition = codeChild.props?.node?.position
+    const startLine = Number(nodePosition?.start?.line)
+    const endLine = Number(nodePosition?.end?.line)
+    const hasNodeLinePosition =
+      Number.isFinite(startLine) && Number.isFinite(endLine)
+    const closedMermaidFenceIndex = closedMermaidFenceSources.findIndex(
+      (fence) => {
+        if (fence.source !== value) return false
+        if (hasNodeLinePosition) {
+          return (
+            fence.openingLine === startLine &&
+            fence.closingLine === endLine
+          )
+        }
+        return fence.blockIndex === blockIndex
+      }
+    )
+    const matchedMermaidFence =
+      closedMermaidFenceIndex === -1
+        ? undefined
+        : closedMermaidFenceSources[closedMermaidFenceIndex]
+
+    if (
+      enableMermaidDiagrams &&
+      rawLanguage.trim().toLowerCase() === "mermaid" &&
+      normalizedLanguage === "mermaid" &&
+      matchedMermaidFence
+    ) {
+      return (
+        <MermaidDiagramBlock
+          artifactContextId={artifactContextId}
+          blockIndex={matchedMermaidFence.blockIndex}
+          enableArtifactAction={enableMermaidArtifactActions}
+          source={value}
+        />
+      )
+    }
+
+    if (codeBlockVariant === "plain") {
+      return <div className="my-2 rounded-lg border border-border bg-surface2/70 px-3 py-2 text-xs font-mono leading-relaxed text-text whitespace-pre overflow-x-auto">{value}</div>
+    }
+    if (codeBlockVariant === "compact") {
+      const highlightLanguage = rawLanguage ? normalizedLanguage : "plaintext"
+      return (
+        <div data-code-block className={`not-prose my-2 rounded-lg border border-border bg-surface2/70 ${CODE_BLOCK_GROUP_CLASS}`}>
+          <CodeBlockToolbar language={highlightLanguage} value={value} />
+          <div className="overflow-x-auto px-3 py-2">
+            <Highlight code={value} language={safeLanguage(highlightLanguage)} theme={codeTheme === "auto" ? autoCodeTheme : resolveTheme(codeTheme || "dracula")}>
+              {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
+                <pre
+                  className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
+                  style={{
+                    ...style,
+                    backgroundColor: "transparent",
+                    fontFamily: "var(--font-mono)",
+                  }}
+                >
+                  {tokens.map((line, i) => {
+                    const { key: _lineKey, ...lineProps } = getLineProps({
+                      line,
+                      key: i
+                    })
+                    return (
+                      <div key={i} {...lineProps}>
+                        {line.map((token, key) => {
+                          const { key: _tokenKey, ...tokenProps } =
+                            getTokenProps({ token, key })
+                          return <span key={key} {...tokenProps} />
+                        })}
+                      </div>
+                    )
+                  })}
+                </pre>
+              )}
+            </Highlight>
+          </div>
+        </div>
+      )
+    }
+    if (codeBlockVariant === "github") {
+      return (
+        <div data-code-block className={`not-prose my-2 rounded-md border border-border/80 bg-surface2/70 ${CODE_BLOCK_GROUP_CLASS}`}>
+          <CodeBlockToolbar language={normalizedLanguage} value={value} />
+          <div className="overflow-x-auto px-4 py-3">
+            <Highlight
+              code={value}
+              language={safeLanguage(normalizedLanguage)}
+              theme={autoCodeTheme}
+            >
+              {({
+                className: highlightClassName,
+                style,
+                tokens,
+                getLineProps,
+                getTokenProps
+              }) => (
+                <pre
+                  className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
+                  style={{
+                    ...style,
+                    backgroundColor: "transparent",
+                    fontFamily: "var(--font-mono)"
+                  }}
+                >
+                  {tokens.map((line, i) => {
+                    const { key: _lineKey, ...lineProps } = getLineProps({
+                      line,
+                      key: i
+                    })
+                    return (
+                      <div key={i} {...lineProps}>
+                        {line.map((token, key) => {
+                          const { key: _tokenKey, ...tokenProps } =
+                            getTokenProps({ token, key })
+                          return <span key={key} {...tokenProps} />
+                        })}
+                      </div>
+                    )
+                  })}
+                </pre>
+              )}
+            </Highlight>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <CodeBlock
+        language={match ? match[1] : ""}
+        value={value}
+        blockIndex={blockIndex}
+        enableArtifactAction={enableCodeArtifactActions}
+      />
+    )
+  },
+  code({ className, children, ...props }) {
+    // Inline code (fenced blocks are handled by `pre` above).
+    const mergedClassName = className
+      ? `${className} ${INLINE_CODE_CLASSES}`
+      : INLINE_CODE_CLASSES
+    return (
+      <code className={mergedClassName} {...props}>
+        {children}
+      </code>
+    )
+  },
+  a({ ...props }) {
+    return (
+      <a target="_blank" rel="noopener noreferrer" className="text-primary text-sm hover:underline" {...props}>
+        {props.children}
+      </a>
+    )
+  },
+  img: function MarkdownImage({ src, alt }) {
+    const { allowExternalImages } = useMarkdownRenderContext()
+    const resolvedSrc = typeof src === "string" ? src : ""
+    const managedAssetUuid = parseManagedAssetReference(resolvedSrc)
+    const isExternal = /^https?:\/\//i.test(resolvedSrc) || /^\/\/[^/]/.test(resolvedSrc)
+    const isAllowed = !isExternal || allowExternalImages
+    if (!resolvedSrc) return null
+    if (managedAssetUuid) {
+      return <ManagedMarkdownImage assetUuid={managedAssetUuid} alt={alt || ""} />
+    }
+    if (!isAllowed) {
+      return (
+        <span className="inline-flex items-center gap-2 rounded-md border border-border bg-surface2 px-2 py-1 text-[11px] text-text-muted">
+          <span>{alt ? `Image: ${alt}` : "External image blocked"}</span>
+          <a href={resolvedSrc} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+            Open
+          </a>
+        </span>
+      )
+    }
+    return <img src={resolvedSrc} alt={alt || ""} loading="lazy" referrerPolicy="no-referrer" className="my-2 max-w-full rounded-md border border-border" />
+  },
+  table({ children }) {
+    // TableBlock renders the <table> itself (AX-10).
+    return <TableBlock>{children}</TableBlock>
+  },
+  p: function MarkdownParagraph({ children, className, ...props }) {
+    const { codeBlockVariant, searchQuery } =
+      useMarkdownRenderContext()
+    const paragraphClass =
+      codeBlockVariant === "plain" ||
+      codeBlockVariant === "compact" ||
+      codeBlockVariant === "github"
+        ? "mb-2 last:mb-0 whitespace-pre-wrap"
+        : "mb-2 last:mb-0"
+    const content = renderHighlightedChildren(children, searchQuery)
+    const mergedClassName = [paragraphClass, className].filter(Boolean).join(" ")
+    return (
+      <p className={mergedClassName} {...props}>
+        {content}
+      </p>
+    )
+  },
+  li: function MarkdownListItem({ children, ...props }) {
+    const { searchQuery } = useMarkdownRenderContext()
+    return <li {...props}>{renderHighlightedChildren(children, searchQuery)}</li>
+  },
+  td: function MarkdownTableCell({ children, ...props }) {
+    const { searchQuery } = useMarkdownRenderContext()
+    return <td {...props}>{renderHighlightedChildren(children, searchQuery)}</td>
+  },
+  th: function MarkdownTableHeader({ children, ...props }) {
+    const { searchQuery } = useMarkdownRenderContext()
+    return <th {...props}>{renderHighlightedChildren(children, searchQuery)}</th>
+  },
+  h1: createHeading("h1"),
+  h2: createHeading("h2"),
+  h3: createHeading("h3"),
+  h4: createHeading("h4"),
+  h5: createHeading("h5"),
+  h6: createHeading("h6"),
+}
+
+// Chat rows re-render on every health and research poll; memo keeps an
+// unchanged message from being re-parsed. Callers pass strings, booleans and
+// memoized arrays only.
+export const Markdown = React.memo(MarkdownContent)
 
 export default Markdown

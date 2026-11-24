@@ -174,6 +174,16 @@ const setLinkedRunError = () => {
   queryState.errorUpdatedAt += 1
 }
 
+// TanStack passes refetchInterval the query; failures are counted from its state.
+const pollInterval = (runs: unknown[]) =>
+  queryState.capturedOptions?.refetchInterval?.({
+    state: {
+      data: { runs },
+      status: queryState.linkedRunsStatus,
+      errorUpdatedAt: queryState.errorUpdatedAt
+    }
+  })
+
 const renderChat = (extraProps?: Record<string, unknown>) =>
   render(
     <DemoModeProvider>
@@ -695,11 +705,7 @@ describe("PlaygroundChat linked research status integration", () => {
     ])
 
     const { rerender } = renderChat()
-    expect(
-      queryState.capturedOptions?.refetchInterval?.({
-        state: { data: { runs: queryState.linkedRuns } }
-      })
-    ).toBe(5_000)
+    expect(pollInterval(queryState.linkedRuns)).toBe(5_000)
 
     setLinkedRuns([
       {
@@ -713,38 +719,22 @@ describe("PlaygroundChat linked research status integration", () => {
       }
     ])
     rerender(renderChatTree())
-    expect(
-      queryState.capturedOptions?.refetchInterval?.({
-        state: { data: { runs: queryState.linkedRuns } }
-      })
-    ).toBe(30_000)
+    expect(pollInterval(queryState.linkedRuns)).toBe(30_000)
 
     setLinkedRunError()
     rerender(renderChatTree())
     await waitFor(() =>
-      expect(
-        queryState.capturedOptions?.refetchInterval?.({
-          state: { data: { runs: [{ status: "completed" }] } }
-        })
-      ).toBe(30_000)
+      expect(pollInterval([{ status: "completed" }])).toBe(30_000)
     )
     setLinkedRunError()
     rerender(renderChatTree())
     await waitFor(() =>
-      expect(
-        queryState.capturedOptions?.refetchInterval?.({
-          state: { data: { runs: [{ status: "completed" }] } }
-        })
-      ).toBe(30_000)
+      expect(pollInterval([{ status: "completed" }])).toBe(30_000)
     )
     setLinkedRunError()
     rerender(renderChatTree())
     await waitFor(() =>
-      expect(
-        queryState.capturedOptions?.refetchInterval?.({
-          state: { data: { runs: [{ status: "completed" }] } }
-        })
-      ).toBe(60_000)
+      expect(pollInterval([{ status: "completed" }])).toBe(60_000)
     )
 
     setLinkedRuns([
@@ -760,11 +750,7 @@ describe("PlaygroundChat linked research status integration", () => {
     ])
     rerender(renderChatTree())
     await waitFor(() =>
-      expect(
-        queryState.capturedOptions?.refetchInterval?.({
-          state: { data: { runs: queryState.linkedRuns } }
-        })
-      ).toBe(30_000)
+      expect(pollInterval(queryState.linkedRuns)).toBe(30_000)
     )
   })
 

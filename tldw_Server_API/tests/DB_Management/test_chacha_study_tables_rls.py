@@ -31,23 +31,23 @@ STUDY_TABLES = (
 
 
 def _seed_every_study_table(db: CharactersRAGDB) -> None:
-    deck = db.add_deck("Alice private deck")
-    card = db.add_flashcard({"deck_id": deck, "front": "Alice front", "back": "Alice back"})
-    db.review_flashcard(card, 3)
-    db.add_flashcard_asset(image_bytes=b"alice-private", mime_type="image/png")
-    db.add_flashcard_template(
+    deck = db.flashcard_store.add_deck("Alice private deck")
+    card = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Alice front", "back": "Alice back"})
+    db.flashcard_store.review_flashcard(card, 3)
+    db.flashcard_store.add_flashcard_asset(image_bytes=b"alice-private", mime_type="image/png")
+    db.flashcard_store.add_flashcard_template(
         name="Alice template", model_type="basic", front_template="Alice front", back_template="Alice back"
     )
-    db.upsert_deck_share(deck, user_id=4, shared_by=int(db.client_id))
-    pack = db.create_study_pack(
+    db.flashcard_store.upsert_deck_share(deck, user_id=4, shared_by=int(db.client_id))
+    pack = db.flashcard_store.create_study_pack(
         title="Alice pack",
         workspace_id=None,
         deck_id=deck,
         source_bundle_json={"items": [{"source_type": "note", "source_id": "alice-note"}]},
         generation_options_json={"deck_mode": "new"},
     )
-    db.add_study_pack_cards(pack, [card])
-    db.add_flashcard_citations(
+    db.flashcard_store.add_study_pack_cards(pack, [card])
+    db.flashcard_store.add_flashcard_citations(
         card, [{"source_type": "note", "source_id": "alice-note", "citation_text": "Alice evidence"}]
     )
 

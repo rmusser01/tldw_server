@@ -17,9 +17,9 @@ from tldw_Server_API.tests.StudyPacks.test_study_pack_response_timestamps import
 def _seed_cited_card(db, *, with_pack=False):
     with chacha_operation(independent=True):
         note = db.add_note(title="Citation source", content="Synthetic source evidence")
-        deck = db.add_deck("Cited card deck")
-        card = db.add_flashcard({"deck_id": deck, "front": "Synthetic question", "back": "Synthetic answer"})
-        db.add_flashcard_citations(
+        deck = db.flashcard_store.add_deck("Cited card deck")
+        card = db.flashcard_store.add_flashcard({"deck_id": deck, "front": "Synthetic question", "back": "Synthetic answer"})
+        db.flashcard_store.add_flashcard_citations(
             card,
             [
                 {
@@ -31,16 +31,16 @@ def _seed_cited_card(db, *, with_pack=False):
         )
         pack = None
         if with_pack:
-            pack_id = db.create_study_pack(
+            pack_id = db.flashcard_store.create_study_pack(
                 title="Cited pack",
                 workspace_id=None,
                 deck_id=deck,
                 source_bundle_json={"items": [{"source_type": "note", "source_id": note}]},
                 generation_options_json={"deck_mode": "new"},
             )
-            db.add_study_pack_cards(pack_id, [card])
-            pack = db.get_study_pack(pack_id)
-        return note, db.get_flashcard(card), db.list_flashcard_citations(card), pack
+            db.flashcard_store.add_study_pack_cards(pack_id, [card])
+            pack = db.flashcard_store.get_study_pack(pack_id)
+        return note, db.flashcard_store.get_flashcard(card), db.flashcard_store.list_flashcard_citations(card), pack
 
 
 def _wire_time(value):
@@ -56,11 +56,11 @@ def test_assistant_http_serializes_citation_and_primary_without_rewriting_source
         assert isinstance(before_citations[0][field], datetime if kind == "postgres" else str)
     response = client.get(f"/api/v1/flashcards/{before_card['uuid']}/assistant")
     with chacha_operation(independent=True):
-        assert db.get_flashcard(before_card["uuid"]) == before_card
-        assert db.list_flashcard_citations(before_card["uuid"]) == before_citations
+        assert db.flashcard_store.get_flashcard(before_card["uuid"]) == before_card
+        assert db.flashcard_store.list_flashcard_citations(before_card["uuid"]) == before_citations
         assert db.get_note_by_id(note)["content"] == "Synthetic source evidence"
         if before_pack is not None:
-            assert db.get_study_pack(before_pack["id"]) == before_pack
+            assert db.flashcard_store.get_study_pack(before_pack["id"]) == before_pack
     assert response.status_code == 200
     body = response.json()
     assert len(body["citations"]) == 1
@@ -85,7 +85,7 @@ def test_assistant_http_serializes_citation_and_primary_without_rewriting_source
 def test_assistant_http_keeps_uncited_card_response(pack_api):
     db, _jobs, client, _kind = pack_api
     with chacha_operation(independent=True):
-        card = db.add_flashcard({"front": "Legacy question", "back": "Legacy answer"})
+        card = db.flashcard_store.add_flashcard({"front": "Legacy question", "back": "Legacy answer"})
     response = client.get(f"/api/v1/flashcards/{card}/assistant")
     assert response.status_code == 200
     assert response.json()["citations"] == []
@@ -109,8 +109,8 @@ def test_assistant_http_keeps_cited_card_private_to_its_owner(pack_api, tmp_path
         response = client.get(f"/api/v1/flashcards/{card['uuid']}/assistant")
         assert response.status_code == 404
         with chacha_operation(independent=True):
-            assert db.get_flashcard(card["uuid"]) == card
-            assert db.list_flashcard_citations(card["uuid"]) == citations
+            assert db.flashcard_store.get_flashcard(card["uuid"]) == card
+            assert db.flashcard_store.list_flashcard_citations(card["uuid"]) == citations
     finally:
         foreign.close_connection()
 

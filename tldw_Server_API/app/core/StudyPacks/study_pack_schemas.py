@@ -49,7 +49,7 @@ class StudyPackSourceSelection(BaseModel):
         return {
             str(key): item
             for key, item in value.items()
-            if item not in (None, "", [], {})
+            if str(key) in {"section_indices", "section_revision"} or item not in (None, "", [], {})
         }
 
 

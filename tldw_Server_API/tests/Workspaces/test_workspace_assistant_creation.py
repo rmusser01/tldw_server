@@ -220,7 +220,7 @@ def test_corrupt_normalized_defaults_fail_closed_without_private_logs(db, monkey
     sink = logger.add(messages.append, level="WARNING", format="{message}")
     try:
         workspace = db.workspace_store._workspace_row_to_dict(dict(db.workspace_store.get_workspace("ws"), assistant_defaults_json=raw))
-        monkeypatch.setattr(db, "get_workspace", lambda workspace_id: workspace)
+        monkeypatch.setattr(db.workspace_store, "get_workspace", lambda workspace_id: workspace)
         with pytest.raises(HTTPException) as error:
             _resolve(db, {"scope_type": "workspace", "workspace_id": "ws"})
     finally:
@@ -233,7 +233,7 @@ def test_corrupt_normalized_defaults_fail_closed_without_private_logs(db, monkey
 def test_non_null_default_with_opt_out_fails_even_without_corruption_marker(db, monkeypatch):
     """The shared resolver checks inconsistent pairs instead of trusting a diagnostic bit."""
     workspace = dict(db.workspace_store.get_workspace("ws"), assistant_defaults_explicit_none=True, _assistant_defaults_invalid=False)
-    monkeypatch.setattr(db, "get_workspace", lambda workspace_id: workspace)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", lambda workspace_id: workspace)
     with pytest.raises(HTTPException) as error:
         _resolve(db, {"scope_type": "workspace", "workspace_id": "ws"})
     assert error.value.status_code == 409
@@ -289,7 +289,7 @@ def test_startup_propagates_database_failures_to_endpoint_mapper(db, monkeypatch
         """Simulate a DB boundary failure without altering normalization."""
         raise CharactersRAGDBError("PRIVATE-STORAGE-ERROR")
 
-    monkeypatch.setattr(db, method, failed_read)
+    monkeypatch.setattr(db.workspace_store if method == "get_workspace" else db, method, failed_read)
     with pytest.raises(CharactersRAGDBError):
         _resolve_startup(db, {"scope_type": "workspace", "workspace_id": "ws"})
 
@@ -297,7 +297,7 @@ def test_startup_propagates_database_failures_to_endpoint_mapper(db, monkeypatch
 @pytest.mark.parametrize("conn", [None, object()])
 def test_optional_connection_locks_workspace_then_selected_persona(db, monkeypatch, conn):
     """Only transaction calls pass the future locking kwargs; legacy reads still work."""
-    get_workspace, get_profile = db.get_workspace, db.get_persona_profile
+    get_workspace, get_profile = db.workspace_store.get_workspace, db.get_persona_profile
     calls = []
 
     def workspace_read(workspace_id, **kwargs):
@@ -310,7 +310,7 @@ def test_optional_connection_locks_workspace_then_selected_persona(db, monkeypat
         calls.append(("persona", kwargs))
         return get_profile(persona_id, user_id=user_id, include_deleted=include_deleted)
 
-    monkeypatch.setattr(db, "get_workspace", workspace_read)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", workspace_read)
     monkeypatch.setattr(db, "get_persona_profile", profile_read)
     result = _resolve_startup(db, {"scope_type": "workspace", "workspace_id": "ws"}, conn=conn)
     assert result.request.assistant_id == "workspace-persona"
@@ -322,7 +322,7 @@ def test_optional_connection_locks_workspace_then_selected_persona(db, monkeypat
 def test_unrepresentable_origin_raises_bounded_input_error(db, monkeypatch, workspace_id):
     """Legacy Workspace access stays intact but a new origin cannot be truncated."""
     workspace = dict(db.workspace_store.get_workspace("ws"), id=workspace_id)
-    monkeypatch.setattr(db, "get_workspace", lambda requested_id: workspace)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", lambda requested_id: workspace)
     with pytest.raises(InputError) as error:
         _resolve_startup(db, {"scope_type": "workspace", "workspace_id": workspace_id})
     assert "PRIVATE" not in str(error.value)
@@ -332,7 +332,7 @@ def test_unrepresentable_origin_raises_bounded_input_error(db, monkeypatch, work
 @pytest.mark.parametrize("parent_id", [None, "validated-parent"])
 def test_explicit_persona_transaction_uses_selected_profile_and_request_memory(db, monkeypatch, parent_id):
     """Explicit/fork titles use the locked profile, never configured default availability."""
-    get_workspace, get_profile = db.get_workspace, db.get_persona_profile
+    get_workspace, get_profile = db.workspace_store.get_workspace, db.get_persona_profile
     connection = object()
 
     def workspace_read(workspace_id, *, conn, for_update):
@@ -345,7 +345,7 @@ def test_explicit_persona_transaction_uses_selected_profile_and_request_memory(d
         assert conn is connection and for_update
         return get_profile(persona_id, user_id=user_id, include_deleted=include_deleted)
 
-    monkeypatch.setattr(db, "get_workspace", workspace_read)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", workspace_read)
     monkeypatch.setattr(db, "get_persona_profile", profile_read)
     result = _resolve_startup(db, {
         "scope_type": "workspace", "workspace_id": "ws", "assistant_kind": "persona",
@@ -393,7 +393,7 @@ def test_archived_workspace_preserves_legacy_inheritance(db):
 def test_deleted_workspace_rejects_all_choices(db, monkeypatch, choice):
     """Explicit choices still require a visible Workspace before bypassing defaults."""
     workspace = dict(db.workspace_store.get_workspace("ws"), deleted=True)
-    monkeypatch.setattr(db, "get_workspace", lambda workspace_id: workspace)
+    monkeypatch.setattr(db.workspace_store, "get_workspace", lambda workspace_id: workspace)
     with pytest.raises(HTTPException) as error:
         _resolve_startup(db, {"scope_type": "workspace", "workspace_id": "ws", **choice})
     assert error.value.status_code == 404

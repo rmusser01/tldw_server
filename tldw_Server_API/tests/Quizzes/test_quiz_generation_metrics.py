@@ -121,7 +121,7 @@ async def test_source_labels_collapse_mixed_types_but_not_duplicate_notes(
     if duplicate:
         generation_args["sources"].append(dict(generation_args["sources"][0]))
     else:
-        card_id = generation_args["db"].add_flashcard({"front": "Warfarin", "back": "Regular INR monitoring."})
+        card_id = generation_args["db"].flashcard_store.add_flashcard({"front": "Warfarin", "back": "Regular INR monitoring."})
         generation_args["sources"].append({"source_type": "flashcard_card", "source_id": str(card_id)})
 
     await quiz_generator.generate_quiz_from_sources(**generation_args)

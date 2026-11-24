@@ -64,6 +64,7 @@ def _build_app_with_flashcards(principal: AuthPrincipal) -> FastAPI:
     app.dependency_overrides[udh.get_request_user] = _fake_get_request_user
 
     class _FakeDB(CharactersRAGDB):  # type: ignore[misc]
+        flashcard_store = property(lambda self: self)  # the fake defines the flashcard methods itself
         def __init__(self):
             pass
 

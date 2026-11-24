@@ -149,7 +149,10 @@ export const Mermaid: React.FC<MermaidProps> = ({
           mermaid.initialize({
             startOnLoad: false,
             theme,
-            securityLevel: "strict"
+            securityLevel: "strict",
+            // Without this, a failed render draws an error diagram into a
+            // `#d<id>` element on <body> and throws without removing it.
+            suppressErrorRendering: true
           })
           initializedThemeRef.current = theme
         }

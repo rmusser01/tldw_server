@@ -140,7 +140,7 @@ def test_flashcard_template_create_returns_400_for_input_error(
     def fake_add_flashcard_template(**kwargs):
         raise InputError("invalid flashcard template payload")
 
-    monkeypatch.setattr(flashcards_db, "add_flashcard_template", fake_add_flashcard_template)
+    monkeypatch.setattr(flashcards_db.flashcard_store, "add_flashcard_template", fake_add_flashcard_template)
 
     response = client_with_flashcards_db.post(
         "/api/v1/flashcards/templates",
@@ -179,7 +179,7 @@ def test_flashcard_template_create_returns_500_for_db_error(
     def fake_add_flashcard_template(**kwargs):
         raise CharactersRAGDBError("flashcard template backend unavailable")
 
-    monkeypatch.setattr(flashcards_db, "add_flashcard_template", fake_add_flashcard_template)
+    monkeypatch.setattr(flashcards_db.flashcard_store, "add_flashcard_template", fake_add_flashcard_template)
 
     response = client_with_flashcards_db.post(
         "/api/v1/flashcards/templates",
@@ -308,7 +308,7 @@ def test_flashcard_template_list_returns_500_for_db_error(
     def fake_list_flashcard_templates(*args, **kwargs):
         raise CharactersRAGDBError("flashcard template list backend unavailable")
 
-    monkeypatch.setattr(flashcards_db, "list_flashcard_templates", fake_list_flashcard_templates)
+    monkeypatch.setattr(flashcards_db.flashcard_store, "list_flashcard_templates", fake_list_flashcard_templates)
 
     response = client_with_flashcards_db.get("/api/v1/flashcards/templates", headers=AUTH_HEADERS)
 
@@ -363,7 +363,7 @@ def test_flashcard_template_get_returns_500_for_db_error(
     def fake_get_flashcard_template(*args, **kwargs):
         raise CharactersRAGDBError("flashcard template get backend unavailable")
 
-    monkeypatch.setattr(flashcards_db, "get_flashcard_template", fake_get_flashcard_template)
+    monkeypatch.setattr(flashcards_db.flashcard_store, "get_flashcard_template", fake_get_flashcard_template)
 
     response = client_with_flashcards_db.get("/api/v1/flashcards/templates/1", headers=AUTH_HEADERS)
 
@@ -449,7 +449,7 @@ def test_flashcard_template_update_returns_400_for_input_error(
     def fake_update_flashcard_template(*args, **kwargs):
         raise InputError("invalid flashcard template update")
 
-    monkeypatch.setattr(flashcards_db, "update_flashcard_template", fake_update_flashcard_template)
+    monkeypatch.setattr(flashcards_db.flashcard_store, "update_flashcard_template", fake_update_flashcard_template)
 
     response = client_with_flashcards_db.patch(
         f"/api/v1/flashcards/templates/{payload['id']}",
@@ -499,7 +499,7 @@ def test_flashcard_template_update_returns_500_for_db_error(
     def fake_update_flashcard_template(*args, **kwargs):
         raise CharactersRAGDBError("flashcard template update backend unavailable")
 
-    monkeypatch.setattr(flashcards_db, "update_flashcard_template", fake_update_flashcard_template)
+    monkeypatch.setattr(flashcards_db.flashcard_store, "update_flashcard_template", fake_update_flashcard_template)
 
     response = client_with_flashcards_db.patch(
         f"/api/v1/flashcards/templates/{payload['id']}",
@@ -599,7 +599,7 @@ def test_flashcard_template_delete_returns_409_for_conflict_error(
         raise ConflictError("template version conflict")
 
     monkeypatch.setattr(
-        flashcards_db,
+        flashcards_db.flashcard_store,
         "soft_delete_flashcard_template",
         fake_soft_delete_flashcard_template,
     )
@@ -650,7 +650,7 @@ def test_flashcard_template_delete_returns_500_for_db_error(
         raise CharactersRAGDBError("flashcard template delete backend unavailable")
 
     monkeypatch.setattr(
-        flashcards_db,
+        flashcards_db.flashcard_store,
         "soft_delete_flashcard_template",
         fake_soft_delete_flashcard_template,
     )

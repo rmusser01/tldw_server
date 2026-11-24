@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { beforeEach, afterEach, describe, expect, it, vi, type Mock } from "vitest"
 import { ItemsTab } from "../ItemsTab"
 import { useWatchlistsStore } from "@/store/watchlists"
@@ -172,6 +173,24 @@ describe("ItemsTab scale behavior", () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it("restores the loaded updates when re-opening the tab", async () => {
+    serviceMocks.fetchWatchlistSources.mockResolvedValue({
+      items: buildSources(1),
+      total: 1,
+      page: 1,
+      size: 200,
+      has_more: false
+    })
+    const { rerender } = render(<ItemsTab />)
+    await screen.findByTestId("watchlists-item-row-101")
+
+    rerender(<></>)
+    serviceMocks.fetchScrapedItems.mockImplementation(() => new Promise(() => {}))
+    rerender(<ItemsTab />)
+
+    expect(await screen.findByTestId("watchlists-item-row-101")).toBeInTheDocument()
   })
 
   it("renders source rows incrementally for large source catalogs and expands on scroll", async () => {

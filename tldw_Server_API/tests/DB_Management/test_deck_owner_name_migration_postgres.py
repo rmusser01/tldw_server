@@ -48,9 +48,9 @@ def historical(pg_database_config, tmp_path):
     try:
         assert _version(backend) == 68
         assert [row["columns"] for row in _constraints(backend)] == [["name"]]
-        live = db.add_deck("Citrine", description="Preserve source", scheduler_type="sm2_plus")
-        deleted = db.add_deck("Reserved", description="Preserve tombstone")
-        db.soft_delete_deck_by_id(deleted, expected_version=1)
+        live = db.flashcard_store.add_deck("Citrine", description="Preserve source", scheduler_type="sm2_plus")
+        deleted = db.flashcard_store.add_deck("Reserved", description="Preserve tombstone")
+        db.flashcard_store.soft_delete_deck_by_id(deleted, expected_version=1)
         db.close_connection()
         yield backend, _rows(backend), live, deleted
     finally:
@@ -78,14 +78,14 @@ def test_real_v68_upgrade_preserves_rows_and_owner_name_constraints(historical, 
             assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 69  # independent SQLite ladder (73 since 76c5167b35 and later)
         first, second = instances[:2]
         with pytest.raises(ConflictError):
-            first.add_deck("Citrine")
+            first.flashcard_store.add_deck("Citrine")
         for name in ("Citrine", "Reserved"):
-            other = second.add_deck(name)
+            other = second.flashcard_store.add_deck(name)
             assert other not in (live, deleted)
-            assert second.get_deck(other)["client_id"] == "3"
-        assert first.get_deck(deleted)["deleted"] is True
-        assert first.add_deck("Reserved") == deleted
-        assert first.get_deck(deleted)["client_id"] == "2"
+            assert second.flashcard_store.get_deck(other)["client_id"] == "3"
+        assert first.flashcard_store.get_deck(deleted)["deleted"] is True
+        assert first.flashcard_store.add_deck("Reserved") == deleted
+        assert first.flashcard_store.get_deck(deleted)["client_id"] == "2"
     finally:
         for db in instances:
             db.close_all_connections()
@@ -157,7 +157,7 @@ def test_concurrent_deck_name_creation_respects_owner(historical, tmp_path, same
     def create(db):
         try:
             gate.wait()
-            return db.add_deck("Concurrent owner-local deck")
+            return db.flashcard_store.add_deck("Concurrent owner-local deck")
         except ConflictError:
             return "conflict"
         finally:
