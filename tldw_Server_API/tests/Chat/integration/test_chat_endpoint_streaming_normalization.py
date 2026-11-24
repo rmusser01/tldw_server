@@ -649,6 +649,7 @@ def test_endpoint_forwards_an_empty_choices_usage_chunk_only_to_a_client_that_as
         assert [payload.get("usage") for payload in usage_chunks] == ([usage] if forwarded else [])
     finally:
         _app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        db.close_all_connections()
         for path in (db_path, db_path + "-wal", db_path + "-shm"):
             if os.path.exists(path):
                 os.unlink(path)
