@@ -790,13 +790,21 @@ def _git(*args: str, cwd: Path = REPO_ROOT) -> str:
 MANIFEST_GLOB = "Helper_Scripts/rag_split/manifests/*.py"
 
 
-def _chain(root: Path, merge_base: str) -> list[tuple[str, str, str | None]]:
+INTEGRATION_REF = "origin/dev"
+
+
+def _chain(root: Path, merge_base: str, integration: str) -> list[tuple[str, str, str | None]]:
     """``[(manifest, base_ref, head_ref)]``: each manifest is checked against the tree it was built on.
 
-    Manifests added since ``merge_base`` run oldest first, by the commit that introduced each. Manifest i's base is
-    manifest i-1's head (the merge base for the first). Its head is the parent of manifest i+1's commit, so its own
-    fix commits count, or ``None`` (the working tree) for the last. Two manifests added in one commit are not
-    supported: the first one's head would predate its own changes.
+    Only manifests added since ``merge_base`` whose introducing commit is not already on ``integration``
+    are checked: dev proved the others when their PRs merged. That makes a dev -> main release PR (every
+    manifest is "new" against main) check nothing, while a PR into dev, stacked or not, checks its own.
+
+    Manifests run oldest first. A manifest's head is the last commit that touched it, not the working tree: a
+    later edit to the pipeline file that is not a manifest commit (dead-import cleanup, a fix) cannot break an
+    earlier manifest. A manifest edited but not committed yet is checked against the working tree. Manifest
+    i's base is manifest i-1's head (for the first, the last skipped manifest's head, else the merge base).
+    Two manifests added in one commit are not supported.
     """
     added = _git("diff", "--name-only", "--diff-filter=A", merge_base, "--", MANIFEST_GLOB, cwd=root).split()
     order = {c: i for i, c in enumerate(_git("rev-list", "--reverse", f"{merge_base}..HEAD", cwd=root).split())}
@@ -805,28 +813,39 @@ def _chain(root: Path, merge_base: str) -> list[tuple[str, str, str | None]]:
         shas = _git("log", "--diff-filter=A", "--format=%H", f"{merge_base}..HEAD", "--", name, cwd=root).split()
         return shas[-1] if shas else None  # None: not committed yet, so newest
 
+    def head_of(name: str) -> str | None:
+        if _git("status", "--porcelain", "--", name, cwd=root).strip():
+            return None
+        return _git("log", "-1", "--format=%H", "HEAD", "--", name, cwd=root).strip()
+
+    def on_integration(commit: str) -> bool:
+        return subprocess.run(["git", "merge-base", "--is-ancestor", commit, integration], cwd=root).returncode == 0  # noqa: S603, S607  # nosec B603 B607
+
     intro = {n: introduced(n) for n in added}
     ordered = sorted(added, key=lambda n: (order.get(intro[n] or "", len(order)), n))
     steps, base = [], merge_base
-    for i, name in enumerate(ordered):
-        nxt = intro[ordered[i + 1]] if i + 1 < len(ordered) else None
-        head = f"{nxt}^" if nxt else None
+    for name in ordered:
+        head = head_of(name)
+        if intro[name] and on_integration(intro[name]):
+            base = head or base
+            continue
         steps.append((name, base, head))
         base = head or base
     return steps
 
 
-def _verify_chain(root: Path, merge_base: str) -> list[str]:
+def _verify_chain(root: Path, merge_base: str, integration: str = INTEGRATION_REF) -> list[str]:
+    _git("rev-parse", "--verify", "-q", integration, cwd=root)  # fail closed: no integration ref, no decision
     return [
         name
-        for name, base, head in _chain(root, merge_base)
+        for name, base, head in _chain(root, merge_base, integration)
         if rag_split.main(["verify", "--root", str(root), str(root / name), "--base", base, *(["--head", head] if head else [])]) != 0
     ]
 
 
 def test_new_manifests_verify_against_the_pr_base() -> None:
     """R16's proof, gated: every manifest this change adds verifies against the tree it was built on (a stack of PRs included)."""
-    base = os.environ.get("BACKLOG_TASK_FORMAT_BASE") or "origin/dev"
+    base = os.environ.get("BACKLOG_TASK_FORMAT_BASE") or INTEGRATION_REF
     try:
         merge_base = _git("merge-base", base, "HEAD").strip()
         failed = _verify_chain(REPO_ROOT, merge_base)
@@ -860,19 +879,51 @@ def _stacked_repo(tmp: Path) -> tuple[Path, str]:
     _manifest(tmp, "tb", state_init="state = St(rcfg)")
     assert rag_split.main(["apply", "--root", str(tmp), str(tmp / "Helper_Scripts/rag_split/manifests/tb.py")]) == 0
     commit("b")
+    _git("branch", "integ", root_sha, cwd=tmp)  # a PR into the integration branch: none of the stack is on it yet
     return tmp, root_sha
 
 
 def test_manifest_chain_verifies_each_manifest_against_the_tree_it_was_built_on(tmp_path: Path) -> None:
     root, merge_base = _stacked_repo(tmp_path)
-    assert [n.rsplit("/", 1)[1] for n, _, _ in _chain(root, merge_base)] == ["ta.py", "tb.py"]
-    assert _verify_chain(root, merge_base) == []
+    assert [n.rsplit("/", 1)[1] for n, _, _ in _chain(root, merge_base, "integ")] == ["ta.py", "tb.py"]
+    assert _verify_chain(root, merge_base, "integ") == []
     # a flat verify of the first manifest against the merge base sees the second one's statement as an extra
     first = str(root / "Helper_Scripts/rag_split/manifests/ta.py")
     assert rag_split.main(["verify", "--root", str(root), first, "--base", merge_base]) == 1
     # hand-breaking the second manifest is caught
     _manifest(root, "tb", state_init="state = Other(rcfg)")
-    assert _verify_chain(root, merge_base) == ["Helper_Scripts/rag_split/manifests/tb.py"]
+    assert _verify_chain(root, merge_base, "integ") == ["Helper_Scripts/rag_split/manifests/tb.py"]
+
+
+def test_release_pr_verifies_nothing_because_every_manifest_is_already_on_the_integration_branch(tmp_path: Path) -> None:
+    root, merge_base = _stacked_repo(tmp_path)  # merge_base is main's old tip: every manifest is "added"
+    _git("branch", "-f", "integ", "HEAD", cwd=root)
+    # even a manifest broken in history is not re-proven: its own PR did that
+    _manifest(root, "tb", state_init="state = Other(rcfg)")
+    _git("add", "-A", cwd=root)
+    _git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x", cwd=root)
+    _git("branch", "-f", "integ", "HEAD", cwd=root)
+    assert _chain(root, merge_base, "integ") == []
+    assert _verify_chain(root, merge_base, "integ") == []
+
+
+def test_a_later_non_manifest_edit_does_not_break_the_chain(tmp_path: Path) -> None:
+    root, merge_base = _stacked_repo(tmp_path)
+    (root / FILE).write_text((root / FILE).read_text() + "\n\ndef later():\n    return 1\n")
+    _git("add", "-A", cwd=root)
+    _git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "later", cwd=root)
+    assert _verify_chain(root, merge_base, "integ") == []
+    # the first manifest on the integration branch: only the second is checked, against the first's tree
+    first = _git("log", "--format=%H", "--diff-filter=A", "--", "Helper_Scripts/rag_split/manifests/ta.py", cwd=root).strip()
+    _git("branch", "-f", "integ", first, cwd=root)
+    assert [n.rsplit("/", 1)[1] for n, _, _ in _chain(root, merge_base, "integ")] == ["tb.py"]
+    assert _verify_chain(root, merge_base, "integ") == []
+
+
+def test_chain_fails_closed_without_the_integration_ref(tmp_path: Path) -> None:
+    root, merge_base = _stacked_repo(tmp_path)
+    with pytest.raises(subprocess.CalledProcessError):
+        _verify_chain(root, merge_base, "no-such-ref")
 
 
 def test_verify_head_reads_the_ref_not_the_working_tree(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
