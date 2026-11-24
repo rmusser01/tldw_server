@@ -1,15 +1,16 @@
 """post_processing code moved from unified_pipeline.py (TASK-13950.24)."""
 
-from types import SimpleNamespace
-from typing import Any
 import asyncio
 import contextlib
 import hashlib
 import inspect
 import time
 import uuid
-from typing import TYPE_CHECKING
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
+
 from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as up
+
 from .run_config import RagRunConfig
 
 if TYPE_CHECKING:
