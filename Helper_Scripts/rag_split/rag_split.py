@@ -17,6 +17,7 @@ read with ``ast.literal_eval`` and never imported. Keys (all optional but ``base
     moves        [{"name", "module", "span": [a, b], "doc", "noqa": [line]}]
     cells        [[a, b]]                                    extra cells for ``shared``
     prologue     "rcfg = ..."                                one statement inserted first in the function, after its docstring
+    state_init   "state = ..."                               one statement inserted right after the first statement after the docstring
     imports      ["from .x import Y"]                        module-level imports added after the file's last import
     entry_split  true
     file, func, pkg    the pipeline file, function and package directory (defaults below; tests override)
@@ -72,6 +73,7 @@ DEFAULTS: dict[str, Any] = {
     "cells": [],
     "entry_split": False,
     "prologue": "",
+    "state_init": "",
     "imports": [],
 }
 NEW = object()  # a node the tool created: it carries no scope annotation
@@ -857,6 +859,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     used = fn_names(fn)
     intro = {t.split(".")[0] for t in rewrite.values()} | ({"rcfg"} if hidden else set()) | ({"state"} if publish else set())
     intro |= {"rcfg"} if m["prologue"] else set()
+    intro |= {"state", "_run_state"} if m["state_init"] else set()
     intro |= ({"up"} if moves or hoist else set()) | ({"_run_state"} if hoist else set()) | {f"_{x.module}" for x in moves}
     out.errors += [f"V8: {n} is already a name in {fn.name}" for n in sorted(intro & used)]
 
@@ -969,6 +972,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
 
     if m["prologue"]:
         fn.body.insert(docstring_len(fn), ast.parse(m["prologue"]).body[0])
+    if m["state_init"]:
+        fn.body.insert(docstring_len(fn) + 1, ast.parse(m["state_init"]).body[0])
     out.fn = fn
     if m["entry_split"]:
         body = fn.body
@@ -1407,6 +1412,12 @@ def run_apply(root: Path, m: dict) -> list[str]:
         first = f.body[docstring_len(f)]
         frows = new_f.split("\n")
         frows[stmt_start(first) - 1 : stmt_start(first) - 1] = [" " * first.col_offset + m["prologue"], ""]
+        new_f = "\n".join(frows)
+    if m["state_init"]:
+        f = ast.parse(new_f).body[0]
+        first = f.body[docstring_len(f)]
+        frows = new_f.split("\n")
+        frows[first.end_lineno : first.end_lineno] = [" " * first.col_offset + m["state_init"]]
         new_f = "\n".join(frows)
     if m["entry_split"]:
         new_f = split_entry(new_f)

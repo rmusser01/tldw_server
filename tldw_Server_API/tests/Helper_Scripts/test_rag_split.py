@@ -228,6 +228,17 @@ def test_prologue_and_imports_round_trip_and_are_verified(tmp_path: Path, capsys
     assert t.run("verify") == 1
 
 
+def test_state_init_goes_right_after_the_first_statement_and_is_verified(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = 'import os\n\n\nasync def pipe(query, **kwargs):\n    """Doc."""\n\n    cfg = Config()\n\n    return query, os\n'
+    t = Tree(tmp_path, src, state_init="state = _st.State(cfg)", imports=["from .pipeline import st as _st"])
+    assert t.run("apply") == 0
+    head = t.text(FILE)
+    assert head.index("cfg = Config()\n    state = _st.State(cfg)\n") < head.index("return query")
+    assert t.run("verify") == 0, capsys.readouterr().out
+    _edit(t, FILE, "    state = _st.State(cfg)\n", "")
+    assert t.run("verify") == 1
+
+
 def test_move_prefixes_module_globals_with_up(tmp_path: Path) -> None:
     t = full(tmp_path)
     assert t.run("apply") == 0
