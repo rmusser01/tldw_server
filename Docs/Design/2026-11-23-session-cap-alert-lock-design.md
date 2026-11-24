@@ -19,6 +19,7 @@ Why now: on 2026-11-23 a browser that would not keep the sign-in cookie created 
 4. Where no email link can be sent (single-user mode, or no SMTP provider configured), the cap and the alert still apply, and the alert offers **sign out all other sessions** instead of lock. Lock exists only in multi-user mode with SMTP.
 5. While an account is locked its **API keys stop working** until it is unlocked. They are suspended, not deleted.
 6. While an account is locked its **scheduled and background work is paused** until it is unlocked.
+7. After unlock, **API keys created in the 7 days before the lock stay suspended** until the user restores each one.
 
 ## Goals
 
@@ -132,7 +133,7 @@ Without this, an intruder with a session changes the email and then locks: every
 - **Locking** (`POST /api/v1/auth/account/lock`; browser session only, CSRF-protected, no password prompt). Order: (1) set the lock; (2) revoke every session and token of the user, including the caller's; (3) send the lock email. From step 1 the enforcement function refuses everything, so a failure in step 2 cannot leave a working credential; step 2 is idempotent. If the email fails, the response says the account is locked and to use "Send me a new link" on the sign-in page. The SMTP connection gets a timeout and the send result is checked.
 - **One enforcement function**, `assert_account_not_locked(user, token_iat=None)`, called from: password login (after the password is verified, so a wrong password cannot reveal the lock), token refresh, the per-request JWT check (`verify_jwt_and_fetch_user`, which WebSockets and MCP also use), the OIDC callback, password reset, the virtual-key mint, admin impersonation, and inside the cap transaction (so a sign-in racing the lock cannot leave a session behind). A locked account gets HTTP 423 with code `account_locked`. It also refuses any JWT issued before `credentials_valid_after` and any session row created before it; that is what stops tokens that have no session row (virtual-key JWTs, workflow-minted tokens) from working again after unlock. Password reset does not unlock.
 - **API keys:** the lock is checked inside `validate_api_key`, before usage is recorded, with a direct (uncached) lookup; a key of a locked user validates as invalid and callers answer with their existing refusal (401 or a WebSocket close). Nothing is written to the key rows. The MCP paths' missing `is_active` check is fixed by the same change.
-- **API keys after unlock:** keys created more than 7 days before the lock work again immediately. Keys created in the 7 days before the lock stay suspended (`api_keys.suspended_at`) until the user restores each one from the API-keys page, which lists them with created time and last-used IP. *(Reviewer recommendation adopted as the default; the owner may prefer "all keys come back" - see Open question.)*
+- **API keys after unlock:** keys created more than 7 days before the lock work again immediately. Keys created in the 7 days before the lock stay suspended (`api_keys.suspended_at`) until the user restores each one from the API-keys page, which lists them with created time and last-used IP. (Owner decision 7.)
 - **Unlock:** the lock email (template `account_locked`: locked from a signed-in session, when, from which browser and IP, link and lifetime) carries an ordinary magic-link token. `magic-link/verify` on a locked account clears the lock, sets `credentials_valid_after = now`, and signs the user in with one new session. For an account with MFA the verify step returns the existing MFA challenge with an `unlock` marker in its payload, and `/mfa/login` clears the lock when it completes; the lock stays until then.
 - **Requesting another link:** the sign-in page shows "Account locked" with "Send me a new link" when it receives `account_locked`. That is the existing anonymous magic-link request (same generic answer, same rate limits); for a locked account it sends the `account_locked` template. Forgot-password for a locked account sends the same email instead of a reset link.
 - **Chat integrations:** Telegram, Slack and Discord refuse a linked user who is locked where the request arrives.
@@ -169,10 +170,6 @@ One helper in AuthNZ, `blocked_owner_ids()` / `owner_blocked(user_id)`: true whe
 - Org and team API keys owned by a locked user stop working for the whole team until unlock.
 - Magic link has no MFA step for ordinary sign-in today (only the unlock path gets one here). Existing gap, separate task.
 - The hosted-mode `/api/auth/*` proxy is outside this repo; `is_current` and client IPs there are unverified.
-
-## Open question
-
-- After unlock, should API keys created in the 7 days before the lock stay suspended until the user restores them (default in this document), or should all keys come back at once?
 
 ## Delivery
 
