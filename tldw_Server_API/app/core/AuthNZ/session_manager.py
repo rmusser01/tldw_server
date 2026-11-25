@@ -52,7 +52,10 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     SessionError,
     SessionRevokedException,
 )
-from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
+from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import (
+    SESSION_CAP_REVOKE_REASON,
+    AuthnzSessionsRepo,
+)
 
 #
 # Local imports
@@ -1106,7 +1109,7 @@ class SessionManager:
         try:
             db_pool = await self._ensure_db_pool()
             repo = AuthnzSessionsRepo(db_pool)
-            session_id = await repo.create_session_record(
+            session_id, evicted = await repo.create_session_record_with_cap(
                 user_id=user_id,
                 token_hash=access_hash,
                 refresh_token_hash=refresh_hash,
@@ -1119,7 +1122,18 @@ class SessionManager:
                 device_id=device_id,
                 access_jti=access_jti,
                 refresh_jti=refresh_jti,
+                max_live_sessions=self.settings.MAX_SESSIONS_PER_USER,
             )
+            if evicted:
+                # Evicted session:<hash> cache keys lapse on their TTL; validation re-reads is_active.
+                await self._blacklist_session_tokens(
+                    evicted, reason=SESSION_CAP_REVOKE_REASON, revoked_by=None
+                )
+                log_counter("auth_session_cap_evicted", value=len(evicted))
+                if self.settings.PII_REDACT_LOGS:
+                    logger.info(f"Session cap evicted {len(evicted)} session(s) [redacted]")
+                else:
+                    logger.info(f"Session cap evicted {len(evicted)} session(s) for user {user_id}")
 
             # Cache in Redis if available
             if self.redis_client:

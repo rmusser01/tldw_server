@@ -86,3 +86,130 @@ async def test_live_predicate_and_cleanup_postgres(
     assert cap_61 not in remaining and cap_30 in remaining
     assert dead not in remaining and idle in remaining
     assert revoked in remaining
+
+
+# --- the per-user cap on session creation ------------------------------------
+
+
+async def _capped(repo, uid, tag, *, device_id=None) -> int:
+    now = datetime.now(timezone.utc)
+    new_id, _evicted = await repo.create_session_record_with_cap(
+        user_id=uid,
+        token_hash=f"h-{tag}",
+        refresh_token_hash=f"r-{tag}",
+        encrypted_token="enc",
+        encrypted_refresh="enc",
+        expires_at=now + timedelta(hours=1),
+        refresh_expires_at=now + timedelta(days=7),
+        ip_address="127.0.0.1",
+        user_agent="pytest-pg",
+        device_id=device_id,
+        access_jti=f"aj-{tag}",
+        refresh_jti=f"rj-{tag}",
+        max_live_sessions=4,
+    )
+    return new_id
+
+
+async def _live(repo, uid) -> set[int]:
+    return {r["id"] for r in await repo.get_active_sessions_for_user(uid)}
+
+
+@pytest.mark.asyncio
+async def test_fifth_session_evicts_the_oldest_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_fifth")
+    other_uid = await _create_user(pool, "pg_cap_other")
+    repo = AuthnzSessionsRepo(pool)
+
+    other = await _capped(repo, other_uid, "other")
+    ids = [await _capped(repo, uid, f"s{i}") for i in range(5)]
+
+    assert await _live(repo, uid) == set(ids[1:])
+    row = await pool.fetchone("SELECT is_active, revoke_reason FROM sessions WHERE id = $1", ids[0])
+    assert row["revoke_reason"] == "session_cap" and not row["is_active"]
+    assert other in await _live(repo, other_uid)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_creates_at_the_cap_never_exceed_it_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    import asyncio
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_concurrent")
+    repo = AuthnzSessionsRepo(pool)
+    for i in range(4):
+        await _capped(repo, uid, f"seed{i}")
+
+    results = await asyncio.gather(*[_capped(repo, uid, f"race{i}") for i in range(6)])
+
+    assert len(results) == 6
+    assert len(await _live(repo, uid)) == 4
+
+
+@pytest.mark.asyncio
+async def test_expired_refresh_rows_do_not_count_toward_the_cap_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_expired")
+    repo = AuthnzSessionsRepo(pool)
+    h, d = timedelta(hours=1), timedelta(days=1)
+    for i in range(4):
+        await _row(repo, uid, f"dead{i}", access_in=-3 * d, refresh_in=-2 * d)
+    for i in range(3):
+        await _row(repo, uid, f"live{i}", access_in=h, refresh_in=7 * d)
+
+    await _capped(repo, uid, "new")
+
+    assert len(await _live(repo, uid)) == 4
+    rows = await pool.fetch("SELECT id FROM sessions WHERE revoke_reason = $1", "session_cap")
+    assert not rows
+
+
+@pytest.mark.asyncio
+async def test_cap_backlog_is_evicted_in_one_creation_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    import time
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_backlog")
+    repo = AuthnzSessionsRepo(pool)
+    later = (datetime.now(timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
+    # 33,000 rows: more than asyncpg's 32,767-argument limit, so a per-victim IN list cannot work.
+    await pool.execute(
+        """
+        INSERT INTO sessions (
+            user_id, token_hash, refresh_token_hash, encrypted_token, encrypted_refresh,
+            expires_at, refresh_expires_at, device_id
+        )
+        SELECT $1, 'backlog-h-' || g, 'backlog-r-' || g, 'enc', 'enc', $2, $2,
+               'single-user-cookie:v1'
+        FROM generate_series(1, 33000) AS g
+        """,
+        uid,
+        later,
+    )
+    assert len(await _live(repo, uid)) == 33000
+
+    started = time.monotonic()
+    new_id = await _capped(repo, uid, "new")
+    elapsed = time.monotonic() - started
+    print(f"postgres backlog capped insert: {elapsed:.3f}s")
+
+    assert elapsed < 5
+    live = await _live(repo, uid)
+    assert len(live) == 4 and new_id in live

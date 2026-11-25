@@ -311,3 +311,177 @@ async def test_profile_security_counts_live_sessions(authnz_sqlite, monkeypatch)
         user_id=uid, session_manager=SessionManager(db_pool=pool), api_key_manager=_Keys()
     )
     assert sec["active_sessions"] == 2
+
+
+# --- the per-user cap on session creation ------------------------------------
+
+
+async def _create(manager, uid, device=None) -> int:
+    result = await manager.create_session(
+        user_id=uid,
+        access_token=f"temp_access_{uuid.uuid4().hex}",
+        refresh_token=f"temp_refresh_{uuid.uuid4().hex}",
+        ip_address="127.0.0.1",
+        user_agent="pytest",
+        device_id=device,
+    )
+    return int(result["session_id"])
+
+
+def _manager(pool):
+    from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
+
+    return SessionManager(db_pool=pool)
+
+
+async def _ids_with_reason(pool, reason) -> set[int]:
+    rows = await pool.fetchall("SELECT id FROM sessions WHERE revoke_reason = $1", reason)
+    return {int(r["id"] if hasattr(r, "keys") else r[0]) for r in rows}
+
+
+async def test_fifth_session_evicts_the_oldest(authnz_sqlite):
+    pool, uid, other_uid = authnz_sqlite
+    manager = _manager(pool)
+    other = await _create(manager, other_uid)
+    ids = [await _create(manager, uid) for _ in range(5)]
+    assert await live_ids(pool, uid) == set(ids[1:])
+    evicted = await _fetch(pool, ids[0])
+    assert evicted["revoke_reason"] == "session_cap" and not evicted["is_active"]
+    assert other in await live_ids(pool, other_uid)
+
+
+async def test_cap_evicts_the_least_recently_active_session(authnz_sqlite):
+    pool, uid, _ = authnz_sqlite
+    manager = _manager(pool)
+    ids = [await _create(manager, uid) for _ in range(4)]
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "UPDATE sessions SET created_at = datetime('now', '-2 hours'), "
+            "last_activity = datetime('now', '-2 hours') WHERE user_id = $1",
+            uid,
+        )
+        await conn.execute("UPDATE sessions SET last_activity = datetime('now') WHERE id = $1", ids[0])
+    new = await _create(manager, uid)
+    assert await live_ids(pool, uid) == {ids[0], ids[2], ids[3], new}  # ids[1] was least recently active
+
+
+async def test_headerless_logins_replace_each_other_before_browsers(authnz_sqlite):
+    from collections import Counter
+
+    from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
+
+    pool, uid, _ = authnz_sqlite
+    manager = _manager(pool)
+    for device in ("dev-aaaaaaaa", "dev-bbbbbbbb", "dev-cccccccc"):
+        await _create(manager, uid, device)
+    for _ in range(3):
+        await _create(manager, uid)  # no install id
+    rows = await AuthnzSessionsRepo(pool).get_active_sessions_for_user(uid)
+    assert Counter(r["device_id"] for r in rows) == {
+        "dev-aaaaaaaa": 1, "dev-bbbbbbbb": 1, "dev-cccccccc": 1, None: 1
+    }
+
+
+async def test_same_device_id_replaces_only_its_own_row(authnz_sqlite):
+    from collections import Counter
+
+    from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
+
+    pool, uid, _ = authnz_sqlite
+    manager = _manager(pool)
+    a, b, c = [await _create(manager, uid, d) for d in ("dev-aaaaaaaa", "dev-bbbbbbbb", "dev-cccccccc")]
+    for _ in range(6):
+        await _create(manager, uid, "dev-dddddddd")
+    rows = await AuthnzSessionsRepo(pool).get_active_sessions_for_user(uid)
+    assert Counter(r["device_id"] for r in rows) == {
+        "dev-aaaaaaaa": 1, "dev-bbbbbbbb": 1, "dev-cccccccc": 1, "dev-dddddddd": 1
+    }
+    assert {a, b, c} <= await live_ids(pool, uid)
+
+
+async def test_expired_refresh_rows_do_not_count_toward_the_cap(authnz_sqlite):
+    pool, uid, _ = authnz_sqlite
+    h, d = timedelta(hours=1), timedelta(days=1)
+    for i in range(4):
+        await _row(pool, uid, f"dead{i}", access_in=-3 * d, refresh_in=-2 * d)
+    for i in range(3):
+        await _row(pool, uid, f"live{i}", access_in=h, refresh_in=7 * d)
+    await _create(_manager(pool), uid)
+    assert len(await live_ids(pool, uid)) == 4
+    assert not await _ids_with_reason(pool, "session_cap")
+
+
+async def test_concurrent_creates_at_the_cap_never_exceed_it(authnz_sqlite):
+    import asyncio
+
+    pool, uid, _ = authnz_sqlite
+    manager = _manager(pool)
+    for _ in range(4):
+        await _create(manager, uid)
+    results = await asyncio.gather(*[_create(manager, uid) for _ in range(6)])
+    assert len(results) == 6 and len(await live_ids(pool, uid)) == 4
+
+
+async def test_cap_backlog_is_evicted_in_one_creation(authnz_sqlite):
+    import time
+
+    pool, uid, _ = authnz_sqlite
+    now = datetime.now(timezone.utc)
+    # 33,000 rows: more than SQLite's 32,766 bound-variable limit, so a per-victim IN list cannot work.
+    async with pool.transaction() as conn:
+        await conn.execute(
+            """
+            INSERT INTO sessions (
+                user_id, token_hash, refresh_token_hash, encrypted_token, encrypted_refresh,
+                expires_at, refresh_expires_at, device_id
+            )
+            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 33000)
+            SELECT $1, 'backlog-h-' || i, 'backlog-r-' || i, 'enc', 'enc', $2, $3,
+                   'single-user-cookie:v1'
+            FROM n
+            """,
+            uid,
+            (now + timedelta(days=1)).isoformat(),
+            (now + timedelta(days=1)).isoformat(),
+        )
+    assert len(await live_ids(pool, uid)) == 33000
+    manager = _manager(pool)
+    started = time.monotonic()
+    new_id = await _create(manager, uid)
+    elapsed = time.monotonic() - started
+    print(f"sqlite backlog capped insert: {elapsed:.3f}s")
+    assert elapsed < 5  # SQLite busy_timeout; a per-row loop cannot pass
+    live = await live_ids(pool, uid)
+    assert len(live) == 4 and new_id in live
+
+
+async def test_cap_of_one_replaces_the_only_session(authnz_sqlite, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    pool, uid, _ = authnz_sqlite
+    monkeypatch.setenv("MAX_SESSIONS_PER_USER", "1")
+    reset_settings()
+    manager = _manager(pool)
+    first = await _create(manager, uid)
+    second = await _create(manager, uid)
+    assert first != second
+    assert await live_ids(pool, uid) == {second}
+
+
+async def test_evicted_tokens_are_blacklisted_after_commit(authnz_sqlite, monkeypatch):
+    pool, uid, _ = authnz_sqlite
+    manager = _manager(pool)
+    calls = []
+
+    async def _record(*args, **kwargs):
+        # Read on another connection: the eviction must already be committed.
+        committed = [await _fetch(pool, s["id"]) for s in args[0]]
+        calls.append(SimpleNamespace(args=args, kwargs=kwargs, committed=committed))
+
+    monkeypatch.setattr(manager, "_blacklist_session_tokens", _record)
+    ids = [await _create(manager, uid) for _ in range(5)]
+    assert len(calls) == 1  # only the creation that evicted
+    assert [s["id"] for s in calls[-1].args[0]] == [ids[0]]
+    assert calls[-1].kwargs["reason"] == "session_cap"
+    assert calls[-1].kwargs["revoked_by"] is None
+    assert [c["revoke_reason"] for c in calls[-1].committed] == ["session_cap"]
