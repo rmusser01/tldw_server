@@ -13,7 +13,7 @@ import {
   putBuddyAttachment,
   resolveBuddyConversationTarget,
   type BuddyAttachmentState,
-  type BuddyImportPreview,
+  type ReviewedBuddyArchive,
   type BuddyProfile,
   type BuddyConversationSummary
 } from "@/services/buddies"
@@ -113,14 +113,18 @@ export const BuddyManagementModal = ({
   const label = (key: string, text: string) =>
     t(`buddyManagement.${key}`, { defaultValue: text })
   const mounted = React.useRef(true)
+  const uploadLifetime = React.useRef<AbortController | null>(null)
   const targetGeneration = React.useRef(0)
   React.useLayoutEffect(() => {
     targetGeneration.current += 1
   }, [target?.scope_type, target?.scope_id])
   React.useEffect(() => {
+    const controller = new AbortController()
+    uploadLifetime.current = controller
     mounted.current = true
     return () => {
       mounted.current = false
+      controller.abort()
     }
   }, [])
   const [createdArtwork, setCreatedArtwork] = React.useState<{
@@ -137,10 +141,7 @@ export const BuddyManagementModal = ({
   )
   const [starter, setStarter] =
     React.useState<PersonaVisualStarterPackSummary | null>(null)
-  const [reviewedArchive, setReviewedArchive] = React.useState<{
-    file: File
-    preview: BuddyImportPreview
-  } | null>(null)
+  const [reviewedArchive, setReviewedArchive] = React.useState<ReviewedBuddyArchive | null>(null)
   const [reviewingArchive, setReviewingArchive] = React.useState(false)
   const [starters, setStarters] = React.useState<
     PersonaVisualStarterPackSummary[]
@@ -177,7 +178,11 @@ export const BuddyManagementModal = ({
   )
   const [defaultPersona, setDefaultPersona] = React.useState("")
   const [defaultDirty, setDefaultDirty] = React.useState(false)
-  const [busy, setBusy] = React.useState(false)
+  const [applyAttempt, setApplyAttempt] = React.useState<{ target: BuddyManagementTarget | null } | null>(null)
+  const busy = applyAttempt !== null
+  const draftLocked = busy &&
+    applyAttempt.target?.scope_type === target?.scope_type &&
+    applyAttempt.target?.scope_id === target?.scope_id
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
@@ -322,9 +327,9 @@ export const BuddyManagementModal = ({
     setError(null)
     setNotice(null)
     try {
-      const preview = await previewBuddyArchive(file)
+      const reviewed = await previewBuddyArchive(file, uploadLifetime.current?.signal)
       if (!mounted.current) return
-      setReviewedArchive({ file, preview })
+      setReviewedArchive(reviewed)
       setStarter(null)
       setSelected("")
       setSearch("")
@@ -347,7 +352,7 @@ export const BuddyManagementModal = ({
         (loadingChats || !chats.some((c) => c.id === scopeId)))
     )
       return
-    setBusy(true)
+    setApplyAttempt({ target })
     setError(null)
     setNotice(null)
     const generation = targetGeneration.current
@@ -391,10 +396,7 @@ export const BuddyManagementModal = ({
           : "starter:" + starter?.id
         let created = createdArtwork?.sourceKey === sourceKey ? createdArtwork.profile : null
         if (!created && reviewedArchive) {
-          created = await importBuddyArchive(
-            reviewedArchive.file,
-            reviewedArchive.preview.archive_sha256
-          )
+          created = await importBuddyArchive(reviewedArchive, uploadLifetime.current?.signal)
         }
         if (!created && starter) {
           created = await createBuddy({
@@ -467,7 +469,7 @@ export const BuddyManagementModal = ({
         `${savedMessage}${e instanceof Error ? e.message : label("saveFailed", "Could not apply. Your selection is retained; refresh and retry.")}`
       )
     } finally {
-      if (mounted.current) setBusy(false)
+      if (mounted.current) setApplyAttempt(null)
     }
   }
   const stagedChanges = Boolean(
@@ -611,7 +613,7 @@ export const BuddyManagementModal = ({
                 <button
                   key={p.id}
                   type="button"
-                  disabled={reviewingArchive}
+                  disabled={draftLocked || reviewingArchive}
                   aria-pressed={selected === p.id && !starter}
                   aria-label={`${label("use", "Use")} ${p.name}`}
                   onClick={() => {
@@ -660,7 +662,7 @@ export const BuddyManagementModal = ({
                   key={s.id}
                   starter={s}
                   selected={starter?.id === s.id}
-                  disabled={reviewingArchive}
+                  disabled={draftLocked || reviewingArchive}
                   onSelect={() => {
                     setStarter(s)
                     setSelected("")
@@ -750,6 +752,7 @@ export const BuddyManagementModal = ({
             {label("scope", "Scope")}
             <select
               aria-label={label("scope", "Scope")}
+              disabled={draftLocked}
               className={fieldClass}
               value={scope}
               onChange={(e) => {
@@ -771,6 +774,7 @@ export const BuddyManagementModal = ({
                 {label("location", "Conversation location")}
                 <select
                   aria-label={label("location", "Conversation location")}
+                  disabled={draftLocked}
                   className={fieldClass}
                   value={location}
                   onChange={(e) => {
@@ -794,7 +798,7 @@ export const BuddyManagementModal = ({
                 {label("conversation", "Conversation")}
                 <select
                   aria-label={label("conversation", "Conversation")}
-                  disabled={loadingChats}
+                  disabled={draftLocked || loadingChats}
                   className={fieldClass}
                   value={scopeId}
                   onChange={(e) => setScopeId(e.target.value)}
@@ -839,6 +843,7 @@ export const BuddyManagementModal = ({
                 {label("workspace", "Workspace")}
                 <select
                   aria-label={label("workspace", "Workspace")}
+                  disabled={draftLocked}
                   className={fieldClass}
                   value={scopeId}
                   onChange={(e) => setScopeId(e.target.value)}
@@ -866,6 +871,7 @@ export const BuddyManagementModal = ({
                         "Default Persona for new conversations"
                       )}
                       className={fieldClass}
+                      disabled={draftLocked}
                       value={defaultPersona}
                       onChange={(e) => {
                         setDefaultPersona(e.target.value)

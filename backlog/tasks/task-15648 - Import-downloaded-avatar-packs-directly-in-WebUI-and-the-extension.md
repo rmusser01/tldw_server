@@ -37,12 +37,13 @@ Renumbered this Buddy upload task after TASK-15633 was assigned to legacy media 
 The rebase regenerated the OpenAPI fingerprint and path union from the combined backend. The multipart limit test now patches the archive limit in its defining module, preserving the existing transport size cap. The endpoint ratchet and all 89 focused backend cases passed. The 30 focused upload UI cases and all 1,091 tests in the previously failing coverage shard passed. Ruff, Bandit, canonical OpenAPI, and Backlog checks passed.
 
 Live verification imported Cat in WebUI and Orbit in a production Chrome extension build against an isolated local Server and SQLite data store. Both clients displayed the archive credits, returned HTTP 200 for preview and HTTP 201 for import, stored an independent Buddy, and restored the attached avatar after reload. Preview left the stored profiles untouched. The extension test copy granted localhost access for the disposable Server.
+Independent review identified the Quickstart proxy cap, the account change race during upload, and editable controls during Apply. Quickstart now forwards the Server multipart limit. The client keeps the reviewed file bound to its captured authority, and the Server rejects a stale expected principal before saving. Apply locks its current draft while allowing an externally retargeted draft to remain editable. After these fixes, 91 focused backend tests, 285 scoped shared UI tests, six Quickstart config tests, all three TypeScript checks, the Chrome production build, OpenAPI verification, lint, Bandit, and the independent re-review passed. The authenticated Quickstart WebUI uploaded a 12.3 MiB valid fixture with all 60 assets. The rebuilt extension uploaded Orbit from a disposable connected profile with loopback permission. Both flows verified the exact archive digest and credits, an independent profile, the selected workspace attachment, and the rendered sprite after reload.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Direct Buddy pack upload is implemented and verified in WebUI and Chrome extension settings. PR #3601 is pending CI and review.
+Direct Buddy pack upload is implemented and verified in Quickstart WebUI and the production Chrome extension build. PR #3601 awaits GitHub CI and the requester’s Change summary.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

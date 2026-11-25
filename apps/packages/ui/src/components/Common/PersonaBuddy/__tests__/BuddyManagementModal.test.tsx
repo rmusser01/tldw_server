@@ -127,18 +127,31 @@ it("attaches existing artwork to a named conversation without requiring a Person
 it("reviews a downloaded pack and reuses the saved avatar after attachment fails", async () => {
   const digest = "a".repeat(64)
   const file = new File(["archive"], "moss.tldw-persona-vpack")
-  mocks.previewBuddyArchive.mockResolvedValue({
-    name: "Moss",
-    archive_sha256: digest,
-    asset_count: 1,
-    state_count: 9,
-    artwork: {
-      creator: "tldw-project",
-      license: "Apache-2.0",
-      source_url: "https://example.com/moss"
+  const reviewed = {
+    file,
+    preview: {
+      name: "Moss",
+      archive_sha256: digest,
+      asset_count: 1,
+      state_count: 9,
+      artwork: {
+        creator: "tldw-project",
+        license: "Apache-2.0",
+        source_url: "https://example.com/moss"
+      }
+    },
+    requestScope: {
+      config: { serverUrl: "https://example.com", authMode: "single-user" },
+      scopeKey: "test-scope",
+      userId: null,
+      clientPrincipalVerified: true
     }
-  })
-  mocks.importBuddyArchive.mockResolvedValue({ ...profile, id: "moss", name: "Moss" })
+  }
+  mocks.previewBuddyArchive.mockResolvedValue(reviewed)
+  const imported = { ...profile, id: "moss", name: "Moss" }
+  let finishUpload!: (result: BuddyProfile) => void
+  const pendingUpload = new Promise<BuddyProfile>((resolve) => { finishUpload = resolve })
+  mocks.importBuddyArchive.mockReturnValueOnce(pendingUpload)
   mocks.putBuddyAttachment.mockRejectedValueOnce(new Error("Stale attachment"))
   const refresh = vi.fn()
   const { rerender } = render(<BuddyManagementModal {...props} onRetryCollections={refresh} />)
@@ -148,14 +161,21 @@ it("reviews a downloaded pack and reuses the saved avatar after attachment fails
   })
   expect(await screen.findByText("tldw-project")).toBeInTheDocument()
   expect(screen.getByText("https://example.com/moss")).toBeInTheDocument()
-  expect(mocks.previewBuddyArchive).toHaveBeenCalledWith(file)
+  expect(mocks.previewBuddyArchive).toHaveBeenCalledWith(file, expect.any(AbortSignal))
   expect(mocks.importBuddyArchive).not.toHaveBeenCalled()
 
   fireEvent.change(screen.getByLabelText("Conversation"), { target: { value: "chat" } })
   fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+  expect(screen.getByLabelText("Scope")).toBeDisabled()
+  expect(screen.getByLabelText("Conversation location")).toBeDisabled()
+  expect(screen.getByLabelText("Conversation")).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Use Duck" })).toBeDisabled()
+  expect(mocks.putBuddyAttachment).not.toHaveBeenCalled()
+  await act(async () => { finishUpload(imported) })
   expect(await screen.findByRole("alert")).toHaveTextContent("Stale attachment")
+  expect(screen.getByLabelText("Scope")).toBeEnabled()
   expect(refresh).toHaveBeenCalledOnce()
-  expect(mocks.importBuddyArchive).toHaveBeenCalledWith(file, digest)
+  expect(mocks.importBuddyArchive).toHaveBeenCalledWith(reviewed, expect.any(AbortSignal))
   expect(screen.getByRole("button", { name: "Use Moss" })).toHaveAttribute("aria-pressed", "true")
 
   rerender(

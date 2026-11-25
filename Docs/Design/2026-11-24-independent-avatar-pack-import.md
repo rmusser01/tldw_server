@@ -17,6 +17,12 @@ asset sizes, raster dimensions, activation eligibility and artwork credits use
 the native validation rules. An archive cannot set behavior or attachment
 permissions. Validation errors preserve existing profiles and attachments.
 
+Review and Apply keep the file bound to the same Server and authenticated account.
+The client cancels a pending upload when that authority changes, and the Server
+checks the expected principal where supplied. Apply locks the current draft while
+saving. A composer retarget can still stage a new draft. Quickstart allows a
+69 MiB multipart body so the rewrite carries a complete 68 MiB archive.
+
 The independent snapshot path supports SQLite and PostgreSQL. The Persona
 visual-pack editor retains its job-based preview and commit flow. The shared
 Avatar settings component supplies the file picker and review for both clients.

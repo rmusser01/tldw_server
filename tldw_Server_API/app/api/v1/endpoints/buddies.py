@@ -10,7 +10,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.routing import APIRoute
 from starlette.types import Message
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    check_rate_limit,
+    get_request_user,
+    require_expected_user_if_present,
+)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import buddy_turns
 from tldw_Server_API.app.api.v1.schemas.buddies import (
@@ -69,7 +74,10 @@ class BuddyUploadRoute(APIRoute):
         return bounded_handler
 
 
-_upload_router = APIRouter(route_class=BuddyUploadRoute)
+_upload_router = APIRouter(
+    route_class=BuddyUploadRoute,
+    dependencies=[Depends(require_expected_user_if_present)],
+)
 
 
 def get_buddy_service(
