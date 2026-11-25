@@ -1185,6 +1185,7 @@ class Built:
         self.src_mods: list[str] = []  # sibling mode: destination aliases the source still reads
         self.src_functools = False
         self.lifted: set[tuple[str, str]] = set()
+        self.free_imps: dict[str, set[str]] = {}  # module -> free_imports names its lifted defs read
 
 
 def spans_for_cells(m: dict, src: Src) -> list[tuple[str, list[ast.stmt]]]:
@@ -1201,13 +1202,17 @@ def spans_for_cells(m: dict, src: Src) -> list[tuple[str, list[ast.stmt]]]:
 
 
 class Lift:
-    """A def nested directly in the function, becoming ``<module>.<name>(cst, ...)``."""
+    """A def nested in the function (or in a def nested directly in it), becoming ``<module>.<name>(cst, ...)``."""
 
     def __init__(self, name: str, module: str) -> None:
         self.name, self.module = name, module
         self.node: Any = None
         self.block: list[ast.stmt] = []
-        self.defregion: Move | None = None  # the move whose span holds the def; None: the rest of the function
+        self.parent_node: Any = None  # depth 2: the def that holds this one; None at depth 1
+        self.key: Any = None  # the scope that binds the name: the function (depth 1) or the parent def (depth 2)
+        self.free: set[str] = set()  # free_imports names this body reads
+        # where the def site is: the move whose span holds it, the lifted parent (depth 2), or None (the rest of the function)
+        self.defregion: Move | Lift | None = None
 
 
 class Regions:
@@ -1217,9 +1222,9 @@ class Regions:
         self.moves, self.lifts, self.rest_module = moves, lifts, rest_module
 
     def of(self, line: int) -> Any:
-        for lf in self.lifts:
-            if stmt_start(lf.node) <= line <= lf.node.end_lineno:
-                return lf
+        held = [lf for lf in self.lifts if stmt_start(lf.node) <= line <= lf.node.end_lineno]
+        if held:
+            return min(held, key=lambda lf: lf.node.end_lineno - stmt_start(lf.node))
         inner = [x for x in self.moves if x.a <= line <= x.b]
         return min(inner, key=lambda x: x.b - x.a) if inner else None
 
@@ -1234,9 +1239,36 @@ class Regions:
         """
         r = self.of(line)
         here = self.module(r)
-        if r is lf.defregion and not isinstance(r, Lift) and lf.module != self.module(lf.defregion):
+        if r is lf.defregion and lf.module != self.module(r):
             return None
         return lf.name if lf.module == here else f"_{lf.module}.{lf.name}"
+
+
+def lift_defs(fn: Any, name: str) -> list[tuple[list[ast.stmt], Any, Any]]:
+    """Every def called ``name`` directly in ``fn`` or directly in a def that is directly in ``fn``: ``(block, def, parent def)``."""
+    top = [(blk, s, None) for blk in own_blocks(fn) for s in blk if isinstance(s, DEFS) and s.name == name]
+    parents = [s for blk in own_blocks(fn) for s in blk if isinstance(s, DEFS)]
+    return top + [(blk, s, p) for p in parents for blk in own_blocks(p) for s in blk if isinstance(s, DEFS) and s.name == name]
+
+
+def local_import_bindings(root: Any, key: Any, name: str) -> tuple[list[Info], int]:
+    """How the scope ``key`` (the function ``root``) binds ``name``: by which imports, and by how many other bindings."""
+    infos: list[Info] = []
+    other = 0
+    a = root.args
+    other += sum(1 for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x and x.arg == name)
+    for n in ast.walk(root):
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            for al, r in zip(n.names, n._rs):  # type: ignore[attr-defined]
+                if r is key and _bound(al) == name:
+                    infos.append(Info("import", al.name, al.name, al.asname, 0) if isinstance(n, ast.Import) else Info("from", n.module or "", al.name, al.asname, n.level))
+        elif isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.id == name and is_f(n, key):
+            other += 1
+        elif isinstance(n, ast.ExceptHandler) and n.name == name and is_f(n, key):
+            other += 1
+        elif isinstance(n, SCOPE_NODES) and n is not root and getattr(n, "name", None) == name and is_f(n, key):
+            other += 1
+    return infos, other
 
 
 def plan_lifts(m: dict, src: Src, moves: list[Move]) -> tuple[list[Lift], list[str]]:
@@ -1245,41 +1277,61 @@ def plan_lifts(m: dict, src: Src, moves: list[Move]) -> tuple[list[Lift], list[s
     lifts: list[Lift] = []
     for name, module in m["lift"].items():
         lf = Lift(name, module)
-        hits = [(blk, s) for blk in own_blocks(fn) for s in blk if isinstance(s, DEFS) and s.name == name]
+        hits = lift_defs(fn, name)
         if len(hits) != 1:
-            errs.append(f"V11: expected one def {name} directly in {fn.name}, found {len(hits)}")
+            errs.append(f"V11: expected one def {name} directly in {fn.name} (or in a def directly in it), found {len(hits)}")
             continue
-        lf.block, lf.node = hits[0]
+        lf.block, lf.node, lf.parent_node = hits[0]
+        lf.key = key if lf.parent_node is None else src.scopes.tab_of[id(lf.parent_node)]
         if sum(1 for nm, _ in binding_nodes(fn) if nm == name) != 1:
             errs.append(f"V11: {name} has a second binding in {fn.name}; a lifted name must be bound by its def alone")
         if any(mv.name == name for mv in moves):
             errs.append(f"V10: {name} is both a lift and a move")
-        lf.defregion = next(iter(sorted((x for x in moves if x.a <= stmt_start(lf.node) and lf.node.end_lineno <= x.b), key=lambda x: x.b - x.a)), None)
         lifts.append(lf)
-    allowed = set(ctx_names(m)) | {lf.name for lf in lifts}
+    for lf in lifts:  # the def site's region: the lifted parent, else the smallest move that holds the def (or its parent)
+        host = next((x for x in lifts if lf.parent_node is not None and x.node is lf.parent_node), None)
+        site = lf.parent_node if lf.parent_node is not None else lf.node
+        lf.defregion = host or next(iter(sorted((x for x in moves if x.a <= stmt_start(site) and site.end_lineno <= x.b), key=lambda x: x.b - x.a)), None)
+    allowed = set(ctx_names(m))
+    fi = m["free_imports"]
     for lf in lifts:
+        outer = [key] + ([lf.key] if lf.parent_node is not None else [])
+        scope_node = {id(key): fn, id(lf.key): lf.parent_node or fn}
         for n in ast.walk(lf.node):
-            if isinstance(n, ast.Name) and is_f(n, key) and n.id not in allowed:
+            r = getattr(n, "_r", NEW)
+            if isinstance(n, ast.Name) and any(r is k for k in outer):
+                if (r is key and n.id in allowed) or any(o.name == n.id and o.key is r for o in lifts):
+                    continue
+                if n.id in fi and isinstance(n.ctx, ast.Load):
+                    infos, other = local_import_bindings(scope_node[id(r)], r, n.id)
+                    want = import_infos(ast.parse(fi[n.id])).get(n.id)
+                    if infos and not other and all(i == want for i in infos):
+                        lf.free.add(n.id)
+                        continue
+                    errs.append(f"V16: free_imports {n.id}: {scope_node[id(r)].name} binds it as {', '.join(i.line() for i in infos) or 'something else'}, not by `{fi[n.id]}` alone (line {n.lineno})")
+                    continue
                 errs.append(f"V11: lifted {lf.name} reads {n.id} (line {n.lineno}), which is neither {', '.join(ctx_names(m))} nor a lifted name")
-            elif isinstance(n, ast.Nonlocal) and any(r is key for r in n._rs):  # type: ignore[attr-defined]
+            elif isinstance(n, ast.Nonlocal) and any(rr is k for rr in n._rs for k in outer):  # type: ignore[attr-defined]
                 errs.append(f"V11: lifted {lf.name} declares nonlocal at line {n.lineno}")
             elif isinstance(n, ast.Name) and n.id in ("__name__", "__file__") and isinstance(n.ctx, ast.Load):
                 errs.append(f"V1: lifted {lf.name} reads {n.id} (line {n.lineno}); it reads a different module after the move")
             elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "globals" and getattr(n.func, "_r", NEW) is None:
                 errs.append(f"V1: lifted {lf.name} calls globals() (line {n.lineno}); it reads a different module after the move")
+    errs += [f"V16: free_imports {n} is read by no lifted def" for n in fi if lifts and not any(n in lf.free for lf in lifts)]
     return lifts, errs
 
 
 class LiftRefs(ast.NodeTransformer):
     """Reads of a lifted name become ``ref(cst, ...)`` when called and ``functools.partial(ref, cst)`` otherwise."""
 
-    def __init__(self, m: dict, key: Any, lifts: list[Lift], regions: Regions) -> None:
+    def __init__(self, m: dict, lifts: list[Lift], regions: Regions) -> None:
         self.ctx = ctx_names(m)
-        self.key, self.by_name, self.regions = key, {lf.name: lf for lf in lifts}, regions
+        self.by_name, self.regions = {lf.name: lf for lf in lifts}, regions
         self.errors: list[str] = []
 
     def hit(self, n: ast.AST) -> Lift | None:
-        return self.by_name.get(n.id) if isinstance(n, ast.Name) and is_f(n, self.key) and isinstance(n.ctx, ast.Load) else None  # type: ignore[attr-defined]
+        lf = self.by_name.get(n.id) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) else None  # type: ignore[attr-defined]
+        return lf if lf is not None and is_f(n, lf.key) else None
 
     def visit_Call(self, node: ast.Call) -> ast.AST:
         lf = self.hit(node.func)
@@ -1319,13 +1371,13 @@ class LiftRefs(ast.NodeTransformer):
         return node
 
 
-def lift_edits(fn: Any, key: Any, lines: list[bytes], regions: Regions, lifts: list[Lift], ctx: str) -> list[Edit]:
+def lift_edits(fn: Any, lines: list[bytes], regions: Regions, lifts: list[Lift], ctx: str) -> list[Edit]:
     """The text counterpart of ``LiftRefs``."""
     by_name = {lf.name: lf for lf in lifts}
     calls = {id(c.func): c for c in ast.walk(fn) if isinstance(c, ast.Call)}
     out: list[Edit] = []
     for n in ast.walk(fn):
-        if not (isinstance(n, ast.Name) and is_f(n, key) and n.id in by_name and isinstance(n.ctx, ast.Load)):
+        if not (isinstance(n, ast.Name) and n.id in by_name and is_f(n, by_name[n.id].key) and isinstance(n.ctx, ast.Load)):
             continue
         ref = regions.ref(by_name[n.id], n.lineno)
         if ref is None:
@@ -1436,6 +1488,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     if is_sibling(m):
         # an alias an earlier manifest already imported into the source may be read again, never rebound
         reuse = {f"_{x}" for x in {y.module for y in moves} | {lf.module for lf in lifts} | ({entry["module"]} if entry else set()) if src.infos.get(f"_{x}") == Info("from", pkg_dotted(m), x, f"_{x}", 0)}
+        if lifts and src.infos.get("functools") == Info("import", "functools", "functools", None, 0):
+            reuse.add("functools")  # an earlier manifest's partials already import it
         intro -= reuse
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound inside {fn.name}" for nm, x in binding_nodes(fn) if nm in reuse]
     out.errors += [f"V8: {n} is already a name in {fn.name}" for n in sorted(intro & used)]
@@ -1501,7 +1555,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             out.errors.append(f"V6: {name} has a nonlocal outside rewrite")
     if is_sibling(m):  # a loop could run a moved or lifted statement again after code that reads its result
         out.errors += [f"V1: {mv.name}: the span sits inside the loop at line {lp.lineno}; moves are refused in loops" for mv in moves if (lp := loop_above(fn, mv.members[0]))]
-        out.errors += [f"V1: lifted {lf.name} sits inside the loop at line {lp.lineno}; lifts are refused in loops" for lf in lifts if (lp := loop_above(fn, lf.node))]
+        out.errors += [f"V1: lifted {lf.name} sits inside the loop at line {lp.lineno}; lifts are refused in loops" for lf in lifts if (lp := loop_above(lf.parent_node or fn, lf.node))]
     for mv in moves:
         out.errors += check_span(mv, notes)
         out.errors += check_args(mv, fn, key, ctx_names(m), {lf.name for lf in lifts})
@@ -1553,13 +1607,13 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # lifts: reads of lifted names first (in every body), then each def becomes a module function and its site a partial
     lifted_defs: dict[tuple[str, str], Any] = {}
     if lifts:
-        refs = LiftRefs(m, key, lifts, regions)
+        refs = LiftRefs(m, lifts, regions)
         for st in fn.body:
             refs.visit(st)
         out.errors += refs.errors
-        blocks = list(own_blocks(fn))
+        blocks = list(own_blocks(fn)) + [b2 for p in {id(lf.parent_node): lf.parent_node for lf in lifts if lf.parent_node is not None}.values() for b2 in own_blocks(p)]
         bad = {m["facade"]} | {f"_{x}" for x in {y.module for y in moves} | {lf.module for lf in lifts}}
-        for lf in lifts:
+        for lf in sorted(lifts, key=lambda x: x.parent_node is None):  # a def inside a lifted def goes first, so its parent carries the site
             d = up.visit(lf.node)
             a = d.args
             (a.posonlyargs if a.posonlyargs else a.args)[0:0] = copy.deepcopy(ctx_params(m))
@@ -1567,7 +1621,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             if any(isinstance(x, ast.Name) and x.id in bad for r in heads for x in ast.walk(r)):
                 out.errors.append(f"V12: a decorator or default of lifted {lf.name} reads the facade or a module alias; it runs at import, before the late block")
             site = [] if lf.module == regions.module(lf.defregion) else [ast.parse(f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {call_args(m)})").body[0]]
-            if not site and (len(lf.block) == 1 or (lf.defregion and len(lf.defregion.members) == 1 and lf.defregion.members[0] is lf.node)):
+            if not site and (len(lf.block) == 1 or (isinstance(lf.defregion, Move) and len(lf.defregion.members) == 1 and lf.defregion.members[0] is lf.node)):
                 out.errors.append(f"V11: lifting {lf.name} would leave its block or move empty")
             replace_stmt(lf.node, site, blocks, moves)
             lifted_defs[(lf.module, lf.name)] = d
@@ -1575,6 +1629,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             return out
         out.defs.update(lifted_defs)
         out.lifted = set(lifted_defs)
+        for lf in lifts:
+            out.free_imps.setdefault(lf.module, set()).update(lf.free)
 
     # moves, inside out
     for mv in sorted(moves, key=lambda x: x.b - x.a):
@@ -2577,7 +2633,7 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
     lifts, _ = plan_lifts(m, fresh, moves) if m["lift"] else ([], [])
     entry = m["entry"]
     regions = Regions(moves, lifts, entry["module"] if entry else "")
-    edits += lift_edits(fn, fresh.key, lines, regions, lifts, ctx)
+    edits += lift_edits(fn, lines, regions, lifts, ctx)
     lift_cuts: dict[str, Cut] = {}
     for lf in lifts:
         d = lf.node

@@ -2142,3 +2142,144 @@ def test_rewrite_in_names_are_reserved_by_v8(tmp_path: Path, capsys: pytest.Capt
     src = RI_BASE.replace("    shared = os.getenv", "    cst = 1\n    shared = os.getenv")
     t = ri_tree(tmp_path, src)
     assert t.run("apply") == 1 and "V8: cst is already a name" in capsys.readouterr().out
+
+
+# --- depth-2 lift (part 3, R10): a def nested in a def that is nested in the function ---
+
+DEEP_BASE = textwrap.dedent(
+    '''\
+    import os
+    import time
+    from typing import Any
+
+    LIMIT = 5
+
+
+    def audit(*args):
+        return args
+
+
+    def register(fn):
+        return fn
+
+
+    async def call(a):
+        """Doc."""
+        cst = make(a)
+
+        def _note(msg):
+            cst.log.append(audit(msg, LIMIT))
+
+        def gen(items):
+            held = []
+
+            def _emit(x):
+                _note(x)
+                return audit(x, cst.n)
+
+            def _flush():
+                return _emit(None)
+
+            def _tf(x):
+                return audit(x, LIMIT)
+
+            _tf.flush = _flush
+            for it in items:
+                yield _emit(it)
+            yield _tf
+            register(_emit)
+
+        return gen(a)
+    '''
+)
+DEEP = {"_note": "stage_a", "gen": "stage_a", "_emit": "stage_a", "_flush": "stage_a", "_tf": "stage_b"}
+
+
+def deep_tree(tmp: Path, src: str = DEEP_BASE, lift: dict | None = None, **extra: object) -> Tree:
+    return sib_tree(tmp, src, lift=DEEP if lift is None else lift, moves=[], **extra)
+
+
+def test_depth_2_lift_with_its_parent_lifted(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = deep_tree(tmp_path)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    a, b = t.text("mini/stage_a.py"), t.text("mini/stage_b.py")
+    # same module as the parent: the def goes, reads become direct calls, a non-call read is a partial
+    assert "def _emit(cst: \"Call\", x):\n    _note(cst, x)\n    return cs.audit(x, cst.n)" in a
+    assert "def _flush(cst: \"Call\"):\n    return _emit(cst, None)" in a
+    gen = a.split("def gen(")[1].split(LATE)[0]
+    assert "def _emit" not in gen and "def _flush" not in gen and "yield _emit(cst, it)" in gen and "register(functools.partial(_emit, cst))" in gen
+    # another module: the partial stays where the def was, and the attribute is set on that one object
+    assert "_tf = functools.partial(_stage_b._tf, cst)" in gen and "_tf.flush = functools.partial(_flush, cst)" in gen and "yield _tf\n" in gen
+    assert "def _tf(cst: \"Call\", x):\n    return cs.audit(x, cs.LIMIT)" in b
+    assert a.index("def _emit(") < a.index("def gen(") and a.index("def _flush(") < a.index("def gen(")
+    assert "from mini import stage_b as _stage_b" in a.split(LATE)[1] and "import functools\n" in a
+    head = t.text(SIB_FILE)
+    assert "gen = functools.partial(_stage_a.gen, cst)" in head and "return gen(a)" in head and "def gen" not in head
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_depth_2_lift_with_its_parent_left_for_a_later_manifest(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = deep_tree(tmp_path, lift={"_note": "stage_a", "_emit": "stage_a", "_flush": "stage_a", "_tf": "stage_b"})
+    assert t.run("apply") == 0, capsys.readouterr().out
+    head = t.text(SIB_FILE)
+    gen = head.split("def gen(")[1]
+    assert "_emit = functools.partial(_stage_a._emit, cst)" in gen and "_flush = functools.partial(_stage_a._flush, cst)" in gen
+    assert "_tf = functools.partial(_stage_b._tf, cst)" in gen and "_tf.flush = _flush" in gen and "yield _emit(it)" in gen
+    assert "def _flush(cst: \"Call\"):\n    return _emit(cst, None)" in t.text("mini/stage_a.py")
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_a_later_manifest_lifts_the_parent_that_holds_the_partials(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = deep_tree(tmp_path, lift={"_note": "stage_a", "_emit": "stage_a", "_flush": "stage_a", "_tf": "stage_b"})
+    assert t.run("apply") == 0, capsys.readouterr().out
+    base = tmp_path / "base2"
+    shutil.copytree(t.head, base)
+    t.base = base
+    t.set(**{**SIB, "lift": {"gen": "stage_a"}, "moves": []})
+    assert t.run("apply") == 0, capsys.readouterr().out
+    a = t.text("mini/stage_a.py")
+    gen = a.split("def gen(")[1]
+    # the partials the first manifest left in the parent move with it; a bare `_emit = partial(_emit, ...)` would be an unbound local,
+    # so the source's `_stage_a` alias is read through the facade (a global of the source, as for any other moved code)
+    assert "_emit = functools.partial(cs._stage_a._emit, cst)" in gen and "_tf = functools.partial(cs._stage_b._tf, cst)" in gen
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "lift", "needle"),
+    [
+        ("return audit(x, cst.n)", "return audit(x, a)", None, "V11: lifted _emit reads a"),
+        ("return _emit(None)", "return _emit(None) or held", None, "V11: lifted _flush reads held"),
+        ("            _note(x)\n", "            nonlocal held\n            _note(x)\n", None, "V11: lifted _emit declares nonlocal"),
+        ("return _emit(None)", "return _emit.x", None, "V11: line"),
+        ("return _emit(None)", "return _emit is None", None, "is compared with"),
+        ("return audit(x, LIMIT)", "return __name__", None, "V1: lifted _tf reads __name__"),
+        ("        for it in items:\n", "        _emit = 1\n        for it in items:\n", None, "V11: _emit has a second binding"),
+        ("        for it in items:\n            yield _emit(it)", "        for it in items:\n            def _deep():\n                return 1\n            yield _emit(it)", {**DEEP, "_deep": "stage_a"}, "V1: lifted _deep sits inside the loop"),
+        ("            return audit(x, LIMIT)\n", "            def _deep():\n                return 1\n            return audit(x, LIMIT)\n", {**DEEP, "_deep": "stage_a"}, "V11: expected one def _deep"),
+    ],
+)
+def test_depth_2_lift_refusals(tmp_path: Path, capsys: pytest.CaptureFixture, old: str, new: str, lift: dict | None, needle: str) -> None:
+    src = DEEP_BASE.replace(old, new, 1)
+    assert src != DEEP_BASE
+    t = deep_tree(tmp_path, src, lift=lift)
+    got = t.run("apply")
+    out = capsys.readouterr().out
+    assert got == 1 and needle in out, out
+
+
+def test_depth_2_lift_refuses_a_block_it_would_empty(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    one = DEEP_BASE.split("    def gen(items):")[0] + "    def gen(items):\n        def _emit(x):\n            return audit(x, cst.n)\n\n    return gen\n"
+    t = deep_tree(tmp_path, one, lift={"gen": "stage_a", "_emit": "stage_a"})
+    assert t.run("apply") == 1 and "would leave its block or move empty" in capsys.readouterr().out
+
+
+def test_depth_2_verify_rejects_an_unrewritten_read_and_a_missing_partial(tmp_path: Path) -> None:
+    t = deep_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "return _emit(cst, None)", "return _emit(None)")
+    assert t.run("verify") == 1
+    t = deep_tree(tmp_path / "b")
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "_tf = functools.partial(_stage_b._tf, cst)", "pass")
+    assert t.run("verify") == 1
