@@ -49,6 +49,6 @@ it.each([modelsAudioMethods.transcribeAudio])("B05 timeout lets a valid 15-secon
 
 it.each([modelsAudioMethods.transcribeAudio])("B05 timeout preserves an explicit transcription request override", async method => {
   const upload=vi.fn().mockResolvedValue({text:"unit override response"});
-  await method.call({ensureConfigForRequest:vi.fn(),upload} as unknown as TldwApiClientBase,new Blob(["unit audio"]),{model:"parakeet",timeoutMs:45000});
+  await method.call({ensureConfigForRequest:vi.fn(),upload},new Blob(["unit audio"]),{model:"parakeet",timeoutMs:45000});
   expect(upload.mock.calls[0][0].timeoutMs).toBe(45000);
 });

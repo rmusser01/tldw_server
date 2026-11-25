@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   act,
@@ -91,21 +92,21 @@ const deferred = <T,>() => {
 }
 const makeOwner = (key: string) => {
   let current = true
+  const config = { serverUrl: `https://${key}.test`, authMode: "multi-user" as const }
   const owner = {
     ownerKey: key,
     serverScopeKey: key,
     requestScope: {
-      config: {
-        serverUrl: `https://${key}.test`,
-        authMode: "multi-user" as const
-      },
-      userId: key
+      config,
+      userId: key,
+      scopeKey: buildChatSurfaceScopeKeyFromConfig(config, { userId: key }),
+      clientPrincipalVerified: true
     },
     isCurrent: () => current,
-    verificationState: "ready" as const,
+    verificationState: "ready",
     hasEverOwned: () => true,
     retryVerification: () => undefined
-  }
+  } satisfies ReturnType<typeof useChatDraftOwner>
   return {
     owner,
     retire: () => {
@@ -312,7 +313,7 @@ describe("dictionary assignment actual qualified query and controls", () => {
     expect(retryVerification).not.toHaveBeenCalled()
   })
 
-  it.each(["fetching", "paused", "error", "replaced"])(
+  it.each(["fetching", "paused", "error", "replaced"] as const)(
     "refuses a retained Open immediately after the catalogue becomes %s",
     async (transition) => {
       const onOpenChat = vi.fn(async () => true),

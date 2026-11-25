@@ -59,13 +59,13 @@ describe("chat-request-debug lazy cloning (TASK-13511)", () => {
       method: "POST",
       mode: "stream",
       body: { model: "gpt-test", messages: [] },
-      metadata: { model: "gpt-test", toolCounts: { total: 1, kept: 1 } }
+      metadata: { model: "gpt-test", toolCounts: { discovered: 1, executable: 1, disabled: 0, colliding: 0, chatEnabled: 1 } }
     })
     const snapshot = getLastChatCompletionDebugSnapshot()
     expect(snapshot).not.toBeNull()
     expect(snapshot?.endpoint).toBe("/api/v1/chat/completions")
     expect(snapshot?.request.model).toBe("gpt-test")
-    expect(snapshot?.metadata?.toolCounts).toEqual({ total: 1, kept: 1 })
+    expect(snapshot?.metadata?.toolCounts).toEqual({ discovered: 1, executable: 1, disabled: 0, colliding: 0, chatEnabled: 1 })
   })
 
   it("returns null from the helper for other endpoints", () => {

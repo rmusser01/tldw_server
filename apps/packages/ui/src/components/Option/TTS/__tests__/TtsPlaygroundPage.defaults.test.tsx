@@ -140,7 +140,7 @@ describe("TtsPlaygroundPage defaults", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={queryClient}><TtsPlaygroundPage /></QueryClientProvider>)
 
-    const stop = await screen.findByRole("button", { name: "Stop", exact: true })
+    const stop = await screen.findByRole("button", { name: "Stop" })
     expect(stop).toBeEnabled()
     fireEvent.click(stop)
     expect(generationState.clear).toHaveBeenCalledOnce()
@@ -158,7 +158,7 @@ describe("TtsPlaygroundPage defaults", () => {
     generationState.active = true
     generationState.clear.mockClear()
     view.rerender(<QueryClientProvider client={queryClient}><TtsPlaygroundPage /></QueryClientProvider>)
-    const stop = screen.getByRole("button", { name: "Stop", exact: true })
+    const stop = screen.getByRole("button", { name: "Stop" })
     expect(stop).toBeEnabled()
     fireEvent.click(stop)
     expect(generationState.clear).toHaveBeenCalledOnce()

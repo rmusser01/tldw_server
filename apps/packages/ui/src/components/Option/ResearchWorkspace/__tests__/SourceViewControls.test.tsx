@@ -1502,7 +1502,7 @@ describe("SourceViewControls", () => {
         await user.keyboard("{Enter}")
         const input = await screen.findByRole("textbox", { name: "View name" })
         expect(input).toHaveValue("")
-        const current = input.closest("[role=dialog]")!
+        const current = input.closest<HTMLElement>("[role=dialog]")!
         await waitFor(() =>
           expect(current.className).toContain("ant-zoom-enter-active")
         )

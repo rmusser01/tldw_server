@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SidepanelChat from "../sidepanel-chat"
 import type { SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { loadFlashcardsTransferSnapshot, flashcardsHandoffAuthority } from "@/services/tldw/flashcards-generate-transfer"
 import { consumeFlashcardsGenerateHandoff, consumeStudyPackHandoff } from "@/services/tldw/flashcards-generate-handoff"
 
@@ -66,12 +67,20 @@ describe("actual sidepanel Chat private Flashcards producer", () => {
     mocks.background = null
     mocks.message.serverChatId = "conversation-41"
     window.localStorage.clear()
-    window.localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://chat.test", authMode: "single-user", apiKey: "synthetic-key" }))
+    const config = { serverUrl: "https://chat.test", authMode: "single-user" as const, apiKey: "synthetic-key" }
+    window.localStorage.setItem("tldwConfig", JSON.stringify(config))
     openedOwner = {
       ownerKey: "opened-owner", revision: 0, isCurrent: () => true,
       snapshot: {
         scopeKey: "captured-owner", capability: "unchecked", definitions: {},
-        requestScope: { config: { serverUrl: "https://chat.test", authMode: "single-user", apiKey: "synthetic-key" }, userId: null },
+        requestScope: {
+          config: {
+            serverUrl: config.serverUrl,
+            authMode: config.authMode,
+            expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(config.authMode, config.apiKey) ?? undefined
+          },
+          userId: null
+        },
         scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal,
         release: mocks.noop
       }

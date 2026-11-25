@@ -22,7 +22,6 @@ const completedAssistant = () => ({
   variantCount: 1,
   canSwipePrev: false,
   canSwipeNext: false,
-  overflowChipVisibility: "hidden",
   actionRowVisibility: "flex",
   isTtsEnabled: false,
   isSpeaking: false,
@@ -66,7 +65,7 @@ describe("real AntD message action triggers", () => {
     </Popover>)
     expect(screen.queryByRole("button", { name: "Native menu choice" })).not.toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Native More actions" }))
-    expect(await screen.findByRole("button", { name: "Native menu choice" })).toBeVisible()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Native menu choice" })).toBeVisible())
   })
 
   it.each([

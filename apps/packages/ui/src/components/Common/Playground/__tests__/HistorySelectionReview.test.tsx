@@ -24,14 +24,14 @@ import { COMPOSER_CONSTANTS } from "@/config/ui-constants"
 vi.mock("@/hooks/chat/roleplay-resume-send", () => ({
   sendSavedRoleplay: roleplayRetry.send
 }))
-const reviewButtons = vi.hoisted(() => ({ open: [] as Array<() => void> }))
+const reviewButtons = vi.hoisted(() => ({ open: [] as React.MouseEventHandler<HTMLButtonElement>[] }))
 vi.mock("@/components/Common/Button", async (original) => {
   const { Button } =
     await original<typeof import("@/components/Common/Button")>()
   const React = await import("react")
   return {
-    Button: React.forwardRef<HTMLButtonElement, any>((props, ref) => {
-      if (props.children === "Open saved reply")
+    Button: React.forwardRef<HTMLButtonElement, React.ComponentPropsWithoutRef<typeof Button>>((props, ref) => {
+      if (props.children === "Open saved reply" && props.onClick)
         reviewButtons.open.push(props.onClick)
       return React.createElement(Button, { ...props, ref })
     })
@@ -879,7 +879,7 @@ it("a retained Open callback cannot adopt a same-ID draft restore before React c
   usePlaygroundSessionStore.setState({
     restoreRevision: usePlaygroundSessionStore.getState().restoreRevision + 1
   })
-  retained()
+  retained(undefined)
   expect(selection.openRecoveryResult).not.toHaveBeenCalled()
 })
 
@@ -1177,7 +1177,13 @@ describe("bounded retained outcomes", () => {
       input_text: `Exact ${id}.  \nNext line.`,
       result_text: "",
       created_at: Number(id.slice(1)),
-      origin_view: { ...view }
+      origin_view: { ...view },
+      owner_key: view.owner_key,
+      conversation_id: view.conversation_id,
+      selection_digest: "selection",
+      request_context_digest: "context",
+      input_images: [],
+      persistence: "server" as const
     }
   })
   const selectionWith = (recoveries: ReturnType<typeof receipt>[]) =>
@@ -1257,7 +1263,12 @@ describe("bounded retained outcomes", () => {
           owner: {
             kind: "native",
             owner_key: "other-owner",
-            conversation_id: "other-chat"
+            conversation_id: "other-chat",
+            request_scope: {
+              config: { serverUrl: "http://retry.test", authMode: "multi-user" },
+              userId: "alice"
+            },
+            validate_lease: () => true
           },
           recoveries: []
         }}
@@ -2047,7 +2058,7 @@ it("explains explicit saved-history review before continuing an uncertain native
   render(<HistorySelectionReview selection={selection} />)
   fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
   expect(screen.getByText("The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.")).toBeVisible()
-  expect(screen.getByRole("button", { name: "Review conversation history", exact: true })).toBeVisible()
+  expect(screen.getByRole("button", { name: "Review conversation history" })).toBeVisible()
   expect(selection.view).toBe(originalView)
   expect(selection.choose).not.toHaveBeenCalled()
 })
@@ -2062,7 +2073,7 @@ it.each([true, false])("provides explicit owned refresh for an empty retained na
   })
   const original = structuredClone(selection.recoveries)
   render(<HistorySelectionReview selection={selection} />)
-  const refresh = screen.getByRole("button", { name: "Refresh history", exact: true })
+  const refresh = screen.getByRole("button", { name: "Refresh history" })
   expect(selection.refresh).not.toHaveBeenCalled()
   fireEvent.click(refresh)
   if (leaseCurrent) expect(selection.refresh).toHaveBeenCalledOnce()
@@ -2083,7 +2094,7 @@ it("rejects a retained empty-history refresh after its original view fence retir
     fence: () => () => current,
   })
   render(<HistorySelectionReview selection={selection} />)
-  const refresh = screen.getByRole("button", { name: "Refresh history", exact: true })
+  const refresh = screen.getByRole("button", { name: "Refresh history" })
   current = false
   fireEvent.click(refresh)
   expect(selection.refresh).not.toHaveBeenCalled()
@@ -2104,7 +2115,7 @@ it.each(["local", "uncaptured", "different view", "missing bookmark", "foreign o
   if (boundary === "missing bookmark") Object.assign(selection, { bookmarkScope: undefined })
   if (boundary === "foreign outcome") Object.assign(selection.recoveries[0].turn, { owner_key: "foreign" })
   render(<HistorySelectionReview selection={selection} />)
-  expect(screen.queryByRole("button", { name: "Refresh history", exact: true })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Refresh history" })).toBeNull()
   expect(selection.refresh).not.toHaveBeenCalled()
 })
 
@@ -2120,7 +2131,7 @@ it.each(["isLoading", "streaming", "isProcessing"] as const)("prevents empty nat
   try {
     act(() => useStoreMessageOption.setState({ [flag]: true }))
     render(<HistorySelectionReview selection={selection} />)
-    const refresh = screen.getByRole("button", { name: "Refresh history", exact: true })
+    const refresh = screen.getByRole("button", { name: "Refresh history" })
     expect(refresh).toBeDisabled()
     fireEvent.click(refresh)
     expect(selection.refresh).not.toHaveBeenCalled()

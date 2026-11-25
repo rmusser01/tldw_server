@@ -142,7 +142,8 @@ describe("scene destination captured from actual store and declared accepted H1 
     install(h1)
     source.controller.draftAccount = {
       requestScope: { ...requestScope, userId: 2 },
-      isCurrent: () => true
+      isCurrent: () => true,
+      retryVerification: () => {}
     }
     expect(captureCurrentActorSceneTarget(source.controller)?.isCurrent()).toBe(
       true
