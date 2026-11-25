@@ -56,7 +56,6 @@ from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias, 
 
 from loguru import logger  # noqa: E402
 
-
 if TYPE_CHECKING:
     from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
     from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
@@ -112,7 +111,9 @@ from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # n
     current_connection_state,
 )
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
-from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402,F401  # re-exported: Chat persistence and Buddy import it from here
+from tldw_Server_API.app.core.DB_Management.db_errors import (
+    NotFoundError,  # noqa: E402,F401  # re-exported: Chat persistence and Buddy import it from here
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed  # noqa: E402
 from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (  # noqa: E402
