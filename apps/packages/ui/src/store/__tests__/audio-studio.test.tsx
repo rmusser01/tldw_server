@@ -88,7 +88,7 @@ describe("audio studio store", () => {
   })
   it("B06 list refresh preserves unsaved edits even at the same revision", () => {
     const store = useAudioStudioStore.getState()
-    store.setProjects([project({ sections: [{ section_id: "s1", workflow: "narration", order: 0, body_text: "Saved" }] })])
+    store.setProjects([project({ sections: [{ section_id: "s1", title: "Section one", workflow: "narration", order: 0, body_text: "Saved" }] })])
     store.setActiveProjectId("project-1")
     store.updateProjectLocal("project-1", { title: "Unsaved" })
     store.setProjects([{ project_id: "project-1", title: "Untitled", workflow: "narration", status: "draft", revision_id: "rev-1" }])
@@ -98,7 +98,7 @@ describe("audio studio store", () => {
 
   it("B06 metadata refresh retains hydrated sections and records revision conflicts", () => {
     const store = useAudioStudioStore.getState()
-    store.setProjects([project({ sections: [{ section_id: "s1", workflow: "narration", order: 0, body_text: "Saved" }] })])
+    store.setProjects([project({ sections: [{ section_id: "s1", title: "Section one", workflow: "narration", order: 0, body_text: "Saved" }] })])
     store.setActiveProjectId("project-1")
     store.setProjects([{ project_id: "project-1", title: "New title", workflow: "narration", status: "draft", revision_id: "rev-1" }])
     expect(useAudioStudioStore.getState().activeProject?.sections).toHaveLength(1)

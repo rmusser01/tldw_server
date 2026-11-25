@@ -9,7 +9,12 @@ import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
 
 const commandIo = vi.hoisted(() => ({
   listChatCommands: vi.fn<() => Promise<unknown>>(async () => ({ commands: [] })),
-  startSavedChat: vi.fn(() => true)
+  startSavedChat: vi.fn(() => true),
+  openModelSelector: vi.fn(() => true)
+}))
+
+vi.mock("@/utils/model-selector-events", () => ({
+  openModelSelector: commandIo.openModelSelector
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -31,6 +36,7 @@ beforeEach(() => {
   commandIo.listChatCommands.mockReset()
   commandIo.listChatCommands.mockResolvedValue({ commands: [] })
   commandIo.startSavedChat.mockClear()
+  commandIo.openModelSelector.mockClear()
   useConnectionStore.setState({ state: { ...connectedState, isConnected: true } })
 })
 afterEach(() => {
@@ -72,14 +78,7 @@ describe("playground useSlashCommands", () => {
   it("shows slash suggestions with concise descriptions and examples", () => {
     const { result } = renderHook(() =>
       useSlashCommands({
-        chatMode: "normal",
-        setChatMode: vi.fn(),
-        webSearch: false,
-        setWebSearch: vi.fn(),
-        handleImageUpload: vi.fn(),
-        imageBackendDefaultTrimmed: "",
-        imageBackendLabel: "none",
-        setOpenModelSettings: vi.fn(),
+        ...baseParams,
         currentMessage: "/gen"
       })
     )
@@ -95,23 +94,19 @@ describe("playground useSlashCommands", () => {
   it("resolves a slash command without running it until it is executed (CC-N1)", () => {
     const setChatMode = vi.fn()
     const setWebSearch = vi.fn()
-    const setOpenModelSettings = vi.fn()
     const { result } = renderHook(() =>
       useSlashCommands({
-        chatMode: "normal",
+        ...baseParams,
         setChatMode,
-        webSearch: false,
         setWebSearch,
-        handleImageUpload: vi.fn(),
         imageBackendDefaultTrimmed: "flux",
         imageBackendLabel: "Flux",
-        setOpenModelSettings,
         currentMessage: "/web"
       })
     )
 
     const intent = result.current.resolveSubmissionIntent("/web latest news")
-    result.current.resolveSubmissionIntent("/model")
+    const modelIntent = result.current.resolveSubmissionIntent("/model")
 
     expect(intent).toMatchObject({
       handled: true,
@@ -119,26 +114,23 @@ describe("playground useSlashCommands", () => {
       message: "latest news"
     })
     expect(setWebSearch).not.toHaveBeenCalled()
-    expect(setOpenModelSettings).not.toHaveBeenCalled()
+    expect(commandIo.openModelSelector).not.toHaveBeenCalled()
 
     act(() => {
       executeSlashCommand(intent)
     })
     expect(setWebSearch).toHaveBeenCalledTimes(1)
     expect(setWebSearch).toHaveBeenCalledWith(true)
+    act(() => {
+      executeSlashCommand(modelIntent)
+    })
+    expect(commandIo.openModelSelector).toHaveBeenCalledOnce()
   })
 
   it("leaves plain messages and unknown commands unhandled", () => {
     const { result } = renderHook(() =>
       useSlashCommands({
-        chatMode: "normal",
-        setChatMode: vi.fn(),
-        webSearch: false,
-        setWebSearch: vi.fn(),
-        handleImageUpload: vi.fn(),
-        imageBackendDefaultTrimmed: "",
-        imageBackendLabel: "none",
-        setOpenModelSettings: vi.fn(),
+        ...baseParams,
         currentMessage: ""
       })
     )
@@ -154,14 +146,9 @@ describe("playground useSlashCommands", () => {
   it("parses image commands", () => {
     const { result } = renderHook(() =>
       useSlashCommands({
-        chatMode: "normal",
-        setChatMode: vi.fn(),
-        webSearch: false,
-        setWebSearch: vi.fn(),
-        handleImageUpload: vi.fn(),
+        ...baseParams,
         imageBackendDefaultTrimmed: "flux",
         imageBackendLabel: "Flux",
-        setOpenModelSettings: vi.fn(),
         currentMessage: ""
       })
     )

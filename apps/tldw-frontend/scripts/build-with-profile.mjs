@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process"
+import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
 
 import {
@@ -30,12 +31,19 @@ function getBundler(argv = process.argv.slice(2)) {
   )
 }
 
-function getNextBinary() {
-  return process.platform === "win32" ? "next.cmd" : "next"
-}
-
 function getBuildArgs(bundler) {
   return ["build", bundler === "turbopack" ? "--turbopack" : "--webpack"]
+}
+
+// Run Next's CLI entry with the current runtime. Spawning the platform shim
+// fails on Windows: Node refuses `next.cmd` without a shell (CVE-2024-27980),
+// and bun may install `next.exe`/`next.bunx` shims instead of `next.cmd`.
+export function getNextBuildCommand(bundler) {
+  const require = createRequire(import.meta.url)
+  return {
+    command: process.execPath,
+    args: [require.resolve("next/dist/bin/next"), ...getBuildArgs(bundler)],
+  }
 }
 
 export function shapeWebuiBuildEnv(profile, env = process.env) {
@@ -67,7 +75,8 @@ export async function runBuildWithProfile({
     branch: getCurrentGitBranch(cwd),
   })
   const shapedEnv = shapeWebuiBuildEnv(profile, env)
-  execFileSync(getNextBinary(), getBuildArgs(bundler), {
+  const { command, args } = getNextBuildCommand(bundler)
+  execFileSync(command, args, {
     cwd,
     env: shapedEnv,
     stdio: "inherit",

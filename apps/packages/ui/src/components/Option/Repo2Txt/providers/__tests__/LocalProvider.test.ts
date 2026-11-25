@@ -60,7 +60,7 @@ describe("LocalProvider export boundaries", () => {
   it("rejects ZIP traversal before JSZip sanitization hides it", async () => {
     const zip = new JSZip().file("../outside.md", "public outside sentinel")
     const archive = new File(
-      [await zip.generateAsync({ type: "uint8array" })],
+      [await zip.generateAsync({ type: "arraybuffer" })],
       "unsafe.zip"
     )
     await expect(
@@ -73,7 +73,7 @@ describe("LocalProvider export boundaries", () => {
       unixPermissions: 0o120777
     })
     const archive = new File(
-      [await zip.generateAsync({ type: "uint8array", platform: "UNIX" })],
+      [await zip.generateAsync({ type: "arraybuffer", platform: "UNIX" })],
       "link.zip"
     )
     await expect(
@@ -96,7 +96,7 @@ describe("LocalProvider bounded ZIP recovery", () => {
     await provider.initialize({
       source: "zip",
       zipFile: new File(
-        [await zip.generateAsync({ type: "uint8array" })],
+        [await zip.generateAsync({ type: "arraybuffer" })],
         "valid.zip"
       )
     })
@@ -114,7 +114,7 @@ describe("LocalProvider bounded ZIP recovery", () => {
       zipFile: new File(
         [
           await zip.generateAsync({
-            type: "uint8array",
+            type: "arraybuffer",
             compression: "DEFLATE"
           })
         ],

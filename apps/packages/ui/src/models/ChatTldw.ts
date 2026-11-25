@@ -13,6 +13,7 @@ import {
   type ChatResearchContext
 } from "@/services/tldw"
 import type { ToolCall } from "@/types/tool-calls"
+import { preserveGoogleToolCallSignature } from "@/utils/chat-tools"
 import type { ChatScope } from "@/types/chat-scope"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
@@ -207,6 +208,10 @@ export class ChatTldw {
         if (typeof delta?.type === "string") {
           toolCalls[index].type = delta.type as ToolCall["type"]
         }
+        preserveGoogleToolCallSignature(
+          toolCalls[index],
+          delta?.extra_content?.google?.thought_signature
+        )
         if (delta?.function) {
           if (typeof delta.function.name === "string") {
             toolCalls[index].function.name += delta.function.name

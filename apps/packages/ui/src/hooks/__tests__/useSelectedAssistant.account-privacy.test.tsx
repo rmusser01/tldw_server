@@ -81,7 +81,7 @@ describe("private assistant account ownership with native storage adapters", () 
       if (JSON.stringify(value).includes(alice.name)) { started = true; await barrier }
       return originalSet.call(this, key, value)
     })
-    let pending!: Promise<void>
+    let pending!: ReturnType<typeof view.result.current[1]>
     act(() => { pending = view.result.current[1](alice) })
     await waitFor(() => expect(started).toBe(true))
     await switchTo("bob")
@@ -157,8 +157,9 @@ describe("private assistant account ownership with native storage adapters", () 
     const barrier = new Promise<void>(resolve => { release = resolve })
     vi.spyOn(Storage.prototype, "set").mockImplementation(async function (key, value) {
       if (JSON.stringify(value).includes(bob.name)) throw new Error("Current write failed")
-      await originalSet.call(this, key, value)
+      const result = await originalSet.call(this, key, value)
       if (JSON.stringify(value).includes(alice.name)) { started = true; await barrier }
+      return result
     })
     let older!: ReturnType<typeof first.result.current[1]>
     act(() => { older = first.result.current[1](alice) })
@@ -212,9 +213,10 @@ describe("private assistant account ownership with native storage adapters", () 
     const barrier = new Promise<void>(resolve => { release = resolve })
     const spy = vi.spyOn(Storage.prototype, "set").mockImplementation(async function (key, value) {
       if (!JSON.stringify(value).includes(alice.name)) throw new Error("Storage unavailable")
-      await originalSet.call(this, key, value)
+      const result = await originalSet.call(this, key, value)
       started = true
       await barrier
+      return result
     })
     let older!: ReturnType<typeof view.result.current[1]>
     act(() => { older = view.result.current[1](alice) })

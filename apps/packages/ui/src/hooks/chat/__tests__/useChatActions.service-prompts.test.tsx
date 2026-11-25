@@ -356,9 +356,9 @@ const createHookOptions = ({
   abortController: null,
   setAbortController: vi.fn(),
   messages: [],
-  setMessages: vi.fn(() => events.push("setMessages")),
+  setMessages: vi.fn<Parameters<typeof useRawChatActions>[0]["setMessages"]>(() => { events.push("setMessages"); }),
   history: [],
-  setHistory: vi.fn(() => events.push("setHistory")),
+  setHistory: vi.fn<Parameters<typeof useRawChatActions>[0]["setHistory"]>(() => { events.push("setHistory"); }),
   historyId,
   setHistoryId: vi.fn((id: string | null) => useStoreMessageOption.getState().setHistoryId(id)),
   temporaryChat: false,
@@ -613,7 +613,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
       const view = mount();
       const original = { ...createDefaultActorSettings(), isEnabled: true, notes: "SAVED FRESH COMPARE SCENE" };
       const source = captureCurrentActorSceneTarget(view.controller)!;
-      expect(await service.saveActorSettingsForChat({ target: source, expectedRecord: null, settings: original })).toBe(true);
+      expect(await service.saveActorSettingsForChat({ historyId: null, serverChatId: null, target: source, expectedRecord: null, settings: original })).toBe(true);
       normalChatModeMock.mockResolvedValue({ status: "submitted" });
       let result: unknown;
       await act(async () => { result = await view.result.current.onSubmit({ message: "Compare with the saved fresh scene", image: "" }); });
@@ -786,6 +786,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
       const view = mount();
       const load = view.loadConversation.getMockImplementation()!;
       view.loadConversation.mockImplementationOnce((target, bookmark, accepted) => load(target, bookmark, receipt => {
+        if (receipt.owner.kind !== "local") throw new Error("Expected a local Compare history");
         const saved = saveMessageMock.mock.calls[0][0];
         const node = { id: saved.id, revision: "retained-question-revision", parent_id: null, role: "user", settled: true };
         const capture = { status: "captured" as const, purpose: "send" as const, view: receipt.view,
@@ -2228,6 +2229,7 @@ describe("useChatActions owned continuation prompt publication", () => {
       name: "Assistant",
       isBot: true,
       message: "Existing answer.",
+      sources: [],
     },
   ];
   const originalHistory: ChatHistory = [
@@ -2251,6 +2253,7 @@ describe("useChatActions owned continuation prompt publication", () => {
       name: "Assistant",
       isBot: true,
       message: "Replacement source answer.",
+      sources: [],
     },
   ];
   const replacementHistory: ChatHistory = [

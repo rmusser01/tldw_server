@@ -25,11 +25,12 @@ const makeForm = () => {
 }
 const makeWebDeps = (ready: boolean, busy: boolean, imageCommand = false) => {
   const test = makeForm()
-  const deps: UsePlaygroundSubmitDeps = {
+  const deps = {
     captureDraftOwnership: () => ({ isCurrent: () => true, isOwnerCurrent: () => true, isImageCurrent: () => true, normalizeMessage: () => true }),
     captureHistorySelection: () => () => true,
+    captureCompletionGuard: (): (() => boolean) => () => true,
     form: test.form, beginPromptAssistReset: vi.fn(() => 1), restorePromptAssistAttempt: vi.fn(), markPromptAssistAttemptSaved: vi.fn(),
-    isSending: busy, isConnectionReady: ready, draftReady: true, webSearch: false, compareModeActive: false, compareSelectedModels: [], selectedModel: "gpt-test",
+    isSending: busy, isConnectionReady: ready, draftReady: true, chatMode: "normal", webSearch: false, compareModeActive: false, compareSelectedModels: [], selectedModel: "gpt-test",
     fileRetrievalEnabled: false, ragPinnedResults: [], selectedDocuments: [{ id: "keep-tab" }], uploadedFiles: [], currentContextSnapshot: {},
     conversationTokenCount: 0, characterContextTokenEstimate: 0, pinnedSourceTokenEstimate: 0, resolvedMaxContext: 8000, jsonMode: false,
     openUIRequestMode: false, sendMessage: vi.fn(async () => ({ status: "submitted" })), clearOpenUIRequestMode: vi.fn(), clearSelectedDocuments: vi.fn(), clearUploadedFiles: vi.fn(),
@@ -37,7 +38,7 @@ const makeWebDeps = (ready: boolean, busy: boolean, imageCommand = false) => {
     resolveSubmissionIntent: vi.fn(() => ({ message: "NORMALIZED", combinedMessage: "NORMALIZED", handled: imageCommand, isImageCommand: imageCommand, imageBackendOverride: "test" })),
     queueSubmission: vi.fn(() => ({ id: "queued" })), validateSelectedChatModelsAvailability: () => true, compareModelsSupportCapability: () => true,
     notificationApi: { info: vi.fn(), error: vi.fn(), warning: vi.fn() }, t
-  }
+  } satisfies UsePlaygroundSubmitDeps
   return { ...test, deps }
 }
 
@@ -269,7 +270,7 @@ it("actual Compact saved Roleplay preparation uses literal input without reading
     }),
     ensureEmbeddingModelAvailable: vi.fn(async () => true),
     conversationContextComposition: { composeForSend: vi.fn(async () => null) },
-    captureCompletionGuard: () => () => true,
+    captureCompletionGuard: (): (() => boolean) => () => true,
     submitDispatch: dispatcher.result.current.dispatch,
     clearDraft: vi.fn(),
     setContextFiles: vi.fn(),

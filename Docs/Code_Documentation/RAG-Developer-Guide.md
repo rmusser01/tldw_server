@@ -99,15 +99,15 @@ Important route variants:
 
 ## Pipeline Layout
 
-`unified_rag_pipeline(...)` in `unified_pipeline.py` is a kwargs shim. Its signature and `**kwargs` are a public contract (the request transport reads it with `inspect.signature`), so it keeps every keyword. Its body is a docstring plus one `return await run_rag_pipeline(RagRunConfig.from_call_locals(locals()))`; it does nothing else. Callers, streaming and the adaptive rerun still call the shim with keywords.
+`unified_rag_pipeline(...)` in `unified_pipeline.py` is a kwargs shim. Its signature and `**kwargs` are a public contract (the request transport reads it with `inspect.signature`), so it keeps every keyword. Its body is a docstring plus one `return await run_rag_pipeline(RagRunConfig.from_call_locals(locals()))`; it does nothing else. New code calls `run_rag_pipeline(RagRunConfig.from_kwargs(**kw))` directly; the 14 in-tree callers (endpoints, workers, the MCP module and the like) do. Only the by-reference seams (the batch wrapper, `simple_search`, the streaming handoff) and external callers that pass keywords still go through the shim.
 
-`run_rag_pipeline(rcfg: RagRunConfig) -> UnifiedPipelineResult`, defined right after the shim, is the orchestrator. It builds `state = PipelineState(rcfg)`, calls the stage functions in order inside one `try`, runs `finalize_run` in the `finally`, and keeps only the small inline pieces (the empty-query return, the outer error ladder and the result tail). It has no nested functions, lambdas or classes, and it reads no signature parameter by name; its only inputs are `rcfg` and `state`.
+`run_rag_pipeline(rcfg: RagRunConfig) -> UnifiedPipelineResult`, defined right after the shim, is the orchestrator. It builds `state = PipelineState(rcfg)`, then calls the stage functions in order inside one `try` whose `finally` runs `finalize_run`. All of that sits in an outer `try`/`finally` that calls `state.release()`, which clears every slot so the state's reference cycle (the published closures capture it) cannot keep the retriever and its DB handles alive after the call. It keeps only the small inline pieces (the empty-query return, the outer error ladder and the result tail). It has no nested functions, lambdas or classes, and it reads no signature parameter by name; its only inputs are `rcfg` and `state`.
 
 The stage code lives in `rag_service/pipeline/`:
 
 | Module | Holds |
 |---|---|
-| `run_config.py` | `RagRunConfig`, a frozen dataclass of 17 frozen sub-configs, built from the call locals |
+| `run_config.py` | `RagRunConfig`, a frozen dataclass of 17 frozen sub-configs, built with `RagRunConfig.from_kwargs(**kw)` (new code, and every direct caller) or `from_call_locals(locals())` (the shim) |
 | `run_state.py` | `PipelineState` (per-run mutable slots and the helper methods that used to be closures) and `EarlyReturn` |
 | `prepare.py` | `prepare_request`, `apply_search_depth_presets`, `init_run` |
 | `scope.py` | `resolve_sources` |

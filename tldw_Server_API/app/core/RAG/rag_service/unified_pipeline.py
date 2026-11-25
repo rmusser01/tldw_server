@@ -2375,249 +2375,251 @@ async def unified_rag_pipeline(
 
 async def run_rag_pipeline(rcfg: RagRunConfig) -> UnifiedPipelineResult:
     state = _run_state.PipelineState(rcfg)
+    try:
+        _prepare.prepare_request(rcfg, state)
 
-    _prepare.prepare_request(rcfg, state)
+        # Basic input validation (short-circuit before heavier setup)
+        if not isinstance(state.query, str) or not state.query.strip():
+            msg = "Invalid query"
+            metadata = {"original_query": state.query}
+            try:
+                inbound_meta = rcfg.request.metadata
+                if isinstance(inbound_meta, dict):
+                    metadata.update(inbound_meta)
+            except TypeError:
+                pass
+            timings = {"total": 0.0}
+            # Consistent contract: return UnifiedRAGResponse for all outcomes
+            try:
+                from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGResponse
 
-    # Basic input validation (short-circuit before heavier setup)
-    if not isinstance(state.query, str) or not state.query.strip():
-        msg = "Invalid query"
-        metadata = {"original_query": state.query}
+                return UnifiedRAGResponse(
+                    documents=[],
+                    query=(state.query if isinstance(state.query, str) else ""),
+                    expanded_queries=[],
+                    metadata=metadata,
+                    timings=timings,
+                    citations=[],
+                    academic_citations=[],
+                    chunk_citations=[],
+                    generated_answer=msg,
+                    cache_hit=False,
+                    errors=[msg],
+                    security_report=None,
+                    total_time=0.0,
+                    claims=None,
+                    factuality=None,
+                )
+            except (ImportError, TypeError, ValueError):
+                # Fallback to dataclass if schema import fails (non-API contexts)
+                return UnifiedSearchResult(
+                    documents=[],
+                    query=state.query if isinstance(state.query, str) else "",
+                    expanded_queries=[],
+                    metadata=metadata,
+                    timings=timings,
+                    citations=[],
+                    feedback_id=None,
+                    generated_answer=msg,
+                    cache_hit=False,
+                    errors=[msg],
+                    security_report=None,
+                    total_time=0.0,
+                )
+
+        _prepare.apply_search_depth_presets(rcfg, state)
+
+        _prepare.init_run(rcfg, state)
+
         try:
-            inbound_meta = rcfg.request.metadata
-            if isinstance(inbound_meta, dict):
-                metadata.update(inbound_meta)
-        except TypeError:
+            _scope.resolve_sources(rcfg, state)
+
+            # ========== LEARNED FUSION / CALIBRATION HELPERS ==========
+            # ========== PRE-RETRIEVAL CLARIFICATION ==========
+            await _query_prep.clarify_and_spellcheck(rcfg, state)
+            # ========== QUERY CLASSIFICATION & REFORMULATION ==========
+            await _query_prep.run_query_classification(rcfg, state)
+
+            # ========== AGENTIC RESEARCH LOOP ==========
+            # If research loop is enabled and we're in balanced/quality mode,
+            # delegate to the research agent instead of the standard pipeline
+            await _research.run_research_loop(rcfg, state)
+                    # Fall through to standard pipeline
+
+            # ========== PRODUCTION DEFAULTS (env-based) ==========
+            # If running in production, enable stricter guardrails by default
+            _query_prep.apply_guardrail_defaults(rcfg, state)
+
+            # ========== QUERY EXPANSION ==========
+            await _query_prep.run_query_expansion(rcfg, state)
+
+            # ========== INTENT ROUTING (optional) ==========
+            _query_prep.route_and_weight(rcfg, state)
+
+            # ========== HyDE PREP (optional) ==========
+            await _query_prep.prepare_hyde_and_temporal_filters(rcfg, state)
+
+            # ========== CACHE CHECK ==========
+            # Resolve auto-temporal scope before deriving the retrieval cache identity.
+            await _retrieval.lookup_retrieval_cache(rcfg, state)
+
+            # ========== DOCUMENT RETRIEVAL ==========
+            await _retrieval.run_retrieval(rcfg, state)
+
+            if (
+                state.retrieval_cache_eligible
+                and state.base_retrieval_executed
+                and not state.result.cache_hit
+                and not state._skip_retrieval_stack
+                and not state._skip_local_retrieval
+                and state.result.documents
+            ):
+                state.apply_workspace_filtering_to_result()
+                state.cache_retrieval_snapshot = _clone_cached_documents(
+                    list(state.result.documents)
+                )
+
+            # ========== MULTI-VECTOR PASSAGES (optional, pre-rerank) ==========
+            await _augment.augment_passages(rcfg, state)
+
+            # ========== GAP ANALYSIS / FOLLOW-UPS (optional) ==========
+            await _augment.run_gap_analysis(rcfg, state)
+
+            # ========== INSTRUCTION-INJECTION FILTERING (pre-reranking) ==========
+            _filters.apply_content_filters(rcfg, state)
+
+            # ========== SECURITY FILTERING ==========
+            await _filters.apply_security_filter(rcfg, state)
+
+            # ========== TABLE PROCESSING ==========
+            await _processing.process_tables_and_vlm(rcfg, state)
+
+            # ========== PROGRESSIVE EVIDENCE ACCUMULATION ==========
+            await _processing.run_evidence_accumulation(rcfg, state)
+
+            # Apply personalization priors (pre-rerank) if requested
+            try:
+                if rcfg.observability.apply_feedback_boost and state.result.documents and UserPersonalizationStore:
+                    store = UserPersonalizationStore(rcfg.scope.feedback_user_id or rcfg.scope.user_id)
+                    state.result.documents = store.boost_documents(state.result.documents, corpus=rcfg.retrieval.index_namespace)
+                    state.result.metadata.setdefault("personalization", {})["boost_applied_pre_rerank"] = True
+            except ValueError as exc:
+                logger.debug(f"Personalization boost disabled for user_id={rcfg.scope.feedback_user_id or rcfg.scope.user_id}: {exc}")
+            except (AttributeError, OSError, RuntimeError, TypeError, sqlite3.Error):
+                pass
+
+            # ========== SELF-CORRECTING RAG: DOCUMENT GRADING (Stage 1) ==========
+            # Grade documents for relevance BEFORE expensive reranking/generation
+            await _self_correct.grade_documents(rcfg, state)
+
+            # ========== SELF-CORRECTING RAG: QUERY REWRITING LOOP (Stage 2) ==========
+            # When document grading shows low relevance, rewrite query and retry retrieval
+            await _self_correct.run_rewrite_loop(rcfg, state)
+
+            # ========== RERANKING ==========
+            await _rerank.run_rerank(rcfg, state)
+
+            # ========== SELF-CORRECTING RAG: WEB SEARCH FALLBACK (Stage 3) ==========
+            # When local retrieval has low relevance, fall back to web search
+            await _post_retrieval.run_web_fallback(rcfg, state)
+
+            # ========== WHY THESE SOURCES (metadata) ==========
+            _post_retrieval.explain_and_expand_sources(rcfg, state)
+
+            await _post_retrieval.build_citations_and_chains(rcfg, state)
+
+            _generation.prepare_generation(rcfg, state)
+
+            await _generation.run_generation(rcfg, state)
+
+            await _verification.check_citations_and_groundedness(rcfg, state)
+            await _claims.run_claims(rcfg, state)
+
+            await _verification.run_numeric_fidelity(rcfg, state)
+
+            await _verification.run_post_verification(rcfg, state)
+
+            await _post_processing.finish_answer(rcfg, state)
+
+            await _post_processing.store_and_observe(rcfg, state)
+
+        except _run_state.EarlyReturn:
             pass
-        timings = {"total": 0.0}
-        # Consistent contract: return UnifiedRAGResponse for all outcomes
+        except _RAG_PROVIDER_FAILURES:
+            raise
+        except (
+            AttributeError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            asyncio.TimeoutError,
+        ):
+            state.result.errors.append("pipeline_failed")
+            logger.error("Unified pipeline failed")
+            if rcfg.resilience.fallback_on_error:
+                return {
+                    "query": state.query,
+                    "documents": [],
+                    "answer": "",
+                    "cached": False,
+                    "error": "pipeline_failed",
+                    "metadata": state.result.metadata,
+                    "timings": state.result.timings,
+                }
+
+        finally:
+            await _post_processing.finalize_run(rcfg, state)
+
+        if not state.standard_evidence_coordinated:
+            state.result = coordinate_standard_result_evidence(
+                state.result,
+                state.resolved_request,
+                retrieval_plan=state.retrieval_plan,
+            )
+
+        # Convert to Pydantic response
         try:
             from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGResponse
 
+            doc_dicts = [_serialize_result_document(d) for d in (state.result.documents or [])]
             return UnifiedRAGResponse(
-                documents=[],
-                query=(state.query if isinstance(state.query, str) else ""),
-                expanded_queries=[],
-                metadata=metadata,
-                timings=timings,
-                citations=[],
-                academic_citations=[],
-                chunk_citations=[],
-                generated_answer=msg,
-                cache_hit=False,
-                errors=[msg],
-                security_report=None,
-                total_time=0.0,
-                claims=None,
-                factuality=None,
+                documents=doc_dicts,
+                query=state.result.query,
+                expanded_queries=state.result.expanded_queries,
+                metadata=state.result.metadata,
+                timings=state.result.timings,
+                citations=state.result.citations,
+                academic_citations=(state.result.metadata or {}).get("academic_citations", []),
+                chunk_citations=(state.result.metadata or {}).get("chunk_citations", []),
+                generated_answer=state.result.generated_answer,
+                cache_hit=state.result.cache_hit,
+                errors=state.result.errors,
+                security_report=state.result.security_report,
+                total_time=state.result.total_time,
+                claims=state.claims_payload,
+                factuality=state.factuality_payload,
             )
         except (ImportError, TypeError, ValueError):
-            # Fallback to dataclass if schema import fails (non-API contexts)
-            return UnifiedSearchResult(
-                documents=[],
-                query=state.query if isinstance(state.query, str) else "",
-                expanded_queries=[],
-                metadata=metadata,
-                timings=timings,
-                citations=[],
-                feedback_id=None,
-                generated_answer=msg,
-                cache_hit=False,
-                errors=[msg],
-                security_report=None,
-                total_time=0.0,
-            )
-
-    _prepare.apply_search_depth_presets(rcfg, state)
-
-    _prepare.init_run(rcfg, state)
-
-    try:
-        _scope.resolve_sources(rcfg, state)
-
-        # ========== LEARNED FUSION / CALIBRATION HELPERS ==========
-        # ========== PRE-RETRIEVAL CLARIFICATION ==========
-        await _query_prep.clarify_and_spellcheck(rcfg, state)
-        # ========== QUERY CLASSIFICATION & REFORMULATION ==========
-        await _query_prep.run_query_classification(rcfg, state)
-
-        # ========== AGENTIC RESEARCH LOOP ==========
-        # If research loop is enabled and we're in balanced/quality mode,
-        # delegate to the research agent instead of the standard pipeline
-        await _research.run_research_loop(rcfg, state)
-                # Fall through to standard pipeline
-
-        # ========== PRODUCTION DEFAULTS (env-based) ==========
-        # If running in production, enable stricter guardrails by default
-        _query_prep.apply_guardrail_defaults(rcfg, state)
-
-        # ========== QUERY EXPANSION ==========
-        await _query_prep.run_query_expansion(rcfg, state)
-
-        # ========== INTENT ROUTING (optional) ==========
-        _query_prep.route_and_weight(rcfg, state)
-
-        # ========== HyDE PREP (optional) ==========
-        await _query_prep.prepare_hyde_and_temporal_filters(rcfg, state)
-
-        # ========== CACHE CHECK ==========
-        # Resolve auto-temporal scope before deriving the retrieval cache identity.
-        await _retrieval.lookup_retrieval_cache(rcfg, state)
-
-        # ========== DOCUMENT RETRIEVAL ==========
-        await _retrieval.run_retrieval(rcfg, state)
-
-        if (
-            state.retrieval_cache_eligible
-            and state.base_retrieval_executed
-            and not state.result.cache_hit
-            and not state._skip_retrieval_stack
-            and not state._skip_local_retrieval
-            and state.result.documents
-        ):
-            state.apply_workspace_filtering_to_result()
-            state.cache_retrieval_snapshot = _clone_cached_documents(
-                list(state.result.documents)
-            )
-
-        # ========== MULTI-VECTOR PASSAGES (optional, pre-rerank) ==========
-        await _augment.augment_passages(rcfg, state)
-
-        # ========== GAP ANALYSIS / FOLLOW-UPS (optional) ==========
-        await _augment.run_gap_analysis(rcfg, state)
-
-        # ========== INSTRUCTION-INJECTION FILTERING (pre-reranking) ==========
-        _filters.apply_content_filters(rcfg, state)
-
-        # ========== SECURITY FILTERING ==========
-        await _filters.apply_security_filter(rcfg, state)
-
-        # ========== TABLE PROCESSING ==========
-        await _processing.process_tables_and_vlm(rcfg, state)
-
-        # ========== PROGRESSIVE EVIDENCE ACCUMULATION ==========
-        await _processing.run_evidence_accumulation(rcfg, state)
-
-        # Apply personalization priors (pre-rerank) if requested
-        try:
-            if rcfg.observability.apply_feedback_boost and state.result.documents and UserPersonalizationStore:
-                store = UserPersonalizationStore(rcfg.scope.feedback_user_id or rcfg.scope.user_id)
-                state.result.documents = store.boost_documents(state.result.documents, corpus=rcfg.retrieval.index_namespace)
-                state.result.metadata.setdefault("personalization", {})["boost_applied_pre_rerank"] = True
-        except ValueError as exc:
-            logger.debug(f"Personalization boost disabled for user_id={rcfg.scope.feedback_user_id or rcfg.scope.user_id}: {exc}")
-        except (AttributeError, OSError, RuntimeError, TypeError, sqlite3.Error):
-            pass
-
-        # ========== SELF-CORRECTING RAG: DOCUMENT GRADING (Stage 1) ==========
-        # Grade documents for relevance BEFORE expensive reranking/generation
-        await _self_correct.grade_documents(rcfg, state)
-
-        # ========== SELF-CORRECTING RAG: QUERY REWRITING LOOP (Stage 2) ==========
-        # When document grading shows low relevance, rewrite query and retry retrieval
-        await _self_correct.run_rewrite_loop(rcfg, state)
-
-        # ========== RERANKING ==========
-        await _rerank.run_rerank(rcfg, state)
-
-        # ========== SELF-CORRECTING RAG: WEB SEARCH FALLBACK (Stage 3) ==========
-        # When local retrieval has low relevance, fall back to web search
-        await _post_retrieval.run_web_fallback(rcfg, state)
-
-        # ========== WHY THESE SOURCES (metadata) ==========
-        _post_retrieval.explain_and_expand_sources(rcfg, state)
-
-        await _post_retrieval.build_citations_and_chains(rcfg, state)
-
-        _generation.prepare_generation(rcfg, state)
-
-        await _generation.run_generation(rcfg, state)
-
-        await _verification.check_citations_and_groundedness(rcfg, state)
-        await _claims.run_claims(rcfg, state)
-
-        await _verification.run_numeric_fidelity(rcfg, state)
-
-        await _verification.run_post_verification(rcfg, state)
-
-        await _post_processing.finish_answer(rcfg, state)
-
-        await _post_processing.store_and_observe(rcfg, state)
-
-    except _run_state.EarlyReturn:
-        pass
-    except _RAG_PROVIDER_FAILURES:
-        raise
-    except (
-        AttributeError,
-        ConnectionError,
-        OSError,
-        RuntimeError,
-        TypeError,
-        ValueError,
-        asyncio.TimeoutError,
-    ):
-        state.result.errors.append("pipeline_failed")
-        logger.error("Unified pipeline failed")
-        if rcfg.resilience.fallback_on_error:
+            # Fallback: return a minimal dict if Pydantic is not available
             return {
-                "query": state.query,
-                "documents": [],
-                "answer": "",
-                "cached": False,
-                "error": "pipeline_failed",
+                "documents": [_serialize_result_document(d) for d in (state.result.documents or [])],
+                "query": state.result.query,
+                "expanded_queries": state.result.expanded_queries,
                 "metadata": state.result.metadata,
                 "timings": state.result.timings,
+                "citations": state.result.citations,
+                "generated_answer": state.result.generated_answer,
+                "cache_hit": state.result.cache_hit,
+                "errors": state.result.errors,
+                "security_report": state.result.security_report,
+                "total_time": state.result.total_time,
+                "claims": state.claims_payload,
+                "factuality": state.factuality_payload,
             }
-
     finally:
-        await _post_processing.finalize_run(rcfg, state)
-
-    if not state.standard_evidence_coordinated:
-        state.result = coordinate_standard_result_evidence(
-            state.result,
-            state.resolved_request,
-            retrieval_plan=state.retrieval_plan,
-        )
-
-    # Convert to Pydantic response
-    try:
-        from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGResponse
-
-        doc_dicts = [_serialize_result_document(d) for d in (state.result.documents or [])]
-        return UnifiedRAGResponse(
-            documents=doc_dicts,
-            query=state.result.query,
-            expanded_queries=state.result.expanded_queries,
-            metadata=state.result.metadata,
-            timings=state.result.timings,
-            citations=state.result.citations,
-            academic_citations=(state.result.metadata or {}).get("academic_citations", []),
-            chunk_citations=(state.result.metadata or {}).get("chunk_citations", []),
-            generated_answer=state.result.generated_answer,
-            cache_hit=state.result.cache_hit,
-            errors=state.result.errors,
-            security_report=state.result.security_report,
-            total_time=state.result.total_time,
-            claims=state.claims_payload,
-            factuality=state.factuality_payload,
-        )
-    except (ImportError, TypeError, ValueError):
-        # Fallback: return a minimal dict if Pydantic is not available
-        return {
-            "documents": [_serialize_result_document(d) for d in (state.result.documents or [])],
-            "query": state.result.query,
-            "expanded_queries": state.result.expanded_queries,
-            "metadata": state.result.metadata,
-            "timings": state.result.timings,
-            "citations": state.result.citations,
-            "generated_answer": state.result.generated_answer,
-            "cache_hit": state.result.cache_hit,
-            "errors": state.result.errors,
-            "security_report": state.result.security_report,
-            "total_time": state.result.total_time,
-            "claims": state.claims_payload,
-            "factuality": state.factuality_payload,
-        }
+        state.release()  # break the state <-> published-closure cycle (the result does not alias state)
 
 
 # ========== BATCH PROCESSING WRAPPER ==========

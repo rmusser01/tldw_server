@@ -18,6 +18,7 @@ Batch 7. Plan: Docs/Plans/2026-10-06-perf-batch-7-rag-pipeline-implementation-pl
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+TASK-13950.24 (2026-11-24): the unified_rag_pipeline decomposition moved the code this task's line references point at. Line numbers in the description are stale. The reranker singleton, rerank candidate cap and calibration now live in tldw_Server_API/app/core/RAG/rag_service/pipeline/rerank.py (run_rerank: select_reranker, apply_rerank, calibrate_rerank). Query expansion, HyDE and variant merging (the asyncio.gather change) live in pipeline/retrieval.py (run_retrieval, merge_hyde_and_variants, run_decomposition) and pipeline/query_prep.py (run_query_expansion). The orchestrator is run_rag_pipeline in unified_pipeline.py; unified_rag_pipeline is now a kwargs shim.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

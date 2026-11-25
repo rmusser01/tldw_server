@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const runtimeSendMessage = vi.hoisted(() => vi.fn(async () => ({ handled: true })))
+const runtimeSendMessage = vi.hoisted(() => vi.fn(async (
+  _message: { type?: string; payload?: { kind?: string; data?: unknown } }
+) => ({ handled: true })))
 
 const connectListeners = new Set<(port: any) => void>()
 const runtimeMessageListeners = new Set<(
@@ -225,6 +227,7 @@ describe("background effective extension auth", () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllEnvs()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
     if (windowDescriptor) {
@@ -385,6 +388,37 @@ describe("background effective extension auth", () => {
     })).resolves.toMatchObject({ ok: false, status: 503, retryAfterMs: 2000 })
     expect(writes).toHaveLength(1)
     expect(storageState.persistent.get("tldwConfig")).toEqual(config)
+  })
+
+  it.each([
+    {
+      target: "same-origin hosted target",
+      serverUrl: "",
+      response: { ok: true, status: 200 },
+      requests: ["/api/proxy/service-prompts/chat.rag.answer"]
+    },
+    {
+      target: "malformed hosted target",
+      serverUrl: 42,
+      response: { ok: false, status: 412 },
+      requests: []
+    }
+  ])("handles a $target without stored config", async ({ serverUrl, response, requests }) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    storageState.persistent.clear()
+    storageState.session.clear()
+    const fetchSpy = vi.fn<typeof fetch>(async () => Response.json({ prompt: "fixture" }))
+    vi.stubGlobal("fetch", fetchSpy)
+
+    await expect(sendRuntimeMessage({
+      type: "tldw:request",
+      payload: {
+        path: "/api/v1/service-prompts/chat.rag.answer",
+        method: "GET",
+        servicePromptConfig: { serverUrl, authMode: "multi-user", authSource: "cookie-session" }
+      }
+    })).resolves.toMatchObject(response)
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual(requests)
   })
 
   it("invalidates a rejected scoped refresh without overwriting its raw malformed-org config", async () => {
@@ -2375,13 +2409,13 @@ describe("background effective extension auth", () => {
 
       it.each(debugCases)("guards $format after held debug delivery and $boundary", async ({ format, boundary }) => {
         const authority = await configureOriginal()
-        vi.mocked(browser.runtime.sendMessage).mockReset().mockResolvedValue({ handled: true })
+        runtimeSendMessage.mockReset().mockResolvedValue({ handled: true })
         await expect(sendRuntimeMessage({ type: "tldw:debug", enable: true })).resolves.toEqual({ ok: true })
         let releaseDebug!: () => void
         const heldDebug = new Promise<void>(resolve => { releaseDebug = resolve })
         const targetData = format === "DONE" ? "[DONE]" : frame
         const debugEntries: unknown[] = []
-        vi.mocked(browser.runtime.sendMessage).mockImplementation(async (message: { type?: string; payload?: { kind?: string; data?: unknown } }) => {
+        runtimeSendMessage.mockImplementation(async (message) => {
           if (message?.type === "tldw:stream-debug" && message.payload?.kind === "data" && message.payload.data === targetData) {
             debugEntries.push(message)
             await heldDebug
@@ -2441,7 +2475,7 @@ describe("background effective extension auth", () => {
           await pending
           port.disconnect()
           vi.useRealTimers()
-          vi.mocked(browser.runtime.sendMessage).mockReset().mockResolvedValue({ handled: true })
+          runtimeSendMessage.mockReset().mockResolvedValue({ handled: true })
         }
       })
 

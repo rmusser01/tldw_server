@@ -128,7 +128,7 @@ describe("OrgsTeamsPage design-system states", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Create Org$/ }))
     let finish!: (value: unknown) => void
     vi.spyOn(form, "validateFields").mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
-    fireEvent.click(screen.getByRole("button", { name: "OK", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "OK" }))
     apiMock.canonical.mockReturnValue({ config: testConfig(2), authorityLoading: false })
     view.rerender(<OrgsTeamsPage />)
     await act(async () => finish({ name: "old organization" }))
@@ -145,9 +145,9 @@ describe("OrgsTeamsPage design-system states", () => {
     let finish!: (value: unknown) => void
     vi.spyOn(form, "validateFields").mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
     try {
-      fireEvent.click(screen.getByRole("button", { name: "OK", exact: true }))
-      expect(screen.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled()
-      fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: "OK" }))
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
       expect(screen.getByRole("dialog")).toBeVisible()
     } finally {
       await act(async () => finish({ name: "reviewed organization" }))

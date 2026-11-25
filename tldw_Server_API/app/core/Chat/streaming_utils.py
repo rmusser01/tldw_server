@@ -701,6 +701,9 @@ MAX_TOOL_ARGUMENT_LENGTH = _parse_int(
     min_value=0,
 )
 
+# Thought signatures are opaque and independent of the configurable argument limit.
+MAX_GOOGLE_THOUGHT_SIGNATURE_LENGTH = 100_000
+
 # Maximum number of items in the full_response list to prevent unbounded growth
 MAX_RESPONSE_LIST_LENGTH = _parse_int(
     os.getenv('STREAMING_MAX_RESPONSE_LIST_LENGTH') or
@@ -1386,6 +1389,11 @@ class StreamingResponseHandler:
                 accumulator["id"] = entry["id"]
             if entry.get("type"):
                 accumulator["type"] = entry["type"]
+            extra = entry.get("extra_content")
+            google = extra.get("google") if isinstance(extra, dict) else None
+            signature = google.get("thought_signature") if isinstance(google, dict) else None
+            if isinstance(signature, str) and 0 < len(signature) <= MAX_GOOGLE_THOUGHT_SIGNATURE_LENGTH:
+                accumulator["extra_content"] = {"google": {"thought_signature": signature}}
             function_delta = entry.get("function") or {}
             if function_delta.get("name"):
                 accumulator["function"]["name"] = function_delta["name"]
@@ -1438,16 +1446,17 @@ class StreamingResponseHandler:
             if not data:
                 continue
             function_block = data.get("function") or {}
-            results.append(
-                {
-                    "id": data.get("id"),
-                    "type": data.get("type"),
-                    "function": {
-                        "name": function_block.get("name"),
-                        "arguments": function_block.get("arguments", ""),
-                    },
-                }
-            )
+            result = {
+                "id": data.get("id"),
+                "type": data.get("type"),
+                "function": {
+                    "name": function_block.get("name"),
+                    "arguments": function_block.get("arguments", ""),
+                },
+            }
+            if "extra_content" in data:
+                result["extra_content"] = data["extra_content"]
+            results.append(result)
         return results or None
 
     def get_accumulated_function_call(self) -> Optional[dict[str, Any]]:

@@ -27,7 +27,7 @@ POST /api/v1/rag/search
   -> auth/rate-limit/permission dependencies
   -> profile/default resolution
   -> per-user DB adapter/path injection
-  -> unified_rag_pipeline(...)
+  -> run_rag_pipeline(RagRunConfig)  (unified_rag_pipeline(...) is the kwargs shim)
   -> UnifiedRAGResponse mapping
 ```
 
@@ -135,7 +135,7 @@ Use narrower tests while iterating: schema/profile tests for request changes, re
 
 ## Advanced Notes
 
-`strategy` currently selects between `standard` and `agentic` request handling. The agentic branch builds a query-time synthetic chunk path, while the default path builds explicit pipeline kwargs and calls `unified_rag_pipeline()`.
+`strategy` currently selects between `standard` and `agentic` request handling. The agentic branch builds a query-time synthetic chunk path, while the default path builds explicit pipeline kwargs and calls `run_rag_pipeline(RagRunConfig.from_kwargs(**kwargs))`.
 
 Streaming search requires `enable_generation=true`; the endpoint rejects streaming requests without generation enabled. Batch search and batch resume use the batch schema/checkpoint path rather than requiring clients to loop over single-search calls.
 

@@ -1,6 +1,6 @@
 import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest"
 import { MermaidDiagramBlock } from "../MermaidDiagramBlock"
 import type { MermaidRenderState } from "../Mermaid"
 
@@ -63,8 +63,8 @@ vi.mock("@/store/artifacts", () => ({
 describe("MermaidDiagramBlock", () => {
   const source = "graph TD\n  A-->B"
   let writeText: ReturnType<typeof vi.fn>
-  let createObjectURL: ReturnType<typeof vi.fn>
-  let revokeObjectURL: ReturnType<typeof vi.fn>
+  let createObjectURL: Mock<typeof URL.createObjectURL>
+  let revokeObjectURL: Mock<typeof URL.revokeObjectURL>
   let clickSpy: ReturnType<typeof vi.spyOn>
   let blobParts: BlobPart[] | undefined
 

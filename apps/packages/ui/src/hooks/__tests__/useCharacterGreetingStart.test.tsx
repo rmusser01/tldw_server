@@ -18,7 +18,7 @@ const renderStart = (retain = vi.fn(async () => true)) => {
   const controller = { getCurrent: () => ({ status: "idle", owner: null, view: null }), fence: () => () => true,
     draftAccount: { requestScope, isCurrent: () => true } } as unknown as import("../chat/useHistorySelection").HistorySelectionController
   const hook = renderHook(({ isConnectionReady }) => {
-    const form = useSimpleForm({ initialValues: { message: "UNSENT\nexact  ", image: "" } })
+    const form = useSimpleForm({ initialValues: { message: "UNSENT\nexact  ", image: "", imageFilename: "" } })
     return { form, ...useCharacterGreetingStart({ form, retainCurrentDraft: retain, submit,
       ready: true, isConnectionReady, busy: false, readContext: () => [isConnectionReady], preflight, controller, focusComposer: vi.fn() }) }
   }, { initialProps: { isConnectionReady: true } })

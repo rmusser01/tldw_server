@@ -1,3 +1,4 @@
+import sys
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -783,6 +784,25 @@ def test_media_source_projection_repository_failure_is_fixed_and_redacted() -> N
     assert exc_info.value.__context__ is None
     assert secret not in repr(exc_info.value)
     assert secret not in "\n".join(messages)
+
+
+@pytest.mark.integration
+def test_media_listing_keeps_rows_with_unreadable_metadata() -> None:
+    """Deeply nested metadata does not prevent the source file from being listed."""
+    db = MediaDatabase(db_path=":memory:", client_id="media-listing")
+    try:
+        depth = sys.getrecursionlimit() + 1
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Media with unreadable metadata",
+            content="body",
+            media_type="audio",
+            safe_metadata='{"nested":' + "[" * depth + "]" * depth + "}",
+        )
+        files, _, _, _ = MediaLookupRepository(db).paginated_files()
+
+        assert [(row["id"], row["safe_metadata"]) for row in files] == [(media_id, None)]
+    finally:
+        db.close_connection()
 
 
 @pytest.mark.integration
