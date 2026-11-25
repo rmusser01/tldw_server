@@ -109,6 +109,7 @@ class MCPAdapter(ProtocolAdapter):
 
         try:
             orchestration = pc.get("mcp_orchestration", "agent_driven")
+            runner: LLMDrivenRunner | AgentDrivenRunner
             if orchestration == "llm_driven":
                 llm_caller = pc.get("llm_caller")
                 tool_gate = pc.get("tool_gate")

@@ -736,11 +736,12 @@ export class FlashcardsPage extends BasePage {
   }
 
   async setReviewMode(mode: 'due' | 'cram'): Promise<void> {
-    if (mode === 'cram') {
-      await this.reviewCramModeOption.click({ force: true });
-    } else {
-      await this.reviewDueOnlyModeOption.click({ force: true });
+    const label = mode === 'cram' ? 'Cram' : 'Due only';
+    const radio = this.reviewModeToggle.getByRole('radio', { name: label, exact: true });
+    if (!(await radio.isChecked())) {
+      await this.reviewModeToggle.getByText(label, { exact: true }).click();
     }
+    await expect(radio).toBeChecked();
   }
 
   getReviewRatingButton(key: '1' | '2' | '3' | '4'): Locator {

@@ -8,7 +8,7 @@ import json
 import re
 import tracemalloc
 from typing import Any, Literal
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -20,7 +20,9 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_result_context 
     ToolResultPolicy,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_runners import LLMDrivenRunner
+from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
+from tldw_Server_API.app.core.Agent_Client_Protocol.governance_filter import GovernanceFilter, GovernanceToolGate
 from tldw_Server_API.app.core.Agent_Client_Protocol.tool_gate import ToolGateResult
 from tldw_Server_API.app.core.exceptions import MCPResultSourceNotFoundError
 
@@ -49,7 +51,8 @@ class RecordingCaller(LLMCaller):
             return LLMResponse(tool_calls=[LLMToolCall("search1", "search", {"query": "needle"})])
         if len(self.calls) == 2 and self.reread:
             match = re.search(r"r_[a-f0-9]+", messages[-1]["content"])
-            assert match is not None
+            if match is None:
+                return LLMResponse(text="No retained source handle")
             source = match.group()
             return LLMResponse(
                 tool_calls=[
@@ -314,18 +317,20 @@ async def test_adapter_rejects_unapproved_worker_provider(
         "tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_adapter.create_transport",
         lambda pc: transport,
     )
+    governance = GovernanceFilter(SessionEventBus(session_id="test"))
+    worker = RecordingCaller()
     adapter = MCPAdapter()
     await adapter.connect(
         AdapterConfig(
-            event_callback=AsyncMock(),
+            event_callback=governance.process,
             session_id="test",
             protocol_config={
                 "mcp_orchestration": "llm_driven",
                 "llm_caller": RecordingCaller(),
-                "tool_gate": AsyncMock(),
+                "tool_gate": GovernanceToolGate(governance),
                 "mcp_llm_provider": "local-provider",
                 "mcp_tool_result_policy": {"mode": "worker"},
-                "mcp_result_worker": AsyncMock(),
+                "mcp_result_worker": worker,
                 "mcp_result_worker_provider": worker_provider,
             },
         )
@@ -333,6 +338,8 @@ async def test_adapter_rejects_unapproved_worker_provider(
     try:
         with pytest.raises(ValueError, match="same provider"):
             await adapter.send_prompt([{"role": "user", "content": "needle"}])
+        assert not worker.calls
+        transport.call_tool.assert_not_awaited()
     finally:
         await adapter.disconnect()
 
@@ -350,24 +357,26 @@ async def test_adapter_passes_explicit_policy_into_real_runner(monkeypatch: pyte
         lambda pc: transport,
     )
     caller = RecordingCaller()
-    gate = AsyncMock()
-    gate.request_approval.return_value = ToolGateResult(approved=True)
+    governance = GovernanceFilter(SessionEventBus(session_id="test"))
     adapter = MCPAdapter()
     await adapter.connect(
         AdapterConfig(
-            event_callback=AsyncMock(),
+            event_callback=governance.process,
             session_id="test",
             protocol_config={
                 "mcp_orchestration": "llm_driven",
                 "llm_caller": caller,
-                "tool_gate": gate,
+                "tool_gate": GovernanceToolGate(governance),
                 "mcp_tool_result_policy": {"mode": "excerpt", "min_input_bytes": 1024, "max_output_bytes": 768},
             },
         )
     )
     try:
         await adapter.send_prompt([{"role": "user", "content": "needle"}])
-        assert len(caller.calls[1][0][-1]["content"].encode()) <= 768
+        transport.call_tool.assert_awaited_once_with("search", {"query": "needle"})
+        context = caller.calls[1][0][-1]["content"]
+        assert "needle exact evidence" in context
+        assert len(context.encode()) <= 768
     finally:
         await adapter.disconnect()
 
@@ -485,19 +494,8 @@ async def test_internal_reads_do_not_replace_real_tool_selection_metrics(
     """Virtual reads must not replace first-tool or real fallback measurements."""
     from tldw_Server_API.app.core.Agent_Client_Protocol.adapters import mcp_runners
 
-    first_tools, fallbacks = [], []
-    monkeypatch.setattr(mcp_runners.acp_metrics, "record_run_first_rollout", lambda **kwargs: None)
-    monkeypatch.setattr(mcp_runners.acp_metrics, "record_run_first_completion_proxy", lambda **kwargs: None)
-    monkeypatch.setattr(
-        mcp_runners.acp_metrics,
-        "record_run_first_first_tool",
-        lambda **kwargs: first_tools.append(kwargs["first_tool"]),
-    )
-    monkeypatch.setattr(
-        mcp_runners.acp_metrics,
-        "record_run_first_fallback_after_run",
-        lambda **kwargs: fallbacks.append(kwargs["fallback_tool"]),
-    )
+    metrics = Mock(spec_set=mcp_runners.acp_metrics)
+    monkeypatch.setattr(mcp_runners, "acp_metrics", metrics)
 
     class ToolSequenceCaller(RecordingCaller):
         """Interleave local reads with real tools to exercise first-tool metrics."""
@@ -526,8 +524,10 @@ async def test_internal_reads_do_not_replace_real_tool_selection_metrics(
         metrics_context={"presentation_variant": "compact"},
     )
     await runner.run([{"role": "user", "content": "needle"}])
-    assert first_tools == ["run"]
-    assert fallbacks == ["search"]
+    metrics.record_run_first_first_tool.assert_called_once()
+    assert metrics.record_run_first_first_tool.call_args.kwargs["first_tool"] == "run"
+    metrics.record_run_first_fallback_after_run.assert_called_once()
+    assert metrics.record_run_first_fallback_after_run.call_args.kwargs["fallback_tool"] == "search"
     assert events[-1].kind == AgentEventKind.COMPLETION
 
 

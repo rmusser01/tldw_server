@@ -12,7 +12,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -48,7 +48,7 @@ def _extract_text_content(result: dict[str, Any]) -> str:
     Falls back to ``str(result)`` if the structure is unexpected.
     """
     try:
-        return result.get("content", [{}])[0].get("text", str(result))
+        return cast(str, result.get("content", [{}])[0].get("text", str(result)))
     except (IndexError, AttributeError):
         return str(result)
 
@@ -464,8 +464,8 @@ class LLMDrivenRunner:
                     if self._cancel.is_set():
                         break
 
-                    is_result_read = result_context is not None and tc.name == READ_RESULT_TOOL
-                    if not is_result_read:
+                    read_context = result_context if tc.name == READ_RESULT_TOOL else None
+                    if read_context is None:
                         if first_tool_name is None:
                             first_tool_name = tc.name
                             self._record_run_first_first_tool(first_tool_name)
@@ -479,9 +479,9 @@ class LLMDrivenRunner:
 
                     # Keep the approved snapshot private across callbacks and transport.
                     arguments = deepcopy(tc.arguments) if result_context is not None else tc.arguments
-                    if is_result_read:
+                    if read_context is not None:
                         try:
-                            approval_name, approval_arguments = result_context.source_call(
+                            approval_name, approval_arguments = read_context.source_call(
                                 arguments.get("source_id")
                             )
                         except MCPResultSourceNotFoundError as exc:
@@ -534,9 +534,9 @@ class LLMDrivenRunner:
                     )
 
                     prepared = None
-                    if is_result_read:
+                    if read_context is not None:
                         try:
-                            prepared = result_context.read(**arguments)
+                            prepared = read_context.read(**arguments)
                             output, is_error = prepared.output, False
                         except (TypeError, ValueError):
                             output, is_error = "Invalid result read arguments", True

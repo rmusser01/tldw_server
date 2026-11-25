@@ -195,11 +195,11 @@ class ToolResultContext:
                 break
         return "\n".join(parts)
 
-    def source_call(self, source_id: str) -> tuple[str, dict[str, Any]]:
+    def source_call(self, source_id: object) -> tuple[str, dict[str, Any]]:
         """Return an isolated original call for reauthorization, without its text.
 
         Args:
-            source_id: Opaque handle returned by this context's prepare method.
+            source_id: Candidate handle from the model's tool arguments.
 
         Returns:
             Tool name and a deep copy of the arguments to check with ToolGate.
@@ -215,7 +215,7 @@ class ToolResultContext:
         self._sources.clear()
         self._retained_bytes = 0
 
-    def _source(self, source_id: str) -> _Source:
+    def _source(self, source_id: object) -> _Source:
         """Resolve a run-local handle or raise MCPResultSourceNotFoundError."""
         if not isinstance(source_id, str) or source_id not in self._sources:
             raise MCPResultSourceNotFoundError("Unknown result source in this run")
