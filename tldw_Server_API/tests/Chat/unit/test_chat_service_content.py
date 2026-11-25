@@ -936,7 +936,7 @@ async def test_saved_moonshot_reply_replays_verbatim_to_moonshot_only(monkeypatc
     from tldw_Server_API.app.core.LLM_Calls.gateway import _build_adapter_request_from_chat_args
 
     reason = "  Plan <tool> & preserve this\n"
-    assistant = {"role": "assistant", "content": "Answer", "reasoning_content": reason}
+    assistant: dict[str, object] = {"role": "assistant", "content": "Answer", "reasoning_content": reason}
     if tool_turn:
         assistant["tool_calls"] = [
             {"id": "lookup_0", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
@@ -1013,7 +1013,7 @@ async def test_unapproved_moonshot_reasoning_is_not_saved(monkeypatch, scenario)
                 raise RuntimeError("moderation unavailable")
             return ("pass", None, None, None, None)
 
-    config = {"moonshot_api": {}}
+    config: dict[str, dict[str, str]] = {"moonshot_api": {}}
     if scenario == "custom_endpoint":
         config["moonshot_api"]["api_base_url"] = "https://example.com/v1"
     _, saved, _ = await _run_non_stream_content_test(

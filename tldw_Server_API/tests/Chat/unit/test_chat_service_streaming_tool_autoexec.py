@@ -1606,15 +1606,15 @@ async def test_client_managed_moonshot_stream_emits_approved_history_reasoning(o
 
     reasoning = "  Keep <reasoning> exactly.\n"
     messages = [{"role": "user", "content": "hi"}]
-    data = ChatCompletionRequest(
-        api_provider="moonshot",
-        model="kimi-k3.1-pro",
-        messages=messages,
-        stream=True,
-        save_to_db=False,
-        metadata={"tldw_moonshot_reasoning_history_v1": opt_in},
-    )
-    config = {"moonshot_api": {}}
+    data = ChatCompletionRequest.model_validate({
+        "api_provider": "moonshot",
+        "model": "kimi-k3.1-pro",
+        "messages": messages,
+        "stream": True,
+        "save_to_db": False,
+        "metadata": {"tldw_moonshot_reasoning_history_v1": opt_in},
+    })
+    config: dict[str, dict[str, str]] = {"moonshot_api": {}}
     if scenario == "custom_endpoint":
         config["moonshot_api"]["api_base_url"] = "https://example.com/v1"
     args = chat_service.build_call_params_from_request(data, "moonshot", "test-key", messages, None, app_config=config)

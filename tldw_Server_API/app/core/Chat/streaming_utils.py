@@ -1038,7 +1038,7 @@ class StreamingResponseHandler:
         idle_timeout: int = STREAMING_IDLE_TIMEOUT,
         heartbeat_interval: int = HEARTBEAT_INTERVAL,
         max_response_size: int = MAX_RESPONSE_SIZE_BYTES,
-        text_transform: Optional[callable] = None,
+        text_transform: Callable[[str], str] | None = None,
     ):
         """
         Initialize the streaming response handler.
@@ -2288,7 +2288,7 @@ async def create_streaming_response_with_timeout(
     on_first_output: Optional[Callable[[], Any]] = None,
     idle_timeout: int = STREAMING_IDLE_TIMEOUT,
     heartbeat_interval: int = HEARTBEAT_INTERVAL,
-    text_transform: Optional[callable] = None,
+    text_transform: Callable[[str], str] | None = None,
     system_message_id: Optional[str] = None,
     continuation_metadata: Optional[dict[str, Any]] = None,
     history_persistence_ack: bool = False,
