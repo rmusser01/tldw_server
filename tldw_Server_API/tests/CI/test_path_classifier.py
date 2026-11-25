@@ -234,3 +234,61 @@ def test_unrelated_backend_change_leaves_the_rag_job_off() -> None:
 
 def test_rag_split_tool_change_runs_backend_required() -> None:
     assert classify_paths(["Helper_Scripts/rag_split/rag_split.py"])["backend_changed"] is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "tldw_Server_API/app/core/Chat/chat_service.py",
+        "tldw_Server_API/app/core/Chat/call_state.py",
+        "tldw_Server_API/app/core/Chat/completion_pipeline.py",
+        "tldw_Server_API/app/core/Chat/streaming_pipeline.py",
+        "tldw_Server_API/app/core/Chat/moderation_pipeline.py",
+        "tldw_Server_API/app/core/Chat/persistence_service.py",
+        "tldw_Server_API/app/core/Chat/response_processor.py",
+        "tldw_Server_API/app/core/Chat/tool_execution_service.py",
+        "tldw_Server_API/app/core/Chat/history_context.py",
+        "tldw_Server_API/app/core/Chat/streaming_utils.py",
+        "tldw_Server_API/tests/Chat/unit/test_chat_executors_golden.py",
+        "tldw_Server_API/tests/Chat/unit/golden/chat_executors_golden.json",
+        "tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py",
+        "tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py",
+        "tldw_Server_API/tests/Chat_NEW/integration/test_chat_rg_refund.py",
+        "tldw_Server_API/tests/DB_Management/test_chat_queued_resume_history.py",
+        "tldw_Server_API/tests/Guardian/test_chat_integration.py",
+        "tldw_Server_API/tests/unit/test_moderation_event_capture.py",
+        "tldw_Server_API/tests/_plugins/postgres.py",
+        "Helper_Scripts/rag_split/rag_split.py",
+        ".github/workflows/backend-required.yml",
+        ".github/actions/detect-required-gate-changes/action.yml",
+        "Helper_Scripts/ci/path_classifier.py",
+    ),
+)
+def test_chat_executors_paths_enable_the_chat_job(path: str) -> None:
+    assert classify_paths([path])["chat_executors_changed"] is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "tldw_Server_API/app/core/Chat/chat_metrics.py",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
+        "tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py",
+    ),
+)
+def test_unrelated_backend_change_leaves_the_chat_job_off(path: str) -> None:
+    assert classify_paths([path])["chat_executors_changed"] is False
+
+
+def test_chat_executors_gate_list_is_unique_and_excludes_the_roleplay_file() -> None:
+    from Helper_Scripts.ci.path_classifier import (
+        CHAT_EXECUTORS_GATE_DESELECT,
+        CHAT_EXECUTORS_GATE_EXCLUDED,
+        CHAT_EXECUTORS_GATE_TESTS,
+    )
+
+    assert len(CHAT_EXECUTORS_GATE_TESTS) == len(set(CHAT_EXECUTORS_GATE_TESTS))
+    roleplay = "tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py"
+    assert roleplay in CHAT_EXECUTORS_GATE_EXCLUDED
+    assert roleplay not in CHAT_EXECUTORS_GATE_TESTS
+    assert all(reason.strip() for reason in (*CHAT_EXECUTORS_GATE_DESELECT.values(), *CHAT_EXECUTORS_GATE_EXCLUDED.values()))

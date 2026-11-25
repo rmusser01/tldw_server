@@ -1,0 +1,1987 @@
+{
+  "N01_direct_persist": {
+    "result": {
+      "payload": {
+        "id": "chatcmpl-<id>",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Hello from the provider",
+              "name": "Aria"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "tldw_conversation_id": "conv-golden",
+        "tldw_user_message_id": "user-1",
+        "tldw_message_id": "m-1",
+        "tldw_system_message_id": "sys-1"
+      }
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "Hello from the provider",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 5,
+            "total_tokens": 8
+          }
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "choice_count": 1,
+        "estimate_source": "provider_usage",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "model": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_success:openai",
+      "provider_manager.record_success:openai",
+      "save:assistant"
+    ],
+    "background": []
+  },
+  "N02_queued": {
+    "result": {
+      "payload": {
+        "id": "chatcmpl-<id>",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Queued reply",
+              "name": "Aria"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "tldw_conversation_id": "conv-golden",
+        "tldw_user_message_id": "user-1",
+        "tldw_message_id": "m-1",
+        "tldw_system_message_id": "sys-1"
+      }
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "Queued reply",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 5,
+            "total_tokens": 8
+          }
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "choice_count": 1,
+        "estimate_source": "provider_usage",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "model": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      ]
+    ],
+    "order": [
+      "queue.enqueue:streaming=False",
+      "provider:P",
+      "provider_manager.record_success:openai",
+      "on_success:openai",
+      "save:assistant"
+    ],
+    "background": []
+  },
+  "N03_failover": {
+    "result": {
+      "payload": {
+        "id": "chatcmpl-<id>",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "From the fallback",
+              "name": "Aria"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "tldw_conversation_id": "conv-golden",
+        "tldw_user_message_id": "user-1",
+        "tldw_message_id": "m-1",
+        "tldw_system_message_id": "sys-1"
+      }
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "From the fallback",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "claude-3-5-sonnet",
+          "provider": "anthropic",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 5,
+            "total_tokens": 8
+          }
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet",
+        "status": 200,
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "choice_count": 1,
+        "estimate_source": "provider_usage",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": false,
+          "error_type": "ChatProviderError"
+        }
+      ],
+      [
+        "track_llm_call",
+        [
+          "anthropic",
+          "claude-3-5-sonnet"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_provider_fallback_success",
+        [],
+        {
+          "requested_provider": "openai",
+          "selected_provider": "anthropic",
+          "streaming": false,
+          "queued": false
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "model": "claude-3-5-sonnet",
+          "provider": "anthropic"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "provider_manager.record_failure:openai:SanitizedProviderStreamError",
+      "provider_manager.get_available_provider:['openai']",
+      "refresh_provider_params:anthropic",
+      "provider_async:F:anthropic",
+      "on_success:anthropic",
+      "provider_manager.record_success:anthropic",
+      "save:assistant"
+    ],
+    "background": []
+  },
+  "N04_no_fallback_raises": {
+    "result": {
+      "raised": {
+        "type": "SanitizedProviderStreamError",
+        "status_code": 502,
+        "detail": null,
+        "message": "The chat service provider is currently unavailable."
+      }
+    },
+    "persisted": [],
+    "usage": [],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": false,
+          "error_type": "ChatProviderError"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "provider_manager.record_failure:openai:SanitizedProviderStreamError"
+    ],
+    "background": []
+  },
+  "N05_string_response": {
+    "result": {
+      "payload": {
+        "id": "chatcmpl-<id>",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "plain text reply",
+              "name": "Aria"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "tldw_conversation_id": "conv-golden",
+        "tldw_user_message_id": "user-1",
+        "tldw_message_id": "m-1",
+        "tldw_system_message_id": "sys-1"
+      }
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "plain text reply",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 9,
+        "completion_tokens": 4,
+        "total_tokens": 13,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "estimated": true,
+        "estimate_source": "missing_usage",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 9,
+          "completion_tokens": 4,
+          "model": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_success:openai",
+      "provider_manager.record_success:openai",
+      "save:assistant"
+    ],
+    "background": []
+  },
+  "N06_structured_deferred": {
+    "result": {
+      "payload": {
+        "id": "chatcmpl-<id>",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"answer\":\"ok\"}",
+              "name": "Aria"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "tldw_conversation_id": "conv-golden",
+        "tldw_user_message_id": "user-1",
+        "tldw_message_id": "m-3",
+        "tldw_system_message_id": "sys-1",
+        "tldw_tool_results": [
+          {
+            "tool_call_id": "c1",
+            "name": "notes.search",
+            "ok": true,
+            "result": {
+              "ok": true
+            },
+            "module": "notes",
+            "error": null,
+            "skipped": false,
+            "timed_out": false,
+            "content": "{\"ok\":true}"
+          }
+        ],
+        "tldw_tool_auto_continue": {
+          "attempted": true,
+          "succeeded": true
+        },
+        "tldw_structured": {
+          "validated": true,
+          "mode_used": "json_object",
+          "fallback_used": true,
+          "validated_payload": {
+            "answer": "ok"
+          }
+        }
+      }
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "Calling a tool",
+        "tool_calls": [
+          {
+            "id": "c1",
+            "type": "function",
+            "function": {
+              "name": "notes.search",
+              "arguments": "{}"
+            }
+          }
+        ],
+        "generation_metadata": {
+          "finish_reason": "tool_calls",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 5,
+            "total_tokens": 8
+          }
+        }
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": "{\"ok\":true}",
+        "name": "notes.search"
+      },
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "{\"answer\":\"ok\"}",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 5,
+            "total_tokens": 8
+          }
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "choice_count": 1,
+        "estimate_source": "provider_usage",
+        "credential_source": null
+      },
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "choice_count": 1,
+        "estimate_source": "provider_usage",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "model": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      ],
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "model": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_success:openai",
+      "provider_manager.record_success:openai",
+      "execute_assistant_tool_calls",
+      "provider_async:P2:openai",
+      "provider_manager.record_success:openai",
+      "save:assistant",
+      "save:tool",
+      "save:assistant"
+    ],
+    "background": []
+  },
+  "N07_output_moderation_redacts": {
+    "result": {
+      "payload": {
+        "id": "chatcmpl-<id>",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "the [redacted] is out",
+              "name": "Aria"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "tldw_conversation_id": "conv-golden",
+        "tldw_user_message_id": "user-1",
+        "tldw_message_id": "m-1",
+        "tldw_system_message_id": "sys-1"
+      }
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "the [redacted] is out",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 5,
+            "total_tokens": 8
+          }
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "choice_count": 1,
+        "estimate_source": "provider_usage",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "model": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      ],
+      [
+        "track_moderation_output",
+        [
+          "7",
+          "redact"
+        ],
+        {
+          "streaming": false,
+          "category": "default"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_success:openai",
+      "provider_manager.record_success:openai",
+      "save:assistant"
+    ],
+    "background": [
+      [
+        "audit",
+        "chat_completion_success",
+        "success",
+        {
+          "conversation_id": "conv-golden",
+          "provider": "openai",
+          "model": "gpt-4o-mini",
+          "streaming": false
+        }
+      ],
+      [
+        "audit",
+        "moderation.output",
+        "success",
+        {
+          "phase": "output",
+          "streaming": false,
+          "action": "redact",
+          "pattern": "secret"
+        }
+      ],
+      [
+        "topic_monitoring",
+        {
+          "user_id": "7",
+          "text": "the SECRET is out",
+          "source": "chat.output",
+          "scope_type": "user",
+          "scope_id": "7",
+          "team_ids": null,
+          "org_ids": null,
+          "source_id": "conv-golden"
+        }
+      ]
+    ]
+  },
+  "N08_tool_autoexec_continue": {
+    "result": {
+      "payload": {
+        "id": "chatcmpl-<id>",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Final answer after the tool",
+              "name": "Aria"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "tldw_conversation_id": "conv-golden",
+        "tldw_user_message_id": "user-1",
+        "tldw_message_id": "m-3",
+        "tldw_system_message_id": "sys-1",
+        "tldw_tool_results": [
+          {
+            "tool_call_id": "c1",
+            "name": "notes.search",
+            "ok": true,
+            "result": {
+              "ok": true
+            },
+            "module": "notes",
+            "error": null,
+            "skipped": false,
+            "timed_out": false,
+            "content": "{\"ok\":true}"
+          }
+        ],
+        "tldw_tool_auto_continue": {
+          "attempted": true,
+          "succeeded": true
+        }
+      }
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "Calling a tool",
+        "tool_calls": [
+          {
+            "id": "c1",
+            "type": "function",
+            "function": {
+              "name": "notes.search",
+              "arguments": "{}"
+            }
+          }
+        ],
+        "generation_metadata": {
+          "finish_reason": "tool_calls",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 5,
+            "total_tokens": 8
+          }
+        }
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": "{\"ok\":true}",
+        "name": "notes.search"
+      },
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "Final answer after the tool",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 5,
+            "total_tokens": 8
+          }
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "choice_count": 1,
+        "estimate_source": "provider_usage",
+        "credential_source": null
+      },
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "choice_count": 1,
+        "estimate_source": "provider_usage",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "model": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      ],
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "model": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_success:openai",
+      "provider_manager.record_success:openai",
+      "save:assistant",
+      "execute_assistant_tool_calls",
+      "save:tool",
+      "provider_async:P2:openai",
+      "provider_manager.record_success:openai",
+      "save:assistant"
+    ],
+    "background": []
+  },
+  "N09_guardrails_assistant_name": {
+    "result": {
+      "payload": {
+        "id": "chatcmpl-<id>",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Guarded reply",
+              "name": "Aria"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "tldw_conversation_id": "conv-golden",
+        "tldw_user_message_id": "user-1",
+        "tldw_message_id": "m-1",
+        "tldw_system_message_id": "sys-1"
+      }
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "Guarded reply",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 3,
+            "prompt_tokens": 5,
+            "total_tokens": 8
+          }
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 5,
+        "completion_tokens": 3,
+        "total_tokens": 8,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "total_tokens": 8
+        },
+        "choice_count": 1,
+        "estimate_source": "provider_usage",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_tokens",
+        [],
+        {
+          "prompt_tokens": 5,
+          "completion_tokens": 3,
+          "model": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_success:openai",
+      "provider_manager.record_success:openai",
+      "save:assistant"
+    ],
+    "background": []
+  },
+  "S01_direct": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "connection": "keep-alive",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"event\": \"tldw_metadata\", \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "event: stream_start\ndata: {\"conversation_id\": \"conv-golden\", \"model\": \"gpt-4o-mini\", \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"Hello \"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"world\"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 4, \"completion_tokens\": 2, \"total_tokens\": 6}, \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"id\": \"chatcmpl-<id>\", \"object\": \"chat.completion.chunk\", \"created\": 0, \"model\": \"gpt-4o-mini\", \"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\", \"index\": 0}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: stream_end\ndata: {\"conversation_id\": \"conv-golden\", \"success\": true, \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "Hello world",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 2,
+            "prompt_tokens": 4,
+            "total_tokens": 6
+          }
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 4,
+        "completion_tokens": 2,
+        "total_tokens": 6,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": {
+          "prompt_tokens": 4,
+          "completion_tokens": 2,
+          "total_tokens": 6
+        },
+        "estimated": null,
+        "estimate_source": null,
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_streaming",
+        "conv-golden",
+        7
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_provider_output:openai",
+      "submit_accounting",
+      "provider_manager.record_success:openai",
+      "save:assistant",
+      "on_success:openai",
+      "rg_commit:6"
+    ],
+    "background": []
+  },
+  "S02_queued_worker_failover": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "connection": "keep-alive",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"event\": \"tldw_metadata\", \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "event: stream_start\ndata: {\"conversation_id\": \"conv-golden\", \"model\": \"gpt-4o-mini\", \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"fallback \"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"stream\"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"id\": \"chatcmpl-<id>\", \"object\": \"chat.completion.chunk\", \"created\": 0, \"model\": \"gpt-4o-mini\", \"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\", \"index\": 0}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: stream_end\ndata: {\"conversation_id\": \"conv-golden\", \"success\": true, \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "fallback stream",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "claude-3-5-sonnet",
+          "provider": "anthropic"
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet",
+        "status": 200,
+        "prompt_tokens": 9,
+        "completion_tokens": 3,
+        "total_tokens": 12,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": null,
+        "estimated": true,
+        "estimate_source": "stream_estimate",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": false,
+          "error_type": "ChatProviderError"
+        }
+      ],
+      [
+        "track_provider_fallback_success",
+        [],
+        {
+          "requested_provider": "openai",
+          "selected_provider": "anthropic",
+          "streaming": true,
+          "queued": true
+        }
+      ],
+      [
+        "track_llm_call",
+        [
+          "anthropic",
+          "claude-3-5-sonnet"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_streaming",
+        "conv-golden",
+        7
+      ]
+    ],
+    "order": [
+      "queue.enqueue:streaming=True",
+      "provider:P",
+      "provider_manager.record_failure:openai:SanitizedProviderStreamError",
+      "provider_manager.get_available_provider:['openai']",
+      "refresh_provider_params:anthropic",
+      "provider_stream:F:anthropic",
+      "on_provider_output:anthropic",
+      "submit_accounting",
+      "provider_manager.record_success:anthropic",
+      "save:assistant",
+      "on_success:anthropic",
+      "rg_commit:12"
+    ],
+    "background": []
+  },
+  "S03_direct_failover": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "connection": "keep-alive",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"event\": \"tldw_metadata\", \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "event: stream_start\ndata: {\"conversation_id\": \"conv-golden\", \"model\": \"claude-3-5-sonnet\", \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"fallback \"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"stream\"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"id\": \"chatcmpl-<id>\", \"object\": \"chat.completion.chunk\", \"created\": 0, \"model\": \"claude-3-5-sonnet\", \"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\", \"index\": 0}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: stream_end\ndata: {\"conversation_id\": \"conv-golden\", \"success\": true, \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "fallback stream",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "claude-3-5-sonnet",
+          "provider": "anthropic"
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet",
+        "status": 200,
+        "prompt_tokens": 9,
+        "completion_tokens": 3,
+        "total_tokens": 12,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": null,
+        "estimated": true,
+        "estimate_source": "stream_estimate",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": false,
+          "error_type": "ChatProviderError"
+        }
+      ],
+      [
+        "track_llm_call",
+        [
+          "anthropic",
+          "claude-3-5-sonnet"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_provider_fallback_success",
+        [],
+        {
+          "requested_provider": "openai",
+          "selected_provider": "anthropic",
+          "streaming": true,
+          "queued": false
+        }
+      ],
+      [
+        "track_llm_call",
+        [
+          "anthropic",
+          "claude-3-5-sonnet"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_streaming",
+        "conv-golden",
+        7
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "provider_manager.record_failure:openai:SanitizedProviderStreamError",
+      "provider_manager.get_available_provider:['openai']",
+      "refresh_provider_params:anthropic",
+      "provider_stream:F:anthropic",
+      "provider_manager.record_success:anthropic",
+      "on_provider_output:anthropic",
+      "submit_accounting",
+      "provider_manager.record_success:anthropic",
+      "save:assistant",
+      "on_success:anthropic",
+      "rg_commit:12"
+    ],
+    "background": []
+  },
+  "S04_http_exception": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"error\": {\"code\": \"provider_unavailable\", \"type\": \"provider_unavailable\", \"message\": \"The chat service provider is currently unavailable.\"}, \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [],
+    "usage": [],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": false,
+          "error_type": "HTTPException"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "rg_refund:['cancelled', 'error']"
+    ],
+    "background": []
+  },
+  "S05_noncritical_error": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"error\": {\"code\": \"provider_unavailable\", \"type\": \"provider_unavailable\", \"message\": \"The chat service provider is currently unavailable.\"}, \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [],
+    "usage": [],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": false,
+          "error_type": "RuntimeError"
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "provider_manager.record_failure:openai:SanitizedProviderStreamError",
+      "rg_refund:['cancelled', 'error']"
+    ],
+    "background": []
+  },
+  "S06_chunk_moderation_holdback": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "connection": "keep-alive",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"event\": \"tldw_metadata\", \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "event: stream_start\ndata: {\"conversation_id\": \"conv-golden\", \"model\": \"gpt-4o-mini\", \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"start of the [redacted\"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"\"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"\"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"error\": {\"message\": \"Output violates moderation policy\", \"type\": \"output_moderation_block\"}, \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "event: stream_end\ndata: {\"conversation_id\": \"conv-golden\", \"success\": false, \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 9,
+        "completion_tokens": 15,
+        "total_tokens": 24,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": null,
+        "estimated": true,
+        "estimate_source": "stream_estimate",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_moderation_output",
+        [
+          "7",
+          "redact"
+        ],
+        {
+          "streaming": true,
+          "category": "default"
+        }
+      ],
+      [
+        "track_moderation_stream_block",
+        [
+          "7"
+        ],
+        {
+          "category": "default"
+        }
+      ],
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": false,
+          "error_type": "stream_error"
+        }
+      ],
+      [
+        "track_streaming",
+        "conv-golden",
+        8
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_provider_output:openai",
+      "provider_manager.record_failure:openai:RuntimeError",
+      "submit_accounting",
+      "rg_commit:24"
+    ],
+    "background": [
+      [
+        "audit",
+        "moderation.output",
+        "failure",
+        {
+          "phase": "output",
+          "streaming": true,
+          "action": "block",
+          "pattern": "forbidden"
+        }
+      ],
+      [
+        "audit",
+        "moderation.output",
+        "success",
+        {
+          "phase": "output",
+          "streaming": true,
+          "action": "redact",
+          "pattern": "secret"
+        }
+      ],
+      [
+        "topic_monitoring",
+        {
+          "user_id": "7",
+          "text": "and then FORBIDDEN text ",
+          "source": "chat.output",
+          "scope_type": "user",
+          "scope_id": "7",
+          "team_ids": null,
+          "org_ids": null,
+          "source_id": "<id>",
+          "chunk_id": "<id>:2",
+          "chunk_seq": 2
+        }
+      ],
+      [
+        "topic_monitoring",
+        {
+          "user_id": "7",
+          "text": "start of the SECRET reply ",
+          "source": "chat.output",
+          "scope_type": "user",
+          "scope_id": "7",
+          "team_ids": null,
+          "org_ids": null,
+          "source_id": "<id>",
+          "chunk_id": "<id>:1",
+          "chunk_seq": 1
+        }
+      ]
+    ]
+  },
+  "S07_tool_autoexec_loop_compat": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "connection": "keep-alive",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"event\": \"tldw_metadata\", \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "event: stream_start\ndata: {\"conversation_id\": \"conv-golden\", \"model\": \"gpt-4o-mini\", \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": 0, \"id\": \"c1\", \"type\": \"function\", \"function\": {\"name\": \"notes.search\", \"arguments\": \"{}\"}}]}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"tool_calls\"}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "event: tool_results\ndata: {\"tool_results\": [{\"tool_call_id\": \"c1\", \"name\": \"notes.search\", \"ok\": true, \"result\": {\"ok\": true}, \"module\": \"notes\", \"error\": null, \"skipped\": false, \"timed_out\": false, \"content\": \"{\\\"ok\\\":true}\"}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: run_started\ndata: {\"run_id\": \"conv-golden\", \"seq\": 1, \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: tool_proposed\ndata: {\"run_id\": \"conv-golden\", \"seq\": 2, \"tool_calls\": [{\"id\": \"c1\", \"type\": \"function\", \"function\": {\"name\": \"notes.search\", \"arguments\": \"{}\"}}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: tool_finished\ndata: {\"run_id\": \"conv-golden\", \"seq\": 3, \"tool_results\": [{\"tool_call_id\": \"c1\", \"name\": \"notes.search\", \"ok\": true, \"result\": {\"ok\": true}, \"module\": \"notes\", \"error\": null, \"skipped\": false, \"timed_out\": false, \"content\": \"{\\\"ok\\\":true}\"}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: run_complete\ndata: {\"run_id\": \"conv-golden\", \"seq\": 4, \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "data: {\"id\": \"chatcmpl-<id>\", \"object\": \"chat.completion.chunk\", \"created\": 0, \"model\": \"gpt-4o-mini\", \"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\", \"index\": 0}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: stream_end\ndata: {\"conversation_id\": \"conv-golden\", \"success\": true, \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "c1",
+            "type": "function",
+            "function": {
+              "name": "notes.search",
+              "arguments": "{}"
+            }
+          }
+        ],
+        "generation_metadata": {
+          "finish_reason": "tool_calls",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": "{\"ok\":true}",
+        "name": "notes.search"
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 9,
+        "completion_tokens": 1,
+        "total_tokens": 10,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": null,
+        "estimated": true,
+        "estimate_source": "stream_estimate",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_streaming",
+        "conv-golden",
+        11
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_provider_output:openai",
+      "submit_accounting",
+      "provider_manager.record_success:openai",
+      "save:assistant",
+      "execute_assistant_tool_calls",
+      "save:tool",
+      "on_success:openai",
+      "rg_commit:10"
+    ],
+    "background": []
+  },
+  "S08_streams_unified": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"event\": \"tldw_metadata\", \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "event: stream_start\n",
+        "data: {\"conversation_id\": \"conv-golden\", \"model\": \"gpt-4o-mini\", \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"unified \"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"frames\"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"id\": \"chatcmpl-<id>\", \"object\": \"chat.completion.chunk\", \"created\": 0, \"model\": \"gpt-4o-mini\", \"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\", \"index\": 0}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: stream_end\n",
+        "data: {\"conversation_id\": \"conv-golden\", \"success\": true, \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "unified frames",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 9,
+        "completion_tokens": 3,
+        "total_tokens": 12,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": null,
+        "estimated": true,
+        "estimate_source": "stream_estimate",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_provider_output:openai",
+      "submit_accounting",
+      "provider_manager.record_success:openai",
+      "save:assistant",
+      "on_success:openai",
+      "rg_commit:12"
+    ],
+    "background": []
+  },
+  "S09_structured": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "connection": "keep-alive",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"event\": \"tldw_metadata\", \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "event: stream_start\ndata: {\"conversation_id\": \"conv-golden\", \"model\": \"gpt-4o-mini\", \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"{\\\"answer\\\":\\\"ok\\\"}\"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "event: structured_result\ndata: {\"validated\": true, \"mode_used\": \"json_object\", \"fallback_used\": true, \"validated_payload\": {\"answer\": \"ok\"}, \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "data: {\"id\": \"chatcmpl-<id>\", \"object\": \"chat.completion.chunk\", \"created\": 0, \"model\": \"gpt-4o-mini\", \"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\", \"index\": 0}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: stream_end\ndata: {\"conversation_id\": \"conv-golden\", \"success\": true, \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "{\"answer\":\"ok\"}",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 9,
+        "completion_tokens": 3,
+        "total_tokens": 12,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": null,
+        "estimated": true,
+        "estimate_source": "stream_estimate",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_streaming",
+        "conv-golden",
+        7
+      ]
+    ],
+    "order": [
+      "provider:P",
+      "on_provider_output:openai",
+      "submit_accounting",
+      "provider_manager.record_success:openai",
+      "save:assistant",
+      "on_success:openai",
+      "rg_commit:12"
+    ],
+    "background": []
+  },
+  "S10_queued_success": {
+    "result": {
+      "media_type": "text/event-stream",
+      "headers": {
+        "cache-control": "no-cache, no-transform",
+        "connection": "keep-alive",
+        "x-accel-buffering": "no",
+        "content-type": "text/event-stream; charset=utf-8"
+      },
+      "frames": [
+        "data: {\"event\": \"tldw_metadata\", \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_user_message_id\": \"user-1\", \"tldw_system_message_id\": \"sys-1\"}\n\n",
+        "event: stream_start\ndata: {\"conversation_id\": \"conv-golden\", \"model\": \"gpt-4o-mini\", \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"queued \"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {\"content\": \"stream\"}, \"finish_reason\": null}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\"}\n\n",
+        "data: {\"id\": \"chatcmpl-<id>\", \"object\": \"chat.completion.chunk\", \"created\": 0, \"model\": \"gpt-4o-mini\", \"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\", \"index\": 0}], \"conversation_id\": \"conv-golden\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "event: stream_end\ndata: {\"conversation_id\": \"conv-golden\", \"success\": true, \"timestamp\": \"<ts>\", \"tldw_conversation_id\": \"conv-golden\", \"tldw_system_message_id\": \"sys-1\", \"tldw_user_message_id\": \"user-1\", \"tldw_message_id\": \"m-1\"}\n\n",
+        "data: [DONE]\n\n"
+      ]
+    },
+    "persisted": [
+      {
+        "role": "assistant",
+        "name": "Aria",
+        "parent_message_id": "parent-1",
+        "content": "queued stream",
+        "generation_metadata": {
+          "finish_reason": "stop",
+          "generation_status": "complete",
+          "model_id": "gpt-4o-mini",
+          "provider": "openai"
+        }
+      }
+    ],
+    "usage": [
+      {
+        "user_id": 7,
+        "key_id": null,
+        "endpoint": "POST:/api/v1/chat/completions",
+        "operation": "chat",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "status": 200,
+        "prompt_tokens": 9,
+        "completion_tokens": 3,
+        "total_tokens": 12,
+        "request_id": "<uuid>",
+        "conversation_id": "conv-golden",
+        "usage_metadata": null,
+        "estimated": true,
+        "estimate_source": "stream_estimate",
+        "credential_source": null
+      }
+    ],
+    "metrics": [
+      [
+        "track_llm_call",
+        [
+          "openai",
+          "gpt-4o-mini"
+        ],
+        {
+          "success": true
+        }
+      ],
+      [
+        "track_streaming",
+        "conv-golden",
+        7
+      ]
+    ],
+    "order": [
+      "queue.enqueue:streaming=True",
+      "provider:P",
+      "on_provider_output:openai",
+      "submit_accounting",
+      "provider_manager.record_success:openai",
+      "save:assistant",
+      "on_success:openai",
+      "rg_commit:12"
+    ],
+    "background": []
+  }
+}
