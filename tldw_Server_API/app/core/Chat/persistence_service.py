@@ -13,6 +13,10 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import sani
 from tldw_Server_API.app.core.Chat.generation_metadata import sanitize_generation_metadata
 from tldw_Server_API.app.core.Chat.knowledge_save import strip_reasoning_blocks
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, NotFoundError
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Chat.call_state import NonStreamCall
 
 SaveMessageFn = Callable[..., Awaitable[str | None]]
 NativeStreamPersistence = Literal["acknowledge", "retain_reasoning"]
@@ -248,3 +252,120 @@ async def prepare_native_history_message(
     return {"sender": role, "content": "\n".join(text),
             "images": [{"data": data, "mime": mime} for data, mime in images],
             "tool_calls": message.get("tool_calls"), "extra_metadata": extra}
+
+
+async def save_first_non_stream_reply(cst: "NonStreamCall") -> None:
+    """Validate a structured reply, then save the first reply or defer it."""
+    cst.assistant_message_id: str | None = None
+    cst.tool_execution_payload: list[dict[str, Any]] | None = None
+    cst.tool_auto_continue_meta: dict[str, bool] | None = None
+    cst.defer_structured_persistence = bool(
+        cst.structured_request_context is not None
+        and cs.should_run_legacy_tool_autoexec(cst.cleaned_args)
+        and isinstance(cst.tool_calls_to_save, list)
+        and cst.tool_calls_to_save
+        and cs.should_auto_continue_tools_once()
+    )
+    if cst.structured_request_context is not None and not cst.defer_structured_persistence:
+        try:
+            cst.structured_metadata = cs.validate_structured_choices(
+                choices=cst.processed_choices,
+                structured_request_context=cst.structured_request_context,
+                validate_structured_response=cs.validate_structured_response,
+                fallback_content=cst.content_to_save,
+            )
+        except (
+            cs.StructuredGenerationCapabilityError,
+            cs.StructuredGenerationParseError,
+            cs.StructuredGenerationSchemaError,
+        ) as structured_exc:
+            cs._emit_chat_run_first_completion_metric(
+                cst.metrics,
+                context=cst.run_first_metric_context,
+                outcome="error",
+            )
+            cs.raise_detached_error(cs.build_structured_http_exception(structured_exc))
+
+    should_save_response = (
+        cst.should_persist
+        and cst.final_conversation_id
+        and (cst.content_to_save or cst.tool_calls_to_save or cst.function_call_to_save)
+    )
+    if should_save_response and not cst.defer_structured_persistence:
+        message_payload = cs._build_assistant_message_payload(
+            character_card_for_context=cst.character_card_for_context,
+            assistant_parent_message_id=cst.assistant_parent_message_id,
+            content=cst.content_to_save,
+            tool_calls=cst.tool_calls_to_save,
+            function_call=cst.function_call_to_save,
+            generation_metadata=cs._nonstream_generation_metadata(
+                llm_response=cst.llm_response,
+                choice=cst.first_choice,
+                model=cst.model,
+                provider=cst.selected_provider,
+            ),
+        )
+        cst.assistant_message_id = await cs.save_assistant_message(
+            chat_db=cst.chat_db,
+            conversation_id=cst.final_conversation_id,
+            save_message_fn=cst.save_message_fn,
+            payload=message_payload,
+        )
+    elif should_save_response and cst.defer_structured_persistence:
+        cst.pending_assistant_payload = cs._build_assistant_message_payload(
+            character_card_for_context=cst.character_card_for_context,
+            assistant_parent_message_id=cst.assistant_parent_message_id,
+            content=cst.content_to_save,
+            tool_calls=cst.tool_calls_to_save,
+            function_call=cst.function_call_to_save,
+            generation_metadata=cs._nonstream_generation_metadata(
+                llm_response=cst.llm_response,
+                choice=cst.first_choice,
+                model=cst.model,
+                provider=cst.selected_provider,
+            ),
+        )
+
+
+async def flush_deferred_non_stream_persistence(cst: "NonStreamCall") -> None:
+    """Validate the tail reply and flush the deferred persistence."""
+    if cst.structured_request_context is not None and cst.structured_metadata is None:
+        try:
+            cst.structured_metadata = cs.validate_structured_choices(
+                choices=cst.processed_choices,
+                structured_request_context=cst.structured_request_context,
+                validate_structured_response=cs.validate_structured_response,
+                fallback_content=cst.content_to_save,
+            )
+        except (
+            cs.StructuredGenerationCapabilityError,
+            cs.StructuredGenerationParseError,
+            cs.StructuredGenerationSchemaError,
+        ) as structured_exc:
+            cs._emit_chat_run_first_completion_metric(
+                cst.metrics,
+                context=cst.run_first_metric_context,
+                outcome="error",
+            )
+            cs.raise_detached_error(cs.build_structured_http_exception(structured_exc))
+
+    if cst.pending_assistant_payload is not None and cst.should_persist and cst.final_conversation_id:
+        cst.assistant_message_id = await cs.save_assistant_message(
+            chat_db=cst.chat_db,
+            conversation_id=cst.final_conversation_id,
+            save_message_fn=cst.save_message_fn,
+            payload=cst.pending_assistant_payload,
+        )
+        cst.pending_assistant_payload = None
+    if cst.pending_tool_messages and cst.should_persist and cst.final_conversation_id:
+        await cs.save_tool_messages(
+            chat_db=cst.chat_db,
+            conversation_id=cst.final_conversation_id,
+            save_message_fn=cst.save_message_fn,
+            tool_messages=cst.pending_tool_messages,
+        )
+        cst.pending_tool_messages = []
+
+
+# late imports: moved code reads these at call time (TASK-13950.25 R5)
+from tldw_Server_API.app.core.Chat import chat_service as cs

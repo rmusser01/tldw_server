@@ -18,7 +18,7 @@ The Chat module powers the `/api/v1/chat/completions` endpoint, orchestrating re
 | --- | --- |
 | `chat_orchestrator.py` | Orchestrates chat flows: canonical async `achat`, sync wrapper `chat`, plus provider helpers (`chat_api_call`, `chat_api_call_async`). |
 | `chat_service.py` | Compatibility facade and endpoint-facing coordinator for `/api/v1/chat/completions`. |
-| `completion_pipeline.py` | `ChatCompletionPipeline` coordinator for non-streaming and streaming execution paths. |
+| `completion_pipeline.py` | `run_non_stream_call`, the non-streaming stage orchestrator (the forwarding-only `ChatCompletionPipeline` was deleted, TASK-13950.25). |
 | `response_processor.py` | Non-streaming choice extraction, response content mutation, structured validation, usage estimates, and assistant-name injection. |
 | `moderation_pipeline.py` | Output self-monitoring, moderation, topic-monitoring scheduling, and moderation audit/review records. |
 | `persistence_service.py` | Assistant and tool-message persistence helpers. |
@@ -39,7 +39,7 @@ The Chat module powers the `/api/v1/chat/completions` endpoint, orchestrating re
 ---
 
 ## Completion Pipeline Ownership
-`chat_service.py` remains the compatibility facade for existing imports and endpoint wiring. New behavior should be added behind `ChatCompletionPipeline` or one of its focused services:
+`chat_service.py` remains the compatibility facade for existing imports and endpoint wiring. New behavior should be added behind `completion_pipeline.run_non_stream_call` or one of the focused services:
 
 - `response_processor.py`: non-streaming choice extraction, response content mutation, structured validation, response usage estimates, and assistant-name injection.
 - `moderation_pipeline.py`: output self-monitoring, moderation, topic-monitoring scheduling, and moderation audit/review records.

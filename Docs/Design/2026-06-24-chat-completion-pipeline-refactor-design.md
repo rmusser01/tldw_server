@@ -42,7 +42,7 @@ Out of scope:
 
 ## Architecture
 
-`chat_service.py` remains the import-facing compatibility facade. Existing endpoint imports and helper call sites continue to work. The implementation introduces a thin internal orchestration object named `ChatCompletionPipeline` that delegates to focused modules.
+`chat_service.py` remains the import-facing compatibility facade. Existing endpoint imports and helper call sites continue to work. The implementation first introduced a thin internal orchestration object named `ChatCompletionPipeline`; that class was deleted (TASK-13950.25) and `completion_pipeline.run_non_stream_call` now owns the non-stream stages, delegating to focused modules.
 
 New modules under `tldw_Server_API/app/core/Chat/`:
 
@@ -56,7 +56,7 @@ New modules under `tldw_Server_API/app/core/Chat/`:
 
 `document_generator.py` may either delegate prompt storage to a small `document_prompt_store.py` helper or keep a focused private helper if adding a module would create unnecessary coupling.
 
-Import rule: new modules must not import `chat_service.py`. `chat_service.py` may import them as the facade. Shared dataclasses should live in focused modules or a small neutral module to avoid circular imports.
+Import rule (TASK-13950.25, R5): a module that holds moved executor code ends with a late-import block, opened by the comment `# late imports: moved code reads these at call time (TASK-13950.25 R5)`. It first imports every other `core.Chat` destination module the moved code calls (`from tldw_Server_API.app.core.Chat import <dest> as _<dest>`), then, last, `from tldw_Server_API.app.core.Chat import chat_service as cs`. Moved code reads `chat_service` globals as `cs.<name>` at call time, so the existing patches stay live. No module-level code may read `cs.` or `_<dest>.`. Because each module defines its names before any import cycle closes, the purpose of the old rule (no circular-import failures) is kept. Shared dataclasses still live in focused modules or a small neutral module.
 
 ## Non-Streaming Data Flow
 
@@ -64,7 +64,7 @@ Import rule: new modules must not import `chat_service.py`. `chat_service.py` ma
 2. `chat_service.execute_non_stream_call` remains callable with the same signature.
 3. `chat_service.py` performs provider selection, queue/fallback setup, prompt cost guardrails, and the provider call as it does today.
 4. Unsupported modes are rejected before the provider call when possible. In particular, local tool auto-exec with `n > 1` fails fast with HTTP 400 because executing one of several assistant choices is ambiguous.
-5. Raw provider response is passed to `ChatCompletionPipeline`, which calls `response_processor.process_non_stream_response`.
+5. Raw provider response is passed to `completion_pipeline.run_non_stream_call` (the deleted `ChatCompletionPipeline`'s successor, TASK-13950.25), which calls `response_processor.process_non_stream_response`.
 6. `response_processor` walks every returned choice and delegates policy decisions to `moderation_pipeline`.
 7. The processor returns:
    - the mutated response payload,
@@ -232,7 +232,7 @@ Stage 2: Behavior fixes with tests first
 
 Stage 3: Extract non-streaming pipeline services
 
-- Add `ChatCompletionPipeline`.
+- Add `ChatCompletionPipeline` (deleted in TASK-13950.25; `completion_pipeline.run_non_stream_call` owns the non-stream stages).
 - Extract response processing, moderation decisions, persistence, tool execution, and safe logging behind stable `chat_service.py` calls.
 - Keep public signatures stable.
 

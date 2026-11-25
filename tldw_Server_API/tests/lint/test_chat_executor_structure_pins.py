@@ -263,10 +263,8 @@ def moved_chat_code_violations(chat_dir: Path, functions: dict[str, set[str]], p
 
 
 def test_moved_chat_code_reads_patched_names_through_chat_service() -> None:
-    """Vacuous until PR E: no ``c25*`` manifest exists before then, so ``c25_manifest_functions()`` is empty.
-
-    PR E (Task 5) adds the assertion that it is non-empty. The seeded test below proves the check itself.
-    """
+    """Moved and lifted code of every ``c25*`` manifest reads a patched name only as ``cs.<name>``; the seeded test below proves the check itself."""
+    assert c25_manifest_functions()
     assert moved_chat_code_violations(CHAT_DIR, c25_manifest_functions(), _patched_names()) == []
 
 
