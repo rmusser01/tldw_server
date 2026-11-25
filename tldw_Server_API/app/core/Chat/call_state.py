@@ -96,13 +96,3 @@ class NonStreamCall:
         if name in type(self).__slots__:
             raise UnboundLocalError(f"cannot access local variable '{name}' where it is not associated with a value")
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
-
-    def __copy__(self) -> NonStreamCall:
-        """Copy the set slots only: ``copyreg`` reads every slot, and an unset one would raise ``UnboundLocalError``."""
-        new = type(self)()
-        for name in PARAMS + LOCALS:
-            try:
-                setattr(new, name, object.__getattribute__(self, name))
-            except AttributeError:
-                pass
-        return new

@@ -11,7 +11,6 @@ Nothing here imports chat code except the subprocess pin.
 from __future__ import annotations
 
 import ast
-import copy
 import functools
 import importlib.util
 import os
@@ -403,4 +402,3 @@ def test_unset_call_slot_reads_like_an_unbound_local() -> None:
     with pytest.raises(AttributeError):
         _ = cst.zzz
     assert not hasattr(cst, "zzz")
-    assert copy.copy(cst).model == "model"
