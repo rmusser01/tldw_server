@@ -1707,7 +1707,11 @@ class SessionManager:
 
             db_pool = await self._ensure_db_pool()
             repo = AuthnzSessionsRepo(db_pool)
-            deleted = await repo.cleanup_expired_sessions()
+            deleted = await repo.cleanup_expired_sessions(
+                session_cap_retention=timedelta(
+                    minutes=max(60, self.settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+                )
+            )
 
             if deleted:
                 logger.info(f"Cleaned up {deleted} expired sessions")

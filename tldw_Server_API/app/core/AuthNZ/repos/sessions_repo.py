@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+
+# ``sessions.revoke_reason`` written when the per-user session cap evicts a session.
+SESSION_CAP_REVOKE_REASON = "session_cap"
+
+# A session is live until its refresh token expires (``COALESCE`` covers rows
+# without a refresh expiry). Listing, the cap and cleanup all share this predicate.
+LIVE_SESSION_PREDICATE_PG = (
+    "is_active = TRUE AND COALESCE(is_revoked, FALSE) = FALSE "
+    "AND COALESCE(refresh_expires_at, expires_at) > CURRENT_TIMESTAMP"
+)
+LIVE_SESSION_PREDICATE_SQLITE = (
+    "is_active = 1 AND COALESCE(is_revoked, 0) = 0 "
+    "AND datetime(COALESCE(refresh_expires_at, expires_at)) > datetime('now')"
+)
 
 
 @dataclass
@@ -633,11 +647,12 @@ class AuthnzSessionsRepo:
         try:
             if getattr(self.db_pool, "pool", None) is not None:
                 rows = await self.db_pool.fetch(
-                    """
+                    f"""
                     SELECT id, ip_address, user_agent, device_id,
-                           created_at, last_activity, expires_at
+                           created_at, last_activity,
+                           COALESCE(refresh_expires_at, expires_at) AS expires_at
                     FROM sessions
-                    WHERE user_id = $1 AND is_active = TRUE
+                    WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}
                     ORDER BY last_activity DESC
                     """,
                     user_id,
@@ -649,11 +664,12 @@ class AuthnzSessionsRepo:
             async with self.db_pool.acquire() as conn:
                 try:
                     cursor = await conn.execute(
-                        """
+                        f"""
                         SELECT id, ip_address, user_agent, device_id,
-                               created_at, last_activity, expires_at
+                               created_at, last_activity,
+                               COALESCE(refresh_expires_at, expires_at) AS expires_at
                         FROM sessions
-                        WHERE user_id = ? AND is_active = 1
+                        WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                         ORDER BY last_activity DESC
                         """,
                         (user_id,),
@@ -662,11 +678,12 @@ class AuthnzSessionsRepo:
                     msg = str(exc).lower()
                     if "no such column" in msg and "last_activity" in msg:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             SELECT id, ip_address, user_agent, device_id,
-                                   created_at, created_at AS last_activity, expires_at
+                                   created_at, created_at AS last_activity,
+                                   COALESCE(refresh_expires_at, expires_at) AS expires_at
                             FROM sessions
-                            WHERE user_id = ? AND is_active = 1
+                            WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             ORDER BY created_at DESC
                             """,
                             (user_id,),
@@ -698,9 +715,10 @@ class AuthnzSessionsRepo:
             ).error("AuthNZ session read failed")
             raise DatabaseError("Session read operation failed") from None
 
-    async def cleanup_expired_sessions(self) -> int:
+    async def cleanup_expired_sessions(self, *, session_cap_retention: timedelta) -> int:
         """
-        Delete expired or long-revoked sessions.
+        Delete sessions past refresh expiry (plus 1 day), long-revoked sessions,
+        and cap-evicted sessions older than ``session_cap_retention``.
 
         Returns the number of deleted rows (best-effort).
         """
@@ -735,19 +753,27 @@ class AuthnzSessionsRepo:
                     rows = await conn.fetch(
                         """
                         DELETE FROM sessions
-                        WHERE expires_at < CURRENT_TIMESTAMP - INTERVAL '1 day'
+                        WHERE COALESCE(refresh_expires_at, expires_at) < CURRENT_TIMESTAMP - INTERVAL '1 day'
                         OR (is_active = FALSE AND revoked_at < CURRENT_TIMESTAMP - INTERVAL '7 days')
+                        OR (revoke_reason = $1 AND revoked_at < CURRENT_TIMESTAMP - $2::interval)
                         RETURNING id
-                        """
+                        """,
+                        SESSION_CAP_REVOKE_REASON,
+                        session_cap_retention,
                     )
                     deleted = len(rows or [])
                 else:
                     cursor = await conn.execute(
                         """
                         DELETE FROM sessions
-                        WHERE datetime(expires_at) < datetime('now', '-1 day')
+                        WHERE datetime(COALESCE(refresh_expires_at, expires_at)) < datetime('now', '-1 day')
                         OR (is_active = 0 AND datetime(revoked_at) < datetime('now', '-7 days'))
-                        """
+                        OR (revoke_reason = ? AND datetime(revoked_at) < datetime('now', ?))
+                        """,
+                        (
+                            SESSION_CAP_REVOKE_REASON,
+                            f"-{int(session_cap_retention.total_seconds())} seconds",
+                        ),
                     )
                     deleted = getattr(cursor, "rowcount", 0) or 0
 
