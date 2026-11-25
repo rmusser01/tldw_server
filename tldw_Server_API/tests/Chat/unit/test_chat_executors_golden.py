@@ -178,7 +178,7 @@ class _Tracker:
 
 
 class FakeMetrics:
-    """Records every metric call; floats that carry a latency are dropped."""
+    """Records every metric call; only the ``track_llm_call`` latency (third argument) is normalised."""
 
     def __init__(self, rec: Rec) -> None:
         self._rec = rec
@@ -196,7 +196,9 @@ class FakeMetrics:
             raise AttributeError(name)
 
         def _call(*args: Any, **kwargs: Any) -> None:
-            args = tuple(a for a in args if not isinstance(a, float))
+            # The one timing: track_llm_call(provider, model, latency, ...). Every other float is recorded.
+            if name == "track_llm_call" and len(args) > 2:
+                args = (*args[:2], "<latency>", *args[3:])
             self._rec.metrics.append([name, list(args), _drop_volatile(kwargs)])
 
         return _call
@@ -500,8 +502,6 @@ def _kwargs(
             return True
 
         kwargs.update(rg_commit_cb=_commit, rg_refund_cb=_refund, on_provider_output=_on_provider_output)
-        kwargs.pop("on_success")
-        kwargs["on_success"] = _on_success
     kwargs.update(overrides)
     return kwargs
 

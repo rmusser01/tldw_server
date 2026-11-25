@@ -2652,10 +2652,10 @@ def _chat_executors_job_problems(workflow: dict[str, Any]) -> list[str]:
         command, sep, check = step["run"].partition("python - ")
         command_tokens = _step_run_tokens(command)
         listed |= {t for t in command_tokens if _CHAT_GATE_PATH_RE.match(t)}
-        for token in sorted(command_tokens):
+        for token in sorted(t.strip("'\"") for t in command_tokens):  # the deselect ids are quoted in the YAML
             if token.startswith("--deselect="):
                 deselected.add(token.removeprefix("--deselect="))
-            elif token in ("-m", "-k", "--deselect") or token.startswith(("-m=", "-k=", "--ignore")):
+            elif token == "--deselect" or token.startswith(("-m", "-k", "--ignore")):
                 problems.append(f"pytest command selects a subset with {token}")
         if sep:
             has_check = True
@@ -2769,7 +2769,7 @@ def test_chat_gate_contract_fails_when_the_accepted_outcomes_change() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("flag", ["-m", "-k", "--ignore", "-m=", "--deselect"])
+@pytest.mark.parametrize("flag", ["-m", "-k", "--ignore", "-m=", "--deselect", "-kfoo", "-mslow", "--ignore=x"])
 def test_chat_gate_contract_fails_when_pytest_selects_a_subset(flag: str) -> None:
     workflow = _backend_required_workflow()
     step = _chat_gate_pytest_step(workflow)

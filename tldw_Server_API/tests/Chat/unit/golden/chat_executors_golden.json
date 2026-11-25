@@ -76,7 +76,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -178,7 +179,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -281,7 +283,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": false,
@@ -292,7 +295,8 @@
         "track_llm_call",
         [
           "anthropic",
-          "claude-3-5-sonnet"
+          "claude-3-5-sonnet",
+          "<latency>"
         ],
         {
           "success": true
@@ -347,7 +351,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": false,
@@ -423,7 +428,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -607,7 +613,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -627,7 +634,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -734,7 +742,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -957,7 +966,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -977,7 +987,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -1084,7 +1095,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -1177,7 +1189,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -1259,7 +1272,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": false,
@@ -1280,7 +1294,8 @@
         "track_llm_call",
         [
           "anthropic",
-          "claude-3-5-sonnet"
+          "claude-3-5-sonnet",
+          "<latency>"
         ],
         {
           "success": true
@@ -1367,7 +1382,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": false,
@@ -1378,7 +1394,8 @@
         "track_llm_call",
         [
           "anthropic",
-          "claude-3-5-sonnet"
+          "claude-3-5-sonnet",
+          "<latency>"
         ],
         {
           "success": true
@@ -1398,7 +1415,8 @@
         "track_llm_call",
         [
           "anthropic",
-          "claude-3-5-sonnet"
+          "claude-3-5-sonnet",
+          "<latency>"
         ],
         {
           "success": true
@@ -1446,7 +1464,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": false,
@@ -1480,7 +1499,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": false,
@@ -1562,7 +1582,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": false,
@@ -1716,7 +1737,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -1801,7 +1823,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -1878,7 +1901,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
@@ -1960,7 +1984,8 @@
         "track_llm_call",
         [
           "openai",
-          "gpt-4o-mini"
+          "gpt-4o-mini",
+          "<latency>"
         ],
         {
           "success": true
