@@ -1,5 +1,5 @@
 ---
-id: TASK-15633
+id: TASK-15646
 title: Design outbound destination inventory and privacy regression checks
 status: Done
 labels:
@@ -11,7 +11,7 @@ references:
 - Docs/Design/2026-11-24-outbound-destination-inventory-design.md
 - Docs/ADR/097-reviewed-outbound-destinations-and-privacy-modes.md
 - Docs/superpowers/plans/2026-11-24-outbound-privacy-increment-1.md
-- TASK-15634
+- TASK-15647
 ---
 
 ## Description
@@ -34,12 +34,13 @@ ADR required: yes. Proposed ADR-097 adds a durable CI declaration and strict-mod
 Written-spec review findings addressed at the requester’s direction. Increment 1 now requires the shipped browser setup wizard, transport observation for one opt-in download, and an exact local fixture allowlist. Later increments specify approval authority, ledger access and unknown ownership, and denial of new sends on open sessions after revocation or expiry. The proposed ADR records these boundaries. Work in this revision is documentation only.
 Verification for the revision: reviewed all five changes against the spec and ADR, checked Markdown links and placeholders, and passed Backlog canonical-format and Git whitespace checks. No runtime code changed.
 Requester approved the revised written spec on 2026-11-24 and requested the Increment 1 implementation plan. No runtime implementation was included in the design task.
+Renumbered during the PR #3612 CI follow-up because dev already uses the original ID.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Approved design and proposed ADR-097 define the required outbound regression check and scope the later runtime modes. Increment 1 implementation is tracked independently in TASK-15634 with the linked five-stage plan.
+Approved design and proposed ADR-097 define the required outbound regression check and scope the later runtime modes. Increment 1 implementation is tracked independently in TASK-15647 with the linked five-stage plan.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

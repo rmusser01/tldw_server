@@ -10,7 +10,7 @@
 
 **Spec:** [Outbound destination inventory and privacy regression checks](../../Design/2026-11-24-outbound-destination-inventory-design.md), Increment 1.
 
-**Backlog:** TASK-15634, dependent on TASK-15633.
+**Backlog:** TASK-15647, dependent on TASK-15646. The earlier stage commits predate the renumbering.
 
 **ADR check:** Required. [Proposed ADR-097](../../ADR/097-reviewed-outbound-destinations-and-privacy-modes.md) covers the reviewed inventory and required checks. [ADR-026](../../ADR/026-security-outbound-egress-and-ssrf-policy.md) governs existing URL safety. Fit the gate into the existing license-admitted contexts and preserve compatibility with the CI tiers in [proposed ADR-096](../../ADR/096-tiered-development-and-release-ci.md).
 
@@ -23,7 +23,7 @@
 - Guarded runs have no host service socket mounts, checkout bind mounts, forwarded agent sockets, inherited host socket descriptors, or published ports. Only the host-side runner talks to Docker. The isolated process sees image contents, container-local state, and Docker's generated host files.
 - A required scenario that is skipped, fails to start or shut down, or produces missing, malformed or incomplete evidence fails. Report the tested boundaries and limitations, including SDK/argv-only evidence, untested native and child paths, and browser/OS coverage.
 - Do not upload raw URL paths, request bodies, headers, environment, console dumps, browser traces, or raw syscall traces. Use a bounded, redacted report with scenario, component, capability or repository source hint, decision, and coverage.
-- Create tests first and observe the intended failure. Run the applicable focused suites, actionlint for workflow changes, Bandit on touched Python, and `git diff --check`. Use backlog-py for records. Commit each finished stage with TASK-15634. Preserve the required checks and license admission.
+- Create tests first and observe the intended failure. Run the applicable focused suites, actionlint for workflow changes, Bandit on touched Python, and `git diff --check`. Use backlog-py for records. Commit each finished stage with the implementation task ID. Preserve the required checks and license admission.
 
 ## File map and interface
 
@@ -325,6 +325,16 @@ ADR check — proposed ADR-097 still governs the inventory and required checks. 
 | 2. Worker WebSockets | The packaged worker's hostname-based WebSocket attempt is observed before resolution. A positive fixture run stays green and its synthetic denied control is observed. | 45 focused tests passed. Offline Chromium passed the content script and three clean worker runs, and rejected an injected worker startup WebSocket. | Complete |
 | 3. Diagnostics and exception anchors | Reports identify the failing check with stable redacted data. Exception anchors resolve in the shipped source. | 425 focused tests and all seven disconnected Docker scenarios passed from rebuilt images. Ruff and actionlint passed. Bandit found no new issues. | Complete |
 
+## Hosted CI follow-up
+
+Proposed ADR-097 still governs the privacy checks. This follow-up requires no new ADR.
+
+| Stage | Success criteria and tests | Status |
+| --- | --- | --- |
+| 1. Publish ADR-097 | Reproduced the missing mirror and broken strict-build link, then passed 79 docs and inventory tests. Renumbered the two outbound tasks to avoid collisions with `dev`. | Complete |
+| 2. Integrate `dev` | The admitted checkout includes the current RAG test selection. The workflow and classifier contracts pass, and Backlog IDs remain unique. | In Progress |
+| 3. Stabilize Chromium trace collection | The extension worker and its WebSocket control produce complete evidence. Incomplete traces and unexpected traffic still fail the gate. | In Progress |
+
 ## Handoff
 
-Before marking TASK-15634 complete, confirm the four Backlog acceptance criteria against executed evidence. Stage 1 validates declarations, Stages 2 and 3 provide default and opted-in backend evidence, Stage 4 covers all three browser surfaces, and Stage 5 enforces the same runner in the required CI contexts. Capture transport or platform expansions as separate follow-up tasks. The implementation plan deliberately carries no strict-mode release claim.
+Before marking TASK-15647 complete, confirm the four Backlog acceptance criteria against executed evidence. Stage 1 validates declarations, Stages 2 and 3 provide default and opted-in backend evidence, Stage 4 covers all three browser surfaces, and Stage 5 enforces the same runner in the required CI contexts. Capture transport or platform expansions as separate follow-up tasks. The implementation plan deliberately carries no strict-mode release claim.

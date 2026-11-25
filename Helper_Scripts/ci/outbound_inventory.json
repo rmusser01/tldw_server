@@ -297,14 +297,14 @@
       "source_path": "tldw_Server_API/app/core/Setup/install_manager.py",
       "symbol": "_run_subprocess",
       "owner": "setup-installer",
-      "follow_up": "TASK-15634"
+      "follow_up": "TASK-15647"
     },
     {
       "id": "installer.sidecar-launcher",
       "source_path": "Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py",
       "symbol": "_run_checked_command",
       "owner": "setup-sidecar",
-      "follow_up": "TASK-15634"
+      "follow_up": "TASK-15647"
     }
   ]
 }

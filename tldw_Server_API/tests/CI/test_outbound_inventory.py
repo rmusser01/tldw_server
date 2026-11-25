@@ -130,7 +130,7 @@ def test_asset_requires_full_identity(load, field, change):
 def test_exception_has_exact_owned_anchor_and_grants_no_destination_permission(load):
     exception = {
         "id": "legacy.calls", "source_path": "app/relative.py", "symbol": "Client.download",
-        "owner": "setup", "follow_up": "TASK-15634",
+        "owner": "setup", "follow_up": "TASK-15647",
     }
     inventory = load(exceptions=[exception])
     assert inventory.exceptions["legacy.calls"].symbol == "Client.download"
@@ -150,7 +150,7 @@ def test_exception_anchor_resolves_the_exact_declared_symbol(load, tmp_path):
     )
     exception = {
         "id": "legacy.calls", "source_path": "installer.py", "symbol": "Client.download",
-        "owner": "setup", "follow_up": "TASK-15634",
+        "owner": "setup", "follow_up": "TASK-15647",
     }
     with pytest.raises(InventoryError, match="unknown_exception_anchor"):
         load(exceptions=[exception]).verify_exception_anchors(tmp_path)

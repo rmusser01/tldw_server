@@ -1,17 +1,18 @@
 ---
-id: TASK-15634
+id: TASK-15647
 title: Implement outbound privacy regression gate Increment 1
-status: Done
+status: In Progress
 labels:
 - security
 - privacy
 - ci
 dependencies:
-- TASK-15633
+- TASK-15646
 references:
 - Docs/Design/2026-11-24-outbound-destination-inventory-design.md
 - Docs/superpowers/plans/2026-11-24-outbound-privacy-increment-1.md
 - Docs/ADR/097-reviewed-outbound-destinations-and-privacy-modes.md
+- https://github.com/rmusser01/tldw_server/pull/3612
 ---
 
 ## Description
@@ -44,6 +45,9 @@ Pre-push review follow-up authorized. Verify three stages test-first: dedicated 
 Pre-push stage 1: auth, shared API and smoke inputs now trigger a dedicated browser job without selecting the frontend unit shards. Both dedicated runner jobs reclaim unused SDK space and record cold build time and lowest sampled Docker free disk. Required contexts fail for a selected job that fails, is cancelled or skips. Red run reproduced the missing flag and runner topology; 255 classifier and workflow contract tests passed with the fix, as did actionlint, Ruff and whitespace checks. Bandit found no new findings. Hosted x64 metrics await GitHub execution.
 Pre-push stage 2: Chromium’s bounded startup NetLog detects WebSocket attempts in both extension scenarios. A separate worker profile proves a denied hostname is recorded and the negative control stays outside the normal profile. The focused suite passed 45 tests. In disconnected Linux Chromium, the content script and three clean worker repeats passed. A separate injected startup WebSocket was rejected while the Playwright flow itself passed. One earlier run had incomplete native trace output and will be checked again in the full run. Ruff, Bandit and whitespace checks passed.
 Pre-push stage 3: the public report distinguishes missing, invalid and stale preparation, containment preflight, timeout and per-case failures using allowlisted diagnostic codes. GitHub displays the same redacted output. Reviewed Python exception anchors resolve by source and definition without imports. Negative tests reproduced each defect before the fix. The final focused run passed 425 tests. The exact checkout prepared both Linux arm64 images and passed all seven guarded scenarios in 243.79 seconds after preparation. Ruff, actionlint, Bandit baseline comparison and whitespace checks passed. Actual hosted x64 disk measurements and GitHub check results await the first branch run.
+Hosted CI follow-up for PR #3612 authorized. Reproduce the extension worker trace failure, repair publication of ADR-097, and integrate current dev so the RAG workflow and its checked-out tests agree. ADR required: no new ADR. Proposed ADR-097 still governs the privacy boundary.
+Renumbered during the PR #3612 CI follow-up because dev already uses the original ID.
+Hosted CI stage 1: red runs reproduced the untracked published ADR and the strict MkDocs warning after refreshing the mirror. Published ADR-097 and used a repository-relative code reference for its unpublished design. All 79 docs and inventory tests passed, including strict MkDocs, plus Ruff, Backlog normalization and Bandit with only existing test assert findings. The design and implementation task IDs were updated because dev already held the originals.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

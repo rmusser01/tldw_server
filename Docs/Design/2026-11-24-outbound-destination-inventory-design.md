@@ -1,7 +1,7 @@
 # Outbound destination inventory and privacy regression checks
 
 **Status:** Approved for Increment 1 planning
-**Backlog:** TASK-15633
+**Backlog:** TASK-15646
 **ADR check:** Required. [ADR-097](../ADR/097-reviewed-outbound-destinations-and-privacy-modes.md) proposes the new release and runtime policy. [ADR-026](../ADR/026-security-outbound-egress-and-ssrf-policy.md), [ADR-030](../ADR/030-configured-local-llm-egress-policy.md), and [ADR-090](../ADR/090-configured-searx-egress-policy.md) continue to govern URL safety and narrowly scoped local endpoints. The gate fits the existing required contexts and the proposed CI tiers in [ADR-096](../ADR/096-tiered-development-and-release-ci.md).
 
 ## Goal and scope
@@ -61,4 +61,4 @@ Release a deployment-wide strict mode only when each enabled outbound path in it
 
 ## Spec review and handoff
 
-Implement Increment 1 under TASK-15634 using the [implementation plan](../superpowers/plans/2026-11-24-outbound-privacy-increment-1.md). Track the coverage and runtime-policy increments separately, with evidence tied to each release criterion. TASK-15633 records the design. Place the concrete CI steps in the existing required contexts and preserve their license admission.
+Implement Increment 1 under TASK-15647 using the [implementation plan](../superpowers/plans/2026-11-24-outbound-privacy-increment-1.md). Track the coverage and runtime-policy increments separately, with evidence tied to each release criterion. TASK-15646 records the design. Place the concrete CI steps in the existing required contexts and preserve their license admission.
