@@ -1890,3 +1890,72 @@ def test_late_imports_shape_is_checked(tmp_path: Path) -> None:
         t = sib_tree(tmp_path / str(abs(hash(str(bad)))), late_imports=bad)
         with pytest.raises(rag_split.SplitError):
             rag_split.load_manifest(t.manifest_path)
+
+
+# --- strict crossing (sibling mode) ---
+
+FLAG_BASE = textwrap.dedent(
+    '''\
+    import os
+
+
+    def audit(*args):
+        return args
+
+
+    async def call(a):
+        """Doc."""
+        cst = make(a)
+        done = False
+        try:
+            x = os.getenv("A")
+            if x:
+                done = True
+                audit(x)
+        finally:
+            audit(done)
+        return cst
+    '''
+)
+
+
+def flag_tree(tmp: Path, **extra: object) -> Tree:
+    mv = {"name": "step", "module": "stage_a", "span": [row(FLAG_BASE, "x = os"), row(FLAG_BASE, "audit(x)")]}
+    return sib_tree(tmp, FLAG_BASE, moves=[mv], **extra)
+
+
+def test_a_flag_set_in_a_span_and_tested_after_it_is_a_crossing_local(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = flag_tree(tmp_path)
+    assert t.run("apply") == 1
+    assert "V4: crossing local done: bound in step, read after it in <rest>" in capsys.readouterr().out
+    assert t.run("shared") == 0
+    assert "done: bound in step, read after it in <rest>" in capsys.readouterr().out
+
+
+def test_rewriting_the_flag_into_the_ctx_resolves_it(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = flag_tree(tmp_path, rewrite={"done": "cst.done"})
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert "cst.done = True" in t.text("mini/stage_a.py") and "cst.done = False" in t.text(SIB_FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_a_name_rebound_between_the_span_and_the_read_does_not_cross(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = FLAG_BASE.replace("    finally:\n        audit(done)", "    finally:\n        done = False\n        audit(done)")
+    mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(x)")]}
+    t = sib_tree(tmp_path, src, moves=[mv])
+    assert t.run("apply") == 0, capsys.readouterr().out
+
+
+def test_the_rag_layout_does_not_use_the_strict_rule(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = FLAG_BASE.replace("    cst = make(a)\n", "")
+    mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(x)")]}
+    t = Tree(tmp_path, src, func="call", moves=[mv])
+    assert t.run("shared") == 0
+    assert "done" not in capsys.readouterr().out
+
+
+def test_a_destination_that_gets_no_defs_gets_no_new_imports(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = late_tree(tmp_path)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    stage = t.text("mini/stage_b.py")
+    assert "TYPE_CHECKING" not in stage and "functools" not in stage

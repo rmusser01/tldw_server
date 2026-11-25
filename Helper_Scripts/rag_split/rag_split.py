@@ -37,6 +37,21 @@ Parametrised for other code (TASK-13950.25; each default is the RAG value, so th
     task         text in the header, ``noqa`` and docstrings (default ``TASK-13950.24``)
     state_class, state_module            the hoist target class and its module (``PipelineState``, ``run_state``)
 
+Chat part 2 (TASK-13950.25; each needs ``pkg: ""``: the destinations are existing siblings of the source file):
+
+    lift         {nested def: module}    a def directly in the function becomes ``<module>.<def>(cst, ...)``; its site becomes
+                                         ``<def> = functools.partial(_<module>.<def>, cst)``, or goes (and every read of it is
+                                         rewritten to ``<ref>(cst, ...)``) when the code that held it is itself in that module
+    moves[].args [name]                  read-only locals of the function passed after the ctx (``except ... as e``)
+    entry        {name, module, doc}     the body after the ``cst = <expr>`` prologue moves whole to ``<module>.<name>(cst)``
+    drop         [{module, def|import|all|replace}]   delete a def, an import binding or ``__all__`` entries (``all_add`` adds),
+                                         or replace a call-site expression; a dropped name must have no reference left (V15)
+    late_imports [{module, lines}]       a top import of a destination moves into its late-import block
+
+A destination that exists gets its new defs above a trailing *late-import block* (marker comment, then the ``_<module>`` aliases
+the new code calls, then ``from <pkg> import <source> as cs``), so no module reads ``cs`` or an alias at import time (R5).
+``verify`` compares the whole module AST with the base module plus those additions.
+
 ``apply`` edits the working tree as text edits at AST positions. ``verify`` rebuilds the expected result
 from the base *as an AST*, independently of those text edits, and compares it with the head.
 Every difference prints one line; any difference exits 1.
@@ -656,8 +671,10 @@ def meet(a: set | None, b: set | None) -> set | None:
 class Cells:
     """Liveness of F's locals across cells: each span, plus the residual function."""
 
-    def __init__(self, fn: Any, key: Any, spans: list[tuple[str, list[ast.stmt]]], skip: tuple[str, ...] = ("rcfg", "state"), args: dict[str, list[str]] | None = None) -> None:
+    def __init__(self, fn: Any, key: Any, spans: list[tuple[str, list[ast.stmt]]], skip: tuple[str, ...] = ("rcfg", "state"), args: dict[str, list[str]] | None = None, strict: bool = False) -> None:
         self.skip = skip
+        self.strict = strict
+        self.end = [max(s.end_lineno for s in members) for _, members in spans]
         self.args = args or {}  # span label -> names it takes as parameters, so they do not cross
         self.fn, self.key = fn, key
         self.labels = [s[0] for s in spans] + ["<rest>"]
@@ -678,6 +695,7 @@ class Cells:
         self.refs: list[set[str]] = []
         self.first_read: list[dict[str, int]] = []
         self.first_import: list[dict[str, int]] = []
+        self.loads: list[dict[str, list[int]]] = []
         for i in range(n + 1):
             b: dict[str, list[int]] = defaultdict(list)
             r: set[str] = set()
@@ -694,6 +712,11 @@ class Cells:
                             fi[_bound(al)] = min(fi.get(_bound(al), x.lineno), x.lineno)
             self.first_read.append(fr)
             self.first_import.append(fi)
+            ld: dict[str, list[int]] = defaultdict(list)
+            for x in self.nodes[i]:
+                if isinstance(x, ast.Name) and is_f(x, key) and isinstance(x.ctx, ast.Load):
+                    ld[x.id].append(x.lineno)
+            self.loads.append(ld)
             if i == n:
                 for p in self.params:
                     b[p].append(0)
@@ -863,6 +886,17 @@ class Cells:
                 for i in range(n):
                     if i != j and name in self.bound[i] and not (name in self.idem and self.first_import[j].get(name, 10**9) < self.first_read[j].get(name, 0)):
                         out[name].append(f"bound in {self.labels[i]}, live-in at {self.labels[j]}")
+        if self.strict:
+            # a span that rebinds a name which another cell reads after it. Liveness misses it when that cell
+            # also binds the name before the span (a flag set in the span and tested after it).
+            for i in range(n - 1):
+                for name in self.bound[i]:
+                    if name in self.idem:
+                        continue
+                    for j in range(n):
+                        late = [ln for ln in self.loads[j].get(name, []) if ln > self.end[i]]
+                        if j != i and late and not any(self.end[i] < b < min(late) for b in self.bound[j].get(name, [])) and name not in self.args.get(self.labels[j], ()):
+                            out[name].append(f"bound in {self.labels[i]}, read after it in {self.labels[j]}")
         for c in range(n):
             for d in (x for x in self.nodes[c] if isinstance(x, DEFS) and is_f(x, self.key)):
                 free = {m.id for st in d.body for m in ast.walk(st) if isinstance(m, ast.Name) and is_f(m, self.key)}
@@ -1176,7 +1210,7 @@ def lift_edits(fn: Any, key: Any, lines: list[bytes], regions: Regions, lifts: l
         row, col = n.end_lineno, n.end_col_offset
         if lines[row - 1][col : col + 1] != b"(":
             raise SplitError(f"line {row}: expected '(' right after {n.id}")
-        out.append(insert_first(lines, row, col + 1, ctx, (c.args + [k for k in c.keywords])[:1]))
+        out.append(insert_first(lines, row, col + 1, ctx, [*c.args, *c.keywords][:1]))
     return out
 
 
@@ -1258,7 +1292,9 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     kept = pro is not None and not m["prologue"] and is_sibling(m)  # the ctx prologue is already in the source (an earlier PR)
     if (moves or lifts or entry) and m["ctx"] != DEFAULT_CTX:
         intro |= set(ctx_names(m)) - ({ctx_names(m)[0]} if kept else set())
-    if kept and (moves or lifts or entry):
+    if kept:
+        intro.discard(ctx_names(m)[0])  # a rewrite into the ctx reads the name the source already binds
+    if kept and (moves or lifts or entry or rewrite):
         mine = {id(x) for x in ast.walk(pro)}
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside the prologue statement" for nm, x in binding_nodes(fn) if nm == ctx_names(m)[0] and id(x) not in mine]
     init = [x for x in fn.body[:3] if isinstance(x, ast.Assign) and ast.unparse(x).startswith(f"state = _{sm}.{sc}(")]
@@ -1375,7 +1411,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # cells and crossings (V4)
     cell_spans = [(mv.name, mv.members) for mv in sorted(moves, key=lambda x: x.a - x.b)]
     if cell_spans:
-        for name, why in sorted(Cells(fn, key, cell_spans, tuple(ctx_names(m)) + lifted, {mv.name: mv.args for mv in moves}).crossing().items()):
+        for name, why in sorted(Cells(fn, key, cell_spans, tuple(ctx_names(m)) + lifted, {mv.name: mv.args for mv in moves}, strict=is_sibling(m)).crossing().items()):
             out.errors.append(f"V4: crossing local {name}: {'; '.join(why[:2])}")
 
     # lifts: reads of lifted names first (in every body), then each def becomes a module function and its site a partial
@@ -2139,6 +2175,8 @@ def type_checking_block(top: list[ast.stmt]) -> ast.If | None:
 
 def top_additions(m: dict, plan: ModPlan, top: list[ast.stmt]) -> tuple[list[str], list[str]]:
     """``(import lines, TYPE_CHECKING lines)`` the module still lacks; each is added after its last top import."""
+    if not plan.defs:  # a module that only loses or reorders imports gets no new ones
+        return [], []
     have = set(import_infos(ast.Module(body=top, type_ignores=[])))
     tc = [x for x in ctx_imports(m)[1] if not {_bound(a) for a in ast.parse(x).body[0].names} <= have]  # type: ignore[attr-defined]
     std = dict(plan.std)
@@ -2670,11 +2708,14 @@ def run_shared(root: Path, m: dict | None, hoist: list[str], base: str | None, b
             raise SplitError(f"no closure {name}")
         out.append(f"{name}: " + ", ".join(sorted(free_locals(d, src.key))))
     spans = spans_for_cells(m, src) if m["cells"] else []
+    moves: list[Move] = []
     if m["moves"]:
         moves = plan_moves(src, m["moves"], text.split("\n"))
         spans += [(mv.name, mv.members) for mv in sorted(moves, key=lambda x: x.a - x.b)]
     if spans:
-        for name, why in sorted(Cells(src.fn, src.key, spans, tuple(ctx_names(m))).crossing().items()):
+        lifted = tuple(m["lift"])
+        args = {mv.name: mv.args for mv in moves} if m["moves"] else {}
+        for name, why in sorted(Cells(src.fn, src.key, spans, tuple(ctx_names(m)) + lifted, args, strict=is_sibling(m)).crossing().items()):
             out.append(f"{name}: {'; '.join(why)}")
     return out
 
