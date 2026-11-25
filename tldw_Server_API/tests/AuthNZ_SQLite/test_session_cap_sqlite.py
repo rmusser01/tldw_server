@@ -177,6 +177,55 @@ async def test_cleanup_purges_cap_evicted_rows_after_retention(
     assert logout_row in remaining  # ordinary revocations still keep 7 days
 
 
+async def test_cleanup_purges_logged_out_rows_a_day_after_access_expiry(authnz_sqlite):
+    from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
+
+    pool, uid, _ = authnz_sqlite
+    h, d = timedelta(hours=1), timedelta(days=1)
+    stale_logout = await _row(pool, uid, "slo", access_in=-2 * d, refresh_in=5 * d)
+    fresh_logout = await _row(pool, uid, "flo", access_in=h, refresh_in=5 * d)
+    stale_cap = await _row(pool, uid, "scap", access_in=-2 * d, refresh_in=5 * d)
+    await _revoke(pool, stale_logout, "User logout")
+    await _revoke(pool, fresh_logout, "User logout")
+    await _revoke(pool, stale_cap, "session_cap", minutes_ago=30)
+    await SessionManager(db_pool=pool).cleanup_expired_sessions()
+    remaining = await _remaining(pool, uid)
+    assert stale_logout not in remaining
+    assert fresh_logout in remaining
+    assert stale_cap in remaining  # cap rows keep their own retention
+
+
+async def test_token_update_is_refused_for_a_cap_evicted_row(authnz_sqlite):
+    from tldw_Server_API.app.core.AuthNZ.exceptions import SessionError
+    from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
+
+    pool, uid, _ = authnz_sqlite
+    sid = await _row(pool, uid, "temp", access_in=timedelta(hours=1), refresh_in=7 * timedelta(days=1))
+    await _revoke(pool, sid, "session_cap")
+    with pytest.raises(SessionError):
+        await SessionManager(db_pool=pool).update_session_tokens(sid, "access.real", "refresh.real")
+    row = await pool.fetchone("SELECT token_hash FROM sessions WHERE id = $1", sid)
+    assert dict(row)["token_hash"] == "h-temp"
+
+
+async def test_failed_sign_in_steps_revoke_the_placeholder_row(authnz_sqlite):
+    from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
+
+    pool, uid, _ = authnz_sqlite
+    sm = SessionManager(db_pool=pool)
+    made = {}
+    for tag in ("fails", "works"):
+        made[tag] = (await sm.create_session(user_id=uid, access_token=f"a-{tag}", refresh_token=f"r-{tag}"))[
+            "session_id"
+        ]
+    with pytest.raises(ValueError, match="boom"):
+        async with sm.revoke_on_failure(made["fails"], uid):
+            raise ValueError("boom")
+    async with sm.revoke_on_failure(made["works"], uid):
+        pass
+    assert await live_ids(pool, uid) == {made["works"]}
+
+
 # --- callers that gate on the live predicate ---------------------------------
 
 
