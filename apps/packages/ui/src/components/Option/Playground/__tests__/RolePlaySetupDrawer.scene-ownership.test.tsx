@@ -130,7 +130,7 @@ const stageAndApply = async (notes = "Frozen proposed scene.") => {
   const input = await screen.findByRole("textbox", { name: "Scene notes" })
   await waitFor(() => expect(input).toHaveValue(originalScene.notes))
   fireEvent.change(input, { target: { value: notes } })
-  fireEvent.click(screen.getByRole("button", { name: "Apply", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }))
 }
 
 beforeEach(() => {
@@ -202,7 +202,7 @@ describe("actual role-play Scene ownership and original-read Save", () => {
       "Scene settings could not be loaded"
     )
     expect(io.get).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Apply", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
     expect(f.onApply).not.toHaveBeenCalled()
   })
 
@@ -227,7 +227,7 @@ describe("actual role-play Scene ownership and original-read Save", () => {
     )
     expect(useActorStore.getState().applied).toBeNull()
     expect(f.onClose).not.toHaveBeenCalled()
-    const retry = screen.getByRole("button", { name: "Apply", exact: true })
+    const retry = screen.getByRole("button", { name: "Apply" })
     await waitFor(() => expect(retry).not.toHaveClass("ant-btn-loading"))
     await act(async () => { fireEvent.click(retry) })
     await waitFor(() =>
@@ -260,7 +260,7 @@ describe("actual role-play Scene ownership and original-read Save", () => {
         "scene settings could not be saved"
       )
       fireEvent.click(
-        screen.getByRole("button", { name: "Review saved scene", exact: true })
+        screen.getByRole("button", { name: "Review saved scene" })
       )
       await screen.findByRole("button", { name: "Use my staged edits" })
       expect(screen.getByText(/Saved scene to review/)).toBeInTheDocument()
@@ -275,7 +275,7 @@ describe("actual role-play Scene ownership and original-read Save", () => {
         expect(screen.queryByRole("alert")).not.toBeInTheDocument()
       )
       fireEvent.click(
-        screen.getByRole("button", { name: "Apply", exact: true })
+        screen.getByRole("button", { name: "Apply" })
       )
       if (changedAgain) {
         expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -582,7 +582,7 @@ describe("actual role-play Scene ownership and original-read Save", () => {
     ).toHaveAttribute("role", "status")
     expect(screen.getByRole("textbox", { name: "Scene notes" })).toHaveValue("")
     expect(
-      screen.getByRole("button", { name: "Apply", exact: true })
+      screen.getByRole("button", { name: "Apply" })
     ).toBeEnabled()
     expect(useActorStore.getState().applied).toBeNull()
   })
@@ -594,7 +594,7 @@ describe("actual role-play Scene ownership and original-read Save", () => {
         originalScene.notes
       )
     )
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(f.onClose).toHaveBeenCalledOnce()
     expect(f.onApply).not.toHaveBeenCalled()
     expect(io.set).not.toHaveBeenCalled()

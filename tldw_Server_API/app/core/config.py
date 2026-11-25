@@ -3800,12 +3800,12 @@ def load_and_log_configs(
 
         # LLM API Settings - streaming / temperature / top_p / min_p
         # Anthropic
-        anthropic_model = config_parser_object.get('API', 'anthropic_model', fallback='claude-sonnet-4.5')
+        anthropic_model = config_parser_object.get('API', 'anthropic_model', fallback='claude-sonnet-4-6')
         anthropic_streaming = config_parser_object.get('API', 'anthropic_streaming', fallback='False')
         anthropic_temperature = config_parser_object.get('API', 'anthropic_temperature', fallback='0.7')
         anthropic_top_p = config_parser_object.get('API', 'anthropic_top_p', fallback='0.95')
         anthropic_top_k = config_parser_object.get('API', 'anthropic_top_k', fallback='100')
-        anthropic_max_tokens = config_parser_object.get('API', 'anthropic_max_tokens', fallback='4096')
+        anthropic_max_tokens = config_parser_object.get('API', 'anthropic_max_tokens', fallback=None) or None
         anthropic_api_timeout = config_parser_object.get('API', 'anthropic_api_timeout', fallback='90')
         anthropic_api_retries = config_parser_object.get('API', 'anthropic_api_retry', fallback='3')
         anthropic_api_retry_delay = config_parser_object.get('API', 'anthropic_api_retry_delay', fallback='5')
@@ -3815,8 +3815,8 @@ def load_and_log_configs(
         cohere_temperature = config_parser_object.get('API', 'cohere_temperature', fallback='0.7')
         cohere_max_p = config_parser_object.get('API', 'cohere_max_p', fallback='0.95')
         cohere_top_k = config_parser_object.get('API', 'cohere_top_k', fallback='100')
-        cohere_model = config_parser_object.get('API', 'cohere_model', fallback='command-r-plus')
-        cohere_max_tokens = config_parser_object.get('API', 'cohere_max_tokens', fallback='4096')
+        cohere_model = config_parser_object.get('API', 'cohere_model', fallback='command-a-plus-05-2026')
+        cohere_max_tokens = config_parser_object.get('API', 'cohere_max_tokens', fallback=None) or None
         cohere_api_timeout = config_parser_object.get('API', 'cohere_api_timeout', fallback='90')
         cohere_api_retries = config_parser_object.get('API', 'cohere_api_retry', fallback='3')
         cohere_api_retry_delay = config_parser_object.get('API', 'cohere_api_retry_delay', fallback='5')
@@ -3826,18 +3826,18 @@ def load_and_log_configs(
         deepseek_temperature = config_parser_object.get('API', 'deepseek_temperature', fallback='0.7')
         deepseek_top_p = config_parser_object.get('API', 'deepseek_top_p', fallback='0.95')
         deepseek_min_p = config_parser_object.get('API', 'deepseek_min_p', fallback='0.05')
-        deepseek_model = config_parser_object.get('API', 'deepseek_model', fallback='deepseek-chat')
-        deepseek_max_tokens = config_parser_object.get('API', 'deepseek_max_tokens', fallback='4096')
+        deepseek_model = config_parser_object.get('API', 'deepseek_model', fallback='deepseek-flash')
+        deepseek_max_tokens = config_parser_object.get('API', 'deepseek_max_tokens', fallback=None) or None
         deepseek_api_timeout = config_parser_object.get('API', 'deepseek_api_timeout', fallback='90')
         deepseek_api_retries = config_parser_object.get('API', 'deepseek_api_retry', fallback='3')
         deepseek_api_retry_delay = config_parser_object.get('API', 'deepseek_api_retry_delay', fallback='5')
 
         # Qwen (DashScope-compatible)
-        qwen_model = config_parser_object.get('API', 'qwen_model', fallback='qwen-plus')
+        qwen_model = config_parser_object.get('API', 'qwen_model', fallback='qwen3.7-plus')
         qwen_streaming = config_parser_object.get('API', 'qwen_streaming', fallback='True')
         qwen_temperature = config_parser_object.get('API', 'qwen_temperature', fallback='0.7')
         qwen_top_p = config_parser_object.get('API', 'qwen_top_p', fallback='0.8')
-        qwen_max_tokens = config_parser_object.get('API', 'qwen_max_tokens', fallback='4096')
+        qwen_max_tokens = config_parser_object.get('API', 'qwen_max_tokens', fallback=None) or None
         qwen_api_timeout = config_parser_object.get('API', 'qwen_api_timeout', fallback='90')
         qwen_api_retries = config_parser_object.get('API', 'qwen_api_retry', fallback='3')
         qwen_api_retry_delay = config_parser_object.get('API', 'qwen_api_retry_delay', fallback='1')
@@ -3847,22 +3847,22 @@ def load_and_log_configs(
         )
 
         # Groq
-        groq_model = config_parser_object.get('API', 'groq_model', fallback='llama3-70b-8192')
+        groq_model = config_parser_object.get('API', 'groq_model', fallback='openai/gpt-oss-120b')
         groq_streaming = config_parser_object.get('API', 'groq_streaming', fallback='False')
         groq_temperature = config_parser_object.get('API', 'groq_temperature', fallback='0.7')
         groq_top_p = config_parser_object.get('API', 'groq_top_p', fallback='0.95')
-        groq_max_tokens = config_parser_object.get('API', 'groq_max_tokens', fallback='4096')
+        groq_max_tokens = config_parser_object.get('API', 'groq_max_tokens', fallback=None) or None
         groq_api_timeout = config_parser_object.get('API', 'groq_api_timeout', fallback='90')
         groq_api_retries = config_parser_object.get('API', 'groq_api_retry', fallback='3')
         groq_api_retry_delay = config_parser_object.get('API', 'groq_api_retry_delay', fallback='5')
 
         # Google
-        google_model = config_parser_object.get('API', 'google_model', fallback='gemini-2.5-flash')
+        google_model = config_parser_object.get('API', 'google_model', fallback='gemini-3.5-flash-lite')
         google_streaming = config_parser_object.get('API', 'google_streaming', fallback='False')
         google_temperature = config_parser_object.get('API', 'google_temperature', fallback='0.7')
         google_top_p = config_parser_object.get('API', 'google_top_p', fallback='0.95')
         google_min_p = config_parser_object.get('API', 'google_min_p', fallback='0.05')
-        google_max_tokens = config_parser_object.get('API', 'google_max_tokens', fallback='4096')
+        google_max_tokens = config_parser_object.get('API', 'google_max_tokens', fallback=None) or None
         google_api_timeout = config_parser_object.get('API', 'google_api_timeout', fallback='90')
         google_api_retries = config_parser_object.get('API', 'google_api_retry', fallback='3')
         google_api_retry_delay = config_parser_object.get('API', 'google_api_retry_delay', fallback='5')
@@ -3870,68 +3870,68 @@ def load_and_log_configs(
         # HuggingFace
         huggingface_use_router_url_format = config_parser_object.getboolean('API', 'huggingface_use_router_url_format', fallback=False)
         huggingface_router_base_url = config_parser_object.get('API', 'huggingface_router_base_url', fallback='https://router.huggingface.co/hf-inference')
-        huggingface_api_base_url = config_parser_object.get('API', 'huggingface_api_base_url', fallback='https://router.huggingface.co/hf-inference/models')
-        huggingface_api_chat_path = config_parser_object.get('API', 'huggingface_api_chat_path', fallback='v1/chat/completions')
-        huggingface_model = config_parser_object.get('API', 'huggingface_model', fallback='/Qwen/Qwen3-235B-A22B')
+        huggingface_api_base_url = config_parser_object.get('API', 'huggingface_api_base_url', fallback='https://router.huggingface.co/v1')
+        huggingface_api_chat_path = config_parser_object.get('API', 'huggingface_api_chat_path', fallback=None)
+        huggingface_model = config_parser_object.get('API', 'huggingface_model', fallback='Qwen/Qwen3.6-35B-A3B')
         huggingface_streaming = config_parser_object.get('API', 'huggingface_streaming', fallback='False')
         huggingface_temperature = config_parser_object.get('API', 'huggingface_temperature', fallback='0.7')
         huggingface_top_p = config_parser_object.get('API', 'huggingface_top_p', fallback='0.95')
         huggingface_min_p = config_parser_object.get('API', 'huggingface_min_p', fallback='0.05')
-        huggingface_max_tokens = config_parser_object.get('API', 'huggingface_max_tokens', fallback='4096')
+        huggingface_max_tokens = config_parser_object.get('API', 'huggingface_max_tokens', fallback=None) or None
         huggingface_api_timeout = config_parser_object.get('API', 'huggingface_api_timeout', fallback='90')
         huggingface_api_retries = config_parser_object.get('API', 'huggingface_api_retry', fallback='3')
         huggingface_api_retry_delay = config_parser_object.get('API', 'huggingface_api_retry_delay', fallback='5')
 
         # Mistral
-        mistral_model = config_parser_object.get('API', 'mistral_model', fallback='mistral-large-latest')
+        mistral_model = config_parser_object.get('API', 'mistral_model', fallback='mistral-small-2603')
         mistral_streaming = config_parser_object.get('API', 'mistral_streaming', fallback='False')
         mistral_temperature = config_parser_object.get('API', 'mistral_temperature', fallback='0.7')
         mistral_top_p = config_parser_object.get('API', 'mistral_top_p', fallback='0.95')
-        mistral_max_tokens = config_parser_object.get('API', 'mistral_max_tokens', fallback='4096')
+        mistral_max_tokens = config_parser_object.get('API', 'mistral_max_tokens', fallback=None) or None
         mistral_api_timeout = config_parser_object.get('API', 'mistral_api_timeout', fallback='90')
         mistral_api_retries = config_parser_object.get('API', 'mistral_api_retry', fallback='3')
         mistral_api_retry_delay = config_parser_object.get('API', 'mistral_api_retry_delay', fallback='5')
 
         # OpenAI
-        openai_model = config_parser_object.get('API', 'openai_model', fallback='gpt-4o')
+        openai_model = config_parser_object.get('API', 'openai_model', fallback='gpt-6-luna')
         openai_streaming = config_parser_object.get('API', 'openai_streaming', fallback='False')
         openai_temperature = config_parser_object.get('API', 'openai_temperature', fallback='0.7')
         openai_top_p = config_parser_object.get('API', 'openai_top_p', fallback='0.95')
-        openai_max_tokens = config_parser_object.get('API', 'openai_max_tokens', fallback='4096')
+        openai_max_tokens = config_parser_object.get('API', 'openai_max_tokens', fallback=None) or None
         openai_api_timeout = config_parser_object.get('API', 'openai_api_timeout', fallback='90')
         openai_api_retries = config_parser_object.get('API', 'openai_api_retry', fallback='3')
         openai_api_retry_delay = config_parser_object.get('API', 'openai_api_retry_delay', fallback='5')
 
         # OpenRouter
-        openrouter_model = config_parser_object.get('API', 'openrouter_model', fallback='z-ai/glm-4.6')
+        openrouter_model = config_parser_object.get('API', 'openrouter_model', fallback='google/gemini-3.1-flash-lite')
         openrouter_streaming = config_parser_object.get('API', 'openrouter_streaming', fallback='False')
         openrouter_temperature = config_parser_object.get('API', 'openrouter_temperature', fallback='0.7')
         openrouter_top_p = config_parser_object.get('API', 'openrouter_top_p', fallback='0.95')
         openrouter_min_p = config_parser_object.get('API', 'openrouter_min_p', fallback='0.05')
         openrouter_top_k = config_parser_object.get('API', 'openrouter_top_k', fallback='100')
-        openrouter_max_tokens = config_parser_object.get('API', 'openrouter_max_tokens', fallback='4096')
+        openrouter_max_tokens = config_parser_object.get('API', 'openrouter_max_tokens', fallback=None) or None
         openrouter_api_timeout = config_parser_object.get('API', 'openrouter_api_timeout', fallback='90')
         openrouter_api_retries = config_parser_object.get('API', 'openrouter_api_retry', fallback='3')
         openrouter_api_retry_delay = config_parser_object.get('API', 'openrouter_api_retry_delay', fallback='5')
 
         # Moonshot
-        moonshot_model = config_parser_object.get('API', 'moonshot_model', fallback='moonshot-v1-8k')
+        moonshot_model = config_parser_object.get('API', 'moonshot_model', fallback='kimi-k3.1-pro')
         moonshot_api_base_url = config_parser_object.get('API', 'moonshot_api_base_url', fallback='https://api.moonshot.cn/v1')
         moonshot_streaming = config_parser_object.get('API', 'moonshot_streaming', fallback='False')
         moonshot_temperature = config_parser_object.get('API', 'moonshot_temperature', fallback='0.7')
         moonshot_top_p = config_parser_object.get('API', 'moonshot_top_p', fallback='0.95')
-        moonshot_max_tokens = config_parser_object.get('API', 'moonshot_max_tokens', fallback='')
+        moonshot_max_tokens = config_parser_object.get('API', 'moonshot_max_tokens', fallback=None) or None
         moonshot_api_timeout = config_parser_object.get('API', 'moonshot_api_timeout', fallback='90')
         moonshot_api_retries = config_parser_object.get('API', 'moonshot_api_retry', fallback='3')
         moonshot_api_retry_delay = config_parser_object.get('API', 'moonshot_api_retry_delay', fallback='1')
 
         # Z.AI
-        zai_model = config_parser_object.get('API', 'zai_model', fallback='glm-4.5-flash')
+        zai_model = config_parser_object.get('API', 'zai_model', fallback='glm-5.3-flash')
         zai_api_base_url = config_parser_object.get('API', 'zai_api_base_url', fallback='https://api.z.ai/api/paas/v4')
         zai_streaming = config_parser_object.get('API', 'zai_streaming', fallback='False')
         zai_temperature = config_parser_object.get('API', 'zai_temperature', fallback='0.7')
         zai_top_p = config_parser_object.get('API', 'zai_top_p', fallback='0.95')
-        zai_max_tokens = config_parser_object.get('API', 'zai_max_tokens', fallback='4096')
+        zai_max_tokens = config_parser_object.get('API', 'zai_max_tokens', fallback=None) or None
         zai_api_timeout = config_parser_object.get('API', 'zai_api_timeout', fallback='90')
         zai_api_retries = config_parser_object.get('API', 'zai_api_retry', fallback='3')
         zai_api_retry_delay = config_parser_object.get('API', 'zai_api_retry_delay', fallback='1')
@@ -3940,11 +3940,11 @@ def load_and_log_configs(
         bedrock_api_key = env.get('BEDROCK_API_KEY') or env.get('AWS_BEARER_TOKEN_BEDROCK') or config_parser_object.get('API', 'bedrock_api_key', fallback=None)
         bedrock_region = env.get('BEDROCK_REGION') or config_parser_object.get('API', 'bedrock_region', fallback='us-west-2')
         bedrock_runtime_endpoint = env.get('BEDROCK_RUNTIME_ENDPOINT') or config_parser_object.get('API', 'bedrock_runtime_endpoint', fallback=None)
-        bedrock_model = env.get('BEDROCK_MODEL') or config_parser_object.get('API', 'bedrock_model', fallback=None)
+        bedrock_model = env.get('BEDROCK_MODEL') or config_parser_object.get('API', 'bedrock_model', fallback='openai.gpt-oss-20b-1:0')
         bedrock_streaming = config_parser_object.get('API', 'bedrock_streaming', fallback='False')
         bedrock_temperature = config_parser_object.get('API', 'bedrock_temperature', fallback='0.7')
         bedrock_top_p = config_parser_object.get('API', 'bedrock_top_p', fallback='')
-        bedrock_max_tokens = config_parser_object.get('API', 'bedrock_max_tokens', fallback='')
+        bedrock_max_tokens = config_parser_object.get('API', 'bedrock_max_tokens', fallback=None) or None
         bedrock_api_timeout = config_parser_object.get('API', 'bedrock_api_timeout', fallback='90')
         bedrock_api_retries = config_parser_object.get('API', 'bedrock_api_retry', fallback='3')
         bedrock_api_retry_delay = config_parser_object.get('API', 'bedrock_api_retry_delay', fallback='5')

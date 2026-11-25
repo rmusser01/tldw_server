@@ -63,7 +63,7 @@ def _zai_request(
 
     logging.debug("Z.AI: Using configured API key")
 
-    current_model = model or zai_config.get("model", "glm-4.5-flash")
+    current_model = model or zai_config.get("model", "glm-5.3-flash")
     current_temp = temp if temp is not None else _safe_cast(zai_config.get("temperature"), float, 0.7)
     current_top_p = maxp if maxp is not None else _safe_cast(zai_config.get("top_p"), float, 0.95)
     current_streaming_cfg = zai_config.get("streaming", False)

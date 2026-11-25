@@ -101,6 +101,14 @@ class GroqAdapter(ChatProvider):
             value = request.get(key)
             if value is not None:
                 payload[key] = value
+        if request.get("max_completion_tokens") is not None:
+            payload.pop("max_tokens", None)
+            payload["max_completion_tokens"] = request["max_completion_tokens"]
+        elif payload["model"] == "openai/gpt-oss-120b" and "max_tokens" in payload:
+            from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import is_bundled_model_endpoint
+
+            if is_bundled_model_endpoint(self.name, payload["model"], self._resolve_base_url(request)):
+                payload["max_completion_tokens"] = payload.pop("max_tokens")
         # Tools and tool_choice gating (consistent with OpenAI-compatible behavior)
         tools = request.get("tools")
         if tools is not None:

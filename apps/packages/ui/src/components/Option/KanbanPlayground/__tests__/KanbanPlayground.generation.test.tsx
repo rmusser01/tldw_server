@@ -193,7 +193,7 @@ const tree = () => (
 async function open() {
   const view = render(tree());
   fireEvent.click(
-    await screen.findByRole("button", { name: "Generate board", exact: true }),
+    await screen.findByRole("button", { name: "Generate board" }),
   );
   // AntD gives its selector and dialog the same test-mode ID; check the dialog and title together.
   const dialog = await screen.findByRole("dialog");
@@ -209,13 +209,12 @@ async function open() {
 }
 async function generate(dialog: HTMLElement) {
   fireEvent.click(
-    within(dialog).getByRole("button", { name: "Generate draft", exact: true }),
+    within(dialog).getByRole("button", { name: "Generate draft" }),
   );
   await waitFor(() =>
     expect(
       within(dialog).getByRole("button", {
         name: "Generate draft",
-        exact: true,
       }),
     ).toBeEnabled(),
   );
@@ -308,7 +307,6 @@ describe("generated Kanban drafts", () => {
     const { dialog } = await open();
     const button = within(dialog).getByRole("button", {
       name: "Generate draft",
-      exact: true,
     });
     expect(button).toBeDisabled();
     fireEvent.click(button);
@@ -338,7 +336,7 @@ describe("generated Kanban drafts", () => {
       stream: false,
     });
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Save board", exact: true }),
+      within(dialog).getByRole("button", { name: "Save board" }),
     );
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(saves()).toHaveLength(1);
@@ -356,13 +354,12 @@ describe("generated Kanban drafts", () => {
     fireEvent.click(
       within(dialog).getByRole("button", {
         name: "Generate draft",
-        exact: true,
       }),
     );
     await waitFor(() => expect(chats()).toHaveLength(1));
     expect(within(dialog).queryByText("Fixture model picker")).not.toBeInTheDocument();
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Stop", exact: true }),
+      within(dialog).getByRole("button", { name: "Stop" }),
     );
     expect(chats()[0].init.signal?.aborted).toBe(true);
     await act(async () => {
@@ -372,7 +369,7 @@ describe("generated Kanban drafts", () => {
       within(dialog).queryByRole("region", { name: "Generated board preview" }),
     ).not.toBeInTheDocument();
     expect(
-      within(dialog).getByRole("button", { name: "Save board", exact: true }),
+      within(dialog).getByRole("button", { name: "Save board" }),
     ).toBeDisabled();
     expect(saves()).toHaveLength(0);
   });
@@ -385,7 +382,6 @@ describe("generated Kanban drafts", () => {
     fireEvent.click(
       within(dialog).getByRole("button", {
         name: "Generate draft",
-        exact: true,
       }),
     );
     await waitFor(() =>
@@ -397,7 +393,7 @@ describe("generated Kanban drafts", () => {
       within(dialog).queryByRole("region", { name: "Generated board preview" }),
     ).not.toBeInTheDocument();
     expect(
-      within(dialog).getByRole("button", { name: "Save board", exact: true }),
+      within(dialog).getByRole("button", { name: "Save board" }),
     ).toBeDisabled();
     expect(saves()).toHaveLength(0);
   });
@@ -409,7 +405,6 @@ describe("generated Kanban drafts", () => {
     fireEvent.click(
       within(dialog).getByRole("button", {
         name: "Generate draft",
-        exact: true,
       }),
     );
     await waitFor(() =>
@@ -433,14 +428,13 @@ describe("generated Kanban drafts", () => {
     await generate(dialog);
     const button = within(dialog).getByRole("button", {
       name: "Save board",
-      exact: true,
     });
     fireEvent.click(button);
     fireEvent.click(button);
     await waitFor(() => expect(saves()).toHaveLength(1));
     expect(dialog).toBeVisible();
     expect(
-      within(dialog).getByRole("button", { name: "Cancel", exact: true }),
+      within(dialog).getByRole("button", { name: "Cancel" }),
     ).toBeDisabled();
     await act(async () => {
       saved = completeBoard(saves()[0].body.data);
@@ -464,7 +458,7 @@ describe("generated Kanban drafts", () => {
     const { dialog } = await open();
     await generate(dialog);
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Save board", exact: true }),
+      within(dialog).getByRole("button", { name: "Save board" }),
     );
     await waitFor(() =>
       expect(within(dialog).getByRole("alert")).toHaveTextContent(
@@ -475,7 +469,7 @@ describe("generated Kanban drafts", () => {
       within(dialog).getByRole("region", { name: "Generated board preview" }),
     ).toHaveTextContent("Calibrate Selene");
     fireEvent.click(
-      await within(dialog).findByRole("button", { name: "Save board", exact: true }),
+      await within(dialog).findByRole("button", { name: "Save board" }),
     );
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(chats()).toHaveLength(1);
@@ -492,7 +486,6 @@ describe("generated Kanban drafts", () => {
       fireEvent.click(
         within(dialog).getByRole("button", {
           name: "Generate draft",
-          exact: true,
         }),
       );
       await waitFor(() => expect(chats()).toHaveLength(1));

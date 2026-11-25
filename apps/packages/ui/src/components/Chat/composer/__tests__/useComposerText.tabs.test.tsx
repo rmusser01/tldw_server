@@ -68,6 +68,7 @@ describe("Playground drafts in distinct native tab storage areas", () => {
         textareaRef: React.createRef<HTMLTextAreaElement>() })
       const deps: UsePlaygroundSubmitDeps & { draftReady: boolean } = {
         ...composer, draftReady: composer.draftReady, isSending, isConnectionReady: true,
+        captureHistorySelection: () => () => true, chatMode: "normal",
         webSearch: false, compareModeActive: false, compareSelectedModels: [], selectedModel: "test",
         fileRetrievalEnabled: false, ragPinnedResults: [], selectedDocuments: [], uploadedFiles: [],
         currentContextSnapshot: {}, conversationTokenCount: 0, characterContextTokenEstimate: 0,

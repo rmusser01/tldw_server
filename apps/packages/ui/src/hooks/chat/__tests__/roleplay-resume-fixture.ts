@@ -1,15 +1,16 @@
 import { resolveHistorySelection } from "@/utils/history-selection"
 import type { HistoryCaptureRequestV1, HistoryCaptureResultV1 } from "@/types/history-selection"
+import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import type { RoleplayResumeUserAppendRequest, RoleplayResumeCompletionRequest } from "@/services/tldw/roleplay-resume"
 
 // Declared server responses; the actual sender, parsers and journal remain under test.
 export const roleplayDetail = (id: string, tailId: string | null) => ({
-  id, scope_type: "global", workspace_id: null,
+  id, title: "Saved role-play", created_at: "2026-10-07T00:00:00Z", scope_type: "global", workspace_id: null,
   behavior_snapshot: { status: "valid", schema_version: 1, digest: "sha256:" + "c".repeat(64) },
   resume_eligible: true, resume_ineligible_reason: null,
   settings_version: 4, history_version: 9,
   tail: { message_id: tailId, message_version: tailId === null ? null : 1 }
-})
+} satisfies ServerChatSummary)
 
 export const roleplayAppend = (id: string, input: RoleplayResumeUserAppendRequest) => ({
   version: 1 as const, conversation_id: id, message_id: input.message_id, message_version: 1,

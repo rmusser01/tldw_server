@@ -159,7 +159,7 @@ describe(
     it("final edited-result publication cannot overwrite a synchronous replacement draft", async () => {
       const view = await renderWithSavedChat()
       const replacement = [
-        { id: "new-user", isBot: false, name: "You", message: "NEW DRAFT" }
+        { id: "new-user", isBot: false, name: "You", message: "NEW DRAFT", sources: [] }
       ]
       let replaced = false
       const unsubscribe = useStoreMessageOption.subscribe((state, previous) => {

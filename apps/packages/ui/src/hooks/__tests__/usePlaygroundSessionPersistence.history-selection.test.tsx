@@ -660,7 +660,7 @@ it.each(["local", "native-global", "native-workspace"])("installs a saved %s dra
   mount()
   await waitFor(() => expect(outcome).toBe("restored"))
   expect(useStoreMessageOption.getState().chatDraftAddress).toEqual(address)
-  expect(controller.getCurrent().owner?.conversation_id).toBe(address.id)
+  expect(controller.getCurrent().owner).toMatchObject({ conversation_id: address.id })
 })
 
 it.each(["local-profile", "native-owner"])("rejects a mismatched saved %s address after H1 qualification", async kind => {

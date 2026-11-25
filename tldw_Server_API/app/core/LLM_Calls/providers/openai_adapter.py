@@ -163,14 +163,30 @@ class OpenAIAdapter(ChatProvider):
 
     def _build_openai_payload(self, request: dict[str, Any]) -> dict[str, Any]:
         payload = build_openai_chat_payload(request)
-        # gpt-5 models use max_completion_tokens and reject top_p
+        from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import is_bundled_model_endpoint
+
         model = payload.get("model")
-        if isinstance(model, str) and model.lower().startswith("gpt-5"):
+        bundled = model == "gpt-6-luna" and is_bundled_model_endpoint(self.name, model, self._resolve_base_url(request))
+        if bundled or (isinstance(model, str) and model.lower().startswith("gpt-5")):
             if "max_tokens" in payload and "max_completion_tokens" not in payload:
                 payload["max_completion_tokens"] = payload.pop("max_tokens")
             else:
                 payload.pop("max_tokens", None)
-            payload.pop("top_p", None)
+            if model.lower().startswith("gpt-5"):
+                payload.pop("top_p", None)
+        if bundled and "reasoning_effort" not in (request.get("extra_body") or {}):
+            payload["reasoning_effort"] = request.get("reasoning_effort") or "none"
+        return payload
+
+    def _finalize_openai_payload(self, payload: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+        from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import is_bundled_model_endpoint
+
+        payload = merge_extra_body(payload, request)
+        if payload.get("reasoning_effort") not in (None, "none") and is_bundled_model_endpoint(
+            self.name, payload.get("model"), self._resolve_base_url(request)
+        ):
+            for key in ("temperature", "top_p", "top_logprobs", "logprobs"):
+                payload.pop(key, None)
         return payload
 
     def _openai_base_url(self) -> str:
@@ -249,7 +265,7 @@ class OpenAIAdapter(ChatProvider):
             payload["stream"] = False
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
             payload, cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
-            payload = merge_extra_body(payload, request)
+            payload = self._finalize_openai_payload(payload, request)
             headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
                 resolved_timeout = self._resolve_timeout(request, timeout)
@@ -300,7 +316,7 @@ class OpenAIAdapter(ChatProvider):
             payload["stream"] = True
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
             payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
-            payload = merge_extra_body(payload, request)
+            payload = self._finalize_openai_payload(payload, request)
             headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
                 # Inside the try: a malformed base URL (``http://[::1``) fails as a sanitized provider error.

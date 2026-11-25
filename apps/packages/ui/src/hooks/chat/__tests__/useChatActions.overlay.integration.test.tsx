@@ -2,6 +2,7 @@ import "./native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import React from "react"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { useStoreChatModelSettings } from "@/store/model"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -18,7 +19,7 @@ const {
     createChatMock: vi.fn(),
     normalChatModeMock: vi.fn(),
     streamCharacterChatCompletionMock: vi.fn(),
-    syncChatSettingsForServerChatMock: vi.fn(async () => null),
+    syncChatSettingsForServerChatMock: vi.fn<typeof import("@/services/chat-settings").syncChatSettingsForServerChat>(async () => null),
     saveLocalSuccessMock: vi.fn()
   }))
 
@@ -158,13 +159,17 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+type HookOptions = Parameters<typeof useOriginalSdkSceneFixture>[0]
+
 const createHookOptions = () => ({
-  t: (_key: string, fallback?: string) => fallback || _key,
+  t: ((_key: string, fallback?: string) => fallback || _key) as HookOptions["t"],
   notification: {
     error: vi.fn(),
     warning: vi.fn(),
     info: vi.fn(),
-    success: vi.fn()
+    success: vi.fn(),
+    open: vi.fn(),
+    destroy: vi.fn()
   },
   abortController: null,
   setAbortController: vi.fn(),
@@ -182,6 +187,7 @@ const createHookOptions = () => ({
   toolChoice: "auto" as const,
   webSearch: false,
   currentChatModelSettings: {
+    ...useStoreChatModelSettings.getInitialState(),
     apiProvider: "openai",
     setSystemPrompt: vi.fn()
   },
@@ -222,7 +228,7 @@ const createHookOptions = () => ({
   setServerChatClusterId: vi.fn(),
   setServerChatSource: vi.fn(),
   setServerChatExternalRef: vi.fn(),
-  ensureServerChatHistoryId: vi.fn(async () => "history-overlay"),
+  ensureServerChatHistoryId: vi.fn<HookOptions["ensureServerChatHistoryId"]>(async () => "history-overlay"),
   contextFiles: [],
   setContextFiles: vi.fn(),
   documentContext: null,
@@ -256,10 +262,10 @@ const createHookOptions = () => ({
   messageSteeringMode: "none" as const,
   messageSteeringForceNarrate: false,
   clearMessageSteering: vi.fn()
-})
+} satisfies HookOptions)
 
 const entryAccount = { requestScope: { config: { serverUrl: "https://chat.test", authMode: "single-user" as const }, userId: null }, scopeInvalidatedSignal: new AbortController().signal }
-const useChatActions = (options: Parameters<typeof useOriginalSdkSceneFixture>[0]) =>
+const useChatActions = (options: HookOptions) =>
   useOriginalSdkSceneFixture(options, () => entryAccount)
 
 describe("useChatActions overlay integration", () => {
@@ -282,7 +288,7 @@ describe("useChatActions overlay integration", () => {
 
   it("routes overlay character selections through normal chat mode without creating tracked chats", async () => {
     const options = createHookOptions()
-    const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -351,7 +357,7 @@ describe("useChatActions overlay integration", () => {
         }
       )
       const hook = renderHook(() =>
-        useChatActions(options as Parameters<typeof useChatActions>[0])
+        useChatActions(options)
       )
       const submission = hook.result.current.onSubmit({
         message: "Overlay request",
@@ -455,7 +461,7 @@ describe("useChatActions overlay integration", () => {
         }
       )
       const hook = renderHook(() =>
-        useChatActions(options as Parameters<typeof useChatActions>[0])
+        useChatActions(options)
       )
       const submission = hook.result.current.onSubmit({
         message: "Current question",
@@ -494,7 +500,7 @@ describe("useChatActions overlay integration", () => {
       ...createHookOptions(), serverChatId: "server-chat-42",
       serverChatCharacterId: "saved-character", serverChatMetaLoaded: true
     }
-    const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
     await act(async () => {
       expect(await result.current.onSubmit({ message: "Retain this draft", image: "" })).toMatchObject({
         status: "failed", restoreDraft: true
@@ -529,7 +535,7 @@ describe("useChatActions overlay integration", () => {
       })
     })
 
-    const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({

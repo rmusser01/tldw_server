@@ -938,6 +938,14 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         if key not in request:
             request[key] = value
 
+    if request.get("max_completion_tokens") is not None:
+        from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import NATIVE_COMPLETION_TOKEN_PROVIDERS
+
+        if provider in NATIVE_COMPLETION_TOKEN_PROVIDERS or custom_openai_provider_number(provider) is not None:
+            request.pop("max_tokens", None)
+        else:
+            request["max_tokens"] = request.pop("max_completion_tokens")
+
     provenance = chat_args.get("_endpoint_provenance")
     if (
         custom_openai_provider_number(provider) is not None

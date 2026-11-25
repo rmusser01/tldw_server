@@ -18,6 +18,7 @@ import { useActorEditorPrefs, useActorStore } from "@/store/actor"
 import {
   HistorySelectionContext,
   useHistorySelection,
+  type HistoryLoadReceipt,
   type HistorySelectionController
 } from "@/hooks/chat/useHistorySelection"
 import { createDefaultActorSettings } from "@/types/actor"
@@ -47,7 +48,7 @@ const io = vi.hoisted(() => ({
   realActorEditor: false,
   characterId: "character-one",
   retries: [] as Array<() => unknown>,
-  accountCurrent: () => true,
+  accountCurrent: (): boolean => true,
   finishes: [] as Array<(values: Record<string, unknown>) => unknown>,
   confirmations: [] as Array<import("antd").ModalFuncProps>
 }))
@@ -210,6 +211,14 @@ const seedOwnedRecord = (key: string, value: unknown) =>
   io.values.set(key, { value, updatedAt: 1 })
 const ownedRecordValue = (key: string) =>
   (io.values.get(key) as { value: unknown } | undefined)?.value
+const editorView = (conversationId: string, ownerKey: string): HistoryLoadReceipt["view"] => ({
+  view_session_id: `scene-editor:${conversationId}`,
+  conversation_id: conversationId,
+  owner_key: ownerKey,
+  interpretation: { kind: "parent_graph_v1" },
+  cursor: { kind: "empty" },
+  selection_revision: 0
+})
 let declaredReceipt: {
   owner: {
     kind: "native"
@@ -218,7 +227,7 @@ let declaredReceipt: {
     request_scope: typeof editorRequestScope
     validate_lease: () => boolean
   }
-  view: { conversation_id: string; owner_key: string }
+  view: HistoryLoadReceipt["view"]
   account: () => boolean
 } | null = null
 // These legacy editor cases declare accepted H1 ownership; actual H1 epoch/fence tests keep their controller methods.
@@ -238,7 +247,7 @@ const declaredEditorReceipt = () => {
         request_scope: editorRequestScope,
         validate_lease: account
       },
-      view: { conversation_id: id, owner_key: "qualified-h1" },
+      view: editorView(id, "qualified-h1"),
       account
     }
   }
@@ -259,11 +268,7 @@ const target = (serverChatId: string) => {
     serverChatAssistantKind: null
   })
   declaredReceipt = null
-  captureChatDraftLoad("switch")(
-    declaredEditorReceipt() as unknown as Parameters<
-      ReturnType<typeof captureChatDraftLoad>
-    >[0]
-  )
+  captureChatDraftLoad("switch")(declaredEditorReceipt())
 }
 const editorClients = new Set<QueryClient>()
 let consoleErrorSpy: { mockRestore: () => void } | undefined
@@ -278,10 +283,10 @@ const mountEditor = (
   const controller = selection
     ? selection.getCurrent().owner
       ? selection
-      : ({
+      : {
           ...selection,
-          getCurrent: declaredEditorReceipt
-        } as HistorySelectionController)
+          getCurrent: () => ({ ...selection.getCurrent(), ...declaredEditorReceipt() })
+        }
     : editorFixtureController
   const content = (visible: boolean, currentSelection = controller) => (
     <HistorySelectionContext.Provider value={currentSelection}>
@@ -871,7 +876,7 @@ it("does not apply a held Scene Director reset to a newly selected scene", async
   mountEditor("model")
   fireEvent.click(await screen.findByRole("tab", { name: /scene director/i }))
   fireEvent.click(await screen.findByRole("button", { name: "Reset for this chat" }))
-  const confirm = await screen.findByRole("button", { name: "Confirm", exact: true })
+  const confirm = await screen.findByRole("button", { name: "Confirm" })
   act(() => target("scene-two"))
   await waitFor(() => expect(useActorStore.getState().settings?.notes).toBe("New scene."))
   fireEvent.click(confirm)
@@ -889,7 +894,7 @@ it("keeps Scene Director presets staged when Cancel is chosen", async () => {
   const preset = await screen.findByRole("button", { name: /slice of life/i })
   const before = useActorStore.getState().settings
   fireEvent.click(preset)
-  fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   expect({ closed: view.close.mock.calls, scene: useActorStore.getState().settings, writes: io.set.mock.calls })
     .toEqual({ closed: [[false]], scene: before, writes: [] })
 }, 15_000)
@@ -917,8 +922,8 @@ it("keeps the standalone scene draft when dirty-close is cancelled", async () =>
   const view = mountEditor("actor")
   const notes = await screen.findByLabelText("Scene notes")
   fireEvent.change(notes, { target: { value: "Staged scene." } })
-  fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
-  fireEvent.click(await screen.findByRole("button", { name: "Keep editing", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Close" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Keep editing" }))
   expect({ closed: view.close.mock.calls.length, notes: (notes as HTMLInputElement).value, writes: io.set.mock.calls })
     .toEqual({ closed: 0, notes: "Staged scene.", writes: [] })
 })
@@ -1238,7 +1243,7 @@ describe.each(["actor", "model"] as const)(
       ).toBeInTheDocument()
       fireEvent.click(screen.getByRole("button", { name: "Reset for this chat" }))
       fireEvent.click(
-        await screen.findByRole("button", { name: "Confirm", exact: true })
+        await screen.findByRole("button", { name: "Confirm" })
       )
       expect(
         screen.queryByText(
@@ -1415,7 +1420,7 @@ const qualifiedSceneEditorSource = (kind: "native" | "local" = "native") => {
         }
   const selected = {
     owner,
-    view: { conversation_id: "scene-one", owner_key: owner.owner_key }
+    view: editorView(owner.conversation_id, owner.owner_key)
   }
   const signal = new AbortController().signal
   const controller = {
@@ -1424,11 +1429,7 @@ const qualifiedSceneEditorSource = (kind: "native" | "local" = "native") => {
     fence: () => () => true,
     draftAccount: { requestScope, isCurrent: () => io.accountCurrent() }
   } as unknown as HistorySelectionController
-  expect(
-    captureChatDraftLoad("switch")(
-      selected as Parameters<ReturnType<typeof captureChatDraftLoad>>[0]
-    )
-  ).toBe(true)
+  expect(captureChatDraftLoad("switch")(selected)).toBe(true)
   useStoreMessageOption.setState({
     historyId: kind === "local" ? "scene-one" : null,
     serverChatId: kind === "native" ? "scene-one" : null
@@ -1596,8 +1597,7 @@ describe.each(["actor", "model"] as const)(
         screen.getByRole("button", { name: "Review saved scene" })
       )
       const confirm = await screen.findByRole("button", {
-        name: "Use my staged edits",
-        exact: true
+        name: "Use my staged edits"
       })
       expect(io.values.get(source.key)).toEqual(competing)
       expect(notes).toHaveValue("My staged replacement.")
@@ -1628,12 +1628,11 @@ describe.each(["actor", "model"] as const)(
           screen.getByRole("button", { name: "Review saved scene" })
         )
         await screen.findByRole("button", {
-          name: "Use my staged edits",
-          exact: true
+          name: "Use my staged edits"
         })
         const old = io.confirmations.at(-1)!
         fireEvent.click(
-          screen.getByRole("button", { name: "Keep editing", exact: true })
+          screen.getByRole("button", { name: "Keep editing" })
         )
         if (outcome === "superseded") {
           io.values.set(source.key, {
@@ -1685,8 +1684,7 @@ describe.each(["actor", "model"] as const)(
         screen.getByRole("button", { name: "Review saved scene" })
       )
       const confirm = await screen.findByRole("button", {
-        name: "Use my staged edits",
-        exact: true
+        name: "Use my staged edits"
       })
       fireEvent.change(notes, { target: { value: "Staged B." } })
       fireEvent.click(confirm)

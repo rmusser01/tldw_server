@@ -99,12 +99,12 @@ it.each(["Close", "reopen", "unmount"])(
     fireEvent.click(opener)
     const help = await screen.findByRole("dialog", { name: "Page Help" })
     const originalStart = retainedClick(
-      within(help).getByRole("button", { name: "Start", exact: true })
+      within(help).getByRole("button", { name: "Start" })
     )
     if (boundary === "unmount") mounted.unmount()
     else {
       fireEvent.click(
-        within(help).getByRole("button", { name: "Close", exact: true })
+        within(help).getByRole("button", { name: "Close" })
       )
       if (boundary === "reopen") {
         opener.focus()
@@ -173,7 +173,7 @@ it.each([false, true])(
     )
     const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" })
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Close", exact: true })
+      within(dialog).getByRole("button", { name: "Close" })
     )
     if (reopen)
       fireEvent.click(screen.getByRole("button", { name: "Open Notes help" }))
@@ -214,7 +214,7 @@ it("warm actual Quick Helper transfers its original opener through removal and r
   fireEvent.click(opener)
   const warm = await screen.findByRole("dialog")
   fireEvent.click(
-    within(warm).getByRole("button", { name: "Close", exact: true })
+    within(warm).getByRole("button", { name: "Close" })
   )
   await waitFor(() =>
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
