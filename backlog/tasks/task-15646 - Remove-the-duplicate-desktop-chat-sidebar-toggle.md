@@ -1,5 +1,5 @@
 ---
-id: TASK-15635
+id: TASK-15646
 title: Remove the duplicate desktop chat sidebar toggle
 status: Done
 labels:
@@ -29,6 +29,7 @@ Follow-up to TASK-15493. Use the existing persistent-sidebar rendering predicate
 Two layout integration cases reproduced the duplicate before the change. The two layout conditions now keep only the desktop rail control whenever the persistent sidebar renders. Updated the shared research UAT script to locate the existing page-launcher button for geometry and the single accessible sidebar button for opening Chats. Verified 211 focused tests and scoped ESLint, plus local Chromium at 1440px for arrow expansion and collapse and at 390px for hamburger opening and keyboard dismissal. The live shared research UAT and hosted rollout were outside this check. Bandit is inapplicable to the TS/JS-only diff.
 Renumbered from TASK-15494 while refreshing PR #3468. The original ID on dev belongs to the v0.1.47 release record, which is retained unchanged. The sidebar task still references TASK-15493. ADR-059 and ADR-084 govern the ID correction. ADR required: no. The navigation change reuses the existing header callbacks and persistent-sidebar predicate.
 Independent review found that the only desktop toggle could lose focus when the compact and expanded sidebar controls exchange places. The existing two views now transfer focus to the replacement only when the outgoing control held focus and focus returned to the document. Pressing Enter in each state fails without the change and passes with it. The focused shared and WebUI selections passed 348 and 179 tests respectively, including existing Find conversations and mobile drawer behavior.
+TASK-15635 was also assigned to the shared UI typecheck record that landed in #3607. This sidebar record has a fresh ID and still references TASK-15493.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
