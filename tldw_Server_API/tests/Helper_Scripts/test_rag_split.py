@@ -1083,7 +1083,7 @@ def test_is_pkg_uses_the_manifests_package_name() -> None:
 # --- fix round 1: refusals ---
 
 
-@pytest.mark.parametrize(("key", "hint"), [("relocate", "not supported yet"), ("typo", "unknown")])
+@pytest.mark.parametrize(("key", "hint"), [("relocate", "top-level manifest keys, not move keys"), ("typo", "unknown")])
 def test_unsupported_move_keys_are_refused(tmp_path: Path, key: str, hint: str) -> None:
     mv = {**moves()[0], key: ["e"]}
     t = Tree(tmp_path, moves=[mv])

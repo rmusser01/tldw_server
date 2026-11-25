@@ -124,7 +124,7 @@ from typing import Any, NamedTuple
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
-PART2_KEYS = {"relocate"}
+TOP_LEVEL_ONLY_KEYS = {"relocate"}
 MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals", "args"}
 LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
 DEFAULTS: dict[str, Any] = {
@@ -436,7 +436,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
                     raise SplitError(f"{path}: move {spec.get('name')}: args must be a list of distinct names")
                 extra = sorted(set(spec) - MOVE_KEYS)
                 if extra:
-                    hint = "not supported yet (TASK-13950.25 part 2/3)" if set(extra) <= PART2_KEYS else "unknown"
+                    hint = "top-level manifest keys, not move keys" if set(extra) <= TOP_LEVEL_ONLY_KEYS else "unknown"
                     raise SplitError(f"{path}: move {spec.get('name')}: keys {extra} are {hint}")
             if m["pkg"] == "":
                 bad = [k for k in ("publish", "hoist", "classes", "entry_split", "prologue", "state_init", "hidden") if m[k]]
