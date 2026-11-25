@@ -1083,14 +1083,14 @@ def test_is_pkg_uses_the_manifests_package_name() -> None:
 # --- fix round 1: refusals ---
 
 
-@pytest.mark.parametrize("key", ["rewrite_in", "free_imports", "relocate"])
+@pytest.mark.parametrize("key", ["relocate"])
 def test_part_2_and_3_manifest_keys_are_refused(tmp_path: Path, key: str) -> None:
     t = Tree(tmp_path, **{key: {}})
     with pytest.raises(rag_split.SplitError, match=rf"{key}.*not supported yet \(TASK-13950.25 part 2/3\)"):
         rag_split.load_manifest(t.manifest_path)
 
 
-@pytest.mark.parametrize(("key", "hint"), [("rewrite_in", "not supported yet"), ("typo", "unknown")])
+@pytest.mark.parametrize(("key", "hint"), [("relocate", "not supported yet"), ("typo", "unknown")])
 def test_unsupported_move_keys_are_refused(tmp_path: Path, key: str, hint: str) -> None:
     mv = {**moves()[0], key: ["e"]}
     t = Tree(tmp_path, moves=[mv])
@@ -2030,3 +2030,115 @@ def test_moves_and_lifts_inside_a_loop_are_refused(tmp_path: Path, capsys: pytes
     assert t.run("apply") == 1
     out = capsys.readouterr().out
     assert "step: the span sits inside the loop" in out and "lifted _note sits inside the loop" in out
+
+
+# --- rewrite_in (part 3): names local to a nested def go onto the call state ---
+
+RI_BASE = textwrap.dedent(
+    '''\
+    import os
+
+
+    async def call(a):
+        """Doc."""
+        shared = os.getenv("A")
+
+        def gen(items):
+            seq = 0
+            held = []
+            sid = shared
+
+            def _emit(x):
+                nonlocal seq
+                seq += 1
+                held.append(x)
+                return sid
+
+            def _flush():
+                nonlocal seq, held
+                held = []
+                return seq
+
+            for it in items:
+                yield _emit(it)
+            yield _flush()
+
+        return gen(a)
+    '''
+)
+RI_ALL = {"seq": "cst.seq", "held": "cst.held", "sid": "cst.sid"}
+
+
+def ri_tree(tmp: Path, src: str = RI_BASE, rewrite_in: dict | None = None, **extra: object) -> Tree:
+    rewrite_in = {"gen": RI_ALL} if rewrite_in is None else rewrite_in
+    return Tree(tmp, src, **{**CHAT, "rewrite": {"shared": "cst.shared"}, "rewrite_in": rewrite_in, **extra})
+
+
+def test_rewrite_in_rewrites_a_defs_locals_and_drops_their_nonlocals(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = ri_tree(tmp_path)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    out = t.text(CHAT_FILE)
+    assert "cst.seq = 0\n" in out and "cst.held = []\n" in out and "cst.sid = cst.shared\n" in out
+    assert "nonlocal" not in out and "cst.seq += 1" in out and "cst.held.append(x)" in out and "return cst.sid" in out
+    assert "return cst.seq" in out and "yield _emit(it)" in out
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_rewrite_in_leaves_other_nonlocal_names_and_other_scopes_alone(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = ri_tree(tmp_path, rewrite_in={"gen": {"seq": "cst.seq", "sid": "cst.sid"}})
+    assert t.run("apply") == 0, capsys.readouterr().out
+    out = t.text(CHAT_FILE)
+    assert "nonlocal held\n" in out and "nonlocal seq" not in out and "held = []\n" in out and "cst.held" not in out
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_rewrite_in_and_rewrite_apply_to_one_nonlocal_statement(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = RI_BASE.replace("nonlocal seq, held", "nonlocal seq, shared")
+    t = ri_tree(tmp_path, src, rewrite_in={"gen": {"seq": "cst.seq"}})
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert "nonlocal" not in t.text(CHAT_FILE).split("def _flush")[1]
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("rewrite_in", "src_edit", "needle"),
+    [
+        ({"gen": {**RI_ALL, "sid": "cst.shared"}}, None, "V16: rewrite_in gen.sid -> cst.shared collides"),
+        ({"gen": {**RI_ALL, "sid": "cst.seq"}}, None, "V16: rewrite_in gen.sid -> cst.seq collides"),
+        ({"gen": {"seq": "cst.seq", "nope": "cst.nope"}}, None, "V16: rewrite_in gen.nope is not a local of gen"),
+        ({"gen": {"items": "cst.items"}}, None, "V16: rewrite_in gen.items is a parameter of gen"),
+        ({"gone": {"seq": "cst.seq"}}, None, "V16: rewrite_in: expected one def gone"),
+        ({"gen": {"sid": "cst.sid"}}, ("yield _flush()", "try:\n            pass\n        except Exception as sid:\n            pass"), "V5: line"),
+        ({"gen": {"sid": "cst.sid"}}, ("sid = shared", "import json as sid"), "V5: line"),
+        ({"gen": {"sid": "cst.sid"}}, ("sid = shared", "def sid():\n            pass"), "V5: line"),
+    ],
+)
+def test_rewrite_in_refusals(tmp_path: Path, capsys: pytest.CaptureFixture, rewrite_in: dict, src_edit: tuple[str, str] | None, needle: str) -> None:
+    src = RI_BASE.replace(*src_edit, 1) if src_edit else RI_BASE
+    t = ri_tree(tmp_path, src, rewrite_in=rewrite_in)
+    assert t.run("apply") == 1
+    assert needle in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad", [{"gen": {"seq": "cst.seq()"}}, {"gen": {"seq": 1}}, {"gen": {}}, {"gen": ["seq"]}, ["gen"], {"gen": {"a b": "cst.x"}}])
+def test_rewrite_in_shape_is_checked(tmp_path: Path, bad: object) -> None:
+    t = ri_tree(tmp_path, rewrite_in=bad)  # type: ignore[arg-type]
+    with pytest.raises(rag_split.SplitError, match="rewrite_in must map a def name"):
+        rag_split.load_manifest(t.manifest_path)
+
+
+def test_rewrite_in_verify_rejects_a_left_name_and_a_kept_nonlocal(tmp_path: Path) -> None:
+    t = ri_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, CHAT_FILE, "cst.seq = 0", "seq = 0")
+    assert t.run("verify") == 1
+    t = ri_tree(tmp_path / "b")
+    assert t.run("apply") == 0
+    _edit(t, CHAT_FILE, "def _emit(x):\n", "def _emit(x):\n            nonlocal seq\n")
+    assert t.run("verify") == 1
+
+
+def test_rewrite_in_names_are_reserved_by_v8(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = RI_BASE.replace("    shared = os.getenv", "    cst = 1\n    shared = os.getenv")
+    t = ri_tree(tmp_path, src)
+    assert t.run("apply") == 1 and "V8: cst is already a name" in capsys.readouterr().out

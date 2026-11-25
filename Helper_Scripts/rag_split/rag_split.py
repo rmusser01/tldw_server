@@ -99,8 +99,7 @@ from typing import Any, NamedTuple
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
-PART2_KEYS = {"rewrite_in", "free_imports", "relocate"}
-PART3_KEYS = {"rewrite_in", "free_imports", "relocate"}
+PART2_KEYS = {"relocate"}
 MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals", "args"}
 LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
 DEFAULTS: dict[str, Any] = {
@@ -132,6 +131,8 @@ DEFAULTS: dict[str, Any] = {
     "entry": None,
     "drop": [],
     "late_imports": [],
+    "rewrite_in": {},
+    "free_imports": {},
 }
 NEW = object()  # a node the tool created: it carries no scope annotation
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -438,6 +439,15 @@ def load_manifest(path: Path) -> dict[str, Any]:
                     raise SplitError(f"{path}: lift needs pkg '' (the destination modules are siblings of the source)")
                 if not isinstance(m["lift"], dict) or not all(isinstance(k, str) and isinstance(v, str) and v for k, v in m["lift"].items()):
                     raise SplitError(f"{path}: lift must map a def name to a module name")
+            ri = m["rewrite_in"]
+            if not (isinstance(ri, dict) and all(isinstance(k, str) and isinstance(v, dict) and v and all(isinstance(a, str) and a.isidentifier() and _is_target(e) for a, e in v.items()) for k, v in ri.items())):
+                raise SplitError(f"{path}: rewrite_in must map a def name to {{local name: 'cst.x' (a name or an attribute chain)}}")
+            fi = m["free_imports"]
+            if fi:
+                if m["pkg"] != "":
+                    raise SplitError(f"{path}: free_imports needs pkg ''")
+                if not (isinstance(fi, dict) and all(isinstance(k, str) and isinstance(v, str) and _is_import_of(v, k) for k, v in fi.items())):
+                    raise SplitError(f"{path}: free_imports must map a name to one import line that binds exactly that name")
             if m["publish"] and m["facade"] == "cs":
                 raise SplitError(f"{path}: publish is refused when facade is 'cs' (R6)")
             if not m["ctx"] or any(not (isinstance(c, list) and len(c) == 2 and all(isinstance(x, str) for x in c)) for c in m["ctx"]):
@@ -449,6 +459,21 @@ def load_manifest(path: Path) -> dict[str, Any]:
                     raise SplitError(f"{path}: {key} needs entry_split")
             return m
     raise SplitError(f"{path}: no MANIFEST literal")
+
+
+def _is_target(text: Any) -> bool:
+    try:
+        return isinstance(text, str) and isinstance(ast.parse(text, mode="eval").body, (ast.Name, ast.Attribute))
+    except SyntaxError:
+        return False
+
+
+def _is_import_of(line: str, name: str) -> bool:
+    try:
+        body = ast.parse(line).body
+    except SyntaxError:
+        return False
+    return len(body) == 1 and isinstance(body[0], (ast.Import, ast.ImportFrom)) and [_bound(a) for a in body[0].names] == [name]
 
 
 def is_sibling(m: dict) -> bool:
@@ -1022,6 +1047,52 @@ class Rewriter(ast.NodeTransformer):
         return node
 
 
+def plan_rewrite_in(m: dict, src: Src) -> tuple[list[tuple[Any, Any, dict]], list[str]]:
+    """``[(def, its scope, {name: expr})]`` for ``rewrite_in``, and the V5/V16 refusals.
+
+    The names are locals of a def nested in the function; the replacement expressions must differ from every other
+    replacement, or two variables would share one ``cst`` slot.
+    """
+    fn = src.fn
+    out: list[tuple[Any, Any, dict]] = []
+    errs: list[str] = []
+    seen = list(m["rewrite"].values())
+    for dname, rw in m["rewrite_in"].items():
+        hits = [n for n in ast.walk(fn) if isinstance(n, DEFS) and n is not fn and n.name == dname]
+        if len(hits) != 1:
+            errs.append(f"V16: rewrite_in: expected one def {dname} in {fn.name}, found {len(hits)}")
+            continue
+        d = hits[0]
+        key = src.scopes.tab_of[id(d)]
+        a = d.args
+        params = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x}
+        bound = f_bound(d, key)
+        for name, expr in rw.items():
+            if expr in seen:
+                errs.append(f"V16: rewrite_in {dname}.{name} -> {expr} collides with another rewritten name; two variables would share one slot")
+            seen.append(expr)
+            if name in params:
+                errs.append(f"V16: rewrite_in {dname}.{name} is a parameter of {dname}; its value never reaches {expr}")
+            elif name not in bound:
+                errs.append(f"V16: rewrite_in {dname}.{name} is not a local of {dname}")
+        for n in ast.walk(d):
+            bad = None
+            if isinstance(n, ast.ExceptHandler) and n.name in rw and is_f(n, key):
+                bad = "except ... as"
+            elif isinstance(n, ast.NamedExpr) and n.target.id in rw and is_f(n.target, key):
+                bad = "a walrus"
+            elif isinstance(n, (ast.Import, ast.ImportFrom)) and any(r is key and _bound(x) in rw for x, r in zip(n.names, n._rs)):  # type: ignore[attr-defined]
+                bad = "an import"
+            elif isinstance(n, ast.Global) and set(n.names) & set(rw):
+                bad = "a global statement"
+            elif isinstance(n, SCOPE_NODES) and n is not d and getattr(n, "name", None) in rw and is_f(n, key):
+                bad = "a def or class"
+            if bad:
+                errs.append(f"V5: line {n.lineno}: a name mapped by rewrite_in {dname} is bound by {bad}")
+        out.append((d, key, rw))
+    return out, errs
+
+
 class Methodize(ast.NodeTransformer):
     """state -> self, rcfg -> self.rcfg (V6)."""
 
@@ -1339,6 +1410,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # V8: a name the manifest introduces must not already be used in the function.
     used = fn_names(fn)
     intro = {t.split(".")[0] for t in rewrite.values()} | ({"rcfg"} if hidden else set()) | ({"state"} if publish else set())
+    intro |= {t.split(".")[0] for rw in m["rewrite_in"].values() for t in rw.values()}
     sm, sc = m["state_module"], m["state_class"]
     intro |= {ctx_names(m)[0]} if m["prologue"] else set()
     intro |= {"state", f"_{sm}"} if m["state_init"] else set()
@@ -1386,6 +1458,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             bad = "a def or class" + (" (a published def must be the only binding of its name)" if isinstance(n, DEFS) and n.name in publish else "")
         if bad:
             out.errors.append(f"V5: line {n.lineno}: a mapped name is bound by {bad}")
+    ri_plan, ri_errs = plan_rewrite_in(m, src)
+    out.errors += ri_errs
     for n in publish:
         if not any(isinstance(s, DEFS) and s.name == n for b in own_blocks(fn) for s in b):
             out.errors.append(f"V5: publish: no closure {n} in {fn.name}")
@@ -1437,6 +1511,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
 
     for s in fn.body:
         Rewriter(key, rewrite, hidden).visit(s)
+    for d, dkey, rw in ri_plan:
+        Rewriter(dkey, rw, {}).visit(d)
     names = src.names
     up = UpTransform(names, src.exempt, m["facade"], bump=not is_sibling(m))
     for old, (block, d) in class_defs.items():
@@ -1921,15 +1997,18 @@ def row_end(lines: list[bytes], row: int) -> int:
 def gather(src: Src, m: dict, lines: list[bytes]) -> tuple[list[Edit], list[Cut]]:
     fn, key = src.fn, src.key
     rewrite, hidden, publish = m["rewrite"], m["hidden"], set(m["publish"])
+    scopes = [(key, rewrite)] + [(k, rw) for _, k, rw in plan_rewrite_in(m, src)[0]]  # rewrite_in: the nested def's own scope
+    gone = lambda x, r: any(r is k and x in rw for k, rw in scopes)  # noqa: E731
     edits: list[Edit] = []
     cuts: list[Cut] = []
     for n in ast.walk(fn):
-        if isinstance(n, ast.Name) and is_f(n, key) and n.id in rewrite:
-            edits.append(Edit(*pos(n), rewrite[n.id], True))
+        hit = next((rw[n.id] for k, rw in scopes if isinstance(n, ast.Name) and is_f(n, k) and n.id in rw), None)
+        if hit is not None:
+            edits.append(Edit(*pos(n), hit, True))
         elif isinstance(n, ast.Call) and (hit := hidden_match(n, key, hidden)):
             edits.append(Edit(*pos(n), f"rcfg.{hit[0]}.{hit[1]}", True))
-        elif isinstance(n, ast.Nonlocal) and any(r is key and x in rewrite for x, r in zip(n.names, n._rs)):  # type: ignore[attr-defined]
-            keep = [x for x, r in zip(n.names, n._rs) if not (r is key and x in rewrite)]  # type: ignore[attr-defined]
+        elif isinstance(n, ast.Nonlocal) and any(gone(x, r) for x, r in zip(n.names, n._rs)):  # type: ignore[attr-defined]
+            keep = [x for x, r in zip(n.names, n._rs) if not gone(x, r)]  # type: ignore[attr-defined]
             if keep:
                 edits.append(Edit(*pos(n), "nonlocal " + ", ".join(keep)))
             else:
