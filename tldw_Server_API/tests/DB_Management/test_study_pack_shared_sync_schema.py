@@ -42,6 +42,8 @@ def test_actual_worker_persists_pack_in_each_content_schema(request, tmp_path, m
 
         async def model(self, *, system_prompt, user_prompt):
             assert EVIDENCE in user_prompt
+            if system_prompt.startswith("Verify each flashcard"):
+                return '{"supported":[true]}'
             return json.dumps(
                 {
                     "cards": [

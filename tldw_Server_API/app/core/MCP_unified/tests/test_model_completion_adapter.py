@@ -1265,6 +1265,9 @@ async def test_native_usage_self_cancel_after_paid_receipt_is_not_public_cancell
         h.transport.calls += 1
         if on_receipt is not None:
             on_receipt("valid content")
+        if outcome == "paid":
+            # Let usage self-cancel without waiting for the test to wake inside the 10 ms usage wait.
+            native.finish.set()
         return NormalizedModelCompletion("valid content", 3, 4)
 
     h.transport.complete = transport
@@ -1280,13 +1283,15 @@ async def test_native_usage_self_cancel_after_paid_receipt_is_not_public_cancell
             call.cancel("second-native-usage-human-cancel")
         elif outcome == "shutdown":
             await adapter.shutdown()
-        native.finish.set()
         if outcome == "paid":
             assert call.cancelling() == 0
             assert (await call).content == "valid content"
             assert call.cancelling() == 0
             assert not call.cancelled()
+            # If the usage wait expired, release any pending cleanup before checking warnings.
+            native.finish.set()
         else:
+            native.finish.set()
             with pytest.raises(asyncio.CancelledError) as cancellation:
                 await call
             if outcome == "cancel":

@@ -2,10 +2,8 @@ import asyncio
 import importlib
 import json
 import os
-import shutil
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -34,7 +32,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture()
-def client_with_user(monkeypatch):
+def client_with_user(monkeypatch, tmp_path):
     async def override_user():
         return User(id=222, username="reader", email=None, is_active=True)
 
@@ -42,9 +40,8 @@ def client_with_user(monkeypatch):
     monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
     monkeypatch.setenv("ROUTES_ENABLE", "reading")
 
-    base_dir = Path.cwd() / "Databases" / "test_reading_digest"
-    shutil.rmtree(base_dir, ignore_errors=True)
-    base_dir.mkdir(parents=True, exist_ok=True)
+    # An open SQLite handle can prevent Windows from deleting a reused database.
+    base_dir = tmp_path
     prev_base_dir = settings.get("USER_DB_BASE_DIR")
     settings.USER_DB_BASE_DIR = str(base_dir)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
