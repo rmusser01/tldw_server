@@ -1,6 +1,6 @@
 # Import downloaded avatar packs
 
-Backlog: TASK-15633.
+Backlog: TASK-15648.
 
 In WebUI and the browser extension, Avatar settings lets the user choose a
 native `.tldw-persona-vpack` and review its name, contents and credits. Apply

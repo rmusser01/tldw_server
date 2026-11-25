@@ -27,7 +27,7 @@ from tldw_Server_API.app.api.v1.schemas.buddies import (
     BuddyReplySettings,
     BuddyUpdate,
 )
-from tldw_Server_API.app.core.Buddy.native_pack import MAX_BUDDY_ARCHIVE_BYTES
+from tldw_Server_API.app.core.Buddy import native_pack
 from tldw_Server_API.app.core.Buddy.service import BuddyService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import BuddyConflictError, BuddyNotFoundError
@@ -37,7 +37,6 @@ from tldw_Server_API.app.core.Persona.visual_starter_catalog import PersonaVisua
 router = APIRouter(dependencies=[Depends(check_rate_limit)])
 router.include_router(buddy_turns.router)
 ClientSlot = Annotated[str, Query(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]
-MAX_BUDDY_REQUEST_BYTES = MAX_BUDDY_ARCHIVE_BYTES + 1024 * 1024
 
 
 class BuddyUploadRoute(APIRoute):
@@ -47,7 +46,7 @@ class BuddyUploadRoute(APIRoute):
         handler = super().get_route_handler()
 
         async def bounded_handler(request: Request) -> Response:
-            limit = MAX_BUDDY_REQUEST_BYTES
+            limit = native_pack.MAX_BUDDY_ARCHIVE_BYTES + 1024 * 1024
             detail = "The avatar upload is too large."
             declared = request.headers.get("content-length", "").lstrip("0")
             if declared.isascii() and declared.isdecimal() and (

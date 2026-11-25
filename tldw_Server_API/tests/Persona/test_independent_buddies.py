@@ -56,14 +56,13 @@ def _create(client, **updates):
 @pytest.mark.parametrize("route", ["import-preview", "import"])
 @pytest.mark.parametrize("stream", [False, True])
 def test_buddy_upload_rejects_oversized_multipart_request(db, monkeypatch, route, stream):
-    endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.buddies")
-    monkeypatch.setattr(endpoint, "MAX_BUDDY_REQUEST_BYTES", 1024, raising=False)
     parts = [
         b'--pack\r\nContent-Disposition: form-data; name="archive"; filename="pack.zip"\r\n\r\n',
-        b"x" * 2048,
+        b"x" * (2 * 1024 * 1024),
         b"\r\n--pack--\r\n",
     ]
     with _client(db) as client:
+        monkeypatch.setattr("tldw_Server_API.app.core.Buddy.native_pack.MAX_BUDDY_ARCHIVE_BYTES", 1024)
         response = client.post(
             f"/api/v1/buddies/{route}",
             content=iter(parts) if stream else b"".join(parts),
