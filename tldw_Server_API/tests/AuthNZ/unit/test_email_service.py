@@ -11,8 +11,12 @@ import asyncio
 import json
 import pytest
 import os
+import smtplib
+from io import StringIO
 from unittest.mock import patch, MagicMock, AsyncMock
 from pathlib import Path
+
+from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.email_service import EmailService, EMAIL_TEMPLATES
 
@@ -65,6 +69,10 @@ class TestEmailTemplates:
         assert "subject" in EMAIL_TEMPLATES["admin_reauth"]
         assert "html" in EMAIL_TEMPLATES["admin_reauth"]
         assert "text" in EMAIL_TEMPLATES["admin_reauth"]
+
+    def test_email_changed_template_exists(self):
+        """Email-changed notice template should be defined (TASK-15640)."""
+        assert "email_changed" in EMAIL_TEMPLATES
 
 
 class TestEmailServiceInitialization:
@@ -135,6 +143,44 @@ class TestMockEmailSending:
         assert file_names
         invalid_chars = set('<>:"/\\|?*')
         assert all(invalid_chars.isdisjoint(name) for name in file_names)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("provider", "delivery_error", "logged_detail"),
+        [
+            ("mock", None, None),
+            ("smtp", None, None),
+            ("smtp", OSError, "OSError"),
+            ("smtp", lambda text: smtplib.SMTPDataError(554, text), "SMTP code 554"),
+        ],
+        ids=["mock", "smtp-sent", "smtp-failed", "smtp-refused"],
+    )
+    async def test_send_logs_mask_the_recipient(
+        self, monkeypatch, mock_settings, tmp_path, provider, delivery_error, logged_detail
+    ):
+        """Send-path log lines carry a masked recipient and never the full address (TASK-15640)."""
+        recipient = "owner.name@example.org"
+        monkeypatch.setenv("EMAIL_PROVIDER", provider)
+        monkeypatch.setenv("EMAIL_MOCK_OUTPUT", "both")
+        monkeypatch.setenv("EMAIL_MOCK_FILE_PATH", str(tmp_path))
+        service = EmailService(settings=mock_settings)
+
+        def _deliver(_message):
+            if delivery_error:
+                raise delivery_error(f"550 mailbox {recipient} unavailable")
+
+        monkeypatch.setattr(service, "_deliver_smtp_message", _deliver)
+        buffer = StringIO()
+        sink = logger.add(buffer, level="DEBUG")
+        try:
+            await service.send_email(to_email=recipient, subject="Test", html_body="<p>Test</p>", text_body="Test")
+        finally:
+            logger.remove(sink)
+        logs = buffer.getvalue()
+        assert recipient not in logs
+        assert "o***@example.org" in logs
+        if logged_detail:
+            assert logged_detail in logs
 
 
 class TestHeaderInjectionPrevention:
@@ -265,6 +311,24 @@ class TestTemplateEmailSending:
         assert "https://example.com/admin/reauth?token=reauth-token-123" in captured["html_body"]
         assert "https://example.com/admin/reauth?token=reauth-token-123" in captured["text_body"]
         assert captured["redact_mock_tokens"] == "True"
+
+    @pytest.mark.asyncio
+    async def test_send_email_changed_email_masks_the_new_address(self, email_service, monkeypatch):
+        sent: dict[str, object] = {}
+
+        async def _capture(to_email, subject, html_body, text_body=None, **kwargs):
+            sent.update(to=to_email, subject=subject, html=html_body, text=text_body, template=kwargs.get("_template"))
+            return True
+
+        monkeypatch.setattr(email_service, "send_email", _capture)
+        assert await email_service.send_email_changed_email(
+            to_email="old@example.org", username="owner", new_email="new.owner@example.org", ip_address="203.0.113.9"
+        ) is True
+        assert (sent["to"], sent["template"]) == ("old@example.org", "email_changed")
+        assert "email address was changed" in str(sent["subject"])
+        for body in (sent["html"], sent["text"]):
+            assert "n***@example.org" in body and "203.0.113.9" in body
+            assert "new.owner@example.org" not in body
 
     @pytest.mark.asyncio
     async def test_mock_admin_reauth_email_redacts_token_in_saved_mock_output(self, email_service, tmp_path):
