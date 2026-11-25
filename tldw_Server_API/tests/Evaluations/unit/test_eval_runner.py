@@ -169,7 +169,7 @@ async def test_eval_response_quality_parses_metric_dicts(tmp_path):
 async def test_rag_pipeline_extracts_metric_scores(monkeypatch, tmp_path):
     runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
 
-    async def fake_unified_rag_pipeline(*args, **kwargs):
+    async def fake_unified_rag_pipeline(rcfg):
         return {
             "documents": [{"content": "ctx", "id": "doc1"}],
             "generated_answer": "answer",
@@ -177,7 +177,7 @@ async def test_rag_pipeline_extracts_metric_scores(monkeypatch, tmp_path):
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Evaluations.eval_runner.unified_rag_pipeline",
+        "tldw_Server_API.app.core.Evaluations.eval_runner.run_rag_pipeline",
         fake_unified_rag_pipeline,
     )
 

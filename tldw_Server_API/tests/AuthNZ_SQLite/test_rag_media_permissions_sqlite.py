@@ -65,10 +65,11 @@ def _override_rag(app, monkeypatch):
     app.dependency_overrides[get_media_db_for_user] = lambda: type("DB", (), {"db_path": ":memory:"})()
     app.dependency_overrides[get_chacha_db_for_user] = lambda: type("DB", (), {"db_path": ":memory:"})()
 
-    async def _fake_pipeline(**kwargs):
+    async def _fake_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         return rag_mod.UnifiedRAGResponse(documents=[], query=kwargs.get("query"), expanded_queries=[], metadata={})
 
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", _fake_pipeline)
 
 
 @pytest.mark.asyncio

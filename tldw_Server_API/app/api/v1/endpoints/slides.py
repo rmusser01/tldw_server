@@ -2747,14 +2747,14 @@ async def generate_from_rag(
         user_id = int(db.client_id)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=500, detail="user_unavailable") from exc
-    rag_result = await _unified_pipeline.unified_rag_pipeline(
+    rag_result = await _unified_pipeline.run_rag_pipeline(_unified_pipeline.RagRunConfig.from_kwargs(
         query=query,
         top_k=request.top_k or 8,
         sources=["media_db", "notes", "chats"],
         media_db_path=str(DatabasePaths.get_media_db_path(user_id)),
         notes_db_path=str(DatabasePaths.get_chacha_db_path(user_id)),
         character_db_path=str(DatabasePaths.get_chacha_db_path(user_id)),
-    )
+    ))
     documents = rag_result.documents if hasattr(rag_result, "documents") else []
     source_text = _format_rag_documents(documents)
     if not source_text and hasattr(rag_result, "generated_answer") and rag_result.generated_answer:

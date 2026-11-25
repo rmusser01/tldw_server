@@ -54,7 +54,7 @@ from tldw_Server_API.app.core.Persona.robustness_eval import (
     PersonaRobustnessCase,
     PersonaRobustnessEval,
 )
-from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
 _LOCAL_SUMMARIZATION_PROVIDERS = {
@@ -397,7 +397,7 @@ async def _run_unified_rag_request(
     user_id: str | None,
 ) -> dict[str, Any]:
     payload = request.model_dump(exclude_none=True) if hasattr(request, "model_dump") else dict(request)
-    response = await unified_rag_pipeline(
+    response = await run_rag_pipeline(RagRunConfig.from_kwargs(
         **payload,
         media_db_path=get_user_media_db_path(user_id) if user_id else None,
         notes_db_path=get_user_chacha_db_path(user_id) if user_id else None,
@@ -411,7 +411,7 @@ async def _run_unified_rag_request(
         enable_post_verification=False,
         adaptive_hybrid_weights=False,
         track_cost=False,
-    )
+    ))
     if hasattr(response, "model_dump"):
         return dict(response.model_dump(mode="json"))
     return dict(response)

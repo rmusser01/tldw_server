@@ -433,6 +433,7 @@ jobs:
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_result_mapping_core.py \
+            tldw_Server_API/tests/RAG_NEW/unit/test_rag_run_config_caller_equivalence.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_response_mapping.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py \
@@ -493,6 +494,7 @@ jobs:
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_profiles.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_result_mapping_core.py \
+            tldw_Server_API/tests/RAG_NEW/unit/test_rag_run_config_caller_equivalence.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_transport_helpers.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_response_mapping.py \
             tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py \

@@ -208,11 +208,12 @@ def _recording_pipeline(monkeypatch) -> list[dict]:
 
     calls: list[dict] = []
 
-    async def _fake_pipeline(**kwargs):
+    async def _fake_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         calls.append(kwargs)
         return up.UnifiedSearchResult(documents=[], query=kwargs.get("query", ""), errors=[])
 
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", _fake_pipeline)
     return calls
 
 
@@ -267,12 +268,13 @@ def _over_the_limit_with_own_keys(monkeypatch, own: set[str]) -> tuple[list[str]
         asked.append(provider)
         return provider in own
 
-    async def _fake_pipeline(**kwargs):
+    async def _fake_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         marked.append(current_llm_call_context().prechecked)
         return up.UnifiedSearchResult(documents=[], query=kwargs.get("query", ""), errors=[])
 
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", _fake_pipeline)
     refuse_llm_work(monkeypatch)
     return asked, marked
 

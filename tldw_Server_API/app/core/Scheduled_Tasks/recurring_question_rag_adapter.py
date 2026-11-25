@@ -210,9 +210,9 @@ def safe_rag_request_snapshot(
 
 
 async def _default_rag_executor(request: UnifiedRAGRequest) -> UnifiedRAGResponse:
-    from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+    from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
 
-    return await unified_rag_pipeline(**request.model_dump())
+    return await run_rag_pipeline(RagRunConfig.from_kwargs(**request.model_dump()))
 
 
 def _sources_from_scope(scope: dict[str, Any]) -> list[str]:

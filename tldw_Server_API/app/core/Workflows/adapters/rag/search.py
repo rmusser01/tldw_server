@@ -19,7 +19,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.http_client import create_client as _wf_create_client
-from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
 from tldw_Server_API.app.core.Security.egress import is_url_allowed, is_url_allowed_for_tenant
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from tldw_Server_API.app.core.Workflows.adapters._common import resolve_context_user_id
@@ -128,7 +128,7 @@ async def run_rag_search_adapter(config: dict[str, Any], context: dict[str, Any]
 
     # Media DB only: with no notes, character or ChaCha handle passed, the pipeline opens no
     # ChaCha retriever, so this step needs no ChaCha operation. Passing one needs one (ADR-080, TASK-13897).
-    result = await unified_rag_pipeline(
+    result = await run_rag_pipeline(RagRunConfig.from_kwargs(
         query=rendered_query,
         sources=sources,
         search_mode=search_mode,
@@ -136,7 +136,7 @@ async def run_rag_search_adapter(config: dict[str, Any], context: dict[str, Any]
         hybrid_alpha=hybrid_alpha,
         media_db_path=media_db_path,
         **kwargs,
-    )
+    ))
 
     docs = []
     for d in result.documents:

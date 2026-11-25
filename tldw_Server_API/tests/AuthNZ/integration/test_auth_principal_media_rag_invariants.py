@@ -272,10 +272,11 @@ def test_rag_search_jwt_principal_and_state_alignment(isolated_test_environment,
     fastapi_app.dependency_overrides[get_media_db_for_user] = lambda: type("DB", (), {"db_path": ":memory:"})()
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: type("DB", (), {"db_path": ":memory:"})()
 
-    async def _fake_pipeline(**kwargs):
+    async def _fake_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         return _StubRagResult(kwargs.get("query", ""))
 
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", _fake_pipeline)
 
     try:
         # 1. Register and log in via real auth endpoints.

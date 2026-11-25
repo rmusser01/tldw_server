@@ -68,7 +68,7 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import SummaryProviderError
 from tldw_Server_API.app.core.RAG.rag_custom_metrics import get_custom_metrics
-from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
 from tldw_Server_API.app.core.RAG.rag_service.vector_stores import (
     create_from_settings_for_user,
 )
@@ -811,10 +811,10 @@ class EvaluationRunner:
 
                 try:
                     # Call unified RAG pipeline
-                    upr_result = await unified_rag_pipeline(
+                    upr_result = await run_rag_pipeline(RagRunConfig.from_kwargs(
                         query=query,
                         **upr_args_common
-                    )
+                    ))
                 except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as e:
                     logger.error(f"unified_rag_pipeline failed for {cfg_id} sample {s_idx}: {e}")
                     per_sample.append({"sample_index": s_idx, "error": str(e)})

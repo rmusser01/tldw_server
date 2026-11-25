@@ -45,7 +45,8 @@ async def test_rag_pipeline_runner_basic(monkeypatch, tmp_path):
     runner.db = _StubDB()  # type: ignore
 
     # Mock unified_rag_pipeline to return deterministic minimal result
-    async def _fake_unified_rag_pipeline(query: str, **kwargs):
+    async def _fake_unified_rag_pipeline(rcfg):
+        query = rcfg.request.query
         return {
             "documents": [{"content": f"ctx for {query}"}],
             "generated_answer": f"ans for {query}",
@@ -53,7 +54,7 @@ async def test_rag_pipeline_runner_basic(monkeypatch, tmp_path):
         }
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Evaluations.eval_runner.unified_rag_pipeline",
+        "tldw_Server_API.app.core.Evaluations.eval_runner.run_rag_pipeline",
         _fake_unified_rag_pipeline,
     )
 

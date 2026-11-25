@@ -217,11 +217,12 @@ async def test_standard_search_passes_ephemeral_runtime_and_closes_it(
     _install_runtime(monkeypatch)
     _install_common_endpoint_fakes(monkeypatch, bundle=bundle)
 
-    async def fake_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+    async def fake_pipeline(rcfg) -> UnifiedSearchResult:
+        kwargs = rcfg.as_kwargs()
         captured.update(kwargs)
         return _result()
 
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", fake_pipeline)
     try:
         response = await rag_endpoint.unified_search_endpoint(
             request_raw=_request(),
@@ -349,7 +350,8 @@ async def test_knowledge_qa_routes_isolate_configured_server_credentials_at_adap
     async def no_usage_log(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    async def acceptance_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+    async def acceptance_pipeline(rcfg) -> UnifiedSearchResult:
+        kwargs = rcfg.as_kwargs()
         query = str(kwargs.get("query") or "")
         documents = [
             {
@@ -389,7 +391,7 @@ async def test_knowledge_qa_routes_isolate_configured_server_credentials_at_adap
     )
     monkeypatch.setattr(rag_endpoint, "_resolve_kanban_db_path", lambda *_args: "kanban.db")
     monkeypatch.setattr(rag_endpoint, "_log_rag_queries_for_org", no_usage_log)
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", acceptance_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", acceptance_pipeline)
     monkeypatch.setattr(gateway, "_get_llm_registry", lambda: Registry())
 
     async def invoke(label: str) -> Any:
@@ -1106,10 +1108,10 @@ async def test_standard_untyped_failure_has_bounded_http_error_and_logs(
         "body=credential-runtime-secret-response"
     )
 
-    async def failing_standard_pipeline(**_kwargs: Any) -> UnifiedSearchResult:
+    async def failing_standard_pipeline(rcfg) -> UnifiedSearchResult:
         raise RuntimeError(raw_failure)
 
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", failing_standard_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", failing_standard_pipeline)
     log_records: list[Any] = []
     sink_id = logger.add(log_records.append)
     try:
