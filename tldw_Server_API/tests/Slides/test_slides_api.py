@@ -273,12 +273,12 @@ def _setup_media_too_large(monkeypatch, fake_notes, fake_media):
 
 
 def _setup_rag_too_large(monkeypatch, fake_notes, fake_media):
-    async def stub_rag_pipeline(*args, **kwargs):
+    async def stub_rag_pipeline(rcfg):
         doc = SimpleNamespace(content="x" * 50, metadata={"title": "Doc"})
         return SimpleNamespace(documents=[doc], generated_answer=None)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline",
+        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline",
         stub_rag_pipeline,
     )
 
@@ -2130,13 +2130,13 @@ def test_slides_generate_from_prompt_uses_stubbed_llm(slides_client, monkeypatch
 def test_slides_generate_from_rag_explicit_sources(slides_client, monkeypatch):
     sources_seen = {}
 
-    async def stub_rag_pipeline(*args, **kwargs):
-        sources_seen["sources"] = kwargs.get("sources")
+    async def stub_rag_pipeline(rcfg):
+        sources_seen["sources"] = rcfg.as_kwargs()["sources"]
         doc = SimpleNamespace(content="Doc content", metadata={"title": "Doc"})
         return SimpleNamespace(documents=[doc], generated_answer=None)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline",
+        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline",
         stub_rag_pipeline,
     )
     monkeypatch.setattr(

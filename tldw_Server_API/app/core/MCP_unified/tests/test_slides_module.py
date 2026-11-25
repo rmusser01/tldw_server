@@ -361,13 +361,13 @@ async def test_slides_templates_export_and_rag(monkeypatch, tmp_path):
         base64.b64decode(exported_pdf["content_base64"]) == b"pdf", f"Unexpected pdf export payload: {exported_pdf!r}"
     )
 
-    async def _fake_rag_pipeline(**kwargs):
+    async def _fake_rag_pipeline(rcfg):
         doc = SimpleNamespace(metadata={"title": "Doc"}, content="RAG content")
         return SimpleNamespace(documents=[doc], generated_answer=None)
 
     import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as rag_pipeline
 
-    monkeypatch.setattr(rag_pipeline, "unified_rag_pipeline", _fake_rag_pipeline)
+    monkeypatch.setattr(rag_pipeline, "run_rag_pipeline", _fake_rag_pipeline)
     mod._get_generator = lambda: FakeGenerator()  # type: ignore[attr-defined]
 
     rag_out = await mod.execute_tool(

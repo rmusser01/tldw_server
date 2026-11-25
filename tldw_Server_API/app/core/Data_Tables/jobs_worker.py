@@ -84,7 +84,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputParseError,
     parse_structured_output,
 )
-from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
 
 DATA_TABLES_DOMAIN = "data_tables"
 DATA_TABLES_JOB_TYPE = "data_table_generate"
@@ -853,7 +853,7 @@ async def _resolve_rag_query_source(
         }
     )
 
-    result = await unified_rag_pipeline(
+    result = await run_rag_pipeline(RagRunConfig.from_kwargs(
         query=query,
         sources=sources,
         media_db_path=str(media_db.db_path_str),
@@ -870,7 +870,7 @@ async def _resolve_rag_query_source(
         user_id=str(user_id),
         media_db=media_db,
         chacha_db=chacha_db,
-    )
+    ))
 
     documents = []
     if hasattr(result, "documents"):

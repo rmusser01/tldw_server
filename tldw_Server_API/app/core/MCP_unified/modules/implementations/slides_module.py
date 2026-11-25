@@ -1639,14 +1639,14 @@ class SlidesModule(BaseModule):
             chacha_path = context.db_paths.get("chacha")
             if not media_path and not chacha_path:
                 return None
-            from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+            from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
 
             sources = []
             if media_path:
                 sources.append("media_db")
             if chacha_path:
                 sources.append("notes")
-            result = await unified_rag_pipeline(
+            result = await run_rag_pipeline(RagRunConfig.from_kwargs(
                 query=query,
                 sources=sources or ["media_db"],
                 media_db_path=media_path,
@@ -1657,7 +1657,7 @@ class SlidesModule(BaseModule):
                 top_k=top_k,
                 enable_generation=False,
                 user_id=str(getattr(context, "user_id", "") or ""),
-            )
+            ))
             documents = getattr(result, "documents", None) or []
             content = self._format_rag_documents(documents)
             if not content and getattr(result, "generated_answer", None):

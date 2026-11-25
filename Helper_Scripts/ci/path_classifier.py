@@ -106,6 +106,7 @@ _RAG_NEW_UNIT = [
     "test_rag_profiles",
     "test_rag_provider_credentials",
     "test_rag_result_mapping_core",
+    "test_rag_run_config_caller_equivalence",
     "test_rag_transport_helpers",
     "test_rag_unified_response_mapping",
     "test_rag_unified_search_agent_defaults",

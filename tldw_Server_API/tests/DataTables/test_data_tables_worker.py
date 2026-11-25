@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.Data_Tables import jobs_worker
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.exceptions import DataTablesJobError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.tests.helpers.run_config_spy import spy_from_kwargs
 
 pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")]
 
@@ -356,11 +357,14 @@ async def test_rag_query_source_clamps_retrieval_and_snapshot(monkeypatch, tmp_p
         for idx in range(75)
     ]
 
-    async def fake_unified_rag_pipeline(**kwargs):
+    passed = spy_from_kwargs(monkeypatch)
+
+    async def fake_unified_rag_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         captured.update(kwargs)
         return {"documents": documents}
 
-    monkeypatch.setattr(jobs_worker, "unified_rag_pipeline", fake_unified_rag_pipeline)
+    monkeypatch.setattr(jobs_worker, "run_rag_pipeline", fake_unified_rag_pipeline)
     monkeypatch.setattr(jobs_worker, "get_user_chacha_db_path", lambda _user_id: str(tmp_path / "chacha.db"))
 
     class MediaDbStub:
@@ -381,6 +385,7 @@ async def test_rag_query_source_clamps_retrieval_and_snapshot(monkeypatch, tmp_p
     assert captured["sources"] == ["media_db", "notes"]
     assert captured["top_k"] == 50
     assert captured["min_score"] == 0.0
+    assert passed["min_score"] == 0.0  # clamped by the worker; 0.0 is also the config default
     assert len(snapshot["chunks"]) == 50
     assert "content 49" in text
     assert "content 50" not in text

@@ -919,17 +919,17 @@ async def rag_ablate(
 
         runs = []
 
-        r1 = await _unified_pipeline.unified_rag_pipeline(**common, enable_reranking=False)
+        r1 = await _unified_pipeline.run_rag_pipeline(_unified_pipeline.RagRunConfig.from_kwargs(**common, enable_reranking=False))
         runs.append({
             "label": "baseline",
             "result": _response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(r1)),
         })
 
-        r2 = await _unified_pipeline.unified_rag_pipeline(
+        r2 = await _unified_pipeline.run_rag_pipeline(_unified_pipeline.RagRunConfig.from_kwargs(
             **common,
             enable_reranking=True,
             reranking_strategy=request.reranking_strategy,
-        )
+        ))
         runs.append({
             "label": "+rerank",
             "result": _response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(r2)),
@@ -1611,7 +1611,7 @@ async def unified_search_endpoint(
             kwargs = dict(standard_bundle.pipeline_kwargs)
             kwargs["credential_runtime"] = credential_runtime
             _sync_retriever_overrides_to_pipeline()
-            result = await _unified_pipeline.unified_rag_pipeline(**kwargs)
+            result = await _unified_pipeline.run_rag_pipeline(_unified_pipeline.RagRunConfig.from_kwargs(**kwargs))
 
         # Convert to response format
         response = _response_mapping.rag_result_to_response(_response_mapping.rag_result_from_unified_search_result(result))
