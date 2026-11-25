@@ -47,6 +47,7 @@ PARAMS: tuple[str, ...] = (
 
 LOCALS: tuple[str, ...] = (
     "assistant_message_id",
+    "bounded_error",
     "content_text_for_usage",
     "content_to_save",
     "defer_structured_persistence",
@@ -58,6 +59,7 @@ LOCALS: tuple[str, ...] = (
     "function_call_to_save",
     "llm_response",
     "llm_start_time",
+    "metrics_recorded",
     "normalized_continuation_metadata",
     "pending_assistant_payload",
     "pending_tool_messages",
