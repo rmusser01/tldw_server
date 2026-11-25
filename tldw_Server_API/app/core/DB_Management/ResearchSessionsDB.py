@@ -224,6 +224,7 @@ class ResearchSessionsDB:
                     limits_json TEXT NOT NULL DEFAULT '{}',
                     provider_overrides_json TEXT NOT NULL DEFAULT '{}',
                     follow_up_json TEXT NOT NULL DEFAULT '{}',
+                    phase_dispatch_json TEXT NOT NULL DEFAULT '{}',
                     control_state TEXT NOT NULL DEFAULT 'running',
                     progress_percent REAL,
                     progress_message TEXT,
@@ -329,21 +330,33 @@ class ResearchSessionsDB:
                     ON research_chat_handoffs(owner_user_id, chat_id, handoff_status);
                 """
             )
-            columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info('research_sessions')").fetchall()}
-            if "phase_dispatch_json" not in columns:
-                conn.execute("ALTER TABLE research_sessions ADD COLUMN phase_dispatch_json TEXT NOT NULL DEFAULT '{}'")
-            if "provider_overrides_json" not in columns:
-                conn.execute(
+            upgrades = {
+                "phase_dispatch_json": (
+                    "ALTER TABLE research_sessions ADD COLUMN phase_dispatch_json TEXT NOT NULL DEFAULT '{}'"
+                ),
+                "provider_overrides_json": (
                     "ALTER TABLE research_sessions ADD COLUMN provider_overrides_json TEXT NOT NULL DEFAULT '{}'"
-                )
-            if "follow_up_json" not in columns:
-                conn.execute("ALTER TABLE research_sessions ADD COLUMN follow_up_json TEXT NOT NULL DEFAULT '{}'")
-            if "control_state" not in columns:
-                conn.execute("ALTER TABLE research_sessions ADD COLUMN control_state TEXT NOT NULL DEFAULT 'running'")
-            if "progress_percent" not in columns:
-                conn.execute("ALTER TABLE research_sessions ADD COLUMN progress_percent REAL")
-            if "progress_message" not in columns:
-                conn.execute("ALTER TABLE research_sessions ADD COLUMN progress_message TEXT")
+                ),
+                "follow_up_json": (
+                    "ALTER TABLE research_sessions ADD COLUMN follow_up_json TEXT NOT NULL DEFAULT '{}'"
+                ),
+                "control_state": (
+                    "ALTER TABLE research_sessions ADD COLUMN control_state TEXT NOT NULL DEFAULT 'running'"
+                ),
+                "progress_percent": "ALTER TABLE research_sessions ADD COLUMN progress_percent REAL",
+                "progress_message": "ALTER TABLE research_sessions ADD COLUMN progress_message TEXT",
+            }
+            table_info = "PRAGMA table_info('research_sessions')"
+            columns = {str(row["name"]) for row in conn.execute(table_info).fetchall()}
+            if upgrades.keys() <= columns:
+                return
+
+            # Another initializer may upgrade the schema before this connection gets the write lock.
+            conn.execute("BEGIN IMMEDIATE")
+            columns = {str(row["name"]) for row in conn.execute(table_info).fetchall()}
+            for column, statement in upgrades.items():
+                if column not in columns:
+                    conn.execute(statement)
 
     @staticmethod
     def _session_from_row(row: sqlite3.Row | None) -> ResearchSessionRow | None:
