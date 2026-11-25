@@ -1710,6 +1710,8 @@ TEST_SEAM_GATE_SUITES = (
     # The RAG split tool and structure pins (TASK-13950.24) guard each move PR.
     "tldw_Server_API/tests/Helper_Scripts/test_rag_split.py",
     "tldw_Server_API/tests/lint/test_rag_pipeline_structure_pins.py",
+    # The chat executor structure pins (TASK-13950.25) guard each chat move PR.
+    "tldw_Server_API/tests/lint/test_chat_executor_structure_pins.py",
     "tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py",
     "tldw_Server_API/tests/CI/test_path_classifier.py",
 )

@@ -95,7 +95,7 @@ class Tree:
         self.base, self.head = tmp / "base", tmp / "head"
         for d in (self.base, self.head):
             (d / "mini").mkdir(parents=True)
-            (d / FILE).write_text(src)
+            (d / str(manifest.get("file", FILE))).write_text(src)
         self.manifest_path = tmp / "m.py"
         self.set(**manifest)
 
@@ -946,3 +946,133 @@ def test_prologue_and_state_init_must_be_one_statement(tmp_path: Path) -> None:
 def test_refuses_python_older_than_3_12(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "version_info", (3, 11, 9, "final", 0))
     assert rag_split.main(["verify", "x.py", "--base", "HEAD"]) == 2
+
+
+# --- TASK-13950.25 part 1: the tool is parametrised for chat code, and every RAG default is unchanged ---
+
+RAG_MANIFESTS = sorted((REPO_ROOT / "Helper_Scripts/rag_split/manifests").glob("t*.py"))
+
+
+def test_every_rag_manifest_still_verifies_after_generalisation() -> None:
+    """Each RAG manifest verifies at its recorded base against the commit that last touched it, with 0 differences.
+
+    The ``base`` is the manifest's own record, so this needs no integration ref; it does need history
+    (CI checks out with ``fetch-depth: 0``).
+    """
+    if _git("rev-parse", "--is-shallow-repository").strip() == "true":
+        pytest.skip("shallow clone: the recorded bases are not reachable")
+    assert len(RAG_MANIFESTS) >= 13
+    failed = []
+    for mf in RAG_MANIFESTS:
+        base = rag_split.load_manifest(mf)["base"]
+        head = _git("log", "-1", "--format=%H", "HEAD", "--", str(mf.relative_to(REPO_ROOT))).strip()
+        assert base and head, mf
+        if rag_split.main(["verify", "--root", str(REPO_ROOT), str(mf), "--base", base, "--head", head]) != 0:
+            failed.append(mf.name)
+    assert failed == []
+
+
+CHAT_FILE = "mini/chat_service.py"
+CHAT_BASE = textwrap.dedent(
+    """\
+    import os
+    import time
+
+    LIMIT = 5
+
+
+    def audit(*args):
+        return args
+
+
+    async def call(a):
+        \"\"\"Doc.\"\"\"
+        x = os.getenv("A")
+        t0 = time.time()
+        audit(LIMIT, x, t0)
+        return a
+    """
+)
+CHAT = {
+    "file": CHAT_FILE,
+    "func": "call",
+    "ctx": [["cst", "Call"]],
+    "ctx_import": ["from .types import Call"],
+    "facade": "cs",
+    "facade_stdlib": ["time"],
+    "task": "TASK-X",
+    "prologue": "cst = Call()",
+}
+
+
+def chat_tree(tmp: Path, src: str = CHAT_BASE, noqa: list[int] | None = None, **extra: object) -> Tree:
+    mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(LIMIT")], "doc": "Step."}
+    if noqa:
+        mv["noqa"] = noqa
+    return Tree(tmp, src, **{**CHAT, "moves": [mv], **extra})
+
+
+def test_chat_keys_apply_and_verify(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = chat_tree(tmp_path)
+    assert t.run("apply") == 0
+    stage = t.text(f"{PKG}/stage_a.py")
+    assert stage.startswith('"""stage_a code moved from chat_service.py (TASK-X)."""')
+    assert 'def step(cst: "Call") -> None:' in stage
+    assert "cs.audit(cs.LIMIT, x, t0)" in stage and "t0 = cs.time.time()" in stage
+    assert 'os.getenv("A")' in stage and "cs.os" not in stage
+    assert "from mini import chat_service as cs" in stage and "\nimport os\n" in stage and "\nimport time\n" not in stage
+    assert "if TYPE_CHECKING:\n    from .types import Call\n" in stage
+    assert "from .run_config" not in stage and "PipelineState" not in stage
+    assert "cst = Call()" in t.text(CHAT_FILE) and "_stage_a.step(cst)" in t.text(CHAT_FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_chat_noqa_text_uses_the_file_and_task(tmp_path: Path) -> None:
+    t = chat_tree(tmp_path, noqa=[row(CHAT_BASE, "x = os")])
+    assert t.run("apply") == 0
+    assert '  # noqa: BLE001 - moved from chat_service.py (TASK-X)' in t.text(f"{PKG}/stage_a.py")
+
+
+def test_chat_verify_rejects_a_bare_facade_stdlib_read(tmp_path: Path) -> None:
+    t = chat_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, f"{PKG}/stage_a.py", "cs.time.time()", "time.time()")
+    assert t.run("verify") == 1
+
+
+def test_chat_verify_rejects_the_rag_facade_name(tmp_path: Path) -> None:
+    t = chat_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, f"{PKG}/stage_a.py", "cs.audit(", "up.audit(")
+    assert t.run("verify") == 1
+
+
+@pytest.mark.parametrize("name", ["cst", "cs"])
+def test_v8_reserves_the_ctx_names_and_the_facade(tmp_path: Path, capsys: pytest.CaptureFixture, name: str) -> None:
+    t = chat_tree(tmp_path, CHAT_BASE.replace("return a", f"{name} = 1\n    return a"))
+    assert t.run("apply") == 1
+    assert f"V8: {name} is already a name" in capsys.readouterr().out
+
+
+def test_ctx_names_are_not_reported_as_crossing_locals(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = CHAT_BASE.replace('x = os.getenv("A")', 'cst = 1\n    x = os.getenv("A")').replace("audit(LIMIT, x, t0)", "audit(LIMIT, x, t0, cst)")
+    mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(LIMIT")]}
+    t = Tree(tmp_path, src, **{**CHAT, "prologue": "", "moves": [mv]})
+    assert t.run("shared") == 0
+    assert "cst" not in capsys.readouterr().out
+
+
+def test_state_class_and_state_module_are_parametrised(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = "def helper2():\n    pass\n\n\nasync def pipe(q):\n    def _h():\n        return helper2()\n\n    return _h()\n"
+    t = Tree(tmp_path, src, rewrite={"_h": "state.h"}, hoist={"_h": "h"}, state_class="ChatState", state_module="chat_state")
+    assert t.run("apply") == 0
+    state = t.text(f"{PKG}/chat_state.py")
+    assert "class ChatState:" in state and "def h(self)" in state and "run_state" not in t.text(FILE)
+    assert "from .pipeline import chat_state as _chat_state" in t.text(FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_is_pkg_uses_the_manifests_package_name() -> None:
+    text = "from .chatpkg import thing\n\n\ndef f():\n    return thing\n"
+    assert "thing" in rag_split.Src(text, "f", pkg="chatpkg").exempt
+    assert "thing" not in rag_split.Src(text, "f").exempt

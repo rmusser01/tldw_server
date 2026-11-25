@@ -26,6 +26,17 @@ read with ``ast.literal_eval`` and never imported. Keys (all optional but ``base
     shim_doc     str: replaces the docstring of the shim (unset: the shim keeps the original one)
     file, func, pkg    the pipeline file, function and package directory (defaults below; tests override)
 
+Parametrised for other code (TASK-13950.25; each default is the RAG value, so the RAG manifests verify unchanged):
+
+    ctx          [[name, annotation]]    leading parameters of every moved function; the call passes the names
+                                         (default ``[["rcfg","RagRunConfig"],["state","PipelineState"]]``)
+    ctx_import   ["from .x import Y"]    ctx annotation imports, all under ``if TYPE_CHECKING`` and quoted in the
+                                         signature (unset: RAG's ``RagRunConfig`` runtime import plus the state class)
+    facade       alias for the source module in moved code (default ``up``; chat: ``cs``)
+    facade_stdlib [name]                 stdlib-bound names still read through the facade (chat: ``time``)
+    task         text in the header, ``noqa`` and docstrings (default ``TASK-13950.24``)
+    state_class, state_module            the hoist target class and its module (``PipelineState``, ``run_state``)
+
 ``apply`` edits the working tree as text edits at AST positions. ``verify`` rebuilds the expected result
 from the base *as an AST*, independently of those text edits, and compares it with the head.
 Every difference prints one line; any difference exits 1.
@@ -71,8 +82,7 @@ from typing import Any, NamedTuple
 
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
-STATE_CLASS = "PipelineState"
-NOQA = "  # noqa: BLE001 - moved from unified_pipeline.py (TASK-13950.24)"
+DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
 DEFAULTS: dict[str, Any] = {
     "base": "",
     "file": PIPELINE_FILE,
@@ -91,6 +101,13 @@ DEFAULTS: dict[str, Any] = {
     "prologue": "",
     "state_init": "",
     "imports": [],
+    "ctx": DEFAULT_CTX,
+    "ctx_import": None,
+    "facade": "up",
+    "facade_stdlib": [],
+    "task": "TASK-13950.24",
+    "state_class": "PipelineState",
+    "state_module": "run_state",
 }
 NEW = object()  # a node the tool created: it carries no scope annotation
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -309,12 +326,12 @@ def module_names(tree: ast.Module) -> set[str]:
     return out
 
 
-def _is_pkg(i: Info) -> bool:
-    return i.kind == "from" and i.level > 0 and (i.module == "pipeline" or i.module.startswith("pipeline."))
+def _is_pkg(i: Info, pkg: str = "pipeline") -> bool:
+    return i.kind == "from" and i.level > 0 and (i.module == pkg or i.module.startswith(pkg + "."))
 
 
 class Src:
-    def __init__(self, text: str, func: str | None = None) -> None:
+    def __init__(self, text: str, func: str | None = None, pkg: str = "pipeline", facade_stdlib: tuple[str, ...] = ()) -> None:
         self.text = text
         self.tree = ast.parse(text)
         self.scopes = Scopes(self.tree, text)
@@ -327,7 +344,7 @@ class Src:
             if self.fn is None:
                 raise SplitError(f"no top-level function {func}")
             self.key = self.scopes.tab_of[id(self.fn)]
-        self.exempt = {n for n, i in self.infos.items() if i.stdlib or _is_pkg(i)}
+        self.exempt = {n for n, i in self.infos.items() if (i.stdlib and n not in facade_stdlib) or _is_pkg(i, pkg)}
 
 
 def continuation_rows(text: str) -> set[int]:
@@ -360,6 +377,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
             for key in ("prologue", "state_init"):
                 if m[key] and len(ast.parse(m[key]).body) != 1:
                     raise SplitError(f"{path}: {key} must be exactly one statement")
+            if not m["ctx"] or any(not (isinstance(c, list) and len(c) == 2 and all(isinstance(x, str) for x in c)) for c in m["ctx"]):
+                raise SplitError(f"{path}: ctx must be a non-empty list of [name, annotation]")
             for key in ("entry_doc", "shim_doc"):
                 if m[key] is not None and not isinstance(m[key], str):
                     raise SplitError(f"{path}: {key} must be a str")
@@ -371,6 +390,40 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 def pkg_rel(m: dict) -> Path:
     return Path(m["file"]).parent / m["pkg"]
+
+
+def mk_src(text: str, m: dict) -> Src:
+    return Src(text, m["func"], m["pkg"], tuple(m["facade_stdlib"]))
+
+
+def ctx_names(m: dict) -> list[str]:
+    return [n for n, _ in m["ctx"]]
+
+
+def call_args(m: dict) -> str:
+    return ", ".join(ctx_names(m))
+
+
+def src_name(m: dict) -> str:
+    return Path(m["file"]).name
+
+
+def noqa_text(m: dict) -> str:
+    return f"  # noqa: BLE001 - moved from {src_name(m)} ({m['task']})"
+
+
+def ctx_imports(m: dict) -> tuple[dict[str, str], list[str]]:
+    """``(runtime imports by name, TYPE_CHECKING import lines)`` for the ctx annotations."""
+    if m["ctx_import"] is None:
+        return {"RagRunConfig": "from .run_config import RagRunConfig"}, [f"from .{m['state_module']} import {m['state_class']}"]
+    return {}, list(m["ctx_import"])
+
+
+def ctx_sig(m: dict) -> str:
+    """The leading parameters; an annotation imported only under ``TYPE_CHECKING`` is quoted."""
+    _, tc = ctx_imports(m)
+    typed = {_bound(a) for line in tc for a in ast.parse(line).body[0].names}  # type: ignore[attr-defined]
+    return ", ".join(f'{n}: "{a}"' if a in typed else f"{n}: {a}" for n, a in m["ctx"])
 
 
 def read_base(root: Path, rel: str, base: str | None, base_dir: str | None) -> str | None:
@@ -511,7 +564,8 @@ def meet(a: set | None, b: set | None) -> set | None:
 class Cells:
     """Liveness of F's locals across cells: each span, plus the residual function."""
 
-    def __init__(self, fn: Any, key: Any, spans: list[tuple[str, list[ast.stmt]]]) -> None:
+    def __init__(self, fn: Any, key: Any, spans: list[tuple[str, list[ast.stmt]]], skip: tuple[str, ...] = ("rcfg", "state")) -> None:
+        self.skip = skip
         self.fn, self.key = fn, key
         self.labels = [s[0] for s in spans] + ["<rest>"]
         n = len(spans)
@@ -725,7 +779,7 @@ class Cells:
                     if name in self.def_a.get(id(d), ()) and (not later or name in self.idem):
                         continue
                     out[name].append(f"captured by {d.name} in {self.labels[c]}, referenced in {self.labels[others[0]]}")
-        return {k: v for k, v in out.items() if k not in ("rcfg", "state")}
+        return {k: v for k, v in out.items() if k not in self.skip}
 
 
 # --------------------------------------------------------------------------------------------------
@@ -804,12 +858,12 @@ class Methodize(ast.NodeTransformer):
 class UpTransform(ast.NodeTransformer):
     """V2: module globals become ``up.<name>`` and relative imports gain a level."""
 
-    def __init__(self, names: set[str], exempt: set[str]) -> None:
-        self.names, self.exempt = names, exempt
+    def __init__(self, names: set[str], exempt: set[str], facade: str = "up") -> None:
+        self.names, self.exempt, self.facade = names, exempt, facade
 
     def visit_Name(self, node: ast.Name) -> ast.AST:
         if getattr(node, "_r", NEW) is None and node.id in self.names and node.id not in self.exempt:
-            return ast.copy_location(ast.Attribute(ast.Name("up", ast.Load()), node.id, node.ctx), node)
+            return ast.copy_location(ast.Attribute(ast.Name(self.facade, ast.Load()), node.id, node.ctx), node)
         return node
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.AST:
@@ -858,13 +912,12 @@ def fn_names(fn: ast.AST) -> set[str]:
     return out
 
 
-def call_stmt(m: Move, from_module: str) -> ast.stmt:
+def call_stmt(m: Move, from_module: str, args: str) -> ast.stmt:
     recv = "" if m.module == from_module else f"_{m.module}."
-    return ast.parse(f"{'await ' if m.is_async else ''}{recv}{m.name}(rcfg, state)").body[0]
+    return ast.parse(f"{'await ' if m.is_async else ''}{recv}{m.name}({args})").body[0]
 
 
-def func_template(name: str, is_async: bool) -> Any:
-    sig = 'rcfg: RagRunConfig, state: "PipelineState"'
+def func_template(name: str, is_async: bool, sig: str) -> Any:
     return ast.parse(f"{'async ' if is_async else ''}def {name}({sig}) -> None:\n    pass").body[0]
 
 
@@ -903,16 +956,19 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # V8: a name the manifest introduces must not already be used in the function.
     used = fn_names(fn)
     intro = {t.split(".")[0] for t in rewrite.values()} | ({"rcfg"} if hidden else set()) | ({"state"} if publish else set())
-    intro |= {"rcfg"} if m["prologue"] else set()
-    intro |= {"state", "_run_state"} if m["state_init"] else set()
-    intro |= ({"up"} if moves or hoist else set()) | ({"_run_state"} if hoist else set()) | {f"_{x.module}" for x in moves}
-    init = [x for x in fn.body[:3] if isinstance(x, ast.Assign) and ast.unparse(x).startswith(f"state = _run_state.{STATE_CLASS}(")]
+    sm, sc = m["state_module"], m["state_class"]
+    intro |= {ctx_names(m)[0]} if m["prologue"] else set()
+    intro |= {"state", f"_{sm}"} if m["state_init"] else set()
+    intro |= ({m["facade"]} if moves or hoist else set()) | ({f"_{sm}"} if hoist else set()) | {f"_{x.module}" for x in moves}
+    if moves and m["ctx"] != DEFAULT_CTX:
+        intro |= set(ctx_names(m))
+    init = [x for x in fn.body[:3] if isinstance(x, ast.Assign) and ast.unparse(x).startswith(f"state = _{sm}.{sc}(")]
     if init:
         # An earlier PR (D1's state_init) already introduced both names, so reads of them are fine. Only
         # that one statement may bind them; any other binding would capture the rewritten ``state.<x>``.
-        intro -= {"state", "_run_state"}
+        intro -= {"state", f"_{sm}"}
         mine = {id(x) for st in init for x in ast.walk(st)}
-        out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside D1's state statement" for nm, x in binding_nodes(fn) if nm in ("state", "_run_state") and id(x) not in mine]
+        out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside D1's state statement" for nm, x in binding_nodes(fn) if nm in ("state", f"_{sm}") and id(x) not in mine]
     out.errors += [f"V8: {n} is already a name in {fn.name}" for n in sorted(intro & used)]
 
     # mapped names that cannot become attributes
@@ -937,14 +993,14 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         if not any(isinstance(s, DEFS) and s.name == n for b in own_blocks(fn) for s in b):
             out.errors.append(f"V5: publish: no closure {n} in {fn.name}")
 
-    # classes: each is one ClassDef of the function, mapped to ``_run_state.<new>``
+    # classes: each is one ClassDef of the function, mapped to ``_<state_module>.<new>``
     class_defs: dict[str, tuple[list, Any]] = {}
     for old, new in m["classes"].items():
         defs = [(b, s) for b in own_blocks(fn) for s in b if isinstance(s, ast.ClassDef) and s.name == old]
         if len(defs) != 1:
             out.errors.append(f"V6: expected one class {old}, found {len(defs)}")
-        elif rewrite.get(old) != f"_run_state.{new}":
-            out.errors.append(f"V6: class {old} must be in rewrite as _run_state.{new}")
+        elif rewrite.get(old) != f"_{sm}.{new}":
+            out.errors.append(f"V6: class {old} must be in rewrite as _{sm}.{new}")
         elif any(is_f(x, key) for x in ast.walk(defs[0][1]) if isinstance(x, ast.Name) and x is not defs[0][1]):
             out.errors.append(f"V6: class {old} reads a function local")
         else:
@@ -980,7 +1036,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     for s in fn.body:
         Rewriter(key, rewrite, hidden).visit(s)
     names = src.names
-    up = UpTransform(names, src.exempt)
+    up = UpTransform(names, src.exempt, m["facade"])
     for old, (block, d) in class_defs.items():
         block[:] = [x for x in block if x is not d]
         d.name = m["classes"][old]
@@ -1013,18 +1069,18 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # cells and crossings (V4)
     cell_spans = [(mv.name, mv.members) for mv in sorted(moves, key=lambda x: x.a - x.b)]
     if cell_spans:
-        for name, why in sorted(Cells(fn, key, cell_spans).crossing().items()):
+        for name, why in sorted(Cells(fn, key, cell_spans, tuple(ctx_names(m))).crossing().items()):
             out.errors.append(f"V4: crossing local {name}: {'; '.join(why[:2])}")
 
     # moves, inside out
     for mv in sorted(moves, key=lambda x: x.b - x.a):
         mv.is_async = contains_await(mv.members)
-        d = func_template(mv.name, mv.is_async)
+        d = func_template(mv.name, mv.is_async, ctx_sig(m))
         for i, s in enumerate(mv.members):
             mv.members[i] = up.visit(s)
         d.body = ([ast.Expr(ast.Constant(mv.doc))] if mv.doc else []) + mv.members
         out.defs[(mv.module, mv.name)] = d
-        call = call_stmt(mv, "")
+        call = call_stmt(mv, "", call_args(m))
         i = next(i for i, x in enumerate(mv.block) if x is mv.members[0])
         mv.block[i : i + len(mv.members)] = [call]
         if mv.parent and mv.parent.block is mv.block:
@@ -1100,7 +1156,7 @@ def expected_module(m: dict, src: Src, b: Built) -> ast.Module:
     i = next(i for i, s in enumerate(body) if s is src.fn)
     if b.entry is not None:
         body.insert(i + 1, b.entry)
-    mods = list(dict.fromkeys([x.module for x in b.moves] + (["run_state"] if m["hoist"] else [])))
+    mods = list(dict.fromkeys([x.module for x in b.moves] + ([m["state_module"]] if m["hoist"] else [])))
     have = {ast.dump(s) for s in body}
     last = max((j for j, s in enumerate(body) if isinstance(s, (ast.Import, ast.ImportFrom))), default=-1)
     wanted = [ast.parse(x).body[0] for x in m["imports"]] + [import_stmt(m, x) for x in mods]
@@ -1143,7 +1199,7 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
     text = read_base(root, rel, base, base_dir)
     if text is None:
         return [f"{rel}: not found at the base"]
-    src = Src(text, m["func"])
+    src = mk_src(text, m)
     b = build(m, src, text.split("\n"), notes)
     if b.errors:
         return b.errors
@@ -1187,28 +1243,28 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
         if wd != ast.dump(got):
             errs += diff_lines(f"{mod}.py: {name}", want_def, got)
     for new, want_cls in b.classes.items():
-        tree = module("run_state")
+        tree = module(m["state_module"])
         got_cls = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == new), None) if tree else None
         if got_cls is None:
-            errs.append(f"run_state.py: no class {new}")
+            errs.append(f"{m['state_module']}.py: no class {new}")
         elif ast.dump(want_cls) != ast.dump(got_cls):
-            errs += diff_lines(f"run_state.py: class {new}", want_cls, got_cls)
+            errs += diff_lines(f"{m['state_module']}.py: class {new}", want_cls, got_cls)
     if b.methods:
-        tree = module("run_state")
-        cls = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == STATE_CLASS), None) if tree else None
+        tree = module(m["state_module"])
+        cls = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == m["state_class"]), None) if tree else None
         for method, want_def in b.methods.items():
             got = next((n for n in cls.body if isinstance(n, DEFS) and n.name == method), None) if cls else None
             if got is None:
-                errs.append(f"run_state.py: no method {STATE_CLASS}.{method}")
+                errs.append(f"{m['state_module']}.py: no method {m['state_class']}.{method}")
             elif ast.dump(want_def) != ast.dump(got):
-                errs += diff_lines(f"run_state.py: {method}", want_def, got)
+                errs += diff_lines(f"{m['state_module']}.py: {method}", want_def, got)
     # V9 and the module-shape checks, for every touched pipeline module
     stdlib = {n: i for n, i in src.infos.items() if i.stdlib}
-    mods = list(dict.fromkeys([x.module for x in b.moves] + (["run_state"] if m["hoist"] else [])))
+    mods = list(dict.fromkeys([x.module for x in b.moves] + ([m["state_module"]] if m["hoist"] else [])))
     for name in mods:
         t = module_text(name)
         if t is not None:
-            errs += check_module(t, name, m, stdlib, {x.module for x in b.moves}, name == "run_state")
+            errs += check_module(t, name, m, stdlib, {x.module for x in b.moves}, name == m["state_module"])
     return errs
 
 
@@ -1224,7 +1280,8 @@ def check_module(text: str, name: str, m: dict, stdlib: dict[str, Info], modules
     """V7/V9 for a stage module: only declared shapes at module level, one binding per name."""
     errs: list[str] = []
     tree = ast.parse(text)
-    psrc = Src(text)
+    psrc = Src(text, pkg=m["pkg"])
+    stem = Path(m["file"]).stem
     label = f"{name}.py"
     bound: dict[str, int] = defaultdict(int)
 
@@ -1257,23 +1314,25 @@ def check_module(text: str, name: str, m: dict, stdlib: dict[str, Info], modules
     for n in stdlib:
         got = psrc.infos.get(n)
         if bound.get(n) and got != stdlib[n]:
-            errs.append(f"V9: {label} binds {n} as {got.line() if got else 'a non-import'}; unified_pipeline binds it as {stdlib[n].line()}")
+            errs.append(f"V9: {label} binds {n} as {got.line() if got else 'a non-import'}; {stem} binds it as {stdlib[n].line()}")
     for n in sorted({x.id for x in ast.walk(psrc.tree) if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load) and getattr(x, "_r", NEW) is None}):
         if n in stdlib and psrc.infos.get(n) != stdlib[n] and not bound.get(n):
-            errs.append(f"V9: {label} reads {n}, bound there as nothing; unified_pipeline binds it as {stdlib[n].line()}")
+            errs.append(f"V9: {label} reads {n}, bound there as nothing; {stem} binds it as {stdlib[n].line()}")
     parts = m["file"][:-3].split("/")
-    want = {"up": Info("from", ".".join(parts[:-1]), parts[-1], "up", 0)}
+    fa = m["facade"]
+    want = {fa: Info("from", ".".join(parts[:-1]), parts[-1], fa, 0)}
     if not is_state:
-        want["RagRunConfig"] = Info("from", "run_config", "RagRunConfig", None, 1)
+        for n in ctx_imports(m)[0]:
+            want[n] = Info("from", "run_config", n, None, 1)
     for c in modules - {name}:
         want[f"_{c}"] = Info("from", "", c, f"_{c}", 1)
     for n, info in want.items():
         got = psrc.infos.get(n)
         if got is not None and got != info:
             errs.append(f"{label}: {n} is bound as {got.line()}, expected {info.line()}")
-    uses_up = any(isinstance(x, ast.Name) and x.id == "up" for x in ast.walk(psrc.tree))
-    if uses_up and "up" not in psrc.infos:
-        errs.append(f"{label}: reads up but does not import it")
+    uses_up = any(isinstance(x, ast.Name) and x.id == fa for x in ast.walk(psrc.tree))
+    if uses_up and fa not in psrc.infos:
+        errs.append(f"{label}: reads {fa} but does not import it")
     return errs
 
 
@@ -1379,7 +1438,7 @@ def level_edits(lines: list[bytes], nodes: list[ast.ImportFrom]) -> list[Edit]:
     return out
 
 
-def region_edits(src: Src, lines: list[bytes], lo: int, hi: int, root_nodes: list[ast.AST], hoist: bool) -> list[Edit]:
+def region_edits(src: Src, lines: list[bytes], lo: int, hi: int, root_nodes: list[ast.AST], hoist: bool, facade: str = "up") -> list[Edit]:
     out: list[Edit] = []
     imports = []
     for r in root_nodes:
@@ -1388,7 +1447,7 @@ def region_edits(src: Src, lines: list[bytes], lo: int, hi: int, root_nodes: lis
                 continue
             if isinstance(n, ast.Name):
                 if getattr(n, "_r", NEW) is None and n.id in src.names and n.id not in src.exempt:
-                    out.append(Edit(*pos(n), f"up.{n.id}"))
+                    out.append(Edit(*pos(n), f"{facade}.{n.id}"))
                 elif hoist and n.id in ("state", "rcfg"):
                     out.append(Edit(*pos(n), "self" if n.id == "state" else "self.rcfg"))
             elif isinstance(n, ast.ImportFrom) and n.level:
@@ -1406,10 +1465,10 @@ def needed_imports(src: Src, m: dict, nodes: list[ast.AST], cross: set[str], nee
                 out[n.id] = info.line(0 if info.stdlib else 1)
     if stage:
         out.setdefault("TYPE_CHECKING", "from typing import TYPE_CHECKING")
-        out["RagRunConfig"] = "from .run_config import RagRunConfig"
+        out.update(ctx_imports(m)[0])
     if need_up:
         parts = m["file"][:-3].split("/")
-        out["up"] = f"from {'.'.join(parts[:-1])} import {parts[-1]} as up"
+        out[m["facade"]] = f"from {'.'.join(parts[:-1])} import {parts[-1]} as {m['facade']}"
     for c in sorted(cross):
         out[f"_{c}"] = f"from . import {c} as _{c}"
     return out
@@ -1423,17 +1482,17 @@ def last_import_row(tree: ast.Module) -> int:
     return first.end_lineno if isinstance(first, ast.Expr) and isinstance(getattr(first, "value", None), ast.Constant) else 0
 
 
-def order_imports(wanted: dict[str, str]) -> list[str]:
-    std = sorted(v for k, v in wanted.items() if not v.startswith("from .") and k not in ("up", "TYPE_CHECKING"))
+def order_imports(wanted: dict[str, str], facade: str = "up") -> list[str]:
+    std = sorted(v for k, v in wanted.items() if not v.startswith("from .") and k not in (facade, "TYPE_CHECKING"))
     typ = [v for k, v in wanted.items() if k == "TYPE_CHECKING"]
-    absolute = [v for k, v in wanted.items() if k == "up"]
+    absolute = [v for k, v in wanted.items() if k == facade]
     rel = sorted(v for v in wanted.values() if v.startswith("from ."))
     return std + typ + absolute + rel
 
 
-def add_imports(text: str, wanted: dict[str, str]) -> str:
+def add_imports(text: str, wanted: dict[str, str], facade: str = "up") -> str:
     have = set(import_infos(ast.parse(text)))
-    new = order_imports({k: v for k, v in wanted.items() if k not in have})
+    new = order_imports({k: v for k, v in wanted.items() if k not in have}, facade)
     if not new:
         return text
     rows = text.split("\n")
@@ -1442,10 +1501,10 @@ def add_imports(text: str, wanted: dict[str, str]) -> str:
     return "\n".join(rows)
 
 
-def header_text(mod: str, wanted: dict[str, str], stage: bool) -> str:
-    parts = [f'"""{mod} code moved from unified_pipeline.py (TASK-13950.24)."""', ""] + order_imports(wanted)
+def header_text(mod: str, wanted: dict[str, str], stage: bool, m: dict) -> str:
+    parts = [f'"""{mod} code moved from {src_name(m)} ({m["task"]})."""', ""] + order_imports(wanted, m["facade"])
     if stage:
-        parts += ["", "if TYPE_CHECKING:", "    from .run_state import PipelineState"]
+        parts += ["", "if TYPE_CHECKING:"] + [f"    {x}" for x in ctx_imports(m)[1]]
     return "\n".join(parts) + "\n"
 
 
@@ -1454,11 +1513,11 @@ def run_apply(root: Path, m: dict) -> list[str]:
     path = root / rel
     text = path.read_text(encoding="utf-8")
     rows_text = text.split("\n")
-    src = Src(text, m["func"])
+    src = mk_src(text, m)
     b = build(m, src, rows_text)
     if b.errors:
         return b.errors
-    fresh = Src(text, m["func"])  # build() mutated the first tree; positions come from this one
+    fresh = mk_src(text, m)  # build() mutated the first tree; positions come from this one
     lines = text.encode("utf-8").split(b"\n")
     lines = [ln + b"\n" for ln in lines[:-1]] + lines[-1:]
     cont = continuation_rows(text)
@@ -1484,31 +1543,33 @@ def run_apply(root: Path, m: dict) -> list[str]:
     move_cuts: dict[str, Cut] = {}
     for mv in moves:
         recv = "" if mv.parent and mv.parent.module == mv.module else f"_{mv.module}."
-        call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}(rcfg, state)"
+        call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({call_args(m)})"
         move_cuts[mv.name] = Cut(mv.a, mv.b, call, mv.members[0].col_offset)
     cuts += list(hoist_cuts.values()) + list(move_cuts.values())
 
     pkg_dir = root / pkg_rel(m)
+    sm, sc = m["state_module"], m["state_class"]
+    state_path = pkg_dir / f"{sm}.py"
     outputs: dict[Path, list[str]] = defaultdict(list)
     wanted: dict[Path, dict[str, str]] = defaultdict(dict)
     for mv in moves:
         shift = mv.members[0].col_offset - 4
         live = lambda row, mv=mv: not any(c.a <= row <= c.b for c in mv.children)  # noqa: E731
-        ed = [e for e in edits if mv.a <= e.row <= mv.b] + region_edits(fresh, lines, mv.a, mv.b, list(mv.members), False)
+        ed = [e for e in edits if mv.a <= e.row <= mv.b] + region_edits(fresh, lines, mv.a, mv.b, list(mv.members), False, m["facade"])
         for ln in mv.noqa:
             if not mv.a <= ln <= mv.b:
                 return [f"{mv.name}: noqa line {ln} is outside the span {mv.a}-{mv.b}"]
-            ed.append(Edit(ln, row_end(lines, ln), ln, row_end(lines, ln), NOQA))
+            ed.append(Edit(ln, row_end(lines, ln), ln, row_end(lines, ln), noqa_text(m)))
         body = render(lines, cont, mv.a, mv.b, shift, ed, cuts, own=move_cuts[mv.name])
         if mv.doc is not None:
             if '"""' in mv.doc or "\\" in mv.doc:
                 return [f"{mv.name}: doc must not contain triple quotes or backslashes"]
             body = f'    """{mv.doc}"""\n' + body
-        head = ("async " if mv.is_async else "") + f'def {mv.name}(rcfg: RagRunConfig, state: "PipelineState") -> None:\n'
+        head = ("async " if mv.is_async else "") + f"def {mv.name}({ctx_sig(m)}) -> None:\n"
         target = pkg_dir / f"{mv.module}.py"
         outputs[target].append(head + body)
         mine = [n for n in (x for s in mv.members for x in ast.walk(s)) if live(getattr(n, "lineno", mv.a))]
-        need_up = any(e.text.startswith("up.") and live(e.row) for e in ed)
+        need_up = any(e.text.startswith(m["facade"] + ".") and live(e.row) for e in ed)
         cross = {c.module for c in mv.children if c.module != mv.module}
         wanted[target].update(needed_imports(fresh, m, mine, cross, need_up, True))
 
@@ -1516,7 +1577,7 @@ def run_apply(root: Path, m: dict) -> list[str]:
     for name, method in m["hoist"].items():
         d = next(s for blk in blocks for s in blk if isinstance(s, DEFS) and s.name == name)
         lo = stmt_start(d)
-        ed = [e for e in edits if lo <= e.row <= d.end_lineno] + region_edits(fresh, lines, lo, d.end_lineno, [d], True)
+        ed = [e for e in edits if lo <= e.row <= d.end_lineno] + region_edits(fresh, lines, lo, d.end_lineno, [d], True, m["facade"])
         mt = re.match(rb"(\s*(?:async\s+)?def\s+)(\w+)(\s*\()", lines[d.lineno - 1])
         if not mt:
             return [f"{name}: cannot find the def line"]
@@ -1527,17 +1588,17 @@ def run_apply(root: Path, m: dict) -> list[str]:
         sep = "" if not rest.strip() else " "
         ed.append(Edit(d.lineno, mt.end(3), d.lineno, mt.end(3), ("self," + sep) if has else "self"))
         methods.append(render(lines, cont, lo, d.end_lineno, d.col_offset - 4, ed, cuts, hoist=True, own=hoist_cuts[name]))
-        wanted[pkg_dir / "run_state.py"].update(needed_imports(fresh, m, [d], set(), any(e.text.startswith("up.") for e in ed), False))
+        wanted[state_path].update(needed_imports(fresh, m, [d], set(), any(e.text.startswith(m["facade"] + ".") for e in ed), False))
 
     for new, d in class_nodes.items():
         lo = stmt_start(d)
-        ed = region_edits(fresh, lines, lo, d.end_lineno, [d], False)
+        ed = region_edits(fresh, lines, lo, d.end_lineno, [d], False, m["facade"])
         mt = re.match(rb"(\s*class\s+)(\w+)", lines[d.lineno - 1])
         if not mt:
             return [f"{new}: cannot find the class line"]
         ed.append(Edit(d.lineno, mt.start(2), d.lineno, mt.end(2), new))
         class_text[new] = render(lines, cont, lo, d.end_lineno, d.col_offset, ed, cuts, own=hoist_cuts[f"class {d.name}"]).rstrip("\n")
-        wanted[pkg_dir / "run_state.py"].update(needed_imports(fresh, m, [d], set(), any(e.text.startswith("up.") for e in ed), False))
+        wanted[state_path].update(needed_imports(fresh, m, [d], set(), any(e.text.startswith(m["facade"] + ".") for e in ed), False))
 
     # the pipeline function itself
     f_lo, f_hi = stmt_start(fn), fn.end_lineno
@@ -1558,7 +1619,7 @@ def run_apply(root: Path, m: dict) -> list[str]:
         new_f = split_entry(new_f, m)
     rows = rows_text[: f_lo - 1] + new_f.rstrip("\n").split("\n") + rows_text[f_hi:]
     new_text = "\n".join(rows)
-    mods = list(dict.fromkeys([x.module for x in moves] + (["run_state"] if m["hoist"] else [])))
+    mods = list(dict.fromkeys([x.module for x in moves] + ([sm] if m["hoist"] else [])))
     tree = ast.parse(new_text)
     have = {ast.dump(s) for s in tree.body}
     imps = [x for x in m["imports"] if ast.dump(ast.parse(x).body[0]) not in have]
@@ -1569,14 +1630,13 @@ def run_apply(root: Path, m: dict) -> list[str]:
         rows[at:at] = imps
         new_text = "\n".join(rows)
 
-    state_path = pkg_dir / "run_state.py"
     state_text = ""
     if methods:
-        cur = state_path.read_text(encoding="utf-8") if state_path.exists() else header_text("run_state", wanted[state_path], False) + f"\n\nclass {STATE_CLASS}:\n    pass\n"
-        cur = add_imports(cur, wanted[state_path]) if state_path.exists() else cur
-        cls = next((n for n in ast.parse(cur).body if isinstance(n, ast.ClassDef) and n.name == STATE_CLASS), None)
+        cur = state_path.read_text(encoding="utf-8") if state_path.exists() else header_text(sm, wanted[state_path], False, m) + f"\n\nclass {sc}:\n    pass\n"
+        cur = add_imports(cur, wanted[state_path], m["facade"]) if state_path.exists() else cur
+        cls = next((n for n in ast.parse(cur).body if isinstance(n, ast.ClassDef) and n.name == sc), None)
         if cls is None:
-            return [f"run_state.py has no {STATE_CLASS} class"]
+            return [f"{sm}.py has no {sc} class"]
         crow = cur.split("\n")
         if len(cls.body) == 1 and isinstance(cls.body[0], ast.Pass):
             end = cls.body[0].lineno - 1
@@ -1591,7 +1651,7 @@ def run_apply(root: Path, m: dict) -> list[str]:
             state_text += "\n"
     path.write_text(new_text, encoding="utf-8")
     for p, funcs in outputs.items():
-        cur = add_imports(p.read_text(encoding="utf-8"), wanted[p]) if p.exists() else header_text(p.stem, wanted[p], True)
+        cur = add_imports(p.read_text(encoding="utf-8"), wanted[p], m["facade"]) if p.exists() else header_text(p.stem, wanted[p], True, m)
         cur = cur.rstrip("\n") + "\n" + "".join("\n\n" + f.rstrip("\n") + "\n" for f in funcs)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(cur, encoding="utf-8")
@@ -1636,7 +1696,7 @@ def run_shared(root: Path, m: dict | None, hoist: list[str], base: str | None, b
     text = read_base(root, m["file"], base, base_dir)
     if text is None:
         raise SplitError(f"{m['file']}: not found")
-    src = Src(text, m["func"])
+    src = mk_src(text, m)
     out: list[str] = []
     for name in hoist:
         d = next((s for blk in own_blocks(src.fn) for s in blk if isinstance(s, DEFS) and s.name == name), None)
@@ -1648,7 +1708,7 @@ def run_shared(root: Path, m: dict | None, hoist: list[str], base: str | None, b
         moves = plan_moves(src, m["moves"], text.split("\n"))
         spans += [(mv.name, mv.members) for mv in sorted(moves, key=lambda x: x.a - x.b)]
     if spans:
-        for name, why in sorted(Cells(src.fn, src.key, spans).crossing().items()):
+        for name, why in sorted(Cells(src.fn, src.key, spans, tuple(ctx_names(m))).crossing().items()):
             out.append(f"{name}: {'; '.join(why)}")
     return out
 
