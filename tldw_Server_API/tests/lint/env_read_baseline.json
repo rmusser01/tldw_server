@@ -362,7 +362,7 @@
   "core/RAG/rag_service/semantic_cache.py": {"reads": 2, "import_time": 0, "reason": null},
   "core/RAG/rag_service/synonyms_registry.py": {"reads": 2, "import_time": 0, "reason": null},
   "core/RAG/rag_service/transport.py": {"reads": 3, "import_time": 0, "reason": null},
-  "core/RAG/rag_service/unified_pipeline.py": {"reads": 6, "import_time": 0, "reason": null},
+  "core/RAG/rag_service/unified_pipeline.py": {"reads": 3, "import_time": 0, "reason": null},
   "core/RAG/rag_service/user_personalization_store.py": {"reads": 2, "import_time": 0, "reason": null},
   "core/RAG/rag_service/utils.py": {"reads": 1, "import_time": 0, "reason": null},
   "core/Research/jobs_worker.py": {"reads": 9, "import_time": 0, "reason": null},

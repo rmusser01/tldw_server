@@ -196,6 +196,17 @@ class PipelineState:
             raise UnboundLocalError(f"cannot access local variable '{name}' where it is not associated with a value")
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
+    def release(self) -> None:
+        """Drop every slot once the run is over.
+
+        The published closures capture ``self`` and are stored on it, a reference cycle that would
+        keep the retriever, documents and credential handles alive until a cyclic GC. Nothing runs
+        after ``run_rag_pipeline`` returns (every task is awaited), so clearing is safe.
+        """
+        for name in PipelineState.__slots__:
+            with contextlib.suppress(AttributeError):
+                delattr(self, name)
+
     def resolve_effective_enable_generation(self) -> bool:  # an explicit False is retrieval only (TASK-15482)
         return bool(self.rcfg.generation.enable_generation) and bool((self.resolved_request.payload or {}).get("enable_generation", True))
 

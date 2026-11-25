@@ -214,6 +214,8 @@ def test_unrelated_backend_change_leaves_the_owner_isolation_job_off() -> None:
         "tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py",
         "tldw_Server_API/tests/RAG/test_unified_schema_and_pipeline.py",
         "tldw_Server_API/tests/Sharing/test_shared_workspace_chat_retrieval.py",
+        "tldw_Server_API/app/core/Sharing/shared_workspace_chat_service.py",
+        "tldw_Server_API/tests/helpers/run_config_spy.py",
         "pyproject.toml",
         ".github/workflows/backend-required.yml",
         "Helper_Scripts/rag_split/rag_split.py",
