@@ -12,6 +12,7 @@ export const createTokenRefreshError = (response: ApiSendResponse): Error => {
     status,
     code: response.code,
     headers: response.headers,
-    retryAfterMs: response.retryAfterMs
+    retryAfterMs: response.retryAfterMs,
+    details: response.data
   })
 }

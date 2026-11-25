@@ -36,8 +36,10 @@ async def sign_in(tmp_path, monkeypatch, fresh_services):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test",
         ) as client:
-            async def submit():
-                return await client.post("/api/v1/auth/magic-link/verify", json={"token": token})
+            async def submit(headers=None):
+                return await client.post(
+                    "/api/v1/auth/magic-link/verify", json={"token": token}, headers=headers
+                )
 
             yield SimpleNamespace(submit=submit, pool=pool, jwt=jwt, user_id=user_id)
     finally:
@@ -157,3 +159,12 @@ async def test_unconfirmed_insert_result_is_unavailable(sign_in, monkeypatch, dr
     monkeypatch.setattr("tldw_Server_API.app.services.auth_service.consume_magic_link", consume_with_unknown_result)
     assert (await sign_in.submit()).status_code == 503
     assert await sign_in.pool.fetchval("SELECT count(*) FROM sessions WHERE user_id = ?", sign_in.user_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_magic_link_session_stores_the_install_id(sign_in):
+    response = await sign_in.submit({"X-TLDW-Device-Id": "dev-magic-0001"})
+    assert response.status_code == 200, response.text
+    assert await sign_in.pool.fetchval(
+        "SELECT device_id FROM sessions WHERE user_id = ?", sign_in.user_id
+    ) == "dev-magic-0001"
