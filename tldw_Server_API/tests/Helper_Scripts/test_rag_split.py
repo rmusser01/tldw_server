@@ -2283,3 +2283,82 @@ def test_depth_2_verify_rejects_an_unrewritten_read_and_a_missing_partial(tmp_pa
     assert t.run("apply") == 0
     _edit(t, "mini/stage_a.py", "_tf = functools.partial(_stage_b._tf, cst)", "pass")
     assert t.run("verify") == 1
+
+
+# --- free_imports (part 3): a lifted body reads a name that a function-local import bound in the source ---
+
+FREE_BASE = DEEP_BASE.replace("        held = []\n", "        from mini.utils import Stop\n\n        held = []\n", 1).replace(
+    "return audit(x, cst.n)", "return audit(x, cst.n, Stop)", 1
+)
+STOP = "from mini.utils import Stop"
+
+
+def free_tree(tmp: Path, src: str = FREE_BASE, free: dict | None = None, **extra: object) -> Tree:
+    return deep_tree(tmp, src, free_imports={"Stop": STOP} if free is None else free, **extra)
+
+
+def test_free_imports_put_the_import_at_the_destinations_top(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = free_tree(tmp_path)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    a = t.text("mini/stage_a.py")
+    assert "from typing import Any\nfrom mini.utils import Stop\n" in a and "return cs.audit(x, cst.n, Stop)" in a
+    assert "Stop" not in t.text("mini/stage_b.py")
+    assert "from mini.utils import Stop\n" in a.split("def gen(")[1]  # the parent keeps its own import
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_without_free_imports_the_local_import_is_a_free_variable(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = free_tree(tmp_path, free={})
+    assert t.run("apply") == 1 and "V11: lifted _emit reads Stop" in capsys.readouterr().out
+
+
+def test_free_imports_reuse_an_identical_destination_import(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    stage_a = STAGE_A.replace("import json\n", "import json\nfrom mini.utils import Stop\n")
+    t = free_tree(tmp_path, dests={"stage_a": stage_a, "stage_b": STAGE_B})
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert t.text("mini/stage_a.py").split("\ndef ")[0].count("from mini.utils import Stop") == 1
+    assert t.run("verify") == 0, capsys.readouterr().out
+    other = STAGE_A.replace("import json\n", "import json\nfrom mini.other import Stop\n")
+    t = free_tree(tmp_path / "b", dests={"stage_a": other, "stage_b": STAGE_B})
+    assert t.run("apply") == 1 and "V9: stage_a.py binds Stop as from mini.other import Stop" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("src_edit", "free", "needle"),
+    [
+        (None, {"Stop": "from mini.other import Stop"}, "V16: free_imports Stop: gen binds it as from mini.utils import Stop, not by `from mini.other import Stop` alone"),
+        (("held = []", "held = []\n        Stop = 1"), None, "V16: free_imports Stop"),
+        (("from mini.utils import Stop\n", "Stop = 1\n"), None, "V16: free_imports Stop: gen binds it as something else"),
+        (None, {"Stop": STOP, "Other": "from mini.utils import Other"}, "V16: free_imports Other is read by no lifted def"),
+        (("        from mini.utils import Stop\n\n", ""), {"Stop": STOP}, "V16: free_imports Stop is read by no lifted def"),
+    ],
+)
+def test_free_imports_refusals(tmp_path: Path, capsys: pytest.CaptureFixture, src_edit: tuple[str, str] | None, free: dict | None, needle: str) -> None:
+    src = FREE_BASE.replace(*src_edit, 1) if src_edit else FREE_BASE
+    t = free_tree(tmp_path, src, free=free)
+    assert t.run("apply") == 1
+    assert needle in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad", [{"Stop": "from a import Other"}, {"Stop": "from a import Stop, Other"}, {"Stop": "Stop = 1"}, {"Stop": 1}, ["Stop"], {"Stop": "from a import ("}])
+def test_free_imports_shape_is_checked(tmp_path: Path, bad: object) -> None:
+    t = free_tree(tmp_path, free=bad)  # type: ignore[arg-type]
+    with pytest.raises(rag_split.SplitError, match="free_imports must map a name to one import line"):
+        rag_split.load_manifest(t.manifest_path)
+
+
+def test_free_imports_need_pkg_empty(tmp_path: Path) -> None:
+    t = Tree(tmp_path, free_imports={"Stop": STOP})
+    with pytest.raises(rag_split.SplitError, match="free_imports needs pkg ''"):
+        rag_split.load_manifest(t.manifest_path)
+
+
+def test_free_imports_verify_rejects_a_missing_or_changed_import(tmp_path: Path) -> None:
+    t = free_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "from mini.utils import Stop\n", "")
+    assert t.run("verify") == 1
+    t = free_tree(tmp_path / "b")
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "from mini.utils import Stop\n", "from mini.other import Stop\n")
+    assert t.run("verify") == 1

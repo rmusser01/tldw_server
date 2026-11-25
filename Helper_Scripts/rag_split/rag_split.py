@@ -2347,6 +2347,7 @@ class ModPlan:
         self.need_cs = False
         self.drops: list[dict] = []
         self.late_ranges: list[list[int]] = []  # rows of top imports that move into the late block
+        self.free: set[str] = set()  # free_imports names the appended defs read: module-level imports from the manifest's lines
 
 
 def split_late(text: str) -> tuple[ast.Module, list[ast.stmt], list[ast.stmt]]:
@@ -2490,6 +2491,13 @@ def make_plans(m: dict, src: Src, b: Built, text_of: Any) -> tuple[dict[str, Mod
             continue
         p.text = t
         dest_names(p, m, src, b.dests)
+        p.free = set(b.free_imps.get(mod, ()))
+        have = import_infos(ast.parse(t))
+        for n in sorted(p.free):
+            line = m["free_imports"][n]
+            p.std[n] = line
+            if n in have and have[n] != import_infos(ast.parse(line))[n]:
+                errs.append(f"V9: {mod}.py binds {n} as {have[n].line()}; free_imports wants `{line}`")
         if p.late_ranges:
             tree, top, _ = split_late(t)
             moved = [x for x in top if is_top_import(x) and [x.lineno, x.end_lineno] in p.late_ranges]
@@ -2565,6 +2573,8 @@ def sib_checks(m: dict, src: Src, plan: ModPlan, want_late: int, head_text: str)
         if n == "TYPE_CHECKING":
             continue
         want = src.infos.get(n) if n != "functools" else Info("import", "functools", "functools", None, 0)
+        if n in plan.free:
+            want = import_infos(ast.parse(m["free_imports"][n])).get(n)
         if psrc.infos.get(n) != want:
             got = psrc.infos.get(n)
             errs.append(f"V9: {label} binds {n} as {got.line() if got else 'nothing'}; {src_stem(m)} binds it as {want.line() if want else '?'}")
