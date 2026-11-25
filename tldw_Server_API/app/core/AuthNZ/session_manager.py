@@ -32,10 +32,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from fastapi import HTTPException
 from jose import jwt as jose_jwt
 from jose.exceptions import JWSError, JWTError
 from loguru import logger
-from fastapi import HTTPException
 from redis import asyncio as redis_async
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
