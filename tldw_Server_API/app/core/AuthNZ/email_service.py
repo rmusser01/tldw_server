@@ -439,6 +439,13 @@ If you did not, sign in with your password, change your password, and change you
     }
 }
 
+
+def _mask_email(address: str) -> str:
+    """Return ``a***@domain``: enough to recognise an address without logging or showing it."""
+    local, _, domain = address.partition("@")
+    return f"{local[:1] or '*'}***@{domain}"
+
+
 #######################################################################################################################
 #
 # Email Service Class
@@ -554,7 +561,7 @@ class EmailService:
                 error=error,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("Failed to record email delivery: {}", exc)
+            logger.debug("Failed to record email delivery: {}", type(exc).__name__)
 
     async def send_email(
         self,
@@ -677,7 +684,7 @@ class EmailService:
             logger.info("📧 MOCK EMAIL SENT")
             logger.info("=" * 80)
             logger.info(f"From: {from_email}")
-            logger.info(f"To: {to_email}")
+            logger.info("To: {}", _mask_email(to_email))
             logger.info(f"Subject: {subject}")
             logger.info("-" * 80)
             if stored_text_body:
@@ -869,11 +876,11 @@ class EmailService:
                     msg.attach(part)
 
             await asyncio.to_thread(self._deliver_smtp_message, msg)
-            logger.info(f"Email sent successfully to {to_email}")
+            logger.info("Email sent successfully to {}", _mask_email(to_email))
             return True
 
         except Exception as e:
-            logger.error(f"Failed to send email via SMTP: {e}")
+            logger.error("Failed to send email via SMTP to {}: {}", _mask_email(to_email), type(e).__name__)
             return False
 
     def _deliver_smtp_message(self, message: MIMEMultipart) -> None:
@@ -1141,11 +1148,10 @@ class EmailService:
         ip_address: str = "Unknown",
     ) -> bool:
         """Tell the previous address that the account's email changed; the new address is masked."""
-        local, _, domain = new_email.partition("@")
         template_data = {
             "app_name": self.app_name,
             "username": username,
-            "new_email_masked": f"{local[:1] or '*'}***@{domain}",
+            "new_email_masked": _mask_email(new_email),
             "ip_address": ip_address,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         }

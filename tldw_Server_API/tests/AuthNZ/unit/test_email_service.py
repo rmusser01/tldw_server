@@ -11,8 +11,11 @@ import asyncio
 import json
 import pytest
 import os
+from io import StringIO
 from unittest.mock import patch, MagicMock, AsyncMock
 from pathlib import Path
+
+from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.email_service import EmailService, EMAIL_TEMPLATES
 
@@ -139,6 +142,35 @@ class TestMockEmailSending:
         assert file_names
         invalid_chars = set('<>:"/\\|?*')
         assert all(invalid_chars.isdisjoint(name) for name in file_names)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("provider", "delivery_error"),
+        [("mock", None), ("smtp", None), ("smtp", OSError)],
+        ids=["mock", "smtp-sent", "smtp-failed"],
+    )
+    async def test_send_logs_mask_the_recipient(self, monkeypatch, mock_settings, tmp_path, provider, delivery_error):
+        """Send-path log lines carry a masked recipient and never the full address (TASK-15640)."""
+        recipient = "owner.name@example.org"
+        monkeypatch.setenv("EMAIL_PROVIDER", provider)
+        monkeypatch.setenv("EMAIL_MOCK_OUTPUT", "both")
+        monkeypatch.setenv("EMAIL_MOCK_FILE_PATH", str(tmp_path))
+        service = EmailService(settings=mock_settings)
+
+        def _deliver(_message):
+            if delivery_error:
+                raise delivery_error(f"550 mailbox {recipient} unavailable")
+
+        monkeypatch.setattr(service, "_deliver_smtp_message", _deliver)
+        buffer = StringIO()
+        sink = logger.add(buffer, level="DEBUG")
+        try:
+            await service.send_email(to_email=recipient, subject="Test", html_body="<p>Test</p>", text_body="Test")
+        finally:
+            logger.remove(sink)
+        logs = buffer.getvalue()
+        assert recipient not in logs
+        assert "o***@example.org" in logs
 
 
 class TestHeaderInjectionPrevention:
