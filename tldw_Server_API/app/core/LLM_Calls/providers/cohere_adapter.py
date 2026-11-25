@@ -113,7 +113,7 @@ def _cohere_request(
         raise ChatAuthenticationError(provider="cohere", message="Cohere API key is missing.")
     logging.debug("Cohere: Using configured API key")
 
-    final_model = model or cohere_config.get("model", "command-r")
+    final_model = model or cohere_config.get("model", "command-a-plus-05-2026")
     resolved_temp_from_cfg = cohere_config.get("temperature")
     current_temp = temp if temp is not None else _safe_cast(resolved_temp_from_cfg, float, None)
     resolved_p_cfg = cohere_config.get("top_p")

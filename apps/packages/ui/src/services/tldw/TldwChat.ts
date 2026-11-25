@@ -4,6 +4,7 @@ import {
   ChatMessage,
   ChatCompletionRequest,
   type ChatCompletionContentPart,
+  type ChatCompletionToolCall,
   type ChatResearchContext
 } from "./TldwApiClient"
 import { extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
@@ -405,6 +406,7 @@ export interface ChatStreamChunk {
         index?: number
         id?: string
         type?: "function"
+        extra_content?: ChatCompletionToolCall["extra_content"]
         function?: {
           name?: string
           arguments?: string

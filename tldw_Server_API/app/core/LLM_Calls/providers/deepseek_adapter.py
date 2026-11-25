@@ -132,7 +132,7 @@ class DeepSeekAdapter(ChatProvider):
         if merged.get("api_key") is None and cfg.get("api_key") is not None:
             merged["api_key"] = cfg.get("api_key")
         if merged.get("model") is None:
-            merged["model"] = cfg.get("model") or "deepseek-chat"
+            merged["model"] = cfg.get("model") or "deepseek-flash"
         if merged.get("temperature") is None and cfg.get("temperature") is not None:
             merged["temperature"] = _coerce_float(cfg.get("temperature"))
         if merged.get("top_p") is None and cfg.get("top_p") is not None:
@@ -226,6 +226,16 @@ class DeepSeekAdapter(ChatProvider):
                 payload[k] = request.get(k)
         if request.get("tools") is not None:
             payload["tools"] = request.get("tools")
+            if payload["model"] == "deepseek-flash" and payload["tools"]:
+                from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import is_bundled_model_endpoint
+
+                extra = request.get("extra_body") or {}
+                base = self._base_url(request.get("app_config"), request)
+                options = ("thinking", "reasoning_effort")
+                if not any(request.get(key) is not None or key in extra for key in options) and is_bundled_model_endpoint(
+                    self.name, payload["model"], base
+                ):
+                    payload["thinking"] = {"type": "disabled"}
         if request.get("tool_choice") is not None:
             payload["tool_choice"] = request.get("tool_choice")
         if request.get("logit_bias") is not None:
