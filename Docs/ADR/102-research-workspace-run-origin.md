@@ -4,7 +4,7 @@
 **Date:** 2026-11-24
 **Decision owner:** Research Workspace workstream
 **Related task:** TASK-15638
-**Related design:** [Research Workspace run origin](../Design/research-workspace-run-origin.md)
+**Related design:** [Research Workspace run origin](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/research-workspace-run-origin.md)
 
 ## Decision
 

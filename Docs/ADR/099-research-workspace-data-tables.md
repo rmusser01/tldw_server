@@ -4,7 +4,7 @@
 **Date:** 2026-11-24
 **Decision owner:** Research Workspace workstream
 **Related task:** TASK-15639
-**Related design:** [Research Workspace Data Tables](../Design/research-workspace-data-tables.md)
+**Related design:** [Research Workspace Data Tables](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/research-workspace-data-tables.md)
 
 ## Decision
 

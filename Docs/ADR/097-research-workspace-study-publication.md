@@ -5,7 +5,7 @@
 **Backfilled from:** New decision
 **Decision owner:** Research Workspace workstream
 **Related task:** TASK-15637
-**Related design:** [Research Workspace Study publication](../Design/research-workspace-study-publication.md)
+**Related design:** [Research Workspace Study publication](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/research-workspace-study-publication.md)
 
 ## Decision
 
