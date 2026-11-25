@@ -59,7 +59,7 @@ async def test_agentic_vlm_late_chunking_smoke(monkeypatch):
         # Use a real module object to avoid inserting unhashable objects into sys.modules
         m = types.ModuleType("vlm_registry_stub")
         setattr(m, "get_backend", fake_get_backend)
-        sys.modules[vlm_mod_path] = m
+        monkeypatch.setitem(sys.modules, vlm_mod_path, m)
 
         res = await agentic_rag_pipeline(
             query="table results",
