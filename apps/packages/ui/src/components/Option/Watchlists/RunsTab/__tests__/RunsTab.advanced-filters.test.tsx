@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunsTab } from "../RunsTab"
 
@@ -109,18 +110,12 @@ vi.mock("../RunDetailDrawer", () => ({
 
 const baseState = (overrides: Record<string, unknown> = {}) => ({
   activeTab: "runs",
-  runs: [],
-  runsLoading: false,
-  runsTotal: 0,
   runsPage: 1,
   runsPageSize: 20,
   runsJobFilter: null,
   runsStatusFilter: null,
-  pollingActive: false,
   runDetailOpen: false,
   selectedRunId: null,
-  setRuns: vi.fn(),
-  setRunsLoading: vi.fn(),
   setRunsPage: vi.fn(),
   setRunsPageSize: vi.fn(),
   setRunsJobFilter: vi.fn(),
@@ -128,7 +123,6 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
   setPollingActive: vi.fn(),
   openRunDetail: vi.fn(),
   closeRunDetail: vi.fn(),
-  updateRunInList: vi.fn(),
   ...overrides
 })
 
@@ -211,11 +205,9 @@ describe("RunsTab advanced filters disclosure", () => {
       }))
     ]
 
-    const setRuns = vi.fn()
     mocks.storeStateRef.current = baseState({
       runsJobFilter: 1,
-      runsStatusFilter: "failed",
-      setRuns
+      runsStatusFilter: "failed"
     })
     mocks.fetchJobRunsMock
       .mockResolvedValueOnce({ items: firstPageRuns, total: 500, has_more: true })
@@ -226,30 +218,49 @@ describe("RunsTab advanced filters disclosure", () => {
     await waitFor(() => {
       expect(mocks.fetchJobRunsMock.mock.calls.length).toBeGreaterThanOrEqual(2)
     })
-    expect(mocks.fetchJobRunsMock).toHaveBeenNthCalledWith(1, 1, { page: 1, size: 200 })
-    expect(mocks.fetchJobRunsMock).toHaveBeenNthCalledWith(2, 1, { page: 2, size: 200 })
-    expect(
-      setRuns.mock.calls.some(
-        ([rows, total]) => Array.isArray(rows) && rows.length === 20 && total === 30
-      )
-    ).toBe(true)
+    expect(mocks.fetchJobRunsMock).toHaveBeenNthCalledWith(1, 1, { page: 1, size: 200 }, expect.any(AbortSignal))
+    expect(mocks.fetchJobRunsMock).toHaveBeenNthCalledWith(2, 1, { page: 2, size: 200 }, expect.any(AbortSignal))
+    await screen.findByText("1001")
+    expect(screen.getByTestId("runs-table").querySelectorAll("tbody tr")).toHaveLength(20)
+  })
+
+  it("keeps the selected watchlist's runs when an earlier request resolves late", async () => {
+    let resolvePrevious!: (value: { items: ReturnType<typeof buildRun>[]; total: number; has_more: boolean }) => void
+    mocks.storeStateRef.current = baseState({ selectedWatchlistId: 1 })
+    mocks.fetchWatchlistRunsMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolvePrevious = resolve }))
+      .mockResolvedValueOnce({ items: [buildRun(902)], total: 1, has_more: false })
+
+    const { rerender } = render(<RunsTab />)
+    await waitFor(() => expect(mocks.fetchWatchlistRunsMock).toHaveBeenCalledTimes(1))
+
+    const previousSignal = mocks.fetchWatchlistRunsMock.mock.calls[0][1] as AbortSignal
+    mocks.storeStateRef.current = baseState({ selectedWatchlistId: 2 })
+    rerender(<RunsTab />)
+    expect(previousSignal.aborted).toBe(true)
+    expect(await screen.findByText("902")).toBeInTheDocument()
+
+    await act(async () => {
+      resolvePrevious({ items: [buildRun(901)], total: 1, has_more: false })
+    })
+    expect(screen.getByText("902")).toBeInTheDocument()
+    expect(screen.queryByText("901")).not.toBeInTheDocument()
   })
 
   it("skips auto-refresh polling when Activity tab is not active", async () => {
     vi.useFakeTimers()
     try {
       mocks.storeStateRef.current = baseState({
-        activeTab: "items",
-        pollingActive: true
+        activeTab: "items"
       })
-      mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+      mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [buildRun(7)], total: 1, has_more: false })
 
       render(<RunsTab />)
 
-      await vi.advanceTimersByTimeAsync(0)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
       const initialCallCount = mocks.fetchWatchlistRunsMock.mock.calls.length
 
-      await vi.advanceTimersByTimeAsync(10_000)
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
       expect(mocks.fetchWatchlistRunsMock).toHaveBeenCalledTimes(initialCallCount)
     } finally {
       vi.useRealTimers()
@@ -260,17 +271,16 @@ describe("RunsTab advanced filters disclosure", () => {
     vi.useFakeTimers()
     try {
       mocks.storeStateRef.current = baseState({
-        activeTab: "runs",
-        pollingActive: true
+        activeTab: "runs"
       })
-      mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+      mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [buildRun(7)], total: 1, has_more: false })
 
       render(<RunsTab />)
 
-      await vi.advanceTimersByTimeAsync(0)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
       const initialCallCount = mocks.fetchWatchlistRunsMock.mock.calls.length
 
-      await vi.advanceTimersByTimeAsync(5_000)
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
       expect(mocks.fetchWatchlistRunsMock.mock.calls.length).toBeGreaterThan(initialCallCount)
     } finally {
       vi.useRealTimers()

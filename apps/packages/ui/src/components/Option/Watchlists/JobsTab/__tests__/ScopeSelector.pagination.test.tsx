@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
-import { render, waitFor } from "@testing-library/react"
+import { waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { ScopeSelector } from "../ScopeSelector"
 
 const servicesMock = vi.hoisted(() => ({
@@ -77,10 +78,25 @@ describe("ScopeSelector source pagination", () => {
     expect(servicesMock.fetchWatchlistSources).toHaveBeenNthCalledWith(1, {
       page: 1,
       size: 200
-    })
+    }, expect.any(AbortSignal))
     expect(servicesMock.fetchWatchlistSources).toHaveBeenNthCalledWith(2, {
       page: 2,
       size: 200
-    })
+    }, expect.any(AbortSignal))
+  })
+
+  it("shares a scope catalog request between selectors for the same watchlist", async () => {
+    servicesMock.fetchWatchlistSources.mockResolvedValue({ items: makeSources(1), total: 1 })
+
+    render(<>
+      <ScopeSelector value={{}} onChange={vi.fn()} watchlistId={4} />
+      <ScopeSelector value={{}} onChange={vi.fn()} watchlistId={4} />
+    </>)
+
+    await waitFor(() => expect(servicesMock.fetchWatchlistSources).toHaveBeenCalledTimes(1))
+    expect(servicesMock.fetchWatchlistSources).toHaveBeenCalledWith(
+      { watchlist_id: 4, page: 1, size: 200 },
+      expect.any(AbortSignal)
+    )
   })
 })

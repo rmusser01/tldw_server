@@ -2,7 +2,8 @@
 
 import React from "react"
 import i18next from "i18next"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesTab } from "../SourcesTab"
 import commonEn from "@/assets/locale/en/common.json"
@@ -185,6 +186,7 @@ vi.mock("@/utils/dateFormatters", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  getWatchlistSettings: vi.fn().mockResolvedValue({ forums_enabled: false }),
   checkWatchlistSourcesNow: (...args: any[]) => mocks.checkWatchlistSourcesNowMock(...args),
   createWatchlistSource: (...args: any[]) => mocks.createWatchlistSourceMock(...args),
   deleteWatchlistSource: (...args: any[]) => mocks.deleteWatchlistSourceMock(...args),
@@ -550,7 +552,7 @@ describe("SourcesTab advanced details disclosure", () => {
         groups: [7],
         page: 3,
         size: 10
-      })
+      }, expect.any(AbortSignal))
     })
     expect(mocks.exportOpmlMock).not.toHaveBeenCalled()
   })
@@ -575,7 +577,8 @@ describe("SourcesTab advanced details disclosure", () => {
 
     await waitFor(() => {
       expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith(
-        expect.objectContaining({ groups: [0] })
+        expect.objectContaining({ groups: [0] }),
+        expect.any(AbortSignal)
       )
     })
   })
@@ -583,6 +586,7 @@ describe("SourcesTab advanced details disclosure", () => {
   it("server-filters every group page before client-side type filtering and paging", async () => {
     const firstRssSource = buildSource(501)
     const secondRssSource = buildSource(502)
+    const currentPageSource = { ...buildSource(503), source_type: "site" as const }
     const firstPage = [
       firstRssSource,
       ...Array.from({ length: 199 }, (_unused, index) => ({
@@ -602,7 +606,7 @@ describe("SourcesTab advanced details disclosure", () => {
     mocks.fetchWatchlistSourcesMock.mockImplementation(async ({ page, size }) => {
       if (size === 1) {
         return {
-          items: [secondRssSource],
+          items: [currentPageSource],
           total: 201,
           page: 2,
           size: 1,
@@ -616,13 +620,14 @@ describe("SourcesTab advanced details disclosure", () => {
 
     render(<SourcesTab />)
 
+    expect(await screen.findByText("Feed 503")).toBeInTheDocument()
     await waitFor(() => {
       expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledWith(
-        expect.objectContaining({ groups: [7], page: 2, size: 1 })
+        expect.objectContaining({ groups: [7], page: 2, size: 1 }),
+        expect.any(AbortSignal)
       )
     })
     mocks.fetchWatchlistSourcesMock.mockClear()
-    mocks.storeStateRef.current.setSources.mockClear()
 
     fireEvent.change(screen.getByLabelText("Filter by type"), {
       target: { value: "rss" }
@@ -635,7 +640,8 @@ describe("SourcesTab advanced details disclosure", () => {
       expect.objectContaining({ groups: [7], page: 1, size: 200 }),
       expect.objectContaining({ groups: [7], page: 2, size: 200 })
     ])
-    expect(mocks.storeStateRef.current.setSources).toHaveBeenCalledWith([secondRssSource], 2)
+    expect(await screen.findByText("Feed 502")).toBeInTheDocument()
+    expect(screen.queryByText("Feed 501")).not.toBeInTheDocument()
     expect(mocks.exportOpmlMock).not.toHaveBeenCalled()
   })
 

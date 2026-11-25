@@ -1,10 +1,12 @@
 ---
 id: TASK-15118
 title: Unify Watchlists briefing pipeline contract and harden latest-briefing UX
-status: In Progress
+status: Done
 documentation:
 - Docs/superpowers/specs/2026-07-09-watchlists-briefing-contract-ux-hardening-design.md
 - Docs/superpowers/plans/IMPLEMENTATION_PLAN_watchlists_briefing_contract_ux_2026_07_09.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/2710
 ---
 
 ## Description
@@ -31,12 +33,13 @@ Implement the confirmed UAT-driven Watchlists remediation: route every setup pat
 
 - 2026-07-11 PR review follow-up: confirmed branch contains remote dev tip `42631082bb32611e6a52abe1cf468822477e7c44` and `git rebase origin/dev` is clean. Addressed all valid PR findings: locale collision detection, missing/incomplete translations, artifact filenames, duplicate source loads, rendered tour targets, legacy delivery validation, split idempotency DDL, SQLite lock retry, batched durable selection, projection status/count semantics, stale E2E mocks/assertions, shard ownership, and inherited Chatbook docs/typecheck gates. Verification: 71 backend/docs tests and 91 focused UI tests passed; frontend typecheck passed; Chrome MV3 build passed; shard guard reports `new_uncovered=0`; locale sync/unit tests and JSON/diff checks passed; Bandit returned 0 findings. Mixed-case Chrome locale keys were retained because they are valid and lowercasing would break exact source-key parity. Task remains In Progress only for the required human-written PR Change summary.
 Renumbered from TASK-12946 to TASK-15118 on 2026-10-31 (TASK-13960): TASK-12946 now names only "Address remaining frontend CodeQL alerts for dev" (backlog/completed/task-12946 - Address-remaining-frontend-CodeQL-alerts-for-dev.md). Before 2026-10-31 both tasks used TASK-12946; Docs/Development/Backlog_Task_Id_Renumbering.md lists every renumbered id.
+Closeout reconciliation: PR #2710 merged to dev on 2026-07-11 as 47439bbe5e82f91150fc2984a57ccee2b819a257. Verified the merge commit is reachable from origin/dev. The recorded acceptance and verification are complete.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the Watchlists briefing hardening and independent validity remediation on a clean branch based directly on current dev. The canonical pipeline now produces truthful text/audio/delivery outcomes, the outcome-first setup includes a localized natural-language receipt and successful-audio activation gate, Latest briefing exposes coherent partial/recovery semantics, and Workflow artifacts enforce the correct single-user tenant boundary while allowing generated audio downloads. Rebuilt automated verification passed 476 backend tests, 100 accessibility tests, 53 focused UI tests, 3 static type guards, the Chrome MV3 production build, clean diff/locale checks, and Bandit with zero findings. Final real-backend extension CDP UAT successfully played and downloaded the actual generated briefing audio. The only remaining merge gate is the repository policy requiring the human requester to write the PR Change summary.
+Watchlists briefing hardening shipped in PR #2710. The shared pipeline records text, audio, and delivery outcomes, exposes recovery through Latest Briefing, and uses an accessible setup flow. Recorded tests include 476 backend, 100 accessibility, 53 focused UI, and 3 static type checks. The unpacked extension played and downloaded generated audio against the real backend.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

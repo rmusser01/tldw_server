@@ -1,5 +1,6 @@
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
+import { render } from "@/components/Option/Watchlists/shared/__tests__/render-with-watchlists-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SettingsTab } from "../SettingsTab"
 import { WATCHLISTS_HELP_DOCS } from "../../shared/help-docs"

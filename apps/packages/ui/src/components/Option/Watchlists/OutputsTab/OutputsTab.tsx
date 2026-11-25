@@ -26,16 +26,18 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives"
+import { useInvalidateWatchlists, useWatchlistsAccountGeneration, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   createWatchlistOutput,
   fetchWatchlistJobs,
   fetchWatchlistOutputs,
   fetchWatchlistTemplates,
+  fetchWatchlists,
   downloadWatchlistOutput,
   downloadWatchlistOutputBinary
 } from "@/services/watchlists"
-import type { WatchlistJob, WatchlistOutput, WatchlistTemplate } from "@/types/watchlists"
+import type { WatchlistOutput, WatchlistTemplate } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { trackWatchlistsOnboardingTelemetry } from "@/utils/watchlists-onboarding-telemetry"
@@ -69,6 +71,8 @@ import {
   restoreFocusToElement
 } from "../shared/focus-management"
 
+const EMPTY_OUTPUTS: WatchlistOutput[] = []
+const EMPTY_TEMPLATES: WatchlistTemplate[] = []
 const OUTPUTS_ADVANCED_FILTERS_STORAGE_KEY = "watchlists:outputs:advanced-filters:v1"
 const SENSITIVE_LOG_VALUE_PATTERN =
   /\b(authorization|x-api-key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|password)\b\s*[:=]\s*("[^"]+"|'[^']+'|[^\s,;)}\]]+)/gi
@@ -127,9 +131,6 @@ export const OutputsTab: React.FC = () => {
   const outputMetadataLabels = useMemo(() => createOutputMetadataLabels(t), [t])
 
   // Store state
-  const outputs = useWatchlistsStore((s) => s.outputs)
-  const outputsLoading = useWatchlistsStore((s) => s.outputsLoading)
-  const outputsTotal = useWatchlistsStore((s) => s.outputsTotal)
   const outputsPage = useWatchlistsStore((s) => s.outputsPage)
   const outputsPageSize = useWatchlistsStore((s) => s.outputsPageSize)
   const outputsJobFilter = useWatchlistsStore((s) => s.outputsJobFilter)
@@ -137,11 +138,8 @@ export const OutputsTab: React.FC = () => {
   const outputPreviewOpen = useWatchlistsStore((s) => s.outputPreviewOpen)
   const selectedOutputId = useWatchlistsStore((s) => s.selectedOutputId)
   const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
-  const watchlists = useWatchlistsStore((s) => Array.isArray(s.watchlists) ? s.watchlists : [])
 
   // Store actions
-  const setOutputs = useWatchlistsStore((s) => s.setOutputs)
-  const setOutputsLoading = useWatchlistsStore((s) => s.setOutputsLoading)
   const setOutputsPage = useWatchlistsStore((s) => s.setOutputsPage)
   const setOutputsPageSize = useWatchlistsStore((s) => s.setOutputsPageSize)
   const setOutputsJobFilter = useWatchlistsStore((s) => s.setOutputsJobFilter)
@@ -154,11 +152,8 @@ export const OutputsTab: React.FC = () => {
   const closeOutputPreview = useWatchlistsStore((s) => s.closeOutputPreview)
   const setRunsStatusFilter = useWatchlistsStore((s) => s.setRunsStatusFilter)
 
-  const [jobs, setJobs] = useState<WatchlistJob[]>([])
   const [regenOpen, setRegenOpen] = useState(false)
   const [regenOutput, setRegenOutput] = useState<WatchlistOutput | null>(null)
-  const [templates, setTemplates] = useState<WatchlistTemplate[]>([])
-  const [templatesLoading, setTemplatesLoading] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
   const [selectedTemplateVersion, setSelectedTemplateVersion] = useState<number | null>(null)
   const [customTitle, setCustomTitle] = useState("")
@@ -176,12 +171,54 @@ export const OutputsTab: React.FC = () => {
     return stored ?? hasActiveOutputFilters
   })
   const previousDeliverySnapshotRef = useRef<Map<number, string>>(new Map())
-  const hasOutputAnnouncementBaselineRef = useRef(false)
   const regenTriggerRef = useRef<HTMLElement | null>(null)
   const wasRegenOpenRef = useRef(false)
   const regenTemplateFieldId = "outputs-regenerate-template-field"
   const regenTemplateVersionFieldId = "outputs-regenerate-template-version-field"
   const regenTitleFieldId = "outputs-regenerate-title-field"
+
+  const accountGeneration = useWatchlistsAccountGeneration()
+  const invalidateWatchlists = useInvalidateWatchlists()
+  const outputParams = {
+    watchlist_id: selectedWatchlistId ?? undefined,
+    job_id: outputsJobFilter || undefined,
+    run_id: outputsRunFilter || undefined,
+    page: outputsPage,
+    size: outputsPageSize
+  }
+  const outputsQuery = useWatchlistsQuery("outputs", outputParams, ({ signal }) => fetchWatchlistOutputs(outputParams, signal))
+  const outputs = outputsQuery.data?.items ?? EMPTY_OUTPUTS
+  const outputsTotal = outputsQuery.data?.total ?? 0
+  const outputsLoading = outputsQuery.isFetching
+  const jobsParams = { watchlist_id: selectedWatchlistId ?? undefined, page: 1, size: 200 }
+  const { data: jobsPage } = useWatchlistsQuery("jobs", jobsParams, ({ signal }) => fetchWatchlistJobs(jobsParams, signal))
+  const { data: watchlistsPage } = useWatchlistsQuery("containers", { page: 1, size: 100 }, ({ signal }) =>
+    fetchWatchlists({ page: 1, size: 100 }, signal)
+  )
+  const templatesQuery = useWatchlistsQuery("templates", null, ({ signal }) => fetchWatchlistTemplates(signal), {
+    enabled: regenOpen
+  })
+  const templates = templatesQuery.data?.items ?? EMPTY_TEMPLATES
+  const templatesLoading = regenOpen && templatesQuery.isFetching
+  const firstOutput = outputs[0]
+
+  useEffect(() => {
+    if (!firstOutput) return
+    void trackWatchlistsOnboardingTelemetry({
+      type: "first_output_succeeded",
+      outputId: firstOutput.id,
+      format: typeof firstOutput.format === "string" ? firstOutput.format : null
+    })
+  }, [firstOutput])
+
+  useEffect(() => {
+    if (!outputsQuery.error) return
+    console.error("Failed to fetch outputs:", getSafeLogErrorMessage(outputsQuery.error))
+    message.error(t("watchlists:outputs.fetchError", "Failed to load outputs"))
+    setOutputsLiveAnnouncement(
+      t("watchlists:outputs.live.loadError", "Reports refresh failed.")
+    )
+  }, [outputsQuery.error, t])
 
   const selectedTemplateVersionOptions = useMemo(() => {
     if (!selectedTemplate) return []
@@ -192,85 +229,6 @@ export const OutputsTab: React.FC = () => {
       .sort((a, b) => b - a)
       .map((value) => ({ label: `v${value}`, value }))
   }, [selectedTemplate, templates])
-
-  // Fetch outputs
-  const loadOutputs = useCallback(async () => {
-    setOutputsLoading(true)
-    try {
-      const result = await fetchWatchlistOutputs({
-        watchlist_id: selectedWatchlistId ?? undefined,
-        job_id: outputsJobFilter || undefined,
-        run_id: outputsRunFilter || undefined,
-        page: outputsPage,
-        size: outputsPageSize
-      })
-      setOutputs(result.items, result.total)
-      const firstOutput = Array.isArray(result.items) ? result.items[0] : null
-      if (firstOutput) {
-        void trackWatchlistsOnboardingTelemetry({
-          type: "first_output_succeeded",
-          outputId: firstOutput.id,
-          format: typeof firstOutput.format === "string" ? firstOutput.format : null
-        })
-      }
-    } catch (err) {
-      console.error("Failed to fetch outputs:", getSafeLogErrorMessage(err))
-      message.error(t("watchlists:outputs.fetchError", "Failed to load outputs"))
-      setOutputsLiveAnnouncement(
-        t("watchlists:outputs.live.loadError", "Reports refresh failed.")
-      )
-    } finally {
-      setOutputsLoading(false)
-    }
-  }, [
-    outputsJobFilter,
-    outputsRunFilter,
-    selectedWatchlistId,
-    outputsPage,
-    outputsPageSize,
-    setOutputs,
-    setOutputsLoading,
-    t
-  ])
-
-  // Load jobs for filter dropdown
-  const loadJobs = useCallback(async () => {
-    try {
-      const result = await fetchWatchlistJobs({
-        watchlist_id: selectedWatchlistId ?? undefined,
-        page: 1,
-        size: 200
-      })
-      setJobs(result.items || [])
-    } catch (err) {
-      console.error("Failed to fetch jobs:", getSafeLogErrorMessage(err))
-    }
-  }, [selectedWatchlistId])
-
-  // Initial load
-  useEffect(() => {
-    loadOutputs()
-    loadJobs()
-  }, [loadOutputs, loadJobs])
-
-  const loadTemplates = useCallback(async () => {
-    setTemplatesLoading(true)
-    try {
-      const result = await fetchWatchlistTemplates()
-      setTemplates(Array.isArray(result.items) ? result.items : [])
-    } catch (err) {
-      console.error("Failed to fetch templates:", getSafeLogErrorMessage(err))
-      setTemplates([])
-    } finally {
-      setTemplatesLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (regenOpen) {
-      loadTemplates()
-    }
-  }, [regenOpen, loadTemplates])
 
   useEffect(() => {
     if (regenOpen) {
@@ -300,17 +258,16 @@ export const OutputsTab: React.FC = () => {
   }, [])
 
   useEffect(() => {
+    previousDeliverySnapshotRef.current = new Map()
+    setOutputsLiveAnnouncement("")
+  }, [accountGeneration, selectedWatchlistId])
+
+  useEffect(() => {
     const outputItems = Array.isArray(outputs) ? outputs : []
     const nextSnapshot = new Map<number, string>()
     outputItems.forEach((output) => {
       nextSnapshot.set(output.id, normalizeDeliverySnapshot(output.metadata))
     })
-
-    if (!hasOutputAnnouncementBaselineRef.current) {
-      hasOutputAnnouncementBaselineRef.current = true
-      previousDeliverySnapshotRef.current = nextSnapshot
-      return
-    }
 
     const changedOutputs = outputItems.filter((output) => {
       const previousSnapshot = previousDeliverySnapshotRef.current.get(output.id)
@@ -338,10 +295,10 @@ export const OutputsTab: React.FC = () => {
   // Get job name by ID
   const getJobName = useCallback(
     (jobId: number) => {
-      const job = jobs.find((j) => j.id === jobId)
+      const job = jobsPage?.items?.find((j) => j.id === jobId)
       return job?.name || `Monitor #${jobId}`
     },
-    [jobs]
+    [jobsPage]
   )
 
   const activeOutputFilterSummary = useMemo(() => {
@@ -486,7 +443,7 @@ export const OutputsTab: React.FC = () => {
         })
       )
       setRegenOpen(false)
-      loadOutputs()
+      void invalidateWatchlists("outputs", "overview")
     } catch (err) {
       console.error("Failed to regenerate output:", getSafeLogErrorMessage(err))
       message.error(t("watchlists:outputs.regenerateError", "Failed to regenerate output"))
@@ -522,8 +479,8 @@ export const OutputsTab: React.FC = () => {
     ? outputs.find((o) => o.id === selectedOutputId)
     : null
   const selectedWatchlist = useMemo(
-    () => watchlists.find((watchlist) => watchlist.id === selectedWatchlistId) || null,
-    [selectedWatchlistId, watchlists]
+    () => watchlistsPage?.items?.find((watchlist) => watchlist.id === selectedWatchlistId) || null,
+    [selectedWatchlistId, watchlistsPage]
   )
 
   // Table columns
@@ -1013,7 +970,7 @@ export const OutputsTab: React.FC = () => {
               onChange={setOutputsJobFilter}
               allowClear
               className="w-48"
-              options={jobs.map((j) => ({
+              options={(jobsPage?.items ?? []).map((j) => ({
                 label: j.name,
                 value: j.id
               }))}
@@ -1058,7 +1015,7 @@ export const OutputsTab: React.FC = () => {
         </div>
         <Button
           icon={<RefreshCw className="h-4 w-4" />}
-          onClick={loadOutputs}
+          onClick={() => void outputsQuery.refetch()}
           loading={outputsLoading}
         >
           {t("common:refresh", "Refresh")}
@@ -1165,7 +1122,7 @@ export const OutputsTab: React.FC = () => {
           onClose={() => setReportBuilderOpen(false)}
           onCreated={() => {
             setReportBuilderOpen(false)
-            loadOutputs()
+            void invalidateWatchlists("outputs", "overview")
           }}
         />
       )}

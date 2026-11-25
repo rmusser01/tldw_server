@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, screen } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { OutputsTab } from "../OutputsTab"
 
@@ -96,8 +97,10 @@ vi.mock("@/utils/dateFormatters", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  recordWatchlistsOnboardingTelemetry: async () => undefined,
   createWatchlistOutput: (...args: any[]) => mocks.createWatchlistOutputMock(...args),
   fetchWatchlistJobs: (...args: any[]) => mocks.fetchWatchlistJobsMock(...args),
+  fetchWatchlists: async () => ({ items: [], total: 0 }),
   fetchWatchlistOutputs: (...args: any[]) => mocks.fetchWatchlistOutputsMock(...args),
   fetchWatchlistTemplates: (...args: any[]) => mocks.fetchWatchlistTemplatesMock(...args),
   downloadWatchlistOutput: (...args: any[]) => mocks.downloadWatchlistOutputMock(...args),
@@ -112,8 +115,7 @@ vi.mock("../OutputPreviewDrawer", () => ({
   OutputPreviewDrawer: () => null
 }))
 
-const baseState = (overrides: Record<string, unknown> = {}) => ({
-  outputs: [
+const outputs = [
     {
       id: 44,
       job_id: 7,
@@ -127,17 +129,15 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
       expires_at: null,
       expired: false
     }
-  ],
-  outputsLoading: false,
-  outputsTotal: 1,
+  ]
+
+const baseState = (overrides: Record<string, unknown> = {}) => ({
   outputsPage: 1,
   outputsPageSize: 20,
   outputsJobFilter: null,
   outputsRunFilter: null,
   outputPreviewOpen: false,
   selectedOutputId: null,
-  setOutputs: vi.fn(),
-  setOutputsLoading: vi.fn(),
   setOutputsPage: vi.fn(),
   setOutputsPageSize: vi.fn(),
   setOutputsJobFilter: vi.fn(),
@@ -156,7 +156,7 @@ describe("OutputsTab relationship jump actions", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.storeStateRef.current = baseState()
-    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({ items: outputs, total: 1, has_more: false })
     mocks.fetchWatchlistJobsMock.mockResolvedValue({
       items: [{ id: 7, name: "Morning Monitor" }],
       total: 1,
@@ -168,10 +168,10 @@ describe("OutputsTab relationship jump actions", () => {
     mocks.downloadWatchlistOutputBinaryMock.mockResolvedValue(new ArrayBuffer(0))
   })
 
-  it("deep-links output rows to monitor and run destinations", () => {
+  it("deep-links output rows to monitor and run destinations", async () => {
     render(<OutputsTab />)
 
-    fireEvent.click(screen.getByTestId("watchlists-output-open-job-44"))
+    fireEvent.click(await screen.findByTestId("watchlists-output-open-job-44"))
     expect(mocks.storeStateRef.current.setActiveTab).toHaveBeenCalledWith("jobs")
     expect(mocks.storeStateRef.current.openJobForm).toHaveBeenCalledWith(7)
 

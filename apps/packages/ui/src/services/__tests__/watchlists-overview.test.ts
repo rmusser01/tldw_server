@@ -305,54 +305,54 @@ describe("watchlists overview service", () => {
       watchlist_id: 42,
       page: 1,
       size: 200
-    })
+    }, undefined)
     expect(mocks.fetchWatchlistJobs).toHaveBeenCalledWith({
       watchlist_id: 42,
       page: 1,
       size: 200
-    })
+    }, undefined)
     expect(mocks.fetchScrapedItems).toHaveBeenCalledWith({
       watchlist_id: 42,
       reviewed: false,
       page: 1,
       size: 1
-    })
+    }, undefined)
     expect(mocks.fetchWatchlistContentAlerts).toHaveBeenCalledWith(42, {
       status: "unread",
       page: 1,
       size: 1
-    })
+    }, undefined)
     expect(mocks.fetchWatchlistRuns).toHaveBeenNthCalledWith(1, {
       watchlist_id: 42,
       q: "running",
       page: 1,
       size: 1
-    })
+    }, undefined)
     expect(mocks.fetchWatchlistRuns).toHaveBeenNthCalledWith(2, {
       watchlist_id: 42,
       q: "pending",
       page: 1,
       size: 1
-    })
+    }, undefined)
     expect(mocks.fetchWatchlistRuns).toHaveBeenNthCalledWith(3, {
       watchlist_id: 42,
       q: "failed",
       page: 1,
       size: 5
-    })
+    }, undefined)
     expect(mocks.fetchWatchlistRuns).toHaveBeenNthCalledWith(4, {
       watchlist_id: 42,
       page: 1,
       size: 10
-    })
+    }, undefined)
     expect(mocks.fetchWatchlistOutputs).toHaveBeenCalledWith({
       watchlist_id: 42,
       page: 1,
       size: 100
-    })
+    }, undefined)
     expect(mocks.getLatestWatchlistBriefing).toHaveBeenCalledWith({
       watchlist_id: 42
-    })
+    }, undefined)
   })
 
   it("includes the latest briefing projection and surfaces request errors", async () => {

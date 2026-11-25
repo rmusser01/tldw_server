@@ -9,7 +9,6 @@ import {
   fetchWatchlistGroups,
   fetchJobOutputTemplates,
   fetchWatchlistOutputPresets,
-  fetchWatchlistSources,
   fetchWatchlistTemplates,
   previewWatchlistJob,
   testWatchlistAudioSettings,
@@ -18,7 +17,6 @@ import {
 } from "@/services/watchlists"
 import type {
   JobOutputPrefs,
-  JobPreviewResult,
   JobScope,
   PreviewItem,
   WatchlistOutputPreset,
@@ -43,6 +41,8 @@ import {
 } from "./job-summaries"
 import { evaluatePreviewItems } from "./filter-preview"
 import { ScopeSelector } from "./ScopeSelector"
+import { useScopeSources } from "./useScopeSources"
+import { useInvalidateWatchlists, useIsCurrentWatchlistsAccount, useWatchlistsQuery } from "@/hooks/useWatchlistsQuery"
 import { FilterBuilder } from "./FilterBuilder"
 import { SchedulePicker } from "./SchedulePicker"
 import { findInvalidEmailRecipients } from "./email-utils"
@@ -94,7 +94,10 @@ const AUDIO_TEST_SAMPLE_TEXT =
 const RETENTION_UNITS: DurationUnit[] = ["minutes", "hours", "days", "weeks", "seconds"]
 const JOB_PREVIEW_LIMIT = 60
 const JOB_PREVIEW_PER_SOURCE = 12
-const JOB_SCOPE_CATALOG_PAGE_SIZE = 500
+const GROUP_CATALOG_PARAMS = { page: 1, size: 200 }
+const OUTPUT_TEMPLATE_PARAMS = { limit: 200, offset: 0 }
+const EMPTY_PRESETS: WatchlistOutputPreset[] = []
+const EMPTY_PREVIEW_ITEMS: PreviewItem[] = []
 const BASIC_STEPS: BasicStepId[] = ["scope", "schedule", "output", "review"]
 
 type ConfidenceRiskLevel = "blocking" | "warning"
@@ -297,12 +300,9 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   const [filters, setFilters] = useState<WatchlistFilter[]>([])
   const [schedule, setSchedule] = useState<string | null>(null)
   const [timezone, setTimezone] = useState("UTC")
-  const [templateOptions, setTemplateOptions] = useState<Array<{ label: string; value: string }>>([])
   const [outputPreset, setOutputPreset] = useState<OutputPresetId | undefined>(undefined)
   const [outputPrefsBase, setOutputPrefsBase] = useState<JobOutputPrefs>({})
-  const [savedOutputPresets, setSavedOutputPresets] = useState<WatchlistOutputPreset[]>([])
-  const [savedOutputPresetsLoading, setSavedOutputPresetsLoading] = useState(false)
-  const [savedOutputPresetsError, setSavedOutputPresetsError] = useState<string | null>(null)
+  const [presetMutationError, setPresetMutationError] = useState<string | null>(null)
   const [selectedOutputPresetId, setSelectedOutputPresetId] = useState<number | undefined>(undefined)
   const [outputPresetName, setOutputPresetName] = useState("")
   const [outputPresetBusy, setOutputPresetBusy] = useState<"save" | "update" | "apply" | "delete" | null>(null)
@@ -333,15 +333,92 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   const [showAdvancedAudioOptions, setShowAdvancedAudioOptions] = useState(false)
   const [audioBackgroundUri, setAudioBackgroundUri] = useState("")
   const [audioVoiceMapText, setAudioVoiceMapText] = useState("")
-  const [scopeSourceNamesById, setScopeSourceNamesById] = useState<Record<number, string>>({})
-  const [scopeGroupNamesById, setScopeGroupNamesById] = useState<Record<number, string>>({})
-  const [previewCandidates, setPreviewCandidates] = useState<PreviewItem[]>([])
-  const [previewLoading, setPreviewLoading] = useState(false)
-  const [previewError, setPreviewError] = useState<string | null>(null)
   const [audioTestLoading, setAudioTestLoading] = useState(false)
   const [audioTestError, setAudioTestError] = useState<string | null>(null)
   const [audioTestUrl, setAudioTestUrl] = useState<string | null>(null)
   const authoringContext = isEditing ? "edit" : "create"
+
+  const invalidateWatchlists = useInvalidateWatchlists()
+  const isCurrentAccount = useIsCurrentWatchlistsAccount()
+  const { sources: scopeSources } = useScopeSources(watchlistId, open)
+  const { data: scopeGroups } = useWatchlistsQuery("groups", GROUP_CATALOG_PARAMS, ({ signal }) =>
+    fetchWatchlistGroups(GROUP_CATALOG_PARAMS, signal), { enabled: open }
+  )
+  const scopeSourceNamesById = useMemo(
+    () => Object.fromEntries(scopeSources.map((source) => [source.id, source.name])),
+    [scopeSources]
+  )
+  const scopeGroupNamesById = useMemo(
+    () => Object.fromEntries(scopeGroups?.items?.map((group) => [group.id, group.name]) ?? []),
+    [scopeGroups]
+  )
+
+  const savedOutputPresetsQuery = useWatchlistsQuery("output-presets", null, ({ signal }) =>
+    fetchWatchlistOutputPresets(signal), { enabled: open }
+  )
+  const savedOutputPresets = savedOutputPresetsQuery.data?.items ?? EMPTY_PRESETS
+  const savedOutputPresetsLoading = savedOutputPresetsQuery.isFetching
+  const presetLoadError = savedOutputPresetsQuery.error ? mapWatchlistsError(savedOutputPresetsQuery.error, {
+    t,
+    context: t("watchlists:jobs.form.outputPresetsContext", "output presets"),
+    fallbackMessage: t("watchlists:jobs.form.outputPresetsLoadError", "Could not load saved output presets."),
+    operationLabel: t("watchlists:errors.operation.load", "load")
+  }) : null
+  const savedOutputPresetsError = presetMutationError ?? (
+    presetLoadError && `${presetLoadError.title} ${presetLoadError.description}`.trim()
+  )
+
+  const jobId = initialValues?.id
+  const previewParams = { limit: JOB_PREVIEW_LIMIT, per_source: JOB_PREVIEW_PER_SOURCE }
+  const previewQuery = useWatchlistsQuery("job-preview", { jobId, ...previewParams }, ({ signal }) =>
+    jobId == null ? Promise.resolve(null) : previewWatchlistJob(jobId, previewParams, signal),
+    { enabled: open && Boolean(jobId) }
+  )
+  const previewCandidates = previewQuery.data?.items ?? EMPTY_PREVIEW_ITEMS
+  const previewLoading = previewQuery.isFetching
+  const previewLoadError = previewQuery.error ? mapWatchlistsError(previewQuery.error, {
+    t,
+    context: t("watchlists:jobs.form.previewContext", "monitor preview"),
+    fallbackMessage: t("watchlists:jobs.form.previewLoadError", "Could not load sample candidates for this monitor."),
+    operationLabel: t("watchlists:errors.operation.load", "load")
+  }) : null
+  const previewError = previewLoadError && `${previewLoadError.title} ${previewLoadError.description}`.trim()
+
+  const { data: outputTemplates } = useWatchlistsQuery("output-templates", OUTPUT_TEMPLATE_PARAMS, ({ signal }) =>
+    fetchJobOutputTemplates(OUTPUT_TEMPLATE_PARAMS, signal), { enabled: open }
+  )
+  const { data: legacyTemplates } = useWatchlistsQuery("templates", null, ({ signal }) =>
+    fetchWatchlistTemplates(signal), { enabled: open }
+  )
+  const templateOptions = useMemo(() => {
+    const optionsByName = new Map<string, { label: string; value: string }>()
+    for (const item of outputTemplates?.items ?? []) {
+      const name = item.name.trim()
+      if (!name) continue
+      const formatSuffix = item.format ? ` (${String(item.format).toUpperCase()})` : ""
+      optionsByName.set(name, {
+        label: `${name}${formatSuffix} · ${t("watchlists:jobs.form.templateSource.outputs", "Outputs template")}`,
+        value: name
+      })
+    }
+    for (const item of legacyTemplates?.items ?? []) {
+      const name = item.name.trim()
+      if (!name || optionsByName.has(name)) continue
+      optionsByName.set(name, {
+        label: `${name} · ${t("watchlists:jobs.form.templateSource.legacy", "Legacy watchlists template")}`,
+        value: name
+      })
+    }
+    const options = Array.from(optionsByName.values()).sort((a, b) => a.label.localeCompare(b.label))
+    const currentName = outputTemplateName?.trim()
+    if (currentName && !optionsByName.has(currentName)) {
+      options.push({
+        label: `${currentName} · ${t("watchlists:jobs.form.templateSource.current", "Current selection")}`,
+        value: currentName
+      })
+    }
+    return options
+  }, [legacyTemplates, outputTemplateName, outputTemplates, t])
 
   const watchedName = Form.useWatch("name", form)
 
@@ -720,16 +797,13 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     if (!outputPrefs) return
 
     setOutputPresetBusy("save")
-    setSavedOutputPresetsError(null)
+    setPresetMutationError(null)
     try {
       const created = await createWatchlistOutputPreset({
         name,
         output_prefs: outputPrefs
       })
-      setSavedOutputPresets((previous) => [
-        created,
-        ...previous.filter((preset) => preset.id !== created.id)
-      ])
+      await invalidateWatchlists("output-presets")
       setSelectedOutputPresetId(created.id)
       setOutputPresetName(created.name)
       message.success(t("watchlists:jobs.form.outputPresetSaved", "Output preset saved"))
@@ -743,7 +817,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         ),
         operationLabel: t("watchlists:errors.operation.save", "save")
       })
-      setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
+      setPresetMutationError(`${mapped.title} ${mapped.description}`.trim())
       message.error(mapped.title)
     } finally {
       setOutputPresetBusy(null)
@@ -757,15 +831,13 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     if (!outputPrefs) return
 
     setOutputPresetBusy("update")
-    setSavedOutputPresetsError(null)
+    setPresetMutationError(null)
     try {
       const updated = await updateWatchlistOutputPreset(selectedSavedOutputPreset.id, {
         name,
         output_prefs: outputPrefs
       })
-      setSavedOutputPresets((previous) =>
-        previous.map((preset) => (preset.id === updated.id ? updated : preset))
-      )
+      await invalidateWatchlists("output-presets")
       setOutputPresetName(updated.name)
       message.success(t("watchlists:jobs.form.outputPresetUpdated", "Output preset updated"))
     } catch (err) {
@@ -778,7 +850,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         ),
         operationLabel: t("watchlists:errors.operation.save", "save")
       })
-      setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
+      setPresetMutationError(`${mapped.title} ${mapped.description}`.trim())
       message.error(mapped.title)
     } finally {
       setOutputPresetBusy(null)
@@ -788,7 +860,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   const handleApplySavedOutputPreset = async () => {
     if (!selectedSavedOutputPreset) return
     setOutputPresetBusy("apply")
-    setSavedOutputPresetsError(null)
+    setPresetMutationError(null)
     try {
       const response = await applyWatchlistOutputPreset(selectedSavedOutputPreset.id, {
         base_output_prefs: outputPrefsBase
@@ -813,7 +885,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         ),
         operationLabel: t("watchlists:errors.operation.apply", "apply")
       })
-      setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
+      setPresetMutationError(`${mapped.title} ${mapped.description}`.trim())
       message.error(mapped.title)
     } finally {
       setOutputPresetBusy(null)
@@ -837,14 +909,12 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         onCancel: () => resolve(false)
       })
     })
-    if (!confirmed) return
+    if (!confirmed || !isCurrentAccount()) return
     setOutputPresetBusy("delete")
-    setSavedOutputPresetsError(null)
+    setPresetMutationError(null)
     try {
       await deleteWatchlistOutputPreset(selectedSavedOutputPreset.id)
-      setSavedOutputPresets((previous) =>
-        previous.filter((preset) => preset.id !== selectedSavedOutputPreset.id)
-      )
+      await invalidateWatchlists("output-presets")
       setSelectedOutputPresetId(undefined)
       setOutputPresetName("")
       message.success(t("watchlists:jobs.form.outputPresetDeleted", "Output preset deleted"))
@@ -858,7 +928,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         ),
         operationLabel: t("watchlists:errors.operation.delete", "delete")
       })
-      setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
+      setPresetMutationError(`${mapped.title} ${mapped.description}`.trim())
       message.error(mapped.title)
     } finally {
       setOutputPresetBusy(null)
@@ -943,6 +1013,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   // Reset form when modal opens/closes or initialValues change
   useEffect(() => {
     if (open) {
+      setPresetMutationError(null)
       setAudioTestError(null)
       setAudioTestLoading(false)
       setAudioTestUrl((previous) => {
@@ -1010,213 +1081,6 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       }
     }
   }, [audioTestUrl])
-
-  useEffect(() => {
-    if (!open) {
-      setScopeSourceNamesById({})
-      setScopeGroupNamesById({})
-      return
-    }
-    let cancelled = false
-
-    Promise.all([
-      fetchWatchlistSources({
-        watchlist_id: watchlistId ?? undefined,
-        page: 1,
-        size: JOB_SCOPE_CATALOG_PAGE_SIZE
-      }),
-      fetchWatchlistGroups({ page: 1, size: JOB_SCOPE_CATALOG_PAGE_SIZE })
-    ])
-      .then(([sourcesResult, groupsResult]) => {
-        if (cancelled) return
-        const nextSources: Record<number, string> = {}
-        const nextGroups: Record<number, string> = {}
-        for (const source of sourcesResult.items || []) {
-          nextSources[source.id] = source.name
-        }
-        for (const group of groupsResult.items || []) {
-          nextGroups[group.id] = group.name
-        }
-        setScopeSourceNamesById(nextSources)
-        setScopeGroupNamesById(nextGroups)
-      })
-      .catch((err) => {
-        console.warn("Failed to load monitor scope summary catalog:", err)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [open, watchlistId])
-
-  useEffect(() => {
-    if (!open) {
-      setSavedOutputPresets([])
-      setSavedOutputPresetsError(null)
-      setSavedOutputPresetsLoading(false)
-      setSelectedOutputPresetId(undefined)
-      setOutputPresetName("")
-      return
-    }
-    let cancelled = false
-    setSavedOutputPresetsLoading(true)
-    setSavedOutputPresetsError(null)
-
-    fetchWatchlistOutputPresets()
-      .then((result) => {
-        if (cancelled) return
-        const presets = Array.isArray(result.items) ? result.items : []
-        setSavedOutputPresets(presets)
-        setSelectedOutputPresetId((previous) =>
-          previous && presets.some((preset) => preset.id === previous) ? previous : undefined
-        )
-      })
-      .catch((err) => {
-        if (cancelled) return
-        console.error("Failed to load output presets for job form:", err)
-        const mapped = mapWatchlistsError(err, {
-          t,
-          context: t("watchlists:jobs.form.outputPresetsContext", "output presets"),
-          fallbackMessage: t(
-            "watchlists:jobs.form.outputPresetsLoadError",
-            "Could not load saved output presets."
-          ),
-          operationLabel: t("watchlists:errors.operation.load", "load")
-        })
-        setSavedOutputPresets([])
-        setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setSavedOutputPresetsLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [open, t])
-
-  useEffect(() => {
-    if (!open || !isEditing || !initialValues?.id) {
-      setPreviewCandidates([])
-      setPreviewError(null)
-      setPreviewLoading(false)
-      return
-    }
-    let cancelled = false
-    setPreviewLoading(true)
-    setPreviewError(null)
-
-    previewWatchlistJob(initialValues.id, {
-      limit: JOB_PREVIEW_LIMIT,
-      per_source: JOB_PREVIEW_PER_SOURCE
-    })
-      .then((result: JobPreviewResult) => {
-        if (cancelled) return
-        setPreviewCandidates(Array.isArray(result.items) ? result.items : [])
-      })
-      .catch((err) => {
-        if (cancelled) return
-        console.error("Failed to load monitor preview candidates:", err)
-        setPreviewCandidates([])
-        const mapped = mapWatchlistsError(err, {
-          t,
-          context: t("watchlists:jobs.form.previewContext", "monitor preview"),
-          fallbackMessage: t(
-            "watchlists:jobs.form.previewLoadError",
-            "Could not load sample candidates for this monitor."
-          ),
-          operationLabel: t("watchlists:errors.operation.load", "load")
-        })
-        setPreviewError(`${mapped.title} ${mapped.description}`.trim())
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setPreviewLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [initialValues?.id, isEditing, open, t])
-
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    const loadTemplates = async () => {
-      const [outputsResult, legacyResult] = await Promise.allSettled([
-        fetchJobOutputTemplates({ limit: 200, offset: 0 }),
-        fetchWatchlistTemplates()
-      ])
-      if (cancelled) return
-
-      const optionsByName = new Map<string, { label: string; value: string }>()
-
-      if (outputsResult.status === "fulfilled") {
-        for (const item of outputsResult.value.items) {
-          const normalizedName = item.name.trim()
-          if (!normalizedName) continue
-          const formatSuffix = item.format ? ` (${String(item.format).toUpperCase()})` : ""
-          optionsByName.set(normalizedName, {
-            label: `${normalizedName}${formatSuffix} · ${t("watchlists:jobs.form.templateSource.outputs", "Outputs template")}`,
-            value: normalizedName
-          })
-        }
-      }
-
-      if (legacyResult.status === "fulfilled") {
-        const items = Array.isArray(legacyResult.value.items) ? legacyResult.value.items : []
-        for (const item of items) {
-          const normalizedName = item.name.trim()
-          if (!normalizedName || optionsByName.has(normalizedName)) continue
-          optionsByName.set(normalizedName, {
-            label: `${normalizedName} · ${t("watchlists:jobs.form.templateSource.legacy", "Legacy watchlists template")}`,
-            value: normalizedName
-          })
-        }
-      }
-
-      if (outputsResult.status === "rejected" && legacyResult.status === "rejected") {
-        console.error("Failed to load output template options for job form", {
-          outputs: outputsResult.reason,
-          legacy: legacyResult.reason
-        })
-      }
-
-      setTemplateOptions(
-        Array.from(optionsByName.values()).sort((a, b) => a.label.localeCompare(b.label))
-      )
-    }
-
-    void loadTemplates().catch((err) => {
-      console.error("Failed to load output template options for job form:", err)
-      if (!cancelled) {
-        setTemplateOptions([])
-      }
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [open, t])
-
-  useEffect(() => {
-    const normalizedName = outputTemplateName?.trim()
-    if (!normalizedName) return
-    setTemplateOptions((previous) => {
-      if (previous.some((option) => option.value === normalizedName)) {
-        return previous
-      }
-      return [
-        ...previous,
-        {
-          label: `${normalizedName} · ${t("watchlists:jobs.form.templateSource.current", "Current selection")}`,
-          value: normalizedName
-        }
-      ]
-    })
-  }, [outputTemplateName, t])
 
   const handleSubmit = async () => {
     try {
@@ -1384,6 +1248,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         if (!confirmed) return
       }
 
+      if (!isCurrentAccount()) return
       setSubmitting(true)
 
       if (isEditing && initialValues) {
@@ -1407,7 +1272,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         context: authoringContext
       })
 
-      onSuccess()
+      if (isCurrentAccount()) onSuccess()
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) {
         // Validation error - handled by form
@@ -1808,7 +1673,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
             <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr]">
               <Select
                 allowClear
-                value={selectedOutputPresetId}
+                value={selectedSavedOutputPreset?.id}
                 loading={savedOutputPresetsLoading}
                 onChange={(value) =>
                   handleSavedOutputPresetSelect(

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { render } from "../../shared/__tests__/render-with-watchlists-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesTab } from "../SourcesTab"
 
@@ -178,6 +179,7 @@ vi.mock("@/utils/dateFormatters", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  getWatchlistSettings: vi.fn().mockResolvedValue({ forums_enabled: false }),
   checkWatchlistSourcesNow: (...args: any[]) => mocks.checkWatchlistSourcesNowMock(...args),
   createWatchlistSource: (...args: any[]) => mocks.createWatchlistSourceMock(...args),
   deleteWatchlistSource: (...args: any[]) => mocks.deleteWatchlistSourceMock(...args),
@@ -290,7 +292,7 @@ describe("SourcesTab delete confirmation copy", () => {
   it("shows undo-window copy for single-feed delete confirmation", async () => {
     render(<SourcesTab />)
 
-    fireEvent.click(screen.getByLabelText("Delete source: Feed 101"))
+    fireEvent.click(await screen.findByLabelText("Delete source: Feed 101"))
 
     await waitFor(() => {
       expect(mocks.modalConfirmMock).toHaveBeenCalledTimes(1)
@@ -317,7 +319,7 @@ describe("SourcesTab delete confirmation copy", () => {
 
     render(<SourcesTab />)
 
-    fireEvent.click(screen.getByLabelText("Delete source: Feed 101"))
+    fireEvent.click(await screen.findByLabelText("Delete source: Feed 101"))
 
     await waitFor(() => {
       expect(mocks.modalConfirmMock).toHaveBeenCalledTimes(1)
@@ -341,7 +343,7 @@ describe("SourcesTab delete confirmation copy", () => {
   it("surfaces undo-window timing in bulk delete confirmation", async () => {
     render(<SourcesTab />)
 
-    fireEvent.click(screen.getByTestId("select-source-101"))
+    fireEvent.click(await screen.findByTestId("select-source-101"))
     fireEvent.click(screen.getByText("Delete"))
 
     await waitFor(() => {
@@ -361,7 +363,7 @@ describe("SourcesTab delete confirmation copy", () => {
   it("keeps partial bulk-undo failure guidance actionable", async () => {
     render(<SourcesTab />)
 
-    fireEvent.click(screen.getByTestId("select-source-101"))
+    fireEvent.click(await screen.findByTestId("select-source-101"))
     fireEvent.click(screen.getByTestId("select-source-202"))
     fireEvent.click(screen.getByText("Delete"))
 
