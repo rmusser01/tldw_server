@@ -20,7 +20,7 @@ import {
   SidebarServerChatButton,
   waitFor
 } from "./harness/playground-harness"
-import { useLocation, useNavigate } from "react-router-dom"
+import { useLocation, useNavigate, type NavigateOptions, type To } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 
@@ -36,7 +36,7 @@ vi.mock("react-router-dom", async (importOriginal) => {
     useNavigate: () => {
       const navigate = actual.useNavigate()
       return React.useCallback(
-        (to: Parameters<typeof navigate>[0], options?: Parameters<typeof navigate>[1]) => {
+        (to: To | number, options?: NavigateOptions) => {
           if (typeof to === "number") {
             navigate(to)
             return

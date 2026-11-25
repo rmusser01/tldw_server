@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { NotesGraphResponse } from "@/services/note-graph-suggestions"
 import { NotesSemanticClientError } from "@/services/note-semantic-index"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import React from "react"
@@ -129,8 +130,9 @@ const graph = {
   active_note_count: 1,
   all_notes_note_cap: 20,
   all_notes_eligible: true,
-  suggestions_authorized: false
-}
+  suggestions_authorized: false,
+  manual_link_authorized: false
+} satisfies NotesGraphResponse
 
 const capabilities = (overrides: Record<string, unknown> = {}) => ({
   active_note_count: 12,
@@ -217,10 +219,9 @@ const renderInspector = (
   semantic: ReturnType<typeof semanticController>,
   options: {
     semanticEnabled?: boolean
-    onAnnounce?: ReturnType<typeof vi.fn>
   } = {}
 ) => {
-  const onAnnounce = options.onAnnounce ?? vi.fn()
+  const onAnnounce = vi.fn<(message: string) => void>()
   const element = (semanticValue: ReturnType<typeof semanticController>) => (
     <NotesGraphInspector
       graph={graph}

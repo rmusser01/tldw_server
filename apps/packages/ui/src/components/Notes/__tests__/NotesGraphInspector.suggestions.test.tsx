@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { NotesGraphResponse } from "@/services/note-graph-suggestions"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -82,8 +83,9 @@ const graph = {
   active_note_count: 2,
   all_notes_note_cap: 20,
   all_notes_eligible: true,
-  suggestions_authorized: true
-}
+  suggestions_authorized: true,
+  manual_link_authorized: false
+} satisfies NotesGraphResponse
 
 const suggestion = {
   id: "suggestion-one",

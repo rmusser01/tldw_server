@@ -3,7 +3,6 @@ import {
   useKeyboardShortcuts,
   type KeyboardShortcutConfig
 } from "@/hooks/keyboard/useKeyboardShortcuts"
-import { isEditableTarget } from "@/utils/editable-target"
 
 interface KanbanShortcutActions {
   onNewCard?: () => void
@@ -15,51 +14,48 @@ interface KanbanShortcutActions {
 export const useKanbanShortcuts = (actions: KanbanShortcutActions) => {
   const [helpOpen, setHelpOpen] = useState(false)
 
-  const guard = useCallback(
-    (fn?: () => void) => () => {
-      if (isEditableTarget(document.activeElement)) return
-      fn?.()
-    },
-    []
-  )
-
   const showHelp = useCallback(() => setHelpOpen(true), [])
 
   const shortcuts: KeyboardShortcutConfig[] = useMemo(() => [
     ...(actions.onNewCard
       ? [{
           shortcut: { key: "n", preventDefault: true, stopPropagation: false },
-          action: guard(actions.onNewCard),
+          action: actions.onNewCard,
+          ignoreIfEditable: true,
           description: "New card in active list"
         }]
       : []),
     ...(actions.onNewBoard
       ? [{
           shortcut: { key: "b", preventDefault: true, stopPropagation: false },
-          action: guard(actions.onNewBoard),
+          action: actions.onNewBoard,
+          ignoreIfEditable: true,
           description: "New board"
         }]
       : []),
     ...(actions.onNewList
       ? [{
           shortcut: { key: "l", preventDefault: true, stopPropagation: false },
-          action: guard(actions.onNewList),
+          action: actions.onNewList,
+          ignoreIfEditable: true,
           description: "New list"
         }]
       : []),
     ...(actions.onClosePanel
       ? [{
           shortcut: { key: "Escape", preventDefault: true, stopPropagation: false },
-          action: guard(actions.onClosePanel),
+          action: actions.onClosePanel,
+          ignoreIfEditable: true,
           description: "Close panel"
         }]
       : []),
     {
       shortcut: { key: "?", shiftKey: true, preventDefault: true, stopPropagation: false },
-      action: guard(showHelp),
+      action: showHelp,
+      ignoreIfEditable: true,
       description: "Show keyboard shortcuts"
     }
-  ], [actions.onNewCard, actions.onNewBoard, actions.onNewList, actions.onClosePanel, guard, showHelp])
+  ], [actions.onNewCard, actions.onNewBoard, actions.onNewList, actions.onClosePanel, showHelp])
 
   useKeyboardShortcuts(shortcuts)
 

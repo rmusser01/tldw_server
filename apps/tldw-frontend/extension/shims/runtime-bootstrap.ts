@@ -1,4 +1,5 @@
 import { browser } from "./wxt-browser"
+import { createRandomId, getInstallIdHeaders } from "@/services/tldw/session-identity"
 import { clearRuntimeAuth } from "@web/lib/authStorage"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { createSafeStorage } from "@/utils/safe-storage"
@@ -343,6 +344,7 @@ const bootstrapCookieSession = async (
         method: "POST",
         credentials: "include",
         cache: "no-store",
+        headers: getInstallIdHeaders(),
         signal
       })
     )
@@ -477,7 +479,7 @@ const seedTldwConfigFromRuntime = async (
       authMode: "single-user",
       authSource: "cookie-session",
       serverUrl: quickstartWebUiServerUrl,
-      verificationRevision: globalThis.crypto.randomUUID()
+      verificationRevision: createRandomId() ?? String(Date.now())
     }
 
     if (existing?.apiKey && !hasCompleteManualDeviceKey(existing)) {

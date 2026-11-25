@@ -11,7 +11,7 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
-import { beforeEach, expect, it, vi } from "vitest";
+import { assert, beforeEach, expect, it, vi } from "vitest";
 import { LocalChatList } from "../LocalChatList";
 import {
   HistorySelectionProvider,
@@ -397,7 +397,7 @@ it("previews stored alternatives in Temporary without changing real Core or H1 o
   useStoreMessageOption.getState().setTemporaryChat(true);
   useStoreMessageOption.setState({
     messages: [
-      { id: "current", isBot: false, message: "Current Temporary turn" },
+      { id: "current", isBot: false, name: "You", message: "Current Temporary turn", sources: [] },
     ],
     history: [{ role: "user", content: "Current Temporary turn" }],
   });
@@ -861,7 +861,8 @@ it("keeps a settled scope-owned H1 lease when only the on-device list closes", a
     await screen.findByRole("button", { name: "Owned local chat" }),
   );
   await waitFor(() => expect(selected).toHaveBeenCalledOnce());
-  const owner = io.controller!.getCurrent().owner!;
+  const owner = io.controller!.getCurrent().owner;
+  assert(owner?.kind === "local");
   expect(owner.validate_lease?.()).toBe(true);
   page.rerender(content(false));
   expect(io.controller!.getCurrent().owner).toBe(owner);
@@ -923,8 +924,9 @@ it("rejects promotion during preparation before replacing a settled H1 owner", a
   await waitFor(() => expect(mounted.selected).toHaveBeenCalledWith("owned"));
   const state = useStoreMessageOption.getState();
   const selection = io.controller!.getCurrent();
+  assert(selection.owner?.kind === "local");
   const captures = io.capture.mock.calls.length;
-  expect(selection.owner?.validate_lease?.()).toBe(true);
+  expect(selection.owner.validate_lease?.()).toBe(true);
   const pending = deferred<boolean>();
   io.model.mockReturnValueOnce(pending.promise);
   fireEvent.click(screen.getByRole("button", { name: "Second local chat" }));
@@ -940,7 +942,7 @@ it("rejects promotion during preparation before replacing a settled H1 owner", a
   expect(io.capture.mock.calls.length).toBe(captures);
   expect(mounted.selected).toHaveBeenCalledTimes(1);
   expect(io.controller!.getCurrent().owner).toBe(selection.owner);
-  expect(selection.owner?.validate_lease?.()).toBe(true);
+  expect(selection.owner.validate_lease?.()).toBe(true);
   expect(useStoreMessageOption.getState().chatDraftAddress).toBe(
     state.chatDraftAddress,
   );
@@ -976,6 +978,7 @@ it.each(["model", "prompt", "files"] as const)(
     await waitFor(() => expect(mounted.selected).toHaveBeenCalledWith("owned"));
     const state = useStoreMessageOption.getState();
     const selection = io.controller!.getCurrent();
+    assert(selection.owner?.kind === "local");
     const captures = io.capture.mock.calls.length;
     const sourceTitle = document.title;
     const read = { model: io.model, prompt: io.prompt, files: io.files }[
@@ -991,7 +994,7 @@ it.each(["model", "prompt", "files"] as const)(
     expect(mounted.selected).toHaveBeenCalledTimes(1);
     expect(io.controller!.getCurrent().owner).toBe(selection.owner);
     expect(io.controller!.getCurrent().view).toBe(selection.view);
-    expect(selection.owner?.validate_lease?.()).toBe(true);
+    expect(selection.owner.validate_lease?.()).toBe(true);
     expect(useStoreMessageOption.getState()).toMatchObject({
       chatDraftAddress: state.chatDraftAddress,
       chatDraftRevision: state.chatDraftRevision,
@@ -1128,7 +1131,8 @@ it.each(["New", "account ABA"])(
       await screen.findByRole("button", { name: "Owned local chat" }),
     );
     await waitFor(() => expect(selected).toHaveBeenCalledOnce());
-    const owner = io.controller!.getCurrent().owner!;
+    const owner = io.controller!.getCurrent().owner;
+    assert(owner?.kind === "local");
     page.rerender(content(false));
     expect(owner.validate_lease?.()).toBe(true);
     if (boundary === "New")
@@ -1166,6 +1170,7 @@ it("preserves the previous owned selection when candidate qualification fails", 
   await waitFor(() => expect(mounted.selected).toHaveBeenCalledWith("owned"));
   const state = useStoreMessageOption.getState();
   const selection = io.controller!.getCurrent();
+  assert(selection.owner?.kind === "local");
   const captures = io.capture.mock.calls.length;
   const bookmarks = io.bookmark.mock.calls.length;
   const pending = deferred<unknown>();
@@ -1184,7 +1189,7 @@ it("preserves the previous owned selection when candidate qualification fails", 
   expect(mounted.selected).toHaveBeenCalledTimes(1);
   expect(io.controller!.getCurrent().owner).toBe(selection.owner);
   expect(io.controller!.getCurrent().view).toBe(selection.view);
-  expect(selection.owner?.validate_lease?.()).toBe(true);
+  expect(selection.owner.validate_lease?.()).toBe(true);
   expect(useStoreMessageOption.getState().chatDraftAddress).toBe(
     state.chatDraftAddress,
   );

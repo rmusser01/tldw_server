@@ -189,14 +189,14 @@ const getSettingsButton = (name: string) => {
   const candidates = Array.from(document.querySelectorAll("button")).filter(button =>
     button.getAttribute("aria-label") === name || button.textContent?.trim() === name)
   if (candidates.length !== 1 || !candidates[0].parentElement) throw new Error(`expected one settings action: ${name}`)
-  return within(candidates[0].parentElement).getByRole("button", { name, exact: true })
+  return within(candidates[0].parentElement).getByRole("button", { name })
 }
 
 const getSettingsTab = (name: string) => {
   const tabs = Array.from(document.querySelectorAll('form [role="tab"]'))
     .filter(tab => tab.textContent?.trim() === name)
   if (tabs.length !== 1 || !tabs[0].parentElement) throw new Error(`expected one settings tab: ${name}`)
-  return within(tabs[0].parentElement).getByRole("tab", { name, exact: true })
+  return within(tabs[0].parentElement).getByRole("tab", { name })
 }
 
 const getModelCombobox = () => {

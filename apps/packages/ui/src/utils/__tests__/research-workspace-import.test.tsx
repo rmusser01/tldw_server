@@ -15,6 +15,7 @@ import {
   renderHook,
   screen,
   waitFor,
+  type RenderOptions,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -36,7 +37,7 @@ type CanonicalNote = Omit<WorkspaceNote, "isDirty"> & {
 };
 
 // Match the router context supplied by the WebUI and extension shells.
-const render: typeof renderUI = (ui, options) =>
+const render = (ui: React.ReactNode, options?: RenderOptions) =>
   renderUI(ui, {
     wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
     ...options,

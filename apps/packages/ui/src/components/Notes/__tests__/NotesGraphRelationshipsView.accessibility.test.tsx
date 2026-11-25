@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { NotesGraphResponse } from "@/services/note-graph-suggestions"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
@@ -106,8 +107,9 @@ const graph = {
   active_note_count: 3,
   all_notes_note_cap: 200,
   all_notes_eligible: true,
-  suggestions_authorized: true
-}
+  suggestions_authorized: true,
+  manual_link_authorized: false
+} satisfies NotesGraphResponse
 
 describe("NotesGraphRelationshipsView", () => {
   it("projects fixed directional groups from the loaded graph with no fetch", () => {

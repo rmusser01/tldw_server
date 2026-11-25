@@ -40,7 +40,7 @@ beforeEach(() => {
     temporaryChat: true,
     historyId: "temp",
     serverChatId: null,
-    messages: [{ role: "user", message: "Keep my draft" }]
+    messages: [{ role: "user", message: "Keep my draft", isBot: false, name: "You", sources: [] }]
   })
   vi.spyOn(window, "confirm").mockReturnValue(true)
 })
