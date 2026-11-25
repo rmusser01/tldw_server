@@ -39,14 +39,30 @@ Parametrised for other code (TASK-13950.25; each default is the RAG value, so th
 
 Chat part 2 (TASK-13950.25; each needs ``pkg: ""``: the destinations are existing siblings of the source file):
 
-    lift         {nested def: module}    a def directly in the function becomes ``<module>.<def>(cst, ...)``; its site becomes
+    lift         {nested def: module}    a def directly in the function (or, depth 2, in a def that is directly in it) becomes
+                                         ``<module>.<def>(cst, ...)``; its site becomes
                                          ``<def> = functools.partial(_<module>.<def>, cst)``, or goes (and every read of it is
-                                         rewritten to ``<ref>(cst, ...)``) when the code that held it is itself in that module
+                                         rewritten to ``<ref>(cst, ...)``) when the code that held it is itself in that module.
+                                         A depth-2 site sits in its parent: the lifted parent's body, or the function while the
+                                         parent is still nested (a later manifest lifts it). The partial is bound once, so an
+                                         attribute set on it (``_out_transform.flush = _flush``) is set on the object that is read.
     moves[].args [name]                  read-only locals of the function passed after the ctx (``except ... as e``)
     entry        {name, module, doc}     the body after the ``cst = <expr>`` prologue moves whole to ``<module>.<name>(cst)``
     drop         [{module, def|import|all|replace}]   delete a def, an import binding or ``__all__`` entries (``all_add`` adds),
                                          or replace a call-site expression; a dropped name must have no reference left (V15)
     late_imports [{module, lines}]       a top import of a destination moves into its late-import block
+
+Chat part 3 (TASK-13950.25):
+
+    rewrite_in   {nested def: {name: expr}}   a rewrite, like ``rewrite``, of the names that are locals of that nested def (its own
+                                         scope, nested defs included), with their ``nonlocal`` entries deleted. The expressions
+                                         must be ``cst.x`` names or attribute chains, distinct from every other rewrite
+                                         expression (V16), and the names locals of the def: not parameters, not bound by
+                                         ``except as``, a walrus, an import, a def or ``global`` (V5). Works in either layout.
+    free_imports {name: import line}     (``pkg: ""``) a lifted body reads ``name`` from a function-local import of the function or
+                                         of its lifted parent. The line must be that import, alone (V16); it is added at the top
+                                         of each destination whose lifted def reads the name. A lifted parent's own copy of the
+                                         import goes when nothing in the parent still reads it (it would be unused, ruff F401).
 
 A destination that exists gets its new defs above a trailing *late-import block* (marker comment, then the ``_<module>`` aliases
 the new code calls, then ``from <pkg> import <source> as cs``), so no module reads ``cs`` or an alias at import time (R5).
@@ -1263,12 +1279,10 @@ def local_import_bindings(root: Any, key: Any, name: str) -> tuple[list[Info], i
             for al, r in zip(n.names, n._rs):  # type: ignore[attr-defined]
                 if r is key and _bound(al) == name:
                     infos.append(Info("import", al.name, al.name, al.asname, 0) if isinstance(n, ast.Import) else Info("from", n.module or "", al.name, al.asname, n.level))
-        elif isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.id == name and is_f(n, key):
-            other += 1
-        elif isinstance(n, ast.ExceptHandler) and n.name == name and is_f(n, key):
-            other += 1
-        elif isinstance(n, SCOPE_NODES) and n is not root and getattr(n, "name", None) == name and is_f(n, key):
-            other += 1
+        else:
+            stored = isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.id == name
+            named = isinstance(n, (ast.ExceptHandler, *SCOPE_NODES)) and n is not root and getattr(n, "name", None) == name
+            other += (stored or named) and is_f(n, key)
     return infos, other
 
 
