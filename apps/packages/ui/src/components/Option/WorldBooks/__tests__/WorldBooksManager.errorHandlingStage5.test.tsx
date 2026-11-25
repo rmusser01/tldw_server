@@ -225,8 +225,8 @@ describe("WorldBooksManager error-handling stage-5 edge warnings", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(message)
     expect(screen.getByRole("heading", { name: "Unable to load world books" })).toBeVisible()
-    expect(screen.queryByRole("button", { name: "Create your first world book", exact: true })).not.toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Retry", exact: true }))
+    expect(screen.queryByRole("button", { name: "Create your first world book" })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Retry" }))
     expect(refetch).toHaveBeenCalledTimes(1)
   })
 
@@ -242,7 +242,7 @@ describe("WorldBooksManager error-handling stage-5 edge warnings", () => {
     )
     render(<WorldBooksManager />)
 
-    const retry = screen.getByRole("button", { name: "Retry", exact: true })
+    const retry = screen.getByRole("button", { name: "Retry" })
     expect(retry).toBeDisabled()
     await user.click(retry)
     expect(refetch).not.toHaveBeenCalled()
@@ -261,7 +261,7 @@ describe("WorldBooksManager error-handling stage-5 edge warnings", () => {
     )
     const view = render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Retry", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Retry" }))
     view.rerender(<WorldBooksManager />)
     expect(refetch).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole("heading", { name: "Unable to load world books" })).not.toBeInTheDocument()

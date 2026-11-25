@@ -172,7 +172,7 @@ describe("WorkspaceACPHistoryModal lazy task details (WP-44)", () => {
                   (detail as Record<string, unknown>).code ||
                   `HTTP ${response.status}`
                 : `HTTP ${response.status}`
-          throw Object.assign(new Error(message), {
+          throw Object.assign(new Error(String(message)), {
             status: response.status,
             details: payload
           })

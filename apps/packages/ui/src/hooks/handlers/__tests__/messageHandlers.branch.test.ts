@@ -71,7 +71,7 @@ const testController = () => {
     })
   } as any
 }
-const setup = (extra = {}) => ({
+const setup = <T extends object>(extra?: T) => ({
   historySelection: testController(),
   notification: { error: vi.fn(), warning: vi.fn() } as any,
   historyId: "source",

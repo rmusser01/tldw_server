@@ -224,21 +224,21 @@ describe("managed reference-image catalog through its real media method and tran
     await expect(
       bgRequest({
         ...requestScopeFields(requestScope),
-        path: "/api/v1/files/reference-images" as never,
+        path: "/api/v1/files/reference-images",
         method: "GET",
       }),
     ).resolves.toEqual(response);
     expect(boundary.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])(
+  it.each(["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const)(
     "refuses scoped catalog %s before transport dispatch",
     async (method) => {
       await expect(
         bgRequest({
           ...requestScopeFields(requestScope),
-          path: "/api/v1/files/reference-images" as never,
-          method: method as never,
+          path: "/api/v1/files/reference-images",
+          method,
         }),
       ).rejects.toThrow(/Service Prompt config/);
       expect(boundary.fetch).not.toHaveBeenCalled();
@@ -258,11 +258,11 @@ describe("managed reference-image catalog through its real media method and tran
     "/api/v1/files\\reference-images",
     "/api/v1/files/reference-images%zz",
     "https://other.example/api/v1/files/reference-images",
-  ])("refuses malformed or expanded scoped catalog path %s", async (path) => {
+  ] as const)("refuses malformed or expanded scoped catalog path %s", async (path) => {
     await expect(
       bgRequest({
         ...requestScopeFields(requestScope),
-        path: path as never,
+        path,
         method: "GET",
       }),
     ).rejects.toThrow(/Service Prompt config/);

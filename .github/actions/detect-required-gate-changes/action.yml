@@ -32,6 +32,9 @@ outputs:
   rag_pipeline_changed:
     description: Whether paths that run the RAG pipeline golden and pipeline-test job changed.
     value: ${{ steps.classify.outputs.rag_pipeline_changed }}
+  chat_executors_changed:
+    description: Whether paths that run the chat executors golden and chat-service test job changed.
+    value: ${{ steps.classify.outputs.chat_executors_changed }}
 
 runs:
   using: composite

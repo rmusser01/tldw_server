@@ -6,6 +6,8 @@
 
 `HTTP request -> request_bundle.build_request_bundle -> unified_rag_pipeline (retrieval + generation) -> post_retrieval_coordinator.coordinate_standard_result_evidence -> response_mapping.rag_result_to_response`
 
+In-tree callers build a `RagRunConfig` and call `run_rag_pipeline(rcfg)`; `unified_rag_pipeline(...)` is the kwargs shim over it (see Pipeline Layout in `Docs/Code_Documentation/RAG-Developer-Guide.md`).
+
 ## Active Entrypoints
 
 - `unified_pipeline.py` - `unified_rag_pipeline(...)`

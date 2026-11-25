@@ -14,6 +14,9 @@ import { historySelectionExpansionPath } from "@/hooks/chat/useHistorySelection"
 import type { HistoryBookmark } from "@/db/dexie/types";
 
 import { Playground } from "../Playground";
+import type { ApplyCharacterRoute } from "../PlaygroundForm";
+import type { HistorySelectionSnapshotV1 } from "@/types/history-selection";
+import type { tldwClient } from "@/services/tldw/TldwApiClient";
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
 import { usePlaygroundSessionStore } from "@/store/playground-session";
 import { useStoreMessageOption } from "@/store/option";
@@ -145,7 +148,7 @@ const cockpitChatRenderState = vi.hoisted(() => ({
 }));
 
 const tldwClientState = vi.hoisted(() => ({
-  getCharacter: vi.fn(async (id: string | number) => ({
+  getCharacter: vi.fn(async (id: string | number, _options?: Parameters<typeof tldwClient.getCharacter>[1]) => ({
     id,
     name: "Route Character",
   })),
@@ -208,7 +211,7 @@ vi.mock("react-i18next", () => ({
 
 // The root fixture stubs the Form acceptance boundary; actual preflight/retention
 // behavior is exercised in PlaygroundForm.role-play-starter.integration.test.tsx.
-const routeApplyOutcome = vi.hoisted(() => ({ value: null as string | null }))
+const routeApplyOutcome = vi.hoisted(() => ({ value: null as Awaited<ReturnType<ApplyCharacterRoute>> | null }))
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
   PlaygroundForm: ({ onDraftPresenceChange, onCharacterRouteApplyReady, characterChatSendBlocker }: React.ComponentProps<typeof import("../PlaygroundForm").PlaygroundForm>) => {
     React.useEffect(() => {
@@ -454,7 +457,7 @@ describe("Playground cockpit shell", () => {
     recentChatState.bookmark.mockReset().mockResolvedValue(null);
     recentChatState.capture.mockReset().mockImplementation(async (owner, request) => {
       const view = { ...request, owner_key: "local-owner" };
-      const snapshot = { version: 1, owner_key: "local-owner", conversation_id: owner.conversation_id, source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: { kind: "parent_graph_v1" }, nodes: [] };
+      const snapshot: HistorySelectionSnapshotV1 = { version: 1, owner_key: "local-owner", conversation_id: owner.conversation_id, source_digest: "source", storage_context_digest: "storage", fences: { conversation: "", history: "", settings: "" }, interpretation_status: { kind: "parent_graph_v1" }, nodes: [] };
       const result = resolveHistorySelection(snapshot, view, "send", "");
       if (result.status !== "ready") return { ...result, view, snapshot };
       return { status: "captured", view, snapshot, rows: result.rows, selected_content: [], storage_context_digest: "storage", purpose: "send" };
@@ -1003,7 +1006,7 @@ describe("Playground cockpit shell", () => {
     expect(messageOptionState.value.setMessages).not.toHaveBeenCalled();
     expect(messageOptionState.value.serverChatId).toBe('ordinary-source');
     routeApplyOutcome.value = null;
-    fireEvent.click(within(status).getByRole('button', { name: 'Retry', exact: true }));
+    fireEvent.click(within(status).getByRole('button', { name: 'Retry' }));
     await waitFor(() =>
       expect(routerNavigateState.navigate).toHaveBeenCalledWith(
         expect.objectContaining({ search: '?mode=character&keep=1' }),

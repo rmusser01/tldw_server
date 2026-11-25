@@ -16,10 +16,12 @@ import type {
   HistoryViewSelectionV1,
   HistorySelectionSnapshotV1
 } from "@/types/history-selection"
+import type { NativeHistoryOwnerV1 } from "@/services/chat-history-selection"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { resolveHistorySelection, selectionDigest } from "@/utils/history-selection"
 
 const mocks = vi.hoisted(() => ({
-  openButtons: [] as Array<() => void>,
+  openButtons: [] as React.MouseEventHandler<HTMLButtonElement>[],
   bookmarks: new Map<string, any>(),
   saveBookmark: vi.fn<() => Promise<void>>(async () => {}),
   configChanged: null as null | (() => void),
@@ -45,8 +47,8 @@ vi.mock("@/components/Common/Button", async (original) => {
     await original<typeof import("@/components/Common/Button")>()
   const React = await import("react")
   return {
-    Button: React.forwardRef<HTMLButtonElement, any>((props, ref) => {
-      if (props.children === "Open saved reply")
+    Button: React.forwardRef<HTMLButtonElement, React.ComponentPropsWithoutRef<typeof Button>>((props, ref) => {
+      if (props.children === "Open saved reply" && props.onClick)
         mocks.openButtons.push(props.onClick)
       return React.createElement(Button, { ...props, ref })
     })
@@ -277,7 +279,6 @@ it.each([false, true])(
       pending = mounted.result.current.loadConversation(
         {
           serverChatId: 'chat',
-          resetOnCancel: true,
           isCurrent: () => current,
         },
         null
@@ -1590,13 +1591,21 @@ const savedEditedRecovery = (view: HistoryViewSelectionV1) => ({
     }
   }
 })
-const editedRecoveryOwner = {
-  kind: "native" as const,
+const makeNativeOwner = () => ({
+  kind: "native",
   owner_key: "owner",
   conversation_id: "chat",
-  request_scope: {} as never,
-  validate_lease: () => true
-}
+  request_scope: {
+    config: {
+      serverUrl: "https://chat.test",
+      authMode: "single-user",
+      expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope("single-user", "synthetic")
+    },
+    userId: null
+  },
+  validate_lease: (): boolean => true
+} satisfies NativeHistoryOwnerV1)
+const editedRecoveryOwner = makeNativeOwner()
 
 it("explicit recovery opens a freshly reread completed edit result and dismisses only after capture", async () => {
   const hook = renderHook(() => useHistorySelection())
@@ -1729,14 +1738,14 @@ it("a retained rendered recovery callback refuses an actual same-ID H1 refresh b
   const refreshed = controller.view
   mocks.capture.mockClear()
   await act(async () => {
-    retained()
+    retained(undefined)
     await Promise.resolve()
   })
   expect(mocks.capture).not.toHaveBeenCalled()
   expect(mocks.dismissRecovery).not.toHaveBeenCalled()
   expect(controller.view).toBe(refreshed)
   await act(async () => {
-    mocks.openButtons.at(-1)!()
+    mocks.openButtons.at(-1)!(undefined)
     await Promise.resolve()
   })
   await waitFor(() => expect(mocks.dismissRecovery).toHaveBeenCalledOnce())
@@ -1923,19 +1932,7 @@ it.each(["regenerate", "continue"] as const)("explicit %s recovery opens the act
 
 
 describe("owned native stale-send choices", () => {
-  const nativeOwner = {
-    kind: "native" as const,
-    owner_key: "owner",
-    conversation_id: "chat",
-    request_scope: {
-      config: {
-        serverUrl: "https://chat.test",
-        authMode: "single-user" as const,
-        apiKey: "synthetic"
-      }
-    },
-    validate_lease: () => true
-  }
+  const nativeOwner = makeNativeOwner()
   const mountedAtEarlierAnswer = async () => {
     const hook = renderHook(() => useHistorySelection())
     await act(async () => {
@@ -2430,19 +2427,7 @@ describe("owned native stale-send choices", () => {
 })
 
 it("an actual H1 branch survives a held compact focus capture and subsequent focus checks", async () => {
-  const nativeOwner = {
-    kind: "native" as const,
-    owner_key: "owner",
-    conversation_id: "chat",
-    request_scope: {
-      config: {
-        serverUrl: "https://chat.test",
-        authMode: "single-user" as const,
-        apiKey: "synthetic"
-      }
-    },
-    validate_lease: () => true
-  }
+  const nativeOwner = makeNativeOwner()
   const hook = renderHook(() => {
     const selection = useHistorySelection()
     const freshness = useSidepanelChatFreshness({
@@ -2498,19 +2483,7 @@ it("an actual H1 branch survives a held compact focus capture and subsequent foc
 
 
 describe("shared proactive native freshness", () => {
-  const nativeOwner = {
-    kind: "native" as const,
-    owner_key: "owner",
-    conversation_id: "chat",
-    request_scope: {
-      config: {
-        serverUrl: "https://chat.test",
-        authMode: "single-user" as const,
-        apiKey: "synthetic"
-      }
-    },
-    validate_lease: () => true
-  }
+  const nativeOwner = makeNativeOwner()
   const mount = async () => {
     const { useStoreMessageOption } = await import("@/store/option")
     useStoreMessageOption.setState({
@@ -2971,7 +2944,9 @@ describe("acknowledged recovery controller", () => {
           owner_key: "owner",
           conversation_id: "chat",
           origin_view: hook.result.current.view!,
+          persistence: "client",
           input_id: "input",
+          assistant_id: "unsaved-answer",
           created_at: 1,
           input_text: "  exact input\n  ",
           input_images: [],
@@ -3121,7 +3096,9 @@ it("explicitly refreshes empty native history after settlement without widening 
   settled = true
   await act(async () => { expect(await hook.result.current.refresh()).toBe(true) })
   expect(hook.result.current.capture?.snapshot.nodes).toHaveLength(snapshot.nodes.length)
-  expect(hook.result.current.capture?.rows).toEqual([])
+  const refreshed = hook.result.current.capture
+  if (refreshed?.status !== "captured") throw new Error("Expected refreshed history capture")
+  expect(refreshed.rows).toEqual([])
   expect(hook.result.current.view).toEqual(originalView)
   expect(hook.result.current.view?.cursor).toEqual({ kind: "empty" })
   expect(hook.result.current.owner).toBe(native)
@@ -3153,14 +3130,14 @@ it.each(['settlement', 'capture failure', 'later focus', 'retired account'])("re
   const mounted = render(<RecoveryView />)
   try {
     await act(async () => { await controller.open(native) })
-    const refresh = await screen.findByRole('button', { name: 'Refresh history', exact: true })
+    const refresh = await screen.findByRole('button', { name: 'Refresh history' })
     refresh.focus()
     await userEvent.setup().keyboard('{Enter}')
     await waitFor(() => expect(reads).toBe(2))
     if (outcome === 'later focus' || outcome === 'retired account') screen.getByRole('button', { name: 'Other control' }).focus()
     if (outcome === 'retired account') leaseCurrent = false
     await act(async () => { release(); await held })
-    if (outcome === 'settlement') await waitFor(() => expect(screen.getByRole('button', { name: 'Review conversation history', exact: true })).toHaveFocus())
+    if (outcome === 'settlement') await waitFor(() => expect(screen.getByRole('button', { name: 'Review conversation history' })).toHaveFocus())
     else if (outcome === 'capture failure') await waitFor(() => expect(screen.getByRole('alert').closest('[tabindex="-1"]')).toHaveFocus())
     else expect(screen.getByRole('button', { name: 'Other control' })).toHaveFocus()
   } finally { release(); mounted.unmount() }

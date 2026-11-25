@@ -266,7 +266,9 @@ describe("ServerChatList reliability states", () => {
       sidebarRefreshState: "ready",
       hasUsableData: false,
       isShowingStaleData: false,
-      isServerPagedResult: false
+      isServerPagedResult: false,
+      isFetching: false,
+      refetch: vi.fn()
     }
     mocks.deleteChat.mockResolvedValue(undefined)
     mocks.restoreChat.mockResolvedValue(undefined)
@@ -384,7 +386,9 @@ describe("ServerChatList reliability states", () => {
       sidebarRefreshState: "recoverable-error",
       hasUsableData: true,
       isShowingStaleData: true,
-      isServerPagedResult: false
+      isServerPagedResult: false,
+      isFetching: false,
+      refetch: vi.fn()
     }
 
     render(<ServerChatList searchQuery="" />)
@@ -404,7 +408,9 @@ describe("ServerChatList reliability states", () => {
       sidebarRefreshState: "recoverable-error",
       hasUsableData: false,
       isShowingStaleData: false,
-      isServerPagedResult: false
+      isServerPagedResult: false,
+      isFetching: false,
+      refetch: vi.fn()
     }
 
     render(<ServerChatList searchQuery="" />)
@@ -426,7 +432,9 @@ describe("ServerChatList reliability states", () => {
       sidebarRefreshState: "ready",
       hasUsableData: true,
       isShowingStaleData: false,
-      isServerPagedResult: false
+      isServerPagedResult: false,
+      isFetching: false,
+      refetch: vi.fn()
     }
     mocks.deleteChat.mockRejectedValueOnce(
       Object.assign(new Error("409 conflict: expected version mismatch"), {
@@ -454,7 +462,9 @@ describe("ServerChatList reliability states", () => {
       sidebarRefreshState: "ready",
       hasUsableData: true,
       isShowingStaleData: false,
-      isServerPagedResult: true
+      isServerPagedResult: true,
+      isFetching: false,
+      refetch: vi.fn()
     }
 
     render(<ServerChatList searchQuery="quota" />)

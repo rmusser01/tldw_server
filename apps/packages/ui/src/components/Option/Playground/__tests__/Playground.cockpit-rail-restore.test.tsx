@@ -51,10 +51,8 @@ describe("Playground cockpit rail restore tabs", () => {
       onRightRailVisibleChange,
     });
     const contextButton = screen.getByRole("button", { name: "Context",
-      exact: true,
     });
     const runtimeButton = screen.getByRole("button", { name: "Runtime",
-      exact: true,
     });
     fireEvent.click(runtimeButton);
     fireEvent.click(

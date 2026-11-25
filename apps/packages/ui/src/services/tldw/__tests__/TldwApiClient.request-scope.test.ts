@@ -266,7 +266,10 @@ describe("TldwApiClient captured request scope", () => {
   ])("binds the QA %s request without changing its body", async (method, args, requestMethod) => {
     const client = new TldwApiClient()
     vi.spyOn(client, "ensureConfigForRequest").mockResolvedValue({ ...requestScope.config, accessToken: "token" })
-    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, [path]) => {
+      if (!path?.startsWith("/")) throw new Error("Expected an API path")
+      return path as `/${string}`
+    })
     if (method === "updateChat") {
       mocks.bgRequest.mockImplementation(async request => ({
         id: "owned", version: request.method === "GET" ? 4 : 5,

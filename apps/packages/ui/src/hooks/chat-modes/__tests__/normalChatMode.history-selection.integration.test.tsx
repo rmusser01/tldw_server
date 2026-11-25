@@ -147,7 +147,7 @@ import { saveMessageOnSuccess, saveMessageOnError } from "@/hooks/chat-helper"
 import { captureHistorySnapshot } from "@/services/chat-history-selection"
 import { assertHistoryConversationTarget, type NativeHistoryOwnerV1 } from "@/services/chat-history-selection"
 import { linkServerChatMirror } from "@/db/dexie/server-chat-mirror"
-import { tldwChat, tldwModels } from "@/services/tldw"
+import { tldwChat, tldwModels, type ChatStreamChunk } from "@/services/tldw"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { HistoryLoadReceipt, HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
@@ -2356,10 +2356,9 @@ it.each(["cleanup", "navigation", "account"])("retains an acknowledged local ass
   const mounted = renderHook(() => useHistorySelection())
   await act(async () => { await mounted.result.current.loadConversation({ historyId: source.id }) })
   const origin = mounted.result.current.getCurrent()
-  const scoped = snapshot()
   const invalidation = new AbortController()
   // Explicit account-signal I/O double; real event/controller retirement is covered by root ownership checks.
-  scoped.scopeInvalidatedSignal = invalidation.signal
+  const scoped = { ...snapshot(), scopeInvalidatedSignal: invalidation.signal }
   let acknowledgedId: string | undefined
   const save = vi.fn(async (data: Parameters<typeof saveMessageOnSuccess>[0]) => {
     const turn = data.historyTurn!
@@ -2385,7 +2384,7 @@ it.each(["cleanup", "navigation", "account"])("retains an acknowledged local ass
   if (boundary === "cleanup") {
     expect(mounted.result.current.getCurrent().view?.cursor).toEqual({ kind: "after_message", message_id: "first-answer" })
   } else {
-    expect(mounted.result.current.getCurrent().owner?.conversation_id).toBe(other.id)
+    expect(mounted.result.current.getCurrent().owner).toMatchObject({ conversation_id: other.id })
     expect(mounted.result.current.getCurrent().view?.cursor).toEqual({ kind: "empty" })
     const retained = await loadHistoryTurnRecoveries(origin.bookmarkScope!, origin.view!)
     if (boundary === "navigation") {
@@ -2461,7 +2460,7 @@ it.each(
         preview: "Original answer"
       }
     ]
-    const serverCapture = async (_id: unknown, request: any) => {
+    const serverCapture: OmitThisParameter<typeof tldwClient.captureHistorySelection> = async (_id, request) => {
       const view = { ...request.view, owner_key: "server-owner" }
       const snapshot = {
         version: 1 as const,
@@ -3048,7 +3047,7 @@ describe("real full and compact Scene consumers across persistence and steering"
     regenerateLastMessage?: FullActions["regenerateLastMessage"]
     createChatBranch?: FullActions["createChatBranch"]
     stopStreamingRequest: ReturnType<typeof useMessage>["stopStreamingRequest"]
-    clearChat?: ReturnType<typeof useMessage>["clearChat"]
+    clearChat?: () => boolean
     composer?: ReturnType<typeof useComposerText>
   }
   let initialCore: ReturnType<typeof useStoreMessageOption.getState>
@@ -3457,7 +3456,7 @@ describe("real full and compact Scene consumers across persistence and steering"
         return { id: childId } as never
       })
       const append = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (id, body) => {
-        const rows = graphs.get(id)!
+        const rows = graphs.get(String(id))!
         if (outcome === "partial" && rows.length === 1) throw new Error("Declared second ACK loss")
         const row = { id: id + "-" + (rows.length + 1), role: body.role, content: body.content!, parent_message_id: body.parent_message_id ?? null }
         rows.push(row)
@@ -3503,7 +3502,7 @@ describe("real full and compact Scene consumers across persistence and steering"
         expect(refresh).toHaveBeenCalledTimes(outcome === "ABA" || outcome === "unmount" ? 0 : 2)
         expect(graphs.get("copy-source")).toEqual(source)
         if (outcome === "saved") {
-          expect(consumer.selection.getCurrent().owner?.conversation_id).toBe(childId)
+          expect(consumer.selection.getCurrent().owner).toMatchObject({ conversation_id: childId })
           expect(account.isCurrent()).toBe(true)
           expect(original.kind !== "unavailable" && original.validate_lease?.()).toBe(false)
           expect(append).toHaveBeenCalledTimes(2)
@@ -3515,7 +3514,7 @@ describe("real full and compact Scene consumers across persistence and steering"
           expect(account.isCurrent()).toBe(false)
           expect(append).not.toHaveBeenCalled()
         } else {
-          expect(consumer.selection.getCurrent().owner?.conversation_id).toBe("copy-source")
+          expect(consumer.selection.getCurrent().owner).toMatchObject({ conversation_id: "copy-source" })
           let recorded!: typeof copied
           await act(async () => { recorded = await consumer.mounted.result.current.createChatBranch!("copy-a") })
           expect(recorded.operation_id).toBe(copied.operation_id)
@@ -3652,13 +3651,11 @@ describe("real full and compact Scene consumers across persistence and steering"
         if (boundary === "admitted") {
           const selection = options.preparedRequest!.tldw_history_selection_v1!;
           rows.push({ id: "refused-input", role: "user", content: "Retain refused Model question", parent_message_id: null });
-          const admission = { version: 1, owner_key: "server-owner", conversation_id: newServerId,
+          await onChunk?.({ tldw_history_admission_v1: {
+            version: 1, owner_key: "server-owner", conversation_id: newServerId,
             input_message_id: "refused-input", input_message_revision: "1", selection_digest: selection.selection_digest,
-            messages: selection.messages, originating_selection_revision: selection.selection_revision };
-          const chunk: Parameters<NonNullable<typeof onChunk>>[0] & { tldw_history_admission_v1: typeof admission } = {
-            tldw_history_admission_v1: admission
-          };
-          await onChunk?.(chunk);
+            messages: selection.messages, originating_selection_revision: selection.selection_revision
+          } });
         }
         if (boundary === "unknown") throw new TypeError("Network response lost");
         if (boundary === "message-only") throw new Error("provider_disabled");
@@ -3750,7 +3747,7 @@ describe("real full and compact Scene consumers across persistence and steering"
           rows.push({ id: "canonical-input", role: "user", content: "Original native completion question", parent_message_id: null })
           const admission = { tldw_history_admission_v1: { version: 1, owner_key: "server-owner", conversation_id: newServerId,
             input_message_id: "canonical-input", input_message_revision: "1", selection_digest: selection.selection_digest,
-            messages: selection.messages, originating_selection_revision: selection.selection_revision } }
+            messages: selection.messages, originating_selection_revision: selection.selection_revision } } satisfies ChatStreamChunk
           if (boundary === "Stop before admission") {
             consumer.mounted.result.current.stopStreamingRequest()
             throw new DOMException("Stopped before admission receipt", "AbortError")
@@ -4126,9 +4123,8 @@ describe("real full and compact Scene consumers across persistence and steering"
   )(
     "actual mounted $surface native mirror refuses $boundary during its original link",
     async ({ surface, boundary }) => {
-      const scoped = answerSnapshot()
       const auth = new AbortController()
-      scoped.scopeInvalidatedSignal = auth.signal
+      const scoped = { ...answerSnapshot(), scopeInvalidatedSignal: auth.signal }
       // Declared snapshot IO retains its parent's Stop, as the production lease does.
       vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockImplementation(
         async (_ids, options) => ({
@@ -5217,7 +5213,8 @@ describe("real full and compact Scene consumers across persistence and steering"
       })
       const initial = consumer.selection.getCurrent()
       expect(initial.owner?.kind).toBe("local")
-      const owner = initial.owner!
+      const owner = initial.owner
+      if (owner?.kind !== "local") throw new Error("Missing accepted local owner")
       const view = initial.view!
       await act(async () => {
         useStoreMessageOption
@@ -5713,7 +5710,8 @@ describe("real full and compact Scene consumers across persistence and steering"
           })
         ).toEqual({ status: "submitted" })
       })
-      const originalOwner = consumer.selection.getCurrent().owner!
+      const originalOwner = consumer.selection.getCurrent().owner
+      if (originalOwner?.kind !== "local") throw new Error("Missing original local owner")
       const originalReplyRow = useStoreMessageOption.getState().messages.at(-1)!
       await act(async () => {
         useStoreMessageOption.getState().setReplyTarget({
@@ -5783,7 +5781,8 @@ describe("real full and compact Scene consumers across persistence and steering"
           })
         ).toEqual({ status: "submitted" })
       })
-      const laterOwner = consumer.selection.getCurrent().owner!
+      const laterOwner = consumer.selection.getCurrent().owner
+      if (laterOwner?.kind !== "local") throw new Error("Missing later local owner")
       expect(laterOwner.kind).toBe("local")
       expect(laterOwner).not.toBe(originalOwner)
       const laterAddress = useStoreMessageOption.getState().chatDraftAddress
@@ -7014,15 +7013,7 @@ it.each(["unsupported", "changed", "uncertain"])(
       }
     ]
     vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
-      async (
-        _id,
-        request: {
-          tldw_history_selection_v1: {
-            conversation_id: string
-            selection_digest: string
-          }
-        }
-      ) => {
+      async (_id, request) => {
         const view = { ...request.view, owner_key: "server-owner" }
         const state = {
           version: 1 as const,

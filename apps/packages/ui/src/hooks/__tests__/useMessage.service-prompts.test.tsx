@@ -289,7 +289,7 @@ vi.mock("~/store/option", async (importOriginal) => {
         setState: (
           update:
             | Record<string, unknown>
-            | ((state: typeof mocks.storeState) => Record<string, unknown>)
+            | ((state: Record<string, unknown>) => Record<string, unknown>)
         ) => {
           if (mocks.useRealQueueState)
             actual.useStoreMessageOption.setState(update)
@@ -1115,7 +1115,14 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
           saveToDb: true,
           scopeSignal: scope.signal,
           message: "Original request",
-          fullText: "Saved reply"
+          fullText: "Saved reply",
+          isRegenerate: false,
+          source: [],
+          reasoning_time_taken: 0,
+          selectedModel: "model-1",
+          image: "",
+          modelId: "model-1",
+          assistantMessageId: "saved-reply"
         })
         return { status: "submitted" }
       })

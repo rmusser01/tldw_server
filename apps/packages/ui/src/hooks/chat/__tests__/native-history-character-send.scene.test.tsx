@@ -290,7 +290,8 @@ describe("native admitted reasoning progress", () => {
     }
     const origin = controller.getCurrent()
     expect(origin.status).toBe("ready")
-    expect(origin.capture?.rows.map((row) => row.id)).toEqual([
+    if (origin.capture?.status !== "captured") throw new Error("Missing native Scene capture")
+    expect(origin.capture.rows.map((row) => row.id)).toEqual([
       "old-user",
       "old-assistant"
     ])
@@ -304,6 +305,8 @@ describe("native admitted reasoning progress", () => {
     const target = captureCurrentActorSceneTarget(controller)!
     expect(
       await saveActorSettingsForChat({
+        historyId: null,
+        serverChatId: chatId,
         target,
         expectedRecord: null,
         settings: {
@@ -496,6 +499,7 @@ describe("native admitted reasoning progress", () => {
       const replacement = [
         {
           id: "replacement",
+          name: "You",
           isBot: false,
           message: "Keep my new draft",
           sources: []

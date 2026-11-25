@@ -18,7 +18,12 @@ test.describe("Notes", () => {
   test.beforeEach(async ({ authedPage, serverInfo }) => {
     skipIfServerUnavailable(serverInfo)
     notes = new NotesPage(authedPage)
-    await notes.goto()
+    // Notes verifies the signed-in user before requesting the list.
+    const [listCall] = await Promise.all([
+      expectApiCall(authedPage, { method: "GET", url: /\/api\/v1\/notes\/?(?:\?|$)/ }, 30_000),
+      notes.goto(),
+    ])
+    expect(listCall.response.ok()).toBe(true)
   })
 
   test("page loads with expected elements", async ({ diagnostics }) => {
@@ -43,7 +48,7 @@ test.describe("Notes", () => {
     await assertNoCriticalErrors(diagnostics)
   })
 
-  test("search notes filters results", async ({ authedPage, diagnostics }) => {
+  test("search notes filters results", async ({ diagnostics }) => {
     const testTitle = `Searchable ${generateTestId()}`
     await notes.createNote({ title: testTitle, content: "Unique content for search" })
 

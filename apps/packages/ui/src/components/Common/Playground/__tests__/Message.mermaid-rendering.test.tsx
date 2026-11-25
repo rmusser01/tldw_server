@@ -343,7 +343,7 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
 
   it("keeps a mismatched character name unresolved in a saved greeting", async () => {
     render(<PlaygroundMessage {...baseProps} message="{{user}} meets {{char}}" message_type="character:greeting"
-      characterIdentityEnabled characterIdentity={{ id: "12", name: "Other Guide" }} speakerCharacterId="34" />)
+      characterIdentityEnabled characterIdentity={{ id: "12", name: "Other Guide" }} speakerCharacterId={34} />)
     await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("User meets {{char}}"))
   })
   it("does not substitute placeholders in ordinary assistant content", async () => {

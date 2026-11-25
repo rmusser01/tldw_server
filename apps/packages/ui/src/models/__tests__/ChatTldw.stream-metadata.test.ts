@@ -105,6 +105,53 @@ describe("ChatTldw stream metadata handoff", () => {
 
 
 describe("selected history provider fidelity", () => {
+  it("replays the Gemini signature captured from a streamed function call", async () => {
+    const extraContent = { google: { thought_signature: "c2lnbmF0dXJl" } }
+    mocks.streamMessage.mockImplementationOnce(async function* (_messages, _options, onChunk) {
+      onChunk({
+        choices: [{ delta: { tool_calls: [{
+          index: 0,
+          id: "call-1",
+          function: { name: "lookup", arguments: "{" },
+          extra_content: { ...extraContent, ignored_provider: { extra: "ignored" } }
+        }] } }]
+      })
+      onChunk({
+        choices: [{ delta: { tool_calls: [{
+          index: 0,
+          function: { arguments: "}" },
+          extra_content: { google: { thought_signature: "a".repeat(100_001) } }
+        }] } }]
+      })
+      yield ""
+    })
+    const model = new ChatTldw({ model: "gemini-3-flash-preview", clientManagedHistory: true })
+    const handleLLMEnd = vi.fn()
+    for await (const _ of await model.stream([new HumanMessage("Look it up")], {
+      callbacks: [{ handleLLMEnd }]
+    })) {
+      // Allow the completion callback to run before checking metadata.
+    }
+    const { tool_calls } = handleLLMEnd.mock.lastCall![0].generations[0][0].generationInfo
+    const request = model.prepareClientManagedRequest([
+      new AIMessage({ content: "", additional_kwargs: { tool_calls } }),
+      new ToolMessage({ content: "found", tool_call_id: "call-1" })
+    ])
+    expect(request.messages).toEqual([
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "call-1",
+          type: "function",
+          function: { name: "lookup", arguments: "{}" },
+          extra_content: extraContent
+        }]
+      },
+      { role: "tool", content: "found", tool_call_id: "call-1" }
+    ])
+  })
+
   it("preserves tool-call-only assistant and its exact result identity", async () => {
     mocks.streamMessage.mockImplementation(async function* () {
       yield "ok"
@@ -121,6 +168,7 @@ describe("selected history provider fidelity", () => {
       new AIMessage({ content: "", additional_kwargs: { tool_calls: calls } }),
       new ToolMessage({ content: "found", tool_call_id: "call-1" })
     ])) {
+      // Consume the response before checking the recorded request.
     }
     expect(mocks.streamMessage.mock.lastCall?.[0]).toEqual([
       { role: "assistant", content: "", tool_calls: calls },
@@ -149,6 +197,7 @@ describe("selected history provider fidelity", () => {
       saveToDb: true
     })
     for await (const _ of await model.stream([new HumanMessage("Hi")])) {
+      // Consume the response before checking client state.
     }
     expect(model.saveToDb).toBe(false)
     expect(model.conversationId).toBeUndefined()
