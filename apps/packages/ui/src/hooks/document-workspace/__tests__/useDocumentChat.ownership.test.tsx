@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { StrictMode } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"

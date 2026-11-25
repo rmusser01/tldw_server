@@ -54,7 +54,7 @@ vi.mock("../EpubViewer/EpubSearch", () => ({
 
 vi.mock("epubjs", () => ({
   default: () => ({
-    ready: Promise.reject(new Error("EPUB load failed")),
+    open: vi.fn().mockRejectedValue(new Error("EPUB load failed")),
     destroy: vi.fn()
   })
 }))

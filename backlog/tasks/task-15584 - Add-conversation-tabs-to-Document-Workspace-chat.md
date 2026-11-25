@@ -35,6 +35,8 @@ Document Workspace currently loads the newest owner-matching history for each do
 The requester selected browser-scoped tabs. The design applies ADR-049 to the existing document index and ownership contract. Cross-device conversation discovery is tracked in TASK-15586.
 174 targeted Vitest cases passed, including the production Document Chat dispatcher with two server-backed chats, owner and document checks, and switching during reads and stopped replies. Frontend typecheck, scoped ESLint and git diff --check passed. An independent review caught server identity reload, stopped-turn activity ownership, temporary transcript retention and saved message identity cases. Fixed those paths and added regression coverage. Bandit does not apply to the TypeScript-only changes.
 Local Next preview rendered the workspace. The synthetic API fixture has not opened the PDF yet, so the browser overflow check remains pending.
+The frontend gate on Dev PR #3534 reproduced two fixture failures. The document chat scene test now uses the existing durable Plasmo storage fixture, and the EPUB alert test models a failed open call. On current Dev the two package-owned suites passed 22 tests, WebUI passed 30 focused tests, and the Translate and expected-account backend suites passed 16 tests.
+Re-ran shared UI coverage shard 2 of 32, which previously failed in PR #3534. All 988 tests in 93 files passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
