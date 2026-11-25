@@ -60,11 +60,11 @@ async def single_user_cookie_client(tmp_path, monkeypatch, fresh_services):
     await reset_users_db()
 
 
-def _mint(client: TestClient, api_key: str):
-    return client.post(
-        "/api/v1/auth/single-user/session",
-        headers={"X-API-KEY": api_key},
-    )
+def _mint(client: TestClient, api_key: str, device: str | None = None):
+    headers = {"X-API-KEY": api_key}
+    if device is not None:
+        headers["X-TLDW-Device-Id"] = device
+    return client.post("/api/v1/auth/single-user/session", headers=headers)
 
 
 @pytest.mark.parametrize("method", ["POST", "DELETE"])
@@ -104,6 +104,27 @@ def test_mint_returns_no_token_and_sets_exact_cookie(single_user_cookie_client):
     assert "SameSite=lax" in cookie
     assert "Path=/api" in cookie
     assert api_key not in response.text + cookie
+
+
+def test_install_that_drops_its_cookie_replaces_only_its_own_session(single_user_cookie_client):
+    """TASK-15628: one install minting again and again must not sign the other installs out."""
+    client, api_key = single_user_cookie_client
+    cookies = {}
+    for device in ("install-aaaaaaaa", "install-bbbbbbbb", "install-cccccccc"):
+        client.cookies.clear()
+        assert _mint(client, api_key, device).status_code == 200
+        cookies[device] = client.cookies["tldw_single_user_session"]
+    for _ in range(10):
+        client.cookies.clear()
+        assert _mint(client, api_key, "install-dddddddd").status_code == 200
+    client.cookies.clear()
+    # Four live rows (the default cap) and every older install still authenticating
+    # means install d holds exactly one row.
+    assert len(client.get("/api/v1/auth/sessions", headers={"X-API-KEY": api_key}).json()) == 4
+    for cookie in cookies.values():
+        client.cookies.clear()
+        client.cookies.set("tldw_single_user_session", cookie, path="/api")
+        assert client.get("/api/v1/auth/sessions").status_code == 200
 
 
 def test_cookie_principal_authenticates_existing_http_dependencies(single_user_cookie_client):

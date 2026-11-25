@@ -9,6 +9,7 @@ from fastapi import Request, Response
 
 from tldw_Server_API.app.core.AuthNZ import single_user_session
 from tldw_Server_API.app.core.AuthNZ.exceptions import SessionError
+from tldw_Server_API.app.core.AuthNZ.session_manager import request_device_id
 from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     MintedSingleUserSession,
     SingleUserSessionIdentity,
@@ -21,10 +22,12 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import (
 pytestmark = pytest.mark.unit
 
 
-def _request(*, cookie: str | None = None) -> Request:
+def _request(*, cookie: str | None = None, device_id: str | None = None) -> Request:
     headers = [(b"user-agent", b"test-browser")]
     if cookie is not None:
         headers.append((b"cookie", f"tldw_single_user_session={cookie}".encode()))
+    if device_id is not None:
+        headers.append((b"x-tldw-device-id", device_id.encode()))
     return Request(
         {
             "type": "http",
@@ -97,6 +100,70 @@ async def test_validate_rejects_wrong_type_and_accepts_cookie_session(session_se
     assert identity.session_id == 4
     assert identity.user_id == 1
     assert identity.expires_at == datetime(2026, 8, 9, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_mint_tags_session_with_install_id(session_settings):
+    manager = AsyncMock()
+    manager.create_session.return_value = {"session_id": 7, "user_id": 1}
+
+    await mint_single_user_session(_request(device_id="install-12345678"), manager)
+
+    assert manager.create_session.call_args.kwargs["device_id"] == "single-user-cookie:v1:install-12345678"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("device", [None, "short", "has space here"])
+async def test_mint_without_install_id_uses_bare_tag(session_settings, device):
+    manager = AsyncMock()
+    manager.create_session.return_value = {"session_id": 7, "user_id": 1}
+
+    await mint_single_user_session(_request(device_id=device), manager)
+
+    kwargs = manager.create_session.call_args.kwargs
+    assert kwargs["device_id"] == "single-user-cookie:v1"
+
+
+@pytest.mark.asyncio
+async def test_validation_accepts_tagged_install_rows(session_settings):
+    manager = AsyncMock()
+    manager.validate_session.return_value = {
+        "id": 4,
+        "user_id": 1,
+        "device_id": "single-user-cookie:v1:install-12345678",
+        "expires_at": "2026-08-09T00:00:00+00:00",
+    }
+
+    assert (await validate_single_user_session(_request(cookie="opaque"), manager)).session_id == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("device", ["single-user-cookie:v1x", "single-user-cookie:v2:install-12345678", None])
+async def test_validation_rejects_lookalike_device_tags(session_settings, device):
+    manager = AsyncMock()
+    manager.validate_session.return_value = {
+        "id": 4,
+        "user_id": 1,
+        "device_id": device,
+        "expires_at": "2026-08-09T00:00:00+00:00",
+    }
+
+    assert await validate_single_user_session(_request(cookie="opaque"), manager) is None
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("install-12345678", "install-12345678"),
+        ("short", None),
+        ("a" * 65, None),
+        ("has space here", None),
+        ("single-user-cookie:v1", None),
+        (None, None),
+    ],
+)
+def test_request_device_id_accepts_only_safe_ids(raw, expected):
+    assert request_device_id(_request(device_id=raw)) == expected
 
 
 @pytest.mark.asyncio

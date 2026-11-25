@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import stat
 import threading
 from contextlib import contextmanager, suppress
@@ -97,6 +98,20 @@ try:
     from tldw_Server_API.app.core.config import settings as core_settings
 except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive fallback
     core_settings = {}
+
+# Browser install id, which groups a user's sessions for the per-user cap.
+DEVICE_ID_HEADER = "X-TLDW-Device-Id"
+# No ":", so a client id can never pose as a server-composed tag such as "single-user-cookie:v1:<id>".
+_DEVICE_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{8,64}")
+
+
+def request_device_id(request: Any) -> Optional[str]:
+    """Return the request's install id header, or None when it is absent or malformed."""
+    headers = getattr(request, "headers", None)
+    value = headers.get(DEVICE_ID_HEADER) if headers is not None else None
+    if isinstance(value, str) and _DEVICE_ID_PATTERN.fullmatch(value):
+        return value
+    return None
 
 #######################################################################################################################
 #
