@@ -7,6 +7,7 @@ there, and checks the result with ``verify --base-dir`` or by reading the text. 
 from __future__ import annotations
 
 import ast
+import hashlib
 import os
 import subprocess
 import sys
@@ -1102,3 +1103,91 @@ def test_publish_is_refused_when_the_facade_is_cs(tmp_path: Path) -> None:
     with pytest.raises(rag_split.SplitError, match="publish is refused when facade is 'cs'"):
         rag_split.load_manifest(t.manifest_path)
 
+
+# --- fix round 1: apply's RAG output is pinned against the pre-generalisation tool ---
+
+# sha256 of every file each RAG manifest's apply writes or changes, run on the files at the manifest's recorded base.
+# The digests were computed with the tool as of b768507f15 (before TASK-13950.25 part 1), never with the current
+# one. They must only change with a deliberate, reviewed change to RAG's apply output.
+RAG_APPLY_DIGESTS: dict[str, dict[str, str]] = {
+    "t03_config": {
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "8f6e43b07719551bac6ea2d9638ca328a27b0a1c86a3aa88e1bb654f03527e1a",
+    },
+    "t04a_state": {
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "5611c65df704abff3191b270129cdb70284df1bcaf14fcb623e46de99f6dcba4",
+    },
+    "t04b_hoist": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/run_state.py": "d746ccf055842f34c2a1082f03c028d9c258d0837e247b9d86207281a5820dfa",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "f9fb09e3dbda4e72dee75e7d11ff08e4a0f2ab8d5019feb2d76041b7b48c2513",
+    },
+    "t04c_shared": {
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "377b25c7e148bf24ef0f634924be791c049d100334facb7ae0d2090d386673c6",
+    },
+    "t05e_post_processing": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/post_processing.py": "faea942e00a6ddd4064ee00c7492432997bca2b4386f13a0ecb4525ed2fc7350",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "4c973a497375494132b96d338eb2c9a0a46a55a56318cb2a209b940ba7db1cf3",
+    },
+    "t05f_verification_claims": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/claims.py": "32d5e7fe0eb2b510ccddbed5d6ef0c255b5347e88ea248d6acd312368290ab1d",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/verification.py": "b1f94ca8245d35f7ad36443f4a777af96942521ff989f66d43243b2d43513ded",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "a6a711dfee8d95074f58c3184d434b2837d4689106225dadbb0c92bac47c79b5",
+    },
+    "t06g_generation": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/generation.py": "e5274ee30c84692cf1ada9660a5c0099708c90735bd9b9cc7493cf5499339293",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "02a18dc515602db99e8a39a2f3d3496ffe54cb0d98f4c84f09de0f01d83b051c",
+    },
+    "t06h_rerank_post_retrieval": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/post_retrieval.py": "8c74cfd995dd8a6b19f3188bc911227fd5aeb0f12f5f62e67f8dbfe665f75817",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/rerank.py": "51b3fa65de2fc114e4844fe1d81e39f94a3d428bfd23251609f268ec101915e4",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "2b7651c819c9254340d6fb36b8c66cd33a91268741c4a701ceeea3009c6b7292",
+    },
+    "t07i1_documents": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/processing.py": "e60bfb2fa114c5be42a979235ddaa6837b5422ccb2450ac461985caa972435bf",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/self_correct.py": "cc8a45ae8c72c2ec2dcd62c7b1315e4c2067e36520877e4b20e0ce754473a153",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "8b8853c747dff907693dd0219586bdccf6e73d54a26e6b5b3926fe4e3dc7362e",
+    },
+    "t07i2_augment_filters": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/augment.py": "1fda7c28cd79bde5e67e3416f5efa80996f0bebd116b927cfb48796417d15f45",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/filters.py": "6959ca8fa382c6327bcdbc2d76ab2d4bda84ba3c571bde8be877c53278af90d6",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "35923d0acb8d9f561d356eea08e8a5da31a4d80f61e60c1651f83ee81f7477b0",
+    },
+    "t08j_retrieval": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/retrieval.py": "a80ccbc6ddb8891673b33d1fdffb963a0be09beddbf7518ec60d7c86e0839f3c",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "2e4571d108402b314aa27069531367bd8916c47fbfb85568826a2cdbd699c46c",
+    },
+    "t09k_scope_query_prep_research": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/query_prep.py": "b9ff6fedcc72f94a978c11ac1aad7e07923e786d7ff15c4311346039d497b192",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/research.py": "4bc3203243b5c1bb29ee94c36c3bce1c8fd8fc143ff3846202657bb05cfbb6ae",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/scope.py": "75eaeb297698f22dd9762da6952e55262ec5ad63d7932d73743164e47407a947",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "7f69b9a015aed450ffc7de86789dc0d558ba53d4097ceb6779e431f168c58c77",
+    },
+    "t10l_entry": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/prepare.py": "9816484eea093d1b6683cf1121e382f134a25dd97ea0d8013632abac97da5e97",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "c7144027eb500cc90065573bde150924f091f556f5eb0dd4a0714b7912b51b73",
+    },
+}
+
+
+def _have(ref: str) -> bool:
+    return subprocess.run(["git", "cat-file", "-e", f"{ref}^{{commit}}"], cwd=REPO_ROOT, capture_output=True).returncode == 0  # noqa: S603, S607  # nosec B603 B607
+
+
+@pytest.mark.parametrize("mf", RAG_MANIFESTS, ids=lambda p: p.stem)
+def test_rag_apply_output_is_unchanged_by_generalisation(mf: Path, tmp_path: Path) -> None:
+    m = rag_split.load_manifest(mf)
+    if not _have(m["base"]):
+        pytest.skip(f"base {m['base']} is not available locally; fetch full history (CI uses fetch-depth: 0)")
+    pkg = rag_split.pkg_rel(m).as_posix()
+    before: dict[str, str] = {}
+    for rel in sorted({m["file"], *_git("ls-tree", "-r", "--name-only", m["base"], "--", pkg).split()}):
+        before[rel] = _git("show", f"{m['base']}:{rel}")
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(before[rel], encoding="utf-8")
+    assert rag_split.main(["apply", "--root", str(tmp_path), str(mf)]) == 0
+    got = {}
+    for p in sorted(tmp_path.rglob("*.py")):
+        rel = p.relative_to(tmp_path).as_posix()
+        text = p.read_text(encoding="utf-8")
+        if before.get(rel) != text:
+            got[rel] = hashlib.sha256(text.encode()).hexdigest()
+    assert got == RAG_APPLY_DIGESTS[mf.stem]
