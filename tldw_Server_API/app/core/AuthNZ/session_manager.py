@@ -1728,7 +1728,7 @@ class SessionManager:
                 self._token_hash_candidates(token)
             )
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
-            logger.bind(exception_type=type(exc).__name__).debug("Revoke reason lookup failed")
+            logger.warning("Revoke reason lookup failed ({})", type(exc).__name__)
             return None
 
     async def revoked_token_exception(self, token: str, default: HTTPException) -> HTTPException:
