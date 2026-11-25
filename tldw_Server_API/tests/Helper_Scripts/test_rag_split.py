@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -1191,3 +1192,177 @@ def test_rag_apply_output_is_unchanged_by_generalisation(mf: Path, tmp_path: Pat
         if before.get(rel) != text:
             got[rel] = hashlib.sha256(text.encode()).hexdigest()
     assert got == RAG_APPLY_DIGESTS[mf.stem]
+
+
+# --- TASK-13950.25 part 2: destinations that already exist (pkg "", late-import block) ---
+
+SIB_FILE = "mini/chat_service.py"
+SIB_BASE = textwrap.dedent(
+    '''\
+    import os
+    import time
+    from typing import Any
+
+    LIMIT = 5
+
+
+    def audit(*args):
+        return args
+
+
+    async def call(a):
+        """Doc."""
+        cst = make(a)
+        x = os.getenv("A")
+        t0 = time.time()
+        audit(LIMIT, x, t0)
+        return cst
+    '''
+)
+STAGE_A = textwrap.dedent(
+    '''\
+    """Stage A."""
+
+    from __future__ import annotations
+
+    import json
+    from typing import Any
+
+
+    def existing(x: Any) -> str:
+        return json.dumps(x)
+
+
+    __all__ = ["existing"]
+    '''
+)
+STAGE_B = textwrap.dedent(
+    '''\
+    """Stage B."""
+
+    from __future__ import annotations
+
+    from typing import TYPE_CHECKING, Any
+
+    if TYPE_CHECKING:
+        from .types import Other
+
+
+    def other(x: Other) -> Any:
+        return x
+    '''
+)
+SIB = {
+    "file": SIB_FILE,
+    "func": "call",
+    "pkg": "",
+    "ctx": [["cst", "Call"]],
+    "ctx_import": ["from .types import Call"],
+    "facade": "cs",
+    "facade_stdlib": ["time"],
+    "task": "TASK-X",
+}
+
+
+def sib_tree(tmp: Path, src: str = SIB_BASE, dests: dict[str, str] | None = None, **extra: object) -> Tree:
+    dests = {"stage_a": STAGE_A, "stage_b": STAGE_B} if dests is None else dests
+    t = Tree(tmp, src, **{**SIB, **extra})
+    for d in (t.base, t.head):
+        for name, text in dests.items():
+            (d / "mini" / f"{name}.py").write_text(text)
+    return t
+
+
+def sib_move(src: str = SIB_BASE, **extra: object) -> dict:
+    return {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(LIMIT")], "doc": "Step.", **extra}
+
+
+def test_sibling_append_goes_above_a_late_block_and_verifies(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = sib_tree(tmp_path, moves=[sib_move()])
+    assert t.run("apply") == 0
+    stage = t.text("mini/stage_a.py")
+    assert stage.index("def step(cst") > stage.index('__all__ = ["existing"]')
+    assert stage.index("def step(cst") < stage.index(LATE) < stage.index("from mini import chat_service as cs")
+    assert stage.rstrip().endswith("from mini import chat_service as cs")
+    assert stage.index("import os") < stage.index("def existing") and "import time" not in stage
+    assert "from typing import TYPE_CHECKING\n" in stage and "if TYPE_CHECKING:\n    from .types import Call\n" in stage
+    assert "cs.audit(cs.LIMIT, x, t0)" in stage and "t0 = cs.time.time()" in stage
+    assert "await _stage_a.step(cst)" not in t.text(SIB_FILE) and "_stage_a.step(cst)" in t.text(SIB_FILE)
+    assert "from mini import stage_a as _stage_a" in t.text(SIB_FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+LATE = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
+
+
+def test_sibling_append_reuses_an_existing_type_checking_block(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = sib_tree(tmp_path, moves=[{**sib_move(), "module": "stage_b"}])
+    assert t.run("apply") == 0
+    stage = t.text("mini/stage_b.py")
+    assert stage.count("if TYPE_CHECKING:") == 1 and "    from .types import Call\n" in stage
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+SIB_TWO = SIB_BASE.replace("    return cst\n", "    y = os.getenv(\"B\")\n    audit(y)\n    return cst\n")
+
+
+def test_a_later_manifest_appends_above_the_block_the_first_one_made(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = sib_tree(tmp_path, SIB_TWO, moves=[sib_move(SIB_TWO)])
+    assert t.run("apply") == 0
+    shutil.copytree(t.head, t.base, dirs_exist_ok=True)  # the head is the next manifest's base
+    second = t.text(SIB_FILE)
+    t.set(**{**SIB, "moves": [{"name": "again", "module": "stage_a", "span": [row(second, "y = os"), row(second, "audit(y)")]}]})
+    assert t.run("apply") == 0
+    stage = t.text("mini/stage_a.py")
+    assert stage.count(LATE) == 1 and stage.count("from mini import chat_service as cs") == 1
+    assert stage.index("def step(") < stage.index("def again(") < stage.index(LATE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_sibling_verify_rejects_a_changed_late_block_or_a_def_below_it(tmp_path: Path) -> None:
+    t = sib_tree(tmp_path, moves=[sib_move()])
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "from mini import chat_service as cs", "from mini import other as cs")
+    assert t.run("verify") == 1
+
+
+def test_sibling_verify_rejects_a_missing_marker(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = sib_tree(tmp_path, moves=[sib_move()])
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", LATE + "\n", "")
+    assert t.run("verify") == 1
+    assert "no marker comment" in capsys.readouterr().out
+
+
+def test_sibling_verify_rejects_module_level_code_that_reads_the_facade(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = sib_tree(tmp_path, moves=[sib_move()])
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", '__all__ = ["existing"]', 'WHERE = cs.LIMIT\n__all__ = ["existing"]')
+    assert t.run("verify") == 1
+    assert "module-level code reads cs" in capsys.readouterr().out
+
+
+def test_sibling_verify_rejects_an_import_parity_break(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = sib_tree(tmp_path, moves=[sib_move()])
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "import os\n", "import os as _o\nos = _o\n")
+    assert t.run("verify") == 1
+
+
+def test_sibling_refuses_a_destination_name_clash(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = sib_tree(tmp_path, dests={"stage_a": STAGE_A.replace("def existing", "def step"), "stage_b": STAGE_B}, moves=[sib_move()])
+    assert t.run("apply") == 1
+    assert "V10: stage_a.py already binds step" in capsys.readouterr().out
+
+
+def test_sibling_refuses_a_missing_destination(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = sib_tree(tmp_path, dests={"stage_b": STAGE_B}, moves=[sib_move()])
+    assert t.run("apply") == 1
+    assert "stage_a.py: not found at the base" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("key", ["hoist", "classes", "entry_split", "prologue", "state_init", "hidden", "publish"])
+def test_sibling_refuses_the_keys_that_need_a_state_module(tmp_path: Path, key: str) -> None:
+    t = sib_tree(tmp_path, moves=[sib_move()], **{key: {"a": 1} if key not in ("prologue", "state_init", "entry_split", "publish") else ("x = 1" if key != "entry_split" else True)})
+    with pytest.raises(rag_split.SplitError):
+        rag_split.load_manifest(t.manifest_path)

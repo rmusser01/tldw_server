@@ -83,8 +83,10 @@ from typing import Any, NamedTuple
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
-PART2_KEYS = {"lift", "args", "entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"}
+PART2_KEYS = {"lift", "entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"}
+PART3_KEYS = {"rewrite_in", "free_imports", "relocate"}
 MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals"}
+LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
 DEFAULTS: dict[str, Any] = {
     "base": "",
     "file": PIPELINE_FILE,
@@ -110,6 +112,10 @@ DEFAULTS: dict[str, Any] = {
     "task": "TASK-13950.24",
     "state_class": "PipelineState",
     "state_module": "run_state",
+    "lift": {},
+    "entry": None,
+    "drop": [],
+    "late_imports": [],
 }
 NEW = object()  # a node the tool created: it carries no scope annotation
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -388,6 +394,10 @@ def load_manifest(path: Path) -> dict[str, Any]:
                 if extra:
                     hint = "not supported yet (TASK-13950.25 part 2/3)" if set(extra) <= PART2_KEYS | {"args"} else "unknown"
                     raise SplitError(f"{path}: move {spec.get('name')}: keys {extra} are {hint}")
+            if m["pkg"] == "":
+                bad = [k for k in ("publish", "hoist", "classes", "entry_split", "prologue", "state_init", "hidden") if m[k]]
+                if bad:
+                    raise SplitError(f"{path}: {bad} are not supported when pkg is '' (destinations are siblings of the source)")
             if m["publish"] and m["facade"] == "cs":
                 raise SplitError(f"{path}: publish is refused when facade is 'cs' (R6)")
             if not m["ctx"] or any(not (isinstance(c, list) and len(c) == 2 and all(isinstance(x, str) for x in c)) for c in m["ctx"]):
@@ -399,6 +409,19 @@ def load_manifest(path: Path) -> dict[str, Any]:
                     raise SplitError(f"{path}: {key} needs entry_split")
             return m
     raise SplitError(f"{path}: no MANIFEST literal")
+
+
+def is_sibling(m: dict) -> bool:
+    """``pkg == ""``: the destination modules sit next to the source file and already exist (chat)."""
+    return m["pkg"] == ""
+
+
+def pkg_dotted(m: dict) -> str:
+    return ".".join(Path(m["file"]).parent.parts)
+
+
+def src_stem(m: dict) -> str:
+    return Path(m["file"]).stem
 
 
 def pkg_rel(m: dict) -> Path:
@@ -871,8 +894,8 @@ class Methodize(ast.NodeTransformer):
 class UpTransform(ast.NodeTransformer):
     """V2: module globals become ``up.<name>`` and relative imports gain a level."""
 
-    def __init__(self, names: set[str], exempt: set[str], facade: str = "up") -> None:
-        self.names, self.exempt, self.facade = names, exempt, facade
+    def __init__(self, names: set[str], exempt: set[str], facade: str = "up", bump: bool = True) -> None:
+        self.names, self.exempt, self.facade, self.bump = names, exempt, facade, bump
 
     def visit_Name(self, node: ast.Name) -> ast.AST:
         if getattr(node, "_r", NEW) is None and node.id in self.names and node.id not in self.exempt:
@@ -880,7 +903,7 @@ class UpTransform(ast.NodeTransformer):
         return node
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.AST:
-        if node.level:
+        if node.level and self.bump:
             node.level += 1
         return node
 
@@ -944,6 +967,10 @@ class Built:
         self.entry: Any = None
         self.classes: dict[str, ast.ClassDef] = {}
         self.imports: list[str] = []  # module names to import into the pipeline file
+        self.order: list[tuple[str, str]] = []  # sibling mode: (module, name) of every appended def, in file order
+        self.dests: set[str] = set()  # sibling mode: every destination module the manifest names
+        self.src_mods: list[str] = []  # sibling mode: destination aliases the source still reads
+        self.src_functools = False
 
 
 def spans_for_cells(m: dict, src: Src) -> list[tuple[str, list[ast.stmt]]]:
@@ -973,8 +1000,13 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     intro |= {ctx_names(m)[0]} if m["prologue"] else set()
     intro |= {"state", f"_{sm}"} if m["state_init"] else set()
     intro |= ({m["facade"]} if moves or hoist else set()) | ({f"_{sm}"} if hoist else set()) | {f"_{x.module}" for x in moves}
+    pro = prologue_stmt(fn, ctx_names(m)[0])
+    kept = pro is not None and not m["prologue"] and is_sibling(m)  # the ctx prologue is already in the source (an earlier PR)
     if moves and m["ctx"] != DEFAULT_CTX:
-        intro |= set(ctx_names(m))
+        intro |= set(ctx_names(m)) - ({ctx_names(m)[0]} if kept else set())
+    if kept and moves:
+        mine = {id(x) for x in ast.walk(pro)}
+        out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside the prologue statement" for nm, x in binding_nodes(fn) if nm == ctx_names(m)[0] and id(x) not in mine]
     init = [x for x in fn.body[:3] if isinstance(x, ast.Assign) and ast.unparse(x).startswith(f"state = _{sm}.{sc}(")]
     if init:
         # An earlier PR (D1's state_init) already introduced both names, so reads of them are fine. Only
@@ -982,6 +1014,11 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         intro -= {"state", f"_{sm}"}
         mine = {id(x) for st in init for x in ast.walk(st)}
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside D1's state statement" for nm, x in binding_nodes(fn) if nm in ("state", f"_{sm}") and id(x) not in mine]
+    if is_sibling(m):
+        # an alias an earlier manifest already imported into the source may be read again, never rebound
+        reuse = {f"_{x.module}" for x in moves if src.infos.get(f"_{x.module}") == Info("from", pkg_dotted(m), x.module, f"_{x.module}", 0)}
+        intro -= reuse
+        out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound inside {fn.name}" for nm, x in binding_nodes(fn) if nm in reuse]
     out.errors += [f"V8: {n} is already a name in {fn.name}" for n in sorted(intro & used)]
 
     # mapped names that cannot become attributes
@@ -1049,7 +1086,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     for s in fn.body:
         Rewriter(key, rewrite, hidden).visit(s)
     names = src.names
-    up = UpTransform(names, src.exempt, m["facade"])
+    up = UpTransform(names, src.exempt, m["facade"], bump=not is_sibling(m))
     for old, (block, d) in class_defs.items():
         block[:] = [x for x in block if x is not d]
         d.name = m["classes"][old]
@@ -1134,7 +1171,27 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         head = [doc_stmt(m["shim_doc"])] if m["shim_doc"] is not None else body[:i0]
         fn.body = head + [shim]
         out.entry = new
+    if is_sibling(m):
+        out.order = [(mv.module, mv.name) for mv in moves]
+        finish_sibling(m, out)
     return out
+
+
+def finish_sibling(m: dict, out: Built) -> None:
+    """Which destination aliases and ``functools`` the source function still reads once everything is moved."""
+    out.dests = {mod for mod, _ in out.order}
+    names = {n.id for n in ast.walk(out.fn) if isinstance(n, ast.Name)}
+    out.src_mods = sorted(x for x in out.dests if f"_{x}" in names)
+    out.src_functools = "functools" in names
+
+
+def prologue_stmt(fn: Any, ctx0: str) -> ast.stmt | None:
+    """``<ctx0> = <expr>``, the first statement after the docstring, if the function has it."""
+    i0 = docstring_len(fn)
+    s1 = fn.body[i0] if len(fn.body) > i0 else None
+    if isinstance(s1, ast.Assign) and len(s1.targets) == 1 and isinstance(s1.targets[0], ast.Name) and s1.targets[0].id == ctx0:
+        return s1
+    return None
 
 
 def doc_stmt(text: str) -> ast.stmt:
@@ -1161,6 +1218,8 @@ def free_locals(d: Any, key: Any) -> set[str]:
 
 
 def import_stmt(m: dict, name: str) -> ast.stmt:
+    if is_sibling(m):
+        return ast.parse(f"from {pkg_dotted(m)} import {name} as _{name}").body[0]
     return ast.parse(f"from .{m['pkg']} import {name} as _{name}").body[0]
 
 
@@ -1170,9 +1229,13 @@ def expected_module(m: dict, src: Src, b: Built) -> ast.Module:
     if b.entry is not None:
         body.insert(i + 1, b.entry)
     mods = list(dict.fromkeys([x.module for x in b.moves] + ([m["state_module"]] if m["hoist"] else [])))
+    extra = []
+    if is_sibling(m):
+        mods = b.src_mods
+        extra = [ast.parse("import functools").body[0]] if b.src_functools else []
     have = {ast.dump(s) for s in body}
     last = max((j for j, s in enumerate(body) if isinstance(s, (ast.Import, ast.ImportFrom))), default=-1)
-    wanted = [ast.parse(x).body[0] for x in m["imports"]] + [import_stmt(m, x) for x in mods]
+    wanted = [ast.parse(x).body[0] for x in m["imports"]] + extra + [import_stmt(m, x) for x in mods]
     body[last + 1 : last + 1] = [s for s in wanted if ast.dump(s) not in have]
     return ast.Module(body=body, type_ignores=[])
 
@@ -1190,6 +1253,22 @@ def diff_lines(label: str, want: ast.AST, got: ast.AST, limit: int = 6) -> list[
     if len(ds) > limit:
         out.append(f"{label}: ... {len(ds) - limit} more differing lines")
     return out or [f"{label}: differs"]
+
+
+def cmp_module(rel: str, want: ast.Module, head: ast.Module) -> list[str]:
+    """V7: the whole module AST, reported statement by statement."""
+    errs: list[str] = []
+    if ast.dump(want) != ast.dump(head):
+        if len(want.body) != len(head.body):
+            wn = [getattr(s, "name", type(s).__name__) for s in want.body]
+            hn = [getattr(s, "name", type(s).__name__) for s in head.body]
+            errs.append(f"{rel}: top-level statements differ: {len(want.body)} expected, {len(head.body)} found")
+            errs += [f"{rel}: {d[:160]}" for d in difflib.unified_diff(wn, hn, "expected", "found", lineterm="", n=0) if d[:1] in "+-" and d[:3] not in ("+++", "---")][:8]
+        else:
+            for w, h in zip(want.body, head.body):
+                if ast.dump(w) != ast.dump(h):
+                    errs += diff_lines(f"{rel}: {getattr(w, 'name', type(w).__name__)} (line {getattr(w, 'lineno', '?')})", w, h)
+    return errs
 
 
 def def_in(tree: ast.Module, name: str) -> Any:
@@ -1222,16 +1301,9 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
         return [f"{rel}: not found at the head"]
     head = ast.parse(head_text)
     want = expected_module(m, src, b)
-    if ast.dump(want) != ast.dump(head):  # V7
-        if len(want.body) != len(head.body):
-            wn = [getattr(s, "name", type(s).__name__) for s in want.body]
-            hn = [getattr(s, "name", type(s).__name__) for s in head.body]
-            errs.append(f"{rel}: top-level statements differ: {len(want.body)} expected, {len(head.body)} found")
-            errs += [f"{rel}: {d[:160]}" for d in difflib.unified_diff(wn, hn, "expected", "found", lineterm="", n=0) if d[:1] in "+-" and d[:3] not in ("+++", "---")][:8]
-        else:
-            for w, h in zip(want.body, head.body):
-                if ast.dump(w) != ast.dump(h):
-                    errs += diff_lines(f"{rel}: {getattr(w, 'name', type(w).__name__)} (line {getattr(w, 'lineno', '?')})", w, h)
+    errs += cmp_module(rel, want, head)  # V7
+    if is_sibling(m):
+        return errs + verify_siblings(root, m, src, b, base, base_dir, head_ref)
     pkg = pkg_rel(m)
     cache: dict[str, str | None] = {}
 
@@ -1451,7 +1523,7 @@ def level_edits(lines: list[bytes], nodes: list[ast.ImportFrom]) -> list[Edit]:
     return out
 
 
-def region_edits(src: Src, lines: list[bytes], lo: int, hi: int, root_nodes: list[ast.AST], hoist: bool, facade: str = "up") -> list[Edit]:
+def region_edits(src: Src, lines: list[bytes], lo: int, hi: int, root_nodes: list[ast.AST], hoist: bool, facade: str = "up", bump: bool = True) -> list[Edit]:
     out: list[Edit] = []
     imports = []
     for r in root_nodes:
@@ -1465,7 +1537,7 @@ def region_edits(src: Src, lines: list[bytes], lo: int, hi: int, root_nodes: lis
                     out.append(Edit(*pos(n), "self" if n.id == "state" else "self.rcfg"))
             elif isinstance(n, ast.ImportFrom) and n.level:
                 imports.append(n)
-    return out + level_edits(lines, imports)
+    return out + (level_edits(lines, imports) if bump else [])
 
 
 def needed_imports(src: Src, m: dict, nodes: list[ast.AST], cross: set[str], need_up: bool, stage: bool) -> dict[str, str]:
@@ -1522,6 +1594,8 @@ def header_text(mod: str, wanted: dict[str, str], stage: bool, m: dict) -> str:
 
 
 def run_apply(root: Path, m: dict) -> list[str]:
+    if is_sibling(m):
+        return apply_sibling(root, m)
     rel = m["file"]
     path = root / rel
     text = path.read_text(encoding="utf-8")
@@ -1693,6 +1767,291 @@ def split_entry(f_text: str, m: dict) -> str:
         new += doc_text(m["entry_doc"]) + [""]
     new += rows[s1.end_lineno : f.end_lineno]
     return "\n".join(shim + new) + "\n"
+
+
+# --------------------------------------------------------------------------------------------------
+# sibling mode (pkg ""): append into destination modules that already exist, behind a late-import block
+# --------------------------------------------------------------------------------------------------
+
+
+class ModPlan:
+    """What one destination module gains: defs above the late block, imports, aliases."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.text = ""
+        self.defs: list[ast.stmt] = []
+        self.std: dict[str, str] = {}  # bound name -> import line, after the module's last top import
+        self.aliases: list[str] = []  # other destination modules the new code calls, imported in the late block
+        self.need_cs = False
+
+
+def split_late(text: str) -> tuple[ast.Module, list[ast.stmt], list[ast.stmt]]:
+    """``(tree, top statements, late-block statements)``; the block starts at the marker comment."""
+    tree = ast.parse(text)
+    k = next((i for i, r in enumerate(text.split("\n"), 1) if r.strip() == LATE_MARK), None)
+    if k is None:
+        return tree, list(tree.body), []
+    late = [s for s in tree.body if s.lineno > k]
+    bad = [s for s in late if not isinstance(s, (ast.Import, ast.ImportFrom))]
+    if bad:
+        raise SplitError(f"line {bad[0].lineno}: only imports may follow the late-import marker")
+    return tree, [s for s in tree.body if s.lineno < k], late
+
+
+def is_top_import(s: ast.stmt) -> bool:
+    return isinstance(s, (ast.Import, ast.ImportFrom))
+
+
+def type_checking_block(top: list[ast.stmt]) -> ast.If | None:
+    return next((s for s in top if isinstance(s, ast.If) and isinstance(s.test, ast.Name) and s.test.id == "TYPE_CHECKING" and not s.orelse), None)
+
+
+def top_additions(m: dict, plan: ModPlan, top: list[ast.stmt]) -> tuple[list[str], list[str]]:
+    """``(import lines, TYPE_CHECKING lines)`` the module still lacks; each is added after its last top import."""
+    have = set(import_infos(ast.Module(body=top, type_ignores=[])))
+    tc = [x for x in ctx_imports(m)[1] if not {_bound(a) for a in ast.parse(x).body[0].names} <= have]  # type: ignore[attr-defined]
+    std = dict(plan.std)
+    if tc and type_checking_block(top) is None:
+        std.setdefault("TYPE_CHECKING", "from typing import TYPE_CHECKING")
+    return sorted({line for n, line in std.items() if n not in have}), tc
+
+
+def late_block(m: dict, plan: ModPlan, late: list[ast.stmt], texts: list[str]) -> list[tuple[ast.stmt, str]]:
+    """The late block: what it has, then the new aliases, then ``cs`` last (R5). ``texts`` are the source of ``late``."""
+    cs = ast.parse(f"from {pkg_dotted(m)} import {src_stem(m)} as {m['facade']}").body[0]
+    out: dict[str, tuple[ast.stmt, str]] = {}
+    for s, t in zip(late, texts):
+        if ast.dump(s) != ast.dump(cs):
+            out.setdefault(ast.dump(s), (s, t))
+    for a in plan.aliases:
+        s = import_stmt(m, a)
+        out.setdefault(ast.dump(s), (s, ast.unparse(s)))
+    keep = plan.need_cs or any(ast.dump(s) == ast.dump(cs) for s in late)
+    return list(out.values()) + ([(cs, ast.unparse(cs))] if keep else [])
+
+
+def sib_expected(m: dict, plan: ModPlan) -> tuple[ast.Module, int]:
+    """The destination module as an AST: base top, added imports, appended defs, late block. Plus the block's length."""
+    _, top, late = split_late(plan.text)
+    std, tc = top_additions(m, plan, top)
+    at = max((i for i, s in enumerate(top) if is_top_import(s)), default=-1) + 1
+    if at == 0 and top and isinstance(top[0], ast.Expr) and isinstance(getattr(top[0], "value", None), ast.Constant):
+        at = 1
+    ins: list[ast.stmt] = [ast.parse(x).body[0] for x in std]
+    tcs = [ast.parse(x).body[0] for x in tc]
+    blk = type_checking_block(top)
+    if tcs and blk is not None:
+        blk.body += tcs
+    elif tcs:
+        ins.append(ast.If(test=ast.Name("TYPE_CHECKING", ast.Load()), body=tcs, orelse=[]))
+    block = late_block(m, plan, late, [""] * len(late))
+    return ast.Module(body=top[:at] + ins + top[at:] + plan.defs + [s for s, _ in block], type_ignores=[]), len(block)
+
+
+def sib_write(m: dict, plan: ModPlan, def_texts: list[str]) -> str:
+    """The text counterpart of ``sib_expected``."""
+    text = plan.text
+    tree, top, late = split_late(text)
+    rows = text.split("\n")
+    std, tc = top_additions(m, plan, top)
+    blk = type_checking_block(top)
+    last = [s.end_lineno for s in top if is_top_import(s)]
+    at = max(last) if last else (top[0].end_lineno if top and isinstance(top[0], ast.Expr) and isinstance(getattr(top[0], "value", None), ast.Constant) else 0)
+    adds: list[tuple[int, list[str]]] = []
+    if tc and blk is not None:
+        adds.append((blk.end_lineno, [f"    {x}" for x in tc]))
+    new = list(std) + (["", "if TYPE_CHECKING:"] + [f"    {x}" for x in tc] if tc and blk is None else [])
+    if new:
+        adds.append((at, new))
+    for row, lines in sorted(adds, reverse=True):
+        rows[row:row] = lines
+    text = "\n".join(rows)
+    tree, top, late = split_late(text)
+    rows = text.split("\n")
+    k = next((i for i, r in enumerate(rows, 1) if r.strip() == LATE_MARK), None)
+    block = late_block(m, plan, late, [ast.get_source_segment(text, s) or "" for s in late])
+    head = rows[: k - 1] if k else rows
+    out = "\n".join(head).rstrip("\n") + "\n" + "".join("\n\n" + d.rstrip("\n") + "\n" for d in def_texts)
+    if block:
+        out += "\n\n" + LATE_MARK + "\n" + "\n".join(t for _, t in block) + "\n"
+    return out
+
+
+def dest_names(plan: ModPlan, m: dict, src: Src, dests: set[str]) -> None:
+    """Read the imports and the late-block aliases the appended defs need off their (transformed) ASTs."""
+    for d in plan.defs:
+        for n in ast.walk(d):
+            if not isinstance(n, ast.Name):
+                continue
+            if n.id == m["facade"]:
+                plan.need_cs = True
+            elif n.id.startswith("_") and n.id[1:] in dests and n.id[1:] != plan.name:
+                plan.aliases.append(n.id[1:])
+            elif getattr(n, "_r", NEW) is None and n.id in src.exempt:
+                plan.std[n.id] = src.infos[n.id].line(0 if src.infos[n.id].stdlib else 1)
+            elif n.id == "functools" and getattr(n, "_r", NEW) is NEW:
+                plan.std["functools"] = "import functools"
+    plan.aliases = sorted(set(plan.aliases))
+
+
+def make_plans(m: dict, src: Src, b: Built, text_of: Any) -> tuple[dict[str, ModPlan], list[str]]:
+    errs: list[str] = []
+    plans: dict[str, ModPlan] = {}
+    for mod, name in b.order:
+        plans.setdefault(mod, ModPlan(mod)).defs.append(b.defs[(mod, name)])
+    for mod, p in plans.items():
+        t = text_of(mod)
+        if t is None:
+            errs.append(f"{mod}.py: not found at the base")
+            continue
+        p.text = t
+        dest_names(p, m, src, b.dests)
+        clash = module_names(ast.parse(t))
+        errs += [f"V10: {mod}.py already binds {d.name}" for d in p.defs if d.name in clash]  # type: ignore[attr-defined]
+        names = [d.name for d in p.defs]  # type: ignore[attr-defined]
+        errs += [f"V10: {mod}.py would get {n} twice" for n in sorted({x for x in names if names.count(x) > 1})]
+    return plans, errs
+
+
+def eval_names(stmts: list[ast.stmt], future: bool) -> Iterator[ast.Name]:
+    """Names read when the module is imported: function bodies and (under the future import) annotations do not run."""
+
+    def names(*roots: ast.AST | None) -> Iterator[ast.Name]:
+        for r in roots:
+            if r is not None:
+                yield from (n for n in ast.walk(r) if isinstance(n, ast.Name))
+
+    for s in stmts:
+        if isinstance(s, DEFS):
+            a = s.args
+            heads = [*s.decorator_list, *a.defaults, *a.kw_defaults]
+            if not future:
+                heads += [x.annotation for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x] + [s.returns]
+            yield from names(*heads)
+        elif isinstance(s, ast.ClassDef):
+            yield from names(*s.decorator_list, *s.bases, *[k.value for k in s.keywords])
+            yield from eval_names(s.body, future)
+        elif isinstance(s, ast.AnnAssign):
+            yield from names(s.value, None if future else s.annotation, s.target)
+        else:
+            for c in ast.iter_child_nodes(s):
+                if isinstance(c, ast.stmt):
+                    yield from eval_names([c], future)
+                elif isinstance(c, (ast.ExceptHandler, ast.match_case)):
+                    yield from names(getattr(c, "type", None), getattr(c, "pattern", None), getattr(c, "guard", None))
+                    yield from eval_names(c.body, future)
+                else:
+                    yield from names(c)
+
+
+def has_future(tree: ast.Module) -> bool:
+    return any(isinstance(s, ast.ImportFrom) and s.module == "__future__" and any(a.name == "annotations" for a in s.names) for s in tree.body)
+
+
+def sib_checks(m: dict, src: Src, plan: ModPlan, want_late: int, head_text: str) -> list[str]:
+    """What the AST comparison cannot see: the marker, import parity (V9), undefined names, cycle safety (R5)."""
+    label = f"{plan.name}.py"
+    errs: list[str] = []
+    if want_late and not any(r.strip() == LATE_MARK for r in head_text.split("\n")):
+        errs.append(f"{label}: the late-import block has no marker comment")
+    psrc = Src(head_text, pkg=m["pkg"])
+    for n in sorted(plan.std):
+        if n == "TYPE_CHECKING":
+            continue
+        want = src.infos.get(n) if n != "functools" else Info("import", "functools", "functools", None, 0)
+        if psrc.infos.get(n) != want:
+            got = psrc.infos.get(n)
+            errs.append(f"V9: {label} binds {n} as {got.line() if got else 'nothing'}; {src_stem(m)} binds it as {want.line() if want else '?'}")
+    import builtins
+
+    mine = {d.name for d in plan.defs}  # type: ignore[attr-defined]
+    for d in psrc.tree.body:
+        if isinstance(d, DEFS) and d.name in mine:
+            for n in ast.walk(d):
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and getattr(n, "_r", NEW) is None and n.id not in psrc.names and not hasattr(builtins, n.id):
+                    errs.append(f"{label}: {d.name} reads {n.id} (line {n.lineno}), which the module does not bind")
+    bad = {m["facade"]} | {f"_{x}" for x in plan.aliases} | {f"_{plan.name}"}
+    errs += [f"R5: {label}: line {n.lineno}: module-level code reads {n.id}, which is bound only in the late block" for n in eval_names(psrc.tree.body, has_future(psrc.tree)) if n.id in bad]
+    return errs
+
+
+def verify_siblings(root: Path, m: dict, src: Src, b: Built, base: str | None, base_dir: str | None, head_ref: str | None) -> list[str]:
+    pkg = pkg_rel(m)
+    plans, errs = make_plans(m, src, b, lambda mod: read_base(root, (pkg / f"{mod}.py").as_posix(), base, base_dir))
+    for mod, p in plans.items():
+        if not p.text:
+            continue
+        ht = read_head(root, pkg / f"{mod}.py", head_ref)
+        if ht is None:
+            errs.append(f"{mod}.py: not found at the head")
+            continue
+        want, nlate = sib_expected(m, p)
+        errs += cmp_module(f"{mod}.py", want, ast.parse(ht))
+        errs += sib_checks(m, src, p, nlate, ht)
+    return errs
+
+
+def apply_sibling(root: Path, m: dict) -> list[str]:
+    rel = m["file"]
+    path = root / rel
+    text = path.read_text(encoding="utf-8")
+    rows_text = text.split("\n")
+    src = mk_src(text, m)
+    b = build(m, src, rows_text)
+    if b.errors:
+        return b.errors
+    pkg_dir = root / pkg_rel(m)
+    plans, errs = make_plans(m, src, b, lambda mod: (pkg_dir / f"{mod}.py").read_text(encoding="utf-8") if (pkg_dir / f"{mod}.py").exists() else None)
+    if errs:
+        return errs
+    fresh = mk_src(text, m)  # build() mutated the first tree; positions come from this one
+    lines = text.encode("utf-8").split(b"\n")
+    lines = [ln + b"\n" for ln in lines[:-1]] + lines[-1:]
+    cont = continuation_rows(text)
+    fn = fresh.fn
+    edits, cuts = gather(fresh, m, lines)
+    moves = plan_moves(fresh, m["moves"], rows_text)
+    for mv in moves:
+        mv.is_async = next(x.is_async for x in b.moves if x.name == mv.name)
+    move_cuts: dict[str, Cut] = {}
+    for mv in moves:
+        recv = "" if mv.parent and mv.parent.module == mv.module else f"_{mv.module}."
+        call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({call_args(m)})"
+        move_cuts[mv.name] = Cut(mv.a, mv.b, call, mv.members[0].col_offset)
+    cuts += list(move_cuts.values())
+    made: dict[tuple[str, str], str] = {}
+    for mv in moves:
+        shift = mv.members[0].col_offset - 4
+        ed = [e for e in edits if mv.a <= e.row <= mv.b] + region_edits(fresh, lines, mv.a, mv.b, list(mv.members), False, m["facade"], bump=False)
+        for ln in mv.noqa:
+            if not mv.a <= ln <= mv.b:
+                return [f"{mv.name}: noqa line {ln} is outside the span {mv.a}-{mv.b}"]
+            ed.append(Edit(ln, row_end(lines, ln), ln, row_end(lines, ln), noqa_text(m)))
+        body = render(lines, cont, mv.a, mv.b, shift, ed, cuts, own=move_cuts[mv.name])
+        if mv.doc is not None:
+            if '"""' in mv.doc or "\\" in mv.doc:
+                return [f"{mv.name}: doc must not contain triple quotes or backslashes"]
+            body = f'    """{mv.doc}"""\n' + body
+        head = ("async " if mv.is_async else "") + f"def {mv.name}({ctx_sig(m)}) -> None:\n"
+        made[(mv.module, mv.name)] = head + body
+    f_lo, f_hi = stmt_start(fn), fn.end_lineno
+    new_f = render(lines, cont, f_lo, f_hi, 0, edits, cuts)
+    rows = rows_text[: f_lo - 1] + new_f.rstrip("\n").split("\n") + rows_text[f_hi:]
+    new_text = "\n".join(rows)
+    tree = ast.parse(new_text)
+    have = {ast.dump(s) for s in tree.body}
+    wanted = list(m["imports"]) + (["import functools"] if b.src_functools else []) + [ast.unparse(import_stmt(m, x)) for x in b.src_mods]
+    imps = [x for x in wanted if ast.dump(ast.parse(x).body[0]) not in have]
+    if imps:
+        rows = new_text.split("\n")
+        at = last_import_row(tree)
+        rows[at:at] = imps
+        new_text = "\n".join(rows)
+    path.write_text(new_text, encoding="utf-8")
+    for mod, p in plans.items():
+        (pkg_dir / f"{mod}.py").write_text(sib_write(m, p, [made[k] for k in b.order if k[0] == mod]), encoding="utf-8")
+    return []
 
 
 # --------------------------------------------------------------------------------------------------
