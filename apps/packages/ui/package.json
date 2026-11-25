@@ -21,7 +21,8 @@
     "test:watchlists:scale": "vitest run src/components/Option/Watchlists/shared/__tests__/scale-benchmark.test.ts src/components/Option/Watchlists/RunsTab/__tests__/runs-filter-fetch.test.ts src/components/Option/Watchlists/RunsTab/__tests__/run-notifications.test.ts src/components/Option/Watchlists/RunsTab/__tests__/RunsTab.advanced-filters.test.tsx src/components/Option/Watchlists/ItemsTab/__tests__/items-utils.performance.test.ts src/components/Option/Watchlists/ItemsTab/__tests__/ItemsTab.batch-controls.test.tsx src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.run-notifications.test.tsx --maxWorkers=1 --no-file-parallelism",
     "test:watchlists:typecheck": "vitest run src/components/Option/Watchlists/__tests__/watchlists-static-guard.typecheck.test.ts --maxWorkers=1 --no-file-parallelism",
     "verify:openapi": "node ../../extension/scripts/verify-openapi-client-paths.mjs",
-    "verify:design-system-state": "node scripts/verify-design-system-product-state.mjs"
+    "verify:design-system-state": "node scripts/verify-design-system-product-state.mjs",
+    "report:design-system-drift": "node scripts/verify-design-system-drift.mjs"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
