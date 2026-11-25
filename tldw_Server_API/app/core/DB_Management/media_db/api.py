@@ -351,7 +351,7 @@ def get_media_source_projection(
     max_chars: int,
     owner_user_id: str | None = None,
 ) -> dict[str, Any] | None:
-    """Return a bounded active text projection for standalone Slides generation."""
+    """Return a bounded active source text and its Media revision."""
     db_instance = unwrap_media_database_like(db)
     if is_media_database_like(db_instance):
         return MediaLookupRepository.from_legacy_db(db_instance).source_projection_by_id(

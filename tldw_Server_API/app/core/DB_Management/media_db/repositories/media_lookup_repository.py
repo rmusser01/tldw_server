@@ -163,7 +163,7 @@ class MediaLookupRepository:
             raise InputError("media_id must be an integer.")  # noqa: TRY003
 
         query = (
-            "SELECT id, uuid, title, type, url, chunking_status, vector_processing, "
+            "SELECT id, uuid, title, type, url, chunking_status, vector_processing, version, "
             "CASE WHEN content IS NOT NULL AND content <> '' THEN 1 ELSE 0 END AS has_content "
             "FROM Media WHERE id = ? AND system_operation_id IS NULL"
         )
@@ -197,7 +197,7 @@ class MediaLookupRepository:
         max_chars: int,
         owner_user_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Return bounded text-only fields for standalone Slides generation."""
+        """Return bounded active source text and its Media revision."""
         if isinstance(media_id, bool) or not isinstance(media_id, int) or not 1 <= media_id <= 2**63 - 1:
             raise InputError("media_id must be a positive 64-bit integer.")  # noqa: TRY003
         if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 1:
@@ -265,6 +265,7 @@ class MediaLookupRepository:
         query = f"""
             SELECT
                 m.id AS id,
+                m.version AS version,
                 SUBSTR(
                     {resolved_text},
                     1,

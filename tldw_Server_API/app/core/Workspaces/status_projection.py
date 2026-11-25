@@ -9,7 +9,6 @@ from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Workspaces.context import build_workspace_core_context
 
-
 _ACTIVE_JOB_STATUSES = frozenset({"queued", "processing", "running", "retrying"})
 _FAILED_JOB_STATUSES = frozenset({"failed", "cancelled", "quarantined"})
 _PROCESSING_STATES = frozenset({"queued", "ingesting", "extracting", "chunking", "indexing", "retrying"})
@@ -256,6 +255,7 @@ def _status_from_media(
     media_db: Any | None,
     media_id: int,
 ) -> dict[str, Any]:
+    source = {**source, "catalog_item_version": media.get("version")}
     text_ready = _media_has_text(media)
     chunking_status = str(media.get("chunking_status") or "").strip().lower()
     vector_processing = media.get("vector_processing")
@@ -360,6 +360,7 @@ def _base_status(
         "id": source["id"],
         "workspace_id": source["workspace_id"],
         "media_id": source.get("media_id"),
+        "catalog_item_version": source.get("catalog_item_version"),
         "title": source.get("title") or "",
         "source_type": source.get("source_type") or "",
         "url": source.get("url"),

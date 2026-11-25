@@ -70,8 +70,9 @@ def create_data_table(
     table_uuid: str | None = None,
     generation_job: dict[str, str] | None = None,
     owner_user_id: int | None = None,
+    if_absent: bool = False,
 ) -> dict[str, Any]:
-    """Create a data table metadata record and return the row."""
+    """Create a table, returning an empty mapping if an optional reservation already exists."""
     if not name:
         raise InputError("name is required")  # noqa: TRY003
     if not prompt:
@@ -82,36 +83,38 @@ def create_data_table(
     owner_client_id = self._resolve_data_tables_owner(owner_user_id) or str(self.client_id)
     column_hints_json = _serialize_column_hints(column_hints)
 
+    insert_sql = """
+        INSERT INTO data_tables (
+            uuid, name, description, workspace_tag, prompt, column_hints_json, status,
+            row_count, generation_model, last_error, generation_job_json,
+            created_at, updated_at, last_modified, version, client_id, deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    params = (
+        table_uuid,
+        name,
+        description,
+        workspace_tag,
+        prompt,
+        column_hints_json,
+        status,
+        int(row_count),
+        generation_model,
+        None,
+        json.dumps(generation_job, sort_keys=True) if generation_job is not None else None,
+        now,
+        now,
+        now,
+        1,
+        owner_client_id,
+        False,
+    )
     with self.transaction() as conn:
-        self._execute_with_connection(
-            conn,
-            """
-            INSERT INTO data_tables (
-                uuid, name, description, workspace_tag, prompt, column_hints_json, status,
-                row_count, generation_model, last_error, generation_job_json,
-                created_at, updated_at, last_modified, version, client_id, deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                table_uuid,
-                name,
-                description,
-                workspace_tag,
-                prompt,
-                column_hints_json,
-                status,
-                int(row_count),
-                generation_model,
-                None,
-                json.dumps(generation_job, sort_keys=True) if generation_job is not None else None,
-                now,
-                now,
-                now,
-                1,
-                owner_client_id,
-                False,
-            ),
-        )
+        if if_absent:
+            return self._fetchone_with_connection(
+                conn, insert_sql + " ON CONFLICT(uuid) DO NOTHING RETURNING *", params,
+            ) or {}
+        self._execute_with_connection(conn, insert_sql, params)
         row = self._fetchone_with_connection(
             conn,
             "SELECT * FROM data_tables WHERE uuid = ?",

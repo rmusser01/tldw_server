@@ -23,10 +23,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_request_user,
     rbac_rate_limit,
+    require_expected_user_if_present,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import (
     DataTableColumn,
     DataTableContentUpdateRequest,
@@ -53,6 +53,7 @@ from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import (
     FileExportRequest,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     MEDIA_CREATE,
     MEDIA_DELETE,
@@ -84,7 +85,7 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 
-router = APIRouter(prefix="/data-tables", tags=["data-tables"])
+router = APIRouter(dependencies=[Depends(require_expected_user_if_present)], prefix="/data-tables", tags=["data-tables"])
 
 MAX_CACHED_JOB_MANAGER_INSTANCES = 4
 DATA_TABLE_GENERATION_FAILED_DETAIL = "Data table generation failed"
