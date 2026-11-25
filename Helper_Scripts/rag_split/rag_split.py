@@ -51,6 +51,9 @@ Chat part 2 (TASK-13950.25; each needs ``pkg: ""``: the destinations are existin
     drop         [{module, def|import|all|replace}]   delete a def, an import binding or ``__all__`` entries (``all_add`` adds),
                                          or replace a call-site expression; a dropped name must have no reference left (V15)
     late_imports [{module, lines}]       a top import of a destination moves into its late-import block
+    prune_dead_sites true                 a lifted name that no code in the function reads once the manifest is applied gets no
+                                         ``functools.partial`` at its def site (the def just goes). Off by default: PR E's committed
+                                         output keeps its dead partials, and verify must still accept it
 
 Chat part 3 (TASK-13950.25):
 
@@ -149,6 +152,7 @@ DEFAULTS: dict[str, Any] = {
     "late_imports": [],
     "rewrite_in": {},
     "free_imports": {},
+    "prune_dead_sites": False,
 }
 NEW = object()  # a node the tool created: it carries no scope annotation
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -458,10 +462,14 @@ def load_manifest(path: Path) -> dict[str, Any]:
             ri = m["rewrite_in"]
             if not (isinstance(ri, dict) and all(isinstance(k, str) and isinstance(v, dict) and v and all(isinstance(a, str) and a.isidentifier() and _is_target(e) for a, e in v.items()) for k, v in ri.items())):
                 raise SplitError(f"{path}: rewrite_in must map a def name to {{local name: 'cst.x' (a name or an attribute chain)}}")
+            if m["prune_dead_sites"] and (m["pkg"] != "" or not isinstance(m["prune_dead_sites"], bool)):
+                raise SplitError(f"{path}: prune_dead_sites is a bool and needs pkg ''")
             fi = m["free_imports"]
             if fi:
                 if m["pkg"] != "":
                     raise SplitError(f"{path}: free_imports needs pkg ''")
+                if not m["lift"]:
+                    raise SplitError(f"{path}: free_imports needs a lift that reads the name")
                 if not (isinstance(fi, dict) and all(isinstance(k, str) and isinstance(v, str) and _is_import_of(v, k) for k, v in fi.items())):
                     raise SplitError(f"{path}: free_imports must map a name to one import line that binds exactly that name")
             if m["publish"] and m["facade"] == "cs":
@@ -1084,8 +1092,8 @@ def plan_rewrite_in(m: dict, src: Src) -> tuple[list[tuple[Any, Any, dict]], lis
         params = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x}
         bound = f_bound(d, key)
         for name, expr in rw.items():
-            if expr in seen:
-                errs.append(f"V16: rewrite_in {dname}.{name} -> {expr} collides with another rewritten name; two variables would share one slot")
+            if any(expr == o or expr.startswith(o + ".") or o.startswith(expr + ".") for o in seen):
+                errs.append(f"V16: rewrite_in {dname}.{name} -> {expr} collides with another rewritten name (the same slot or a prefix of it); two variables would share one slot")
             seen.append(expr)
             if name in params:
                 errs.append(f"V16: rewrite_in {dname}.{name} is a parameter of {dname}; its value never reaches {expr}")
@@ -1227,6 +1235,7 @@ class Lift:
         self.parent_node: Any = None  # depth 2: the def that holds this one; None at depth 1
         self.key: Any = None  # the scope that binds the name: the function (depth 1) or the parent def (depth 2)
         self.free: set[str] = set()  # free_imports names this body reads
+        self.needed = True  # False: nothing in the code that holds the def site reads the name once the manifest is applied, so no partial is bound
         self.dead: list[ast.stmt] = []  # local imports in this body that its lifted children replaced and nothing reads any more
         # where the def site is: the move whose span holds it, the lifted parent (depth 2), or None (the rest of the function)
         self.defregion: Move | Lift | None = None
@@ -1284,6 +1293,13 @@ def local_import_bindings(root: Any, key: Any, name: str) -> tuple[list[Info], i
             named = isinstance(n, (ast.ExceptHandler, *SCOPE_NODES)) and n is not root and getattr(n, "name", None) == name
             other += (stored or named) and is_f(n, key)
     return infos, other
+
+
+def mark_needed(fn: Any, lifts: list[Lift], regions: Regions, prune: bool) -> None:
+    """Set ``needed``: some read of the name stays bare (the def site's partial serves it). Run before any read is rewritten."""
+    reads = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)]
+    for lf in lifts:
+        lf.needed = not prune or any(n.id == lf.name and is_f(n, lf.key) and regions.ref(lf, n.lineno) is None for n in reads)
 
 
 def plan_lifts(m: dict, src: Src, moves: list[Move]) -> tuple[list[Lift], list[str]]:
@@ -1635,6 +1651,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # lifts: reads of lifted names first (in every body), then each def becomes a module function and its site a partial
     lifted_defs: dict[tuple[str, str], Any] = {}
     if lifts:
+        mark_needed(fn, lifts, regions, m["prune_dead_sites"])
         refs = LiftRefs(m, lifts, regions)
         for st in fn.body:
             refs.visit(st)
@@ -1655,7 +1672,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             heads = d.decorator_list + a.defaults + [x for x in a.kw_defaults if x]
             if any(isinstance(x, ast.Name) and x.id in bad for r in heads for x in ast.walk(r)):
                 out.errors.append(f"V12: a decorator or default of lifted {lf.name} reads the facade or a module alias; it runs at import, before the late block")
-            site = [] if lf.module == regions.module(lf.defregion) else [ast.parse(f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {call_args(m)})").body[0]]
+            site = [] if lf.module == regions.module(lf.defregion) or not lf.needed else [ast.parse(f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {call_args(m)})").body[0]]
             if not site and (len(lf.block) == 1 or (isinstance(lf.defregion, Move) and len(lf.defregion.members) == 1 and lf.defregion.members[0] is lf.node)):
                 out.errors.append(f"V11: lifting {lf.name} would leave its block or move empty")
             replace_stmt(lf.node, site, blocks, moves)
@@ -2678,11 +2695,12 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
     lifts, _ = plan_lifts(m, fresh, moves) if m["lift"] else ([], [])
     entry = m["entry"]
     regions = Regions(moves, lifts, entry["module"] if entry else "")
+    mark_needed(fn, lifts, regions, m["prune_dead_sites"])
     edits += lift_edits(fn, lines, regions, lifts, ctx)
     lift_cuts: dict[str, Cut] = {}
     for lf in lifts:
         d = lf.node
-        keep = lf.module != regions.module(lf.defregion)
+        keep = lf.module != regions.module(lf.defregion) and lf.needed
         tail = d.end_lineno + (1 if not keep and d.end_lineno < len(rows_text) and not rows_text[d.end_lineno].strip() else 0)
         lift_cuts[lf.name] = Cut(stmt_start(d), tail, f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {ctx})" if keep else None, d.col_offset)
     dead_cuts = [Cut(stmt_start(st), st.end_lineno + (1 if st.end_lineno < len(rows_text) and not rows_text[st.end_lineno].strip() else 0), None, st.col_offset) for lf in lifts for st in lf.dead]

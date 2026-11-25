@@ -2381,3 +2381,60 @@ def test_free_imports_verify_rejects_a_missing_or_changed_import(tmp_path: Path)
     assert t.run("apply") == 0
     _edit(t, "mini/stage_a.py", "from mini.utils import Stop\n", "from mini.other import Stop\n")
     assert t.run("verify") == 1
+
+
+# --- fix round 1: dead def sites, free_imports needing a lift, prefix collisions ---
+
+
+def test_a_lifted_name_nothing_reads_leaves_no_dead_partial(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = LIFT_BASE.replace("    _note(x)\n    register(_note)\n", "")
+    assert src != LIFT_BASE
+    t = lift_tree(tmp_path, src, lift={"_note": "stage_b", "_outer": "stage_a"}, prune_dead_sites=True)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    head = t.text(SIB_FILE)
+    assert "_note = functools" not in head and "def _note" not in head  # nothing in the function reads it; _outer reads it through stage_b
+    assert "_outer = functools.partial(_stage_a._outer, cst)" in head and "await _outer(t0)" in head
+    assert "_stage_b._note(cst, msg)" in t.text("mini/stage_a.py") and "def _note(" in t.text("mini/stage_b.py")
+    assert t.run("verify") == 0, capsys.readouterr().out
+    _edit(t, SIB_FILE, "_outer = functools.partial", "_note = functools.partial(_stage_b._note, cst)\n    _outer = functools.partial")
+    assert t.run("verify") == 1
+
+
+def test_a_lifted_name_that_is_still_read_keeps_its_partial(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = lift_tree(tmp_path, lift={"_note": "stage_b", "_outer": "stage_a"}, prune_dead_sites=True)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert "_note = functools.partial(_stage_b._note, cst)" in t.text(SIB_FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_free_imports_without_any_lift_are_refused(tmp_path: Path) -> None:
+    t = sib_tree(tmp_path, free_imports={"Stop": STOP})
+    with pytest.raises(rag_split.SplitError, match="free_imports needs a lift"):
+        rag_split.load_manifest(t.manifest_path)
+
+
+@pytest.mark.parametrize(
+    ("rewrite", "rewrite_in"),
+    [
+        ({"shared": "cst.shared"}, {"gen": {**RI_ALL, "sid": "cst.shared.x"}}),
+        ({"shared": "cst.sid.x"}, {"gen": RI_ALL}),
+        ({"shared": "cst.shared"}, {"gen": {"seq": "cst.seq", "held": "cst.seq.h", "sid": "cst.sid"}}),
+    ],
+)
+def test_rewrite_in_refuses_prefix_collisions(tmp_path: Path, capsys: pytest.CaptureFixture, rewrite: dict, rewrite_in: dict) -> None:
+    t = ri_tree(tmp_path, rewrite=rewrite, rewrite_in=rewrite_in)
+    assert t.run("apply") == 1 and "V16: rewrite_in gen." in capsys.readouterr().out
+
+
+def test_dead_sites_are_kept_unless_the_manifest_asks_to_prune_them(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    # PR E's committed output has dead partials, so the default stays what it was
+    src = LIFT_BASE.replace("    _note(x)\n    register(_note)\n", "")
+    t = lift_tree(tmp_path, src, lift={"_note": "stage_b", "_outer": "stage_a"})
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert "_note = functools.partial(_stage_b._note, cst)" in t.text(SIB_FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+    t.set(**{**SIB, "lift": {"_note": "stage_b", "_outer": "stage_a"}, "moves": [], "prune_dead_sites": True})
+    assert t.run("verify") == 1
+    with pytest.raises(rag_split.SplitError, match="prune_dead_sites is a bool and needs pkg ''"):
+        t.set(**{**SIB, "pkg": "pipeline", "prune_dead_sites": True})
+        rag_split.load_manifest(t.manifest_path)
