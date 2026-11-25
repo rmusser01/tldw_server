@@ -83,6 +83,8 @@ from typing import Any, NamedTuple
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
+PART2_KEYS = {"lift", "args", "entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"}
+MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals"}
 DEFAULTS: dict[str, Any] = {
     "base": "",
     "file": PIPELINE_FILE,
@@ -370,13 +372,24 @@ def load_manifest(path: Path) -> dict[str, Any]:
     tree = ast.parse(Path(path).read_text(encoding="utf-8"))
     for n in tree.body:
         if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "MANIFEST" for t in n.targets):
-            m = {**DEFAULTS, **ast.literal_eval(n.value)}
+            raw = ast.literal_eval(n.value)
+            later = sorted(set(raw) & PART2_KEYS)
+            if later:
+                raise SplitError(f"{path}: manifest keys {later} are not supported yet (TASK-13950.25 part 2/3)")
+            m = {**DEFAULTS, **raw}
             unknown = set(m) - set(DEFAULTS)
             if unknown:
                 raise SplitError(f"{path}: unknown manifest keys {sorted(unknown)}")
             for key in ("prologue", "state_init"):
                 if m[key] and len(ast.parse(m[key]).body) != 1:
                     raise SplitError(f"{path}: {key} must be exactly one statement")
+            for spec in m["moves"]:
+                extra = sorted(set(spec) - MOVE_KEYS)
+                if extra:
+                    hint = "not supported yet (TASK-13950.25 part 2/3)" if set(extra) <= PART2_KEYS | {"args"} else "unknown"
+                    raise SplitError(f"{path}: move {spec.get('name')}: keys {extra} are {hint}")
+            if m["publish"] and m["facade"] == "cs":
+                raise SplitError(f"{path}: publish is refused when facade is 'cs' (R6)")
             if not m["ctx"] or any(not (isinstance(c, list) and len(c) == 2 and all(isinstance(x, str) for x in c)) for c in m["ctx"]):
                 raise SplitError(f"{path}: ctx must be a non-empty list of [name, annotation]")
             for key in ("entry_doc", "shim_doc"):

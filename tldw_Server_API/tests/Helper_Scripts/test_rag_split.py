@@ -1076,3 +1076,29 @@ def test_is_pkg_uses_the_manifests_package_name() -> None:
     text = "from .chatpkg import thing\n\n\ndef f():\n    return thing\n"
     assert "thing" in rag_split.Src(text, "f", pkg="chatpkg").exempt
     assert "thing" not in rag_split.Src(text, "f").exempt
+
+
+# --- fix round 1: refusals ---
+
+
+@pytest.mark.parametrize("key", ["lift", "entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"])
+def test_part_2_and_3_manifest_keys_are_refused(tmp_path: Path, key: str) -> None:
+    t = Tree(tmp_path, **{key: {}})
+    with pytest.raises(rag_split.SplitError, match=rf"{key}.*not supported yet \(TASK-13950.25 part 2/3\)"):
+        rag_split.load_manifest(t.manifest_path)
+
+
+@pytest.mark.parametrize(("key", "hint"), [("args", "not supported yet"), ("typo", "unknown")])
+def test_unsupported_move_keys_are_refused(tmp_path: Path, key: str, hint: str) -> None:
+    mv = {**moves()[0], key: ["e"]}
+    t = Tree(tmp_path, moves=[mv])
+    with pytest.raises(rag_split.SplitError, match=rf"move step_one: keys \['{key}'\] are {hint}"):
+        rag_split.load_manifest(t.manifest_path)
+    assert t.run("apply") == 1
+
+
+def test_publish_is_refused_when_the_facade_is_cs(tmp_path: Path) -> None:
+    t = Tree(tmp_path, publish=["_fmt"], facade="cs")
+    with pytest.raises(rag_split.SplitError, match="publish is refused when facade is 'cs'"):
+        rag_split.load_manifest(t.manifest_path)
+

@@ -11,6 +11,7 @@ Nothing here imports chat code except the subprocess pin.
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
 import os
 import re
@@ -119,11 +120,24 @@ def patched_chat_service_names(test_roots: Iterable[Path]) -> frozenset[str]:
     for path in _files(test_roots):
         text = path.read_text(encoding="utf-8", errors="replace")
         if MODULE in text:
-            names |= _names_in(ast.parse(text, filename=str(path)))
+            try:
+                tree = ast.parse(text, filename=str(path))
+            except SyntaxError as exc:
+                pytest.fail(f"cannot scan {path}: {exc}", pytrace=False)
+            names |= _names_in(tree)
     return frozenset(names)
 
 
-PATCHED_CHAT_SERVICE_NAMES: frozenset[str] = patched_chat_service_names(SCAN_ROOTS)
+@functools.cache
+def _patched_names() -> frozenset[str]:
+    return patched_chat_service_names(SCAN_ROOTS)
+
+
+def __getattr__(name: str) -> frozenset[str]:
+    """``PATCHED_CHAT_SERVICE_NAMES``, computed on first use so an unparsable test file cannot break collection."""
+    if name == "PATCHED_CHAT_SERVICE_NAMES":
+        return _patched_names()
+    raise AttributeError(name)
 
 
 SEEDED_SCAN = '''
@@ -150,7 +164,7 @@ def test_forms(monkeypatch, mocker):
 
 
 def test_patch_scan_finds_the_known_targets() -> None:
-    assert PATCHED_CHAT_SERVICE_NAMES >= KNOWN_TARGETS
+    assert _patched_names() >= KNOWN_TARGETS
 
 
 def test_patch_scan_sees_each_form(tmp_path: Path) -> None:
@@ -181,20 +195,43 @@ def c25_manifest_functions() -> dict[str, set[str]]:
     return dict(out)
 
 
+def _own_scope_nodes(fn: ast.AST) -> Iterable[ast.AST]:
+    """Nodes of ``fn``'s own scope: nested def/lambda/class bodies are skipped (their names are theirs)."""
+    stack = list(ast.iter_child_nodes(fn))
+    while stack:
+        n = stack.pop()
+        yield n
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            stack.extend(ast.iter_child_nodes(n))
+
+
 def _local_names(fn: ast.AST) -> set[str]:
     out: set[str] = set()
-    for n in ast.walk(fn):
+    for a in ast.walk(fn.args):  # type: ignore[attr-defined]
+        if isinstance(a, ast.arg):
+            out.add(a.arg)
+    for n in _own_scope_nodes(fn):
         if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
             out.add(n.id)
-        elif isinstance(n, ast.arg):
-            out.add(n.arg)
-        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n is not fn:
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             out.add(n.name)
         elif isinstance(n, ast.alias):
             out.add((n.asname or n.name).split(".")[0])
         elif isinstance(n, ast.ExceptHandler) and n.name:
             out.add(n.name)
     return out
+
+
+def _bare_reads(scope: ast.AST, names: set[str], outer: set[str]) -> list[ast.Name]:
+    """Loads of ``names`` that no enclosing function scope binds, descending into nested scopes."""
+    bound = outer | _local_names(scope)
+    found: list[ast.Name] = []
+    for n in _own_scope_nodes(scope):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id in names and n.id not in bound:
+            found.append(n)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            found += _bare_reads(n, names, bound)
+    return found
 
 
 def moved_chat_code_violations(chat_dir: Path, functions: dict[str, set[str]], patched: Iterable[str]) -> list[str]:
@@ -218,11 +255,9 @@ def moved_chat_code_violations(chat_dir: Path, functions: dict[str, set[str]], p
             for a in n.names
         }
         for fn in (n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in names):
-            local = _local_names(fn)
             out += [
                 f"{path.name}:{n.lineno}: {fn.name} reads {n.id} bare; read it as cs.{n.id}"
-                for n in ast.walk(fn)
-                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id in patched & imported and n.id not in local
+                for n in _bare_reads(fn, patched & imported, set())
             ]
     return out
 
@@ -232,7 +267,7 @@ def test_moved_chat_code_reads_patched_names_through_chat_service() -> None:
 
     PR E (Task 5) adds the assertion that it is non-empty. The seeded test below proves the check itself.
     """
-    assert moved_chat_code_violations(CHAT_DIR, c25_manifest_functions(), PATCHED_CHAT_SERVICE_NAMES) == []
+    assert moved_chat_code_violations(CHAT_DIR, c25_manifest_functions(), _patched_names()) == []
 
 
 def test_a_bare_patched_name_in_a_moved_def_is_reported(tmp_path: Path) -> None:
@@ -265,6 +300,13 @@ def test_a_bare_patched_name_in_a_moved_def_is_reported(tmp_path: Path) -> None:
     patched = {"perform_chat_api_call"}
     got = moved_chat_code_violations(tmp_path, {"mini": {"lifted", "lifted_ok", "lifted_local"}}, patched)
     assert len(got) == 1 and "lifted reads perform_chat_api_call bare" in got[0]
+    (tmp_path / "nested.py").write_text(
+        "from pkg.llm import perform_chat_api_call\n\n\nasync def outer(cst):\n"
+        "    def inner(perform_chat_api_call):\n        perform_chat_api_call = 1\n        return perform_chat_api_call\n"
+        "    return await perform_chat_api_call(inner)\n"
+    )
+    nested = moved_chat_code_violations(tmp_path, {"nested": {"outer"}}, patched)
+    assert len(nested) == 1 and "outer reads perform_chat_api_call bare" in nested[0]
     assert moved_chat_code_violations(tmp_path, {"missing": {"f"}}, patched) != []
     assert moved_chat_code_violations(tmp_path, {}, patched) == []
 
@@ -327,3 +369,9 @@ def test_each_chat_module_imports_first_in_a_fresh_interpreter(module: str) -> N
         timeout=300,
     )
     assert r.returncode == 0, r.stderr[-2000:]
+
+
+def test_an_unparsable_test_file_is_a_named_failure_not_a_collection_error(tmp_path: Path) -> None:
+    (tmp_path / "test_bad.py").write_text("import chat_service\ndef (:\n")
+    with pytest.raises(pytest.fail.Exception, match=r"cannot scan .*test_bad\.py"):
+        patched_chat_service_names([tmp_path])
