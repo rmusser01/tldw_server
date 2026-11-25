@@ -143,6 +143,9 @@ const stoppedSelection = () => {
     replaceOwner: () => {
       state = { ...state, owner: { ...owner } }
     },
+    advanceSelectionRevision: () => {
+      state.view.selection_revision++
+    },
     replaceSource: () => {
       sourceCurrent = false
     }
@@ -203,8 +206,7 @@ describe("stopped turn history installation", () => {
     probe.controller.choose = async (cursor) => {
       const following = choose(cursor)
       probe.retire()
-      const state = probe.controller.getCurrent()
-      state.view!.selection_revision++
+      probe.advanceSelectionRevision()
       return following
     }
     const following = followStoppedChatTurnSelection(

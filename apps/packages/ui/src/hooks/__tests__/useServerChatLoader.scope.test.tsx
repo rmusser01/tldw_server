@@ -4,6 +4,7 @@ import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
 import { resolveHistorySelection } from "@/utils/history-selection"
 import { hasCurrentServerChatSelection } from "@/store/playground-session"
 import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
+import type { HistorySelectionSnapshotV1 } from "@/types/history-selection"
 // @vitest-environment jsdom
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { t as translate, type TFunction } from "i18next"
@@ -787,7 +788,7 @@ it("reads saved history through the actual Temporary selector without granting o
     useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((key: string) => key) as TFunction })
     return { control, select: useSelectServerChat() }
   }, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> })
-  act(() => mounted.result.current.select({ id: "saved", title: "Saved" }))
+  act(() => mounted.result.current.select({ id: "saved", title: "Saved", created_at: "2026-01-01T00:00:00Z" }))
   await act(async () => { await vi.advanceTimersByTimeAsync(300) })
   expect(mocks.setMessages).toHaveBeenCalledWith([expect.objectContaining({ message: "Saved answer" })])
   expect(mocks.store.setServerChatLoadState).toHaveBeenLastCalledWith("loaded")
@@ -844,7 +845,12 @@ it("reloads canonical metadata after a successful deliberate selection unmounts 
   mocks.getChat.mockResolvedValue({ id: "B", title: "Before departure", scope_type: "global", version: 1 })
   mocks.captureHistorySnapshot.mockImplementation(async (owner, incoming) => {
     const view = { ...incoming, owner_key: "native-B" }
-    const snapshot = { version: 1, owner_key: "native-B", conversation_id: owner.conversation_id, nodes: [], source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: { kind: "parent_graph_v1" } }
+    const snapshot: HistorySelectionSnapshotV1 = {
+      version: 1, owner_key: "native-B", conversation_id: owner.conversation_id,
+      nodes: [], source_digest: "source", storage_context_digest: "storage",
+      fences: { conversation: "1", history: "1", settings: "1" },
+      interpretation_status: { kind: "parent_graph_v1" }
+    }
     const result = resolveHistorySelection(snapshot, view, "send", "")
     if (result.status !== "ready") return { ...result, view, snapshot }
     return { status: "captured", view, snapshot, rows: result.rows, selected_content: [], storage_context_digest: "storage", purpose: "send" }
@@ -857,7 +863,7 @@ it("reloads canonical metadata after a successful deliberate selection unmounts 
     return { control, select: useSelectServerChat() }
   }, { wrapper: MemoryRouter })
   let mounted = mount()
-  act(() => mounted.result.current.select({ id: "B", title: "B" }))
+  act(() => mounted.result.current.select({ id: "B", title: "B", created_at: "2026-01-01T00:00:00Z" }))
   await act(async () => { await vi.advanceTimersByTimeAsync(300) })
   expect(mocks.store.setServerChatTitle).toHaveBeenCalledWith("Before departure")
   const address = actual.useStoreMessageOption.getState().chatDraftAddress

@@ -1,7 +1,7 @@
 # Source Hash Index for Media Pre-check
 
 ## Context
-Media ingestion pre-checks currently deduplicate local files by searching
+Media ingestion pre-checks originally deduplicated local files by searching
 `DocumentVersions.safe_metadata` with a JSON `LIKE` predicate for
 `source_hash`. This is slow on large datasets and cannot use indexes.
 
@@ -17,13 +17,13 @@ falling back to the legacy `safe_metadata` search for older rows.
   available during ingestion.
 - Pre-check: when `source_hash` is present and the column exists, query
   by `Media.source_hash`. If the column is missing or a row lacks a value,
-  fall back to the legacy `safe_metadata` `LIKE` filter.
+  fall back to the top-level `source_hash` in legacy `safe_metadata` JSON.
 
 ## Status
 - Implemented in schema/index and migration/ensure paths (SQLite/Postgres),
   ingestion persistence, and pre-checks.
-- Pre-check now falls back to `safe_metadata` when `Media.source_hash` is
-  NULL/absent for legacy rows.
+- Pre-check falls back to parsed `safe_metadata` only when `Media.source_hash`
+  is NULL or the column is absent. JSON formatting does not affect matching.
 - Remaining gap: no automatic backfill to populate `Media.source_hash`
   for existing rows; fallback is best-effort and depends on historical
   `safe_metadata` containing `source_hash`.
@@ -41,5 +41,5 @@ falling back to the legacy `safe_metadata` search for older rows.
 
 ## Testing
 - Unit test: insert media with `source_hash` and verify it persists.
-- Optional integration check: pre-check query returns existing row by
-  `Media.source_hash`.
+- Pre-check regression tests cover indexed matches, legacy JSON formatting,
+  and a stored hash that differs from the historical metadata hash.
