@@ -7,7 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GenerateTab } from "../GenerateTab";
@@ -462,11 +462,10 @@ describe("GenerateTab question plan controls", () => {
                 ? { status: 502, details: { detail } }
                 : { response: { status: 502, data: { detail } } },
             );
-      const mutateAsync = vi.fn().mockRejectedValue(failure);
-      vi.mocked(useGenerateQuizMutation).mockReturnValue({
-        mutateAsync,
-        isPending: false,
-      } as ReturnType<typeof useGenerateQuizMutation>);
+      const mutateAsync = vi.fn<ReturnType<typeof useGenerateQuizMutation>["mutateAsync"]>().mockRejectedValue(failure);
+      vi.mocked(useGenerateQuizMutation).mockImplementation(function useFailingQuizMutation() {
+        return useMutation({ mutationFn: (variables) => mutateAsync(variables) });
+      });
       renderWithQueryClient();
       await selectDefaultMedia();
       fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));

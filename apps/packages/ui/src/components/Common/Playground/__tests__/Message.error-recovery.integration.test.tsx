@@ -938,7 +938,7 @@ for (const initialPortraits of [true, false]) {
       expect(screen.getByRole("textbox")).toBe(editor)
       expect(editor).toHaveValue("Retained authored draft")
       await user.click(
-        screen.getByRole("button", { name: action, exact: true })
+        screen.getByRole("button", { name: action })
       )
       if (action === "save")
         expect(submit).toHaveBeenCalledWith(
@@ -1188,7 +1188,7 @@ it.each([false, true])(
     )
     const editor = screen.getByRole('textbox')
     fireEvent.change(editor, { target: { value: "Exact preserved edit  \n" } })
-    fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
     try {
       expect(screen.queryByRole("textbox")).toBe(editor)
       expect(editor).toHaveValue("Exact preserved edit  \n")
@@ -1206,7 +1206,7 @@ it.each([false, true])(
     expect(screen.getByRole("textbox")).toHaveValue("Exact preserved edit  \n")
     expect(parentChat.messages[0].message).toBe("Original row")
     parentChat.editMessage.mockResolvedValue({ status: "submitted" })
-    fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
     await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull())
     expect(parentChat.editMessage).toHaveBeenLastCalledWith(
       0,
@@ -1246,7 +1246,7 @@ it.each([false, true])(
     fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "First edited text" }
     })
-    fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "save" }))
     view.rerender(<PlaygroundMessage {...closeProps} messageId="second" />)
     act(() =>
       window.dispatchEvent(
@@ -1297,7 +1297,7 @@ it("the compact body returns its held Save outcome and retains a rejected draft"
   )
   const editor = screen.getByRole("textbox")
   fireEvent.change(editor, { target: { value: "Exact compact edit  \n" } })
-  fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "save" }))
   try {
     expect(screen.queryByRole("textbox")).toBe(editor)
     expect(editor).toHaveValue("Exact compact edit  \n")

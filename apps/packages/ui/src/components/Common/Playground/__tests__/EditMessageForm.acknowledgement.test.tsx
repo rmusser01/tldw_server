@@ -52,7 +52,7 @@ it.each(["Save", "Save & Send"])(
     const pending = deferred()
     const submit = vi.fn(() => pending.promise)
     const view = mount(submit)
-    fireEvent.click(screen.getByRole("button", { name: action, exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: action }))
     try {
       expect(view.close).not.toHaveBeenCalled()
       expect(view.editor).toHaveValue("Exact authored edit  \n")
@@ -77,7 +77,7 @@ it.each(["Save", "Save & Send"])(
   async (action) => {
     const pending = deferred()
     const view = mount(() => pending.promise)
-    fireEvent.click(screen.getByRole("button", { name: action, exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: action }))
     await act(async () => {
       pending.reject(new Error("Request refused"))
       await pending.promise.catch(() => {})
@@ -88,7 +88,7 @@ it.each(["Save", "Save & Send"])(
       "Your edited text is kept"
     )
     expect(
-      screen.getByRole("button", { name: action, exact: true })
+      screen.getByRole("button", { name: action })
     ).toBeEnabled()
   }
 )
@@ -101,7 +101,7 @@ it.each([
   { unexpected: "unconfirmed" }
 ])("does not close for an unconfirmed outcome %j", async (outcome) => {
   const view = mount(() => Promise.resolve(outcome))
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   await screen.findByRole("alert")
   expect(view.close).not.toHaveBeenCalled()
   expect(view.editor).toHaveValue("Exact authored edit  \n")
@@ -112,7 +112,7 @@ it.each([false, true])(
   async (undo) => {
     const pending = deferred()
     const view = mount(() => pending.promise)
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
     fireEvent.change(view.editor, { target: { value: "Newer unsaved text" } })
     if (undo)
       fireEvent.change(view.editor, {
@@ -132,8 +132,8 @@ it.each([false, true])(
 it("Cancel retires a held save before a later acknowledgement", async () => {
   const pending = deferred()
   const view = mount(() => pending.promise)
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
-  fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   await act(async () => {
     pending.resolve({ status: "submitted" })
     await pending.promise
@@ -144,7 +144,7 @@ it("Cancel retires a held save before a later acknowledgement", async () => {
 it("unmount retires the held save", async () => {
   const pending = deferred()
   const view = mount(() => pending.promise)
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   view.unmount()
   await act(async () => {
     pending.resolve({ status: "submitted" })
@@ -160,7 +160,7 @@ it("a changed canonical message preserves the authored edit and blocks an unrevi
     <EditMessageForm {...view.props} value="Changed in another view" />
   )
   expect(view.editor).toHaveValue("Exact authored edit  \n")
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   expect(submit).not.toHaveBeenCalled()
   expect(view.close).not.toHaveBeenCalled()
   expect(screen.getByRole("alert")).toHaveTextContent(/saved message has changed/i)
@@ -192,14 +192,14 @@ it("composition does not submit an unfinished edit", () => {
 
 it("synchronous legacy saves still close after completion", async () => {
   const view = mount()
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   await waitFor(() => expect(view.close).toHaveBeenCalledOnce())
 })
 
 it("accepts the current write's matching canonical value without erasing newer input", async () => {
   const held = deferred()
   const view = mount(() => held.promise)
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   fireEvent.change(view.editor, { target: { value: "Newer authored edit" } })
   view.rerender(
     <EditMessageForm {...view.props} value={"Exact authored edit  \n"} />
@@ -217,7 +217,7 @@ it("a matching canonical value arriving after acknowledgement keeps newer input 
   const held = deferred()
   const submit = vi.fn(() => held.promise)
   const view = mount(submit)
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   fireEvent.change(view.editor, { target: { value: "Newer authored edit" } })
   await act(async () => {
     held.resolve({ status: "submitted" })
@@ -229,7 +229,7 @@ it("a matching canonical value arriving after acknowledgement keeps newer input 
   expect(view.editor).toHaveValue("Newer authored edit")
   expect(screen.queryByRole("alert")).toBeNull()
   submit.mockResolvedValue({ status: "submitted" })
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   await waitFor(() => expect(view.close).toHaveBeenCalledOnce())
   expect(submit).toHaveBeenLastCalledWith(
     "Newer authored edit",
@@ -242,7 +242,7 @@ it("a matching canonical value arriving after acknowledgement keeps newer input 
 it("canonical edit/undo cannot certify an old held acknowledgement", async () => {
   const held = deferred()
   const view = mount(() => held.promise)
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   view.rerender(<EditMessageForm {...view.props} value="Other view update" />)
   view.rerender(<EditMessageForm {...view.props} />)
   await act(async () => {
@@ -258,7 +258,7 @@ it("an external canonical transition retires an expected delayed acknowledgement
   const held = deferred()
   const submit = vi.fn(() => held.promise)
   const view = mount(submit)
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   fireEvent.change(view.editor, { target: { value: "Newer authored draft" } })
   await act(async () => {
     held.resolve({ status: "submitted" })
@@ -272,7 +272,7 @@ it("an external canonical transition retires an expected delayed acknowledgement
     <EditMessageForm {...view.props} value={"Exact authored edit  \n"} />
   )
   expect(screen.getByRole("alert")).toHaveTextContent(/saved message has changed/i)
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   expect(submit).toHaveBeenCalledOnce()
   expect(view.close).not.toHaveBeenCalled()
   expect(view.editor).toHaveValue("Newer authored draft")
@@ -286,7 +286,7 @@ it.each(["typing", "undo", "cancel"])(
     const submit = vi.fn((..._args: unknown[]) => held.promise)
     const view = mount(submit)
     fireEvent.click(
-      screen.getByRole("button", { name: "Save & Send", exact: true })
+      screen.getByRole("button", { name: "Save & Send" })
     )
     try {
       const lease = submit.mock.calls[0]?.[2]
@@ -295,7 +295,7 @@ it.each(["typing", "undo", "cancel"])(
       expect(isCurrent()).toBe(true)
       if (change === "cancel")
         fireEvent.click(
-          screen.getByRole("button", { name: "Cancel", exact: true })
+          screen.getByRole("button", { name: "Cancel" })
         )
       else {
         fireEvent.change(view.editor, {
@@ -324,7 +324,7 @@ it("the editor origin lease preserves newer typing but retires Cancel and unrela
     full = current!; origin = original!
     return held.promise
   })
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
   try {
     expect(full()).toBe(true)
     expect(origin).toEqual(expect.any(Function))
@@ -335,7 +335,7 @@ it("the editor origin lease preserves newer typing but retires Cancel and unrela
     expect(origin()).toBe(true)
     view.rerender(<EditMessageForm {...view.props} value="Unrelated canonical edit" />)
     expect(origin()).toBe(false)
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(origin()).toBe(false)
   } finally { await act(async () => { held.resolve({ status: "submitted" }); await held.promise }) }
 })

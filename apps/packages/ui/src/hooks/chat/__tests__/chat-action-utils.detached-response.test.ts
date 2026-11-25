@@ -132,7 +132,7 @@ it("an early refusal before beginning response presentation leaves the active ma
 
 
 it("native regeneration keeps the saved reply passive through a held dispatch", async () => {
-  const gate = held(), original = { id: "saved-answer", message: "Original reply", isBot: true, name: "Assistant" }
+  const gate = held(), original = { id: "saved-answer", message: "Original reply", isBot: true, name: "Assistant", sources: [] }
   useStoreMessageOption.setState({ messages: [original] })
   const submit = withDetachedHistoryResponse(async (_params, beginResponse) => { beginResponse(); await gate.promise })
   const pending = submit({ historyRegenerate: { isOriginCurrent: () => true } as NativeHistoryRegenerate })

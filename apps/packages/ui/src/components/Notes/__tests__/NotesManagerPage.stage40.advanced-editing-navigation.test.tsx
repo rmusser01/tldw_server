@@ -525,12 +525,12 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
       if (mode === "wysiwyg")
         fireEvent.click(screen.getByTestId("notes-input-mode-wysiwyg"))
       fireEvent.click(
-        screen.getByRole("button", { name: "Preview", exact: true })
+        screen.getByRole("button", { name: "Preview" })
       )
       fireEvent.click(screen.getByTestId("notes-toc-item-end"))
       await waitFor(() =>
         expect(
-          screen.getByRole("button", { name: "Split", exact: true })
+          screen.getByRole("button", { name: "Split" })
         ).toHaveAttribute("aria-pressed", "true")
       )
       await waitFor(() => {
@@ -612,7 +612,7 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
       screen.getByPlaceholderText("Write your note here... (Markdown supported)"),
       { target: { value: source } }
     )
-    fireEvent.click(screen.getByRole("button", { name: "Split", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Split" }))
     const textarea = screen.getByPlaceholderText(
       "Write your note here... (Markdown supported)"
     ) as HTMLTextAreaElement

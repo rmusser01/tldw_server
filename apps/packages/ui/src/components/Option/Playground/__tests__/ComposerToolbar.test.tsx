@@ -190,7 +190,7 @@ describe("calm composer", () => {
     (layout) => {
       render(<ToolbarHarness {...layout} />);
       for (const name of ["Model selector", "Attach", "Tools", "Send"]) {
-        expect(screen.getByRole("button", { name, exact: true })).toBeVisible();
+        expect(screen.getByRole("button", { name })).toBeVisible();
       }
       expect(
         screen.queryByRole("region", { name: "Composer tools" }),
@@ -210,7 +210,7 @@ describe("calm composer", () => {
         modeLauncherButton={<button type="button">Modes</button>}
       />,
     );
-    const toggle = screen.getByRole("button", { name: "Tools", exact: true });
+    const toggle = screen.getByRole("button", { name: "Tools" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -248,7 +248,7 @@ describe("calm composer", () => {
     });
     expect(screen.queryByRole("region", { name: "Composer tools" })).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Tools", exact: true }),
+      screen.getByRole("button", { name: "Tools" }),
     ).toHaveFocus();
   });
 
@@ -333,7 +333,7 @@ describe("calm composer", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "Improve prompt" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Tools", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
     expect(
       screen.getByRole("button", { name: "Improve prompt" }),
     ).toBeVisible();
@@ -549,12 +549,12 @@ describe("composer starter events", () => {
 describe("composer keyboard disclosure", () => {
   it("closes Tools when Escape is pressed on its opening trigger", () => {
     render(<ToolbarHarness />);
-    const toggle = screen.getByRole("button", { name: "Tools", exact: true });
+    const toggle = screen.getByRole("button", { name: "Tools" });
     fireEvent.click(toggle);
     toggle.focus();
     fireEvent.keyDown(toggle, { key: "Escape" });
     expect(
-      screen.getByRole("button", { name: "Tools", exact: true }),
+      screen.getByRole("button", { name: "Tools" }),
     ).toHaveAttribute("aria-expanded", "false");
   });
 });

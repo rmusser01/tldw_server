@@ -8,7 +8,8 @@ import {
   within
 } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import NotesSidebar, { type NotesSidebarProps } from '../NotesSidebar'
+import NotesSidebar from '../NotesSidebar'
+import { buildNotesSidebarProps } from './notes-sidebar-test-props'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -34,104 +35,7 @@ vi.mock('react-i18next', () => ({
   })
 }))
 
-const noopAsync = vi.fn(async () => {})
-const noop = vi.fn()
-
-const baseProps = {
-  isMobileViewport: false,
-  mobileSidebarOpen: false,
-  sidebarCollapsed: false,
-  listMode: 'active',
-  listViewMode: 'list',
-  page: 1,
-  pageSize: 20,
-  total: 1,
-  sortOption: 'modified_desc',
-  selectedId: null,
-  visibleNotes: [],
-  filteredCount: 0,
-  timelineSections: [],
-  recentNotes: [],
-  pinnedNoteIds: [],
-  pinnedNoteIdSet: new Set<string>(),
-  queryInput: 'server failure',
-  hasActiveFilters: true,
-  activeFilterSummary: {
-    countText: 'Showing 0 of 1 notes',
-    detailsText: 'Query: "server failure"'
-  },
-  keywordTokens: [],
-  keywordOptions: [],
-  availableKeywords: [],
-  notebookOptions: [],
-  selectedNotebookId: null,
-  selectedNotebook: null,
-  moodboards: [],
-  selectedMoodboardId: null,
-  selectedMoodboard: null,
-  isMoodboardsFetching: false,
-  moodboardTotalPages: 1,
-  moodboardCanGoPrev: false,
-  moodboardCanGoNext: false,
-  moodboardRangeStart: 0,
-  moodboardRangeEnd: 0,
-  bulkSelectedIds: [],
-  searchTipsContent: null,
-  query: 'server failure',
-  isFetching: false,
-  hasListError: true,
-  listErrorMessage: 'Backend unavailable',
-  isStaleResults: false,
-  isOnline: true,
-  demoEnabled: false,
-  capsLoading: false,
-  capabilities: { hasNotes: true } as NotesSidebarProps['capabilities'],
-  queuedOfflineDraftCount: 0,
-  showLargeListPaginationHint: false,
-  conversationLabelById: {},
-  importSubmitting: false,
-  exportProgress: null,
-  setMobileSidebarOpen: noop,
-  setListViewMode: noop,
-  setPage: noop,
-  setPageSize: noop,
-  setSortOption: noop,
-  setQueryInput: noop,
-  setSelectedMoodboardId: noop,
-  setSelectedNotebookId: noop,
-  setSearchTipsQuery: noop,
-  handleNewNote: noopAsync,
-  switchListMode: noop,
-  handleSelectNote: noopAsync,
-  handleClearFilters: noop,
-  retryList: noop,
-  handleKeywordFilterSearch: noop,
-  handleKeywordFilterChange: noop,
-  handleToggleBulkSelection: noop,
-  clearSearchQueryTimeout: noop,
-  setQuery: noop,
-  openKeywordPicker: noop,
-  createNotebookFromCurrentKeywords: noop,
-  removeSelectedNotebook: noopAsync,
-  createMoodboard: noopAsync,
-  renameMoodboard: noopAsync,
-  deleteMoodboard: noopAsync,
-  clearBulkSelection: noop,
-  exportSelectedBulk: noop,
-  addTagsToSelectedBulk: noopAsync,
-  deleteSelectedBulk: noopAsync,
-  toggleNotePinned: noopAsync,
-  restoreNote: noopAsync,
-  exportAll: noopAsync,
-  exportAllCSV: noopAsync,
-  exportAllJSON: noopAsync,
-  openImportPicker: noop,
-  onSyncFolder: noop,
-  resetEditor: noop,
-  renderKeywordLabelWithFrequency: (keyword: string) => keyword,
-  onOpenSettings: noop,
-  onOpenHealth: noop
-} satisfies NotesSidebarProps
+const handleSelectNote = vi.fn(async () => {})
 
 const notes = Array.from({ length: 5 }, (_, index) => ({
   id: String(index + 1),
@@ -139,19 +43,13 @@ const notes = Array.from({ length: 5 }, (_, index) => ({
   content: 'Saved body',
   version: 1
 }))
-const expandedProps = {
-  ...baseProps,
+const expandedProps = buildNotesSidebarProps({
   total: 5,
   visibleNotes: notes,
   filteredCount: 5,
   recentNotes: notes.slice(0, 3).map(({ id, title }) => ({ id, title })),
-  queryInput: '',
-  query: '',
-  hasActiveFilters: false,
-  activeFilterSummary: null,
-  hasListError: false,
-  listErrorMessage: null
-}
+  handleSelectNote
+})
 
 describe('Notes expanded sidebar result access', () => {
   beforeEach(() => {
@@ -187,7 +85,7 @@ describe('Notes expanded sidebar result access', () => {
     )
     const fifth = within(results).getByTestId('notes-open-button-5')
     await user.click(fifth)
-    expect(noopAsync).toHaveBeenCalledWith('5')
+    expect(handleSelectNote).toHaveBeenCalledWith('5')
     // The results are one Tab stop that remembers the last row used (AX-03).
     filters.focus()
     for (
@@ -202,7 +100,7 @@ describe('Notes expanded sidebar result access', () => {
     const first = within(results).getByTestId('notes-open-button-1')
     expect(first).toHaveFocus()
     await user.keyboard('{Enter}')
-    expect(noopAsync).toHaveBeenCalledWith('1')
+    expect(handleSelectNote).toHaveBeenCalledWith('1')
   })
   it('retains expanded controls after reload and keeps results available on resize and mobile', async () => {
     const user = userEvent.setup()
@@ -229,6 +127,6 @@ describe('Notes expanded sidebar result access', () => {
       height: '100%'
     })
     await user.click(screen.getByTestId('notes-open-button-5'))
-    expect(noopAsync).toHaveBeenCalledWith('5')
+    expect(handleSelectNote).toHaveBeenCalledWith('5')
   })
 })

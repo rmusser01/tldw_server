@@ -73,7 +73,7 @@ const mocks = vi.hoisted(() => {
   linkMirror: vi.fn<typeof import("@/db/dexie/server-chat-mirror").linkServerChatMirror>(),
   injectActor: vi.fn<typeof import("@/utils/actor").maybeInjectActorMessage>(),
   notifyError: vi.fn(),
-  rows: [] as Array<Record<string, unknown>>,
+  rows: [] as MessageHistory,
   mirrorHistories: new Map<string, Record<string, unknown>>(),
   withLoader: false,
   selectionRevision: 0,
@@ -201,15 +201,15 @@ vi.mock("@/db/dexie/schema", () => ({ db: {
   messages: {
     get: async (id: string) => mocks.rows.find(row => row.id === id),
     where: (field: string) => ({ equals: (value: unknown) => ({ toArray: async () => mocks.rows.filter(row => row[field] === value) }) }),
-    add: async (row: Record<string, unknown>) => { mocks.rows.push(row); return row.id },
-    put: async (row: Record<string, unknown>) => {
+    add: async (row: MessageHistory[number]) => { mocks.rows.push(row); return row.id },
+    put: async (row: MessageHistory[number]) => {
       const index = mocks.rows.findIndex(item => item.id === row.id)
       if (index < 0) mocks.rows.push(row)
       else mocks.rows[index] = row
       return row.id
     },
     bulkGet: async (ids: string[]) => ids.map(id => mocks.rows.find(row => row.id === id)),
-    bulkPut: async (rows: Record<string, unknown>[]) => {
+    bulkPut: async (rows: MessageHistory) => {
       for (const row of rows) {
         const index = mocks.rows.findIndex(item => item.id === row.id)
         if (index < 0) mocks.rows.push(row)
@@ -251,7 +251,7 @@ vi.mock("@/db/dexie/helpers", async () => {
   removeMessageByIndex: vi.fn(),
   removeMessageById: mocks.removeMessageById,
   formatToChatHistory: (items: Parameters<typeof actual.formatToChatHistory>[0]) => mocks.realPersistence ? actual.formatToChatHistory(items) : items,
-  formatToMessage: (items: Array<Record<string, unknown>>) => mocks.realPersistence ? actual.formatToMessage(items as Parameters<typeof actual.formatToMessage>[0]) : mocks.withLoader ? items.map(row => ({
+  formatToMessage: (items: MessageHistory) => mocks.realPersistence ? actual.formatToMessage(items) : mocks.withLoader ? items.map(row => ({
     ...row, id: row.id, serverMessageId: row.serverMessageId, message: row.content,
     isBot: row.role !== "user", name: row.name || "You", sources: row.sources || [],
     parentMessageId: row.parent_message_id
@@ -634,6 +634,7 @@ describe("saved normal Chat pipeline with autosave", () => {
         serverMessageId: serverId,
         serverMessageVersion: 2,
         role: "assistant",
+        name: "Cedar",
         content: "Cedar reply",
         createdAt: 1
       }
@@ -660,14 +661,15 @@ describe("saved normal Chat pipeline with autosave", () => {
             role: "assistant",
             isBot: true,
             name: "Cedar",
-            message: "Cedar reply"
+            message: "Cedar reply",
+            sources: []
           }
         ],
         history: [{ role: "assistant", content: "Cedar reply" }],
         replyTarget: {
           id: replyKind === "local" ? localId : serverId,
-          role: "assistant",
-          text: "Cedar reply"
+          isBot: true,
+          preview: "Cedar reply"
         }
       })
       const { result } = renderWorkspace()
@@ -759,7 +761,9 @@ describe("saved normal Chat pipeline with autosave", () => {
     const rows = boundary === "equal rows" ? [original, { ...original, id: "source-two" }] : [original]
     useStoreMessageOption.setState({ historyId: "local-draft", messages: rows, history: rows.map(row => ({ role: row.role, content: row.message })) })
     mocks.mirrorHistories.set("local-draft", { id: "local-draft" })
-    mocks.rows.push(...rows.map(row => ({ id: row.id, role: row.role, content: row.message, history_id: "local-draft", images: [] })))
+    mocks.rows.push(...rows.map((row, index) => ({
+      id: row.id, role: row.role, name: row.name, content: row.message, history_id: "local-draft", images: [], createdAt: index + 1
+    })))
     const ack = deferred<void>()
     const originalAdd = mocks.addChatMessage.getMockImplementation()!
     mocks.addChatMessage.mockImplementationOnce(async (...args) => { const saved = await originalAdd(...args); await ack.promise; return saved })

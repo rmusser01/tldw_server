@@ -789,7 +789,7 @@ const replacePresentation = (
   core.setServerChatId(serverChatId)
   core.setHistoryId(historyId, { preserveServerChatId: true })
   core.setServerChatTitle("Later selected title")
-  core.setServerChatState("completed")
+  core.setServerChatState("resolved")
   core.setServerChatVersion(93)
   core.setServerChatCharacterId(null)
   core.setHistory([
@@ -802,14 +802,16 @@ const replacePresentation = (
       isBot: false,
       role: "user",
       name: "You",
-      message: "Later selected question"
+      message: "Later selected question",
+      sources: []
     },
     {
       id: "later-answer",
       isBot: true,
       role: "assistant",
       name: "test",
-      message: "Later selected answer"
+      message: "Later selected answer",
+      sources: []
     }
   ])
   return presentation()

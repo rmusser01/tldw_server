@@ -49,7 +49,7 @@ const createOwner = (userId: string) => {
 type Owner = ReturnType<typeof createOwner>;
 let owner: Owner;
 let source: object;
-const leases: Array<ReturnType<typeof snapshotFor>> = [];
+const leases: (ServicePromptSnapshot & { release: ReturnType<typeof vi.fn> })[] = [];
 const clients: QueryClient[] = [];
 const snapshotFor = (captured: Owner) => {
   const lease = {

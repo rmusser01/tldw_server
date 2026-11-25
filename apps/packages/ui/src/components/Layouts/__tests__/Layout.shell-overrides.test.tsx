@@ -789,7 +789,7 @@ it.each(["Close", "Skip tour", "Finish"])(
     opener.focus()
     fireEvent.click(opener)
     await screen.findByRole("dialog", { name: "Page Help" })
-    const start = screen.getByRole("button", { name: "Start", exact: true })
+    const start = screen.getByRole("button", { name: "Start" })
     start.focus()
     fireEvent.click(start)
     await screen.findByRole("alertdialog", { name: "Choose a Model" })
@@ -803,8 +803,7 @@ it.each(["Close", "Skip tour", "Finish"])(
       }
     }
     const exit = await screen.findByRole("button", {
-      name: action,
-      exact: true
+      name: action
     })
     exit.focus()
     fireEvent.click(exit)
@@ -841,7 +840,7 @@ it("real Joyride cannot adopt BODY after outside focus even on explicit Skip", a
   opener.focus()
   fireEvent.click(opener)
   await screen.findByRole("dialog", { name: "Page Help" })
-  const start = screen.getByRole("button", { name: "Start", exact: true })
+  const start = screen.getByRole("button", { name: "Start" })
   start.focus()
   fireEvent.click(start)
   await screen.findByRole("alertdialog", { name: "Choose a Model" })
@@ -854,7 +853,7 @@ it("real Joyride cannot adopt BODY after outside focus even on explicit Skip", a
   fireEvent.click(skip)
   await waitFor(() => expect(useTutorialStore.getState().activeRun).toBeNull())
   await act(
-    async () => new Promise((resolve) => window.requestAnimationFrame(resolve))
+    async () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
   )
   expect(focus).not.toHaveBeenCalled()
   expect(useTutorialStore.getState().completedTutorials).toEqual([])
@@ -878,7 +877,7 @@ it("starts the real shared tutorial runner from Tour while the full extension he
   )
   fireEvent.click(screen.getByRole("button", { name: "Take a quick tour" }))
   const help = await screen.findByRole("dialog", { name: "Page Help" })
-  fireEvent.click(screen.getByRole("button", { name: "Start", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Start" }))
   expect(help).not.toBeInTheDocument()
   const tour = await screen.findByRole("alertdialog", {
     name: "Choose a Model"

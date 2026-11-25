@@ -1384,7 +1384,6 @@ describe("sidepanel chat handoff import", () => {
         setCompareMode: vi.fn(),
         setCompareSelectedModels: vi.fn(),
         setSelectedSystemPrompt: vi.fn(),
-        setSelectedQuickPrompt: vi.fn(),
         setToolChoice: vi.fn(),
         setUseOCR: vi.fn(),
         compareModelsSupportCapability: vi.fn(() => true),

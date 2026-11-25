@@ -280,7 +280,7 @@ describe("history-first sidebar navigation", () => {
     if (state === "unverified") io.verificationState = "error";
     if (state === "retired") io.ownerCurrent = false;
     renderSidebar();
-    expect(await screen.findByRole("radio", { name: "Server", exact: true })).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: "Server" })).toBeInTheDocument();
   });
 
   it.each([{ count: 1, label: "Folders (1 chat)" }, { count: 2, label: "Folders (2 chats)" }])(

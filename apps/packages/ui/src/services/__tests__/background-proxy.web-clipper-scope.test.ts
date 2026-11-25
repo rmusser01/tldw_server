@@ -187,7 +187,7 @@ describe("captured web clip save through its scoped client and transport", () =>
     expect(boundary.sendMessage).not.toHaveBeenCalled()
   })
 
-  it.each(["GET", "PUT", "PATCH", "DELETE"])(
+  it.each(["GET", "PUT", "PATCH", "DELETE"] as const)(
     "rejects scoped save method %s before dispatch",
     async (method) => {
       expect(
@@ -200,7 +200,7 @@ describe("captured web clip save through its scoped client and transport", () =>
         bgRequest({
           ...requestScopeFields(requestScope),
           path: "/api/v1/web-clipper/save",
-          method: method as never
+          method
         })
       ).rejects.toThrow(/Service Prompt config/)
       expect(boundary.fetch).not.toHaveBeenCalled()
@@ -412,7 +412,7 @@ describe("public article capture through actual scoped direct transport", () => 
     const body = { content: "Edited capture", prompt: "", analysis_content: "" }
     await bgRequest({
       ...requestScopeFields(options().requestScope),
-      path: "/api/v1/media/71/versions" as never,
+      path: "/api/v1/media/71/versions",
       method: "POST",
       body
     })
@@ -447,14 +447,14 @@ describe("public article capture through actual scoped direct transport", () => 
     ["/api/v1/web-clipper/clip/enrichments", "GET"],
     ["/api/v1/web-clipper/clip", "DELETE"],
     ["https://clips.example/api/v1/media/ingest-web-content", "POST"]
-  ])(
+  ] as const)(
     "rejects unsupported capture route %s %s before dispatch",
     async (path, method) => {
       await expect(
         bgRequest({
           ...requestScopeFields(options().requestScope),
-          path: path as never,
-          method: method as never
+          path,
+          method
         })
       ).rejects.toThrow(/Service Prompt config/)
       expect(boundary.fetch).not.toHaveBeenCalled()
@@ -469,11 +469,11 @@ describe("public article capture through actual scoped direct transport", () => 
         `/api/v1/workspaces/${control}../sources`,
         `/api/v1/web-clipper/${control}..`,
         `/api/v1/workspaces/ws/sources/${control}../preview`
-      ]) {
+      ] as const) {
         await expect(
           bgRequest({
             ...requestScopeFields(options().requestScope),
-            path: path as never,
+            path,
             method: "GET"
           })
         ).rejects.toThrow(/Service Prompt config/)
@@ -574,7 +574,7 @@ describe("saved source views through scoped client transport", () => {
     ["POST", "/api/v1/workspaces/ws/source-views%2fextra"],
     ["POST", "/api/v1/workspaces/ws/source-views\n"],
     ["POST", "/api/v1/workspaces/ws/source-views\t"]
-  ])(
+  ] as const)(
     "denies raw scoped %s %s before either transport",
     async (method, path) => {
       for (const runtimeId of [null, "extension-fixture"]) {

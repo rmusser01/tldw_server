@@ -102,7 +102,7 @@ describe("RecordingStrip", () => {
       fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [new File(["new"], "new.wav", { type: "audio/wav" })] } })
       await waitFor(() => expect(mockLoadBlob).toHaveBeenCalled())
     } else {
-      fireEvent.click(screen.getByRole("button", { name: action === "Record" ? "Start recording (Space)" : "Clear recording", exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: action === "Record" ? "Start recording (Space)" : "Clear recording" }))
     }
     expect(order).toEqual(["intent", action])
   })
