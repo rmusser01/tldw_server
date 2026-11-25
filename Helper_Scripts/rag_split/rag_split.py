@@ -84,7 +84,7 @@ from typing import Any, NamedTuple
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
-PART2_KEYS = {"entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"}
+PART2_KEYS = {"drop", "late_imports", "rewrite_in", "free_imports", "relocate"}
 PART3_KEYS = {"rewrite_in", "free_imports", "relocate"}
 MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals", "args"}
 LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
@@ -402,6 +402,12 @@ def load_manifest(path: Path) -> dict[str, Any]:
                 bad = [k for k in ("publish", "hoist", "classes", "entry_split", "prologue", "state_init", "hidden") if m[k]]
                 if bad:
                     raise SplitError(f"{path}: {bad} are not supported when pkg is '' (destinations are siblings of the source)")
+            if m["entry"] is not None:
+                e = m["entry"]
+                if m["pkg"] != "":
+                    raise SplitError(f"{path}: entry needs pkg '' (use entry_split for the RAG layout)")
+                if not isinstance(e, dict) or set(e) - {"name", "module", "doc"} or not all(isinstance(e.get(k), str) and e.get(k) for k in ("name", "module")) or not isinstance(e.get("doc", ""), str):
+                    raise SplitError(f"{path}: entry must be {{'name': str, 'module': str, 'doc': str (optional)}}")
             if m["lift"]:
                 if m["pkg"] != "":
                     raise SplitError(f"{path}: lift needs pkg '' (the destination modules are siblings of the source)")
@@ -577,13 +583,10 @@ def f_bound(root: ast.AST, key: Any) -> set[str]:
 
 
 def check_args(mv: Move, fn: Any, key: Any, ctx: list[str], lifted: set[str]) -> list[str]:
-    """V3: a name a span takes as a parameter is read, never rebound, in it, and is bound by the code around it."""
+    """V3: a name a span takes as a parameter is a local of the function that the span reads and never rebinds."""
     errs: list[str] = []
     reads = {n.id for s in mv.members for n in ast.walk(s) if isinstance(n, ast.Name) and is_f(n, key) and isinstance(n.ctx, ast.Load)}
     inside = f_bound(ast.Module(body=mv.members, type_ignores=[]), key)
-    outer = f_bound(fn, key) - inside | {x.arg for x in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs + [fn.args.vararg, fn.args.kwarg] if x}
-    if mv.parent:
-        outer |= set(mv.parent.args) | f_bound(ast.Module(body=mv.parent.members, type_ignores=[]), key)
     for a in mv.args:
         if a in ctx or a in lifted:
             errs.append(f"V3: {mv.name}: args {a} is a ctx or lifted name")
@@ -591,8 +594,6 @@ def check_args(mv: Move, fn: Any, key: Any, ctx: list[str], lifted: set[str]) ->
             errs.append(f"V3: {mv.name}: args {a} is rebound inside the span; a parameter must be read-only there")
         elif a not in reads:
             errs.append(f"V3: {mv.name}: args {a} is not read in the span")
-        elif a not in outer:
-            errs.append(f"V3: {mv.name}: args {a} is not bound by the code around the span")
     return errs
 
 
@@ -1223,7 +1224,16 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     out.moves = moves
     lifts, lift_errs = plan_lifts(m, src, moves) if m["lift"] else ([], [])
     out.errors += lift_errs
-    regions = Regions(moves, lifts, "")
+    entry = m["entry"]
+    regions = Regions(moves, lifts, entry["module"] if entry else "")
+    if entry:
+        pro0 = prologue_stmt(fn, ctx_names(m)[0])
+        if pro0 is None:
+            out.errors.append(f"V8: entry needs `{ctx_names(m)[0]} = <expr>` as the first statement after the docstring")
+        elif any(x is pro0 for mv in moves for x in mv.members):
+            out.errors.append("V8: a move span holds the entry's prologue statement")
+        if any(x["name"] == entry["name"] for x in m["moves"]) or entry["name"] in m["lift"]:
+            out.errors.append(f"V10: entry {entry['name']} is also a move or a lift")
 
     # V8: a name the manifest introduces must not already be used in the function.
     used = fn_names(fn)
@@ -1231,13 +1241,14 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     sm, sc = m["state_module"], m["state_class"]
     intro |= {ctx_names(m)[0]} if m["prologue"] else set()
     intro |= {"state", f"_{sm}"} if m["state_init"] else set()
-    intro |= ({m["facade"]} if moves or hoist or lifts else set()) | ({f"_{sm}"} if hoist else set()) | {f"_{x.module}" for x in moves}
+    intro |= ({m["facade"]} if moves or hoist or lifts or entry else set()) | ({f"_{sm}"} if hoist else set()) | {f"_{x.module}" for x in moves}
     intro |= ({"functools"} | {f"_{lf.module}" for lf in lifts}) if lifts else set()
+    intro |= {f"_{entry['module']}"} if entry else set()
     pro = prologue_stmt(fn, ctx_names(m)[0])
     kept = pro is not None and not m["prologue"] and is_sibling(m)  # the ctx prologue is already in the source (an earlier PR)
-    if (moves or lifts) and m["ctx"] != DEFAULT_CTX:
+    if (moves or lifts or entry) and m["ctx"] != DEFAULT_CTX:
         intro |= set(ctx_names(m)) - ({ctx_names(m)[0]} if kept else set())
-    if kept and (moves or lifts):
+    if kept and (moves or lifts or entry):
         mine = {id(x) for x in ast.walk(pro)}
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside the prologue statement" for nm, x in binding_nodes(fn) if nm == ctx_names(m)[0] and id(x) not in mine]
     init = [x for x in fn.body[:3] if isinstance(x, ast.Assign) and ast.unparse(x).startswith(f"state = _{sm}.{sc}(")]
@@ -1249,7 +1260,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside D1's state statement" for nm, x in binding_nodes(fn) if nm in ("state", f"_{sm}") and id(x) not in mine]
     if is_sibling(m):
         # an alias an earlier manifest already imported into the source may be read again, never rebound
-        reuse = {f"_{x}" for x in {y.module for y in moves} | {lf.module for lf in lifts} if src.infos.get(f"_{x}") == Info("from", pkg_dotted(m), x, f"_{x}", 0)}
+        reuse = {f"_{x}" for x in {y.module for y in moves} | {lf.module for lf in lifts} | ({entry["module"]} if entry else set()) if src.infos.get(f"_{x}") == Info("from", pkg_dotted(m), x, f"_{x}", 0)}
         intro -= reuse
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound inside {fn.name}" for nm, x in binding_nodes(fn) if nm in reuse]
     out.errors += [f"V8: {n} is already a name in {fn.name}" for n in sorted(intro & used)]
@@ -1391,7 +1402,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             mv.members[i] = up.visit(s)
         d.body = ([ast.Expr(ast.Constant(mv.doc))] if mv.doc else []) + mv.members
         out.defs[(mv.module, mv.name)] = d
-        call = call_stmt(mv, "", ", ".join([call_args(m), *mv.args]))
+        call = call_stmt(mv, "" if mv.parent else regions.rest_module, ", ".join([call_args(m), *mv.args]))
         i = next(i for i, x in enumerate(mv.block) if x is mv.members[0])
         mv.block[i : i + len(mv.members)] = [call]
         if mv.parent and mv.parent.block is mv.block:
@@ -1432,10 +1443,35 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         head = [doc_stmt(m["shim_doc"])] if m["shim_doc"] is not None else body[:i0]
         fn.body = head + [shim]
         out.entry = new
+    if entry and not out.errors:
+        split_entry_into_module(m, out, fn, key, up, entry)
     if is_sibling(m):
-        out.order = list(lifted_defs) + [(mv.module, mv.name) for mv in moves]
+        out.order = list(lifted_defs) + [(mv.module, mv.name) for mv in moves] + ([(entry["module"], entry["name"])] if entry else [])
         finish_sibling(m, out)
     return out
+
+
+def split_entry_into_module(m: dict, out: Built, fn: Any, key: Any, up: UpTransform, entry: dict) -> None:
+    """The body after the prologue statement moves whole into ``<module>.<name>(cst)``; the source keeps a shim."""
+    i0 = docstring_len(fn)
+    pro, rest = fn.body[i0], fn.body[i0 + 1 :]
+    params = {x.arg for x in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs + [fn.args.vararg, fn.args.kwarg] if x} - set(ctx_names(m))
+    stored = {x.id for s in rest for x in ast.walk(s) if isinstance(x, ast.Name) and is_f(x, key) and isinstance(x.ctx, ast.Store)}
+    for n in (x for s in rest for x in ast.walk(s)):
+        if isinstance(n, ast.Name) and is_f(n, key) and n.id in params - stored and isinstance(n.ctx, ast.Load):
+            out.errors.append(f"V8: the entry body reads the parameter {n.id} (line {n.lineno}); map it into {ctx_names(m)[0]} first")
+        elif isinstance(n, ast.Name) and n.id in ("__name__", "__file__") and isinstance(n.ctx, ast.Load):
+            out.errors.append(f"V1: the entry body reads {n.id} (line {n.lineno}); it reads a different module after the move")
+    for n in walk_own(rest):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in INTROSPECTION and getattr(n.func, "_r", NEW) is None:
+            out.errors.append(f"V1: the entry body calls {n.func.id}() (line {n.lineno}); it reads a different scope after the move")
+    aw = isinstance(fn, ast.AsyncFunctionDef)
+    d = func_template(entry["name"], aw, ctx_sig(m))
+    d.returns = up.visit(copy.deepcopy(fn.returns)) if fn.returns else None
+    d.body = ([doc_stmt(entry["doc"])] if entry.get("doc") is not None else []) + [up.visit(x) for x in rest]
+    out.defs[(entry["module"], entry["name"])] = d
+    call = ast.Call(ast.Attribute(ast.Name(f"_{entry['module']}", ast.Load()), entry["name"], ast.Load()), [pro.value], [])
+    fn.body = fn.body[:i0] + [ast.Return(ast.Await(call) if aw else call)]
 
 
 def finish_sibling(m: dict, out: Built) -> None:
@@ -2284,7 +2320,8 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
         mv.is_async = next(x.is_async for x in b.moves if x.name == mv.name)
     ctx = call_args(m)
     lifts, _ = plan_lifts(m, fresh, moves) if m["lift"] else ([], [])
-    regions = Regions(moves, lifts, "")
+    entry = m["entry"]
+    regions = Regions(moves, lifts, entry["module"] if entry else "")
     edits += lift_edits(fn, fresh.key, lines, regions, lifts, ctx)
     lift_cuts: dict[str, Cut] = {}
     for lf in lifts:
@@ -2294,7 +2331,7 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
         lift_cuts[lf.name] = Cut(stmt_start(d), tail, f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {ctx})" if keep else None, d.col_offset)
     move_cuts: dict[str, Cut] = {}
     for mv in moves:
-        recv = "" if mv.parent and mv.parent.module == mv.module else f"_{mv.module}."
+        recv = "" if (mv.parent.module if mv.parent else regions.rest_module) == mv.module else f"_{mv.module}."
         call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({', '.join([ctx, *mv.args])})"
         move_cuts[mv.name] = Cut(mv.a, mv.b, call, mv.members[0].col_offset)
     cuts += list(lift_cuts.values()) + list(move_cuts.values())
@@ -2320,7 +2357,21 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
         head = ("async " if mv.is_async else "") + f"def {mv.name}({', '.join([ctx_sig(m), *mv.args])}) -> None:\n"
         made[(mv.module, mv.name)] = head + body
     f_lo, f_hi = stmt_start(fn), fn.end_lineno
-    new_f = render(lines, cont, f_lo, f_hi, 0, edits, cuts)
+    if entry:
+        i0 = docstring_len(fn)
+        pro, aw = fn.body[i0], isinstance(fn, ast.AsyncFunctionDef)
+        lo = pro.end_lineno + 1
+        ed = edits + region_edits(fresh, lines, lo, f_hi, fn.body[i0 + 1 :], False, m["facade"], bump=False)
+        body = render(lines, cont, lo, f_hi, 0, ed, cuts).lstrip("\n")
+        want = b.defs[(entry["module"], entry["name"])]
+        sig = f"{'async ' if aw else ''}def {entry['name']}({ctx_sig(m)})" + (f" -> {ast.unparse(want.returns)}" if want.returns else "") + ":\n"
+        doc = "\n".join(doc_text(entry["doc"])) + "\n\n" if entry.get("doc") is not None else ""
+        made[(entry["module"], entry["name"])] = sig + doc + body
+        value = ast.get_source_segment(text, pro.value)
+        shim = [f"    return {'await ' if aw else ''}_{entry['module']}.{entry['name']}({value})"]
+        new_f = "\n".join(rows_text[f_lo - 1 : pro.lineno - 1] + shim)
+    else:
+        new_f = render(lines, cont, f_lo, f_hi, 0, edits, cuts)
     rows = rows_text[: f_lo - 1] + new_f.rstrip("\n").split("\n") + rows_text[f_hi:]
     new_text = "\n".join(rows)
     tree = ast.parse(new_text)
