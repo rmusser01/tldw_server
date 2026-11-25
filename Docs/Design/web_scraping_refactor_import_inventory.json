@@ -494,6 +494,30 @@
       },
       {
         "import_kind": "from",
+        "imported_name": "search_discussions",
+        "line": 107,
+        "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
+        "path": "tldw_Server_API/app/core/RAG/rag_service/pipeline/query_prep.py",
+        "target_name": "WebSearch_APIs"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "perform_websearch",
+        "line": 136,
+        "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
+        "path": "tldw_Server_API/app/core/RAG/rag_service/pipeline/query_prep.py",
+        "target_name": "WebSearch_APIs"
+      },
+      {
+        "import_kind": "from",
+        "imported_name": "process_web_search_results",
+        "line": 136,
+        "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
+        "path": "tldw_Server_API/app/core/RAG/rag_service/pipeline/query_prep.py",
+        "target_name": "WebSearch_APIs"
+      },
+      {
+        "import_kind": "from",
         "imported_name": "perform_websearch",
         "line": 378,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
@@ -530,30 +554,6 @@
         "line": 517,
         "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
         "path": "tldw_Server_API/app/core/RAG/rag_service/research_agent.py",
-        "target_name": "WebSearch_APIs"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "search_discussions",
-        "line": 2819,
-        "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
-        "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
-        "target_name": "WebSearch_APIs"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "perform_websearch",
-        "line": 2848,
-        "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
-        "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
-        "target_name": "WebSearch_APIs"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "process_web_search_results",
-        "line": 2848,
-        "module": "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs",
-        "path": "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py",
         "target_name": "WebSearch_APIs"
       },
       {
