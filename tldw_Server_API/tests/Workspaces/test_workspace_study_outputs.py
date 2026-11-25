@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints import flashcards, quizzes, workspaces
+from tldw_Server_API.app.api.v1.endpoints import flashcards, quizzes, workspace_study_outputs
 from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
@@ -76,7 +76,7 @@ async def _allow_rate_limit() -> None:
 @pytest.fixture
 def client(db: CharactersRAGDB) -> Iterator[TestClient]:
     app = FastAPI()
-    app.include_router(workspaces.router, prefix="/api/v1/workspaces")
+    app.include_router(workspace_study_outputs.router, prefix="/api/v1/workspaces")
     app.include_router(flashcards.router, prefix="/api/v1")
     app.include_router(quizzes.router, prefix="/api/v1")
     app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)

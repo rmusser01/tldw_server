@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints import research_runs, workspaces
+from tldw_Server_API.app.api.v1.endpoints import research_runs, workspace_research_runs
 from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
@@ -38,7 +38,7 @@ def owner(tmp_path, monkeypatch):
         job_manager=manager,
     )
     app = FastAPI()
-    app.include_router(workspaces.router, prefix="/api/v1/workspaces")
+    app.include_router(workspace_research_runs.router, prefix="/api/v1/workspaces")
     app.include_router(research_runs.router, prefix="/api/v1")
 
     async def allow_rate_limit():

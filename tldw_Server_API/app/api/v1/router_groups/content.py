@@ -459,6 +459,27 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             route_key="workspaces",
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.workspace_study_outputs",
+            log_name="workspace_study_outputs",
+            prefix=f"{API_V1_PREFIX}/workspaces",
+            tags=("workspaces",),
+            route_key="workspaces",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.workspace_research_runs",
+            log_name="workspace_research_runs",
+            prefix=f"{API_V1_PREFIX}/workspaces",
+            tags=("workspaces",),
+            route_key="workspaces",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.workspace_data_tables",
+            log_name="workspace_data_tables",
+            prefix=f"{API_V1_PREFIX}/workspaces",
+            tags=("workspaces",),
+            route_key="workspaces",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.workspaces",
             log_name="workspaces",
             prefix=f"{API_V1_PREFIX}/workspaces",

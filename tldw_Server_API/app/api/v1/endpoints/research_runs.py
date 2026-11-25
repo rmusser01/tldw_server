@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 import tldw_Server_API.app.core.Workflows.research_wait_bridge as _research_wait_bridge
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_expected_user_if_present
+from tldw_Server_API.app.api.v1.API_Deps.research_deps import get_research_service
 from tldw_Server_API.app.api.v1.schemas.research_runs_schemas import (
     ResearchArtifactResponse,
     ResearchCheckpointPatchApproveRequest,
@@ -33,11 +34,6 @@ from tldw_Server_API.app.core.testing import is_test_mode
 
 router = APIRouter(prefix="/research", tags=["research-runs"])
 _RESEARCH_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
-
-
-def get_research_service() -> ResearchService:
-    """Return the default deep research service."""
-    return ResearchService(research_db_path=None, outputs_dir=None, job_manager=None)
 
 
 def _raise_research_http_error(exc: Exception) -> None:

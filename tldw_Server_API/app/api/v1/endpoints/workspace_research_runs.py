@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_expected_user_if_present
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints.research_runs import get_research_service
+from tldw_Server_API.app.api.v1.API_Deps.research_deps import get_research_service
 from tldw_Server_API.app.api.v1.schemas.research_runs_schemas import ResearchWorkspaceRunResponse
 from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,

@@ -19,17 +19,14 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     require_expected_user_if_present,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.data_tables_deps import data_tables_jobs_queue, get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.endpoints.data_tables import (
-    _data_tables_jobs_queue,
-    _table_summary_from_row,
-    get_job_manager,
-)
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import (
     DATA_TABLES_MAX_ROWS_LIMIT,
     DataTableColumnHint,
     DataTableGenerateResponse,
 )
+from tldw_Server_API.app.api.v1.utils.data_tables_responses import table_summary_from_row
 from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
@@ -150,7 +147,7 @@ def get_workspace_data_table_capability(
     try:
         if workspace.get("archived") or workspace.get("native_chat_admission_closed"):
             raise DataTablesJobError("workspace_closed", retryable=False)
-        _check_route(route, jm, _data_tables_jobs_queue())
+        _check_route(route, jm, data_tables_jobs_queue())
     except DataTablesJobError as exc:
         reason = str(exc)
     return WorkspaceDataTableCapability(
@@ -218,7 +215,7 @@ def _admit_table(
     db: CharactersRAGDB, media: Any, jm: JobManager, request: Request, workspace_id: str,
     owner: str, table_uuid: str, key: str, payload: WorkspaceDataTableRequest,
 ) -> WorkspaceDataTableAdmission:
-    queue = _data_tables_jobs_queue()
+    queue = data_tables_jobs_queue()
     table = media.get_data_table_by_uuid(table_uuid, include_deleted=True, owner_user_id=owner)
     stored = None
     if table:
@@ -301,7 +298,7 @@ def _admit_table(
     if any(bound.get(field) != value for field, value in current.items() if field != "attempt"):
         raise DataTablesJobError("workspace_table_operation_conflict", retryable=False)
     return WorkspaceDataTableAdmission(
-        table=_table_summary_from_row(table, source_count=len(payload.sources), column_count=0),
+        table=table_summary_from_row(table, source_count=len(payload.sources), column_count=0),
         job_id=job["id"], job_uuid=job["uuid"], status=job["status"], publication_status=publication_status,
         published_version=(job.get("result") or {}).get("table_version") if publication_status == "ready" else None,
     )

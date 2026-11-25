@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints import data_tables, workspaces
+from tldw_Server_API.app.api.v1.endpoints import data_tables, workspace_data_tables
 from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
@@ -45,7 +45,7 @@ def owner(tmp_path, monkeypatch, data_tables_app_factory):
         "workspace-a", {"id": "source-1", "media_id": media_id, "title": "Selected source", "selected": True}
     )
     app, jobs_path = data_tables_app_factory(path)
-    app.include_router(workspaces.router, prefix="/api/v1/workspaces")
+    app.include_router(workspace_data_tables.router, prefix="/api/v1/workspaces")
     jobs = JobManager(jobs_path, backend="sqlite")
     app.dependency_overrides[data_tables.get_job_manager] = lambda: jobs
     app.dependency_overrides[get_chacha_db_for_user] = lambda: cha

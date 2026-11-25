@@ -4,15 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import threading
 import time
 import uuid
-from pathlib import Path
 from typing import Any, Union
 from uuid import UUID
 
-from cachetools import LRUCache
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
 
@@ -26,6 +22,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     require_expected_user_if_present,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.data_tables_deps import data_tables_jobs_queue, get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import (
     DataTableColumn,
@@ -51,6 +48,10 @@ from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import (
     FileCreateOptions,
     FileCreateRequest,
     FileExportRequest,
+)
+from tldw_Server_API.app.api.v1.utils.data_tables_responses import (
+    parse_json_value as _parse_json_value,
+    table_summary_from_row as _table_summary_from_row,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
@@ -87,16 +88,8 @@ from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 
 router = APIRouter(dependencies=[Depends(require_expected_user_if_present)], prefix="/data-tables", tags=["data-tables"])
 
-MAX_CACHED_JOB_MANAGER_INSTANCES = 4
 DATA_TABLE_GENERATION_FAILED_DETAIL = "Data table generation failed"
-_job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES)
-_job_manager_lock = threading.Lock()
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
-
-
-def _data_tables_jobs_queue() -> str:
-    """Return the configured jobs queue for data tables workers."""
-    return (os.getenv("DATA_TABLES_JOBS_QUEUE") or "default").strip() or "default"
 
 
 def _file_artifacts_http_exception(exc: FileArtifactsError) -> HTTPException:
@@ -127,42 +120,6 @@ def _mark_data_table_generate_failed(
         )
     except Exception:
         logger.debug("data_tables.generate: failed to mark table as failed")
-
-
-def get_job_manager() -> JobManager:
-    """Return a cached JobManager instance keyed by JOBS_DB_URL or JOBS_DB_PATH."""
-    db_url = (os.getenv("JOBS_DB_URL") or "").strip()
-    db_path = (os.getenv("JOBS_DB_PATH") or "").strip()
-    cache_key = f"url:{db_url}" if db_url else f"path:{db_path or 'default'}"
-    with _job_manager_lock:
-        cached = _job_manager_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        if db_url:
-            backend = "postgres" if db_url.startswith("postgres") else None
-            job_manager = JobManager(backend=backend, db_url=db_url)
-        elif db_path:
-            job_manager = JobManager(db_path=Path(db_path))
-        else:
-            job_manager = JobManager()
-
-        _job_manager_cache[cache_key] = job_manager
-        return job_manager
-
-
-def _parse_json_value(raw: str | None) -> Any:
-    """Parse a JSON string when possible, otherwise return the original value."""
-    if raw is None:
-        return None
-    if not isinstance(raw, str):
-        return raw
-    if not raw.strip():
-        return None
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return raw
 
 
 def _model_dump(obj: Any) -> dict[str, Any]:
@@ -223,37 +180,6 @@ def _resolve_owner_id(principal: AuthPrincipal, current_user: User) -> int | str
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="owner_user_id_invalid",
-    )
-
-
-def _table_summary_from_row(
-    row: dict[str, Any],
-    *,
-    column_count: int | None = None,
-    source_count: int | None = None,
-) -> DataTableSummary:
-    """Build a DataTableSummary response from a database row."""
-    return DataTableSummary(
-        uuid=str(row.get("uuid") or ""),
-        name=str(row.get("name") or ""),
-        description=row.get("description"),
-        workspace_tag=row.get("workspace_tag"),
-        prompt=str(row.get("prompt") or ""),
-        column_hints=_parse_json_value(row.get("column_hints_json")),
-        status=str(row.get("status") or ""),
-        row_count=int(row.get("row_count") or 0),
-        column_count=column_count
-        if column_count is not None
-        else row.get("column_count"),
-        generation_model=row.get("generation_model"),
-        last_error=row.get("last_error"),
-        created_at=row.get("created_at"),
-        updated_at=row.get("updated_at"),
-        last_modified=row.get("last_modified"),
-        version=int(row.get("version")) if row.get("version") is not None else None,
-        source_count=source_count
-        if source_count is not None
-        else row.get("source_count"),
     )
 
 
@@ -483,7 +409,7 @@ async def generate_data_table(
     table_id = None
     table_uuid = None
     owner_user_id = _resolve_owner_id(principal, current_user)
-    reservation = {"key": str(uuid.uuid4()), "owner": str(current_user.id), "queue": _data_tables_jobs_queue()}
+    reservation = {"key": str(uuid.uuid4()), "owner": str(current_user.id), "queue": data_tables_jobs_queue()}
     generation_job = json.dumps(reservation, sort_keys=True)
 
     try:
@@ -1170,7 +1096,7 @@ async def regenerate_data_table(
     if prompt_override == "":
         prompt_override = None
 
-    reservation = {"key": str(uuid.uuid4()), "owner": str(current_user.id), "queue": _data_tables_jobs_queue()}
+    reservation = {"key": str(uuid.uuid4()), "owner": str(current_user.id), "queue": data_tables_jobs_queue()}
     payload: dict[str, Any] = {
         PROTOCOL_KEY: 1,
         "generation_key": reservation["key"],
