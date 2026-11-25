@@ -607,6 +607,22 @@ def f_bound(root: ast.AST, key: Any) -> set[str]:
     return out
 
 
+def loop_above(fn: Any, target: ast.stmt) -> ast.stmt | None:
+    """The innermost ``for``/``while`` statement that encloses ``target`` inside ``fn``, if any."""
+
+    def walk(block: list[ast.stmt], loop: ast.stmt | None) -> tuple[bool, ast.stmt | None]:
+        for st in block:
+            if st is target:
+                return True, loop
+            for sub in child_blocks(st):
+                found, lp = walk(sub, st if isinstance(st, (ast.For, ast.AsyncFor, ast.While)) else loop)
+                if found:
+                    return True, lp
+        return False, None
+
+    return walk(fn.body, None)[1]
+
+
 def check_args(mv: Move, fn: Any, key: Any, ctx: list[str], lifted: set[str]) -> list[str]:
     """V3: a name a span takes as a parameter is a local of the function that the span reads and never rebinds."""
     errs: list[str] = []
@@ -1409,6 +1425,9 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             out.errors.append(f"V6: {name} overlaps a move span")
         if any(isinstance(x, ast.Nonlocal) and any(n2 not in rewrite for n2 in x.names) for x in ast.walk(d)):
             out.errors.append(f"V6: {name} has a nonlocal outside rewrite")
+    if is_sibling(m):  # a loop could run a moved or lifted statement again after code that reads its result
+        out.errors += [f"V1: {mv.name}: the span sits inside the loop at line {lp.lineno}; moves are refused in loops" for mv in moves if (lp := loop_above(fn, mv.members[0]))]
+        out.errors += [f"V1: lifted {lf.name} sits inside the loop at line {lp.lineno}; lifts are refused in loops" for lf in lifts if (lp := loop_above(fn, lf.node))]
     for mv in moves:
         out.errors += check_span(mv, notes)
         out.errors += check_args(mv, fn, key, ctx_names(m), {lf.name for lf in lifts})

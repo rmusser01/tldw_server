@@ -2016,3 +2016,17 @@ def test_lift_refuses_a_comparison_of_a_lifted_name(tmp_path: Path, capsys: pyte
     src = LIFT_BASE.replace("register(_note)", f"register({cmp})")
     t = lift_tree(tmp_path, src)
     assert t.run("apply") == 1 and "is compared with" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("loop", ["for i in range(2):", "while cst.go:", "async for i in cst.items:"])
+def test_moves_and_lifts_inside_a_loop_are_refused(tmp_path: Path, capsys: pytest.CaptureFixture, loop: str) -> None:
+    src = ENTRY_BASE.replace("        x = os.getenv", "        x = os.getenv", 1)
+    lines = src.split("\n")
+    a, b = row(src, "def _note"), row(src, "_note(x)")
+    body = [("    " + ln if ln.strip() else ln) for ln in lines[a - 1 : b]]
+    src = "\n".join(lines[: a - 1] + [f"    {loop}"] + body + lines[b:])
+    mv = {"name": "step", "module": "stage_b", "span": [row(src, "x = os"), row(src, "_note(x)")]}
+    t = sib_tree(tmp_path, src, lift={"_note": "stage_a"}, moves=[mv])
+    assert t.run("apply") == 1
+    out = capsys.readouterr().out
+    assert "step: the span sits inside the loop" in out and "lifted _note sits inside the loop" in out
