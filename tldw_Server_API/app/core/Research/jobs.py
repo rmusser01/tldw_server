@@ -142,7 +142,7 @@ def enqueue_research_phase_job(
     phase_dispatch: dict[str, Any] | None = None,
     continuation: bool = False,
 ) -> dict[str, Any]:
-    """Create a core Jobs entry for a research session phase."""
+    """Submit a research phase, recovering an already committed initial dispatch."""
     payload = {
         "session_id": session_id,
         "phase": phase,
@@ -152,6 +152,7 @@ def enqueue_research_phase_job(
     }
     suffix = ""
     admission = {}
+    lookup = None
     if phase_dispatch is not None:
         dispatch = read_phase_dispatch(phase_dispatch)
         if dispatch["phase"] != phase or payload_overrides:
@@ -170,6 +171,8 @@ def enqueue_research_phase_job(
         checkpoint_id = dispatch["checkpoint_id"]
         policy_version = dispatch["policy_version"]
         suffix = ":" + dispatch["dispatch_id"]
+        if phase == "drafting_plan" and dispatch["authorization"] == "initial":
+            lookup = getattr(jm, "get_job_or_archived_by_idempotency_key", None)
         if continuation:
             if not dispatch["predecessor_job_uuid"]:
                 raise ValueError("research_continuation_requires_predecessor")
@@ -178,16 +181,22 @@ def enqueue_research_phase_job(
         raise ValueError("research_continuation_requires_dispatch")
     if isinstance(payload_overrides, dict):
         payload.update(payload_overrides)
-    return jm.create_job(
-        domain=RESEARCH_DOMAIN,
-        queue=RESEARCH_QUEUE,
-        job_type=RESEARCH_JOB_TYPE,
-        payload=payload,
-        owner_user_id=str(owner_user_id),
-        priority=priority,
-        idempotency_key=f"research:{session_id}:{phase}:{checkpoint_id or 'none'}:{policy_version}{suffix}",
-        **admission,
-    )
+    identity = {
+        "domain": RESEARCH_DOMAIN,
+        "queue": RESEARCH_QUEUE,
+        "job_type": RESEARCH_JOB_TYPE,
+        "owner_user_id": str(owner_user_id),
+        "idempotency_key": f"research:{session_id}:{phase}:{checkpoint_id or 'none'}:{policy_version}{suffix}",
+    }
+    if lookup is not None and (existing := lookup(**identity)) is not None:
+        return existing
+    try:
+        return jm.create_job(payload=payload, priority=priority, **identity, **admission)
+    except ValueError:
+        # A concurrent enqueue may have committed before the admission policy rejected this call.
+        if lookup is not None and (existing := lookup(**identity)) is not None:
+            return existing
+        raise
 
 
 async def handle_research_phase_job(

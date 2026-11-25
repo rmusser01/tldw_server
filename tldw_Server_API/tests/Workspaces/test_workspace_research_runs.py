@@ -171,3 +171,37 @@ def test_retry_replays_committed_native_dispatch_after_interruption(owner, monke
     ordinary = owner.client.post(RUNS, json={"query": "An ordinary run"})
     assert ordinary.status_code == 200
     assert owner.client.get(f"{RUNS}/{ordinary.json()['id']}").json().get("workspace_launch") is None
+
+
+@pytest.mark.parametrize("lost_acknowledgement", (True, False), ids=("lost-response", "competing-admission"))
+def test_workspace_phase_recovers_exact_job_at_fair_share_limit(owner, monkeypatch, lost_acknowledgement):
+    monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+    create_job = owner.manager.create_job
+    committed = []
+
+    def commit_then_interrupt(**kwargs):
+        committed.append(create_job(**kwargs))
+        if lost_acknowledgement:
+            raise RuntimeError("Committed Jobs response was lost")
+        # A competing request committed after our lookup, filling the last slot.
+        return create_job(**kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(owner.manager, "create_job", commit_then_interrupt)
+        response = owner.client.post(ROOT, json=_launch())
+    database = owner.service._db_for_user("1")
+    [session] = database.list_sessions("1")
+    [job] = committed
+    if lost_acknowledgement:
+        assert response.status_code == 500
+        assert session.status == "queued" and session.active_job_id is None
+        response = owner.client.post(ROOT, json=_launch())
+
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == session.id
+    recovered = database.get_session(session.id)
+    assert recovered.status == "queued"
+    assert recovered.active_job_id == str(job["id"])
+    assert recovered.phase_dispatch_json["job_uuid"] == job["uuid"]
+    [stored] = owner.manager.list_jobs(domain="research", owner_user_id="1")
+    assert stored["uuid"] == job["uuid"] and stored["status"] == "queued"
