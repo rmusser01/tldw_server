@@ -162,7 +162,7 @@ describe("WizardResultsStep navigation buttons", () => {
     render(<WizardResultsStep onClose={vi.fn()} onRetryItems={onRetryItems} />)
     expect(screen.getByText("Daily upload limit")).toBeVisible()
     expect(screen.getByText(/administrator/)).toBeVisible()
-    fireEvent.click(screen.getByRole("button", { name: "Retry quota.txt", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry quota.txt" }))
     expect(onRetryItems).toHaveBeenCalledWith(["quota"])
   })
 

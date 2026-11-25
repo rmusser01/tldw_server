@@ -75,8 +75,8 @@ describe("createSidepanelOpenOnceGuard", () => {
 
 describe("createBackgroundStatusBroadcaster", () => {
   const deps = vi.hoisted(() => ({
-    openSidepanel: vi.fn(async () => undefined),
-    sendMessage: vi.fn(async () => ({ handled: true })),
+    openSidepanel: vi.fn(async (_tabId?: number) => undefined),
+    sendMessage: vi.fn(async (_message: unknown) => ({ handled: true })),
     logError: vi.fn()
   }))
 
@@ -91,8 +91,8 @@ describe("createBackgroundStatusBroadcaster", () => {
     deps.sendMessage.mockResolvedValue({ handled: true })
     deps.openSidepanel.mockResolvedValue(undefined)
     broadcaster = createBackgroundStatusBroadcaster({
-      openSidepanel: (tabId) => deps.openSidepanel(tabId),
-      sendMessage: (message) => deps.sendMessage(message),
+      openSidepanel: deps.openSidepanel,
+      sendMessage: deps.sendMessage,
       logError: deps.logError
     })
   })

@@ -51,7 +51,7 @@ describe("TldwApiClient prototype ownership (stage 3 guard)", () => {
           continue
         }
         expect(
-          TldwApiClient.prototype[key as keyof TldwApiClient.prototype],
+          TldwApiClient.prototype[key as keyof typeof TldwApiClient.prototype],
           `${name}.${String(key)} must own the prototype slot`,
         ).toBe(methods[key])
       }

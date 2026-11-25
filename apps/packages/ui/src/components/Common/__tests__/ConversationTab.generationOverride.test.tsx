@@ -1,6 +1,7 @@
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useStoreMessageOption } from "@/store/option"
+import type { ChatSettingsRecord } from "@/types/chat-session-settings"
 import { useQuery } from "@tanstack/react-query"
 import {
   fireEvent,
@@ -102,6 +103,19 @@ describe("ConversationTab generation override controls", () => {
     scope: { type: "workspace" as const, workspaceId: "W" },
     validate_lease: () => current
   }
+  const buildSettingsRecord = (overrides: Partial<ChatSettingsRecord>): ReturnType<typeof useChatSettingsRecord> => ({
+    settings: { schemaVersion: 2, updatedAt: "2026-10-08T00:00:00Z", ...overrides },
+    updateSettings,
+    chatKey: "chat:test",
+    target,
+    captureTarget: () => target,
+    isReady: ready,
+    isCurrent: () => current,
+    mode: "ordinary",
+    settingsRecovery: null,
+    settingsRecoveryError: null,
+    refreshRecovery: async () => {}
+  })
   type DraftStatus = { dirty: boolean; pending: boolean; revision: number }
   const buildQueryResult = (overrides: Record<string, unknown> = {}) =>
     ({
@@ -163,20 +177,9 @@ describe("ConversationTab generation override controls", () => {
       serverChatVersion: 4
     })
     vi.mocked(useQuery).mockReturnValue(buildQueryResult())
-    vi.mocked(useChatSettingsRecord).mockReturnValue({
-      settings: {
-        chatGenerationOverride: {
-          enabled: false
-        }
-      },
-      updateSettings,
-      chatKey: "chat:test",
-      target,
-      captureTarget: () => target,
-      isReady: ready,
-      isCurrent: () => current,
-      mode: "ordinary"
-    } as any)
+    vi.mocked(useChatSettingsRecord).mockReturnValue(
+      buildSettingsRecord({ chatGenerationOverride: { enabled: false } })
+    )
   })
 
   const renderConversationTab = (
@@ -451,30 +454,14 @@ describe("ConversationTab generation override controls", () => {
   })
 
   it("keeps edited fields through external hydration and applies only the changed generation field", async () => {
-    vi.mocked(useChatSettingsRecord).mockReturnValue({
-      settings: {
-        schemaVersion: 2,
-        updatedAt: "2026-10-08T00:00:00Z",
-        chatGenerationOverride: {
-          enabled: true,
-          temperature: 0.7,
-          top_p: 0.9,
-          stop: ["END"]
-        }
-      },
-      updateSettings,
-      chatKey: "chat:test",
-      target,
-      captureTarget: () => target,
-      isReady: true,
-      isCurrent: () => current,
-      mode: "ordinary"
-    } as ReturnType<typeof useChatSettingsRecord>)
+    const record = buildSettingsRecord({
+      chatGenerationOverride: { enabled: true, temperature: 0.7, top_p: 0.9, stop: ["END"] }
+    })
+    vi.mocked(useChatSettingsRecord).mockReturnValue(record)
     const view = renderConversationTab()
     const section = screen.getByTestId("chat-generation-override")
     const number = within(section).getAllByRole("spinbutton")[0]
     fireEvent.change(number, { target: { value: "0" } })
-    const record = vi.mocked(useChatSettingsRecord).mock.results.at(-1)?.value
     vi.mocked(useChatSettingsRecord).mockReturnValue({
       ...record,
       settings: {

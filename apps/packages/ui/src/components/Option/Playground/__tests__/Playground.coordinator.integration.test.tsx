@@ -231,7 +231,7 @@ const messageOptionState = vi.hoisted(() => ({
     streaming: false,
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
-    setSelectedAssistant: vi.fn(async () => true),
+    setSelectedAssistant: vi.fn(async (_selection: AssistantSelection | null) => true),
     compareMode: false,
     compareFeatureEnabled: false
   }
@@ -976,7 +976,7 @@ describe("Playground coordinator integration", () => {
     try {
       await waitFor(() => {
         expect(observedSelection?.status).toBe("ready")
-        expect(observedSelection?.getCurrent().owner?.conversation_id).toBe("robot")
+        expect(observedSelection?.getCurrent().owner).toMatchObject({ conversation_id: "robot" })
         expect(useStoreMessageOption.getState().chatDraftAddress).toMatchObject({ kind: "native", id: "robot" })
       })
       const parent = useStoreMessageOption.getState()
@@ -1483,8 +1483,8 @@ describe("Playground coordinator integration", () => {
     tldwClientState.captureHistorySelection.mockClear();
     useMessageOptionMock.mockImplementation(useRealServerConversation);
     window.history.replaceState({}, '', '/chat?mode=character&characterId=4');
-    const messages = [{ id: 'ordinary-local', message: 'Keep my saved conversation', isBot: false }];
-    const history = [{ role: 'user', content: 'Keep my saved conversation' }];
+    const messages = [{ id: 'ordinary-local', message: 'Keep my saved conversation', isBot: false, name: 'You', sources: [] }];
+    const history = [{ role: 'user' as const, content: 'Keep my saved conversation' }];
     useStoreMessageOption.setState({
       serverChatId: 'ordinary',
       historyId: null,
