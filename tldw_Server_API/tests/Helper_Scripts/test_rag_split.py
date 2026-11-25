@@ -1083,7 +1083,7 @@ def test_is_pkg_uses_the_manifests_package_name() -> None:
 # --- fix round 1: refusals ---
 
 
-@pytest.mark.parametrize("key", ["lift", "entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"])
+@pytest.mark.parametrize("key", ["entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"])
 def test_part_2_and_3_manifest_keys_are_refused(tmp_path: Path, key: str) -> None:
     t = Tree(tmp_path, **{key: {}})
     with pytest.raises(rag_split.SplitError, match=rf"{key}.*not supported yet \(TASK-13950.25 part 2/3\)"):
@@ -1365,4 +1365,157 @@ def test_sibling_refuses_a_missing_destination(tmp_path: Path, capsys: pytest.Ca
 def test_sibling_refuses_the_keys_that_need_a_state_module(tmp_path: Path, key: str) -> None:
     t = sib_tree(tmp_path, moves=[sib_move()], **{key: {"a": 1} if key not in ("prologue", "state_init", "entry_split", "publish") else ("x = 1" if key != "entry_split" else True)})
     with pytest.raises(rag_split.SplitError):
+        rag_split.load_manifest(t.manifest_path)
+
+
+# --- lift (depth 1, R10) ---
+
+LIFT_BASE = textwrap.dedent(
+    '''\
+    import os
+    import time
+    from typing import Any
+
+    LIMIT = 5
+
+
+    def audit(*args):
+        return args
+
+
+    def register(fn):
+        return fn
+
+
+    async def call(a):
+        """Doc."""
+        cst = make(a)
+
+        def _note(msg: Any) -> int:
+            """Note."""
+            cst.log.append(audit(msg, LIMIT))
+            return cst.count
+
+        async def _outer(msg):
+            _note(msg)
+            return await audit(_note)
+
+        x = os.getenv("A")
+        t0 = time.time()
+        _note(x)
+        register(_note)
+        y = await _outer(t0)
+        return cst
+    '''
+)
+
+
+def lift_tree(tmp: Path, src: str = LIFT_BASE, lift: dict | None = None, moves_: list[dict] | None = None, **extra: object) -> Tree:
+    lift = {"_note": "stage_a", "_outer": "stage_a"} if lift is None else lift
+    return sib_tree(tmp, src, lift=lift, moves=moves_ or [], **extra)
+
+
+def test_lift_makes_a_module_function_and_leaves_a_partial(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = lift_tree(tmp_path)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    stage = t.text("mini/stage_a.py")
+    assert 'def _note(cst: "Call", msg: Any) -> int:\n    """Note."""\n    cst.log.append(cs.audit(msg, cs.LIMIT))' in stage
+    assert 'async def _outer(cst: "Call", msg):\n    _note(cst, msg)\n    return await cs.audit(functools.partial(_note, cst))' in stage
+    assert stage.index("def _note(") < stage.index("def _outer(") < stage.index(LATE)
+    assert "import functools\n" in stage
+    head = t.text(SIB_FILE)
+    assert "_note = functools.partial(_stage_a._note, cst)" in head and "_outer = functools.partial(_stage_a._outer, cst)" in head
+    assert "def _note" not in head and "register(_note)" in head and "await _outer(t0)" in head
+    assert "import functools\n" in head and "from mini import stage_a as _stage_a" in head
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_a_move_reads_a_lifted_name_through_the_module_that_holds_it(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = LIFT_BASE
+    for module, call in (("stage_a", "_note(cst, x)"), ("stage_b", "_stage_a._note(cst, x)")):
+        t = lift_tree(tmp_path / module, src, moves_=[{"name": "step", "module": module, "span": [row(src, "x = os"), row(src, "y = await")]}])
+        assert t.run("apply") == 0, capsys.readouterr().out
+        body = t.text(f"mini/{module}.py")
+        assert call in body and "functools.partial(" + ("_note" if module == "stage_a" else "_stage_a._note") + ", cst)" in body
+        assert t.run("verify") == 0, capsys.readouterr().out
+    other = t.text("mini/stage_b.py")
+    assert other.index("from mini import stage_a as _stage_a") < other.index("from mini import chat_service as cs")
+
+
+def test_a_lift_inside_a_move_is_applied_first(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    span = [row(LIFT_BASE, "def _note"), row(LIFT_BASE, "y = await")]
+    # same module as the move: the partial would be an unbound local, so the def goes and every read is rewritten
+    t = lift_tree(tmp_path / "same", lift={"_note": "stage_a", "_outer": "stage_a"}, moves_=[{"name": "step", "module": "stage_a", "span": span}])
+    assert t.run("apply") == 0, capsys.readouterr().out
+    step = t.text("mini/stage_a.py").split("def step(")[1]
+    assert "_note = " not in step and "_outer = " not in step and "_note(cst, x)" in step and "await _outer(cst, t0)" in step
+    assert t.run("verify") == 0, capsys.readouterr().out
+    # another module: the partial stays at the def's place, and the reads in that move keep using it
+    t = lift_tree(tmp_path / "other", lift={"_note": "stage_a", "_outer": "stage_a"}, moves_=[{"name": "step", "module": "stage_b", "span": span}])
+    assert t.run("apply") == 0, capsys.readouterr().out
+    step = t.text("mini/stage_b.py").split("def step(")[1]
+    assert "_note = functools.partial(_stage_a._note, cst)" in step and "\n    _note(x)" in step and "await _outer(t0)" in step
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "needle"),
+    [
+        ("return cst.count", "return a", "V11: lifted _note reads a"),
+        ("def _note(msg: Any) -> int:", "def _note(msg: Any, extra=LIMIT) -> int:", "V12"),
+        ("        return cst.count\n", "        nonlocal x\n        return cst.count\n", "V11: lifted _note declares nonlocal"),
+        ("cst.log.append(audit(msg, LIMIT))", "cst.log.append(__name__)", "V1: lifted _note reads __name__"),
+        ("    x = os.getenv", "    _note = 1\n    x = os.getenv", "V11: _note has a second binding"),
+        ("register(_note)", "_note.flush = 1\n    _outer.flush = 2", "V11: line"),
+    ],
+)
+def test_lift_refusals(tmp_path: Path, capsys: pytest.CaptureFixture, old: str, new: str, needle: str) -> None:
+    src = LIFT_BASE.replace(old, new, 1)
+    t = lift_tree(tmp_path, src, moves_=[{"name": "step", "module": "stage_b", "span": [row(src, "x = os"), row(src, "y = await")]}] if "flush" in new else None)
+    got = t.run("apply")
+    out = capsys.readouterr().out
+    assert got == 1 and needle in out, out
+
+
+def test_lift_refuses_a_missing_def_and_a_clash(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = lift_tree(tmp_path / "a", lift={"_nope": "stage_a"})
+    assert t.run("apply") == 1 and "V11: expected one def _nope" in capsys.readouterr().out
+    t = lift_tree(tmp_path / "b", dests={"stage_a": STAGE_A + "\n\ndef _note():\n    pass\n", "stage_b": STAGE_B}, lift={"_note": "stage_a"})
+    assert t.run("apply") == 1 and "V10: stage_a.py already binds _note" in capsys.readouterr().out
+
+
+def test_lift_decorators_and_defaults_must_not_read_the_facade(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = LIFT_BASE.replace("def _note(msg: Any) -> int:", "def _note(msg: Any, n=LIMIT) -> int:")
+    t = lift_tree(tmp_path / "d", src, lift={"_note": "stage_a"})
+    assert t.run("apply") == 1 and "V12" in capsys.readouterr().out
+    src = LIFT_BASE.replace("        def _note(msg: Any) -> int:", "        @register\n        def _note(msg: Any) -> int:")
+    src = LIFT_BASE.replace("    def _note(msg: Any) -> int:", "    @audit\n    def _note(msg: Any) -> int:")
+    t = lift_tree(tmp_path / "e", src, lift={"_note": "stage_a"})
+    assert t.run("apply") == 1 and "V12" in capsys.readouterr().out
+
+
+def test_lift_annotations_may_read_the_facade_only_under_the_future_import(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = LIFT_BASE.replace("def _note(msg: Any) -> int:", "def _note(msg: Any) -> LIMIT:")
+    t = lift_tree(tmp_path / "with", src, lift={"_note": "stage_a"})
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert "-> cs.LIMIT:" in t.text("mini/stage_a.py") and t.run("verify") == 0
+    no_future = STAGE_A.replace("from __future__ import annotations\n\n", "")
+    t = lift_tree(tmp_path / "without", src, dests={"stage_a": no_future, "stage_b": STAGE_B}, lift={"_note": "stage_a"})
+    assert t.run("apply") == 1 and "V13: stage_a.py has no `from __future__ import annotations`" in capsys.readouterr().out
+
+
+def test_lift_verify_rejects_an_unrewritten_read_and_a_missing_partial(tmp_path: Path) -> None:
+    t = lift_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "_note(cst, msg)", "_note(msg)")
+    assert t.run("verify") == 1
+    t = lift_tree(tmp_path / "b")
+    assert t.run("apply") == 0
+    _edit(t, SIB_FILE, "_note = functools.partial(_stage_a._note, cst)", "pass")
+    assert t.run("verify") == 1
+
+
+def test_lift_needs_pkg_empty(tmp_path: Path) -> None:
+    t = Tree(tmp_path, lift={"_h": "stage_a"})
+    with pytest.raises(rag_split.SplitError, match="lift needs pkg ''"):
         rag_split.load_manifest(t.manifest_path)

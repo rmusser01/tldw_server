@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
 import difflib
 import io
 import re
@@ -83,7 +84,7 @@ from typing import Any, NamedTuple
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
-PART2_KEYS = {"lift", "entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"}
+PART2_KEYS = {"entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"}
 PART3_KEYS = {"rewrite_in", "free_imports", "relocate"}
 MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals"}
 LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
@@ -398,6 +399,11 @@ def load_manifest(path: Path) -> dict[str, Any]:
                 bad = [k for k in ("publish", "hoist", "classes", "entry_split", "prologue", "state_init", "hidden") if m[k]]
                 if bad:
                     raise SplitError(f"{path}: {bad} are not supported when pkg is '' (destinations are siblings of the source)")
+            if m["lift"]:
+                if m["pkg"] != "":
+                    raise SplitError(f"{path}: lift needs pkg '' (the destination modules are siblings of the source)")
+                if not isinstance(m["lift"], dict) or not all(isinstance(k, str) and isinstance(v, str) and v for k, v in m["lift"].items()):
+                    raise SplitError(f"{path}: lift must map a def name to a module name")
             if m["publish"] and m["facade"] == "cs":
                 raise SplitError(f"{path}: publish is refused when facade is 'cs' (R6)")
             if not m["ctx"] or any(not (isinstance(c, list) and len(c) == 2 and all(isinstance(x, str) for x in c)) for c in m["ctx"]):
@@ -971,6 +977,7 @@ class Built:
         self.dests: set[str] = set()  # sibling mode: every destination module the manifest names
         self.src_mods: list[str] = []  # sibling mode: destination aliases the source still reads
         self.src_functools = False
+        self.lifted: set[tuple[str, str]] = set()
 
 
 def spans_for_cells(m: dict, src: Src) -> list[tuple[str, list[ast.stmt]]]:
@@ -979,6 +986,184 @@ def spans_for_cells(m: dict, src: Src) -> list[tuple[str, list[ast.stmt]]]:
         _, members = locate(src.fn, a, b)
         spans.append((f"{a}-{b}", members))
     return spans
+
+
+# --------------------------------------------------------------------------------------------------
+# lifting nested defs to module functions (R10)
+# --------------------------------------------------------------------------------------------------
+
+
+class Lift:
+    """A def nested directly in the function, becoming ``<module>.<name>(cst, ...)``."""
+
+    def __init__(self, name: str, module: str) -> None:
+        self.name, self.module = name, module
+        self.node: Any = None
+        self.block: list[ast.stmt] = []
+        self.defregion: Move | None = None  # the move whose span holds the def; None: the rest of the function
+
+
+class Regions:
+    """Where a line of the function ends up: a lift body, a move body, or the rest (the entry body, or the source)."""
+
+    def __init__(self, moves: list[Move], lifts: list[Lift], rest_module: str) -> None:
+        self.moves, self.lifts, self.rest_module = moves, lifts, rest_module
+
+    def of(self, line: int) -> Any:
+        for lf in self.lifts:
+            if stmt_start(lf.node) <= line <= lf.node.end_lineno:
+                return lf
+        inner = [x for x in self.moves if x.a <= line <= x.b]
+        return min(inner, key=lambda x: x.b - x.a) if inner else None
+
+    def module(self, region: Any) -> str:
+        return self.rest_module if region is None else region.module
+
+    def ref(self, lf: Lift, line: int) -> str | None:
+        """The text that replaces a read of the lifted name at ``line``; None when the def site's partial still binds it.
+
+        A partial can bind the name only in code that lives outside the lifted function's module: inside it the
+        assignment ``f = partial(f, cst)`` would make ``f`` an unbound local, so there the reads are rewritten instead.
+        """
+        r = self.of(line)
+        here = self.module(r)
+        if r is lf.defregion and not isinstance(r, Lift) and lf.module != self.module(lf.defregion):
+            return None
+        return lf.name if lf.module == here else f"_{lf.module}.{lf.name}"
+
+
+def plan_lifts(m: dict, src: Src, moves: list[Move]) -> tuple[list[Lift], list[str]]:
+    fn, key = src.fn, src.key
+    errs: list[str] = []
+    lifts: list[Lift] = []
+    for name, module in m["lift"].items():
+        lf = Lift(name, module)
+        hits = [(blk, s) for blk in own_blocks(fn) for s in blk if isinstance(s, DEFS) and s.name == name]
+        if len(hits) != 1:
+            errs.append(f"V11: expected one def {name} directly in {fn.name}, found {len(hits)}")
+            continue
+        lf.block, lf.node = hits[0]
+        if sum(1 for nm, _ in binding_nodes(fn) if nm == name) != 1:
+            errs.append(f"V11: {name} has a second binding in {fn.name}; a lifted name must be bound by its def alone")
+        if any(mv.name == name for mv in moves):
+            errs.append(f"V10: {name} is both a lift and a move")
+        lf.defregion = next(iter(sorted((x for x in moves if x.a <= stmt_start(lf.node) and lf.node.end_lineno <= x.b), key=lambda x: x.b - x.a)), None)
+        lifts.append(lf)
+    allowed = set(ctx_names(m)) | {lf.name for lf in lifts}
+    for lf in lifts:
+        for n in ast.walk(lf.node):
+            if isinstance(n, ast.Name) and is_f(n, key) and n.id not in allowed:
+                errs.append(f"V11: lifted {lf.name} reads {n.id} (line {n.lineno}), which is neither {', '.join(ctx_names(m))} nor a lifted name")
+            elif isinstance(n, ast.Nonlocal) and any(r is key for r in n._rs):  # type: ignore[attr-defined]
+                errs.append(f"V11: lifted {lf.name} declares nonlocal at line {n.lineno}")
+            elif isinstance(n, ast.Name) and n.id in ("__name__", "__file__") and isinstance(n.ctx, ast.Load):
+                errs.append(f"V1: lifted {lf.name} reads {n.id} (line {n.lineno}); it reads a different module after the move")
+            elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "globals" and getattr(n.func, "_r", NEW) is None:
+                errs.append(f"V1: lifted {lf.name} calls globals() (line {n.lineno}); it reads a different module after the move")
+    return lifts, errs
+
+
+class LiftRefs(ast.NodeTransformer):
+    """Reads of a lifted name become ``ref(cst, ...)`` when called and ``functools.partial(ref, cst)`` otherwise."""
+
+    def __init__(self, m: dict, key: Any, lifts: list[Lift], regions: Regions) -> None:
+        self.ctx = ctx_names(m)
+        self.key, self.by_name, self.regions = key, {lf.name: lf for lf in lifts}, regions
+        self.errors: list[str] = []
+
+    def hit(self, n: ast.AST) -> Lift | None:
+        return self.by_name.get(n.id) if isinstance(n, ast.Name) and is_f(n, self.key) and isinstance(n.ctx, ast.Load) else None  # type: ignore[attr-defined]
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        lf = self.hit(node.func)
+        ref = self.regions.ref(lf, node.func.lineno) if lf else None
+        if ref is None:
+            self.generic_visit(node)
+            return node
+        node.args = [self.visit(a) for a in node.args]
+        node.keywords = [self.visit(k) for k in node.keywords]
+        node.func = ast.copy_location(parse_expr(ref), node.func)
+        node.args = [ast.Name(c, ast.Load()) for c in self.ctx] + node.args
+        return node
+
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        lf = self.hit(node)
+        ref = self.regions.ref(lf, node.lineno) if lf else None
+        if ref is None:
+            return node
+        return ast.copy_location(parse_expr(f"functools.partial({ref}, {', '.join(self.ctx)})"), node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+        lf = self.hit(node.value)
+        if lf and self.regions.ref(lf, node.value.lineno) is not None:
+            self.errors.append(f"V11: line {node.lineno}: {lf.name}.{node.attr}; an attribute of a lifted name is not rewritable (no partial binds it here)")
+            return node
+        self.generic_visit(node)
+        return node
+
+
+def lift_edits(fn: Any, key: Any, lines: list[bytes], regions: Regions, lifts: list[Lift], ctx: str) -> list[Edit]:
+    """The text counterpart of ``LiftRefs``."""
+    by_name = {lf.name: lf for lf in lifts}
+    calls = {id(c.func): c for c in ast.walk(fn) if isinstance(c, ast.Call)}
+    out: list[Edit] = []
+    for n in ast.walk(fn):
+        if not (isinstance(n, ast.Name) and is_f(n, key) and n.id in by_name and isinstance(n.ctx, ast.Load)):
+            continue
+        ref = regions.ref(by_name[n.id], n.lineno)
+        if ref is None:
+            continue
+        c = calls.get(id(n))
+        if c is None:
+            out.append(Edit(*pos(n), f"functools.partial({ref}, {ctx})"))
+            continue
+        out.append(Edit(*pos(n), ref))
+        row, col = n.end_lineno, n.end_col_offset
+        if lines[row - 1][col : col + 1] != b"(":
+            raise SplitError(f"line {row}: expected '(' right after {n.id}")
+        out.append(insert_first(lines, row, col + 1, ctx, (c.args + [k for k in c.keywords])[:1]))
+    return out
+
+
+def insert_first(lines: list[bytes], row: int, col: int, text: str, first: list[Any]) -> Edit:
+    """Put ``text`` as the first item of a parameter or argument list that opens at ``(row, col)``."""
+    rest = lines[row - 1][col:].strip()
+    if not first:
+        return Edit(row, col, row, col, text)
+    if rest and not rest.startswith(b"#"):
+        return Edit(row, col, row, col, text + ", ")
+    return Edit(row, col, row, col, f"\n\0{first[0].col_offset}\0{text},")
+
+
+def sig_edit(lines: list[bytes], d: Any, ctx_text: str) -> Edit:
+    """Prepend the ctx parameters to a def's signature."""
+    mt = re.compile(rb"(?:async\s+)?def\s+" + d.name.encode() + rb"\s*\(").match(lines[d.lineno - 1], d.col_offset)
+    if not mt:
+        raise SplitError(f"line {d.lineno}: cannot find the signature of {d.name}")
+    a = d.args
+    has = bool(a.posonlyargs or a.args or a.vararg or a.kwonlyargs or a.kwarg)
+    rest = lines[d.lineno - 1][mt.end() :].strip()
+    if has and not rest:  # the parameters start on the next line
+        nxt = lines[d.lineno]
+        return Edit(d.lineno, mt.end(), d.lineno, mt.end(), f"\n\0{len(nxt) - len(nxt.lstrip(b' '))}\0{ctx_text},")
+    return Edit(d.lineno, mt.end(), d.lineno, mt.end(), ctx_text + (", " if has else ""))
+
+
+def ctx_params(m: dict) -> list[ast.arg]:
+    return ast.parse(f"def _({ctx_sig(m)}): pass").body[0].args.args  # type: ignore[attr-defined]
+
+
+def replace_stmt(old: ast.stmt, new: list[ast.stmt], blocks: list[list[ast.stmt]], moves: list[Move]) -> None:
+    for blk in blocks:
+        for i, x in enumerate(blk):
+            if x is old:
+                blk[i : i + 1] = new
+                break
+    for mv in moves:
+        for i, x in enumerate(mv.members):
+            if x is old:
+                mv.members[i : i + 1] = new
+                break
 
 
 def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -> Built:
@@ -992,6 +1177,9 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         out.errors.append(f"V1: {e}")
         return out
     out.moves = moves
+    lifts, lift_errs = plan_lifts(m, src, moves) if m["lift"] else ([], [])
+    out.errors += lift_errs
+    regions = Regions(moves, lifts, "")
 
     # V8: a name the manifest introduces must not already be used in the function.
     used = fn_names(fn)
@@ -999,12 +1187,13 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     sm, sc = m["state_module"], m["state_class"]
     intro |= {ctx_names(m)[0]} if m["prologue"] else set()
     intro |= {"state", f"_{sm}"} if m["state_init"] else set()
-    intro |= ({m["facade"]} if moves or hoist else set()) | ({f"_{sm}"} if hoist else set()) | {f"_{x.module}" for x in moves}
+    intro |= ({m["facade"]} if moves or hoist or lifts else set()) | ({f"_{sm}"} if hoist else set()) | {f"_{x.module}" for x in moves}
+    intro |= ({"functools"} | {f"_{lf.module}" for lf in lifts}) if lifts else set()
     pro = prologue_stmt(fn, ctx_names(m)[0])
     kept = pro is not None and not m["prologue"] and is_sibling(m)  # the ctx prologue is already in the source (an earlier PR)
-    if moves and m["ctx"] != DEFAULT_CTX:
+    if (moves or lifts) and m["ctx"] != DEFAULT_CTX:
         intro |= set(ctx_names(m)) - ({ctx_names(m)[0]} if kept else set())
-    if kept and moves:
+    if kept and (moves or lifts):
         mine = {id(x) for x in ast.walk(pro)}
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside the prologue statement" for nm, x in binding_nodes(fn) if nm == ctx_names(m)[0] and id(x) not in mine]
     init = [x for x in fn.body[:3] if isinstance(x, ast.Assign) and ast.unparse(x).startswith(f"state = _{sm}.{sc}(")]
@@ -1016,7 +1205,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound outside D1's state statement" for nm, x in binding_nodes(fn) if nm in ("state", f"_{sm}") and id(x) not in mine]
     if is_sibling(m):
         # an alias an earlier manifest already imported into the source may be read again, never rebound
-        reuse = {f"_{x.module}" for x in moves if src.infos.get(f"_{x.module}") == Info("from", pkg_dotted(m), x.module, f"_{x.module}", 0)}
+        reuse = {f"_{x}" for x in {y.module for y in moves} | {lf.module for lf in lifts} if src.infos.get(f"_{x}") == Info("from", pkg_dotted(m), x, f"_{x}", 0)}
         intro -= reuse
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound inside {fn.name}" for nm, x in binding_nodes(fn) if nm in reuse]
     out.errors += [f"V8: {n} is already a name in {fn.name}" for n in sorted(intro & used)]
@@ -1082,6 +1271,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         out.errors += check_span(mv, notes)
     if out.errors:
         return out
+    lifted = tuple(lf.name for lf in lifts)
 
     for s in fn.body:
         Rewriter(key, rewrite, hidden).visit(s)
@@ -1119,8 +1309,34 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # cells and crossings (V4)
     cell_spans = [(mv.name, mv.members) for mv in sorted(moves, key=lambda x: x.a - x.b)]
     if cell_spans:
-        for name, why in sorted(Cells(fn, key, cell_spans, tuple(ctx_names(m))).crossing().items()):
+        for name, why in sorted(Cells(fn, key, cell_spans, tuple(ctx_names(m)) + lifted).crossing().items()):
             out.errors.append(f"V4: crossing local {name}: {'; '.join(why[:2])}")
+
+    # lifts: reads of lifted names first (in every body), then each def becomes a module function and its site a partial
+    lifted_defs: dict[tuple[str, str], Any] = {}
+    if lifts:
+        refs = LiftRefs(m, key, lifts, regions)
+        for st in fn.body:
+            refs.visit(st)
+        out.errors += refs.errors
+        blocks = list(own_blocks(fn))
+        bad = {m["facade"]} | {f"_{x}" for x in {y.module for y in moves} | {lf.module for lf in lifts}}
+        for lf in lifts:
+            d = up.visit(lf.node)
+            a = d.args
+            (a.posonlyargs if a.posonlyargs else a.args)[0:0] = copy.deepcopy(ctx_params(m))
+            heads = d.decorator_list + a.defaults + [x for x in a.kw_defaults if x]
+            if any(isinstance(x, ast.Name) and x.id in bad for r in heads for x in ast.walk(r)):
+                out.errors.append(f"V12: a decorator or default of lifted {lf.name} reads the facade or a module alias; it runs at import, before the late block")
+            site = [] if lf.module == regions.module(lf.defregion) else [ast.parse(f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {call_args(m)})").body[0]]
+            if not site and (len(lf.block) == 1 or (lf.defregion and len(lf.defregion.members) == 1 and lf.defregion.members[0] is lf.node)):
+                out.errors.append(f"V11: lifting {lf.name} would leave its block or move empty")
+            replace_stmt(lf.node, site, blocks, moves)
+            lifted_defs[(lf.module, lf.name)] = d
+        if out.errors:
+            return out
+        out.defs.update(lifted_defs)
+        out.lifted = set(lifted_defs)
 
     # moves, inside out
     for mv in sorted(moves, key=lambda x: x.b - x.a):
@@ -1172,7 +1388,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         fn.body = head + [shim]
         out.entry = new
     if is_sibling(m):
-        out.order = [(mv.module, mv.name) for mv in moves]
+        out.order = list(lifted_defs) + [(mv.module, mv.name) for mv in moves]
         finish_sibling(m, out)
     return out
 
@@ -1911,6 +2127,13 @@ def make_plans(m: dict, src: Src, b: Built, text_of: Any) -> tuple[dict[str, Mod
         errs += [f"V10: {mod}.py already binds {d.name}" for d in p.defs if d.name in clash]  # type: ignore[attr-defined]
         names = [d.name for d in p.defs]  # type: ignore[attr-defined]
         errs += [f"V10: {mod}.py would get {n} twice" for n in sorted({x for x in names if names.count(x) > 1})]
+        bad = {m["facade"]} | {f"_{x}" for x in b.dests}
+        for d in p.defs:
+            if (mod, d.name) in b.lifted and not has_future(ast.parse(t)):  # type: ignore[attr-defined]
+                a = d.args  # type: ignore[attr-defined]
+                heads = [x.annotation for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x and x.annotation] + [d.returns]  # type: ignore[attr-defined]
+                if any(isinstance(x, ast.Name) and x.id in bad for r in heads if r for x in ast.walk(r)):
+                    errs.append(f"V13: {mod}.py has no `from __future__ import annotations`, but an annotation of lifted {d.name} reads the facade or a module alias")  # type: ignore[attr-defined]
     return plans, errs
 
 
@@ -2014,13 +2237,29 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
     moves = plan_moves(fresh, m["moves"], rows_text)
     for mv in moves:
         mv.is_async = next(x.is_async for x in b.moves if x.name == mv.name)
+    ctx = call_args(m)
+    lifts, _ = plan_lifts(m, fresh, moves) if m["lift"] else ([], [])
+    regions = Regions(moves, lifts, "")
+    edits += lift_edits(fn, fresh.key, lines, regions, lifts, ctx)
+    lift_cuts: dict[str, Cut] = {}
+    for lf in lifts:
+        d = lf.node
+        keep = lf.module != regions.module(lf.defregion)
+        tail = d.end_lineno + (1 if not keep and d.end_lineno < len(rows_text) and not rows_text[d.end_lineno].strip() else 0)
+        lift_cuts[lf.name] = Cut(stmt_start(d), tail, f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {ctx})" if keep else None, d.col_offset)
     move_cuts: dict[str, Cut] = {}
     for mv in moves:
         recv = "" if mv.parent and mv.parent.module == mv.module else f"_{mv.module}."
-        call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({call_args(m)})"
+        call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({ctx})"
         move_cuts[mv.name] = Cut(mv.a, mv.b, call, mv.members[0].col_offset)
-    cuts += list(move_cuts.values())
+    cuts += list(lift_cuts.values()) + list(move_cuts.values())
     made: dict[tuple[str, str], str] = {}
+    for lf in lifts:
+        d = lf.node
+        lo = stmt_start(d)
+        ed = [e for e in edits if lo <= e.row <= d.end_lineno] + region_edits(fresh, lines, lo, d.end_lineno, [d], False, m["facade"], bump=False)
+        ed.append(sig_edit(lines, d, ctx_sig(m)))
+        made[(lf.module, lf.name)] = render(lines, cont, lo, d.end_lineno, d.col_offset, ed, cuts, own=lift_cuts[lf.name])
     for mv in moves:
         shift = mv.members[0].col_offset - 4
         ed = [e for e in edits if mv.a <= e.row <= mv.b] + region_edits(fresh, lines, mv.a, mv.b, list(mv.members), False, m["facade"], bump=False)
