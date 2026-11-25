@@ -158,7 +158,7 @@
   "tldw_Server_API.app.core.RAG.rag_service.post_generation_verifier:PostGenerationVerifier.verify_and_maybe_fix": {"lines": 402, "params": 15, "reason": null},
   "tldw_Server_API.app.core.RAG.rag_service.research_agent:research_loop": {"lines": 559, "params": 15, "reason": null},
   "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline:unified_batch_pipeline": {"lines": 362, "params": 7, "reason": null},
-  "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline:unified_rag_pipeline": {"lines": 7063, "params": 234, "reason": null},
+  "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline:unified_rag_pipeline": {"lines": 341, "params": 234, "reason": "TASK-13950.24 PR L: now the kwargs shim (signature + docstring + one return); run_rag_pipeline holds the orchestration"},
   "tldw_Server_API.app.core.Research.discovery.executor:execute_discovery_plan": {"lines": 357, "params": 9, "reason": null},
   "tldw_Server_API.app.core.Resource_Governance.governor_redis:RedisResourceGovernor.check": {"lines": 375, "params": 2, "reason": null},
   "tldw_Server_API.app.core.Resource_Governance.governor_redis:RedisResourceGovernor.reserve": {"lines": 881, "params": 3, "reason": null},

@@ -17,6 +17,10 @@ from tldw_Server_API.app.core.DB_Management.scope_context import (
     get_scope,
     scoped_context,
 )
+from tldw_Server_API.app.core.RAG.rag_service.pipeline.run_config import (
+    FIELD_GROUP,
+    hidden_kwarg_values,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     _serialize_result_document,
@@ -791,11 +795,16 @@ async def test_retrieval_temporarily_uses_owner_content_scope_and_restores_recip
 
 
 def _literal_outer_pipeline_kwargs_reads(source: str | None = None) -> set[str]:
+    """Literal ``kwargs`` keys read by the function in ``source``.
+
+    The default source is ``hidden_kwarg_values``, which now holds the pipeline's
+    13 ``**kwargs`` reads; ``unified_rag_pipeline`` itself must read none.
+    """
     tree = ast.parse(
-        textwrap.dedent(source or inspect.getsource(unified_rag_pipeline))
+        textwrap.dedent(source or inspect.getsource(hidden_kwarg_values))
     )
     root = tree.body[0]
-    assert isinstance(root, ast.AsyncFunctionDef)
+    assert isinstance(root, (ast.FunctionDef, ast.AsyncFunctionDef))
     keys: set[str] = set()
     parents = {
         child: parent
@@ -981,6 +990,15 @@ def test_hidden_pipeline_kwargs_reads_are_explicitly_reviewed_absent() -> None:
     }
 
     assert _literal_outer_pipeline_kwargs_reads() == expected_absent
+    assert (
+        _literal_outer_pipeline_kwargs_reads(inspect.getsource(unified_rag_pipeline))
+        == set()
+    )
+    # RagRunConfig honours exactly the signature plus the reviewed hidden keys.
+    assert (
+        set(FIELD_GROUP) - set(inspect.signature(unified_rag_pipeline).parameters)
+        == SHARED_RETRIEVAL_POLICY.reviewed_absent_kwarg_names
+    )
     assert SHARED_RETRIEVAL_POLICY.reviewed_absent_kwarg_names == expected_absent
     assert not (
         SHARED_RETRIEVAL_POLICY.reviewed_absent_kwarg_names

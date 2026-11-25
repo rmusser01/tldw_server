@@ -15,6 +15,7 @@
       "@/*": ["./*"],
       "~": ["."],
       "~/*": ["./*"],
+      "react-router-dom": ["../node_modules/react-router-dom"],
       "@plasmohq/storage/hook": ["../node_modules/@plasmohq/storage/dist/hook.d.ts"],
       "wxt/browser": ["../node_modules/wxt/dist/browser.d.ts"]
     }

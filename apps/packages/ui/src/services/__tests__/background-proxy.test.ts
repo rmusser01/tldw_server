@@ -2821,7 +2821,7 @@ describe("background proxy fallback safety", () => {
       }
       mocks.connect.mockReturnValue(port)
       const fetchSpy = vi.fn(
-        async () =>
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
           new Response(JSON.stringify({ detail }), {
             status: 409,
             headers: { "content-type": "application/json" }
@@ -2849,10 +2849,13 @@ describe("background proxy fallback safety", () => {
           expect(port.postMessage.mock.calls[0]?.[0]).toMatchObject({
             body: { stream: true }
           })
-        } else
+        } else {
+          const body = fetchSpy.mock.calls[0]?.[1]?.body
+          if (typeof body !== "string") throw new Error("Expected a JSON request body")
           expect(
-            JSON.parse(fetchSpy.mock.calls[0]?.[1]?.body as string)
+            JSON.parse(body)
           ).toMatchObject({ stream: true })
+        }
       } finally {
         vi.unstubAllGlobals()
       }

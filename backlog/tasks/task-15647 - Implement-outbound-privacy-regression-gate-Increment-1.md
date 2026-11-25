@@ -48,6 +48,7 @@ Pre-push stage 3: the public report distinguishes missing, invalid and stale pre
 Hosted CI follow-up for PR #3612 authorized. Reproduce the extension worker trace failure, repair publication of ADR-097, and integrate current dev so the RAG workflow and its checked-out tests agree. ADR required: no new ADR. Proposed ADR-097 still governs the privacy boundary.
 Renumbered during the PR #3612 CI follow-up because dev already uses the original ID.
 Hosted CI stage 1: red runs reproduced the untracked published ADR and the strict MkDocs warning after refreshing the mirror. Published ADR-097 and used a repository-relative code reference for its unpublished design. All 79 docs and inventory tests passed, including strict MkDocs, plus Ruff, Backlog normalization and Bandit with only existing test assert findings. The design and implementation task IDs were updated because dev already held the originals.
+Hosted CI stage 2: merged dev at dde6b02bfd to align the exact admitted head with the current RAG workflow. Preserved both the chat-executors and outbound-backend rollups and the exact checkout contract. All 59 RAG and 33 chat files listed by the merged workflow exist. The originally missing RAG test file passed alongside the classifier, license and Backlog contracts (332 passed). Actionlint, Ruff, the duplicate ID gate and the published ADR index comparison passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

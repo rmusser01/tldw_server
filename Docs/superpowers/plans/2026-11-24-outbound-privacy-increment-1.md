@@ -332,7 +332,7 @@ Proposed ADR-097 still governs the privacy checks. This follow-up requires no ne
 | Stage | Success criteria and tests | Status |
 | --- | --- | --- |
 | 1. Publish ADR-097 | Reproduced the missing mirror and broken strict-build link, then passed 79 docs and inventory tests. Renumbered the two outbound tasks to avoid collisions with `dev`. | Complete |
-| 2. Integrate `dev` | The admitted checkout includes the current RAG test selection. The workflow and classifier contracts pass, and Backlog IDs remain unique. | In Progress |
+| 2. Integrate `dev` | All 59 RAG and 33 chat gate test files exist. The RAG file that failed to collect on GitHub passed locally with the classifier, admission and Backlog contracts, for 332 passing tests. Actionlint and the Backlog ID check passed. | Complete |
 | 3. Stabilize Chromium trace collection | The extension worker and its WebSocket control produce complete evidence. Incomplete traces and unexpected traffic still fail the gate. | In Progress |
 
 ## Handoff

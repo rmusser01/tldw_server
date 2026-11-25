@@ -537,6 +537,8 @@ const mountOriginalScene = async (temporary: boolean, enabled: boolean) => {
     await act(async () => {
       expect(
         await saveActorSettingsForChat({
+          historyId: null,
+          serverChatId: null,
           target: target!,
           settings,
           expectedRecord: null
@@ -788,6 +790,8 @@ describe("compact frozen Scene notes through the actual request", () => {
             await act(async () => {
               expect(
                 await saveActorSettingsForChat({
+                  historyId: null,
+                  serverChatId: null,
                   target: consumer.target,
                   settings: { ...consumer.settings, notes: laterNote },
                   expectedRecord: consumer.scene.originalRecord

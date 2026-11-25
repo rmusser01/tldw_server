@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { Storage as PlasmoStorage } from "@plasmohq/storage"
+import { Storage as PlasmoStorage } from "../../../../../../tldw-frontend/extension/shims/plasmo-storage"
 
 import { createLocalRegistryBucket } from "../local-bucket"
 
@@ -8,6 +8,7 @@ vi.mock(
   "@plasmohq/storage",
   () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage")
 )
+const persistence: { readonly hasPersistentBackend?: boolean } = PlasmoStorage.prototype
 const prefix = "registry:draft:recovery-test:"
 const area = (): Storage => {
   const values = new Map<string, string>()
@@ -191,7 +192,7 @@ describe("nonmutating registry recovery enumeration", () => {
     })
     await bucket.set("draft", "PINNED")
     vi.spyOn(
-      PlasmoStorage.prototype,
+      persistence,
       "hasPersistentBackend",
       "get"
     ).mockReturnValue(false)
@@ -236,7 +237,7 @@ describe("nonmutating registry recovery enumeration", () => {
 
   it("refuses a native no-op write when extension storage is absent", async () => {
     // Native Plasmo has no WebUI backend certification getter.
-    vi.spyOn(PlasmoStorage.prototype, "hasPersistentBackend", "get").mockReturnValue(undefined as unknown as boolean)
+    vi.spyOn(persistence, "hasPersistentBackend", "get").mockReturnValue(undefined)
     Object.defineProperty(PlasmoStorage.prototype, "hasExtensionApi", {
       configurable: true,
       value: false

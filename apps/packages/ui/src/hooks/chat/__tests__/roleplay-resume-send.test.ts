@@ -11,7 +11,7 @@ import type {
 } from "@/types/history-selection"
 import { sendNativeHistoryCharacter } from "../native-history-character-send"
 import { RoleplayResumeResponseError } from "@/services/tldw/roleplay-resume"
-import { sendSavedRoleplay } from "../roleplay-resume-send"
+import { sendSavedRoleplay, type SavedRoleplaySendParams } from "../roleplay-resume-send"
 import { captureChatDraftLoad } from "../chat-draft-transition"
 import { resolveHistorySelection } from "@/utils/history-selection"
 import { useStoreMessageOption } from "@/store/option"
@@ -246,7 +246,7 @@ const prepare = async (requestScope: ServicePromptRequestScope = scope) => {
       }
     }
   })
-  const params: Parameters<typeof sendNativeHistoryCharacter>[0] = {
+  const params = {
     controller,
     surface: "playground",
     originIsCurrent: controller.fence(),
@@ -254,6 +254,7 @@ const prepare = async (requestScope: ServicePromptRequestScope = scope) => {
     signal: stop.signal,
     temporary: false,
     serverChatId: metadata.id,
+    historyId: null as string | null,
     characterId: "snapshot:roleplay-chat",
     model: "",
     settings: {
@@ -267,7 +268,7 @@ const prepare = async (requestScope: ServicePromptRequestScope = scope) => {
     setServerChatId: vi.fn(),
     setMessages: vi.fn(),
     releaseActivity: vi.fn()
-  }
+  } satisfies Parameters<typeof sendNativeHistoryCharacter>[0] & SavedRoleplaySendParams
   return {
     controller,
     owner,

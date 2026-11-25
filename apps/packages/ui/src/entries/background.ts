@@ -5,7 +5,7 @@ import { browser } from "wxt/browser";
 import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage";
 import { formatErrorMessage } from "@/utils/format-error-message";
 import { sanitizeRagProviderFailure } from "@/services/rag/provider-error-contract";
-import { tldwClient } from "@/services/tldw/TldwApiClient";
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
@@ -490,7 +490,7 @@ export default defineBackground({
     };
     const resolveCurrentServicePromptConfig = async (
       checked: ServicePromptTargetLock,
-    ) => {
+    ): Promise<TldwConfig> => {
       const current = await getEffectiveConfig();
       const singleUserApiKeyScopeMatches = current
         ? servicePromptSingleUserApiKeyScopeMatches(
@@ -521,17 +521,22 @@ export default defineBackground({
       ) {
         throw createServicePromptScopeChangedError();
       }
-      const effective = current || checked;
-      return {
-        ...effective,
-        serverUrl: checked.serverUrl,
-        authMode: checked.authMode,
-        authSource: checked.authSource,
-        orgId: checked.orgId,
-        apiKey: current?.apiKey,
-        accessToken: current?.accessToken,
-        refreshToken: current?.refreshToken,
-      };
+      // A matched stored configuration keeps the original refresh marker identity.
+      if (current) return current;
+
+      // Hosted requests may use a same-origin target before storage is configured.
+      const { serverUrl, authMode, authSource: source, orgId: organization } = checked;
+      const authSource = source === "manual" || source === "cookie-session" ? source : undefined;
+      const orgId = typeof organization === "number" ? organization : undefined;
+      if (
+        typeof serverUrl !== "string" ||
+        (authMode !== "single-user" && authMode !== "multi-user") ||
+        (source != null && authSource === undefined) ||
+        (organization != null && orgId === undefined)
+      ) {
+        throw createServicePromptScopeChangedError();
+      }
+      return { serverUrl, authMode, authSource, orgId };
     };
     let handleRuntimeMessageRef:
       | ((message: any, sender: any) => Promise<any>)
@@ -4563,44 +4568,46 @@ export default defineBackground({
 
     browser.storage.onChanged.addListener((rawChanges, areaName) => {
       type StoredConfig = Parameters<typeof connectionAuthoritiesMatch>[0];
-      const changes = Object.fromEntries(Object.entries(rawChanges || {}).map(([key, change]) => [key, {
-        oldValue: safeStorageSerde.deserializer<StoredConfig>(change.oldValue as string),
-        newValue: safeStorageSerde.deserializer<StoredConfig>(change.newValue as string),
-      }]));
+      const changes = rawChanges ?? {};
+      const decodeConfigChange = (change: (typeof changes)[string]) => ({
+        oldValue: safeStorageSerde.deserializer<StoredConfig>(change.oldValue),
+        newValue: safeStorageSerde.deserializer<StoredConfig>(change.newValue),
+      });
       if (areaName === "session") {
-        const change = changes?.[MANUAL_SESSION_KEY];
+        const change = changes[MANUAL_SESSION_KEY];
         if (change) {
-          if (!manualSessionCredentialsMatch(change.oldValue, change.newValue)) {
+          const { oldValue, newValue } = decodeConfigChange(change);
+          if (!manualSessionCredentialsMatch(oldValue, newValue)) {
             retireConnectionAuthority();
           }
         }
         return;
       }
       if (areaName !== "local") return;
-      const retiringChanges = Object.entries(changes || {}).filter(([key, change]) =>
-        ((key === "tldwConfig" || key === "tldwCookieSessionConfig") &&
-        (!change.newValue || !connectionAuthoritiesMatch(change.oldValue, change.newValue))) ||
-        (key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX) && change.oldValue !== change.newValue)
-      );
+      const retiringChanges = Object.entries(changes).filter(([key, change]) => {
+        if (key === "tldwConfig" || key === "tldwCookieSessionConfig") {
+          const { oldValue, newValue } = decodeConfigChange(change);
+          return !newValue || !connectionAuthoritiesMatch(oldValue, newValue);
+        }
+        return key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX) &&
+          safeStorageSerde.deserializer(change.oldValue) !== safeStorageSerde.deserializer(change.newValue);
+      });
       if (retiringChanges.length > 0) {
         const [key, change] = retiringChanges[0];
-        const publication = retiringChanges.length === 1 && change.newValue === true
+        const publication = retiringChanges.length === 1 && safeStorageSerde.deserializer(change.newValue) === true
           ? terminalMarkerPublications.get(key) : undefined;
         if (publication) terminalMarkerPublications.delete(key);
         retireConnectionAuthority(publication);
       }
-      if (Object.keys(changes || {}).some(key => key === "tldwConfig" || key === REFRESH_ROTATION_KEY || key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX))) {
+      if (Object.keys(changes).some(key => key === "tldwConfig" || key === REFRESH_ROTATION_KEY || key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX))) {
         quickIngestCredentialRevision += 1;
         for (const validate of quickIngestAuthorityValidators) void validate().catch(() => {});
       }
-      if (
-        !changes ||
-        !Object.prototype.hasOwnProperty.call(changes, "tldwConfig")
-      ) {
+      if (!Object.prototype.hasOwnProperty.call(changes, "tldwConfig")) {
         return;
       }
-      const change = changes.tldwConfig;
-      if (!connectionAuthoritiesMatch(change?.oldValue, change?.newValue)) {
+      const { oldValue, newValue } = decodeConfigChange(changes.tldwConfig);
+      if (!connectionAuthoritiesMatch(oldValue, newValue)) {
         quickIngestAuthorityRevision += 1;
         for (const controller of quickIngestAuthorityControllers) controller.abort();
         quickIngestModalSessions.clear();

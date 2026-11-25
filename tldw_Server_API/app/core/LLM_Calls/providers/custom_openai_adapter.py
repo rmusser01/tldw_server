@@ -102,7 +102,7 @@ class CustomOpenAIAdapter(ChatProvider):
             "topp": request.get("top_p"),
             "minp": request.get("min_p"),
             "topk": request.get("top_k"),
-            "max_tokens": request.get("max_tokens"),
+            "max_tokens": request.get("max_completion_tokens") or request.get("max_tokens"),
             "seed": request.get("seed"),
             "stop": request.get("stop"),
             "response_format": request.get("response_format"),
@@ -262,6 +262,9 @@ class CustomOpenAIAdapter(ChatProvider):
         ):
             if request.get(k) is not None:
                 payload[k] = request.get(k)
+        if request.get("max_completion_tokens") is not None:
+            payload.pop("max_tokens", None)
+            payload["max_completion_tokens"] = request["max_completion_tokens"]
         if request.get("tools") is not None:
             payload["tools"] = request.get("tools")
         if request.get("tool_choice") is not None:

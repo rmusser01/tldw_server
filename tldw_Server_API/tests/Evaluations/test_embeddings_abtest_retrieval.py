@@ -108,8 +108,8 @@ async def test_abtest_hybrid_results_are_recorded(tmp_path, monkeypatch):
 
     captured = {}
 
-    async def _fake_unified(*_args, **kwargs):
-        captured["include_media_ids"] = kwargs.get("include_media_ids")
+    async def _fake_unified(rcfg):
+        captured["include_media_ids"] = rcfg.as_kwargs().get("include_media_ids")
         docs = [_HybridDoc("doc1", "content", {"media_id": "1"}, 0.9)]
         return _HybridResult(docs)
 
@@ -117,7 +117,7 @@ async def test_abtest_hybrid_results_are_recorded(tmp_path, monkeypatch):
     import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as unified_pipeline
 
     monkeypatch.setattr(service, "_embed_texts", _fake_embed)
-    monkeypatch.setattr(unified_pipeline, "unified_rag_pipeline", _fake_unified)
+    monkeypatch.setattr(unified_pipeline, "run_rag_pipeline", _fake_unified)
 
     await run_vector_search_and_score(
         db,

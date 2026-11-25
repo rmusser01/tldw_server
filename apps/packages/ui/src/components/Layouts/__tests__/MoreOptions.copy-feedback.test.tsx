@@ -60,7 +60,7 @@ describe("MoreOptions copy items", () => {
     "%s says the copy failed instead of confirming it",
     async (key) => {
       io.copy.mockRejectedValue(new Error("Denied"))
-      render(<MoreOptions messages={messages} historyId="history-1" />)
+      render(<MoreOptions messages={messages} historyId="history-1" shareModeEnabled={false} />)
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: key }))
       })
@@ -71,7 +71,7 @@ describe("MoreOptions copy items", () => {
 
   it("confirms a copy that happened", async () => {
     io.copy.mockResolvedValue(undefined)
-    render(<MoreOptions messages={messages} historyId="history-1" />)
+    render(<MoreOptions messages={messages} historyId="history-1" shareModeEnabled={false} />)
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "copy-text" }))
     })

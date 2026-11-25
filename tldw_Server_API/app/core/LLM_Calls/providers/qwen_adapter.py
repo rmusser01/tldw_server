@@ -189,6 +189,9 @@ class QwenAdapter(ChatProvider):
         ):
             if request.get(k) is not None:
                 payload[k] = request.get(k)
+        if request.get("max_completion_tokens") is not None:
+            payload.pop("max_tokens", None)
+            payload["max_completion_tokens"] = request["max_completion_tokens"]
         if request.get("tools") is not None:
             payload["tools"] = request.get("tools")
         if request.get("tool_choice") is not None:

@@ -679,8 +679,8 @@ async def run_vector_search_and_score(
             rerank_scores_out: list[float] | None = None
             if search_mode == 'hybrid':
                 try:
-                    from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
-                    result = await unified_rag_pipeline(
+                    from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline
+                    result = await run_rag_pipeline(RagRunConfig.from_kwargs(
                         query=texts[q_idx],
                         search_mode='hybrid',
                         hybrid_alpha=float(config.retrieval.hybrid_alpha or 0.7),
@@ -688,7 +688,7 @@ async def run_vector_search_and_score(
                         index_namespace=collection_name,
                         user_id=str(user_id),
                         include_media_ids=include_media_ids,
-                    )
+                    ))
                     docs = result.documents or []
                     for d in docs:
                         md = d.metadata if isinstance(getattr(d, "metadata", None), dict) else {}

@@ -140,6 +140,7 @@ ORDINARY_WORKFLOW_NAMES = (
     "sbom.yml",
     "security-required.yml",
     "ui-characters-harness-tests.yml",
+    "ui-design-system-drift-report.yml",
     "ui-dictionaries-tests.yml",
     "ui-playground-quality-gates.yml",
     "ui-research-workspace-parity.yml",
@@ -193,6 +194,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "sbom.yml": "6ba4774ab2129a605bb160c5ee6f48ebc51544881592ad60ad5268b910fcfbde",
     "security-required.yml": "17a6ff1c75afa8c8826e8378c3f73c1099375730bdd06067a2921ecaf38f58ab",
     "ui-characters-harness-tests.yml": "8977899d9903b59c454c686e1fda272a7b919f63782d84ec8c24973449f2eee6",
+    "ui-design-system-drift-report.yml": "9668d35955cd772888b26c55ab8a92b6ab39da5032a63daed98cb7de6e96ed59",
     "ui-dictionaries-tests.yml": "f191b9920abca964265ff7ff4510cc9ac554770d4e4a0b8b172854147c0c0dbe",
     "ui-playground-quality-gates.yml": "af4b03b1d48dd12b93e1bd39a8036109b26a7890ee5cd8ef8ed57b7d2da3008a",
     "ui-research-workspace-parity.yml": "aa73478a8917cbf0eb7be01e1f4212f1a0692200919d9a09982ab6525af49503",
@@ -206,7 +208,7 @@ ORIGINAL_JOB_NAMES = {
     "actionlint.yml": ("actionlint",),
     "backend-required.yml": (
         "changes", "non-utc-tests", "chacha-owner-isolation", "rag-pipeline",
-        "outbound-backend", "backend-required", "queue-tick",
+        "chat-executors", "outbound-backend", "backend-required", "queue-tick",
     ),
     "ci.yml": (
         "http-client-patch-guard",
@@ -250,6 +252,7 @@ ORIGINAL_JOB_NAMES = {
     "sbom.yml": ("build-sbom",),
     "security-required.yml": ("changes", "security-required", "queue-tick", "queue-kick"),
     "ui-characters-harness-tests.yml": ("characters-harness",),
+    "ui-design-system-drift-report.yml": ("drift-report",),
     "ui-dictionaries-tests.yml": ("dictionaries-vitest",),
     "ui-playground-quality-gates.yml": ("playground-quality",),
     "ui-research-workspace-parity.yml": (
@@ -266,12 +269,14 @@ ORIGINAL_DEPENDENCIES = {
     ("backend-required.yml", "non-utc-tests"): ("changes",),
     ("backend-required.yml", "chacha-owner-isolation"): ("changes",),
     ("backend-required.yml", "rag-pipeline"): ("changes",),
+    ("backend-required.yml", "chat-executors"): ("changes",),
     ("backend-required.yml", "outbound-backend"): ("changes",),
     ("backend-required.yml", "backend-required"): (
         "changes",
         "non-utc-tests",
         "chacha-owner-isolation",
         "rag-pipeline",
+        "chat-executors",
         "outbound-backend",
     ),
     ("backend-required.yml", "queue-tick"): ("backend-required",),
@@ -336,6 +341,7 @@ DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | LICENSE_RED_GATES | {
     ("backend-required.yml", "non-utc-tests"),
     ("backend-required.yml", "chacha-owner-isolation"),
     ("backend-required.yml", "rag-pipeline"),
+    ("backend-required.yml", "chat-executors"),
     ("backend-required.yml", "outbound-backend"),
     ("backend-required.yml", "backend-required"),
     ("frontend-e2e-tiers.yml", "critical"),
@@ -373,6 +379,7 @@ FETCH_DEPTH_CHECKOUTS = {
     ("backend-required.yml", "non-utc-tests"),
     ("backend-required.yml", "chacha-owner-isolation"),
     ("backend-required.yml", "rag-pipeline"),
+    ("backend-required.yml", "chat-executors"),
     ("backend-required.yml", "changes"),
     ("backend-required.yml", "backend-required"),
     ("ci.yml", "changes"),
@@ -395,6 +402,7 @@ CHANGE_CLASSIFIER_OUTPUTS = {
         "coverage_required",
         "chacha_owner_scope_changed",
         "rag_pipeline_changed",
+        "chat_executors_changed",
     },
     "ci.yml": {"backend_changed"},
     "coverage-required.yml": {
@@ -606,6 +614,104 @@ def test_ordinary_pr_workflow_inventory_and_direct_triggers_are_frozen() -> None
         direct_trigger.pop("workflow_run", None)
         encoded = json.dumps(direct_trigger, sort_keys=True, separators=(",", ":")).encode()
         assert hashlib.sha256(encoded).hexdigest() == DIRECT_TRIGGER_DIGESTS[name], name
+
+
+def test_design_system_drift_report_is_advisory_and_retains_failure_evidence() -> None:
+    path = REPO_ROOT / ".github/workflows/ui-design-system-drift-report.yml"
+    assert path.exists(), "the advisory drift workflow is missing"  # nosec B101 - regression assertion
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert set(_trigger(data)) == {"pull_request", "workflow_dispatch"}  # nosec B101 - regression assertion
+    assert data["permissions"] == {"contents": "read"}  # nosec B101 - regression assertion
+    job = data["jobs"]["drift-report"]
+    assert job["name"] == "UI Design-System Drift Report"  # nosec B101 - regression assertion
+    assert job["continue-on-error"] is True  # nosec B101 - regression assertion
+    assert job["timeout-minutes"] == 20  # nosec B101 - regression assertion
+    assert job["permissions"] == {"contents": "read"}  # nosec B101 - regression assertion
+    assert _needs(job) == ["admission", "await_license"]  # nosec B101 - regression assertion
+    assert job["env"]["SKIP_WXT_PREPARE"] == "1"  # nosec B101 - regression assertion
+    steps = job["steps"]
+    checkout = steps[0]
+    assert checkout["uses"] == CHECKOUT_ACTION  # nosec B101 - regression assertion
+    assert checkout["with"]["persist-credentials"] is False  # nosec B101 - regression assertion
+    node = next(step for step in steps if step.get("uses", "").startswith("actions/setup-node@"))
+    assert node["with"]["node-version"] == "24"  # nosec B101 - regression assertion
+    bun = next(step for step in steps if step.get("uses") == "oven-sh/setup-bun@v2")
+    assert bun["with"]["bun-version"] == "1.3.2"  # nosec B101 - regression assertion
+    install = next(step for step in steps if step.get("name") == "Install workspace dependencies")
+    assert (install["working-directory"], install["run"]) == (  # nosec B101 - regression assertion
+        "apps", "bun install --frozen-lockfile",
+    )
+    scan = next(step for step in steps if step.get("id") == "drift")
+    assert scan["working-directory"] == "apps/packages/ui"  # nosec B101 - regression assertion
+    assert scan["continue-on-error"] is True  # nosec B101 - regression assertion
+    assert scan["run"] == (  # nosec B101 - regression assertion
+        'bun run report:design-system-drift --output "$RUNNER_TEMP/tldw-design-system-drift.json"'
+    )
+    upload = next(step for step in steps if step.get("name") == "Upload drift report")
+    assert upload["if"] == "always()"  # nosec B101 - regression assertion
+    assert upload["uses"] == "actions/upload-artifact@v7"  # nosec B101 - regression assertion
+    assert upload["with"] == {  # nosec B101 - regression assertion
+        "name": "ui-design-system-drift-${{ github.event.pull_request.head.sha || github.sha }}",
+        "path": "${{ runner.temp }}/tldw-design-system-drift.json",
+        "if-no-files-found": "warn",
+    }
+    summary = next(step for step in steps if step.get("name") == "Publish drift summary")
+    assert summary["if"] == "always()"  # nosec B101 - regression assertion
+    assert "GITHUB_STEP_SUMMARY" in summary["run"]  # nosec B101 - regression assertion
+    assert "./apps/packages/ui/scripts/design-system-drift-report.mjs" in summary["run"]  # nosec B101 - regression assertion
+    assert "formatDriftSummary(report, { limit: 25, reportPath })" in summary["run"]  # nosec B101 - regression assertion
+    failure = steps[-1]
+    assert _normalized(failure["if"]) == _normalized(  # nosec B101 - regression assertion
+        "always() && steps.drift.outcome == 'failure'"
+    )
+    assert failure["run"] == "exit 1"  # nosec B101 - regression assertion
+    assert steps.index(scan) < steps.index(upload) < steps.index(summary) < len(steps) - 1  # nosec B101 - regression assertion
+    assert not any(  # nosec B101 - regression assertion
+        "drift-report" in _needs(candidate)
+        for workflow, _ in _load_ordinary_workflows().values()
+        for candidate in workflow["jobs"].values()
+    )
+
+
+@pytest.mark.parametrize("report_state", ["missing", "complete", "incomplete", "malformed"])
+def test_design_system_drift_summary_preserves_scan_status(tmp_path: Path, report_state: str) -> None:
+    path = REPO_ROOT / ".github/workflows/ui-design-system-drift-report.yml"
+    assert path.exists(), "the advisory drift workflow is missing"  # nosec B101 - regression assertion
+    steps = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["drift-report"]["steps"]
+    summary = next(step for step in steps if step.get("name") == "Publish drift summary")
+    report_path = tmp_path / "tldw-design-system-drift.json"
+    summary_path = tmp_path / "step-summary"
+    if report_state != "missing":
+        report_path.write_text(
+            "{" if report_state == "malformed" else json.dumps({"status": report_state}),
+            encoding="utf-8",
+        )
+    module = tmp_path / "apps/packages/ui/scripts/design-system-drift-report.mjs"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "export function formatDriftSummary(report, options) {\n"
+        "  if (options.limit !== 25) throw new Error('wrong summary limit');\n"
+        "  return `Status: ${report.status}; report: ${options.reportPath}\\n`;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(  # nosec B603 B607 - execute the repository workflow under test
+        ["bash", "-e", "-o", "pipefail", "-c", summary["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_STEP_SUMMARY": str(summary_path)},
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    text = summary_path.read_text(encoding="utf-8")
+    if report_state == "missing":
+        assert result.returncode == 0, result.stderr  # nosec B101 - regression assertion
+        assert "scan did not produce a report" in text  # nosec B101 - regression assertion
+        assert "setup/scan steps" in text  # nosec B101 - regression assertion
+    elif report_state == "malformed":
+        assert result.returncode != 0  # nosec B101 - regression assertion
+        assert "could not be summarized" in text  # nosec B101 - regression assertion
+    else:
+        assert result.returncode == 0, result.stderr  # nosec B101 - regression assertion
+        assert text == f"Status: {report_state}; report: {report_path}\n"  # nosec B101 - regression assertion
 
 
 def test_queue_control_workflows_never_run_pull_request_code() -> None:
@@ -859,6 +965,12 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "needs.changes.outputs.backend_changed == 'true' && "
                         "needs.changes.outputs.rag_pipeline_changed == 'true'"
                     )
+                elif (name, job_name) == ("backend-required.yml", "chat-executors"):
+                    extra_condition = (
+                        "needs.changes.result == 'success' && "
+                        "needs.changes.outputs.backend_changed == 'true' && "
+                        "needs.changes.outputs.chat_executors_changed == 'true'"
+                    )
                 elif (name, job_name) == ("frontend-required.yml", "frontend-unit-tests"):
                     extra_condition = (
                         "needs.changes.result == 'success' && "
@@ -1007,7 +1119,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 65
+    assert checkout_count == 67  # nosec B101
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -1053,10 +1165,10 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         assert "github.event.workflow_run.head_sha" not in text
 
     combined_text = "\n".join(text for _, text in workflows.values())
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
-    assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 58
-    assert combined_text.count("github.event.pull_request.head.sha") == 60
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 28  # nosec B101
+    assert combined_text.count("github.event.pull_request.number") == 28  # nosec B101
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 59  # nosec B101
+    assert combined_text.count("github.event.pull_request.head.sha") == 63  # nosec B101
     # The backlog task ratchet still gets the PR base (TASK-13440).
     assert combined_text.count("github.event.pull_request.base.sha") == 6
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
@@ -1352,7 +1464,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 30
+    assert setup_helper_count == 31
     assert setup_python_cache_count == 1
     assert cache_save_count == 7
     assert cache_restore_count == 7
@@ -1806,6 +1918,8 @@ TEST_SEAM_GATE_SUITES = (
     # The RAG split tool and structure pins (TASK-13950.24) guard each move PR.
     "tldw_Server_API/tests/Helper_Scripts/test_rag_split.py",
     "tldw_Server_API/tests/lint/test_rag_pipeline_structure_pins.py",
+    # The chat executor structure pins (TASK-13950.25) guard each chat move PR.
+    "tldw_Server_API/tests/lint/test_chat_executor_structure_pins.py",
     "tldw_Server_API/tests/DB_Management/test_owner_isolation_skip_fails.py",
     "tldw_Server_API/tests/CI/test_path_classifier.py",
 )
@@ -2702,3 +2816,248 @@ def test_rag_pipeline_gate_lists_every_pipeline_test_file():
     }
     assert sorted(found - listed - excluded) == []  # nosec B101
     assert sorted((listed | excluded) - {p.relative_to(REPO_ROOT).as_posix() for p in tests_root.rglob("test_*.py")}) == []  # nosec B101
+
+
+# TASK-13950.25: the chat executors golden and chat service tests run in a required, path-gated job.
+CHAT_GATE_JOB = "chat-executors"
+CHAT_GATE_CHECK_STEP = "Require chat-executors gate to have passed"
+_CHAT_GATE_PATH_RE = re.compile(r"^tldw_Server_API/tests/\S+\.py$")
+# backend_changed:chat_executors_changed:result -- the only outcomes the required check may accept.
+CHAT_GATE_ACCEPTED = "true:true:success|true:false:skipped|false:*:skipped) ;;"
+
+
+def _chat_gate_lists() -> tuple[tuple[str, ...], dict[str, str], dict[str, str]]:
+    from Helper_Scripts.ci.path_classifier import (
+        CHAT_EXECUTORS_GATE_DESELECT,
+        CHAT_EXECUTORS_GATE_EXCLUDED,
+        CHAT_EXECUTORS_GATE_TESTS,
+    )
+
+    return CHAT_EXECUTORS_GATE_TESTS, CHAT_EXECUTORS_GATE_DESELECT, CHAT_EXECUTORS_GATE_EXCLUDED
+
+
+def _chat_executors_job_problems(workflow: dict[str, Any]) -> list[str]:
+    """Problems with the ``chat-executors`` job and its required check; the lists are the classifier's.
+
+    Unlike ``rag-pipeline``, the job may pass ``--deselect=<id>``, but only for the ids the classifier
+    lists with a reason. ``-m``, ``-k`` and ``--ignore`` stay banned.
+    """
+    tests, deselect, _excluded = _chat_gate_lists()
+    expected = set(tests)
+    jobs = workflow["jobs"]
+    if CHAT_GATE_JOB not in jobs:
+        return [f"no {CHAT_GATE_JOB} job"]
+    job = jobs[CHAT_GATE_JOB]
+    problems = ["job is continue-on-error"] if job.get("continue-on-error", False) else []
+    steps = job.get("steps", [])
+    if not any(str(step.get("env", {}).get("TLDW_TEST_POSTGRES_REQUIRED")) == "1" for step in steps):
+        problems.append("job does not require PostgreSQL")
+    if not any(service.get("image") for service in job.get("services", {}).values()):
+        problems.append("job has no postgres service")
+    listed: set[str] = set()
+    checked: set[str] = set()
+    deselected: set[str] = set()
+    has_check = False
+    for step in [step for step in steps if "pytest" in step.get("run", "")]:
+        command, sep, check = step["run"].partition("python - ")
+        command_tokens = _step_run_tokens(command)
+        listed |= {t for t in command_tokens if _CHAT_GATE_PATH_RE.match(t)}
+        for token in sorted(t.strip("'\"") for t in command_tokens):  # the deselect ids are quoted in the YAML
+            if token.startswith("--deselect="):
+                deselected.add(token.removeprefix("--deselect="))
+            elif token == "--deselect" or token.startswith(("-m", "-k", "--ignore")):
+                problems.append(f"pytest command selects a subset with {token}")
+        if sep:
+            has_check = True
+            lines = [line.strip() for line in check.splitlines()]
+            checked |= {t for t in _step_run_tokens(check.split("<<", 1)[0]) if _CHAT_GATE_PATH_RE.match(t)}
+            if "if skipped or missing:" not in lines or "sys.exit(1)" not in lines:
+                problems.append("junit check does not exit non-zero on skipped or missing cases")
+    if not has_check:
+        problems.append("job has no junit skipped/missing check")
+    problems += [f"job does not run {path}" for path in sorted(expected - listed)]
+    if has_check:
+        problems += [f"junit check does not cover {path}" for path in sorted(expected - checked)]
+    problems += [f"job runs unlisted {path}" for path in sorted((listed | checked) - expected)]
+    problems += [f"job does not deselect {item}" for item in sorted(set(deselect) - deselected)]
+    problems += [f"job deselects unlisted {item}" for item in sorted(deselected - set(deselect))]
+    gate = jobs["backend-required"]
+    if CHAT_GATE_JOB not in gate.get("needs", []):
+        problems.append(f"backend-required does not wait for {CHAT_GATE_JOB}")
+    checks = [s for s in gate["steps"] if s.get("name") == CHAT_GATE_CHECK_STEP]
+    if len(checks) != 1 or f"needs.{CHAT_GATE_JOB}.result" not in str(checks[0].get("env", {})):
+        problems.append(f"backend-required has no {CHAT_GATE_CHECK_STEP!r} step reading the job result")
+    elif CHAT_GATE_ACCEPTED not in [line.strip() for line in checks[0].get("run", "").splitlines()]:
+        problems.append("required check accepts outcomes other than the three approved ones")
+    return problems
+
+
+def _chat_gate_pytest_step(workflow: dict[str, Any]) -> dict[str, Any]:
+    return next(s for s in workflow["jobs"][CHAT_GATE_JOB]["steps"] if "pytest" in s.get("run", ""))
+
+
+@pytest.mark.unit
+def test_backend_required_runs_the_chat_executors_gate():
+    assert len(_chat_gate_lists()[0]) >= 30  # nosec B101
+    assert _chat_executors_job_problems(_backend_required_workflow()) == []  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mutation", ["dropped", "commented-out"])
+def test_chat_gate_contract_fails_when_a_file_leaves_the_job(mutation: str):
+    workflow = _backend_required_workflow()
+    path = _chat_gate_lists()[0][1]
+    step = _chat_gate_pytest_step(workflow)
+    command, sep, check = step["run"].partition("python - ")
+    lines = command.splitlines()
+    if mutation == "dropped":
+        command = "\n".join(line for line in lines if path not in line)
+    else:
+        command = "\n".join(line.replace(path, f"# {path}") for line in lines)
+    step["run"] = command + "\n" + sep + check
+    assert _chat_executors_job_problems(workflow) == [f"job does not run {path}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_an_unlisted_file_is_run():
+    workflow = _backend_required_workflow()
+    extra = "tldw_Server_API/tests/Chat/unit/test_not_listed.py"
+    step = _chat_gate_pytest_step(workflow)
+    step["run"] = step["run"].replace("pytest ", f"pytest {extra} ", 1)
+    assert _chat_executors_job_problems(workflow) == [f"job runs unlisted {extra}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_the_job_is_continue_on_error():
+    workflow = _backend_required_workflow()
+    workflow["jobs"][CHAT_GATE_JOB]["continue-on-error"] = True
+    assert _chat_executors_job_problems(workflow) == ["job is continue-on-error"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_postgres_is_not_required():
+    workflow = _backend_required_workflow()
+    for step in workflow["jobs"][CHAT_GATE_JOB]["steps"]:
+        step.get("env", {}).pop("TLDW_TEST_POSTGRES_REQUIRED", None)
+    assert _chat_executors_job_problems(workflow) == ["job does not require PostgreSQL"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_the_postgres_service_is_removed():
+    workflow = _backend_required_workflow()
+    workflow["jobs"][CHAT_GATE_JOB]["services"] = {}
+    assert _chat_executors_job_problems(workflow) == ["job has no postgres service"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_the_gate_does_not_wait_for_the_job():
+    workflow = _backend_required_workflow()
+    workflow["jobs"]["backend-required"]["needs"].remove(CHAT_GATE_JOB)
+    assert _chat_executors_job_problems(workflow) == [  # nosec B101
+        f"backend-required does not wait for {CHAT_GATE_JOB}"
+    ]
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_the_required_check_is_missing():
+    workflow = _backend_required_workflow()
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    steps[:] = [s for s in steps if s.get("name") != CHAT_GATE_CHECK_STEP]
+    assert _chat_executors_job_problems(workflow) == [  # nosec B101
+        f"backend-required has no {CHAT_GATE_CHECK_STEP!r} step reading the job result"
+    ]
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_the_accepted_outcomes_change() -> None:
+    workflow = _backend_required_workflow()
+    check = next(s for s in workflow["jobs"]["backend-required"]["steps"] if s.get("name") == CHAT_GATE_CHECK_STEP)
+    check["run"] = check["run"].replace("true:true:success|", "true:true:success|true:true:failure|")
+    assert _chat_executors_job_problems(workflow) == [  # nosec B101
+        "required check accepts outcomes other than the three approved ones"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("flag", ["-m", "-k", "--ignore", "-m=", "--deselect", "-kfoo", "-mslow", "--ignore=x"])
+def test_chat_gate_contract_fails_when_pytest_selects_a_subset(flag: str) -> None:
+    workflow = _backend_required_workflow()
+    step = _chat_gate_pytest_step(workflow)
+    step["run"] = step["run"].replace("--durations=15", f'--durations=15 {flag} "not postgres"', 1)
+    assert _chat_executors_job_problems(workflow) == [f"pytest command selects a subset with {flag}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_a_listed_deselect_is_dropped() -> None:
+    workflow = _backend_required_workflow()
+    item = next(iter(_chat_gate_lists()[1]))
+    step = _chat_gate_pytest_step(workflow)
+    step["run"] = "\n".join(line for line in step["run"].splitlines() if f"--deselect={item}" not in line)
+    assert _chat_executors_job_problems(workflow) == [f"job does not deselect {item}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_an_unlisted_deselect_is_added() -> None:
+    workflow = _backend_required_workflow()
+    extra = "tldw_Server_API/tests/Chat/unit/test_chat_executors_golden.py::test_golden_case_matches"
+    step = _chat_gate_pytest_step(workflow)
+    step["run"] = step["run"].replace("--durations=15", f"--durations=15 --deselect={extra}", 1)
+    assert _chat_executors_job_problems(workflow) == [f"job deselects unlisted {extra}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_the_junit_check_misses_a_file() -> None:
+    workflow = _backend_required_workflow()
+    path = _chat_gate_lists()[0][1]
+    step = _chat_gate_pytest_step(workflow)
+    command, sep, check = step["run"].partition("python - ")
+    step["run"] = command + sep + "\n".join(line for line in check.splitlines() if path not in line)
+    assert _chat_executors_job_problems(workflow) == [f"junit check does not cover {path}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_gate_contract_fails_when_the_junit_check_is_deleted() -> None:
+    workflow = _backend_required_workflow()
+    step = _chat_gate_pytest_step(workflow)
+    step["run"] = step["run"].partition("python - ")[0]
+    assert _chat_executors_job_problems(workflow) == ["job has no junit skipped/missing check"]  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("if skipped or missing:", "if skipped:"),
+        ("sys.exit(1)", "sys.exit(0)"),
+    ],
+)
+def test_chat_gate_contract_fails_when_the_junit_check_stops_failing(old: str, new: str) -> None:
+    workflow = _backend_required_workflow()
+    step = _chat_gate_pytest_step(workflow)
+    assert old in step["run"]  # nosec B101
+    step["run"] = step["run"].replace(old, new)
+    assert _chat_executors_job_problems(workflow) == [  # nosec B101
+        "junit check does not exit non-zero on skipped or missing cases"
+    ]
+
+
+@pytest.mark.unit
+def test_chat_executors_globs_cover_every_gate_test_and_the_golden_data():
+    from fnmatch import fnmatch
+
+    from Helper_Scripts.ci.path_classifier import CHAT_EXECUTORS_GLOBS
+
+    tests = _chat_gate_lists()[0]
+    golden_data = "tldw_Server_API/tests/Chat/unit/golden/chat_executors_golden.json"
+    uncovered = [t for t in (*tests, golden_data) if not any(fnmatch(t, g) for g in CHAT_EXECUTORS_GLOBS)]
+    assert uncovered == []  # nosec B101
+
+
+@pytest.mark.unit
+def test_chat_executors_gate_lists_are_consistent():
+    tests, deselect, excluded = _chat_gate_lists()
+    assert not (set(tests) & set(excluded))  # nosec B101
+    assert all(reason.strip() for reason in (*deselect.values(), *excluded.values()))  # nosec B101
+    on_disk = {p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / "tldw_Server_API" / "tests").rglob("test_*.py")}
+    assert sorted((set(tests) | set(excluded)) - on_disk) == []  # nosec B101
+    assert sorted({item.partition("::")[0] for item in deselect} - set(tests)) == []  # nosec B101

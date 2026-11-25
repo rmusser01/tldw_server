@@ -321,7 +321,7 @@ describe("conversation setup identity", () => {
     const user = await choosePersona()
     mocks.historySelection = { getSignal: () => undefined, getCurrent: () => ({ owner: null, view: null }) }
     rerender()
-    const apply = screen.getByRole("button", { name: "Apply", exact: true })
+    const apply = screen.getByRole("button", { name: "Apply" })
     expect(apply).toBeDisabled()
     expect(apply).toHaveAccessibleDescription(/tracked persona.*unavailable.*overlay/i)
     expect(screen.getByTestId("character-select")).toHaveAccessibleName("Guide Persona")
@@ -350,7 +350,7 @@ describe("conversation setup identity", () => {
     )
     const { onClose } = renderDrawer({ onApply })
     const user = await choosePersona()
-    await user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Apply" }))
     expect(mocks.saveScene).not.toHaveBeenCalled()
     await act(async () => {
       resume()
@@ -383,7 +383,7 @@ describe("conversation setup identity", () => {
     expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
     expect(mocks.setHistoryId).not.toHaveBeenCalled()
     expect(mocks.saveScene).not.toHaveBeenCalled()
-    await user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Apply" }))
     await waitFor(() => expect(onApply).toHaveBeenCalledOnce())
     expect(onApply).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -413,12 +413,12 @@ describe("conversation setup identity", () => {
       if (action === "Escape") await user.keyboard("{Escape}")
       else
         await user.click(
-          screen.getByRole("button", { name: action, exact: true })
+          screen.getByRole("button", { name: action })
         )
 
       if (action !== "Cancel")
         await user.click(
-          await screen.findByRole("button", { name: "Discard", exact: true })
+          await screen.findByRole("button", { name: "Discard" })
         )
 
       await waitFor(() =>
@@ -443,8 +443,8 @@ describe("conversation setup identity", () => {
     const notes = screen.getByRole("textbox", { name: "Scene notes" });
     await user.type(notes, " retained draft");
     if (action === "Escape") await user.keyboard("{Escape}");
-    else await user.click(screen.getByRole("button", { name: "Close", exact: true }));
-    await user.click(await screen.findByRole("button", { name: "Keep editing", exact: true }));
+    else await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(await screen.findByRole("button", { name: "Keep editing" }));
     expect(notes).toHaveValue("Original scene retained draft");
     expect(screen.getByTestId("character-select")).toHaveAccessibleName("Guide Persona");
     expect({ closed: onClose.mock.calls.length, applied: onApply.mock.calls.length, writes: mocks.saveScene.mock.calls.length }).toEqual({ closed: 0, applied: 0, writes: 0 });
@@ -487,7 +487,7 @@ describe("conversation setup identity", () => {
       const user = await choosePersona();
       await user.click(screen.getByRole("textbox", { name: "Scene notes" }));
       await user.keyboard("{Escape}");
-      await user.click(await screen.findByRole("button", { name: "Discard", exact: true }));
+      await user.click(await screen.findByRole("button", { name: "Discard" }));
       await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
       expect(onApply).not.toHaveBeenCalled();
       expect(mocks.setSelectedAssistant).not.toHaveBeenCalled();
@@ -529,14 +529,14 @@ describe("conversation setup identity", () => {
     mocks.saveScene.mockResolvedValueOnce(false)
     const { onApply, onClose } = renderDrawer()
     const user = await choosePersona()
-    await user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Apply" }))
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /could not be saved/i
     )
     expect(onApply).toHaveBeenCalledOnce()
     expect(onClose).not.toHaveBeenCalled()
     await user.click(
-      await screen.findByRole("button", { name: "Apply", exact: true })
+      await screen.findByRole("button", { name: "Apply" })
     )
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
     expect(onApply).toHaveBeenCalledOnce()
@@ -554,12 +554,12 @@ describe("conversation setup identity", () => {
     mocks.saveScene.mockResolvedValueOnce(false)
     const { onApply, onClose } = renderDrawer()
     const user = await choosePersona()
-    await user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Apply" }))
     await screen.findByRole("alert")
     fireEvent.change(screen.getByRole("textbox", { name: "Scene notes" }), {
       target: { value: "Corrected scene" }
     })
-    await user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Apply" }))
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
     expect(onApply).toHaveBeenCalledOnce()
     expect(mocks.saveScene).toHaveBeenLastCalledWith(
@@ -580,10 +580,10 @@ describe("conversation setup identity", () => {
     mocks.saveScene.mockResolvedValueOnce(false);
     const { onApply, onClose } = renderDrawer();
     const user = await choosePersona();
-    await user.click(screen.getByRole("button", { name: "Apply", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
     await screen.findByRole("alert");
-    await user.click(screen.getByRole("button", { name: "Clear identity", exact: true }));
-    await user.click(screen.getByRole("button", { name: "Apply", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Clear identity" }));
+    await user.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(onApply).toHaveBeenCalledTimes(2);
     expect(onApply).toHaveBeenLastCalledWith(expect.objectContaining({ clearIdentity: true }), expect.anything());
@@ -765,16 +765,16 @@ describe("conversation setup identity", () => {
         screen.getByRole("textbox", { name: "Scene notes" }),
         " retained"
       )
-      await user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+      await user.click(screen.getByRole("button", { name: "Apply" }))
       await screen.findByRole("alert")
       modelRevision++
       if (action === "Escape") await user.keyboard("{Escape}")
       else
         await user.click(
-          screen.getByRole("button", { name: "Close", exact: true })
+          screen.getByRole("button", { name: "Close" })
         )
       await user.click(
-        await screen.findByRole("button", { name: "Discard", exact: true })
+        await screen.findByRole("button", { name: "Discard" })
       )
       await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
       expect(onApply).toHaveBeenCalledOnce()

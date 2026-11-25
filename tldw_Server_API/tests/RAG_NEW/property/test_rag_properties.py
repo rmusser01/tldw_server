@@ -548,14 +548,14 @@ class RAGStateMachine(RuleBasedStateMachine):
     )
     def update_config(self, top_k):
         """Update configuration."""
-        self.config["top_k"] = top_k
-        # Config changes might invalidate cache
+        # Config changes might invalidate cache: compare with the old top_k before replacing it
         if top_k < self.config.get("top_k", 10):
             # Truncate cached results
             self.cache = {
                 q: docs[:top_k]
                 for q, docs in self.cache.items()
             }
+        self.config["top_k"] = top_k
 
     @invariant()
     def cache_consistency(self):
@@ -658,6 +658,7 @@ class TestErrorHandlingProperties:
 class TestPerformanceProperties:
     """Property tests for performance characteristics."""
 
+    @example(num_documents=101, top_k=97)
     @given(
         num_documents=st.integers(min_value=1, max_value=1000),
         top_k=st.integers(min_value=1, max_value=100)
@@ -674,9 +675,9 @@ class TestPerformanceProperties:
 
         # Actual retrieval should be better than, or at worst comparable to,
         # linear scan for large datasets. For very large top_k (close to n),
-        # index cost (log n + k) can approach O(n); allow small cushion.
+        # index cost (log n + k) can approach O(n); the cushion covers the log term.
         if num_documents > 100:
-            assert index_complexity <= linear_complexity + 2
+            assert index_complexity <= linear_complexity + np.log2(num_documents) + 2
 
     @given(
         query_length=st.integers(min_value=1, max_value=500),
