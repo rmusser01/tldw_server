@@ -208,18 +208,18 @@ def test_deprecated_profile_update_strictly_advances_profile_version(auth_header
 async def test_user_profile_update_accepts_valid_identity_email_with_pydantic_v2(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    updates: list[tuple[int, str, str]] = []
+    updates: list[tuple[int, str]] = []
 
     async def _capture_update(
         _db_conn,
         user_id: int,
-        field: str,
-        value: str,
-        **_kwargs,
+        email: str,
+        *,
+        anchor,
     ) -> None:
-        updates.append((user_id, field, value))
+        updates.append((user_id, email))
 
-    monkeypatch.setattr(update_service_module, "_update_user_field", _capture_update)
+    monkeypatch.setattr(update_service_module, "_update_own_email", _capture_update)
 
     result = await update_service_module.UserProfileUpdateService(db_pool=object()).apply_updates(
         user_id=7,
@@ -232,7 +232,27 @@ async def test_user_profile_update_accepts_valid_identity_email_with_pydantic_v2
 
     assert result.applied == ["identity.email"]
     assert result.skipped == []
-    assert updates == [(7, "email", "restored.profile@example.com")]
+    assert updates == [(7, "restored.profile@example.com")]
+
+
+@pytest.mark.asyncio
+async def test_identity_email_edit_of_another_user_keeps_the_plain_field_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    writes: list[tuple[int, str, str]] = []
+
+    async def _capture(_db_conn, user_id: int, field: str, value: str, **_kwargs) -> None:
+        writes.append((user_id, field, value))
+
+    async def _must_not_run(*_args, **_kwargs) -> None:
+        raise AssertionError("another user's email must not record a previous address")
+
+    monkeypatch.setattr(update_service_module, "_update_user_field", _capture)
+    monkeypatch.setattr(update_service_module, "_update_own_email", _must_not_run)
+    result = await update_service_module.UserProfileUpdateService(db_pool=object()).apply_updates(
+        user_id=7, updates=(("identity.email", "Target@Example.com"),), roles={"user"},
+        dry_run=False, db_conn=object(), updated_by=99,
+    )
+    assert result.applied == ["identity.email"]
+    assert writes == [(7, "email", "target@example.com")]
 
 
 @pytest.mark.asyncio

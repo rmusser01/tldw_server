@@ -3671,6 +3671,24 @@ async def ensure_user_profile_version_pg(pool: DatabasePool | None = None) -> bo
     return True
 
 
+_USERS_EMAIL_CHANGE_COLUMNS = (
+    ("previous_email", "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS previous_email VARCHAR(255)"),
+    ("email_changed_at", "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email_changed_at TIMESTAMPTZ"),
+)
+
+
+async def _ensure_users_email_change_columns(conn: Any) -> None:
+    """Add the email-change columns only when missing, so a normal start never locks ``users`` (TASK-15640)."""
+    for column, alter_statement in _USERS_EMAIL_CHANGE_COLUMNS:
+        present = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'users' AND column_name = $1)",
+            column,
+        )
+        if present is not True:
+            await conn.execute(alter_statement)
+
+
 async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure core AuthNZ tables exist for PostgreSQL backends.
 
@@ -3692,6 +3710,7 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
             for statement in native_quota_schema_statements(postgres=True):
                 await conn.execute(statement)
             await ensure_postgres_session_last_activity(conn)
+            await _ensure_users_email_change_columns(conn)
             has_legacy_uses = await conn.fetchval(
                 "SELECT EXISTS ("
                 "SELECT 1 FROM information_schema.columns "

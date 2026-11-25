@@ -6582,7 +6582,21 @@ def get_authnz_migrations() -> list[Migration]:
             migration_106_add_mcp_external_discovery_state,
         ),
         Migration(107, "Add llm_provider_overrides.denied_models", migration_107_add_override_denied_models),
+        Migration(108, "Add users.previous_email and users.email_changed_at", migration_108_add_users_email_change_columns),
     ]
+
+
+def migration_108_add_users_email_change_columns(conn: sqlite3.Connection) -> None:
+    """Add ``users.previous_email`` and ``users.email_changed_at`` for self-service email changes (TASK-15640)."""
+    if not _sqlite_table_exists(conn, "users"):
+        logger.info("Migration 108: users table not present; skipping")
+        return
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "previous_email" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN previous_email TEXT")
+    if "email_changed_at" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN email_changed_at TIMESTAMP")
+    logger.info("Migration 108: Added users.previous_email and users.email_changed_at")
 
 
 def migration_107_add_override_denied_models(conn: sqlite3.Connection) -> None:

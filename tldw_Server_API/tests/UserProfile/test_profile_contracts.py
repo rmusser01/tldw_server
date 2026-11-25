@@ -138,3 +138,11 @@ def test_effect_policy_values_are_stable() -> None:
     assert EffectPolicy.REQUIRED == "required"
     assert EffectPolicy.BEST_EFFORT.value == "best_effort"
     assert EffectPolicy.BEST_EFFORT == "best_effort"
+
+
+def test_update_command_never_shows_the_password() -> None:
+    command = ProfileUpdateCommand(
+        actor_user_id=7, target_user_id=7, updates=(), roles=frozenset({"user"}), dry_run=False,
+        current_password="s3cret-value",
+    )
+    assert "s3cret-value" not in repr(command)

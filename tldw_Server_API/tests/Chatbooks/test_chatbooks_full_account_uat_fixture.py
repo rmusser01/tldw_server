@@ -181,7 +181,7 @@ async def test_fixture_round_trip_verifies_full_inventory_and_exact_embeddings(
     verified = await fixture.verify(tmp_path)
 
     assert imported["success"] is True
-    assert verified["profile"] == expected["profile"]
+    assert verified["profile"] == {"identity.email": fixture.DESTINATION_EMAIL}
     assert verified["settings"] == expected["settings"]
     assert verified["characters"] == [
         {"name": character["name"]} for character in expected["characters"]
