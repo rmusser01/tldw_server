@@ -675,6 +675,10 @@ class Cells:
         self.skip = skip
         self.strict = strict
         self.end = [max(s.end_lineno for s in members) for _, members in spans]
+        blocks = list(own_blocks(fn))
+        self.span_block = [next(b for b in blocks if any(x is members[0] for x in b)) for _, members in spans]
+        self.span_last = [members[-1] for _, members in spans]
+        self.span_start = [min(stmt_start(s) for s in members) for _, members in spans]
         self.args = args or {}  # span label -> names it takes as parameters, so they do not cross
         self.fn, self.key = fn, key
         self.labels = [s[0] for s in spans] + ["<rest>"]
@@ -716,6 +720,8 @@ class Cells:
             for x in self.nodes[i]:
                 if isinstance(x, ast.Name) and is_f(x, key) and isinstance(x.ctx, ast.Load):
                     ld[x.id].append(x.lineno)
+                elif isinstance(x, ast.AugAssign) and isinstance(x.target, ast.Name) and is_f(x.target, key):
+                    ld[x.target.id].append(x.target.lineno)  # x += 1 reads x
             self.loads.append(ld)
             if i == n:
                 for p in self.params:
@@ -739,6 +745,11 @@ class Cells:
                 elif (isinstance(x, ast.ExceptHandler) and x.name or isinstance(x, SCOPE_NODES) and getattr(x, "name", None)) and is_f(x, key):
                     other.add(x.name)
         self.idem = {k for k, v in imp.items() if len(v) == 1 and k not in other}
+
+    def _binds(self, x: ast.AST) -> list[str]:
+        if isinstance(x, (ast.Import, ast.ImportFrom)):
+            return [_bound(a) for a, r in zip(x.names, x._rs) if r is self.key]  # type: ignore[attr-defined]
+        return [x.name] if getattr(x, "name", None) and is_f(x, self.key) else []  # type: ignore[attr-defined]
 
     def _visit(self, s: ast.stmt, cur: int, span_of: dict[int, int]) -> None:
         c = span_of.get(id(s), cur)
@@ -887,15 +898,35 @@ class Cells:
                     if i != j and name in self.bound[i] and not (name in self.idem and self.first_import[j].get(name, 10**9) < self.first_read[j].get(name, 0)):
                         out[name].append(f"bound in {self.labels[i]}, live-in at {self.labels[j]}")
         if self.strict:
-            # a span that rebinds a name which another cell reads after it. Liveness misses it when that cell
-            # also binds the name before the span (a flag set in the span and tested after it).
+            # A name bound in a span and read (or augmented) anywhere after it crosses, unless the first such reference
+            # follows a plain, unconditional rebinding in the span's own block. Liveness misses the rest (a flag set in the
+            # span and tested after it); when unsure the name crosses, which only costs a ctx slot.
             for i in range(n - 1):
+                blk = self.span_block[i]
+                after = blk[next(k for k, x in enumerate(blk) if x is self.span_last[i]) + 1 :]
+                plain_bound = {
+                    x.id for x in self.nodes[i] if isinstance(x, ast.Name) and is_f(x, self.key) and isinstance(x.ctx, ast.Store)
+                } | {nm for x in self.nodes[i] if isinstance(x, (ast.Import, ast.ImportFrom, *SCOPE_NODES)) for nm in self._binds(x)}
                 for name in self.bound[i]:
-                    if name in self.idem:
+                    if name in self.idem or name not in plain_bound:  # an `except ... as e` target is scoped to its handler
                         continue
                     for j in range(n):
+                        # another span that does not enclose this one binds before it reads, or liveness flagged it above
+                        if j < n - 1 and not (self.span_start[j] <= self.span_start[i] and self.end[i] <= self.end[j]):
+                            continue
                         late = [ln for ln in self.loads[j].get(name, []) if ln > self.end[i]]
-                        if j != i and late and not any(self.end[i] < b < min(late) for b in self.bound[j].get(name, [])) and name not in self.args.get(self.labels[j], ()):
+                        if j == i or not late or name in self.args.get(self.labels[j], ()):
+                            continue
+                        first = min(late)
+                        plain = any(
+                            self.owner.get(id(x)) == j
+                            and isinstance(x, (ast.Assign, ast.AnnAssign))
+                            and (x.value is not None)
+                            and any(isinstance(t, ast.Name) and t.id == name and is_f(t, self.key) for t in (x.targets if isinstance(x, ast.Assign) else [x.target]))
+                            and x.end_lineno < first
+                            for x in after
+                        )
+                        if not plain:
                             out[name].append(f"bound in {self.labels[i]}, read after it in {self.labels[j]}")
         for c in range(n):
             for d in (x for x in self.nodes[c] if isinstance(x, DEFS) and is_f(x, self.key)):
@@ -1181,6 +1212,16 @@ class LiftRefs(ast.NodeTransformer):
         if ref is None:
             return node
         return ast.copy_location(parse_expr(f"functools.partial({ref}, {', '.join(self.ctx)})"), node)
+
+    def visit_Compare(self, node: ast.Compare) -> ast.AST:
+        ops = (ast.Is, ast.IsNot, ast.Eq, ast.NotEq, ast.In, ast.NotIn)
+        for op, a, b in zip(node.ops, [node.left, *node.comparators], node.comparators):
+            for x in (a, b):
+                lf = self.hit(x)
+                if lf and isinstance(op, ops):
+                    self.errors.append(f"V11: line {node.lineno}: lifted {lf.name} is compared with {type(op).__name__}; a partial is not the closure it replaces")
+        self.generic_visit(node)
+        return node
 
     def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
         lf = self.hit(node.value)
@@ -1509,6 +1550,8 @@ def split_entry_into_module(m: dict, out: Built, fn: Any, key: Any, up: UpTransf
         elif isinstance(n, ast.Name) and n.id in ("__name__", "__file__") and isinstance(n.ctx, ast.Load):
             out.errors.append(f"V1: the entry body reads {n.id} (line {n.lineno}); it reads a different module after the move")
     for n in walk_own(rest):
+        if isinstance(n, (ast.Yield, ast.YieldFrom)):
+            out.errors.append(f"V1: the entry body contains yield at line {n.lineno}; a generator cannot move behind `return await`")
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in INTROSPECTION and getattr(n.func, "_r", NEW) is None:
             out.errors.append(f"V1: the entry body calls {n.func.id}() (line {n.lineno}); it reads a different scope after the move")
     aw = isinstance(fn, ast.AsyncFunctionDef)

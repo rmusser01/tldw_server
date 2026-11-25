@@ -1488,7 +1488,6 @@ def test_lift_decorators_and_defaults_must_not_read_the_facade(tmp_path: Path, c
     src = LIFT_BASE.replace("def _note(msg: Any) -> int:", "def _note(msg: Any, n=LIMIT) -> int:")
     t = lift_tree(tmp_path / "d", src, lift={"_note": "stage_a"})
     assert t.run("apply") == 1 and "V12" in capsys.readouterr().out
-    src = LIFT_BASE.replace("        def _note(msg: Any) -> int:", "        @register\n        def _note(msg: Any) -> int:")
     src = LIFT_BASE.replace("    def _note(msg: Any) -> int:", "    @audit\n    def _note(msg: Any) -> int:")
     t = lift_tree(tmp_path / "e", src, lift={"_note": "stage_a"})
     assert t.run("apply") == 1 and "V12" in capsys.readouterr().out
@@ -1939,13 +1938,6 @@ def test_rewriting_the_flag_into_the_ctx_resolves_it(tmp_path: Path, capsys: pyt
     assert t.run("verify") == 0, capsys.readouterr().out
 
 
-def test_a_name_rebound_between_the_span_and_the_read_does_not_cross(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-    src = FLAG_BASE.replace("    finally:\n        audit(done)", "    finally:\n        done = False\n        audit(done)")
-    mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(x)")]}
-    t = sib_tree(tmp_path, src, moves=[mv])
-    assert t.run("apply") == 0, capsys.readouterr().out
-
-
 def test_the_rag_layout_does_not_use_the_strict_rule(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     src = FLAG_BASE.replace("    cst = make(a)\n", "")
     mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(x)")]}
@@ -1959,3 +1951,68 @@ def test_a_destination_that_gets_no_defs_gets_no_new_imports(tmp_path: Path, cap
     assert t.run("apply") == 0, capsys.readouterr().out
     stage = t.text("mini/stage_b.py")
     assert "TYPE_CHECKING" not in stage and "functools" not in stage
+
+
+# --- fix round 1: strict crossing is conservative, entry yield, lifted-name comparisons ---
+
+SET_BASE = textwrap.dedent(
+    '''\
+    import os
+
+
+    def audit(*args):
+        return args
+
+
+    async def call(a):
+        """Doc."""
+        cst = make(a)
+        done = False
+        x = os.getenv("A")
+        if x:
+            done = True
+        audit(x)
+    TAIL
+        return cst
+    '''
+)
+
+
+def set_tree(tmp: Path, tail: str) -> Tree:
+    src = SET_BASE.replace("TAIL\n", tail)
+    mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(x)")]}
+    return sib_tree(tmp, src, moves=[mv])
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "    if cst.flag:\n        done = False\n    audit(done)\n",
+        "    done |= cst.flag\n",
+        "    try:\n        done = False\n    finally:\n        audit(done)\n",
+        "    audit(done)\n    done = False\n",
+        "    done = bool(done)\n",
+    ],
+)
+def test_strict_crossing_treats_anything_but_a_plain_rebind_as_crossing(tmp_path: Path, capsys: pytest.CaptureFixture, tail: str) -> None:
+    t = set_tree(tmp_path, tail)
+    assert t.run("apply") == 1 and "V4: crossing local done: bound in step, read after it in <rest>" in capsys.readouterr().out
+
+
+def test_strict_crossing_exempts_a_plain_rebind_in_the_spans_block(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = set_tree(tmp_path, "    done = False\n    audit(done)\n")
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_entry_refuses_a_generator_body(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = ENTRY_BASE.replace("return await audit(cst)", "yield cst")
+    t = sib_tree(tmp_path, src, lift={}, moves=[], entry=ENTRY)
+    assert t.run("apply") == 1 and "V1: the entry body contains yield" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("cmp", ["_note is None", "_note == _outer", "None is not _note", "_note in [1]"])
+def test_lift_refuses_a_comparison_of_a_lifted_name(tmp_path: Path, capsys: pytest.CaptureFixture, cmp: str) -> None:
+    src = LIFT_BASE.replace("register(_note)", f"register({cmp})")
+    t = lift_tree(tmp_path, src)
+    assert t.run("apply") == 1 and "is compared with" in capsys.readouterr().out
