@@ -62,7 +62,7 @@ Import rule (TASK-13950.25, R5): a module that holds moved executor code ends wi
 
 1. The FastAPI endpoint continues to validate the request and build `cleaned_args`.
 2. `chat_service.execute_non_stream_call` remains callable with the same signature.
-3. `chat_service.py` performs provider selection, queue/fallback setup, prompt cost guardrails, and the provider call as it does today.
+3. `chat_service.py` keeps provider selection and request normalisation. `completion_pipeline.run_non_stream_call` (reached through the `_execute_non_stream_call_impl` shim) performs queue/fallback setup, prompt cost guardrails, and the provider call (`call_non_stream_provider`).
 4. Unsupported modes are rejected before the provider call when possible. In particular, local tool auto-exec with `n > 1` fails fast with HTTP 400 because executing one of several assistant choices is ambiguous.
 5. Raw provider response is passed to `completion_pipeline.run_non_stream_call` (the deleted `ChatCompletionPipeline`'s successor, TASK-13950.25), which calls `response_processor.process_non_stream_response`.
 6. `response_processor` walks every returned choice and delegates policy decisions to `moderation_pipeline`.
