@@ -6,6 +6,7 @@ there, and checks the result with ``verify --base-dir`` or by reading the text. 
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import sys
@@ -590,6 +591,73 @@ def test_entry_split_moves_the_body_behind_a_shim(tmp_path: Path) -> None:
     assert t.run("verify") == 0
     _edit(t, FILE, "x = await go(rcfg)", "x = await go(None)")
     assert t.run("verify") == 1
+
+
+ENTRY_SRC = textwrap.dedent(
+    """\
+    async def pipe(a, b=1):
+        \"\"\"Doc.\"\"\"
+        rcfg = make(a, b)
+        x = await go(rcfg)
+        return x
+    """
+)
+
+
+def _entry_parts(t: Tree) -> tuple[ast.AsyncFunctionDef, ast.AsyncFunctionDef]:
+    fns = [n for n in ast.parse(t.text(FILE)).body if isinstance(n, ast.AsyncFunctionDef)]
+    return fns[0], fns[1]
+
+
+def test_entry_split_keeps_the_docstring_on_the_shim_only(tmp_path: Path) -> None:
+    t = Tree(tmp_path, ENTRY_SRC, entry_split=True)
+    assert t.run("apply") == 0
+    shim, entry = _entry_parts(t)
+    assert ast.get_docstring(shim) == "Doc." and ast.get_docstring(entry) is None
+    assert isinstance(entry.body[0], ast.Assign)  # `x = ...`: nothing before the old body
+    assert t.run("verify") == 0
+
+
+def test_entry_split_entry_doc_and_shim_doc_round_trip(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = Tree(tmp_path, ENTRY_SRC, entry_split=True, entry_doc="Run it.", shim_doc="Shim; see run_rag_pipeline.\n\n    More.\n    ")
+    assert t.run("apply") == 0
+    shim, entry = _entry_parts(t)
+    assert ast.get_docstring(entry, clean=False) == "Run it."
+    assert ast.get_docstring(shim, clean=False) == "Shim; see run_rag_pipeline.\n\n    More.\n    "
+    assert len(shim.body) == 2 and isinstance(entry.body[1], ast.Assign)
+    assert t.run("verify") == 0
+    capsys.readouterr()
+    _edit(t, FILE, "Run it.", "Run it!")
+    assert t.run("verify") == 1
+    _edit(t, FILE, "Run it!", "Run it.")
+    _edit(t, FILE, "Shim; see", "Shim: see")
+    assert t.run("verify") == 1
+
+
+def test_entry_split_verify_rejects_a_stray_or_missing_docstring(tmp_path: Path) -> None:
+    t = Tree(tmp_path, ENTRY_SRC, entry_split=True)
+    assert t.run("apply") == 0
+    _edit(t, FILE, "    x = await go(rcfg)", '    "stray"\n    x = await go(rcfg)')
+    assert t.run("verify") == 1  # a docstring where the key is not set
+    t2 = Tree(tmp_path / "two", ENTRY_SRC, entry_split=True, entry_doc="Run it.")
+    assert t2.run("apply") == 0
+    _edit(t2, FILE, '    """Run it."""\n', "")
+    assert t2.run("verify") == 1  # a missing docstring where the key is set
+    t3 = Tree(tmp_path / "three", ENTRY_SRC, entry_split=True, entry_doc="Run it.")
+    assert t3.run("apply") == 0
+    _edit(t3, FILE, '    """Run it."""\n', '    """Run it."""\n    1 + 1\n')
+    assert t3.run("verify") == 1  # an extra statement after the docstring
+    _edit(t3, FILE, '    """Run it."""\n    1 + 1\n', "    f'Run it.'\n")
+    assert t3.run("verify") == 1  # not a plain str constant
+
+
+def test_entry_docs_must_be_strings_and_need_entry_split(tmp_path: Path) -> None:
+    t = Tree(tmp_path / "a", entry_split=True, shim_doc=["x"])
+    with pytest.raises(rag_split.SplitError, match="shim_doc must be a str"):
+        rag_split.load_manifest(t.manifest_path)
+    t = Tree(tmp_path / "b", entry_doc="x")
+    with pytest.raises(rag_split.SplitError, match="needs entry_split"):
+        rag_split.load_manifest(t.manifest_path)
 
 
 def test_verify_rejects_a_shadowing_duplicate_def(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
