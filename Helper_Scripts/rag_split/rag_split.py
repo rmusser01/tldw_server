@@ -1600,6 +1600,14 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     if is_sibling(m):  # a loop could run a moved or lifted statement again after code that reads its result
         out.errors += [f"V1: {mv.name}: the span sits inside the loop at line {lp.lineno}; moves are refused in loops" for mv in moves if (lp := loop_above(fn, mv.members[0]))]
         out.errors += [f"V1: lifted {lf.name} sits inside the loop at line {lp.lineno}; lifts are refused in loops" for lf in lifts if (lp := loop_above(lf.parent_node or fn, lf.node))]
+    if m["prune_dead_sites"]:
+        first = fn.body[docstring_len(fn)] if len(fn.body) > docstring_len(fn) else None
+        inside = {id(x) for x in ast.walk(first)} if first is not None else set()
+        out.errors += [
+            f"V17: prune_dead_sites: {n.func.id}() at line {n.lineno} can read a def site by name; only the first statement after the docstring may call it"
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("locals", "vars", "globals", "eval", "exec") and getattr(n.func, "_r", NEW) is None and id(n) not in inside
+        ]
     for mv in moves:
         out.errors += check_span(mv, notes)
         out.errors += check_args(mv, fn, key, ctx_names(m), {lf.name for lf in lifts})

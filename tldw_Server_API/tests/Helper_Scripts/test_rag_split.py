@@ -2438,3 +2438,24 @@ def test_dead_sites_are_kept_unless_the_manifest_asks_to_prune_them(tmp_path: Pa
     with pytest.raises(rag_split.SplitError, match="prune_dead_sites is a bool and needs pkg ''"):
         t.set(**{**SIB, "pkg": "pipeline", "prune_dead_sites": True})
         rag_split.load_manifest(t.manifest_path)
+
+
+@pytest.mark.parametrize(
+    "probe",
+    ["register(locals()['_note'])", "register(eval('_note'))", "exec('_note(1)')", "register(vars()['_note'])", "register(globals()['_note'])",
+     "register(lambda: locals())", "register([locals() for _ in range(1)])"],
+)
+def test_prune_dead_sites_refuses_introspection_outside_the_prologue(tmp_path: Path, capsys: pytest.CaptureFixture, probe: str) -> None:
+    src = LIFT_BASE.replace("    _note(x)\n    register(_note)\n", f"    {probe}\n")
+    assert src != LIFT_BASE
+    t = lift_tree(tmp_path, src, lift={"_note": "stage_b", "_outer": "stage_a"}, prune_dead_sites=True)
+    assert t.run("apply") == 1 and "V17: prune_dead_sites" in capsys.readouterr().out
+    t = lift_tree(tmp_path / "off", src, lift={"_note": "stage_b", "_outer": "stage_a"})  # without the key nothing is pruned, so it is fine
+    assert t.run("apply") == 0
+
+
+def test_prune_dead_sites_accepts_locals_in_the_prologue_statement(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = LIFT_BASE.replace("cst = make(a)", "cst = make(locals())")
+    t = lift_tree(tmp_path, src, lift={"_note": "stage_b", "_outer": "stage_a"}, prune_dead_sites=True)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert t.run("verify") == 0, capsys.readouterr().out
