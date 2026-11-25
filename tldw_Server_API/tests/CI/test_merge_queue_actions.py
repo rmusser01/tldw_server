@@ -165,6 +165,7 @@ class FakeGh:
         self.run_reads = {}
         self.behind_by = behind_by or {}
         self.license_runs = license_runs or []
+        self.license_requests = []
         self.line_reads = 0
         self.runs_reads = {}
         self.statuses_reads = {}
@@ -254,7 +255,7 @@ class FakeGh:
 
     def rest(self, method, path, fields=None):
         if method == "GET" and f"/actions/workflows/{LICENSE_GATE}/runs?" in path:
-            assert "event=workflow_dispatch" in path and "branch=dev" in path
+            self.license_requests.append(path)
             status = re.search(r"[?&]status=([^&]+)", path).group(1)
             runs = [r for r in self.license_runs if r["status"] == status]
             return {"total_count": len(runs), "workflow_runs": self._page(runs, path)}
@@ -800,6 +801,9 @@ def test_a_live_license_dispatch_without_a_posted_status_is_not_replaced(status,
 
     assert _run(gh)[0][1].contexts == (LICENSE,)
     assert gh.calls == [], "a queued dispatch must survive until its runner can post the policy status"
+    assert gh.license_requests
+    assert all("event=workflow_dispatch" in path and "branch=dev" in path
+               and "head_sha=" not in path for path in gh.license_requests)
 
 
 @pytest.mark.parametrize("changes", [
