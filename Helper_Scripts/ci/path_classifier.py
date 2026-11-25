@@ -168,6 +168,142 @@ RAG_PIPELINE_GATE_EXCLUDED: dict[str, str] = {
     f"{_RAG_NEW}integration/test_rag_benchmarks_ablation.py": "it skips without TestClient lifespan",
 }
 
+# Paths that run the required `chat-executors` job (TASK-13950.25): the golden-output test and the chat
+# service tests below, only when the chat executors, their destination modules, a gate test or the job changes.
+_CHAT_CORE = "tldw_Server_API/app/core/Chat/"
+CHAT_EXECUTORS_GLOBS = [
+    *(
+        f"{_CHAT_CORE}{n}.py"
+        for n in (
+            "chat_service",
+            "call_state",
+            "completion_pipeline",
+            "streaming_pipeline",
+            "moderation_pipeline",
+            "persistence_service",
+            "response_processor",
+            "tool_execution_service",
+            "history_context",
+            "streaming_utils",
+        )
+    ),
+    "tldw_Server_API/tests/Chat/unit/test_chat_executors_golden.py",
+    "tldw_Server_API/tests/Chat/unit/golden/**",
+    "tldw_Server_API/tests/Chat/unit/test_chat_service_*.py",
+    "tldw_Server_API/tests/Chat/unit/test_streaming_structured_events.py",
+    "tldw_Server_API/tests/Chat/unit/test_prompt_cost_guardrails.py",
+    "tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py",
+    "tldw_Server_API/tests/Chat/unit/test_history_context.py",
+    "tldw_Server_API/tests/Chat/unit/test_history_selected_images.py",
+    "tldw_Server_API/tests/Chat/unit/test_native_history_frozen_worldbooks.py",
+    "tldw_Server_API/tests/Chat/unit/test_failed_retry_provider_order.py",
+    "tldw_Server_API/tests/Chat/integration/test_chat_endpoint_simplified.py",
+    "tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py",
+    "tldw_Server_API/tests/Chat/integration/test_chat_endpoint_streaming_normalization.py",
+    "tldw_Server_API/tests/Chat/integration/test_chat_run_first_rollout.py",
+    "tldw_Server_API/tests/Chat_NEW/unit/test_chat_continuation_controls.py",
+    "tldw_Server_API/tests/Chat_NEW/unit/test_chat_history_dedup.py",
+    "tldw_Server_API/tests/Chat_NEW/unit/test_new_chat_title.py",
+    "tldw_Server_API/tests/Chat_NEW/unit/test_tool_message_persistence.py",
+    "tldw_Server_API/tests/Chat_NEW/unit/test_chat_queue_integration.py",
+    "tldw_Server_API/tests/Chat_NEW/integration/test_chat_rg_refund.py",
+    "tldw_Server_API/tests/Chat_NEW/integration/test_native_character_prompt_delivery.py",
+    "tldw_Server_API/tests/Chat_NEW/integration/test_server_settled_generation_metadata.py",
+    "tldw_Server_API/tests/DB_Management/test_chat_retry_system_messages.py",
+    "tldw_Server_API/tests/DB_Management/test_chat_successful_regeneration.py",
+    "tldw_Server_API/tests/DB_Management/test_chat_queued_resume_history.py",
+    "tldw_Server_API/tests/Guardian/test_chat_integration.py",
+    "tldw_Server_API/tests/Usage/test_llm_quota_byok_calls.py",
+    "tldw_Server_API/tests/unit/test_moderation_event_capture.py",
+    "Helper_Scripts/rag_split/**",
+    "tldw_Server_API/tests/_plugins/postgres.py",
+    ".github/workflows/backend-required.yml",
+    ".github/actions/detect-required-gate-changes/action.yml",
+    "Helper_Scripts/ci/path_classifier.py",
+]
+
+_T = "tldw_Server_API/tests/"
+# The `chat-executors` job runs exactly these files, serially (the workflow lists the same paths literally).
+CHAT_EXECUTORS_GATE_TESTS: tuple[str, ...] = (
+    f"{_T}Chat/unit/test_chat_executors_golden.py",
+    *(
+        f"{_T}Chat/unit/{n}.py"
+        for n in (
+            "test_chat_service_fallback",
+            "test_chat_service_fallback_credential_taxonomy",
+            "test_chat_service_content",
+            "test_chat_service_streaming_tool_autoexec",
+            "test_chat_service_tool_autoexec",
+            "test_chat_service_queue_estimate",
+            "test_chat_service_audit_tasks",
+            "test_streaming_structured_events",
+            "test_prompt_cost_guardrails",
+            "test_chat_history_and_streaming",
+            "test_history_context",
+            "test_history_selected_images",
+            "test_native_history_frozen_worldbooks",
+            "test_failed_retry_provider_order",
+        )
+    ),
+    *(
+        f"{_T}Chat/integration/{n}.py"
+        for n in (
+            "test_chat_endpoint_simplified",
+            "test_chat_endpoint_auto_routing",
+            "test_chat_endpoint_streaming_normalization",
+            "test_chat_run_first_rollout",
+        )
+    ),
+    *(
+        f"{_T}Chat_NEW/unit/{n}.py"
+        for n in (
+            "test_chat_continuation_controls",
+            "test_chat_history_dedup",
+            "test_new_chat_title",
+            "test_tool_message_persistence",
+            "test_chat_queue_integration",
+        )
+    ),
+    *(
+        f"{_T}Chat_NEW/integration/{n}.py"
+        for n in (
+            "test_chat_rg_refund",
+            "test_native_character_prompt_delivery",
+            "test_server_settled_generation_metadata",
+        )
+    ),
+    *(
+        f"{_T}DB_Management/{n}.py"
+        for n in (
+            "test_chat_retry_system_messages",
+            "test_chat_successful_regeneration",
+            "test_chat_queued_resume_history",
+        )
+    ),
+    f"{_T}Guardian/test_chat_integration.py",
+    f"{_T}Usage/test_llm_quota_byok_calls.py",
+    f"{_T}unit/test_moderation_event_capture.py",
+)
+# Test ids the job deselects (passed as `--deselect`), with the reason.
+CHAT_EXECUTORS_GATE_DESELECT: dict[str, str] = {
+    f"{_T}Chat/integration/test_chat_endpoint_simplified.py::test_chat_completion_streaming": (
+        'static skip: "Streaming tests hang with TestClient"'
+    ),
+    f"{_T}DB_Management/test_chat_retry_system_messages.py::test_retry_context_does_not_expose_another_owners_instructions[postgres]": (
+        "fails at dev with NotFoundError 'Conversation not found' under postgres:18 (TASK-15643)"
+    ),
+    f"{_T}DB_Management/test_chat_queued_resume_history.py::test_foreign_conversation_is_not_used_as_history_evidence[postgres]": (
+        "fails at dev with NotFoundError 'Conversation not found' under postgres:18 (TASK-15643)"
+    ),
+}
+# Chat test files the job does not run, with the reason.
+CHAT_EXECUTORS_GATE_EXCLUDED: dict[str, str] = {
+    f"{_T}Character_Chat_NEW/unit/test_roleplay_resume_contract.py": (
+        "325 s serial run that touches the executors once, through a patch of _format_selected_history_messages; "
+        "the structure pin guards that patch and the character shard runs it nightly"
+    ),
+}
+
 FAMILY_GUARDRAILS_GLOBS = [
     "apps/tldw-frontend/**/family-guardrails*",
     "apps/tldw-frontend/**/option-family-guardrails-wizard*",
@@ -220,6 +356,7 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         _matches_any(path, CHACHA_OWNER_SCOPE_GLOBS) for path in normalized_paths
     )
     rag_pipeline_changed = any(_matches_any(path, RAG_PIPELINE_GLOBS) for path in normalized_paths)
+    chat_executors_changed = any(_matches_any(path, CHAT_EXECUTORS_GLOBS) for path in normalized_paths)
     security_relevant_changed = backend_changed or any(
         path.endswith(("requirements.txt", "pyproject.toml", "uv.lock")) for path in normalized_paths
     )
@@ -235,4 +372,5 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         "coverage_required": coverage_required,
         "chacha_owner_scope_changed": chacha_owner_scope_changed,
         "rag_pipeline_changed": rag_pipeline_changed,
+        "chat_executors_changed": chat_executors_changed,
     }
