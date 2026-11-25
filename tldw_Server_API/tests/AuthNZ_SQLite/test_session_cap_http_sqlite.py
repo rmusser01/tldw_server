@@ -115,3 +115,66 @@ async def test_users_sessions_alias_lists_and_revokes_idle_refreshable_session(m
 
     assert client.delete(f"/api/v1/users/sessions/{idle}", headers=_bearer(tok)).status_code == 200
     assert idle not in {s["id"] for s in client.get("/api/v1/users/sessions", headers=_bearer(tok)).json()}
+
+
+# --- the evicted browser is told why ------------------------------------------
+
+
+async def test_fifth_login_evicts_oldest_and_its_token_gets_session_replaced(multi_user_client):
+    client, _uid, pw = multi_user_client
+    first, *_rest, fifth = [_login(client, pw) for _ in range(5)]
+
+    r = client.get("/api/v1/auth/sessions", headers=_bearer(first))
+
+    assert r.status_code == 401 and r.json()["detail"]["code"] == "session_replaced"
+    assert r.headers["WWW-Authenticate"] == "Bearer"
+    assert len(client.get("/api/v1/auth/sessions", headers=_bearer(fifth)).json()) == 4
+
+
+async def test_evicted_refresh_token_gets_session_replaced_after_purge(multi_user_client):
+    client, uid, pw = multi_user_client
+    first = _login(client, pw)
+    for _ in range(4):
+        _login(client, pw)
+    pool = await get_db_pool()
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "UPDATE sessions SET revoked_at = datetime('now', '-2 hours') WHERE revoke_reason = $1",
+            "session_cap",
+        )
+    await AuthnzSessionsRepo(pool).cleanup_expired_sessions(session_cap_retention=timedelta(hours=1))
+    assert not await pool.fetchall(
+        "SELECT id FROM sessions WHERE user_id = $1 AND revoke_reason = $2", uid, "session_cap"
+    )
+
+    r = client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]})
+
+    assert r.status_code == 401 and r.json()["detail"]["code"] == "session_replaced"
+
+
+async def test_logged_out_token_keeps_generic_401(multi_user_client):
+    client, _uid, pw = multi_user_client
+    tok = _login(client, pw)
+    assert client.post("/api/v1/auth/logout", headers=_bearer(tok)).status_code == 200
+
+    r = client.get("/api/v1/auth/sessions", headers=_bearer(tok))
+    assert r.status_code == 401 and r.json()["detail"] == "Could not validate credentials"
+    refreshed = client.post("/api/v1/auth/refresh", json={"refresh_token": tok["refresh_token"]})
+    assert refreshed.status_code == 401
+    assert refreshed.json()["detail"] == "Invalid or expired refresh token"
+
+
+async def test_forged_token_for_an_evicted_session_keeps_generic_401(multi_user_client):
+    from jose import jwt
+
+    client, _uid, pw = multi_user_client
+    first = _login(client, pw)
+    for _ in range(4):
+        _login(client, pw)
+    def _forge(token: str) -> str:
+        return jwt.encode(jwt.get_unverified_claims(token), "not-the-server-secret-0123456789", algorithm="HS256")
+
+    r = client.post("/api/v1/auth/refresh", json={"refresh_token": _forge(first["refresh_token"])})
+    assert r.status_code == 401 and r.json()["detail"] == "Invalid or expired refresh token"
+    r = client.get("/api/v1/auth/sessions", headers={"Authorization": f"Bearer {_forge(first['access_token'])}"})
+    assert r.status_code == 401 and r.json()["detail"] == "Could not validate credentials"

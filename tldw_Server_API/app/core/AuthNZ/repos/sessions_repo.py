@@ -677,6 +677,43 @@ class AuthnzSessionsRepo:
             )
             raise
 
+    async def fetch_revoke_reason_for_token_hash_candidates(
+        self,
+        token_hash_candidates: list[str],
+    ) -> str | None:
+        """
+        Return the ``revoke_reason`` of a revoked session whose access or
+        refresh token hash matches one of the candidates, or None.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                for candidate in token_hash_candidates:
+                    if self._is_postgres_backend():
+                        row = await conn.fetchrow(
+                            "SELECT revoke_reason FROM sessions WHERE is_revoked = TRUE "
+                            "AND (token_hash = $1 OR refresh_token_hash = $1) "
+                            "ORDER BY id DESC LIMIT 1",
+                            candidate,
+                        )
+                        reason = row["revoke_reason"] if row else None
+                    else:
+                        cursor = await conn.execute(
+                            "SELECT revoke_reason FROM sessions WHERE is_revoked = 1 "
+                            "AND (token_hash = ? OR refresh_token_hash = ?) "
+                            "ORDER BY id DESC LIMIT 1",
+                            (candidate, candidate),
+                        )
+                        found = await cursor.fetchone()
+                        reason = found[0] if found else None
+                    if reason:
+                        return reason
+                return None
+        except Exception as exc:  # pragma: no cover - surfaced via callers
+            logger.error(
+                f"AuthnzSessionsRepo.fetch_revoke_reason_for_token_hash_candidates failed: {exc}"
+            )
+            raise
+
     async def mark_sessions_revoked_for_user_with_audit(
         self,
         *,

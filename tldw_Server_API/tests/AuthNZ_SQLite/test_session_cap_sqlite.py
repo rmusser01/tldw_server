@@ -485,3 +485,38 @@ async def test_evicted_tokens_are_blacklisted_after_commit(authnz_sqlite, monkey
     assert calls[-1].kwargs["reason"] == "session_cap"
     assert calls[-1].kwargs["revoked_by"] is None
     assert [c["revoke_reason"] for c in calls[-1].committed] == ["session_cap"]
+
+
+# --- why a revoked token was revoked -----------------------------------------
+
+
+async def test_revoke_reason_falls_back_to_the_session_row(authnz_sqlite):
+    pool, uid, _ = authnz_sqlite
+    manager = _manager(pool)
+    await manager.create_session(
+        user_id=uid, access_token="temp_access_first", refresh_token="temp_refresh_first"
+    )
+    for _ in range(4):
+        await _create(manager, uid)
+    assert await manager.get_revoke_reason("temp_access_first") == "session_cap"
+    assert await manager.get_revoke_reason("temp_refresh_first") == "session_cap"
+
+
+async def test_revoke_reason_reports_other_reasons_and_is_none_on_unknown_or_error(authnz_sqlite, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
+
+    pool, uid, _ = authnz_sqlite
+    manager = _manager(pool)
+    result = await manager.create_session(
+        user_id=uid, access_token="temp_access_out", refresh_token="temp_refresh_out"
+    )
+    await _revoke(pool, int(result["session_id"]), "User logout")
+    assert await manager.get_revoke_reason("temp_access_out") == "User logout"
+    assert await manager.get_revoke_reason("unknown-token") is None
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(AuthnzSessionsRepo, "fetch_revoke_reason_for_token_hash_candidates", _boom)
+    assert await manager.get_revoke_reason("temp_access_out") is None
+    assert await manager.get_revoke_reason("") is None

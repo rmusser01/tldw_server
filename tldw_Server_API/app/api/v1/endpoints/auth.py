@@ -86,6 +86,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     InvalidTokenError,
     RegistrationError,
     SessionError,
+    SessionReplacedError,
     SessionRevokedException,
     TokenExpiredError,
     WeakPasswordError,
@@ -107,7 +108,12 @@ from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
-from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager, request_device_id
+from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import SESSION_CAP_REVOKE_REASON
+from tldw_Server_API.app.core.AuthNZ.session_manager import (
+    SessionManager,
+    request_device_id,
+    session_replaced_http_exception,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 from tldw_Server_API.app.core.AuthNZ.single_user_session import (
     clear_single_user_session_cookie,
@@ -2360,6 +2366,8 @@ async def refresh_token(
                         response.headers["X-TLDW-Refresh-Reason"] = "revoked"
                     except _AUTH_NONCRITICAL_EXCEPTIONS:
                         pass
+                if await session_manager.get_revoke_reason(payload.refresh_token) == SESSION_CAP_REVOKE_REASON:
+                    raise SessionReplacedError()
                 raise InvalidTokenError("Refresh token has been revoked")
 
             # JWT standard uses 'sub' for subject (user ID)
@@ -2523,6 +2531,8 @@ async def refresh_token(
                 response.headers.setdefault("X-TLDW-Refresh-Reason", type(e).__name__)
             except _AUTH_NONCRITICAL_EXCEPTIONS:
                 pass
+        if isinstance(e, SessionReplacedError):
+            raise session_replaced_http_exception() from e
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",

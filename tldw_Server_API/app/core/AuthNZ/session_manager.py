@@ -35,6 +35,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from jose import jwt as jose_jwt
 from jose.exceptions import JWSError, JWTError
 from loguru import logger
+from fastapi import HTTPException
 from redis import asyncio as redis_async
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
@@ -57,6 +58,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import (
     SESSION_CAP_REVOKE_REASON,
     AuthnzSessionsRepo,
 )
+from tldw_Server_API.app.core.AuthNZ.repos.token_blacklist_repo import AuthnzTokenBlacklistRepo
 
 #
 # Local imports
@@ -112,6 +114,18 @@ def request_device_id(request: Any) -> Optional[str]:
     if isinstance(value, str) and _DEVICE_ID_PATTERN.fullmatch(value):
         return value
     return None
+
+def session_replaced_http_exception() -> HTTPException:
+    """401 telling a browser its session was ended by the per-user session cap."""
+    return HTTPException(
+        status_code=401,
+        detail={
+            "code": "session_replaced",
+            "message": "You were signed out because your account was signed in on another device.",
+        },
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
 
 #######################################################################################################################
 #
@@ -1694,6 +1708,34 @@ class SessionManager:
                 raise
             logger.error(f"Error checking token blacklist; treating token as revoked: {e}")
             return True
+
+    async def get_revoke_reason(self, token: str) -> Optional[str]:
+        """
+        Return why a revoked token was revoked, or None (unknown or any lookup error).
+
+        Call only for a token whose signature and expiry were already verified
+        and which is already known to be revoked; this never decides access.
+        """
+        try:
+            claims = self._get_unverified_claims(token) or {}
+            jti = claims.get("jti")
+            db_pool = await self._ensure_db_pool()
+            if jti:
+                reason = await AuthnzTokenBlacklistRepo(db_pool).get_reason_for_jti(jti)
+                if reason:
+                    return reason
+            return await AuthnzSessionsRepo(db_pool).fetch_revoke_reason_for_token_hash_candidates(
+                self._token_hash_candidates(token)
+            )
+        except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.bind(exception_type=type(exc).__name__).debug("Revoke reason lookup failed")
+            return None
+
+    async def revoked_token_exception(self, token: str, default: HTTPException) -> HTTPException:
+        """Return the session_replaced 401 for a cap-evicted token, else ``default``."""
+        if await self.get_revoke_reason(token) == SESSION_CAP_REVOKE_REASON:
+            return session_replaced_http_exception()
+        return default
 
     async def get_user_sessions(
         self,
