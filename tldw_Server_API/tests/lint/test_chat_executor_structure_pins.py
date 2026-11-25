@@ -349,6 +349,7 @@ CHAT_PKG = "tldw_Server_API.app.core.Chat"
 IMPORT_FIRST_MODULES = (
     *(f"{CHAT_PKG}.{m}" for m in DESTINATIONS),
     f"{CHAT_PKG}.chat_service",
+    f"{CHAT_PKG}.call_state",
     "tldw_Server_API.app.api.v1.endpoints.chat",
 )
 
@@ -375,3 +376,29 @@ def test_an_unparsable_test_file_is_a_named_failure_not_a_collection_error(tmp_p
     (tmp_path / "test_bad.py").write_text("import chat_service\ndef (:\n")
     with pytest.raises(pytest.fail.Exception, match=r"cannot scan .*test_bad\.py"):
         patched_chat_service_names([tmp_path])
+
+
+# ---- the per-call state (R6) ------------------------------------------------------------------
+
+
+def test_nonstream_call_params_match_the_executor_signature() -> None:
+    from tldw_Server_API.app.core.Chat import call_state
+
+    tree = ast.parse((CHAT_DIR / "chat_service.py").read_text(encoding="utf-8"))
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "_execute_non_stream_call_impl")
+    assert call_state.NonStreamCall.PARAMS == tuple(a.arg for a in fn.args.kwonlyargs)
+    assert len(call_state.NonStreamCall.PARAMS) == 30
+    assert call_state.NonStreamCall.__slots__ == (*call_state.PARAMS, *call_state.LOCALS, "__weakref__")
+
+
+def test_unset_call_slot_reads_like_an_unbound_local() -> None:
+    from tldw_Server_API.app.core.Chat import call_state, chat_service
+
+    cst = call_state.NonStreamCall.from_call_locals({n: n for n in call_state.PARAMS})
+    assert cst.model == "model"
+    with pytest.raises(UnboundLocalError):
+        _ = cst.llm_response
+    assert not issubclass(UnboundLocalError, chat_service._CHAT_NONCRITICAL_EXCEPTIONS)
+    with pytest.raises(AttributeError):
+        _ = cst.zzz
+    assert not hasattr(cst, "zzz")
