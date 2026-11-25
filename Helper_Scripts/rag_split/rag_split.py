@@ -1211,6 +1211,7 @@ class Lift:
         self.parent_node: Any = None  # depth 2: the def that holds this one; None at depth 1
         self.key: Any = None  # the scope that binds the name: the function (depth 1) or the parent def (depth 2)
         self.free: set[str] = set()  # free_imports names this body reads
+        self.dead: list[ast.stmt] = []  # local imports in this body that its lifted children replaced and nothing reads any more
         # where the def site is: the move whose span holds it, the lifted parent (depth 2), or None (the rest of the function)
         self.defregion: Move | Lift | None = None
 
@@ -1318,6 +1319,19 @@ def plan_lifts(m: dict, src: Src, moves: list[Move]) -> tuple[list[Lift], list[s
             elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "globals" and getattr(n.func, "_r", NEW) is None:
                 errs.append(f"V1: lifted {lf.name} calls globals() (line {n.lineno}); it reads a different module after the move")
     errs += [f"V16: free_imports {n} is read by no lifted def" for n in fi if lifts and not any(n in lf.free for lf in lifts)]
+    skip = {id(x.node) for x in lifts}
+    for par in lifts:  # a lifted parent's own `from x import Name` that only its lifted children read is replaced by the module-level import
+        kids = [c for c in lifts if c.parent_node is par.node]
+        for name in sorted({n for c in kids for n in c.free}):
+            stack, readers, stmts = [par.node], 0, []
+            while stack:
+                n = stack.pop()
+                if isinstance(n, (ast.Import, ast.ImportFrom)) and any(r is kids[0].key and _bound(a) == name for a, r in zip(n.names, n._rs)):  # type: ignore[attr-defined]
+                    stmts.append(n)
+                readers += isinstance(n, ast.Name) and n.id == name and is_f(n, kids[0].key) and isinstance(n.ctx, ast.Load)
+                stack.extend(c for c in ast.iter_child_nodes(n) if id(c) not in skip or c is par.node)
+            if not readers:
+                par.dead += [x for x in stmts if len(x.names) == 1]
     return lifts, errs
 
 
@@ -1613,6 +1627,13 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         out.errors += refs.errors
         blocks = list(own_blocks(fn)) + [b2 for p in {id(lf.parent_node): lf.parent_node for lf in lifts if lf.parent_node is not None}.values() for b2 in own_blocks(p)]
         bad = {m["facade"]} | {f"_{x}" for x in {y.module for y in moves} | {lf.module for lf in lifts}}
+        for lf in lifts:
+            for st in lf.dead:
+                blk = next(b2 for b2 in own_blocks(lf.node) if any(x is st for x in b2))
+                if len(blk) == 1:
+                    out.errors.append(f"V11: removing the local import at line {st.lineno} would leave its block empty")
+                else:
+                    blk[:] = [x for x in blk if x is not st]
         for lf in sorted(lifts, key=lambda x: x.parent_node is None):  # a def inside a lifted def goes first, so its parent carries the site
             d = up.visit(lf.node)
             a = d.args
@@ -2650,12 +2671,13 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
         keep = lf.module != regions.module(lf.defregion)
         tail = d.end_lineno + (1 if not keep and d.end_lineno < len(rows_text) and not rows_text[d.end_lineno].strip() else 0)
         lift_cuts[lf.name] = Cut(stmt_start(d), tail, f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {ctx})" if keep else None, d.col_offset)
+    dead_cuts = [Cut(stmt_start(st), st.end_lineno + (1 if st.end_lineno < len(rows_text) and not rows_text[st.end_lineno].strip() else 0), None, st.col_offset) for lf in lifts for st in lf.dead]
     move_cuts: dict[str, Cut] = {}
     for mv in moves:
         recv = "" if (mv.parent.module if mv.parent else regions.rest_module) == mv.module else f"_{mv.module}."
         call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({', '.join([ctx, *mv.args])})"
         move_cuts[mv.name] = Cut(mv.a, mv.b, call, mv.members[0].col_offset)
-    cuts += list(lift_cuts.values()) + list(move_cuts.values())
+    cuts += list(lift_cuts.values()) + list(move_cuts.values()) + dead_cuts
     made: dict[tuple[str, str], str] = {}
     for lf in lifts:
         d = lf.node

@@ -2303,8 +2303,27 @@ def test_free_imports_put_the_import_at_the_destinations_top(tmp_path: Path, cap
     a = t.text("mini/stage_a.py")
     assert "from typing import Any\nfrom mini.utils import Stop\n" in a and "return cs.audit(x, cst.n, Stop)" in a
     assert "Stop" not in t.text("mini/stage_b.py")
-    assert "from mini.utils import Stop\n" in a.split("def gen(")[1]  # the parent keeps its own import
+    # the parent's own import is replaced by the module-level one: nothing in it reads Stop any more (ruff F401 otherwise)
+    assert "from mini.utils import Stop" not in a.split("def gen(")[1] and "from mini.utils import Stop" not in t.text(SIB_FILE)
     assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_free_imports_keep_the_parents_import_when_the_parent_reads_it(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = FREE_BASE.replace("        _tf.flush = _flush\n", "        _tf.flush = _flush\n        audit(Stop)\n", 1)
+    t = free_tree(tmp_path, src)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    gen = t.text("mini/stage_a.py").split("def gen(")[1]
+    assert "    from mini.utils import Stop\n" in gen and "cs.audit(Stop)" in gen
+    assert t.run("verify") == 0, capsys.readouterr().out
+    _edit(t, "mini/stage_a.py", "    from mini.utils import Stop\n\n    held", "    held")
+    assert t.run("verify") == 1
+
+
+def test_free_imports_verify_rejects_a_kept_dead_import(tmp_path: Path) -> None:
+    t = free_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "def gen(cst: \"Call\", items):\n", "def gen(cst: \"Call\", items):\n    from mini.utils import Stop\n")
+    assert t.run("verify") == 1
 
 
 def test_without_free_imports_the_local_import_is_a_free_variable(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
