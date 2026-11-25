@@ -318,9 +318,10 @@ class _ColumnProbeConnection:
     def __init__(self, existing: set[str]) -> None:
         self.existing = existing
         self.executed: list[str] = []
+        self.probes: list[str] = []
 
     async def fetchval(self, query: str, column: str) -> bool:
-        assert "information_schema.columns" in query
+        self.probes.append(query)
         return column in self.existing
 
     async def execute(self, query: str) -> None:
@@ -342,3 +343,5 @@ def test_users_email_change_columns_are_altered_only_when_missing(existing, expe
     conn = _ColumnProbeConnection(existing)
     asyncio.run(pg_migrations_extra._ensure_users_email_change_columns(conn))
     assert conn.executed == expected
+    assert len(conn.probes) == 2
+    assert all("information_schema.columns" in query for query in conn.probes)
