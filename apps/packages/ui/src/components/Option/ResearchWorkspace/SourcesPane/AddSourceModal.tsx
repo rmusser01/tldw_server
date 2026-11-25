@@ -2049,7 +2049,7 @@ function getSourceTypeFromFile(file: File): WorkspaceSourceType {
   const mimeType = file.type.toLowerCase()
 
   if (ext === "pdf" || mimeType === "application/pdf") return "pdf"
-  if (["mp4", "webm", "mkv", "avi", "mov"].includes(ext) || mimeType.startsWith("video/"))
+  if (["mp4", "webm", "mkv", "ogm", "avi", "mov"].includes(ext) || mimeType.startsWith("video/"))
     return "video"
   if (["mp3", "wav", "m4a", "ogg", "flac"].includes(ext) || mimeType.startsWith("audio/"))
     return "audio"
@@ -2077,7 +2077,7 @@ function getSourceTypeFromUrl(url: string): WorkspaceSourceType {
   const pathname = parsed.pathname.toLowerCase()
   if (pathname.endsWith(".pdf")) return "pdf"
   if (pathname.match(/\.(mp3|wav|m4a|ogg|flac)$/)) return "audio"
-  if (pathname.match(/\.(mp4|webm|mkv|avi|mov)$/)) return "video"
+  if (pathname.match(/\.(mp4|webm|mkv|ogm|avi|mov)$/)) return "video"
 
   return "website"
 }

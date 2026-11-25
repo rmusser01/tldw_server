@@ -4,6 +4,10 @@ import { detectPlaylistPreflightCandidate, detectTypeFromUrl } from "../AddConte
 import { normalizeUrlForDedupe } from "@/entries/shared/ingest-payloads"
 
 describe("detectTypeFromUrl", () => {
+  it("recognizes direct OGM links as video", () => {
+    expect(detectTypeFromUrl("https://example.com/movie.OGM?token=123")).toBe("video")
+  })
+
   it("detects supported media hosts from exact hosts and subdomains", () => {
     expect(detectTypeFromUrl("https://www.youtube.com/watch?v=123")).toBe("video")
     expect(detectTypeFromUrl("https://player.vimeo.com/video/42")).toBe("video")

@@ -268,6 +268,7 @@ async def save_uploaded_files(
                         ".avi",
                         ".mov",
                         ".mkv",
+                        ".ogm",
                         ".webm",
                         ".flv",
                         ".wmv",

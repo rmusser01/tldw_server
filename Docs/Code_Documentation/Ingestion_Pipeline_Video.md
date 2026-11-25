@@ -76,6 +76,7 @@ Endpoint specifics:
 - Uses a managed temporary directory (`TempDirManager`) and passes its path to `process_videos`.
 - Provider API keys are read from server configuration; the library calls do not require an `api_key` argument.
 - Uploaded files are validated for allowed video types; remote URLs are downloaded via yt-dlp inside the library.
+- Ogg Media (`.ogm`) is accepted as a video input. FFmpeg extracts the audio track for transcription.
 - Playlist URLs (e.g., YouTube playlists) are expanded server-side into per-video entries before processing begins.
 
 ## Dependencies & Config

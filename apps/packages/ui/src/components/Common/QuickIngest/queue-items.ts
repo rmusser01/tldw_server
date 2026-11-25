@@ -35,7 +35,7 @@ export const detectTypeFromUrl = (url: string): DetectedMediaType => {
     // Check common file extensions in URL path
     const ext = pathname.split(".").pop() || ""
     if (["mp3", "wav", "ogg", "flac", "m4a"].includes(ext)) return "audio"
-    if (["mp4", "mkv", "avi", "mov", "webm"].includes(ext)) return "video"
+    if (["mp4", "mkv", "ogm", "avi", "mov", "webm"].includes(ext)) return "video"
     if (ext === "pdf") return "pdf"
     if (["epub", "mobi"].includes(ext)) return "ebook"
     if (["docx", "txt", "rtf", "md", "markdown", "xml", "json"].includes(ext))

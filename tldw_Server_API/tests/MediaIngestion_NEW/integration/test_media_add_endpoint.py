@@ -32,36 +32,43 @@ class TestAddMediaEndpoint:
     """Test the /media/add endpoint."""
 
     @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("filename", "content_type"),
+        [("upload-transcription.mp4", "video/mp4"), ("upload-transcription.OGM", "application/octet-stream")],
+    )
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.perform_transcription')
-    def test_add_video_from_url(self, mock_transcribe, test_client, auth_headers, test_video_file):
-        """Test adding a video via file upload to avoid URL-specific behaviors."""
+    def test_add_video_upload(self, mock_transcribe, test_client, auth_headers, test_video_file, filename, content_type):
+        """Accept video uploads and persist the result from the transcription pipeline."""
         mock_transcribe.return_value = ("This is a test transcription.", [])
 
-        with open(test_video_file, 'rb') as f:
-            form = {
-                "media_type": "video",
-                "title": "Test Video",
-                "chunk_method": "sentences",
-                "chunk_size": "500",
-                "chunk_overlap": "50",
-                "transcription_language": "en",
-                "transcription_model": "deepdml/faster-distil-whisper-large-v3.5",
-                "diarize": "false",
-                "vad_use": "false",
-                "timestamp_option": "true",
-            }
-            files = {"files": ("test_video.mp4", f, "video/mp4")}
-            response = test_client.post(
-                "/api/v1/media/add",
-                data=form,
-                files=files,
-                headers=auth_headers
-            )
+        # STT is mocked, so only the container signature is needed for upload validation.
+        video_bytes = test_video_file.read_bytes() if filename.endswith(".mp4") else b"OggS\x00\x02"
+        form = {
+            "media_type": "video",
+            "title": "Test Video",
+            "chunk_method": "sentences",
+            "chunk_size": "500",
+            "chunk_overlap": "50",
+            "transcription_language": "en",
+            "transcription_model": "deepdml/faster-distil-whisper-large-v3.5",
+            "diarize": "false",
+            "vad_use": "false",
+            "timestamp_option": "true",
+        }
+        response = test_client.post(
+            "/api/v1/media/add",
+            data=form,
+            files={"files": (filename, video_bytes, content_type)},
+            headers=auth_headers,
+        )
 
         assert response.status_code in (status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS)
         data = response.json()
         assert isinstance(data, dict) and "results" in data
-        assert any(item.get("db_id") for item in data.get("results", []))
+        assert any(
+            item.get("db_id") and "This is a test transcription." in (item.get("content") or "")
+            for item in data["results"]
+        ), data
 
     @pytest.mark.unit
     def test_add_document_with_content(self, test_client, auth_headers, populated_media_db, test_text_file):

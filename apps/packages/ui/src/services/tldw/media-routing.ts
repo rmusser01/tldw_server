@@ -22,7 +22,7 @@ export type DraftMediaType = "html" | "pdf" | "document" | "audio" | "video"
 export type UploadMediaType = "audio" | "video" | "pdf" | "ebook" | "document"
 
 const AUDIO_EXTENSIONS = [".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"]
-const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mkv", ".mov", ".avi"]
+const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mkv", ".ogm", ".mov", ".avi"]
 const PDF_EXTENSIONS = [".pdf"]
 const EBOOK_EXTENSIONS = [".epub", ".mobi"]
 const HTML_EXTENSIONS = [".html", ".htm", ".xhtml"]

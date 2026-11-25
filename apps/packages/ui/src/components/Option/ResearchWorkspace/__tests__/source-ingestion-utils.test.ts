@@ -61,8 +61,14 @@ describe("source-ingestion-utils", () => {
 
   it("builds an upload accept string aligned with backend document support", () => {
     expect(buildSourceUploadAccept()).toBe(
-      ".pdf,.docx,.txt,.md,.markdown,.epub,.html,.htm,.xhtml,.xml,.json,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.avi,.mov"
+      ".pdf,.docx,.txt,.md,.markdown,.epub,.html,.htm,.xhtml,.xml,.json,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.ogm,.avi,.mov"
     )
+  })
+
+  it("validates an OGM source without browser MIME metadata", () => {
+    expect(validateSourceUploadFile({ name: "movie.ogm", type: "", size: 1024 }, 2048)).toEqual({
+      valid: true
+    })
   })
 
   it.each([

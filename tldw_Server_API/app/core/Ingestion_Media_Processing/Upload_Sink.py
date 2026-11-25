@@ -184,9 +184,9 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
         "max_size_mb": media_config.get('max_audio_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB),
     },
     "video": {
-        "allowed_extensions": {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv'},
+        "allowed_extensions": {'.mp4', '.avi', '.mov', '.mkv', '.ogm', '.webm', '.flv'},
         "allowed_mimetypes": {'video/mp4', 'video/x-msvideo', 'video/quicktime', 'video/x-matroska', 'video/webm',
-                              'video/x-flv', 'video/avi'},
+                              'video/x-flv', 'video/avi', 'video/x-ogm+ogg'},
         "max_size_mb": media_config.get('max_video_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB),
     },
     "image": {
@@ -279,7 +279,7 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
 # This can be auto-generated or manually maintained for clarity.
 EXT_TO_MEDIA_TYPE_KEY = {
     '.mp3': 'audio', '.wav': 'audio', '.flac': 'audio', '.aac': 'audio', '.ogg': 'audio', '.m4a': 'audio',
-    '.mp4': 'video', '.avi': 'video', '.mov': 'video', '.mkv': 'video', '.webm': 'video', '.flv': 'video',
+    '.mp4': 'video', '.avi': 'video', '.mov': 'video', '.mkv': 'video', '.ogm': 'video', '.webm': 'video', '.flv': 'video',
     '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.gif': 'image', '.webp': 'image', '.bmp': 'image',
     # Route SVG to XML pipeline so sanitizer applies
     '.svg': 'xml',
@@ -711,6 +711,14 @@ class FileValidator:
                 mime_detection_source = "fallback"
 
         if normalized_allowed_mimetypes:
+            if (
+                media_type_key == "video"
+                and ".ogm" in claimed_candidates
+                and allowed_mimetypes_override is None
+                and "video/x-ogm+ogg" in normalized_allowed_mimetypes
+            ):
+                # OGM shares the Ogg signature and a valid video can lead with an audio stream.
+                normalized_allowed_mimetypes.update({"application/ogg", "audio/ogg", "video/ogg"})
             fallback_lower = (fallback_mime_type or '').lower() or None
             if detected_mime_type:
                 detected_lower = detected_mime_type.lower()

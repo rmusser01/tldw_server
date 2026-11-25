@@ -154,6 +154,15 @@ it("ignores a captured tab after the owner changes", async () => {
 });
 
 describe("file rejection feedback", () => {
+  it("queues an OGM file that has no browser MIME type", () => {
+    mount();
+    const file = new File(["video"], "movie.ogm");
+    fireEvent.change(screen.getByTestId("qi-file-input"), {
+      target: { files: [file] },
+    });
+    expect(screen.getByTestId("filenames")).toHaveTextContent('["movie.ogm"]');
+  });
+
   it.each(["unsupported", "oversized"])(
     "explains a rejected %s file without adding it",
     (kind) => {
