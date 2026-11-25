@@ -257,6 +257,8 @@ export class TldwAuthService {
    * Logout and clear tokens
    */
   async logout(): Promise<void | "unconfirmed"> {
+    // An explicit sign-out supersedes any pending "signed in elsewhere" notice.
+    clearSessionReplacedNotice()
     const config = await tldwClient.getConfig()
     if (!config) {
       return
@@ -360,10 +362,10 @@ export class TldwAuthService {
       })
     } catch (error) {
       if ((error as { status?: number } | null)?.status === 401) {
-        noteSessionReplaced(error)
         if (!await tldwClient.invalidateRefreshSession(config)) {
           throw createServicePromptScopeChangedError()
         }
+        noteSessionReplaced(error)
         if (this.refreshTimer && this.refreshTimer === refreshTimer) {
           clearTimeout(this.refreshTimer)
           this.refreshTimer = null

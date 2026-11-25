@@ -753,10 +753,11 @@ const refreshAuthDirect = async (
             return
           }
           assertCurrent()
-          if ((error as { status?: number } | null)?.status === 401) noteSessionReplaced(error)
-          if ((error as { status?: number } | null)?.status === 401 &&
-              !await invalidateRefreshSessionIfCurrent(storage, cfg, assertCurrent)) {
-            throw createServicePromptScopeChangedError()
+          if ((error as { status?: number } | null)?.status === 401) {
+            if (!await invalidateRefreshSessionIfCurrent(storage, cfg, assertCurrent)) {
+              throw createServicePromptScopeChangedError()
+            }
+            noteSessionReplaced(error)
           }
           throw error
         } finally {
