@@ -1083,13 +1083,6 @@ def test_is_pkg_uses_the_manifests_package_name() -> None:
 # --- fix round 1: refusals ---
 
 
-@pytest.mark.parametrize("key", ["relocate"])
-def test_part_2_and_3_manifest_keys_are_refused(tmp_path: Path, key: str) -> None:
-    t = Tree(tmp_path, **{key: {}})
-    with pytest.raises(rag_split.SplitError, match=rf"{key}.*not supported yet \(TASK-13950.25 part 2/3\)"):
-        rag_split.load_manifest(t.manifest_path)
-
-
 @pytest.mark.parametrize(("key", "hint"), [("relocate", "not supported yet"), ("typo", "unknown")])
 def test_unsupported_move_keys_are_refused(tmp_path: Path, key: str, hint: str) -> None:
     mv = {**moves()[0], key: ["e"]}
@@ -2459,3 +2452,129 @@ def test_prune_dead_sites_accepts_locals_in_the_prologue_statement(tmp_path: Pat
     t = lift_tree(tmp_path, src, lift={"_note": "stage_b", "_outer": "stage_a"}, prune_dead_sites=True)
     assert t.run("apply") == 0, capsys.readouterr().out
     assert t.run("verify") == 0, capsys.readouterr().out
+
+
+# --- relocate (TASK-13950.25 PR J): a whole top-level def moves verbatim into another module ---
+
+REL_SRC = textwrap.dedent(
+    '''\
+    import os
+    import time
+    from typing import Any
+
+    LIMIT = 5
+
+
+    def audit(*args):
+        return args
+
+
+    def helper(a: Any, b: int = 3) -> Any:
+        """Doc."""
+        x = os.getenv("A")  # nosec B105
+        t0 = time.time()
+        return audit(LIMIT, x, t0, a, b)
+
+
+    def dead():
+        return None
+
+
+    def keep():
+        return helper(1)
+    '''
+)
+
+
+def rel_tree(tmp: Path, src: str = REL_SRC, dests: dict[str, str] | None = None, **extra: object) -> Tree:
+    return sib_tree(tmp, src, dests, **{"relocate": [{"name": "helper", "module": "stage_a"}], **extra})
+
+
+def test_relocate_moves_the_def_behind_the_late_block_and_verifies(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = rel_tree(tmp_path)
+    assert t.run("apply") == 0
+    stage, head = t.text("mini/stage_a.py"), t.text(SIB_FILE)
+    assert stage.index("def helper(") > stage.index('__all__ = ["existing"]')
+    assert stage.index("def helper(") < stage.index(LATE) < stage.index("from mini import chat_service as cs")
+    assert stage.rstrip().endswith("from mini import chat_service as cs")
+    assert "cs.audit(cs.LIMIT, x, t0, a, b)" in stage and "t0 = cs.time.time()" in stage and "x = os.getenv(\"A\")  # nosec B105" in stage
+    assert "import os\n" in stage and "def helper" not in head
+    assert head.index("from mini.stage_a import helper") > head.index("from typing import Any")
+    assert head.index("from mini.stage_a import helper") < head.index("def audit")
+    assert "return helper(1)" in head
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_relocate_with_drop_removes_the_dead_def(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = rel_tree(tmp_path, drop=[{"module": "chat_service", "def": "dead"}])
+    assert t.run("apply") == 0
+    assert "def dead" not in t.text(SIB_FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_relocate_verify_rejects_an_edited_def_or_a_missing_reexport(tmp_path: Path) -> None:
+    t = rel_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "return cs.audit(", "return cs.audit(1, ")
+    assert t.run("verify") == 1
+    t = rel_tree(tmp_path / "b")
+    assert t.run("apply") == 0
+    _edit(t, SIB_FILE, "from mini.stage_a import helper  # noqa: F401 - re-export (TASK-X)\n", "")
+    assert t.run("verify") == 1
+
+
+def test_relocate_refuses_a_destination_name_clash(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = rel_tree(tmp_path, dests={"stage_a": STAGE_A.replace("def existing", "def helper"), "stage_b": STAGE_B})
+    assert t.run("apply") == 1
+    assert "V10: stage_a.py already binds helper" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "needle"),
+    [
+        ("def helper(a: Any, b: int = 3)", "def helper(a: Any, b: int = LIMIT)", "V12"),
+        ("def helper(", "@audit\ndef helper(", "V12"),
+        ("    t0 = time.time()", "    global LIMIT\n    t0 = time.time()", "global"),
+        ("    t0 = time.time()", "    t0 = locals()", "locals"),
+        ("    t0 = time.time()", "    from . import q\n    t0 = time.time()", "relative import"),
+        ("    t0 = time.time()", "    cs = 1\n    t0 = time.time()", "cs"),
+    ],
+)
+def test_relocate_refusals_in_the_def(tmp_path: Path, capsys: pytest.CaptureFixture, old: str, new: str, needle: str) -> None:
+    t = rel_tree(tmp_path, REL_SRC.replace(old, new))
+    assert t.run("apply") == 1
+    assert needle in capsys.readouterr().out
+
+
+def test_relocate_refuses_a_missing_def_and_a_missing_destination(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = rel_tree(tmp_path, relocate=[{"name": "nope", "module": "stage_a"}])
+    assert t.run("apply") == 1
+    assert "no top-level function nope" in capsys.readouterr().out
+    t = rel_tree(tmp_path / "b", dests={"stage_b": STAGE_B})
+    assert t.run("apply") == 1
+    assert "stage_a.py: not found at the base" in capsys.readouterr().out
+
+
+def test_relocate_allows_annotations_under_future_and_refuses_them_without(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = REL_SRC.replace("def helper(a: Any, b: int = 3) -> Any:", "def helper(a: Any, b: int = 3) -> LimitT:").replace("LIMIT = 5", "LIMIT = 5\nLimitT = int")
+    t = rel_tree(tmp_path, src)
+    assert t.run("apply") == 0 and t.run("verify") == 0
+    assert "-> cs.LimitT:" in t.text("mini/stage_a.py")
+    plain = STAGE_A.replace("from __future__ import annotations\n\n", "")
+    t = rel_tree(tmp_path / "b", src, dests={"stage_a": plain, "stage_b": STAGE_B})
+    assert t.run("apply") == 1
+    assert "V13" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"relocate": []}, {"relocate": {"name": "helper"}}, {"relocate": [{"name": "helper"}]}, {"relocate": [{"name": "helper", "module": "stage_a"}] * 2}, {"moves": [{"name": "m", "module": "stage_a", "span": [1, 2]}]}],
+)
+def test_relocate_manifest_shape_is_checked(tmp_path: Path, extra: dict) -> None:
+    t = rel_tree(tmp_path)
+    t.set(**{**SIB, "relocate": [{"name": "helper", "module": "stage_a"}], **extra})
+    if extra.get("relocate") == []:
+        rag_split.load_manifest(t.manifest_path)  # empty means off, like every other list key
+        return
+    with pytest.raises(rag_split.SplitError):
+        rag_split.load_manifest(t.manifest_path)

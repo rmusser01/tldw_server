@@ -57,6 +57,12 @@ Chat part 2 (TASK-13950.25; each needs ``pkg: ""``: the destinations are existin
 
 Chat part 3 (TASK-13950.25):
 
+    relocate     [{name, module}]        a whole top-level def moves verbatim above the destination's late block, its source-module
+                                         globals read through ``cs.``; the source gets ``from <pkg>.<module> import <name>`` after
+                                         its last top import. Needs pkg ``""``; only ``drop`` may go with it. Refused: a global
+                                         statement, a relative import, locals()/globals()/vars(), ``__name__``, a local named ``cs``,
+                                         and a decorator or default that reads ``cs`` (V12)
+
     rewrite_in   {nested def: {name: expr}}   a rewrite, like ``rewrite``, of the names that are locals of that nested def (its own
                                          scope, nested defs included), with their ``nonlocal`` entries deleted. The expressions
                                          must be ``cst.x`` names or attribute chains, distinct from every other rewrite
@@ -153,6 +159,7 @@ DEFAULTS: dict[str, Any] = {
     "rewrite_in": {},
     "free_imports": {},
     "prune_dead_sites": False,
+    "relocate": [],
 }
 NEW = object()  # a node the tool created: it carries no scope annotation
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -416,9 +423,6 @@ def load_manifest(path: Path) -> dict[str, Any]:
     for n in tree.body:
         if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "MANIFEST" for t in n.targets):
             raw = ast.literal_eval(n.value)
-            later = sorted(set(raw) & PART2_KEYS)
-            if later:
-                raise SplitError(f"{path}: manifest keys {later} are not supported yet (TASK-13950.25 part 2/3)")
             m = {**DEFAULTS, **raw}
             unknown = set(m) - set(DEFAULTS)
             if unknown:
@@ -472,6 +476,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
                     raise SplitError(f"{path}: free_imports needs a lift that reads the name")
                 if not (isinstance(fi, dict) and all(isinstance(k, str) and isinstance(v, str) and _is_import_of(v, k) for k, v in fi.items())):
                     raise SplitError(f"{path}: free_imports must map a name to one import line that binds exactly that name")
+            if m["relocate"]:
+                check_relocate_items(path, m)
             if m["publish"] and m["facade"] == "cs":
                 raise SplitError(f"{path}: publish is refused when facade is 'cs' (R6)")
             if not m["ctx"] or any(not (isinstance(c, list) and len(c) == 2 and all(isinstance(x, str) for x in c)) for c in m["ctx"]):
@@ -1906,6 +1912,8 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
     text = read_base(root, rel, base, base_dir)
     if text is None:
         return [f"{rel}: not found at the base"]
+    if m["relocate"]:
+        return verify_relocate(root, m, text, base, base_dir, head_ref)
     src = mk_src(text, m)
     b = build(m, src, text.split("\n"), notes)
     if b.errors:
@@ -2215,6 +2223,8 @@ def header_text(mod: str, wanted: dict[str, str], stage: bool, m: dict) -> str:
 
 
 def run_apply(root: Path, m: dict) -> list[str]:
+    if m["relocate"]:
+        return apply_relocate(root, m)
     if is_sibling(m):
         return apply_sibling(root, m)
     rel = m["file"]
@@ -2767,6 +2777,144 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
         rows[at:at] = imps
         new_text = "\n".join(rows)
     path.write_text(new_text, encoding="utf-8")
+    for mod, p in plans.items():
+        (pkg_dir / f"{mod}.py").write_text(sib_write(m, p, [made[k] for k in b.order if k[0] == mod]), encoding="utf-8")
+    return []
+
+
+# --------------------------------------------------------------------------------------------------
+# relocate: a whole top-level def moves verbatim into another module (PR J)
+# --------------------------------------------------------------------------------------------------
+
+RELOCATE_EXCLUSIVE = ("moves", "lift", "entry", "entry_split", "rewrite", "hidden", "hoist", "classes", "publish", "cells", "prologue", "state_init", "late_imports", "rewrite_in", "free_imports", "imports")
+
+
+def check_relocate_items(path: Path, m: dict) -> None:
+    rl = m["relocate"]
+    if not (isinstance(rl, list) and all(isinstance(x, dict) and set(x) == {"name", "module"} and all(isinstance(v, str) and v for v in x.values()) for x in rl)):
+        raise SplitError(f"{path}: relocate is a list of {{'name': def, 'module': destination}}")
+    names = [x["name"] for x in rl]
+    if len(set(names)) != len(names):
+        raise SplitError(f"{path}: relocate names a def twice")
+    if m["pkg"] != "":
+        raise SplitError(f"{path}: relocate needs pkg ''")
+    bad = [k for k in RELOCATE_EXCLUSIVE if m[k]]
+    if bad:
+        raise SplitError(f"{path}: relocate cannot be combined with {bad} (it moves whole defs; only drop may go with it)")
+    if m["ctx_import"] is None:
+        m["ctx_import"] = []  # no ctx parameter is added, so no TYPE_CHECKING import either
+
+
+def build_relocate(m: dict, src: Src) -> Built:
+    """The expected destination defs: each def verbatim, its source-module globals read through the facade."""
+    out = Built()
+    fac = m["facade"]
+    up = UpTransform(src.names, src.exempt, fac, bump=False)
+    for spec in m["relocate"]:
+        name, mod = spec["name"], spec["module"]
+        d = next((n for n in src.tree.body if isinstance(n, DEFS) and n.name == name), None)
+        if d is None:
+            out.errors.append(f"V1: relocate: no top-level function {name}")
+            continue
+        errs: list[str] = []
+        for n in ast.walk(d):
+            if isinstance(n, ast.Global):
+                errs.append(f"V1: {name} has a global statement (line {n.lineno}); it would bind in the destination")
+            elif isinstance(n, ast.ImportFrom) and n.level:
+                errs.append(f"V1: {name} has a relative import (line {n.lineno}); it resolves against another package after the move")
+            elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in INTROSPECTION and getattr(n.func, "_r", NEW) is None:
+                errs.append(f"V1: {name} calls {n.func.id}() (line {n.lineno}); it reads another module's scope after the move")
+            elif isinstance(n, ast.Name) and n.id in ("__name__", "__file__") and isinstance(n.ctx, ast.Load):
+                errs.append(f"V1: {name} reads {n.id} (line {n.lineno}); it reads a different module after the move")
+            elif isinstance(n, ast.Name) and n.id == fac or isinstance(n, ast.arg) and n.arg == fac:
+                errs.append(f"V8: {name} already uses the name {fac} (line {n.lineno})")
+        if errs:
+            out.errors += errs
+            continue
+        t = up.visit(clone(d))
+        a = t.args
+        heads = t.decorator_list + a.defaults + [x for x in a.kw_defaults if x]
+        if any(isinstance(x, ast.Name) and x.id == fac for r in heads for x in ast.walk(r)):
+            out.errors.append(f"V12: a decorator or default of {name} reads the facade; it runs at import, before the late block")
+            continue
+        out.defs[(mod, name)] = t
+        out.order.append((mod, name))
+    out.dests = {mod for mod, _ in out.order}
+    out.lifted = set(out.order)  # V13: an annotation that reads the facade needs `from __future__ import annotations`
+    return out
+
+
+def relocate_source(m: dict, src: Src, b: Built) -> ast.Module:
+    """The source as an AST: the defs gone, the drops applied, one re-export per def after the last top import."""
+    gone = {name for _, name in b.order}
+    body = [s for s in src.tree.body if not (isinstance(s, DEFS) and s.name in gone)]
+    drops = [d for d in m["drop"] if d["module"] == src_stem(m)]
+    if drops:
+        body = drop_apply(body, drops, src_name(m))
+    last = max((j for j, s in enumerate(body) if is_top_import(s)), default=-1)
+    body[last + 1 : last + 1] = [ast.parse(reexport_line(m, mod, name)).body[0] for mod, name in b.order]
+    if drops:
+        drop_refs(body, drops, src_name(m))
+    return ast.Module(body=body, type_ignores=[])
+
+
+def reexport_line(m: dict, mod: str, name: str) -> str:
+    return f"from {pkg_dotted(m)}.{mod} import {name}"
+
+
+def verify_relocate(root: Path, m: dict, text: str, base: str | None, base_dir: str | None, head_ref: str | None) -> list[str]:
+    src = Src(text, None, m["pkg"], tuple(m["facade_stdlib"]))
+    b = build_relocate(m, src)
+    if b.errors:
+        return b.errors
+    head_text = read_head(root, m["file"], head_ref)
+    if head_text is None:
+        return [f"{m['file']}: not found at the head"]
+    try:
+        want = relocate_source(m, src, b)
+    except SplitError as e:
+        return [str(e)]
+    return cmp_module(m["file"], want, ast.parse(head_text)) + verify_siblings(root, m, src, b, base, base_dir, head_ref)
+
+
+def apply_relocate(root: Path, m: dict) -> list[str]:
+    path = root / m["file"]
+    text = path.read_text(encoding="utf-8")
+    src = Src(text, None, m["pkg"], tuple(m["facade_stdlib"]))
+    b = build_relocate(m, src)
+    if b.errors:
+        return b.errors
+    pkg_dir = root / pkg_rel(m)
+    plans, errs = make_plans(m, src, b, lambda mod: (pkg_dir / f"{mod}.py").read_text(encoding="utf-8") if (pkg_dir / f"{mod}.py").exists() else None)
+    if errs:
+        return errs
+    try:  # the drop checks (V15) run on the AST before anything is written
+        relocate_source(m, src, b)
+        for p in plans.values():
+            sib_expected(m, p)
+    except SplitError as e:
+        return [str(e)]
+    fresh = Src(text, None, m["pkg"], tuple(m["facade_stdlib"]))  # build() read the first tree; positions come from this one
+    lines = text.encode("utf-8").split(b"\n")
+    lines = [ln + b"\n" for ln in lines[:-1]] + lines[-1:]
+    cont = continuation_rows(text)
+    rows = text.split("\n")
+    made: dict[tuple[str, str], str] = {}
+    spans: list[tuple[int, int]] = []
+    for mod, name in b.order:
+        d = next(n for n in fresh.tree.body if isinstance(n, DEFS) and n.name == name)
+        lo, hi = stmt_start(d), d.end_lineno
+        made[(mod, name)] = render(lines, cont, lo, hi, 0, region_edits(fresh, lines, lo, hi, [d], False, m["facade"], bump=False), [])
+        while hi < len(rows) and not rows[hi].strip():
+            hi += 1
+        spans.append((lo, hi))
+    for lo, hi in sorted(spans, reverse=True):
+        del rows[lo - 1 : hi]
+    new_text = drop_text("\n".join(rows), [d for d in m["drop"] if d["module"] == src_stem(m)], src_name(m))
+    at = last_import_row(ast.parse(new_text))
+    rows = new_text.split("\n")
+    rows[at:at] = [f"{reexport_line(m, mod, name)}  # noqa: F401 - re-export ({m['task']})" for mod, name in b.order]
+    path.write_text("\n".join(rows), encoding="utf-8")
     for mod, p in plans.items():
         (pkg_dir / f"{mod}.py").write_text(sib_write(m, p, [made[k] for k in b.order if k[0] == mod]), encoding="utf-8")
     return []
