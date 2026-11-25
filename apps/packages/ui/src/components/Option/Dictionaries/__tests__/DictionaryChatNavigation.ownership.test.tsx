@@ -3,6 +3,7 @@ import {
   HistorySelectionContext,
   useHistorySelection
 } from "@/hooks/chat/useHistorySelection"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { act, renderHook } from "@testing-library/react"
@@ -32,13 +33,17 @@ vi.mock("@/services/service-prompts", () => ({
 vi.mock("@/services/chat-account-boundary", () => ({
   watchChatAccountChanges: () => () => undefined
 }))
+const config = { serverUrl: "https://one.test", authMode: "multi-user" as const }
+const userId = "A"
 const owner = {
   isCurrent: () => true,
   requestScope: {
-    config: { serverUrl: "https://one.test", authMode: "multi-user" as const },
-    userId: "A"
+    config,
+    userId,
+    scopeKey: buildChatSurfaceScopeKeyFromConfig(config, { userId }),
+    clientPrincipalVerified: true
   }
-}
+} satisfies Parameters<typeof useDictionaryChatContextNavigation>[0]
 const chat = {
   id: "saved",
   title: "Actual saved title",

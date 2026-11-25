@@ -26,25 +26,16 @@ vi.mock("@/components/Common/Settings/ThemePicker", () => ({
   ThemePicker: () => <div>Theme picker</div>
 }))
 
-const runtimeGlobals = globalThis as typeof globalThis & {
-  browser?: unknown
-  chrome?: unknown
-}
-const originalBrowser = runtimeGlobals.browser
-const originalChrome = runtimeGlobals.chrome
-
 describe("SettingsBody", () => {
   afterEach(() => {
     storage.values.clear()
     storage.write.mockReset()
     vi.unstubAllGlobals()
-    runtimeGlobals.browser = originalBrowser
-    runtimeGlobals.chrome = originalChrome
   })
 
   it("renders compact operational shortcuts", () => {
-    runtimeGlobals.browser = undefined
-    runtimeGlobals.chrome = undefined
+    vi.stubGlobal("browser", undefined)
+    vi.stubGlobal("chrome", undefined)
 
     render(<SettingsBody />)
 
@@ -74,19 +65,19 @@ describe("SettingsBody", () => {
   })
 
   it("uses the actual WebUI route when the browser shim exposes getURL without an extension id", () => {
-    runtimeGlobals.browser = { runtime: { id: undefined, getURL: (path: string) => `https://webui.test${path}` } }
-    runtimeGlobals.chrome = undefined
+    vi.stubGlobal("browser", { runtime: { id: undefined, getURL: (path: string) => `https://webui.test${path}` } })
+    vi.stubGlobal("chrome", undefined)
     render(<SettingsBody />)
     expect(screen.getByRole("link", { name: "Server & auth" })).toHaveAttribute("href", "/settings/tldw")
   })
 
   it("opens full options routes when rendered in an extension runtime", () => {
-    runtimeGlobals.browser = {
+    vi.stubGlobal("browser", {
       runtime: {
         id: "test-extension",
         getURL: vi.fn((path: string) => `chrome-extension://test${path}`)
       }
-    }
+    })
 
     render(<SettingsBody />)
 
@@ -101,13 +92,13 @@ describe("SettingsBody", () => {
   })
 
   it("opens full options routes when only chrome.runtime is available", () => {
-    runtimeGlobals.browser = undefined
-    runtimeGlobals.chrome = {
+    vi.stubGlobal("browser", undefined)
+    vi.stubGlobal("chrome", {
       runtime: {
         id: "chrome-extension",
         getURL: vi.fn((path: string) => `chrome-extension://chrome-only${path}`)
       }
-    }
+    })
 
     render(<SettingsBody />)
 

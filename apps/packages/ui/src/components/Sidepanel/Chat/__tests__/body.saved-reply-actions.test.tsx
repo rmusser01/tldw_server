@@ -223,7 +223,6 @@ describe("SidePanelBody saved-reply refusals (review follow-up)", () => {
       message_revision: "1",
       input_message_id: "u1",
       input_message_revision: "1",
-      action: "regenerate",
       isCurrent: () => true,
       isOriginCurrent: () => true
     }

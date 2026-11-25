@@ -104,7 +104,7 @@ const mount = (strict = false) => {
   return render(strict ? <React.StrictMode>{panel}</React.StrictMode> : panel)
 }
 const press = async (name: string) => {
-  const button = await screen.findByRole("button", { name, exact: true })
+  const button = await screen.findByRole("button", { name })
   await waitFor(() => expect(button).toBeEnabled())
   fireEvent.click(button)
 }
@@ -185,7 +185,7 @@ describe("native Flashcards with the real query cache and account boundaries", (
     await screen.findByText("Bob private deck")
     expect(screen.queryByText("Alice private deck")).not.toBeInTheDocument()
     fireEvent.click(
-      screen.getByRole("button", { name: "Save card", exact: true })
+      screen.getByRole("button", { name: "Save card" })
     )
     await waitFor(() =>
       expect(
@@ -281,7 +281,7 @@ describe("native Flashcards with the real query cache and account boundaries", (
     ).not.toBeInTheDocument()
     expect(screen.getByDisplayValue("Bob current source")).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Generate draft cards", exact: true })
+      screen.getByRole("button", { name: "Generate draft cards" })
     ).toBeEnabled()
   })
 
@@ -326,7 +326,7 @@ describe("native Flashcards with the real query cache and account boundaries", (
       expect(requests("/api/v1/flashcards", "POST")).toHaveLength(1)
       expect(screen.getByDisplayValue("Bob current source")).toBeInTheDocument()
       expect(
-        screen.getByRole("button", { name: "Save card", exact: true })
+        screen.getByRole("button", { name: "Save card" })
       ).toBeEnabled()
       expect(
         screen.queryByText("Saved to Alice private deck.")
@@ -394,7 +394,7 @@ describe("native Flashcards with the real query cache and account boundaries", (
       screen.queryByText("Reviewed 1 card in this sidepanel session.")
     ).not.toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Good", exact: true })
+      screen.getByRole("button", { name: "Good" })
     ).toBeEnabled()
   })
 

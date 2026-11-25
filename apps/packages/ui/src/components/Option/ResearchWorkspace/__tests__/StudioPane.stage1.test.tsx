@@ -2361,11 +2361,11 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       if (outcome !== "early-cancel") {
         await waitFor(() => expect(mockGenerateSlidesFromMedia).toHaveBeenCalledTimes(1))
       } else {
-        fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
         await waitFor(() => expect(workspaceStoreState.isGeneratingOutput).toBe(false))
         expect(mockGenerateSlidesFromMedia).not.toHaveBeenCalled()
       }
-      if (outcome === "cancel") fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+      if (outcome === "cancel") fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
       if (outcome === "unmount") view.unmount()
       await act(async () => {
         resolve({
@@ -2443,7 +2443,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     const view = renderStudioPane()
     try {
       fireEvent.click(
-        screen.getByRole("button", { name: "Slides", exact: true }),
+        screen.getByRole("button", { name: "Slides" }),
       )
       await waitFor(() => expect(mockMessageError).toHaveBeenCalled())
       expect(mockGenerateSlidesFromMedia).toHaveBeenCalledTimes(1)

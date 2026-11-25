@@ -128,14 +128,14 @@ describe("dictionary catalogue through the actual SDK and proxy", () => {
     controller.abort()
     await rejected
   })
-  it.each(["POST", "PUT", "PATCH", "DELETE", "HEAD"])(
+  it.each(["POST", "PUT", "PATCH", "DELETE", "HEAD"] as const)(
     "does not expand scoped catalogue permission to %s",
     async (method) => {
       await expect(
         bgRequest({
           ...requestScopeFields(requestScope),
-          path: "/api/v1/chat/dictionaries" as never,
-          method: method as never
+          path: "/api/v1/chat/dictionaries",
+          method
         })
       ).rejects.toThrow(/Service Prompt config/)
       expect(boundary.fetch).not.toHaveBeenCalled()
@@ -150,11 +150,11 @@ describe("dictionary catalogue through the actual SDK and proxy", () => {
     "/api/v1/chat//dictionaries",
     "/api/v1/chat/../chat/dictionaries",
     "/api/v1/chat/%2e%2e/dictionaries"
-  ])("does not expand scoped catalogue permission to %s", async (path) => {
+  ] as const)("does not expand scoped catalogue permission to %s", async (path) => {
     await expect(
       bgRequest({
         ...requestScopeFields(requestScope),
-        path: path as never,
+        path,
         method: "GET"
       })
     ).rejects.toThrow(/Service Prompt config/)

@@ -223,6 +223,8 @@ function createBaseKnowledgeQaState(): KnowledgeQAContextValue {
     client: createKnowledgeQaClient(null, () => false),
     isAuthorityCurrent: () => false,
     storageScopeKey: null,
+    notesAuthorityScope: null,
+    notesAuthorityId: null,
     setQuery: vi.fn(),
     search: vi.fn(async () => undefined),
     cancelSearch: vi.fn(),

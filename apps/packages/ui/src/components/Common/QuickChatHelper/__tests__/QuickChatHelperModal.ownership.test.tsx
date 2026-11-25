@@ -91,7 +91,7 @@ function mount() {
       </MemoryRouter>
     </ConfigProvider>
   )
-  return screen.getByRole("button", { name: "Pop out", exact: true })
+  return screen.getByRole("button", { name: "Pop out" })
 }
 beforeEach(() => {
   authority.ready = true

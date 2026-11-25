@@ -15,10 +15,9 @@ import { ResearchWorkspace } from "../index"
 import type { ResearchWorkspaceMigrationRunResult } from "@/store/workspace-migration"
 
 // Match the router context provided by both deployed shells.
-const render: typeof renderUI = (ui, options) =>
+const render = (ui: Parameters<typeof renderUI>[0]) =>
   renderUI(ui, {
-    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
-    ...options
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>
   })
 
 const {

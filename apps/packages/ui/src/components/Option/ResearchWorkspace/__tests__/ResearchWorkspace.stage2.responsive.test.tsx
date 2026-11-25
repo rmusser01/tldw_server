@@ -13,10 +13,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "../index"
 
 // Match the router context provided by both deployed shells.
-const render: typeof renderUI = (ui, options) =>
+const render = (ui: Parameters<typeof renderUI>[0]) =>
   renderUI(ui, {
-    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
-    ...options
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>
   })
 import { RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY } from "../research-workspace-route-state"
 import {
@@ -1070,7 +1069,7 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       expect(mockGetResearchBundle).toHaveBeenCalledWith("research-run-7")
     })
     expect(
-      screen.getByRole("button", { name: "Importing", exact: true })
+      screen.getByRole("button", { name: "Importing" })
     ).toBeDisabled()
 
     testState.workspaceId = "workspace-2"
