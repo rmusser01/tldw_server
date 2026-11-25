@@ -30,6 +30,7 @@ Let Chatbook recover an authenticated Server run and its exact workspace origin 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: yes. ADR path: Docs/ADR/102-research-workspace-run-origin.md. The dedicated Workspace API and durable native Runs receipt define the authenticated launch and return boundary.
 The Workspace launch stores an owner-scoped receipt with the exact native run and its first phase dispatch intent. Native detail and bundle reads project the launch to that account. Concurrent replay, interruption before and after Jobs admission, deleted operation replay, and changed references are covered. The focused Server run passed 144 tests. The PostgreSQL-backed existing Chat ownership test passed separately against a disposable database. OpenAPI fingerprint and path union checks, Ruff, and Bandit on changed production paths passed. A localhost Chatbook smoke test dropped the successful launch response, recovered one run, and saved a verified draft Report using a stored bundle fixture.
+The rebased CI run records the launch receipt as SQLite-only and verifies owner-scoped lookup across the supported deployment modes. The tenant isolation checks and focused Workspace Study and Runs regressions passed locally.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

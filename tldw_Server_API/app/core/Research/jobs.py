@@ -7,7 +7,7 @@ import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, TypedDict
 
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
@@ -28,6 +28,9 @@ from tldw_Server_API.app.core.Research.providers.web import WebResearchProvider
 from tldw_Server_API.app.core.Research.synthesizer import ResearchSynthesizer
 
 from .phase_dispatch import PHASES, new_phase_dispatch, read_phase_dispatch
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 RESEARCH_DOMAIN = "research"
 RESEARCH_JOB_TYPE = "research_phase"
@@ -129,9 +132,22 @@ async def _write_text_artifact(artifact_store: ResearchArtifactStore, **kwargs: 
     return await asyncio.to_thread(artifact_store.write_text, **kwargs)
 
 
+class _PhaseJobIdentity(TypedDict):
+    domain: str
+    queue: str
+    job_type: str
+    owner_user_id: str
+    idempotency_key: str
+
+
+class _PhaseAdmissionExemptions(TypedDict, total=False):
+    fair_share_exempt: bool
+    quota_exempt: bool
+
+
 def enqueue_research_phase_job(
     *,
-    jm: Any,
+    jm: JobManager,
     session_id: str,
     phase: str,
     owner_user_id: str,
@@ -151,8 +167,8 @@ def enqueue_research_phase_job(
         "policy_version": int(policy_version),
     }
     suffix = ""
-    admission = {}
-    lookup = None
+    admission: _PhaseAdmissionExemptions = {}
+    lookup: Callable[..., dict[str, Any] | None] | None = None
     if phase_dispatch is not None:
         dispatch = read_phase_dispatch(phase_dispatch)
         if dispatch["phase"] != phase or payload_overrides:
@@ -181,7 +197,7 @@ def enqueue_research_phase_job(
         raise ValueError("research_continuation_requires_dispatch")
     if isinstance(payload_overrides, dict):
         payload.update(payload_overrides)
-    identity = {
+    identity: _PhaseJobIdentity = {
         "domain": RESEARCH_DOMAIN,
         "queue": RESEARCH_QUEUE,
         "job_type": RESEARCH_JOB_TYPE,

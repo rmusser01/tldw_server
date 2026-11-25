@@ -239,7 +239,9 @@ def test_existing_sqlite_study_data_survives_the_receipt_migration(tmp_path, mon
         before.close_all_connections()
 
     after = CharactersRAGDB(path, client_id="1")
-    assert after.flashcard_store.get_deck(old_deck)["name"] == "Existing deck"
+    existing_deck = after.flashcard_store.get_deck(old_deck)
+    assert existing_deck is not None
+    assert existing_deck["name"] == "Existing deck"
     # Read through the normal store API after real v85-to-v86 initialization.
     from tldw_Server_API.app.core.Research_Workspace.study_publication import ResearchStudyPublisher
 

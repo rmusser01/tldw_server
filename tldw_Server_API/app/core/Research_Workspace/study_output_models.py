@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
@@ -109,6 +109,9 @@ class _QuizQuestion(_StudyEntry):
 
 
 class _StudyPublication(ResearchStudyGeneration):
+    if TYPE_CHECKING:
+        items: tuple[_StudyEntry, ...]
+
     title: Annotated[
         str, StringConstraints(strict=True, strip_whitespace=True, max_length=120, pattern=r"^[^\x00-\x1f]*$")
     ] = Field(default="", repr=False)
