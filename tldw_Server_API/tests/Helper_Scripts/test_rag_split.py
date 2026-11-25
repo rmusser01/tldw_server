@@ -1083,7 +1083,7 @@ def test_is_pkg_uses_the_manifests_package_name() -> None:
 # --- fix round 1: refusals ---
 
 
-@pytest.mark.parametrize("key", ["late_imports", "rewrite_in", "free_imports", "relocate"])
+@pytest.mark.parametrize("key", ["rewrite_in", "free_imports", "relocate"])
 def test_part_2_and_3_manifest_keys_are_refused(tmp_path: Path, key: str) -> None:
     t = Tree(tmp_path, **{key: {}})
     with pytest.raises(rag_split.SplitError, match=rf"{key}.*not supported yet \(TASK-13950.25 part 2/3\)"):
@@ -1818,3 +1818,75 @@ def test_drop_verify_rejects_a_kept_def_or_a_stale_all(tmp_path: Path) -> None:
     assert t.run("apply") == 0
     _edit(t, SIB_FILE, '__all__ = ["run_it", "call"]', '__all__ = ["Pipe", "run_it", "call"]')
     assert t.run("verify") == 1
+
+
+# --- late_imports ---
+
+LATE_STAGE = textwrap.dedent(
+    '''\
+    """Stage B."""
+
+    from __future__ import annotations
+
+    from typing import Any
+
+    from mini.stage_a import (
+        existing,
+        helper,
+    )
+
+
+    def use(x: Any) -> Any:
+        return existing(x) + helper(x)
+    '''
+)
+
+
+def late_tree(tmp: Path, stage_b: str = LATE_STAGE, lines: list[int] | None = None, **extra: object) -> Tree:
+    a = row(stage_b, "from mini.stage_a import (")
+    mv = {**sib_move(), "module": "stage_a"}
+    return sib_tree(tmp, dests={"stage_a": STAGE_A + "\n\ndef helper(x):\n    return x\n", "stage_b": stage_b}, moves=[mv], late_imports=[{"module": "stage_b", "lines": lines or [a, a + 3]}], **extra)
+
+
+def test_late_imports_move_a_top_import_into_the_late_block(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = late_tree(tmp_path)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    stage = t.text("mini/stage_b.py")
+    top, late = stage.split(LATE)
+    assert "mini.stage_a" not in top and late.strip() == "from mini.stage_a import (\n    existing,\n    helper,\n)"
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("stage", "lines", "needle"),
+    [
+        (LATE_STAGE, [7, 8], "are not whole top-level import statements"),
+        (LATE_STAGE.replace("def use(x: Any) -> Any:", "VALUE = existing\n\n\ndef use(x: Any) -> Any:"), None, "V14: stage_b.py reads existing when it is imported"),
+        (LATE_STAGE.replace("def use(x: Any) -> Any:", "@helper\ndef use(x: Any) -> Any:"), None, "V14: stage_b.py reads helper when it is imported"),
+        (LATE_STAGE.replace("from __future__ import annotations\n\n", "").replace("def use(x: Any) -> Any:", "def use(x: existing) -> Any:"), None, "V14: stage_b.py reads existing when it is imported"),
+    ],
+)
+def test_late_imports_refusals(tmp_path: Path, capsys: pytest.CaptureFixture, stage: str, lines: list[int] | None, needle: str) -> None:
+    t = late_tree(tmp_path, stage, lines=lines)
+    assert t.run("apply") == 1 and needle in capsys.readouterr().out
+
+
+def test_late_imports_allow_reads_in_bodies_and_future_annotations(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    stage = LATE_STAGE.replace("def use(x: Any) -> Any:", "def use2(x: existing) -> helper:\n    return x\n\n\ndef use(x: Any) -> Any:")
+    t = late_tree(tmp_path, stage)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_late_imports_verify_rejects_a_top_import_left_behind(tmp_path: Path) -> None:
+    t = late_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_b.py", "from typing import Any\n", "from typing import Any\nfrom mini.stage_a import existing, helper\n")
+    assert t.run("verify") == 1
+
+
+def test_late_imports_shape_is_checked(tmp_path: Path) -> None:
+    for bad in ([{"module": "x"}], [{"module": "x", "lines": [3, 1]}], [{"module": "x", "lines": [1]}], "x"):
+        t = sib_tree(tmp_path / str(abs(hash(str(bad)))), late_imports=bad)
+        with pytest.raises(rag_split.SplitError):
+            rag_split.load_manifest(t.manifest_path)

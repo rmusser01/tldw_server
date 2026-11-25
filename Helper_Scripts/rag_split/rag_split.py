@@ -84,7 +84,7 @@ from typing import Any, NamedTuple
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
-PART2_KEYS = {"late_imports", "rewrite_in", "free_imports", "relocate"}
+PART2_KEYS = {"rewrite_in", "free_imports", "relocate"}
 PART3_KEYS = {"rewrite_in", "free_imports", "relocate"}
 MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals", "args"}
 LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
@@ -408,6 +408,12 @@ def load_manifest(path: Path) -> dict[str, Any]:
                     raise SplitError(f"{path}: entry needs pkg '' (use entry_split for the RAG layout)")
                 if not isinstance(e, dict) or set(e) - {"name", "module", "doc"} or not all(isinstance(e.get(k), str) and e.get(k) for k in ("name", "module")) or not isinstance(e.get("doc", ""), str):
                     raise SplitError(f"{path}: entry must be {{'name': str, 'module': str, 'doc': str (optional)}}")
+            if m["late_imports"]:
+                li = m["late_imports"]
+                if m["pkg"] != "":
+                    raise SplitError(f"{path}: late_imports needs pkg ''")
+                if not (isinstance(li, list) and all(isinstance(x, dict) and set(x) == {"module", "lines"} and isinstance(x["module"], str) and isinstance(x["lines"], list) and len(x["lines"]) == 2 and all(isinstance(n, int) for n in x["lines"]) and 0 < x["lines"][0] <= x["lines"][1] for x in li)):
+                    raise SplitError(f"{path}: late_imports is a list of {{'module': name, 'lines': [first, last]}}")
             if m["drop"]:
                 if m["pkg"] != "":
                     raise SplitError(f"{path}: drop needs pkg ''")
@@ -2107,6 +2113,7 @@ class ModPlan:
         self.aliases: list[str] = []  # other destination modules the new code calls, imported in the late block
         self.need_cs = False
         self.drops: list[dict] = []
+        self.late_ranges: list[list[int]] = []  # rows of top imports that move into the late block
 
 
 def split_late(text: str) -> tuple[ast.Module, list[ast.stmt], list[ast.stmt]]:
@@ -2157,6 +2164,10 @@ def late_block(m: dict, plan: ModPlan, late: list[ast.stmt], texts: list[str]) -
 def sib_expected(m: dict, plan: ModPlan) -> tuple[ast.Module, int]:
     """The destination module as an AST: base top, added imports, appended defs, late block. Plus the block's length."""
     _, top, late = split_late(plan.text)
+    moved = [x for x in top if is_top_import(x) and [x.lineno, x.end_lineno] in plan.late_ranges]
+    if len(moved) != len(plan.late_ranges):
+        raise SplitError(f"{plan.name}.py: late_imports {plan.late_ranges} are not whole top-level import statements")
+    top = [x for x in top if not any(x is y for y in moved)]
     top = drop_apply(top, plan.drops, f"{plan.name}.py")
     std, tc = top_additions(m, plan, top)
     at = max((i for i, s in enumerate(top) if is_top_import(s)), default=-1) + 1
@@ -2169,7 +2180,7 @@ def sib_expected(m: dict, plan: ModPlan) -> tuple[ast.Module, int]:
         blk.body += tcs
     elif tcs:
         ins.append(ast.If(test=ast.Name("TYPE_CHECKING", ast.Load()), body=tcs, orelse=[]))
-    block = late_block(m, plan, late, [""] * len(late))
+    block = late_block(m, plan, late + moved, [""] * (len(late) + len(moved)))
     body = top[:at] + ins + top[at:] + plan.defs + [s for s, _ in block]
     if plan.drops:
         drop_refs(body, plan.drops, f"{plan.name}.py")
@@ -2178,7 +2189,12 @@ def sib_expected(m: dict, plan: ModPlan) -> tuple[ast.Module, int]:
 
 def sib_write(m: dict, plan: ModPlan, def_texts: list[str]) -> str:
     """The text counterpart of ``sib_expected``."""
-    text = drop_text(plan.text, plan.drops, f"{plan.name}.py")
+    rows = plan.text.split("\n")
+    moved_txt: list[str] = []
+    for a, b in sorted(plan.late_ranges, reverse=True):
+        moved_txt.insert(0, "\n".join(rows[a - 1 : b]))
+        del rows[a - 1 : b]
+    text = drop_text("\n".join(rows), plan.drops, f"{plan.name}.py")
     tree, top, late = split_late(text)
     rows = text.split("\n")
     std, tc = top_additions(m, plan, top)
@@ -2197,7 +2213,7 @@ def sib_write(m: dict, plan: ModPlan, def_texts: list[str]) -> str:
     tree, top, late = split_late(text)
     rows = text.split("\n")
     k = next((i for i, r in enumerate(rows, 1) if r.strip() == LATE_MARK), None)
-    block = late_block(m, plan, late, [ast.get_source_segment(text, s) or "" for s in late])
+    block = late_block(m, plan, late + [ast.parse(t).body[0] for t in moved_txt], [ast.get_source_segment(text, s) or "" for s in late] + moved_txt)
     head = rows[: k - 1] if k else rows
     out = "\n".join(head).rstrip("\n") + "\n" + "".join("\n\n" + d.rstrip("\n") + "\n" for d in def_texts)
     if block:
@@ -2230,6 +2246,8 @@ def make_plans(m: dict, src: Src, b: Built, text_of: Any) -> tuple[dict[str, Mod
     for it in m["drop"]:
         if it["module"] != src_stem(m):
             plans.setdefault(it["module"], ModPlan(it["module"])).drops.append(it)
+    for li in m["late_imports"]:
+        plans.setdefault(li["module"], ModPlan(li["module"])).late_ranges.append(li["lines"])
     for mod, p in plans.items():
         t = text_of(mod)
         if t is None:
@@ -2237,6 +2255,15 @@ def make_plans(m: dict, src: Src, b: Built, text_of: Any) -> tuple[dict[str, Mod
             continue
         p.text = t
         dest_names(p, m, src, b.dests)
+        if p.late_ranges:
+            tree, top, _ = split_late(t)
+            moved = [x for x in top if is_top_import(x) and [x.lineno, x.end_lineno] in p.late_ranges]
+            if len(moved) != len(p.late_ranges):
+                errs.append(f"{mod}.py: late_imports {p.late_ranges} are not whole top-level import statements")
+            else:
+                bound = {_bound(a) for x in moved for a in x.names}  # type: ignore[attr-defined]
+                rest = [x for x in top if not any(x is y for y in moved)]
+                errs += [f"V14: {mod}.py reads {n} when it is imported, but late_imports moves that import to the end" for n in sorted(bound & {x.id for x in eval_names(rest, has_future(tree))})]
         clash = module_names(ast.parse(t))
         errs += [f"V10: {mod}.py already binds {d.name}" for d in p.defs if d.name in clash]  # type: ignore[attr-defined]
         names = [d.name for d in p.defs]  # type: ignore[attr-defined]
