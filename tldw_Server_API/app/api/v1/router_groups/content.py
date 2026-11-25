@@ -22,6 +22,26 @@ from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_e
 API_V1_PREFIX = "/api/v1"
 
 
+def _workspace_router_specs() -> tuple[ImportedRouterSpec, ...]:
+    """Declare the routers mounted at the shared Workspaces prefix in order."""
+    return tuple(
+        ImportedRouterSpec(
+            import_path=f"tldw_Server_API.app.api.v1.endpoints.{name}",
+            log_name=name,
+            prefix=f"{API_V1_PREFIX}/workspaces",
+            tags=("workspaces",),
+            route_key="workspaces",
+        )
+        for name in (
+            "workspace_migrations",
+            "workspace_study_outputs",
+            "workspace_research_runs",
+            "workspace_data_tables",
+            "workspaces",
+        )
+    )
+
+
 def iter_content_router_specs() -> Iterable[RouterSpec]:
     """Yield content/media-focused router specs."""
     specs: list[RouterSpec] = []
@@ -451,41 +471,7 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
 
     # Workspace and character endpoints
     for character_spec in (
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
-            log_name="workspace_migrations",
-            prefix=f"{API_V1_PREFIX}/workspaces",
-            tags=("workspaces",),
-            route_key="workspaces",
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.workspace_study_outputs",
-            log_name="workspace_study_outputs",
-            prefix=f"{API_V1_PREFIX}/workspaces",
-            tags=("workspaces",),
-            route_key="workspaces",
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.workspace_research_runs",
-            log_name="workspace_research_runs",
-            prefix=f"{API_V1_PREFIX}/workspaces",
-            tags=("workspaces",),
-            route_key="workspaces",
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.workspace_data_tables",
-            log_name="workspace_data_tables",
-            prefix=f"{API_V1_PREFIX}/workspaces",
-            tags=("workspaces",),
-            route_key="workspaces",
-        ),
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.workspaces",
-            log_name="workspaces",
-            prefix=f"{API_V1_PREFIX}/workspaces",
-            tags=("workspaces",),
-            route_key="workspaces",
-        ),
+        *_workspace_router_specs(),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.workspace_memberships",
             log_name="workspace_memberships",

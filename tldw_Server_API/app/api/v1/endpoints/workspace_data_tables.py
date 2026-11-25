@@ -19,8 +19,8 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     require_expected_user_if_present,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.data_tables_deps import data_tables_jobs_queue, get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import (
     DATA_TABLES_MAX_ROWS_LIMIT,
     DataTableColumnHint,
@@ -32,6 +32,7 @@ from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_WRITE_RATE_LIMIT,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_READ, MEDIA_UPDATE
+from tldw_Server_API.app.core.config_sections.jobs import data_tables_jobs_queue
 from tldw_Server_API.app.core.Data_Tables.jobs_worker import (
     DATA_TABLES_DOMAIN,
     DATA_TABLES_JOB_TYPE,

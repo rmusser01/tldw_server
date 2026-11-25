@@ -22,8 +22,8 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     require_expected_user_if_present,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.data_tables_deps import data_tables_jobs_queue, get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import (
     DataTableColumn,
     DataTableContentUpdateRequest,
@@ -51,6 +51,8 @@ from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import (
 )
 from tldw_Server_API.app.api.v1.utils.data_tables_responses import (
     parse_json_value as _parse_json_value,
+)
+from tldw_Server_API.app.api.v1.utils.data_tables_responses import (
     table_summary_from_row as _table_summary_from_row,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -63,6 +65,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 )
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.config_sections.jobs import data_tables_jobs_queue
 from tldw_Server_API.app.core.Data_Tables.publication import (
     PROTOCOL_KEY,
     public_generation_result,

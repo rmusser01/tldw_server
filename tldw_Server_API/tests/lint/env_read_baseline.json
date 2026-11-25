@@ -27,7 +27,6 @@
   "api/v1/endpoints/config_info.py": {"reads": 21, "import_time": 0, "reason": null},
   "api/v1/endpoints/connectors.py": {"reads": 3, "import_time": 0, "reason": null},
   "api/v1/endpoints/consent.py": {"reads": 1, "import_time": 0, "reason": null},
-  "api/v1/endpoints/data_tables.py": {"reads": 3, "import_time": 0, "reason": null},
   "api/v1/endpoints/embeddings_v5_production_enhanced.py": {"reads": 37, "import_time": 13, "reason": null},
   "api/v1/endpoints/evaluations/evaluations_auth.py": {"reads": 3, "import_time": 0, "reason": null},
   "api/v1/endpoints/evaluations/evaluations_unified.py": {"reads": 2, "import_time": 0, "reason": null},

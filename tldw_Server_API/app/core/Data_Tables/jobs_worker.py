@@ -3,7 +3,7 @@ Data Tables Jobs worker.
 
 - Consumes core Jobs entries for data table generation/regeneration.
 - domain = "data_tables"
-- queue = os.getenv("DATA_TABLES_JOBS_QUEUE", "default")
+- DATA_TABLES_JOBS_QUEUE selects the queue (default: "default")
 - job_type = "data_table_generate"
 
 Payload fields:
@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import load_and_log_configs, usage_quotas_enabled
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
+from tldw_Server_API.app.core.config_sections.jobs import data_tables_jobs_queue
 from tldw_Server_API.app.core.Data_Tables.publication import (
     PROTOCOL_KEY,
     RECEIPT_KEY,
@@ -1372,7 +1373,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
 async def run_data_tables_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     """Run the data tables jobs worker loop until stopped."""
     worker_id = (os.getenv("DATA_TABLES_JOBS_WORKER_ID") or f"data-tables-jobs-{os.getpid()}").strip()
-    queue = (os.getenv("DATA_TABLES_JOBS_QUEUE") or "default").strip() or "default"
+    queue = data_tables_jobs_queue()
     cfg = WorkerConfig(
         domain=DATA_TABLES_DOMAIN,
         queue=queue,
