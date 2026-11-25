@@ -29,6 +29,7 @@ def test_sync_deadline_bounds_certificate_pinning(
 ) -> None:
     """Pin preflight cannot consume an independent connect/handshake budget."""
     budgets: list[float] = []
+    waits: list[tuple[float, float, float]] = []
 
     class Socket:
         """Synthetic pinning socket recording each timeout."""
@@ -44,17 +45,23 @@ def test_sync_deadline_bounds_certificate_pinning(
         def __exit__(self, *_args: Any) -> None:
             return None
 
+    def sleep_for_socket_timeout(timeout: float) -> None:
+        before = time.monotonic()
+        time.sleep(min(timeout, UNCUT_SECONDS))
+        after = time.monotonic()
+        waits.append((timeout, after - before, deadline - after))
+
     def connect(_address: Any, *, timeout: float) -> Socket:
         """Never create a real network socket."""
         budgets.append(timeout)
         if phase == "connect":
-            time.sleep(min(timeout, UNCUT_SECONDS))
+            sleep_for_socket_timeout(timeout)
             raise TimeoutError("synthetic sensitive connect failure")
         return Socket()
 
     def handshake(sock: Socket, **_kwargs: Any) -> None:
         """Simulate a handshake that exhausts its socket timeout."""
-        time.sleep(min(sock.timeout, UNCUT_SECONDS))
+        sleep_for_socket_timeout(sock.timeout)
         raise TimeoutError("synthetic sensitive handshake failure")
 
     monkeypatch.setattr(hc.socket, "create_connection", connect)
@@ -63,14 +70,18 @@ def test_sync_deadline_bounds_certificate_pinning(
         lambda **_kwargs: types.SimpleNamespace(minimum_version=None, wrap_socket=handshake),
     )
     started = time.monotonic()
-    with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
-        hc.fetch(
-            method="GET", url="https://93.184.216.34/models",
-            max_response_bytes=4, deadline=started + 0.1,
-            cert_pinning={"93.184.216.34": {"0" * 64}}, sensitive_observability=True,
-        )
-    assert time.monotonic() - started < CUT_BOUND_SECONDS
-    assert budgets and all(0 < budget <= 0.1 for budget in budgets)
+    deadline = started + 0.1
+    try:
+        with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
+            hc.fetch(
+                method="GET", url="https://93.184.216.34/models",
+                max_response_bytes=4, deadline=deadline,
+                cert_pinning={"93.184.216.34": {"0" * 64}}, sensitive_observability=True,
+            )
+        assert time.monotonic() - started < CUT_BOUND_SECONDS
+        assert budgets and all(0 < budget <= 0.1 for budget in budgets)
+    finally:
+        print(f"[pinning-timeout] {phase}: (timeout_s, slept_s, remaining_s)={waits}")
 
 
 @pytest.mark.parametrize("slow_lookup", [1, 2])
