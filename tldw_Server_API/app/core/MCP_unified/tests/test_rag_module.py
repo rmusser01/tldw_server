@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.rag_module imp
 from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
 from tldw_Server_API.app.core.Utils.app_services import app_services
+from tldw_Server_API.tests.helpers.run_config_spy import spy_from_kwargs
 
 pytestmark = pytest.mark.unit
 
@@ -389,8 +390,10 @@ async def test_rag_capabilities_reports_mcp_top_k_limit() -> None:
 async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
     calls: dict[str, object] = {}
+    passed = spy_from_kwargs(monkeypatch)
 
-    async def fake_pipeline(**kwargs):
+    async def fake_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         calls.update(kwargs)
         return SimpleNamespace(
             documents=[{"id": "d1", "content": "Evidence", "metadata": {"source": "media_db"}, "score": 0.9}],
@@ -406,7 +409,7 @@ async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatc
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
     ctx = RequestContext(
         request_id="r1",
         user_id="1",
@@ -420,7 +423,7 @@ async def test_rag_search_executes_shared_pipeline_without_generation(monkeypatc
     assert "answer" not in out  # nosec B101
     assert calls["enable_generation"] is False  # nosec B101
     assert calls["sources"] == ["media_db"]  # nosec B101
-    assert calls["include_sources"] is True  # nosec B101
+    assert passed["include_sources"] is True  # nosec B101  (the config default is also True: check the module passed it)
     assert calls["media_db_path"] == "media.db"  # nosec B101
     assert calls["notes_db_path"] == "notes.db"  # nosec B101
 
@@ -429,7 +432,8 @@ async def test_rag_search_can_suppress_returned_documents(monkeypatch: pytest.Mo
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
     calls: dict[str, object] = {}
 
-    async def fake_pipeline(**kwargs):
+    async def fake_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         calls.update(kwargs)
         return SimpleNamespace(
             documents=[{"id": "d1", "content": "Evidence", "metadata": {"source": "media_db"}, "score": 0.9}],
@@ -445,7 +449,7 @@ async def test_rag_search_can_suppress_returned_documents(monkeypatch: pytest.Mo
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
 
     out = await module.execute_tool(
         "rag.search",
@@ -462,7 +466,7 @@ async def test_rag_search_can_suppress_returned_documents(monkeypatch: pytest.Mo
 async def test_rag_answer_marks_grounded_cited_output_answered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
 
-    async def fake_pipeline(**kwargs):  # noqa: ARG001
+    async def fake_pipeline(rcfg):  # noqa: ARG001
         return SimpleNamespace(
             documents=[{"id": "d1", "content": "Evidence", "metadata": {"source": "media_db"}, "score": 0.9}],
             query="q",
@@ -477,7 +481,7 @@ async def test_rag_answer_marks_grounded_cited_output_answered(monkeypatch: pyte
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
 
     out = await module.execute_tool("rag.answer", {"query": "q"}, context=RequestContext(request_id="r2", user_id="1"))
 
@@ -489,7 +493,7 @@ async def test_rag_answer_marks_grounded_cited_output_answered(monkeypatch: pyte
 async def test_rag_answer_never_marks_uncited_output_answered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
 
-    async def fake_pipeline(**kwargs):  # noqa: ARG001
+    async def fake_pipeline(rcfg):  # noqa: ARG001
         return SimpleNamespace(
             documents=[{"id": "d1", "content": "Weak evidence", "metadata": {"source": "media_db"}, "score": 0.4}],
             query="q",
@@ -504,7 +508,7 @@ async def test_rag_answer_never_marks_uncited_output_answered(monkeypatch: pytes
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
 
     out = await module.execute_tool("rag.answer", {"query": "q"}, context=RequestContext(request_id="r3", user_id="1"))
 
@@ -518,8 +522,10 @@ async def test_rag_search_applies_supported_scopes_and_disables_external_researc
 ) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_RecordingControls())
     calls: dict[str, object] = {}
+    passed = spy_from_kwargs(monkeypatch)
 
-    async def fake_pipeline(**kwargs):
+    async def fake_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         calls.update(kwargs)
         return SimpleNamespace(
             documents=[],
@@ -535,7 +541,7 @@ async def test_rag_search_applies_supported_scopes_and_disables_external_researc
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
     ctx = RequestContext(
         request_id="r4",
         user_id="1",
@@ -548,13 +554,12 @@ async def test_rag_search_applies_supported_scopes_and_disables_external_researc
     assert calls["include_media_ids"] == [1, 2]  # nosec B101
     assert calls["include_note_ids"] == ["note-7"]  # nosec B101
     assert calls["workspace_id"] == "ws-1"  # nosec B101
-    assert calls["enable_research_loop"] is False  # nosec B101
-    assert calls["search_url_scraping"] is False  # nosec B101
-    assert calls["enable_image_search"] is False  # nosec B101
-    assert calls["enable_video_search"] is False  # nosec B101
-    assert calls["enable_web_fallback"] is False  # nosec B101
-    assert calls["enable_query_classification"] is False  # nosec B101
-    assert calls["search_depth_mode"] is None  # nosec B101
+    # The pipeline config defaults these to False, so check what the module actually passed.
+    assert rag_module_impl._mcp_safe_search_agent_overrides() == rag_module_impl._EXTERNAL_RESEARCH_DISABLED_OVERRIDES  # nosec B101
+    for key in ("enable_research_loop", "search_url_scraping", "enable_image_search", "enable_video_search",
+                "enable_web_fallback", "enable_query_classification", "enable_discussion_search", "web_fallback_enabled"):
+        assert key in passed and passed[key] is False, key  # nosec B101
+    assert "search_depth_mode" in passed and passed["search_depth_mode"] is None  # nosec B101
 
 
 async def test_rag_capabilities_uses_only_protocol_rate_control() -> None:
@@ -652,7 +657,7 @@ async def test_rag_search_uses_quota_and_usage_controls(monkeypatch: pytest.Monk
     controls = _RecordingControls()
     module = RagModule(ModuleConfig(name="rag"), controls=controls)
 
-    async def fake_pipeline(**kwargs):  # noqa: ARG001
+    async def fake_pipeline(rcfg):  # noqa: ARG001
         return SimpleNamespace(
             documents=[],
             query="q",
@@ -667,7 +672,7 @@ async def test_rag_search_uses_quota_and_usage_controls(monkeypatch: pytest.Monk
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
 
     out = await module.execute_tool("rag.search", {"query": "q"}, context=RequestContext(request_id="r7", user_id="1"))
 
@@ -683,7 +688,7 @@ async def test_rag_answer_uses_generation_category_controls(monkeypatch: pytest.
     controls = _RecordingControls()
     module = RagModule(ModuleConfig(name="rag"), controls=controls)
 
-    async def fake_pipeline(**kwargs):  # noqa: ARG001
+    async def fake_pipeline(rcfg):  # noqa: ARG001
         return SimpleNamespace(
             documents=[],
             query="q",
@@ -698,7 +703,7 @@ async def test_rag_answer_uses_generation_category_controls(monkeypatch: pytest.
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
 
     await module.execute_tool("rag.answer", {"query": "q"}, context=RequestContext(request_id="r8", user_id="1"))
 
@@ -728,11 +733,12 @@ async def test_default_controls_enforce_source_tool_permission(monkeypatch: pyte
     protocol.rate_limiter = _NoopRateLimiter()
     monkeypatch.setattr(app_services(), "mcp_server", SimpleNamespace(protocol=protocol))
 
-    async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
+    async def fail_if_pipeline_runs(rcfg):  # noqa: ANN001
+        kwargs = rcfg.as_kwargs()
         del kwargs
         raise AssertionError("pipeline must not run when source authorization fails")
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fail_if_pipeline_runs)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fail_if_pipeline_runs)
 
     out = await module.execute_tool(
         "rag.search",
@@ -754,11 +760,12 @@ async def test_default_controls_require_source_tool_module_registered(monkeypatc
     protocol.rate_limiter = _NoopRateLimiter()
     monkeypatch.setattr(app_services(), "mcp_server", SimpleNamespace(protocol=protocol))
 
-    async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
+    async def fail_if_pipeline_runs(rcfg):  # noqa: ANN001
+        kwargs = rcfg.as_kwargs()
         del kwargs
         raise AssertionError("pipeline must not run when source module is unavailable")
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fail_if_pipeline_runs)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fail_if_pipeline_runs)
 
     out = await module.execute_tool(
         "rag.search",
@@ -780,7 +787,8 @@ async def test_default_controls_authorize_character_backed_rag_sources(monkeypat
     monkeypatch.setattr(app_services(), "mcp_server", SimpleNamespace(protocol=protocol))
     calls: dict[str, object] = {}
 
-    async def fake_pipeline(**kwargs):
+    async def fake_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         calls.update(kwargs)
         return SimpleNamespace(
             documents=[],
@@ -796,7 +804,7 @@ async def test_default_controls_authorize_character_backed_rag_sources(monkeypat
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
 
     out = await module.execute_tool(
         "rag.search",
@@ -811,11 +819,12 @@ async def test_default_controls_authorize_character_backed_rag_sources(monkeypat
 async def test_allow_partial_does_not_run_pipeline_when_all_sources_filtered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
 
-    async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
+    async def fail_if_pipeline_runs(rcfg):  # noqa: ANN001
+        kwargs = rcfg.as_kwargs()
         del kwargs
         raise AssertionError("pipeline must not run with no authorized sources")
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fail_if_pipeline_runs)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fail_if_pipeline_runs)
 
     out = await module.execute_tool(
         "rag.search",
@@ -840,7 +849,8 @@ async def test_default_controls_enforce_rag_query_billing_limit(monkeypatch: pyt
         del request_like, current_user, units
         raise PermissionError("RAG query daily limit exceeded")
 
-    async def fail_if_pipeline_runs(**kwargs):  # noqa: ANN001
+    async def fail_if_pipeline_runs(rcfg):  # noqa: ANN001
+        kwargs = rcfg.as_kwargs()
         del kwargs
         raise AssertionError("pipeline must not run when RAG query billing limit is exceeded")
 
@@ -850,7 +860,7 @@ async def test_default_controls_enforce_rag_query_billing_limit(monkeypatch: pyt
         deny_limit,
         raising=False,
     )
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fail_if_pipeline_runs)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fail_if_pipeline_runs)
 
     with pytest.raises(PermissionError, match="daily limit"):
         await module.execute_tool(
@@ -864,7 +874,8 @@ async def test_allow_partial_filters_unavailable_sources(monkeypatch: pytest.Mon
     module = RagModule(ModuleConfig(name="rag"), controls=_UnavailableNotesControls())
     calls: dict[str, object] = {}
 
-    async def fake_pipeline(**kwargs):
+    async def fake_pipeline(rcfg):
+        kwargs = rcfg.as_kwargs()
         calls.update(kwargs)
         return SimpleNamespace(
             documents=[],
@@ -880,7 +891,7 @@ async def test_allow_partial_filters_unavailable_sources(monkeypatch: pytest.Mon
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
 
     out = await module.execute_tool(
         "rag.search",
@@ -897,12 +908,12 @@ async def test_explicit_unsupported_conversation_scope_fails_closed(monkeypatch:
     module = RagModule(ModuleConfig(name="rag"))
     called = False
 
-    async def fake_pipeline(**kwargs):  # noqa: ARG001
+    async def fake_pipeline(rcfg):  # noqa: ARG001
         nonlocal called
         called = True
         return SimpleNamespace(documents=[], query="q", metadata={}, timings={}, citations=[], chunk_citations=[])
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
 
     out = await module.execute_tool(
         "rag.search",
@@ -916,7 +927,8 @@ async def test_explicit_unsupported_conversation_scope_fails_closed(monkeypatch:
 
 
 async def test_rag_module_jsonrpc_tools_call_smoke(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_pipeline(**kwargs):  # noqa: ANN001
+    async def fake_pipeline(rcfg):  # noqa: ANN001
+        kwargs = rcfg.as_kwargs()
         generated_answer = "Grounded answer." if kwargs.get("enable_generation") else None
         return SimpleNamespace(
             documents=[{"id": "d1", "content": "Evidence", "metadata": {"source": "media_db"}, "score": 0.9}],
@@ -932,7 +944,7 @@ async def test_rag_module_jsonrpc_tools_call_smoke(monkeypatch: pytest.MonkeyPat
             expanded_queries=[],
         )
 
-    monkeypatch.setattr(rag_module_impl, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr(rag_module_impl, "run_rag_pipeline", fake_pipeline)
 
     registry = ModuleRegistry()
     await registry.register_module("rag", RagModule, ModuleConfig(name="rag"))

@@ -326,7 +326,8 @@ def test_rerun_chain_rewrite_reads_through_config_and_state() -> None:
 
 FUNC = "unified_rag_pipeline"
 CONFIG_FILE = PIPELINE_PKG / "run_config.py"
-PROLOGUE = "rcfg = RagRunConfig.from_call_locals(locals())"
+SHIM_RETURN = "return await run_rag_pipeline(RagRunConfig.from_call_locals(locals()))"
+ENTRY = "run_rag_pipeline"
 # The 35 parameters the body assigns; ``PipelineState`` holds them (Task 4).
 MUTATED_PARAMS = frozenset(
     {
@@ -346,6 +347,15 @@ def _pipeline_fn() -> ast.AsyncFunctionDef:
     return next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == FUNC)
 
 
+def _entry_fn() -> ast.AsyncFunctionDef:
+    """``run_rag_pipeline``: the orchestrator, defined right after the kwargs shim."""
+    body = parse_tree(RAG_SERVICE)[PIPELINE_FILE].body
+    shim = next(i for i, n in enumerate(body) if isinstance(n, ast.AsyncFunctionDef) and n.name == FUNC)
+    entry = body[shim + 1]
+    assert isinstance(entry, ast.AsyncFunctionDef) and entry.name == ENTRY
+    return entry
+
+
 def _config_fields() -> dict[str, set[str]]:
     """``{group: {field, ...}}`` read from ``run_config.py`` without importing it."""
     classes = {n.name: n for n in parse_tree(RAG_SERVICE)[CONFIG_FILE].body if isinstance(n, ast.ClassDef)}
@@ -356,17 +366,38 @@ def _config_fields() -> dict[str, set[str]]:
     return {group: {f for f, _ in names(classes[cls])} for group, cls in names(classes["RagRunConfig"])}
 
 
-def test_config_is_built_first_from_the_call_locals() -> None:
+def test_config_is_built_from_the_call_locals_and_handed_to_the_entry_point() -> None:
     body = _pipeline_fn().body
     assert isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)  # the docstring
-    assert ast.dump(body[1]) == ast.dump(ast.parse(PROLOGUE).body[0])
+    assert ast.dump(body[1]) == ast.dump(ast.parse(SHIM_RETURN, mode="exec").body[0])
 
 
-def _bare_parameter_reads(source: str, func: str, allowed: frozenset[str]) -> set[str]:
-    """Parameters of top-level ``func`` read by name, in its scope or any scope inside it, that are not in ``allowed``."""
+def test_shim_only_builds_the_config() -> None:
+    fn = _pipeline_fn()
+    assert len(fn.body) == 2 and isinstance(fn.body[1], ast.Return)
+    assert ENTRY in (ast.get_docstring(fn) or "")
+    entry = _entry_fn()
+    assert [a.arg for a in entry.args.args] == ["rcfg"] and not (entry.args.vararg or entry.args.kwonlyargs or entry.args.kwarg)
+    assert ast.unparse(entry.returns) == ast.unparse(fn.returns)
+
+
+def test_orchestrator_has_no_nested_defs() -> None:
+    nested = [
+        f"{n.lineno}: {type(n).__name__}"
+        for stmt in _entry_fn().body
+        for n in ast.walk(stmt)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef))
+    ]
+    assert nested == []
+
+
+def _bare_parameter_reads(source: str, func: str, allowed: frozenset[str], params_of: str | None = None) -> set[str]:
+    """Parameters of top-level ``params_of`` (default ``func``) read by name, in the scope of top-level ``func`` or any scope
+    inside it, that are not in ``allowed``."""
     top = symtable.symtable(source, "<pipeline>", "exec")
     table = next(t for t in top.get_children() if t.get_name() == func)
-    params = set(table.get_parameters()) - allowed
+    owner = next(t for t in top.get_children() if t.get_name() == (params_of or func))
+    params = set(owner.get_parameters()) - allowed
     out: set[str] = set()
 
     def walk(t: symtable.SymbolTable, shadowed: frozenset[str]) -> None:
@@ -393,7 +424,7 @@ def _bare_parameter_reads(source: str, func: str, allowed: frozenset[str]) -> se
 def test_body_reads_read_only_parameters_through_rcfg() -> None:
     fn = _pipeline_fn()
     assert {a.arg for a in fn.args.args} >= MUTATED_PARAMS and len(MUTATED_PARAMS) == 35
-    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), FUNC, MUTATED_PARAMS) == set()
+    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), ENTRY, MUTATED_PARAMS, params_of=FUNC) == set()
 
 
 # ---- PipelineState (Task 4) -----------------------------------------------------------------------
@@ -454,13 +485,13 @@ def test_state_attribute_scan_sees_a_seeded_attribute() -> None:
     assert set(_attrs_of(tree, "state")) == {"a", "b", "c"}
 
 
-def test_state_is_built_right_after_the_config() -> None:
-    body = _pipeline_fn().body
-    assert ast.dump(body[2]) == ast.dump(ast.parse(STATE_INIT).body[0])
+def test_state_is_the_orchestrators_first_statement() -> None:
+    assert ast.dump(_entry_fn().body[0]) == ast.dump(ast.parse(STATE_INIT).body[0])
 
 
-def test_body_reads_no_parameter_after_the_prologue() -> None:
-    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), FUNC, frozenset()) == set()
+def test_orchestrator_reads_no_signature_parameter() -> None:
+    """``run_rag_pipeline`` reads only ``rcfg`` and ``state``; none of the shim's 234 parameter names."""
+    assert _bare_parameter_reads(PIPELINE_FILE.read_text(encoding="utf-8"), ENTRY, frozenset(), params_of=FUNC) == set()
 
 
 def test_mutated_parameters_are_never_read_from_rcfg() -> None:
@@ -523,7 +554,7 @@ HOISTED = (
 
 
 def test_hoisted_helpers_are_methods_not_closures() -> None:
-    defined = {n.name for n in ast.walk(_pipeline_fn()) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    defined = {n.name for n in ast.walk(_entry_fn()) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
     gone = {f"_{h}" for h in HOISTED} | {"_EarlyReturn"}
     assert len(HOISTED) == 18 and defined & gone == set()
     cls = _state_class()
@@ -570,10 +601,174 @@ def test_pipeline_modules_import_in_either_order() -> None:
     import sys
 
     bad: list[str] = []
-    for first in ("run_state", "post_processing", "unified_pipeline"):
+    for first in ("run_state", "post_processing", "prepare", "unified_pipeline"):
         target = UNIFIED_MODULE if first == "unified_pipeline" else f"{PKG_NAME}.pipeline.{first}"
-        code = f"import importlib; importlib.import_module({target!r}); import {UNIFIED_MODULE} as up; up.unified_rag_pipeline"
+        code = f"import importlib; importlib.import_module({target!r}); import {UNIFIED_MODULE} as up; up.unified_rag_pipeline, up.run_rag_pipeline"
         done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300, cwd=REPO_ROOT)  # nosec B603
         if done.returncode:
             bad.append(f"{first}: {done.stderr[-800:]}")
     assert bad == []
+
+
+# ---- entry-point patches (PR M: callers pass a RagRunConfig to run_rag_pipeline) ---------------
+
+ENTRY_NAMES = frozenset({"unified_rag_pipeline", "run_rag_pipeline"})
+UNIFIED_DOTTED = UNIFIED_MODULE
+
+# Tests that still patch ``unified_pipeline.unified_rag_pipeline``: each one intercepts a path that
+# keeps calling the kwargs shim (R17), not a migrated caller. Keyed (test file, enclosing function).
+PIPELINE_ENTRY_PATCH_ALLOWLIST: dict[tuple[str, str], str] = {
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_checkpoint_api.py", "test_rag_batch_checkpoint_records_errors"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_checkpoint_api.py", "test_rag_batch_creates_checkpoint"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_checkpoint_api.py", "test_rag_batch_ownerless_checkpoint_persists_no_credential_scope"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_checkpoint_api.py", "test_rag_batch_with_generation_refuses_an_over_quota_user"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_resume_api.py", "test_rag_batch_legacy_checkpoint_uses_server_runtime_scope"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_resume_api.py", "test_rag_batch_resume_records_errors"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_resume_api.py", "test_rag_batch_resume_respects_query_indices"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_batch_resume_api.py", "test_rag_batch_resume_with_generation_refuses_an_over_quota_owner"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_convenience_endpoint_credentials.py", "test_simple_search_does_not_generate_an_answer"): "simple_search",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py", "test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving"): "streaming",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py", "test_rag_streaming_emits_explicit_clean_empty_completion"): "streaming",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py", "test_rag_streaming_emits_research_progress_before_generation"): "streaming",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py", "test_rag_streaming_generation_uses_shared_resolved_payload"): "streaming",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py", "test_rag_streaming_partial_provider_error_is_terminal_and_sanitized"): "streaming",
+    ("tldw_Server_API/tests/RAG_NEW/integration/test_rag_stream_parity.py", "test_rag_streaming_preserves_delta_and_claim_events"): "streaming",
+    ("tldw_Server_API/tests/RAG_NEW/unit/test_batch_round2_flags.py", "test_unified_batch_pipeline_forwards_round2_flags"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py", "test_batch_clustering_runtime_remote_local_uses_selected_deployment"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/unit/test_hyde.py", "test_batch_clustering_uses_runtime_credentials_for_hosted_embeddings"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py", "test_checkpoint_batch_cancellation_waits_for_started_queries"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/unit/test_rag_provider_credentials.py", "test_simple_wrapper_forwards_runtime_without_changing_legacy_default"): "simple_search",
+    ("tldw_Server_API/tests/RAG_NEW/unit/test_retrieval_plan_usage.py", "test_unified_batch_pipeline_fallback_rewrites_plan_query_per_item"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/unit/test_retrieval_plan_usage.py", "test_unified_batch_pipeline_rewrites_plan_query_per_item"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/unit/test_retrieval_plan_usage.py", "test_unified_batch_pipeline_rewrites_resolved_request_per_item"): "batch",
+    ("tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_golden.py", "_g10"): "rerun",
+}
+
+
+def _import_aliases(tree: ast.AST) -> dict[str, str]:
+    """Local name -> dotted module path, for ``from a import b``, ``import a.b as c`` and ``c = import_module("a.b")``."""
+    out: dict[str, str] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and n.module and not n.level:
+            out.update({a.asname or a.name: f"{n.module}.{a.name}" for a in n.names})
+        elif isinstance(n, ast.Import):
+            out.update({a.asname: a.name for a in n.names if a.asname})
+        elif isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+            v = n.value
+            if isinstance(v, ast.Call) and _call_name(v.func) == "import_module" and v.args:
+                if isinstance(v.args[0], ast.Constant) and isinstance(v.args[0].value, str):
+                    out[n.targets[0].id] = v.args[0].value
+    return out
+
+
+def _entry_patches(tree: ast.AST) -> list[tuple[str, str | None, str]]:
+    """``(innermost enclosing function, dotted module or None, name)`` for each patch of an entry name."""
+    aliases = _import_aliases(tree)
+    out: list[tuple[str, str | None, str]] = []
+
+    def visit(node: ast.AST, fn: str) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            fn = node.name
+        if isinstance(node, ast.Call) and (_call_name(node.func) in PATCHERS or _call_name(node.func) == "object") and node.args:
+            first = node.args[0]
+            second = node.args[1] if len(node.args) > 1 else None
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                mod, _, name = first.value.rpartition(".")
+                if name in ENTRY_NAMES:
+                    out.append((fn, mod, name))
+                elif isinstance(second, ast.Constant) and second.value in ENTRY_NAMES:
+                    out.append((fn, first.value, str(second.value)))
+            elif isinstance(second, ast.Constant) and second.value in ENTRY_NAMES:
+                out.append((fn, aliases.get(ast.unparse(first)), str(second.value)))
+        elif isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Attribute) and t.attr in ENTRY_NAMES:
+                    out.append((fn, aliases.get(ast.unparse(t.value)), t.attr))
+        for child in ast.iter_child_nodes(node):
+            visit(child, fn)
+
+    visit(tree, "<module>")
+    return out
+
+
+def _module_file(repo_root: Path, dotted: str) -> Path | None:
+    base = repo_root.joinpath(*dotted.split("."))
+    for cand in (base.with_suffix(".py"), base / "__init__.py"):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _loads_name(path: Path, name: str) -> bool:
+    """Whether the module reads ``name`` (a Name load or attribute access); an import binding alone does not count."""
+    for n in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load):
+            return True
+        if isinstance(n, ast.Attribute) and n.attr == name and isinstance(n.ctx, ast.Load):
+            return True
+    return False
+
+
+def entry_patch_violations(test_roots: Iterable[Path], repo_root: Path) -> list[str]:
+    """Patches of an entry name on a module that no longer loads it (the patch would be inert).
+
+    ``unified_pipeline`` itself is skipped: it defines both names, and its shim patches are pinned by
+    ``PIPELINE_ENTRY_PATCH_ALLOWLIST``.
+    """
+    out: list[str] = []
+    for path in _files(test_roots):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not any(name in text for name in ENTRY_NAMES):
+            continue
+        for fn, mod, name in _entry_patches(ast.parse(text, filename=str(path))):
+            if mod == UNIFIED_DOTTED:
+                continue
+            target = _module_file(repo_root, mod) if mod else None
+            if target is None:
+                out.append(f"{path.name}:{fn}: cannot resolve the module patched for {name} ({mod})")
+            elif not _loads_name(target, name):
+                out.append(f"{path.name}:{fn}: {mod} no longer loads {name}")
+    return out
+
+
+def pipeline_entry_patch_sites(test_roots: Iterable[Path], repo_root: Path) -> set[tuple[str, str]]:
+    """``(test file, function)`` of every patch of ``unified_pipeline.unified_rag_pipeline``."""
+    out: set[tuple[str, str]] = set()
+    for path in _files(test_roots):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "unified_rag_pipeline" not in text:
+            continue
+        for fn, mod, name in _entry_patches(ast.parse(text, filename=str(path))):
+            if mod == UNIFIED_DOTTED and name == "unified_rag_pipeline":
+                out.add((path.relative_to(repo_root).as_posix(), fn))
+    return out
+
+
+ENTRY_TEST_ROOTS = SCAN_ROOTS[:2]
+
+
+def test_entry_point_patches_target_a_module_that_calls_it() -> None:
+    assert entry_patch_violations(ENTRY_TEST_ROOTS, REPO_ROOT) == []
+
+
+def test_entry_point_patch_on_a_module_that_dropped_the_call_is_reported(tmp_path: Path) -> None:
+    (tmp_path / "pkg").mkdir()
+    mod = tmp_path / "pkg" / "mod.py"
+    mod.write_text("def f():\n    return 1\n")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_a.py").write_text(
+        "import pkg.mod as m\n\n\ndef test_a(monkeypatch):\n    monkeypatch.setattr('pkg.mod.run_rag_pipeline', 1)\n"
+        "\n\ndef test_b(monkeypatch):\n    monkeypatch.setattr(m, 'unified_rag_pipeline', 1)\n"
+    )
+    assert len(entry_patch_violations([tests], tmp_path)) == 2
+    mod.write_text("from x import run_rag_pipeline, unified_rag_pipeline\n")  # imported, never used
+    assert len(entry_patch_violations([tests], tmp_path)) == 2
+    mod.write_text("from x import run_rag_pipeline, unified_rag_pipeline\n\n\nasync def f():\n    await run_rag_pipeline(1)\n    return x.unified_rag_pipeline\n")
+    assert entry_patch_violations([tests], tmp_path) == []
+
+
+def test_pipeline_entry_patches_are_allow_listed() -> None:
+    sites = pipeline_entry_patch_sites(ENTRY_TEST_ROOTS, REPO_ROOT)
+    assert sites == set(PIPELINE_ENTRY_PATCH_ALLOWLIST)
+    assert set(PIPELINE_ENTRY_PATCH_ALLOWLIST.values()) <= {"batch", "streaming", "sharing", "rerun", "simple_search"}

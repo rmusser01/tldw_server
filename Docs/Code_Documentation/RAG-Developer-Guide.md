@@ -97,6 +97,39 @@ Important route variants:
 
 `profiles.py` owns named presets. Built-in profiles are `production`, `research`, `cheap`, `fast`, `balanced`, and `accuracy`. Public request-time `rag_profile` currently accepts `fast`, `balanced`, and `accuracy`; lower-level profile helpers can build kwargs for all registered profiles.
 
+## Pipeline Layout
+
+`unified_rag_pipeline(...)` in `unified_pipeline.py` is a kwargs shim. Its signature and `**kwargs` are a public contract (the request transport reads it with `inspect.signature`), so it keeps every keyword. Its body is a docstring plus one `return await run_rag_pipeline(RagRunConfig.from_call_locals(locals()))`; it does nothing else. Callers, streaming and the adaptive rerun still call the shim with keywords.
+
+`run_rag_pipeline(rcfg: RagRunConfig) -> UnifiedPipelineResult`, defined right after the shim, is the orchestrator. It builds `state = PipelineState(rcfg)`, calls the stage functions in order inside one `try`, runs `finalize_run` in the `finally`, and keeps only the small inline pieces (the empty-query return, the outer error ladder and the result tail). It has no nested functions, lambdas or classes, and it reads no signature parameter by name; its only inputs are `rcfg` and `state`.
+
+The stage code lives in `rag_service/pipeline/`:
+
+| Module | Holds |
+|---|---|
+| `run_config.py` | `RagRunConfig`, a frozen dataclass of 17 frozen sub-configs, built from the call locals |
+| `run_state.py` | `PipelineState` (per-run mutable slots and the helper methods that used to be closures) and `EarlyReturn` |
+| `prepare.py` | `prepare_request`, `apply_search_depth_presets`, `init_run` |
+| `scope.py` | `resolve_sources` |
+| `query_prep.py` | clarification and spell check, classification, guardrail defaults, expansion, routing, HyDE and temporal filters |
+| `research.py` | the agentic research loop |
+| `retrieval.py` | cache lookup and `run_retrieval` with its leaves (retriever setup, HyDE merge, PRF, decomposition, diagnostics) |
+| `processing.py`, `augment.py`, `filters.py`, `self_correct.py` | document processing, passage augmentation, content and security filters, self-correction |
+| `rerank.py`, `post_retrieval.py` | reranking, web fallback, source explanation, citations |
+| `generation.py` | answer generation and multi-turn synthesis |
+| `verification.py`, `claims.py` | post-generation verification, adaptive rerun, claims |
+| `post_processing.py` | `finish_answer`, `store_and_observe`, `finalize_run` |
+
+Every stage function has the shape `[async] def run_x(rcfg: RagRunConfig, state: PipelineState) -> None`. A stage calls its own leaves by bare name and other modules through `from . import <module> as _<module>`.
+
+Three rules apply when you edit pipeline code:
+
+- **`up.<name>`**: a stage module reads anything defined in `unified_pipeline.py` (helpers, imported collaborators, `logger`) as `up.<name>`, through `from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as up`. Never `from ...unified_pipeline import name`. Tests patch names on `unified_pipeline`, and a stage that bound the name locally would ignore the patch. A structure pin in `tests/lint/test_rag_pipeline_structure_pins.py` fails the build if a stage module does.
+- **`state.<slot>`**: a value that more than one stage reads or writes is a `PipelineState` slot, never a local. The 35 parameters the old body reassigned (`query`, `top_k`, `enable_reranking`, ...) are slots too. Reading an unset slot raises `UnboundLocalError`, as the old local did. Add a slot to `PipelineState.__slots__` before using it; a pin checks that every `state.<attr>` names a slot or method.
+- **`rcfg.<group>.<field>`**: request inputs that a run does not change are read from the frozen config, for example `rcfg.retrieval.search_mode` or `rcfg.scope.user_id`. The pin `test_every_rcfg_read_names_a_config_field` checks each read. Never write to `rcfg`, and never rebuild it with `dataclasses.replace` for the adaptive rerun: the rerun deliberately passes its fixed keyword list to `up.unified_rag_pipeline` so the knobs it resets stay reset.
+
+Stage moves are checked by `Helper_Scripts/rag_split/rag_split.py` (`shared`, `apply`, `verify`) against the manifests in `Helper_Scripts/rag_split/manifests/`. The golden test `tests/RAG_NEW/unit/test_unified_pipeline_golden.py` pins the observable behavior and must not change in a refactor.
+
 ## Extension Points
 
 Retrieval source:

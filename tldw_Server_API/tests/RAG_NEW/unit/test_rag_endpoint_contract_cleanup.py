@@ -77,7 +77,7 @@ async def test_streaming_endpoint_frames_core_events_as_ndjson(monkeypatch: pyte
     async def fake_log_rag_queries_for_org(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
         return None
 
-    async def fake_stream_rag_events(**kwargs):  # noqa: ANN003, ARG001
+    async def fake_stream_rag_events(**kwargs):  # noqa: ARG001
         yield {"type": "first", "value": 1}
         yield {"type": "second", "value": 2}
 
@@ -254,7 +254,7 @@ async def test_unified_search_standard_path_maps_core_result_directly(
     def fake_build_standard_request_bundle(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
         return bundle
 
-    async def fake_unified_rag_pipeline(**kwargs):  # noqa: ANN003, ARG001
+    async def fake_unified_rag_pipeline(rcfg):  # noqa: ARG001
         return standard_result
 
     def fake_rag_result_from_unified_search_result(result):  # noqa: ANN001
@@ -269,7 +269,7 @@ async def test_unified_search_standard_path_maps_core_result_directly(
         return None
 
     monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
-    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", fake_unified_rag_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.run_rag_pipeline", fake_unified_rag_pipeline)
     monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_from_unified_search_result", fake_rag_result_from_unified_search_result)
     monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_to_response", fake_rag_result_to_response)
     monkeypatch.setattr(rag_ep, "_log_rag_queries_for_org", fake_log_rag_queries_for_org)

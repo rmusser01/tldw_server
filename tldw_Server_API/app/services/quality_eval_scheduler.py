@@ -67,7 +67,7 @@ def _load_eval_set(path: Path) -> list[EvalRecord]:
 
 async def _run_eval_once(dataset_path: Path, dataset_label: str) -> None:
     """Run a single evaluation pass and publish metrics."""
-    from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline  # lazy import
+    from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import RagRunConfig, run_rag_pipeline  # lazy import
     try:
         items = _load_eval_set(dataset_path)
         if not items:
@@ -78,7 +78,7 @@ async def _run_eval_once(dataset_path: Path, dataset_label: str) -> None:
         # Keep the pass bounded; cap to 50 queries
         for rec in items[:50]:
             try:
-                resp = await unified_rag_pipeline(
+                resp = await run_rag_pipeline(RagRunConfig.from_kwargs(
                     query=rec.query,
                     index_namespace=rec.namespace,
                     search_mode="hybrid",
@@ -89,7 +89,7 @@ async def _run_eval_once(dataset_path: Path, dataset_label: str) -> None:
                     # Keep it lean for nightly runs
                     adaptive_max_claims=12,
                     adaptive_time_budget_sec=10.0,
-                )
+                ))
                 # Extract faithfulness: 1 - unsupported ratio if present
                 md = getattr(resp, "metadata", {}) if hasattr(resp, "metadata") else (resp.get("metadata", {}) if isinstance(resp, dict) else {})
                 pv = md.get("post_verification") or {}
