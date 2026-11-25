@@ -311,15 +311,15 @@ def workspace_table_route(provider: str, model: str) -> tuple[Any, dict[str, Any
     return adapter, request
 
 
-def read_workspace_table_media(db: Any, media_id: int, version: int, owner: str) -> str:
-    """Read one bounded, active Media revision as its authenticated owner."""
+def read_workspace_table_media(db: Any, media_id: int, version: int, owner: str) -> tuple[str, str]:
+    """Read bounded owner text and fingerprint the effective evidence in that read."""
     source = get_media_source_projection(db, media_id, max_chars=max(1, _MAX_SOURCE_CHARS), owner_user_id=owner)
     if not source or source["version"] != version:
         raise DataTablesJobError("workspace_table_source_changed", retryable=False)
     text = source.get("source_text")
     if source["source_invalid"] or not isinstance(text, str) or not text.strip():
         raise DataTablesJobError("workspace_table_source_has_no_text", retryable=False)
-    return text
+    return text, hashlib.sha256(text.encode()).hexdigest()
 
 
 def _truncate_text(text: str, limit: int) -> str:
@@ -1195,7 +1195,10 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
                 revision = source.get("media_version")
                 if source_type != "document" or type(revision) is not int or revision < 1:
                     raise DataTablesJobError("workspace_table_source_changed", retryable=False)
-                text = read_workspace_table_media(db, int(source_id), revision, user_id)
+                text, fingerprint = read_workspace_table_media(db, int(source_id), revision, user_id)
+                retrieval_params = source.get("retrieval_params_json")
+                if not isinstance(retrieval_params, dict) or retrieval_params.get("workspace_source_sha256") != fingerprint:
+                    raise DataTablesJobError("workspace_table_source_changed", retryable=False)
                 updated_snapshot = None
             elif source_type == "chat":
                 if not text:

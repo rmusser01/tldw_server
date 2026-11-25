@@ -12,8 +12,9 @@ generation options. Credentials and user-supplied source bodies are absent
 from the public contract. When usage quotas are enabled, the route stays
 unavailable until the native worker can meter a Workspace generation.
 
-The worker uses the explicit route and compares native source revisions
-before passing bounded text from each selected source to the model. Completed rows and CSV,
+The worker uses the explicit route and checks the native source revisions and
+the digest of the bounded text captured at admission before passing evidence
+to the model. Completed rows and CSV,
 JSON, and XLSX exports use the same native Data Tables endpoints as other
 tables. A retry returns the same native table and job. Conflicting operation
 reuse and deleted or stale reservations surface a conflict.

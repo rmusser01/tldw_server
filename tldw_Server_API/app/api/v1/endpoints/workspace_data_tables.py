@@ -173,10 +173,13 @@ def _selected_sources(
                 or row["media_id"] != source.catalog_item_id or row["version"] != source.association_version
             ):
                 raise DataTablesJobError("workspace_table_source_changed", retryable=False)
-            read_workspace_table_media(media, source.catalog_item_id, source.catalog_item_version, owner)
+            _, fingerprint = read_workspace_table_media(
+                media, source.catalog_item_id, source.catalog_item_version, owner
+            )
             selected.append({
                 "source_type": "document", "source_id": str(source.catalog_item_id),
                 "title": str(row.get("title") or "")[:200], "media_version": source.catalog_item_version,
+                "retrieval_params_json": {"workspace_source_sha256": fingerprint},
             })
     return selected
 
@@ -222,8 +225,9 @@ def _admit_table(
         if table["deleted"]:
             raise DataTablesJobError("workspace_table_operation_deleted", retryable=False)
         stored = _read_reservation(table["generation_job_json"])
-        if stored["key"] == key:
-            queue = stored["queue"]
+        if stored["key"] != key or stored["owner"] != owner:
+            raise DataTablesJobError("workspace_table_operation_conflict", retryable=False)
+        queue = stored["queue"]
     reservation = {"key": key, "owner": owner, "queue": queue}
     job = jm.get_job_or_archived_by_idempotency_key(
         idempotency_key=key, domain=DATA_TABLES_DOMAIN, queue=queue,
@@ -250,6 +254,16 @@ def _admit_table(
         current = _read_reservation(table["generation_job_json"])
         if any(current.get(field) != value for field, value in reservation.items()):
             raise DataTablesJobError("workspace_table_operation_conflict", retryable=False)
+        expected_evidence = [(source["source_id"], source["retrieval_params_json"]) for source in sources]
+        try:
+            reserved_evidence = [
+                (row["source_id"], json.loads(row["retrieval_params_json"] or "{}"))
+                for row in media.list_data_table_sources(table["id"], owner_user_id=owner)
+            ]
+        except (TypeError, ValueError):
+            raise DataTablesJobError("workspace_table_source_changed", retryable=False) from None
+        if reserved_evidence != expected_evidence:
+            raise DataTablesJobError("workspace_table_source_changed", retryable=False)
         job = jm.create_job(
             domain=DATA_TABLES_DOMAIN, queue=queue, job_type=DATA_TABLES_JOB_TYPE,
             owner_user_id=owner, idempotency_key=key,
@@ -264,14 +278,14 @@ def _admit_table(
     job_payload = job.get("payload") or {}
     if isinstance(job_payload, str):
         job_payload = json.loads(job_payload)
+    bound = reservation_for_job(job, job_payload)
     if (
         not table or job_payload.get("table_uuid") != table_uuid or job_payload.get("table_id") != table["id"]
-        or any(reservation_for_job(job, job_payload).get(field) != value for field, value in reservation.items())
+        or any(bound.get(field) != value for field, value in reservation.items())
     ):
         raise DataTablesJobError("workspace_table_operation_conflict", retryable=False)
 
     raw = table.get("generation_job_json")
-    bound = reservation_for_job(job, job_payload)
     if _read_reservation(raw) == reservation:
         # The worker may have bound its exact lease first. That binding is also sufficient.
         media.update_data_table(table["id"], generation_job=bound, expected_generation_job=raw, owner_user_id=owner)
@@ -283,6 +297,9 @@ def _admit_table(
     table = media.get_data_table_by_uuid(table_uuid, owner_user_id=owner)
     if not table:
         raise DataTablesJobError("workspace_table_operation_deleted", retryable=False)
+    current = _read_reservation(table["generation_job_json"])
+    if any(bound.get(field) != value for field, value in current.items() if field != "attempt"):
+        raise DataTablesJobError("workspace_table_operation_conflict", retryable=False)
     return WorkspaceDataTableAdmission(
         table=_table_summary_from_row(table, source_count=len(payload.sources), column_count=0),
         job_id=job["id"], job_uuid=job["uuid"], status=job["status"], publication_status=publication_status,

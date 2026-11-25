@@ -148,7 +148,8 @@ def test_concurrent_admission_publishes_once_and_replays_original_job(owner):
     assert client.post(ROOT, json=owner.request).status_code == 409
 
 
-def test_retry_recovers_reservation_after_jobs_storage_failure(owner, monkeypatch):
+@pytest.mark.parametrize("change_document", [False, True])
+def test_retry_recovers_reservation_after_jobs_storage_failure(owner, monkeypatch, change_document):
     create = owner.jobs.create_job
 
     def interrupted(**kwargs):
@@ -159,21 +160,51 @@ def test_retry_recovers_reservation_after_jobs_storage_failure(owner, monkeypatc
     assert failed.status_code == 503, failed.text
     [reserved] = owner.media.list_data_tables(owner_user_id=1)
     monkeypatch.setattr(owner.jobs, "create_job", create)
+    if change_document:
+        [source] = owner.request["sources"]
+        owner.media.create_document_version(
+            media_id=source["catalog_item_id"], content="Unselected document revision."
+        )
     resumed = owner.client.post(ROOT, json=owner.request)
-    assert resumed.status_code == 202, resumed.text
-    assert resumed.json()["table"]["uuid"] == reserved["uuid"]
+    if change_document:
+        assert resumed.status_code == 409, resumed.text
+        assert resumed.json()["detail"] == "workspace_table_source_changed"
+    else:
+        assert resumed.status_code == 202, resumed.text
+        assert resumed.json()["table"]["uuid"] == reserved["uuid"]
 
 
-def test_worker_refuses_a_media_revision_changed_after_admission(owner):
+def test_workspace_replay_refuses_a_superseded_generation(owner):
+    first = owner.client.post(ROOT, json=owner.request)
+    assert first.status_code == 202, first.text
+    original = first.json()
+    asyncio.run(_run_worker_once(owner.jobs))
+    regenerated = owner.client.post(f"{NATIVE}/{original['table']['uuid']}/regenerate", json={})
+    assert regenerated.status_code == 202, regenerated.text
+    assert regenerated.json()["job_id"] != original["job_id"]
+
+    replay = owner.client.post(ROOT, json=owner.request)
+    assert replay.status_code == 409, replay.text
+    assert replay.json()["detail"] == "workspace_table_operation_conflict"
+
+
+@pytest.mark.parametrize("revision_owner", ["media", "document"])
+def test_worker_refuses_a_media_revision_changed_after_admission(owner, revision_owner):
     reply = owner.client.post(ROOT, json=owner.request)
     assert reply.status_code == 202, reply.text
     job_id = reply.json()["job_id"]
     [source] = owner.request["sources"]
-    owner.media.execute_query(
-        "UPDATE Media SET content = ?, version = version + 1 WHERE id = ?",
-        ("Newer, unseen evidence", source["catalog_item_id"]),
-        commit=True,
-    )
+    if revision_owner == "document":
+        owner.media.create_document_version(
+            media_id=source["catalog_item_id"], content="Unselected document revision."
+        )
+        assert owner.media.get_media_by_id(source["catalog_item_id"])["version"] == source["catalog_item_version"]
+    else:
+        owner.media.execute_query(
+            "UPDATE Media SET content = ?, version = version + 1 WHERE id = ?",
+            ("Newer, unseen evidence", source["catalog_item_id"]),
+            commit=True,
+        )
 
     async def invoke():
         job = owner.jobs.acquire_next_job(domain="data_tables", queue="default", worker_id="revision-check", lease_seconds=30)

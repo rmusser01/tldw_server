@@ -11,14 +11,18 @@
 The authenticated Workspace endpoint qualifies the explicit provider and model
 against the server-managed Data Tables route. New admissions check selected
 Workspace associations and native Media revisions. Media owns the table and
-its source references. Jobs owns execution and the generation receipt.
+its source references. Each reference records a digest of the bounded resolved
+text because a document revision or transcript can change independently of
+its parent Media row. Jobs checks both when resolving evidence and owns the
+generation receipt.
 
 The owner, Workspace, and client operation identify one Media UUID. The
 generation reservation binds that UUID to the normalized request. Media
 commits the table and sources together, then Jobs accepts the exact
 reservation idempotently. Replay can recover an existing admission or finish
-an interrupted admission. Native Jobs completion remains the authority that
-publishes rows.
+an interrupted admission if the original evidence and reservation still
+match. A new native generation supersedes the earlier reservation. Native
+Jobs completion remains the authority that publishes rows.
 
 ## Alternatives considered
 
