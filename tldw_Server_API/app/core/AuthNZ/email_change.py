@@ -77,14 +77,15 @@ async def notify_previous_address(
     """
 
     async def _send() -> None:
+        reason = "send failed"
         try:
             sent = await get_email_service().send_email_changed_email(
                 to_email=old_email, username=username, new_email=new_email, ip_address=ip_address
             )
-        except _NOTICE_NONCRITICAL_EXCEPTIONS:
-            sent = False
+        except _NOTICE_NONCRITICAL_EXCEPTIONS as exc:
+            sent, reason = False, type(exc).__name__
         if not sent:
-            logger.warning("Email-change notice to the previous address was not sent (user {})", user_id)
+            logger.warning("Email-change notice to the previous address was not sent (user {}): {}", user_id, reason)
 
     if not defer_until_after_commit(_send):
         await _send()

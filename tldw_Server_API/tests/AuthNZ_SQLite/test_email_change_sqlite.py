@@ -111,6 +111,13 @@ async def test_same_address_in_any_case_changes_nothing(owner_db):
 
 
 @pytest.mark.asyncio
+async def test_change_from_an_empty_address_records_no_previous_address(owner_db):
+    _raw(owner_db, "UPDATE users SET email = '' WHERE id = ?")
+    await _change(owner_db, "real@example.com")
+    assert (await _columns(owner_db))[:2] == ("real@example.com", None)
+
+
+@pytest.mark.asyncio
 async def test_own_profile_email_edit_records_the_previous_address(owner_db):
     async with owner_db.pool.transaction() as conn:
         result = await UserProfileUpdateService(owner_db.pool).apply_updates(
@@ -130,9 +137,17 @@ class _FixedStorage:
 
 
 @pytest.fixture
-async def email_api(owner_db, monkeypatch):
+def principal_email() -> str:
+    """The email the token carries; a test parametrizes it to differ from the stored address."""
+    return OWNER_EMAIL
+
+
+@pytest.fixture
+async def email_api(owner_db, monkeypatch, principal_email):
     async def _principal():
-        return AuthPrincipal(kind="user", user_id=owner_db.user_id, username="owner", email=OWNER_EMAIL, roles=["user"])
+        return AuthPrincipal(
+            kind="user", user_id=owner_db.user_id, username="owner", email=principal_email, roles=["user"]
+        )
 
     async def _storage():
         return _FixedStorage()
@@ -205,7 +220,7 @@ async def test_refused_email_change_applies_none_of_the_other_updates(owner_db, 
         "current_password": "Wrong-Pass-2026!",
     }
     response = await email_api.patch("/api/v1/users/me/profile", json=body)
-    assert response.status_code == 403
+    assert (response.status_code, response.json()["error_code"]) == (403, "current_password_invalid")
     overrides = await UserProfileOverridesRepo(owner_db.pool).list_overrides_for_user(owner_db.user_id)
     assert all(row["key"] != "preferences.ui.theme" for row in overrides)
 
@@ -288,14 +303,81 @@ async def test_profile_email_change_notifies_the_previous_address(owner_db, emai
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/v1/users/me/profile", "/api/v2/users/me/profile"])
 @pytest.mark.parametrize(
-    "body",
-    [EMAIL_UPDATE, {**EMAIL_UPDATE, "dry_run": True}, {"updates": [{"key": "identity.email", "value": OWNER_EMAIL.upper()}]}],
+    ("body", "expected_status"),
+    [
+        (EMAIL_UPDATE, 403),
+        ({**EMAIL_UPDATE, "dry_run": True}, 200),
+        ({"updates": [{"key": "identity.email", "value": OWNER_EMAIL.upper()}]}, 200),
+    ],
     ids=["refused", "dry-run", "unchanged"],
 )
-async def test_no_notice_without_a_committed_change(owner_db, email_api, sent_notices, body):
-    await email_api.patch("/api/v1/users/me/profile", json=body)
+async def test_no_notice_without_a_committed_change(owner_db, email_api, sent_notices, path, body, expected_status):
+    response = await email_api.patch(path, json=body)
+    assert response.status_code == expected_status, response.text
+    if expected_status == 403:
+        payload = response.json()
+        assert (payload["detail"] if "/v2/" in path else payload)["error_code"] == "current_password_required"
     assert sent_notices == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/v1/users/me/profile", "/api/v2/users/me/profile"])
+async def test_stored_address_in_name_form_sends_no_notice(owner_db, email_api, sent_notices, path):
+    body = {"updates": [{"key": "identity.email", "value": f"Owner <{OWNER_EMAIL}>"}], "current_password": OWNER_PASSWORD}
+    response = await email_api.patch(path, json=body)
+    assert response.status_code == 200, response.text
+    assert sent_notices == []
+    assert await _columns(owner_db) == (OWNER_EMAIL, None, None)
+
+
+@pytest.mark.asyncio
+async def test_put_sends_no_notice_when_the_write_changed_nothing(owner_db, email_api, sent_notices, monkeypatch):
+    """A concurrent request already stored the address, so this request's write is a no-op."""
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+
+    read_user = AuthnzUsersRepo.get_user_by_id
+
+    async def _read_before_the_concurrent_change(self, user_id):
+        return {**dict(await read_user(self, user_id)), "email": OWNER_EMAIL}
+
+    _raw(owner_db, "UPDATE users SET email = 'new@example.com' WHERE id = ?")
+    monkeypatch.setattr(AuthnzUsersRepo, "get_user_by_id", _read_before_the_concurrent_change)
+    response = await email_api.put("/api/v1/users/me", json={"email": "new@example.com", "current_password": OWNER_PASSWORD})
+    assert response.status_code == 200, response.text
+    assert sent_notices == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("principal_email", ["stale@example.com"])
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("PUT", "/api/v1/users/me", {"email": "new@example.com", "current_password": OWNER_PASSWORD}),
+        ("PATCH", "/api/v1/users/me/profile", {**EMAIL_UPDATE, "current_password": OWNER_PASSWORD}),
+    ],
+    ids=["put", "patch"],
+)
+async def test_notice_goes_to_the_stored_address_not_the_token_email(
+    owner_db, email_api, sent_notices, principal_email, method, path, body
+):
+    response = await email_api.request(method, path, json=body)
+    assert response.status_code == 200, response.text
+    assert [n["to_email"] for n in sent_notices] == [OWNER_EMAIL]
+
+
+@pytest.mark.asyncio
+async def test_single_user_mode_keeps_and_notifies_the_previous_address(owner_db, email_api, sent_notices, monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "single-user-key-for-regression-tests-only-0123456789")
+    reset_settings()
+    response = await email_api.put("/api/v1/users/me", json={"email": "new@example.com"})
+    assert response.status_code == 200, response.text
+    with sqlite3.connect(owner_db.pool.db_path) as conn:
+        row = conn.execute("SELECT email, previous_email FROM users WHERE id = ?", (owner_db.user_id,)).fetchone()
+    assert row == ("new@example.com", OWNER_EMAIL)
+    assert [n["to_email"] for n in sent_notices] == [OWNER_EMAIL]
 
 
 @pytest.mark.asyncio
@@ -318,3 +400,4 @@ async def test_failed_notice_does_not_fail_the_change(owner_db, email_api, monke
     warnings = [line for line in buffer.getvalue().splitlines() if "Email-change notice" in line]
     assert len(warnings) == 1
     assert OWNER_EMAIL not in warnings[0] and "new@example.com" not in warnings[0]
+    assert "OSError" in warnings[0]

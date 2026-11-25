@@ -114,6 +114,11 @@ def _is_postgres_backend_for_pool(db_pool: Any) -> bool:
     return bool(getattr(db_pool, "pool", None))
 
 
+def normalize_profile_email(value: Any) -> str:
+    """Return the address an ``identity.email`` value stores; raise ``ValidationError`` when it is invalid."""
+    return str(TypeAdapter(EmailStr).validate_python(value)).lower()
+
+
 class UserProfileUpdateService:
     """Apply profile updates with catalog-driven validation."""
 
@@ -319,19 +324,19 @@ class UserProfileUpdateService:
     ) -> bool:
         if key == "identity.email":
             try:
-                email = TypeAdapter(EmailStr).validate_python(value)
+                email = normalize_profile_email(value)
             except ValidationError as exc:
                 logger.debug("Invalid email update for user {}", user_id)
                 raise ValueError("invalid_email") from exc
             if not dry_run:
                 if updated_by == user_id:
-                    await _update_own_email(db_conn, user_id, str(email).lower(), anchor=anchor)
+                    await _update_own_email(db_conn, user_id, email, anchor=anchor)
                 else:
                     await _update_user_field(
                         db_conn,
                         user_id,
                         "email",
-                        str(email).lower(),
+                        email,
                         anchor=anchor,
                         is_postgres_backend=is_postgres_backend,
                     )

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_db_transaction
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
+from tldw_Server_API.app.core.AuthNZ.profile_version import UserWriteResult
 from tldw_Server_API.app.main import app
 
 _MISSING_OVERRIDE = object()
@@ -177,7 +178,7 @@ def test_users_me_update_succeeds_when_row_is_updated(auth_headers, monkeypatch)
     assert fake_db.calls == [
         (
             "UPDATE public.users SET email = $1, previous_email = CASE WHEN previous_email IS NOT NULL"
-            " AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' THEN previous_email ELSE email END,"
+            " AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' THEN previous_email ELSE NULLIF(email, '') END,"
             " email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND LOWER(email) <> LOWER($3)",
             "updated@example.com",
             1,
@@ -211,8 +212,9 @@ def test_users_me_update_delegates_email_write_to_db_management(
         backend: str,
         user_id: int,
         email: str,
-    ) -> None:
+    ) -> UserWriteResult:
         calls.append((connection, backend, user_id, email))
+        return UserWriteResult((user_id,), datetime(2026, 7, 26, tzinfo=timezone.utc))
 
     monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.is_postgres_backend", _is_postgres_backend)

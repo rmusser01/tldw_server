@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequireRole,
@@ -82,6 +82,7 @@ from tldw_Server_API.app.core.UserProfiles.response_mappers import (
     LegacyProfileCommandResult,
 )
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
+from tldw_Server_API.app.core.UserProfiles.update_service import normalize_profile_email
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user_profile_catalog
 from tldw_Server_API.app.services.storage_quota_service import (
     StorageQuotaService,
@@ -304,9 +305,14 @@ async def _require_principal_active_verified(
 
 
 def _requested_email(payload: UserProfileUpdateRequest) -> str | None:
-    """Return the last ``identity.email`` value in a profile update, the one that is stored."""
+    """Return the address the last ``identity.email`` value in a profile update stores, or None if invalid."""
     values = [entry.value for entry in payload.updates if entry.key == "identity.email"]
-    return str(values[-1]) if values and values[-1] is not None else None
+    if not values or values[-1] is None:
+        return None
+    try:
+        return normalize_profile_email(values[-1])
+    except ValidationError:
+        return None
 
 
 async def _notify_email_change(
@@ -670,7 +676,7 @@ async def update_user_profile(
                     errors=[UserProfileErrorDetail(key="email", message=exc.code)],
                 )
             try:
-                await update_user_email(
+                write = await update_user_email(
                     db,
                     backend="postgres" if is_pg else "sqlite",
                     user_id=user_id,
@@ -682,7 +688,8 @@ async def update_user_profile(
                     detail="User not found",
                 ) from None
 
-            await _notify_email_change(http_request, user_context, request.email)
+            if write.affected_user_ids:
+                await _notify_email_change(http_request, user_context, request.email)
             updates_made = True
             user_context["email"] = request.email.lower()
             logger.info(f"Updated email for user {user_context['username']} (ID: {user_id})")

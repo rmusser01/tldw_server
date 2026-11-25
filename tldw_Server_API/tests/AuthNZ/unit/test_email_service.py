@@ -11,6 +11,7 @@ import asyncio
 import json
 import pytest
 import os
+import smtplib
 from io import StringIO
 from unittest.mock import patch, MagicMock, AsyncMock
 from pathlib import Path
@@ -145,11 +146,18 @@ class TestMockEmailSending:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("provider", "delivery_error"),
-        [("mock", None), ("smtp", None), ("smtp", OSError)],
-        ids=["mock", "smtp-sent", "smtp-failed"],
+        ("provider", "delivery_error", "logged_detail"),
+        [
+            ("mock", None, None),
+            ("smtp", None, None),
+            ("smtp", OSError, "OSError"),
+            ("smtp", lambda text: smtplib.SMTPDataError(554, text), "SMTP code 554"),
+        ],
+        ids=["mock", "smtp-sent", "smtp-failed", "smtp-refused"],
     )
-    async def test_send_logs_mask_the_recipient(self, monkeypatch, mock_settings, tmp_path, provider, delivery_error):
+    async def test_send_logs_mask_the_recipient(
+        self, monkeypatch, mock_settings, tmp_path, provider, delivery_error, logged_detail
+    ):
         """Send-path log lines carry a masked recipient and never the full address (TASK-15640)."""
         recipient = "owner.name@example.org"
         monkeypatch.setenv("EMAIL_PROVIDER", provider)
@@ -171,6 +179,8 @@ class TestMockEmailSending:
         logs = buffer.getvalue()
         assert recipient not in logs
         assert "o***@example.org" in logs
+        if logged_detail:
+            assert logged_detail in logs
 
 
 class TestHeaderInjectionPrevention:

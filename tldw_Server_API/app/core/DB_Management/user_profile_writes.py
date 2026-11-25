@@ -13,13 +13,13 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
 # SET right-hand sides read the old row on both backends.
 _UPDATE_EMAIL_SQLITE = (
     "UPDATE users SET email = ?, previous_email = CASE WHEN previous_email IS NOT NULL"
-    " AND email_changed_at > datetime('now', '-7 days') THEN previous_email ELSE email END,"
+    " AND email_changed_at > datetime('now', '-7 days') THEN previous_email ELSE NULLIF(email, '') END,"
     " email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP"
     " WHERE id = ? AND LOWER(email) <> LOWER(?)"
 )
 _UPDATE_EMAIL_POSTGRES = (
     "UPDATE users SET email = $1, previous_email = CASE WHEN previous_email IS NOT NULL"
-    " AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' THEN previous_email ELSE email END,"
+    " AND email_changed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' THEN previous_email ELSE NULLIF(email, '') END,"
     " email_changed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP"
     " WHERE id = $2 AND LOWER(email) <> LOWER($3)"
 )

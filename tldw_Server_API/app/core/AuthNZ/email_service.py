@@ -880,7 +880,13 @@ class EmailService:
             return True
 
         except Exception as e:
-            logger.error("Failed to send email via SMTP to {}: {}", _mask_email(to_email), type(e).__name__)
+            smtp_code = getattr(e, "smtp_code", None)
+            logger.error(
+                "Failed to send email via SMTP to {}: {}{}",
+                _mask_email(to_email),
+                type(e).__name__,
+                f" (SMTP code {smtp_code})" if smtp_code is not None else "",
+            )
             return False
 
     def _deliver_smtp_message(self, message: MIMEMultipart) -> None:
