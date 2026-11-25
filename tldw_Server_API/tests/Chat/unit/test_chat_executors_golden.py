@@ -1022,7 +1022,8 @@ def test_golden_covers_every_appendix_c_case() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_call_state_is_collected_after_the_response_is_consumed(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("case_id", ["S01_direct", "S02_queued_worker_failover", "S10_queued_success"])
+async def test_stream_call_state_is_collected_after_the_response_is_consumed(monkeypatch: pytest.MonkeyPatch, case_id: str) -> None:
     """Nothing the response or its callbacks hold keeps the call's StreamCall alive once the body is drained."""
     from tldw_Server_API.app.core.Chat import call_state
 
@@ -1035,7 +1036,7 @@ async def test_stream_call_state_is_collected_after_the_response_is_consumed(mon
         return state
 
     monkeypatch.setattr(call_state.StreamCall, "from_call_locals", classmethod(spy))
-    await run_case("S01_direct", monkeypatch)
+    await run_case(case_id, monkeypatch)
     assert len(record) == 1  # nosec B101
     state_ref = record[0]
     record.clear()

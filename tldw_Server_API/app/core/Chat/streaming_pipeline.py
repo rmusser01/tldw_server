@@ -954,15 +954,7 @@ async def start_queued_stream(cst: "StreamCall") -> None:
     cst.raw_stream_iter = _channel_stream(cst)
 
 
-async def record_stream_http_error(cst: "StreamCall", he) -> None:
-    cs._emit_chat_run_first_completion_metric(
-        cst.metrics,
-        context=cst.run_first_metric_context,
-        outcome="error",
-    )
-    local_signal_kind = cs.trusted_local_chat_signal_kind(he)
-    if local_signal_kind == "queue_admission":
-        raise
+def record_stream_http_error(cst: "StreamCall", he, local_signal_kind) -> None:
     cst.metrics.track_llm_call(
         cst.selected_provider,
         cst.model,
@@ -983,9 +975,9 @@ async def record_stream_http_error(cst: "StreamCall", he) -> None:
             "type": "prompt_cost_guardrail_block",
             "message": "Prompt cost guardrail blocked request before provider dispatch.",
         }
-    await cs._maybe_refund_streaming_rg(cst.rg_refund_cb, cancelled=False, error=True)
-    if isinstance(he, (cs.LLMQuotaExceededError, cs.LLMPolicyRefusal)):
-        raise  # quota (§4b) or policy refusal: the caller gets its 402/400, not a provider-style error frame
+
+
+def build_stream_error_response(cst: "StreamCall", he, local_signal_kind) -> None:
     cst.response = cs.StreamingResponse(
         _terminal_stream_error(cst, cst.error_payload),
         media_type="text/event-stream",
@@ -999,89 +991,6 @@ async def record_stream_http_error(cst: "StreamCall", he) -> None:
         and local_signal_kind == "prompt_cost_guardrail"
     ):
         cs._mark_trusted_local_chat_signal(cst.response, "prompt_cost_guardrail")
-
-
-async def refresh_fallback_params(cst: "StreamCall") -> None:
-    try:
-        cst.refreshed_args, cst.refreshed_model = await cs._refresh_provider_params_bounded(
-            cst.refresh_provider_params,
-            cst.fallback_provider,
-            functools.partial(_remaining_provider_factory_timeout, cst),
-        )
-        # Validate refreshed params have required fields before proceeding
-        if not isinstance(cst.refreshed_args, dict) or "messages_payload" not in cst.refreshed_args:
-            raise ValueError(f"Invalid refreshed params for {cst.fallback_provider}: missing required fields")
-        try:
-            cst.structured_request_context = cs.prepare_structured_response_request(
-                provider=cst.fallback_provider,
-                response_format=cst.refreshed_args.get("response_format"),
-                requested_response_format=(
-                    cst.structured_request_context.requested_response_format
-                    if cst.structured_request_context is not None
-                    else cst.refreshed_args.get("_structured_requested_response_format")
-                ),
-            )
-        except (
-            cs.StructuredGenerationCapabilityError,
-            cs.StructuredGenerationParseError,
-            cs.StructuredGenerationSchemaError,
-        ) as structured_exc:
-            cs.raise_detached_error(
-                cs.build_structured_http_exception(structured_exc)
-            )
-        cs.apply_structured_response_request(
-            cleaned_args=cst.refreshed_args,
-            structured_request_context=cst.structured_request_context,
-        )
-    except cs._CHAT_NONCRITICAL_EXCEPTIONS as refresh_error:
-        cst.provider_manager.record_failure(
-            cst.fallback_provider,
-            cs.sanitized_provider_stream_exception(refresh_error),
-        )
-        raise
-
-
-async def call_stream_fallback(cst: "StreamCall") -> None:
-    cst.cleaned_args = cst.refreshed_args
-    cst.usage_credential_source = cs.call_credential_source(cst.cleaned_args)
-    cst.model = cst.refreshed_model or cst.model
-    fallback_start_time = cs.time.time()
-    def llm_call_func_fb():
-        return cs.perform_chat_api_call(**cst.cleaned_args)
-    try:
-        cst.raw_stream_iter = await cs._call_stream_factory_bounded(
-            llm_call_func_fb,
-            timeout=_remaining_provider_factory_timeout(cst),
-        )
-        fallback_latency = cs.time.time() - fallback_start_time
-        cst.provider_manager.record_success(cst.fallback_provider, fallback_latency)
-        cst.metrics.track_llm_call(cst.fallback_provider, cst.model, fallback_latency, success=True)
-        cst.selected_provider = cst.fallback_provider
-        cst.run_first_metric_context = cs._emit_chat_run_first_rollout_metrics(
-            cst.metrics,
-            cleaned_args=cst.cleaned_args,
-            provider=cst.selected_provider,
-            model=cst.model,
-            streaming=True,
-        )
-        cst.llm_call_func = llm_call_func_fb
-        cst._fallback_stream_ok = True
-        # Explicit telemetry for direct (non-queued) streaming fallback success
-        with contextlib.suppress(cs._CHAT_NONCRITICAL_EXCEPTIONS):
-            cst.metrics.track_provider_fallback_success(
-                requested_provider=cst.provider,
-                selected_provider=cst.fallback_provider,
-                streaming=True,
-                queued=False,
-            )
-    except (cs.LLMQuotaExceededError, cs.LLMPolicyRefusal):
-        raise  # the user's refusal, not the fallback provider's health (TASK-13955)
-    except cs._CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
-        cst.provider_manager.record_failure(
-            cst.fallback_provider,
-            cs.sanitized_provider_stream_exception(fallback_error),
-        )
-        raise
 
 
 async def run_streaming_call(cst: "StreamCall") -> cs.StreamingResponse:
@@ -1150,7 +1059,19 @@ async def run_streaming_call(cst: "StreamCall") -> cs.StreamingResponse:
     except asyncio.CancelledError:
         raise
     except cs.HTTPException as he:
-        await record_stream_http_error(cst, he)
+        cs._emit_chat_run_first_completion_metric(
+            cst.metrics,
+            context=cst.run_first_metric_context,
+            outcome="error",
+        )
+        local_signal_kind = cs.trusted_local_chat_signal_kind(he)
+        if local_signal_kind == "queue_admission":
+            raise
+        record_stream_http_error(cst, he, local_signal_kind)
+        await cs._maybe_refund_streaming_rg(cst.rg_refund_cb, cancelled=False, error=True)
+        if isinstance(he, (cs.LLMQuotaExceededError, cs.LLMPolicyRefusal)):
+            raise  # quota (§4b) or policy refusal: the caller gets its 402/400, not a provider-style error frame
+        build_stream_error_response(cst, he, local_signal_kind)
         return cst.response
     except cs._CHAT_NONCRITICAL_EXCEPTIONS as e:
         cst.metrics.track_llm_call(
@@ -1176,7 +1097,43 @@ async def run_streaming_call(cst: "StreamCall") -> cs.StreamingResponse:
                 cst.fallback_provider = cst.provider_manager.get_available_provider(exclude=[cst.selected_provider])
                 if cst.fallback_provider:
                     cs.logger.warning(f"Trying fallback provider {cst.fallback_provider} after {cst.selected_provider} failed")
-                    await refresh_fallback_params(cst)
+                    try:
+                        cst.refreshed_args, cst.refreshed_model = await cs._refresh_provider_params_bounded(
+                            cst.refresh_provider_params,
+                            cst.fallback_provider,
+                            functools.partial(_remaining_provider_factory_timeout, cst),
+                        )
+                        # Validate refreshed params have required fields before proceeding
+                        if not isinstance(cst.refreshed_args, dict) or "messages_payload" not in cst.refreshed_args:
+                            raise ValueError(f"Invalid refreshed params for {cst.fallback_provider}: missing required fields")
+                        try:
+                            cst.structured_request_context = cs.prepare_structured_response_request(
+                                provider=cst.fallback_provider,
+                                response_format=cst.refreshed_args.get("response_format"),
+                                requested_response_format=(
+                                    cst.structured_request_context.requested_response_format
+                                    if cst.structured_request_context is not None
+                                    else cst.refreshed_args.get("_structured_requested_response_format")
+                                ),
+                            )
+                        except (
+                            cs.StructuredGenerationCapabilityError,
+                            cs.StructuredGenerationParseError,
+                            cs.StructuredGenerationSchemaError,
+                        ) as structured_exc:
+                            cs.raise_detached_error(
+                                cs.build_structured_http_exception(structured_exc)
+                            )
+                        cs.apply_structured_response_request(
+                            cleaned_args=cst.refreshed_args,
+                            structured_request_context=cst.structured_request_context,
+                        )
+                    except cs._CHAT_NONCRITICAL_EXCEPTIONS as refresh_error:
+                        cst.provider_manager.record_failure(
+                            cst.fallback_provider,
+                            cs.sanitized_provider_stream_exception(refresh_error),
+                        )
+                        raise
                     try:
                         cs._check_fallback_prompt_cost(cst.refreshed_args, cst.fallback_provider, cst.refreshed_model or cst.model, streaming=True)
                         cs.ensure_tool_autoexec_supports_request(
@@ -1201,7 +1158,46 @@ async def run_streaming_call(cst: "StreamCall") -> cs.StreamingResponse:
                                 "X-Accel-Buffering": "no",
                             },
                         )
-                    await call_stream_fallback(cst)
+                    cst.cleaned_args = cst.refreshed_args
+                    cst.usage_credential_source = cs.call_credential_source(cst.cleaned_args)
+                    cst.model = cst.refreshed_model or cst.model
+                    fallback_start_time = cs.time.time()
+                    def llm_call_func_fb():
+                        return cs.perform_chat_api_call(**cst.cleaned_args)
+                    try:
+                        cst.raw_stream_iter = await cs._call_stream_factory_bounded(
+                            llm_call_func_fb,
+                            timeout=_remaining_provider_factory_timeout(cst),
+                        )
+                        fallback_latency = cs.time.time() - fallback_start_time
+                        cst.provider_manager.record_success(cst.fallback_provider, fallback_latency)
+                        cst.metrics.track_llm_call(cst.fallback_provider, cst.model, fallback_latency, success=True)
+                        cst.selected_provider = cst.fallback_provider
+                        cst.run_first_metric_context = cs._emit_chat_run_first_rollout_metrics(
+                            cst.metrics,
+                            cleaned_args=cst.cleaned_args,
+                            provider=cst.selected_provider,
+                            model=cst.model,
+                            streaming=True,
+                        )
+                        cst.llm_call_func = llm_call_func_fb
+                        cst._fallback_stream_ok = True
+                        # Explicit telemetry for direct (non-queued) streaming fallback success
+                        with contextlib.suppress(cs._CHAT_NONCRITICAL_EXCEPTIONS):
+                            cst.metrics.track_provider_fallback_success(
+                                requested_provider=cst.provider,
+                                selected_provider=cst.fallback_provider,
+                                streaming=True,
+                                queued=False,
+                            )
+                    except (cs.LLMQuotaExceededError, cs.LLMPolicyRefusal):
+                        raise  # the user's refusal, not the fallback provider's health (TASK-13955)
+                    except cs._CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
+                        cst.provider_manager.record_failure(
+                            cst.fallback_provider,
+                            cs.sanitized_provider_stream_exception(fallback_error),
+                        )
+                        raise
 
         if not cst._fallback_stream_ok:
             cs._emit_chat_run_first_completion_metric(
