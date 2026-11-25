@@ -1083,7 +1083,7 @@ def test_is_pkg_uses_the_manifests_package_name() -> None:
 # --- fix round 1: refusals ---
 
 
-@pytest.mark.parametrize("key", ["drop", "late_imports", "rewrite_in", "free_imports", "relocate"])
+@pytest.mark.parametrize("key", ["late_imports", "rewrite_in", "free_imports", "relocate"])
 def test_part_2_and_3_manifest_keys_are_refused(tmp_path: Path, key: str) -> None:
     t = Tree(tmp_path, **{key: {}})
     with pytest.raises(rag_split.SplitError, match=rf"{key}.*not supported yet \(TASK-13950.25 part 2/3\)"):
@@ -1703,4 +1703,118 @@ def test_entry_verify_rejects_an_edited_shim_or_body(tmp_path: Path) -> None:
     t = entry_tree(tmp_path / "b")
     assert t.run("apply") == 0
     _edit(t, "mini/stage_a.py", "return await cs.audit(cst)", "return cst")
+    assert t.run("verify") == 1
+
+
+# --- drop ---
+
+DROP_SRC = SIB_BASE.replace(
+    "async def call(a):",
+    "class Pipe:\n    def go(self, x):\n        return x\n\n\ndef make_pipe():\n    return Pipe()\n\n\ndef run_it(x):\n    return make_pipe().go(x)\n\n\n__all__ = [\"Pipe\", \"make_pipe\", \"run_it\", \"call\"]\n\n\nasync def call(a):",
+).replace("from typing import Any\n", "from typing import Any\n\nfrom .holder import Holder, Other\n")
+DROP_STAGE = textwrap.dedent(
+    '''\
+    """Stage A."""
+
+    from __future__ import annotations
+
+    from collections.abc import Awaitable
+    from dataclasses import dataclass
+    from typing import Any, Callable
+
+
+    @dataclass
+    class Holder:
+        run: Callable[..., Awaitable[Any]]
+
+
+    __all__ = ["Holder"]
+    '''
+)
+DROPS = [
+    {"module": "chat_service", "replace": {"in": "run_it", "old": "make_pipe().go(x)", "new": "x"}},
+    {"module": "chat_service", "def": "make_pipe"},
+    {"module": "chat_service", "def": "Pipe"},
+    {"module": "chat_service", "import": "Holder"},
+    {"module": "chat_service", "all": ["Pipe", "make_pipe"]},
+    {"module": "stage_a", "def": "Holder"},
+    {"module": "stage_a", "import": "dataclass"},
+    {"module": "stage_a", "import": "Awaitable"},
+    {"module": "stage_a", "import": "Callable"},
+    {"module": "stage_a", "all": ["Holder"], "all_add": ["step"]},
+]
+
+
+def drop_tree(tmp: Path, drops: list[dict] | None = None, src: str = DROP_SRC, **extra: object) -> Tree:
+    return sib_tree(tmp, src, dests={"stage_a": DROP_STAGE, "stage_b": STAGE_B}, drop=DROPS if drops is None else drops, **extra)
+
+
+def test_drop_deletes_defs_imports_and_all_entries_with_declared_replacements(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = drop_tree(tmp_path, moves=[sib_move(DROP_SRC)])
+    assert t.run("apply") == 0, capsys.readouterr().out
+    head = t.text(SIB_FILE)
+    assert "make_pipe" not in head and "class Pipe" not in head and "Holder" not in head
+    assert "def run_it(x):\n    return x\n" in head and '__all__ = ["run_it", "call"]' in head
+    stage = t.text("mini/stage_a.py")
+    assert "Holder" not in stage and "dataclass" not in stage and "Awaitable" not in stage and "Callable" not in stage
+    assert 'from typing import Any' in stage and '__all__ = ["step"]' in stage
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_drop_alone_is_enough_for_a_manifest(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = drop_tree(tmp_path)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("drop", "needle"),
+    [
+        ({"module": "chat_service", "def": "make_pipe"}, "V15: chat_service.py: make_pipe is dropped but still read"),
+        ({"module": "chat_service", "def": "nope"}, "drop def: expected one top-level nope, found 0"),
+        ({"module": "chat_service", "import": "Nope"}, "drop import: no top-level import binds Nope"),
+        ({"module": "chat_service", "replace": {"in": "run_it", "old": "zzz", "new": "x"}}, "does not occur in run_it"),
+        ({"module": "chat_service", "replace": {"in": "nope", "old": "x", "new": "x"}}, "no top-level function nope"),
+        ({"module": "chat_service", "all": ["ghost"]}, "__all__ has no entry ['ghost']"),
+        ({"module": "stage_a", "import": "dataclass"}, "V15: stage_a.py: dataclass is dropped but still read"),
+        ({"module": "stage_b", "def": "other"}, "ok"),
+    ],
+)
+def test_drop_refusals(tmp_path: Path, capsys: pytest.CaptureFixture, drop: dict, needle: str) -> None:
+    t = drop_tree(tmp_path, drops=[drop])
+    got = t.run("apply")
+    out = capsys.readouterr().out
+    if needle == "ok":
+        assert got == 0, out
+    else:
+        assert got == 1 and needle in out, out
+
+
+def test_drop_refuses_a_dropped_name_the_moved_code_still_reads(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = DROP_SRC.replace('audit(LIMIT, x, t0)', "audit(LIMIT, x, t0, Holder)")
+    drops = [{"module": "chat_service", "import": "Holder"}]
+    t = drop_tree(tmp_path, drops=drops, src=src, moves=[sib_move(src)])
+    assert t.run("apply") == 1 and "V15: stage_a.py: step reads cs.Holder (line" in capsys.readouterr().out  # the move reads it through the facade
+    t = drop_tree(tmp_path / "b", drops=drops, src=src)
+    assert t.run("apply") == 1 and "V15: chat_service.py: Holder is dropped but still read" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "item",
+    [{"module": "x"}, {"def": "a"}, {"module": "x", "def": "a", "import": "b"}, {"module": "x", "def": "a", "all_add": ["z"]}, {"module": "x", "all": "a"}, {"module": "x", "replace": {"in": "f"}}, {"module": "x", "replace": {"in": "f", "old": "(", "new": "x"}}, "x"],
+)
+def test_drop_item_shape_is_checked(tmp_path: Path, item: object) -> None:
+    t = drop_tree(tmp_path, drops=[item])  # type: ignore[list-item]
+    with pytest.raises(rag_split.SplitError):
+        rag_split.load_manifest(t.manifest_path)
+
+
+def test_drop_verify_rejects_a_kept_def_or_a_stale_all(tmp_path: Path) -> None:
+    t = drop_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, SIB_FILE, "def run_it(x):", "def make_pipe():\n    return 1\n\n\ndef run_it(x):")
+    assert t.run("verify") == 1
+    t = drop_tree(tmp_path / "b")
+    assert t.run("apply") == 0
+    _edit(t, SIB_FILE, '__all__ = ["run_it", "call"]', '__all__ = ["Pipe", "run_it", "call"]')
     assert t.run("verify") == 1

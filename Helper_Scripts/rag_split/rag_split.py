@@ -84,7 +84,7 @@ from typing import Any, NamedTuple
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
-PART2_KEYS = {"drop", "late_imports", "rewrite_in", "free_imports", "relocate"}
+PART2_KEYS = {"late_imports", "rewrite_in", "free_imports", "relocate"}
 PART3_KEYS = {"rewrite_in", "free_imports", "relocate"}
 MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals", "args"}
 LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
@@ -408,6 +408,10 @@ def load_manifest(path: Path) -> dict[str, Any]:
                     raise SplitError(f"{path}: entry needs pkg '' (use entry_split for the RAG layout)")
                 if not isinstance(e, dict) or set(e) - {"name", "module", "doc"} or not all(isinstance(e.get(k), str) and e.get(k) for k in ("name", "module")) or not isinstance(e.get("doc", ""), str):
                     raise SplitError(f"{path}: entry must be {{'name': str, 'module': str, 'doc': str (optional)}}")
+            if m["drop"]:
+                if m["pkg"] != "":
+                    raise SplitError(f"{path}: drop needs pkg ''")
+                check_drop_items(path, m["drop"])
             if m["lift"]:
                 if m["pkg"] != "":
                     raise SplitError(f"{path}: lift needs pkg '' (the destination modules are siblings of the source)")
@@ -1467,7 +1471,7 @@ def split_entry_into_module(m: dict, out: Built, fn: Any, key: Any, up: UpTransf
             out.errors.append(f"V1: the entry body calls {n.func.id}() (line {n.lineno}); it reads a different scope after the move")
     aw = isinstance(fn, ast.AsyncFunctionDef)
     d = func_template(entry["name"], aw, ctx_sig(m))
-    d.returns = up.visit(copy.deepcopy(fn.returns)) if fn.returns else None
+    d.returns = up.visit(clone(fn.returns)) if fn.returns else None
     d.body = ([doc_stmt(entry["doc"])] if entry.get("doc") is not None else []) + [up.visit(x) for x in rest]
     out.defs[(entry["module"], entry["name"])] = d
     call = ast.Call(ast.Attribute(ast.Name(f"_{entry['module']}", ast.Load()), entry["name"], ast.Load()), [pro.value], [])
@@ -1480,6 +1484,19 @@ def finish_sibling(m: dict, out: Built) -> None:
     names = {n.id for n in ast.walk(out.fn) if isinstance(n, ast.Name)}
     out.src_mods = sorted(x for x in out.dests if f"_{x}" in names)
     out.src_functools = "functools" in names
+
+
+def clone(n: Any) -> Any:
+    """A copy of an AST that keeps its positions and scope annotations (``copy.deepcopy`` cannot copy symtable entries)."""
+    if isinstance(n, list):
+        return [clone(x) for x in n]
+    if not isinstance(n, ast.AST):
+        return n
+    new = type(n)(**{f: clone(getattr(n, f)) for f in n._fields if hasattr(n, f)})
+    for a in ("lineno", "col_offset", "end_lineno", "end_col_offset", "_r", "_rs"):
+        if hasattr(n, a):
+            setattr(new, a, getattr(n, a))
+    return new
 
 
 def prologue_stmt(fn: Any, ctx0: str) -> ast.stmt | None:
@@ -1525,6 +1542,9 @@ def expected_module(m: dict, src: Src, b: Built) -> ast.Module:
     i = next(i for i, s in enumerate(body) if s is src.fn)
     if b.entry is not None:
         body.insert(i + 1, b.entry)
+    drops = [d for d in m["drop"] if d["module"] == src_stem(m)]
+    if drops:
+        body = drop_apply(body, drops, src_name(m))
     mods = list(dict.fromkeys([x.module for x in b.moves] + ([m["state_module"]] if m["hoist"] else [])))
     extra = []
     if is_sibling(m):
@@ -1534,6 +1554,8 @@ def expected_module(m: dict, src: Src, b: Built) -> ast.Module:
     last = max((j for j, s in enumerate(body) if isinstance(s, (ast.Import, ast.ImportFrom))), default=-1)
     wanted = [ast.parse(x).body[0] for x in m["imports"]] + extra + [import_stmt(m, x) for x in mods]
     body[last + 1 : last + 1] = [s for s in wanted if ast.dump(s) not in have]
+    if drops:
+        drop_refs(body, drops, src_name(m))
     return ast.Module(body=body, type_ignores=[])
 
 
@@ -1597,7 +1619,10 @@ def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, note
     if head_text is None:
         return [f"{rel}: not found at the head"]
     head = ast.parse(head_text)
-    want = expected_module(m, src, b)
+    try:
+        want = expected_module(m, src, b)
+    except SplitError as e:
+        return [str(e)]
     errs += cmp_module(rel, want, head)  # V7
     if is_sibling(m):
         return errs + verify_siblings(root, m, src, b, base, base_dir, head_ref)
@@ -2081,6 +2106,7 @@ class ModPlan:
         self.std: dict[str, str] = {}  # bound name -> import line, after the module's last top import
         self.aliases: list[str] = []  # other destination modules the new code calls, imported in the late block
         self.need_cs = False
+        self.drops: list[dict] = []
 
 
 def split_late(text: str) -> tuple[ast.Module, list[ast.stmt], list[ast.stmt]]:
@@ -2131,6 +2157,7 @@ def late_block(m: dict, plan: ModPlan, late: list[ast.stmt], texts: list[str]) -
 def sib_expected(m: dict, plan: ModPlan) -> tuple[ast.Module, int]:
     """The destination module as an AST: base top, added imports, appended defs, late block. Plus the block's length."""
     _, top, late = split_late(plan.text)
+    top = drop_apply(top, plan.drops, f"{plan.name}.py")
     std, tc = top_additions(m, plan, top)
     at = max((i for i, s in enumerate(top) if is_top_import(s)), default=-1) + 1
     if at == 0 and top and isinstance(top[0], ast.Expr) and isinstance(getattr(top[0], "value", None), ast.Constant):
@@ -2143,12 +2170,15 @@ def sib_expected(m: dict, plan: ModPlan) -> tuple[ast.Module, int]:
     elif tcs:
         ins.append(ast.If(test=ast.Name("TYPE_CHECKING", ast.Load()), body=tcs, orelse=[]))
     block = late_block(m, plan, late, [""] * len(late))
-    return ast.Module(body=top[:at] + ins + top[at:] + plan.defs + [s for s, _ in block], type_ignores=[]), len(block)
+    body = top[:at] + ins + top[at:] + plan.defs + [s for s, _ in block]
+    if plan.drops:
+        drop_refs(body, plan.drops, f"{plan.name}.py")
+    return ast.Module(body=body, type_ignores=[]), len(block)
 
 
 def sib_write(m: dict, plan: ModPlan, def_texts: list[str]) -> str:
     """The text counterpart of ``sib_expected``."""
-    text = plan.text
+    text = drop_text(plan.text, plan.drops, f"{plan.name}.py")
     tree, top, late = split_late(text)
     rows = text.split("\n")
     std, tc = top_additions(m, plan, top)
@@ -2197,6 +2227,9 @@ def make_plans(m: dict, src: Src, b: Built, text_of: Any) -> tuple[dict[str, Mod
     plans: dict[str, ModPlan] = {}
     for mod, name in b.order:
         plans.setdefault(mod, ModPlan(mod)).defs.append(b.defs[(mod, name)])
+    for it in m["drop"]:
+        if it["module"] != src_stem(m):
+            plans.setdefault(it["module"], ModPlan(it["module"])).drops.append(it)
     for mod, p in plans.items():
         t = text_of(mod)
         if t is None:
@@ -2209,7 +2242,13 @@ def make_plans(m: dict, src: Src, b: Built, text_of: Any) -> tuple[dict[str, Mod
         names = [d.name for d in p.defs]  # type: ignore[attr-defined]
         errs += [f"V10: {mod}.py would get {n} twice" for n in sorted({x for x in names if names.count(x) > 1})]
         bad = {m["facade"]} | {f"_{x}" for x in b.dests}
+        gone = {it.get("def") or it.get("import") for it in m["drop"] if it["module"] == src_stem(m)} - {None}
         for d in p.defs:
+            errs += [
+                f"V15: {mod}.py: {d.name} reads {m['facade']}.{n.attr} (line {n.lineno}), but {src_stem(m)} drops {n.attr}"  # type: ignore[attr-defined]
+                for n in ast.walk(d)
+                if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == m["facade"] and n.attr in gone and getattr(n.value, "_r", NEW) is NEW
+            ]
             if (mod, d.name) in b.lifted and not has_future(ast.parse(t)):  # type: ignore[attr-defined]
                 a = d.args  # type: ignore[attr-defined]
                 heads = [x.annotation for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x and x.annotation] + [d.returns]  # type: ignore[attr-defined]
@@ -2290,7 +2329,11 @@ def verify_siblings(root: Path, m: dict, src: Src, b: Built, base: str | None, b
         if ht is None:
             errs.append(f"{mod}.py: not found at the head")
             continue
-        want, nlate = sib_expected(m, p)
+        try:
+            want, nlate = sib_expected(m, p)
+        except SplitError as e:
+            errs.append(str(e))
+            continue
         errs += cmp_module(f"{mod}.py", want, ast.parse(ht))
         errs += sib_checks(m, src, p, nlate, ht)
     return errs
@@ -2309,6 +2352,12 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
     plans, errs = make_plans(m, src, b, lambda mod: (pkg_dir / f"{mod}.py").read_text(encoding="utf-8") if (pkg_dir / f"{mod}.py").exists() else None)
     if errs:
         return errs
+    try:  # the drop checks (V15) run on the AST before anything is written
+        expected_module(m, src, b)
+        for p in plans.values():
+            sib_expected(m, p)
+    except SplitError as e:
+        return [str(e)]
     fresh = mk_src(text, m)  # build() mutated the first tree; positions come from this one
     lines = text.encode("utf-8").split(b"\n")
     lines = [ln + b"\n" for ln in lines[:-1]] + lines[-1:]
@@ -2373,7 +2422,7 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
     else:
         new_f = render(lines, cont, f_lo, f_hi, 0, edits, cuts)
     rows = rows_text[: f_lo - 1] + new_f.rstrip("\n").split("\n") + rows_text[f_hi:]
-    new_text = "\n".join(rows)
+    new_text = drop_text("\n".join(rows), [d for d in m["drop"] if d["module"] == src_stem(m)], src_name(m))
     tree = ast.parse(new_text)
     have = {ast.dump(s) for s in tree.body}
     wanted = list(m["imports"]) + (["import functools"] if b.src_functools else []) + [ast.unparse(import_stmt(m, x)) for x in b.src_mods]
@@ -2387,6 +2436,189 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
     for mod, p in plans.items():
         (pkg_dir / f"{mod}.py").write_text(sib_write(m, p, [made[k] for k in b.order if k[0] == mod]), encoding="utf-8")
     return []
+
+
+# --------------------------------------------------------------------------------------------------
+# drop: delete defs, imports and __all__ entries, with the call sites that used them replaced
+# --------------------------------------------------------------------------------------------------
+
+DROP_KINDS = ("def", "import", "all", "replace")
+
+
+def check_drop_items(path: Path, items: Any) -> None:
+    if not isinstance(items, list):
+        raise SplitError(f"{path}: drop must be a list")
+    for it in items:
+        kinds = [k for k in DROP_KINDS if isinstance(it, dict) and k in it]
+        extra = set(it) - {"module", "all_add", *DROP_KINDS} if isinstance(it, dict) else {"?"}
+        if not isinstance(it, dict) or len(kinds) != 1 or extra or not isinstance(it.get("module"), str) or not it["module"]:
+            raise SplitError(f"{path}: each drop item is {{'module': name, one of {', '.join(DROP_KINDS)}}} (all may add 'all_add'): {it!r}")
+        k = kinds[0]
+        if "all_add" in it and k != "all":
+            raise SplitError(f"{path}: drop all_add goes with all")
+        ok = (
+            isinstance(it[k], str)
+            if k in ("def", "import")
+            else all(isinstance(x, str) for x in it[k])
+            if k == "all" and isinstance(it[k], list) and all(isinstance(x, str) for x in it.get("all_add", []))
+            else k == "replace" and isinstance(it[k], dict) and set(it[k]) == {"in", "old", "new"} and all(isinstance(v, str) for v in it[k].values())
+        )
+        if not ok:
+            raise SplitError(f"{path}: drop {k} item has the wrong shape: {it!r}")
+        if k == "replace":
+            for v in (it[k]["old"], it[k]["new"]):
+                try:
+                    ast.parse(v, mode="eval")
+                except SyntaxError as e:
+                    raise SplitError(f"{path}: drop replace {v!r} is not an expression: {e}") from e
+
+
+class Swap(ast.NodeTransformer):
+    """Replace every outermost expression equal to ``old`` with ``new``."""
+
+    def __init__(self, old: str, new: ast.expr) -> None:
+        self.old, self.new, self.hits = old, new, 0
+
+    def visit(self, node: ast.AST) -> Any:
+        if isinstance(node, ast.expr) and ast.dump(node) == self.old:
+            self.hits += 1
+            return clone(self.new)
+        return super().visit(node)
+
+
+def all_stmt(body: list[ast.stmt]) -> int | None:
+    return next(
+        (i for i, s in enumerate(body) if isinstance(s, ast.Assign) and len(s.targets) == 1 and isinstance(s.targets[0], ast.Name) and s.targets[0].id == "__all__" and isinstance(s.value, (ast.List, ast.Tuple))),
+        None,
+    )
+
+
+def all_values(s: ast.stmt) -> list[str]:
+    return [e.value for e in s.value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]  # type: ignore[attr-defined]
+
+
+def new_all(old: list[str], it: dict) -> list[str]:
+    gone = [x for x in it["all"] if x not in old]
+    if gone:
+        raise SplitError(f"{it['module']}: __all__ has no entry {gone}")
+    return [x for x in old if x not in it["all"]] + [x for x in it.get("all_add", []) if x not in old]
+
+
+def drop_apply(body: list[ast.stmt], items: list[dict], label: str) -> list[ast.stmt]:
+    """The module body after the drop items, as an AST (the text side is ``drop_text``)."""
+    body = list(body)
+    for it in items:
+        if "replace" in it:
+            r = it["replace"]
+            i = next((i for i, s in enumerate(body) if isinstance(s, DEFS) and s.name == r["in"]), None)
+            if i is None:
+                raise SplitError(f"{label}: replace: no top-level function {r['in']}")
+            sw = Swap(ast.dump(parse_expr(r["old"])), parse_expr(r["new"]))
+            body[i] = sw.visit(clone(body[i]))
+            if not sw.hits:
+                raise SplitError(f"{label}: replace: {r['old']!r} does not occur in {r['in']}")
+    for it in items:
+        if "def" in it:
+            hits = [i for i, s in enumerate(body) if isinstance(s, DEFS + (ast.ClassDef,)) and s.name == it["def"]]
+            if len(hits) != 1:
+                raise SplitError(f"{label}: drop def: expected one top-level {it['def']}, found {len(hits)}")
+            del body[hits[0]]
+        elif "import" in it:
+            hit = next((i for i, s in enumerate(body) if is_top_import(s) and any(_bound(a) == it["import"] for a in s.names)), None)  # type: ignore[attr-defined]
+            if hit is None:
+                raise SplitError(f"{label}: drop import: no top-level import binds {it['import']}")
+            s = body[hit]
+            keep = [a for a in s.names if _bound(a) != it["import"]]  # type: ignore[attr-defined]
+            if keep:
+                s = copy.copy(s)
+                s.names = keep  # type: ignore[attr-defined]
+                body[hit] = s
+            else:
+                del body[hit]
+        elif "all" in it:
+            i = all_stmt(body)
+            if i is None:
+                raise SplitError(f"{label}: drop all: no literal __all__")
+            body[i] = ast.parse(all_text(new_all(all_values(body[i]), it))).body[0]
+    return body
+
+
+def drop_refs(body: list[ast.stmt], items: list[dict], label: str) -> None:
+    """V15: a dropped def or import has no reference left, other than the declared replacements."""
+    names = {it["def"] for it in items if "def" in it} | {it["import"] for it in items if "import" in it}
+    for n in ast.walk(ast.Module(body=body, type_ignores=[])):
+        if isinstance(n, ast.Name) and n.id in names:
+            raise SplitError(f"V15: {label}: {n.id} is dropped but still read at line {getattr(n, 'lineno', '?')}")
+    i = all_stmt(body)
+    left = sorted(names & set(all_values(body[i]))) if i is not None else []
+    if left:
+        raise SplitError(f"V15: {label}: __all__ still lists the dropped {left}")
+
+
+def all_text(values: list[str]) -> str:
+    one = "__all__ = [" + ", ".join(f'"{v}"' for v in values) + "]"
+    return one if len(one) <= 120 else "__all__ = [\n" + "".join(f'    "{v}",\n' for v in values) + "]"
+
+
+def stmt_text(s: ast.stmt) -> str:
+    one = ast.unparse(s)
+    if len(one) <= 120 or not isinstance(s, ast.ImportFrom):
+        return one
+    names = "".join(f"    {ast.unparse(a)},\n" for a in s.names)
+    return f"from {'.' * s.level}{s.module or ''} import (\n{names})"
+
+
+def drop_text(text: str, items: list[dict], label: str) -> str:
+    """The text counterpart of ``drop_apply``."""
+    for it in items:
+        if "replace" in it:
+            text = replace_text(text, it["replace"], label)
+    for it in items:
+        rows = text.split("\n")
+        body = ast.parse(text).body
+        if "def" in it:
+            s = next(s for s in body if isinstance(s, DEFS + (ast.ClassDef,)) and s.name == it["def"])
+            hi = s.end_lineno
+            while hi < len(rows) and not rows[hi].strip():
+                hi += 1
+            del rows[stmt_start(s) - 1 : hi]
+        elif "import" in it:
+            s = next(s for s in body if is_top_import(s) and any(_bound(a) == it["import"] for a in s.names))  # type: ignore[attr-defined]
+            keep = [a for a in s.names if _bound(a) != it["import"]]  # type: ignore[attr-defined]
+            new = copy.copy(s)
+            new.names = keep  # type: ignore[attr-defined]
+            rows[s.lineno - 1 : s.end_lineno] = stmt_text(new).split("\n") if keep else []
+        elif "all" in it:
+            s = body[all_stmt(body)]  # type: ignore[index]
+            rows[s.lineno - 1 : s.end_lineno] = all_text(new_all(all_values(s), it)).split("\n")
+        text = "\n".join(rows)
+    return text
+
+
+def replace_text(text: str, r: dict, label: str) -> str:
+    old = ast.dump(parse_expr(r["old"]))
+    fn = next((s for s in ast.parse(text).body if isinstance(s, DEFS) and s.name == r["in"]), None)
+    if fn is None:
+        raise SplitError(f"{label}: replace: no top-level function {r['in']}")
+    raw = text.encode("utf-8")
+    starts = [0]
+    for ln in raw.split(b"\n"):
+        starts.append(starts[-1] + len(ln) + 1)
+    hits: list[tuple[int, int]] = []
+
+    def walk(n: ast.AST) -> None:
+        if isinstance(n, ast.expr) and ast.dump(n) == old:
+            hits.append((starts[n.lineno - 1] + n.col_offset, starts[n.end_lineno - 1] + n.end_col_offset))
+            return
+        for c in ast.iter_child_nodes(n):
+            walk(c)
+
+    walk(fn)
+    if not hits:
+        raise SplitError(f"{label}: replace: {r['old']!r} does not occur in {r['in']}")
+    for a, b in sorted(hits, reverse=True):
+        raw = raw[:a] + r["new"].encode("utf-8") + raw[b:]
+    return raw.decode("utf-8")
 
 
 # --------------------------------------------------------------------------------------------------
