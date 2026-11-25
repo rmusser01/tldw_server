@@ -1839,7 +1839,6 @@ async def login(
                     exc,
                 )
 
-        # Create session first to get session_id
         user_agent = request.headers.get("User-Agent", "Unknown")
 
         # Generate tokens based on auth mode

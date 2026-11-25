@@ -1,4 +1,5 @@
-"""Live-session predicate and cap-row cleanup against isolated PostgreSQL."""
+"""Live-session predicate, cap-row cleanup and the per-user session cap (eviction, ordering,
+concurrency, backlog, revoke-reason lookups) against isolated PostgreSQL."""
 
 from __future__ import annotations
 
@@ -133,6 +134,72 @@ async def test_fifth_session_evicts_the_oldest_postgres(
     row = await pool.fetchone("SELECT is_active, revoke_reason FROM sessions WHERE id = $1", ids[0])
     assert row["revoke_reason"] == "session_cap" and not row["is_active"]
     assert other in await _live(repo, other_uid)
+
+
+@pytest.mark.asyncio
+async def test_same_device_id_replaces_only_its_own_row_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    from collections import Counter
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_device")
+    repo = AuthnzSessionsRepo(pool)
+    a, b, c = [await _capped(repo, uid, d, device_id=d) for d in ("dev-aaaaaaaa", "dev-bbbbbbbb", "dev-cccccccc")]
+    for i in range(6):
+        await _capped(repo, uid, f"d{i}", device_id="dev-dddddddd")
+
+    rows = await repo.get_active_sessions_for_user(uid)
+    assert Counter(r["device_id"] for r in rows) == {
+        "dev-aaaaaaaa": 1, "dev-bbbbbbbb": 1, "dev-cccccccc": 1, "dev-dddddddd": 1
+    }
+    assert {a, b, c} <= await _live(repo, uid)
+
+
+@pytest.mark.asyncio
+async def test_cap_evicts_the_least_recently_active_session_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_lru")
+    repo = AuthnzSessionsRepo(pool)
+    ids = [await _capped(repo, uid, f"s{i}") for i in range(4)]
+    await pool.execute(
+        "UPDATE sessions SET created_at = NOW() - INTERVAL '2 hours', "
+        "last_activity = NOW() - INTERVAL '2 hours' WHERE user_id = $1",
+        uid,
+    )
+    await pool.execute("UPDATE sessions SET last_activity = NOW() WHERE id = $1", ids[0])
+
+    new = await _capped(repo, uid, "new")
+
+    assert await _live(repo, uid) == {ids[0], ids[2], ids[3], new}  # ids[1] was least recently active
+
+
+@pytest.mark.asyncio
+async def test_headerless_logins_replace_each_other_before_browsers_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    from collections import Counter
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_headerless")
+    repo = AuthnzSessionsRepo(pool)
+    for device in ("dev-aaaaaaaa", "dev-bbbbbbbb", "dev-cccccccc"):
+        await _capped(repo, uid, device, device_id=device)
+    for i in range(3):
+        await _capped(repo, uid, f"headerless{i}")  # no install id
+
+    rows = await repo.get_active_sessions_for_user(uid)
+    assert Counter(r["device_id"] for r in rows) == {
+        "dev-aaaaaaaa": 1, "dev-bbbbbbbb": 1, "dev-cccccccc": 1, None: 1
+    }
 
 
 @pytest.mark.asyncio
@@ -280,7 +347,7 @@ async def test_cap_evicted_session_gets_session_replaced_over_http_postgres(
     assert reg.status_code == 200
 
     tokens = []
-    for _ in range(5):
+    for _ in range(5):  # relies on the default cap of 4: this fixture ignores MAX_SESSIONS_PER_USER
         login = client.post("/api/v1/auth/login", data={"username": "pgcapuser", "password": password})
         assert login.status_code == 200
         tokens.append(login.json())

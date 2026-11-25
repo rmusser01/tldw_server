@@ -1,4 +1,5 @@
-"""Live-session predicate: listing, cleanup and the callers that gate on it (SQLite)."""
+"""Live-session predicate (listing, cleanup, the callers that gate on it) and the per-user
+session cap (eviction order, bounded blacklisting, revoke reasons) on SQLite."""
 
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ async def authnz_sqlite(tmp_path, monkeypatch, fresh_services):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("SESSION_ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    monkeypatch.setenv("MAX_SESSIONS_PER_USER", "4")  # the cap tests below assume 4
     reset_settings()
 
     pool = await get_db_pool()
@@ -221,7 +223,7 @@ async def test_workflows_require_online_uses_live_predicate(
 
     svc = mod._WFRecurringScheduler()
     monkeypatch.setattr(svc, "_get_db", lambda _uid: _StubDB())
-    svc._core_scheduler = _StubScheduler()  # type: ignore[attr-defined]
+    monkeypatch.setattr(svc, "_core_scheduler", _StubScheduler(), raising=False)
 
     await svc._run_schedule("s1", user_id=uid)  # type: ignore[attr-defined]
 
@@ -485,6 +487,53 @@ async def test_evicted_tokens_are_blacklisted_after_commit(authnz_sqlite, monkey
     assert calls[-1].kwargs["reason"] == "session_cap"
     assert calls[-1].kwargs["revoked_by"] is None
     assert [c["revoke_reason"] for c in calls[-1].committed] == ["session_cap"]
+
+
+async def test_inline_blacklist_is_bounded_to_the_most_recently_active(authnz_sqlite, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import session_manager as sm
+
+    pool, uid, _ = authnz_sqlite
+    manager = _manager(pool)
+    h, d = timedelta(hours=1), timedelta(days=1)
+    for i in range(150):
+        await _row(pool, uid, f"bulk{i}", access_in=h, refresh_in=7 * d)
+    async with pool.transaction() as conn:  # higher id = less recently active
+        await conn.execute(
+            "UPDATE sessions SET last_activity = datetime('now', '-' || id || ' minutes') WHERE user_id = $1",
+            uid,
+        )
+    calls = []
+
+    async def _record(*args, **kwargs):
+        calls.append(args[0])
+
+    monkeypatch.setattr(manager, "_blacklist_session_tokens", _record)
+    await _create(manager, uid)
+
+    evicted = sorted(await _ids_with_reason(pool, "session_cap"))
+    assert len(evicted) == 147 and sm.SESSION_CAP_INLINE_BLACKLIST_LIMIT == 100
+    assert len(calls) == 1 and len(calls[0]) == 100
+    # the 3 most recent rows survive; of the evicted, the lowest ids are the most recently active
+    assert {s["id"] for s in calls[0]} == set(evicted[:100])
+
+
+async def test_skipped_evicted_session_is_still_rejected_by_validation(authnz_sqlite, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import session_manager as sm
+    from tldw_Server_API.app.core.AuthNZ.exceptions import SessionRevokedException
+
+    pool, uid, _ = authnz_sqlite
+    manager = _manager(pool)
+    monkeypatch.setattr(sm, "SESSION_CAP_INLINE_BLACKLIST_LIMIT", 0)
+    first = await manager.create_session(
+        user_id=uid, access_token="temp_access_skipped", refresh_token="temp_refresh_skipped"
+    )
+    for _ in range(4):
+        await _create(manager, uid)
+    assert (await _fetch(pool, int(first["session_id"])))["revoke_reason"] == "session_cap"
+    try:  # the request path treats a revoked row as "no valid session", raised or None
+        assert await manager.validate_session("temp_access_skipped", raise_on_error=True) is None
+    except SessionRevokedException:
+        pass
 
 
 # --- why a revoked token was revoked -----------------------------------------

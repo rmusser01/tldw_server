@@ -68,6 +68,9 @@ from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_his
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from tldw_Server_API.app.core.Utils.app_services import app_services
 
+# Most recently active evicted sessions whose tokens are blacklisted inside one sign-in.
+SESSION_CAP_INLINE_BLACKLIST_LIMIT = 100
+
 _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
     AssertionError,
@@ -1155,9 +1158,25 @@ class SessionManager:
             )
             if evicted:
                 # Evicted session:<hash> cache keys lapse on their TTL; validation re-reads is_active.
-                await self._blacklist_session_tokens(
-                    evicted, reason=SESSION_CAP_REVOKE_REASON, revoked_by=None
+                # ponytail: at most SESSION_CAP_INLINE_BLACKLIST_LIMIT evicted sessions are blacklisted
+                # inline; beyond it a token gets the generic 401 instead of session_replaced once
+                # its revoked row is purged. Move the rest to a background task if that matters.
+                recent_first = sorted(
+                    evicted,
+                    key=lambda e: str(e.get("last_activity") or e.get("created_at") or ""),
+                    reverse=True,
                 )
+                await self._blacklist_session_tokens(
+                    recent_first[:SESSION_CAP_INLINE_BLACKLIST_LIMIT],
+                    reason=SESSION_CAP_REVOKE_REASON,
+                    revoked_by=None,
+                )
+                if len(evicted) > SESSION_CAP_INLINE_BLACKLIST_LIMIT:
+                    logger.info(
+                        f"Session cap blacklisted {SESSION_CAP_INLINE_BLACKLIST_LIMIT} of "
+                        f"{len(evicted)} evicted sessions inline; "
+                        f"{len(evicted) - SESSION_CAP_INLINE_BLACKLIST_LIMIT} left to row validation"
+                    )
                 log_counter("auth_session_cap_evicted", value=len(evicted))
                 if self.settings.PII_REDACT_LOGS:
                     logger.info(f"Session cap evicted {len(evicted)} session(s) [redacted]")

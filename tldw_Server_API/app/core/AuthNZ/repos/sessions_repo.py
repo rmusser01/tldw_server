@@ -142,8 +142,15 @@ class AuthnzSessionsRepo:
         Eviction is one statement: same ``device_id`` first (a missing id is its
         own group), then least recently active, then ``created_at``, then ``id``.
 
+        The outer UPDATE repeats the live predicate so a row revoked by a concurrent
+        logout between the subquery and the update keeps its own reason.
+
+        A caller must not already hold the ``SESSION_CAP_LOCK_NAMESPACE`` advisory
+        lock for ``user_id`` on another connection: this call would wait on itself.
+
         Returns the new id and the evicted rows (``id, user_id, access_jti,
-        refresh_jti, expires_at, refresh_expires_at``) for blacklisting after commit.
+        refresh_jti, expires_at, refresh_expires_at, last_activity, created_at``)
+        for blacklisting after commit.
         """
         is_postgres = self._is_postgres_backend()
         try:
@@ -175,7 +182,9 @@ class AuthnzSessionsRepo:
                                            ORDER BY CASE WHEN device_id IS NOT DISTINCT FROM $2 THEN 0 ELSE 1 END,
                                                     COALESCE(last_activity, created_at), created_at, id
                                            LIMIT $3)
-                            RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                               AND {LIVE_SESSION_PREDICATE_PG}
+                            RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at,
+                                      last_activity, created_at
                             """,
                             user_id,
                             device_id,
@@ -193,7 +202,9 @@ class AuthnzSessionsRepo:
                                            ORDER BY CASE WHEN device_id IS ? THEN 0 ELSE 1 END,
                                                     COALESCE(last_activity, created_at), created_at, id
                                            LIMIT ?)
-                            RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at
+                               AND {LIVE_SESSION_PREDICATE_SQLITE}
+                            RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at,
+                                      last_activity, created_at
                             """,
                             (SESSION_CAP_REVOKE_REASON, user_id, device_id, excess),
                         )

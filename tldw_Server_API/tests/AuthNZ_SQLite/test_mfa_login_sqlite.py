@@ -121,3 +121,31 @@ async def test_password_step_without_second_factor_evicts_nothing(tmp_path, monk
         r = client.post("/api/v1/auth/login", data={"username": "mfa-user", "password": PASSWORD})
         assert r.status_code == 202, r.text
         assert [row["id"] for row in await sessions.get_active_sessions_for_user(uid)] == [existing]
+
+
+@pytest.mark.asyncio
+async def test_wrong_mfa_code_leaves_the_challenge_usable_and_completion_stores_the_install_id(
+    tmp_path, monkeypatch
+):
+    pool, uid, secret = await _mfa_user(tmp_path, monkeypatch)
+
+    from tldw_Server_API.app.main import app
+
+    with TestClient(app) as client:
+        r = client.post("/api/v1/auth/login", data={"username": "mfa-user", "password": PASSWORD})
+        challenge = r.json()["session_token"]
+        wrong = client.post(
+            "/api/v1/auth/mfa/login", json={"session_token": challenge, "mfa_token": "000000"}
+        )
+        assert wrong.status_code == 401 and wrong.json()["detail"] == "Invalid MFA token"
+        assert await AuthnzSessionsRepo(pool).get_active_sessions_for_user(uid) == []
+
+        ok = client.post(
+            "/api/v1/auth/mfa/login",
+            json={"session_token": challenge, "mfa_token": pyotp.TOTP(secret).now()},
+            headers={"X-TLDW-Device-Id": "dev-mfa-00001"},
+        )
+        assert ok.status_code == 200, ok.text
+        assert [s["device_id"] for s in await AuthnzSessionsRepo(pool).get_active_sessions_for_user(uid)] == [
+            "dev-mfa-00001"
+        ]

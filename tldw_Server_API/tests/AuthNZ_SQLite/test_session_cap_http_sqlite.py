@@ -29,6 +29,7 @@ async def multi_user_client(tmp_path, monkeypatch, fresh_services):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
     monkeypatch.setenv("CSRF_ENABLED", "false")
+    monkeypatch.setenv("MAX_SESSIONS_PER_USER", "4")  # the cap tests below assume 4
     monkeypatch.delenv("REDIS_URL", raising=False)
     reset_settings()
     pool = await get_db_pool()
