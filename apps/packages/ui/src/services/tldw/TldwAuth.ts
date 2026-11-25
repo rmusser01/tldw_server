@@ -1,4 +1,5 @@
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { clearSessionReplacedNotice, getInstallIdHeaders, noteSessionReplaced } from "@/services/tldw/session-identity"
 import { assertAuthConnectionAttempt, normalizeAuthServerUrl, type AuthConnectionAttempt } from "./auth-connection-target"
 import type { PathOrUrl } from "./openapi-guard"
 import type { TldwConfig } from "./TldwApiClient"
@@ -173,7 +174,7 @@ export class TldwAuthService {
       const tokens = await bgRequest<TokenResponse, PathOrUrl>({
         path: this.authPath("/api/v1/auth/login", hostedMode, expected),
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: { "Content-Type": "application/x-www-form-urlencoded", ...getInstallIdHeaders() },
         body: formData.toString(),
         noAuth: true
       })
@@ -213,7 +214,7 @@ export class TldwAuthService {
       const tokens = await bgRequest<TokenResponse, PathOrUrl>({
         path: this.authPath("/api/v1/auth/magic-link/verify", hostedMode, expected),
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getInstallIdHeaders() },
         body: { token },
         noAuth: true
       })
@@ -248,6 +249,7 @@ export class TldwAuthService {
     }
     if (expected) assertAuthConnectionAttempt({ target: expected.target, signal: expected.signal }, expected.target)
     if (!hostedMode && tokens.expires_in) this.setupTokenRefresh(tokens.expires_in)
+    clearSessionReplacedNotice()
     emitSplashAfterLoginSuccess()
   }
 
@@ -358,6 +360,7 @@ export class TldwAuthService {
       })
     } catch (error) {
       if ((error as { status?: number } | null)?.status === 401) {
+        noteSessionReplaced(error)
         if (!await tldwClient.invalidateRefreshSession(config)) {
           throw createServicePromptScopeChangedError()
         }
