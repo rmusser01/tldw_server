@@ -291,6 +291,7 @@ errors.log
 !tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json
 !tldw_Server_API/tests/lint/*_baseline.json
 !apps/package.json
+!apps/packages/ui/scripts/design-system-drift-exceptions.json
 !apps/extension/package.json
 !apps/extension/tsconfig.json
 !apps/tldw-frontend/eslint-suppressions.packages-ui.json

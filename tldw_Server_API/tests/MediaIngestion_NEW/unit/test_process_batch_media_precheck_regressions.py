@@ -16,6 +16,9 @@ class _FakeCursor:
     def fetchone(self):
         return self._row
 
+    def fetchall(self):
+        return [] if self._row is None else [self._row]
+
 
 class _FakePrecheckDb:
     def __init__(self, *, row=None, error: Exception | None = None, has_source_hash: bool = False):

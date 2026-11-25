@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from math import ceil
-from typing import Any
+from typing import Any, NoReturn
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
     media_owner_identity,
@@ -16,6 +17,12 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
     MediaDbLike,
     require_media_database_like,
 )
+
+
+def _reject_non_json_constant(token: str) -> NoReturn:
+    """Reject nonstandard numeric constants accepted by the Python JSON decoder."""
+    message = f"Invalid JSON constant: {token}"
+    raise ValueError(message)
 
 
 class MediaLookupRepository:
@@ -40,9 +47,75 @@ class MediaLookupRepository:
             return None
         try:
             parsed = json.loads(raw_value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RecursionError):
             return None
         return parsed if isinstance(parsed, dict) else None
+
+    def local_upload_id_by_source_hash(
+        self,
+        url: str,
+        source_hash: str,
+        *,
+        source_hash_column_available: bool,
+    ) -> int | None:
+        """Find an active local upload, consulting version metadata only for legacy rows."""
+        db = self.session
+        media_filter = "m.url = ? AND m.is_trash = 0 AND m.deleted = 0"
+        params = (url,)
+        is_postgres = getattr(db, "backend_type", None) == BackendType.POSTGRESQL
+        if is_postgres:
+            media_filter += (
+                " AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?"
+                " AND m.system_operation_id IS NULL"
+            )
+            params += (media_owner_identity(db.client_id),)
+
+        if source_hash_column_available:
+            query = "SELECT m.id FROM Media m WHERE "
+            query += media_filter
+            query += " AND m.source_hash = ? LIMIT 1"
+            row = db.execute_query(query, (*params, source_hash)).fetchone()
+            if row is not None:
+                return row["id"]
+            media_filter += " AND m.source_hash IS NULL"
+
+        query = "SELECT m.id, dv.id AS version_id, "
+        if is_postgres:
+            query += "dv.safe_metadata"
+        else:
+            query += (
+                "CAST(dv.safe_metadata AS BLOB) AS safe_metadata, "
+                "(SELECT encoding FROM pragma_encoding) AS metadata_encoding"
+            )
+            media_filter += " AND typeof(dv.safe_metadata) = 'text'"
+        query += """
+            FROM Media m
+            JOIN DocumentVersions dv ON dv.media_id = m.id
+            WHERE dv.deleted = 0 AND dv.safe_metadata IS NOT NULL AND
+        """
+        query += media_filter
+        page_size = 64
+        page_filter = ""
+        page_params = params
+        while True:
+            page = db.execute_query(
+                query + page_filter + " ORDER BY dv.id LIMIT ?",
+                (*page_params, page_size),
+            ).fetchall()
+            for version in page:
+                try:
+                    raw_metadata = version["safe_metadata"]
+                    if not is_postgres:
+                        raw_metadata = raw_metadata.decode(version["metadata_encoding"])
+                    metadata = json.loads(raw_metadata, parse_constant=_reject_non_json_constant)
+                except (TypeError, ValueError, RecursionError):
+                    metadata = None
+                if isinstance(metadata, dict) and metadata.get("source_hash") == source_hash:
+                    return version["id"]
+            if len(page) < page_size:
+                return None
+            page_filter = " AND dv.id > ?"
+            page_params = (*params, page[-1]["version_id"])
 
     def by_id(
         self,
