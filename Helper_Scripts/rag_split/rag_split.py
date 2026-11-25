@@ -47,6 +47,7 @@ Chat part 2 (TASK-13950.25; each needs ``pkg: ""``: the destinations are existin
                                          parent is still nested (a later manifest lifts it). The partial is bound once, so an
                                          attribute set on it (``_out_transform.flush = _flush``) is set on the object that is read.
     moves[].args [name]                  read-only locals of the function passed after the ctx (``except ... as e``)
+    moves[].handler_await "path.py::test"  the opt-out of V18 (below); the file must exist, the test is not run
     entry        {name, module, doc}     the body after the ``cst = <expr>`` prologue moves whole to ``<module>.<name>(cst)``
     drop         [{module, def|import|all|replace}]   delete a def, an import binding or ``__all__`` entries (``all_add`` adds),
                                          or replace a call-site expression; a dropped name must have no reference left (V15)
@@ -89,6 +90,18 @@ nested-scope binding of the same name); otherwise V5 refuses it. ``verify`` rebu
 a missing, extra or misplaced one.
 
 Limits:
+* V18: a move whose span lies in an ``except`` or ``finally`` body of the function and contains an ``await`` (``async for`` and
+  ``async with`` too) is refused. A bare ``raise`` is NOT safe in such a span: once the awaited coroutine is resumed by a Task *throw*
+  (an awaited Future failed and a callee swallowed it), the moved coroutine has no active exception and the ``raise`` is
+  ``RuntimeError: No active exception to reraise``; an exception the moved frame raises itself (``raise_detached_error``, a ``raise``
+  in an inner ``except``) also gets the caller's handled exception re-attached as ``__context__``. Keep the await inline or end
+  the span before it. ``handler_await`` opts out only when no bare ``raise``, ``raise_detached_error`` or inner-``except`` raise
+  follows the span's first await, and the named test must drive that await with a throw-resumed suspension and pin the type,
+  ``__cause__``, ``__context__`` and ``__suppress_context__`` of what the inline code raised.
+  RAG-layout manifests (``pkg`` not ``''``) are not checked by V18. Audited by hand: t05e ``finalize_run`` (base 1e65d8f5f1, span
+  8366-8569) has 6 awaits and no ``raise``, ``raise_detached_error``, inner raising handler or ambient-exception read.
+* ``rewrite_in`` is correct only if the nested def runs once per call of the function (it makes the def's locals per-call state).
+* V17 does not see ``sys._getframe().f_locals`` or ``inspect.currentframe()``; only ``locals()``/``vars()``/``globals()``/``eval``/``exec``.
 * V8 only flags names the manifest itself introduces (``rcfg``, ``state``, ``up``, ``_run_state``,
   ``_<module>``); later PRs legitimately use ``rcfg`` and ``state`` already.
 * V4 is the crossing definition of A.3: a name live-in at one cell and bound in another, or a closure
@@ -125,7 +138,8 @@ PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
 TOP_LEVEL_ONLY_KEYS = {"relocate"}
-MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals", "args"}
+MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals", "args", "handler_await"}
+TEST_ID = re.compile(r"^[\w./-]+\.py::[\w\[\].-]+$")
 LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
 DEFAULTS: dict[str, Any] = {
     "base": "",
@@ -434,6 +448,9 @@ def load_manifest(path: Path) -> dict[str, Any]:
                 args = spec.get("args", [])
                 if not (isinstance(args, list) and all(isinstance(a, str) and a.isidentifier() for a in args)) or len(set(args)) != len(args):
                     raise SplitError(f"{path}: move {spec.get('name')}: args must be a list of distinct names")
+                ha = spec.get("handler_await")
+                if "handler_await" in spec and not (isinstance(ha, str) and TEST_ID.match(ha)):
+                    raise SplitError(f"{path}: move {spec.get('name')}: handler_await must be a pytest node id (path.py::test_name)")
                 extra = sorted(set(spec) - MOVE_KEYS)
                 if extra:
                     hint = "top-level manifest keys, not move keys" if set(extra) <= TOP_LEVEL_ONLY_KEYS else "unknown"
@@ -584,6 +601,7 @@ class Move:
         self.noqa: list[int] = list(spec.get("noqa", []))
         self.allow_locals: bool = bool(spec.get("allow_locals", False))
         self.args: list[str] = list(spec.get("args", []))
+        self.handler_await: str | None = spec.get("handler_await")
         self.block: list[ast.stmt] = []
         self.members: list[ast.stmt] = []
         self.parent: Move | None = None
@@ -691,6 +709,102 @@ def check_args(mv: Move, fn: Any, key: Any, ctx: list[str], lifted: set[str]) ->
         elif a not in reads:
             errs.append(f"V3: {mv.name}: args {a} is not read in the span")
     return errs
+
+
+def handler_kind(fn: Any, block: list[ast.stmt]) -> str | None:
+    """``except`` or ``finally`` when ``block`` lies inside such a body of ``fn`` (nested defs excluded), else None."""
+
+    def walk(b: list[ast.stmt], kind: str | None) -> tuple[bool, str | None]:
+        if b is block:
+            return True, kind
+        for s in b:
+            if isinstance(s, SCOPE_NODES):
+                continue
+            subs = [(getattr(s, f), kind) for f in ("body", "orelse") if isinstance(getattr(s, f, None), list)]
+            subs += [(getattr(s, "finalbody", None) or [], "finally" if getattr(s, "finalbody", None) else kind)]
+            subs += [(h.body, "except") for h in getattr(s, "handlers", [])] + [(c.body, kind) for c in getattr(s, "cases", [])]
+            for sub, k in subs:
+                found, kk = walk(sub, k)
+                if found:
+                    return True, kk
+        return False, None
+
+    return walk(fn.body, None)[1]
+
+
+def ambient_reads(members: list[ast.stmt]) -> Iterator[tuple[ast.Call, str]]:
+    """Calls that read the exception being handled (sys.exc_info(), logger.exception(), format_exc(), ...) outside an inner handler of the span."""
+    todo: list[ast.AST] = list(members)
+    while todo:
+        n = todo.pop()
+        if isinstance(n, SCOPE_NODES):
+            continue
+        if isinstance(n, ast.ExceptHandler):  # an inner handler of the span has its own exception
+            continue
+        if isinstance(n, ast.Call):
+            f = n.func
+            attr = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+            noarg = not n.args and not n.keywords
+            if attr in ("exc_info", "exception", "format_exc", "print_exc") or (attr in ("print_exception", "format_exception") and noarg):
+                yield n, f"{attr}()"
+            elif attr == "opt" and any(k.arg == "exception" for k in n.keywords):
+                yield n, "opt(exception=...)"
+        todo.extend(ast.iter_child_nodes(n))
+
+
+def check_handler_await(mv: Move, fn: Any) -> list[str]:
+    """V18: a span inside an ``except``/``finally`` body of the function that awaits becomes an awaited coroutine, and a Task
+    that resumes it by *throwing* (an awaited Future failed, a callee swallowed it) leaves the caller's handled exception out of
+    the coroutine's exception state: a bare ``raise`` after the await raises ``RuntimeError: No active exception to reraise``, and
+    an exception the moved frame raises itself (``raise_detached_error``, a ``raise`` in an inner ``except``) gets the caller's
+    handled exception re-attached as ``__context__``. Refused unless the move names ``handler_await``, a test that drives the span
+    with a throw-resumed suspension, and then only when none of those follow the span's first await."""
+    kind = handler_kind(fn, mv.block)
+    awaits = [n for n in walk_own(mv.members) if isinstance(n, (ast.Await, ast.AsyncFor, ast.AsyncWith))]
+    if not (kind and awaits):
+        return [f"V18: {mv.name}: handler_await is stray; the span has no await inside an except or finally body"] if mv.handler_await else []
+    if not mv.handler_await:
+        return [
+            f"V18: {mv.name}: the span awaits inside {'an except handler' if kind == 'except' else 'a finally body'} of the function; "
+            "keep the await inline, end the span before it, or declare handler_await: '<pytest node id>' for a span with no bare raise, "
+            "raise_detached_error or inner-handler raise after its first await"
+        ]
+    first = min(n.lineno for n in awaits)
+    errs: list[str] = []
+
+    def scan(block: list[ast.stmt], inner: bool) -> None:
+        for s in block:
+            if isinstance(s, SCOPE_NODES):
+                continue
+            if isinstance(s, ast.Raise) and s.lineno >= first and (s.exc is None or inner):
+                errs.append(f"V18: {mv.name}: handler_await does not cover the {'bare raise' if s.exc is None else 'raise inside an inner except'} at line {s.lineno}, after the span's first await")
+            for f in ("body", "orelse", "finalbody"):
+                if isinstance(getattr(s, f, None), list):
+                    scan(getattr(s, f), inner)
+            for h in getattr(s, "handlers", []):
+                scan(h.body, True)
+            for c in getattr(s, "cases", []):
+                scan(c.body, inner)
+
+    scan(mv.members, False)
+    for n in walk_own(mv.members):
+        if isinstance(n, ast.Call) and n.lineno >= first and getattr(n.func, "id", getattr(n.func, "attr", None)) == "raise_detached_error":
+            errs.append(f"V18: {mv.name}: handler_await does not cover raise_detached_error at line {n.lineno}, after the span's first await")
+    errs += [
+        f"V18: {mv.name}: handler_await does not cover the ambient-exception read {what} at line {n.lineno}, after the span's first await"
+        for n, what in ambient_reads(mv.members)
+        if n.lineno >= first
+    ]
+    return errs
+
+
+def handler_test_errors(root: Path, m: dict) -> list[str]:
+    """A ``handler_await`` node id names a test file that exists under ``root`` (the test is not run)."""
+    return [
+        f"V18: {spec['name']}: handler_await test file {spec['handler_await'].split('::')[0]} does not exist"
+        for spec in m["moves"]
+        if spec.get("handler_await") and not (root / spec["handler_await"].split("::")[0]).is_file()
+    ]
 
 
 def check_span(m: Move, notes: list[str] | None = None) -> list[str]:
@@ -969,12 +1083,9 @@ class Cells:
                     if i != j and name in self.bound[i] and not (name in self.idem and self.first_import[j].get(name, 10**9) < self.first_read[j].get(name, 0)):
                         out[name].append(f"bound in {self.labels[i]}, live-in at {self.labels[j]}")
         if self.strict:
-            # A name bound in a span and read (or augmented) anywhere after it crosses, unless the first such reference
-            # follows a plain, unconditional rebinding in the span's own block. Liveness misses the rest (a flag set in the
-            # span and tested after it); when unsure the name crosses, which only costs a ctx slot.
+            # A name bound in a span and read (or augmented) anywhere after it crosses. Liveness misses some of these (a flag
+            # set in the span and tested after it, a handler read on the exception edge); an extra ctx slot is always safe.
             for i in range(n - 1):
-                blk = self.span_block[i]
-                after = blk[next(k for k, x in enumerate(blk) if x is self.span_last[i]) + 1 :]
                 plain_bound = {
                     x.id for x in self.nodes[i] if isinstance(x, ast.Name) and is_f(x, self.key) and isinstance(x.ctx, ast.Store)
                 } | {nm for x in self.nodes[i] if isinstance(x, (ast.Import, ast.ImportFrom, *SCOPE_NODES)) for nm in self._binds(x)}
@@ -988,17 +1099,7 @@ class Cells:
                         late = [ln for ln in self.loads[j].get(name, []) if ln > self.end[i]]
                         if j == i or not late or name in self.args.get(self.labels[j], ()):
                             continue
-                        first = min(late)
-                        plain = any(
-                            self.owner.get(id(x)) == j
-                            and isinstance(x, (ast.Assign, ast.AnnAssign))
-                            and (x.value is not None)
-                            and any(isinstance(t, ast.Name) and t.id == name and is_f(t, self.key) for t in (x.targets if isinstance(x, ast.Assign) else [x.target]))
-                            and x.end_lineno < first
-                            for x in after
-                        )
-                        if not plain:
-                            out[name].append(f"bound in {self.labels[i]}, read after it in {self.labels[j]}")
+                        out[name].append(f"bound in {self.labels[i]}, read after it in {self.labels[j]}")
         for c in range(n):
             for d in (x for x in self.nodes[c] if isinstance(x, DEFS) and is_f(x, self.key)):
                 free = {m.id for st in d.body for m in ast.walk(st) if isinstance(m, ast.Name) and is_f(m, self.key)}
@@ -1616,6 +1717,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
         ]
     for mv in moves:
         out.errors += check_span(mv, notes)
+        if is_sibling(m):  # V18 is for the chat layout; RAG-layout manifests are not checked (see the module docstring)
+            out.errors += check_handler_await(mv, fn)
         out.errors += check_args(mv, fn, key, ctx_names(m), {lf.name for lf in lifts})
     if out.errors:
         return out
@@ -1909,6 +2012,8 @@ def read_head(root: Path, rel: str | Path, head: str | None) -> str | None:
 
 def run_verify(root: Path, m: dict, base: str | None, base_dir: str | None, notes: list[str] | None = None, head_ref: str | None = None) -> list[str]:
     rel = m["file"]
+    if missing := handler_test_errors(root, m):
+        return missing
     text = read_base(root, rel, base, base_dir)
     if text is None:
         return [f"{rel}: not found at the base"]
@@ -2223,6 +2328,8 @@ def header_text(mod: str, wanted: dict[str, str], stage: bool, m: dict) -> str:
 
 
 def run_apply(root: Path, m: dict) -> list[str]:
+    if missing := handler_test_errors(root, m):
+        return missing
     if m["relocate"]:
         return apply_relocate(root, m)
     if is_sibling(m):

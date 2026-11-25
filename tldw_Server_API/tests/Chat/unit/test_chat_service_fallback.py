@@ -7634,3 +7634,88 @@ async def test_stream_direct_fallback_call_failure_error_chain(monkeypatch):
     assert chain["cause"] is None
     assert chain["context"] is primary_error
     assert sentinel not in "".join(str(error) for error in provider_manager.failure_errors)
+
+
+def _raise_connection_refused():
+    raise ConnectionRefusedError("backend down")
+
+
+async def _swallowed_executor_failure():
+    """Suspend on a Future that fails, swallow it: the awaiting Task resumes the chain by a throw."""
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, _raise_connection_refused)
+    except OSError:
+        pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refusal", _refusals(), ids=["quota", "policy"])
+async def test_stream_refusal_survives_a_throw_resumed_refund(monkeypatch, refusal):
+    """A refund that swallows a failed Future must not turn S7's refusal re-raise into a RuntimeError (final review C1)."""
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
+
+    def refused_llm_call():
+        raise refusal
+
+    kwargs = _stream_fallback_kwargs(
+        llm_call_func=refused_llm_call,
+        provider_manager=_DummyProviderManager(),
+        metrics=_DummyMetrics(),
+        refresh=_stream_fallback_refresh,
+    )
+
+    async def rg_refund_cb(*, cancelled: bool, error: bool):
+        await _swallowed_executor_failure()
+
+    kwargs["rg_refund_cb"] = rg_refund_cb
+
+    with pytest.raises(type(refusal)) as captured:
+        await execute_streaming_call(**kwargs)
+
+    assert captured.value is refusal
+    chain = _stream_chain(captured.value)
+    assert (chain["cause"], chain["context"]) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_stream_refresh_error_stays_detached_after_a_throw_resumed_refresh(monkeypatch):
+    """A refresh that swallows a failed Future keeps the detached structured error detached (final review I1)."""
+    from tldw_Server_API.app.core.LLM_Calls.structured_generation import StructuredGenerationCapabilityError
+
+    primary_error = _certified_pre_dispatch(
+        ChatProviderError(provider="openai", message="primary failed", status_code=502)
+    )
+    original_prepare = chat_service.prepare_structured_response_request
+    calls = []
+
+    def prepare(**kwargs):
+        calls.append(kwargs["provider"])
+        if len(calls) >= 2:
+            raise StructuredGenerationCapabilityError("refresh-structured-secret")
+        return original_prepare(**kwargs)
+
+    async def bounded_refresh(_refresh, provider, _remaining):
+        await _swallowed_executor_failure()
+        return _stream_fallback_refresh(provider)
+
+    def failing_llm_call():
+        raise primary_error
+
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
+    monkeypatch.setattr(chat_service, "prepare_structured_response_request", prepare)
+    monkeypatch.setattr(chat_service, "_refresh_provider_params_bounded", bounded_refresh)
+
+    with pytest.raises(HTTPException) as captured:
+        await execute_streaming_call(
+            **_stream_fallback_kwargs(
+                llm_call_func=failing_llm_call,
+                provider_manager=_DummyProviderManager(),
+                metrics=_DummyMetrics(),
+                refresh=_stream_fallback_refresh,
+            )
+        )
+
+    chain = _stream_chain(captured.value)
+    assert (chain["type"], chain["cause"]) == ("HTTPException", None)
+    assert chain["context"] is None
+    assert len(calls) == 2
