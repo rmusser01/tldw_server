@@ -296,44 +296,34 @@ async def save_first_non_stream_reply(cst: "NonStreamCall") -> None:
             )
             cs.raise_detached_error(cs.build_structured_http_exception(structured_exc))
 
-    should_save_response = (
+    if not (
         cst.should_persist
         and cst.final_conversation_id
         and (cst.content_to_save or cst.tool_calls_to_save or cst.function_call_to_save)
+    ):
+        return
+    message_payload = cs._build_assistant_message_payload(
+        character_card_for_context=cst.character_card_for_context,
+        assistant_parent_message_id=cst.assistant_parent_message_id,
+        content=cst.content_to_save,
+        tool_calls=cst.tool_calls_to_save,
+        function_call=cst.function_call_to_save,
+        moonshot_reasoning=await _response_processor.approve_non_stream_moonshot_reasoning(cst),
+        generation_metadata=cs._nonstream_generation_metadata(
+            llm_response=cst.llm_response,
+            choice=cst.first_choice,
+            model=cst.model,
+            provider=cst.selected_provider,
+        ),
     )
-    if should_save_response and not cst.defer_structured_persistence:
-        message_payload = cs._build_assistant_message_payload(
-            character_card_for_context=cst.character_card_for_context,
-            assistant_parent_message_id=cst.assistant_parent_message_id,
-            content=cst.content_to_save,
-            tool_calls=cst.tool_calls_to_save,
-            function_call=cst.function_call_to_save,
-            generation_metadata=cs._nonstream_generation_metadata(
-                llm_response=cst.llm_response,
-                choice=cst.first_choice,
-                model=cst.model,
-                provider=cst.selected_provider,
-            ),
-        )
+    if cst.defer_structured_persistence:
+        cst.pending_assistant_payload = message_payload
+    else:
         cst.assistant_message_id = await cs.save_assistant_message(
             chat_db=cst.chat_db,
             conversation_id=cst.final_conversation_id,
             save_message_fn=cst.save_message_fn,
             payload=message_payload,
-        )
-    elif should_save_response and cst.defer_structured_persistence:
-        cst.pending_assistant_payload = cs._build_assistant_message_payload(
-            character_card_for_context=cst.character_card_for_context,
-            assistant_parent_message_id=cst.assistant_parent_message_id,
-            content=cst.content_to_save,
-            tool_calls=cst.tool_calls_to_save,
-            function_call=cst.function_call_to_save,
-            generation_metadata=cs._nonstream_generation_metadata(
-                llm_response=cst.llm_response,
-                choice=cst.first_choice,
-                model=cst.model,
-                provider=cst.selected_provider,
-            ),
         )
 
 
@@ -379,3 +369,4 @@ async def flush_deferred_non_stream_persistence(cst: "NonStreamCall") -> None:
 
 # late imports: moved code reads these at call time (TASK-13950.25 R5)
 from tldw_Server_API.app.core.Chat import chat_service as cs
+from tldw_Server_API.app.core.Chat import response_processor as _response_processor

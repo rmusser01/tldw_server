@@ -89,7 +89,6 @@ from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_r
 from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
     apply_output_safety_to_choices,
-    approve_saved_moonshot_reasoning,
     prepare_saved_stream_reply,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
@@ -3026,6 +3025,15 @@ def _history_for_request(
     return formatted
 
 
+def _attach_saved_moonshot_reasoning(message: dict[str, Any], extra: Mapping[str, Any]) -> None:
+    """Carry approved reasoning only from stored Moonshot assistant turns."""
+    if message["role"] != "assistant" or extra.get("provider") != "moonshot":
+        return
+    reasoning = bounded_moonshot_reasoning(extra.get(MOONSHOT_REASONING_KEY))
+    if reasoning is not None:
+        message[MOONSHOT_REASONING_KEY] = reasoning
+
+
 def _format_selected_history_messages(
     snapshot: Any,
     content: Any,
@@ -3083,10 +3091,7 @@ def _format_selected_history_messages(
             ]
         if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
             entry["content"] = None
-        if role == "assistant" and extra.get("provider") == "moonshot":
-            reasoning = bounded_moonshot_reasoning(extra.get(MOONSHOT_REASONING_KEY))
-            if reasoning is not None:
-                entry[MOONSHOT_REASONING_KEY] = reasoning
+        _attach_saved_moonshot_reasoning(entry, extra)
         if item.get("tool_calls") is not None:
             entry["tool_calls"] = item["tool_calls"]
         for key in ("function_call", "tool_call_id"):
@@ -3485,24 +3490,15 @@ async def build_context_and_messages(
             except _CHAT_NONCRITICAL_EXCEPTIONS as meta_err:
                 logger.debug("Metadata lookup failed for message {}: {}", db_msg.get("id"), meta_err)
 
-            tool_calls_meta = None
-            function_call_meta = None
-            content_placeholder_reason = None
-            tool_call_id_meta = None
-            stored_role = None
-            stored_name = None
-            stored_moonshot_reasoning = None
-            if metadata:
-                tool_calls_meta = metadata.get("tool_calls")
-                extra_meta = metadata.get("extra") or {}
-                if isinstance(extra_meta, dict):
-                    function_call_meta = extra_meta.get("function_call")
-                    content_placeholder_reason = extra_meta.get("content_placeholder_reason")
-                    tool_call_id_meta = extra_meta.get("tool_call_id")
-                    stored_role = extra_meta.get("sender_role")
-                    stored_name = extra_meta.get("sender_name")
-                    if extra_meta.get("provider") == "moonshot":
-                        stored_moonshot_reasoning = bounded_moonshot_reasoning(extra_meta.get(MOONSHOT_REASONING_KEY))
+            tool_calls_meta = metadata.get("tool_calls") if metadata else None
+            extra_meta = metadata.get("extra") if metadata else None
+            if not isinstance(extra_meta, dict):
+                extra_meta = {}
+            function_call_meta = extra_meta.get("function_call")
+            content_placeholder_reason = extra_meta.get("content_placeholder_reason")
+            tool_call_id_meta = extra_meta.get("tool_call_id")
+            stored_role = extra_meta.get("sender_role")
+            stored_name = extra_meta.get("sender_name")
 
             role_initial = map_sender_to_role(sender_val, character_card.get("name") if character_card else None)
             role = stored_role if stored_role in {"user", "assistant", "system", "tool"} else role_initial
@@ -3561,9 +3557,8 @@ async def build_context_and_messages(
                     hist_entry["content"] = msg_parts[0].get("text", "")
                 else:
                     hist_entry["content"] = msg_parts or None
+                _attach_saved_moonshot_reasoning(hist_entry, extra_meta)
                 if role == "assistant":
-                    if stored_moonshot_reasoning is not None:
-                        hist_entry[MOONSHOT_REASONING_KEY] = stored_moonshot_reasoning
                     name_source = stored_name or (character_card.get("name") if character_card else None)
                     if name_source:
                         name = sanitize_sender_name(name_source)
