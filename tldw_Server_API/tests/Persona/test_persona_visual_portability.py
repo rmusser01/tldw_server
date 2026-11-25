@@ -12,10 +12,10 @@ from PIL import Image
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.exception_types import PersonaArtworkValidationError
 from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
     PersonaVisualPortabilityRepository,
 )
+from tldw_Server_API.app.core.exception_types import PersonaArtworkValidationError
 from tldw_Server_API.app.core.Persona.visual_portability.archive import (
     DEFAULT_MAX_MEMBER_SIZE_BYTES,
     validate_archive_members,
@@ -1610,6 +1610,7 @@ def _credited_archive(
     extension: dict[str, Any] | None = None,
     carrier: str | None = None,
     context: object = ...,
+    title: str | None = None,
 ) -> Path:
     """Build a native archive with the same credit carrier as collection packs."""
     persona_id, pack, _ = _create_pack_with_asset(
@@ -1633,6 +1634,8 @@ def _credited_archive(
         payload["pack"]["visual_manifest"]["tldw/artwork"] = extension
     if context is not Ellipsis:
         payload["pack"]["source_context"] = context
+    if title is not None:
+        payload["pack"]["title"] = title
     entries["metadata/pack.json"] = _json_bytes(payload)
     entries[CHECKSUMS_PATH] = _json_bytes(
         {name: sha256_bytes(content) for name, content in entries.items() if name != CHECKSUMS_PATH}
@@ -1642,6 +1645,32 @@ def _credited_archive(
         for name, content in entries.items():
             archive.writestr(name, content)
     return path
+
+
+def test_direct_buddy_import_rejects_an_invalid_title_during_review(db_instance, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Buddy.native_pack import read_buddy_archive
+
+    archive = _credited_archive(db_instance, tmp_path, monkeypatch, ARTWORK_CREDITS, title="Bad\x00name")
+    with archive.open("rb") as handle, pytest.raises(ValueError, match="invalid name"):
+        read_buddy_archive(handle)
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        {"state_catalog": {"mood.focused": {"label": "Focused", "kind": []}}},
+        {"fallbacks": {"listening": [{}]}},
+        {"authored_triggers": [{"id": "a", "source": [], "match": "any", "state": "idle"}]},
+        {"authored_triggers": [{"id": "a", "source": "live_state", "match": "any", "state": {}}]},
+    ],
+)
+def test_native_manifest_rejects_non_string_state_fields(section):
+    from tldw_Server_API.app.core.Persona.visuals import PersonaVisualManifestError, validate_visual_manifest
+
+    with pytest.raises(PersonaVisualManifestError):
+        validate_visual_manifest(
+            {**_valid_manifest("a"), **section}, available_asset_ids={"a"}, require_activatable=True
+        )
 
 
 def _commit_archive(db: CharactersRAGDB, archive_path: Path, persona_id: str) -> dict[str, Any]:
@@ -1679,6 +1708,75 @@ def _commit_archive(db: CharactersRAGDB, archive_path: Path, persona_id: str) ->
         target_persona_id=persona_id,
         trust_mode="untrusted_import",
     )["pack"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("database", ["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def test_direct_buddy_import_reviews_and_saves_owned_artwork(database, request, tmp_path, monkeypatch):
+    """Install credited artwork through the same independent API on both databases."""
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.api.v1.endpoints import buddies
+    from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
+
+    backend = (
+        DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+        if database == "postgres"
+        else None
+    )
+    db = CharactersRAGDB(tmp_path / "direct-import.db", "direct-import", backend=backend)
+    try:
+        monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda user_id: tmp_path / user_id))
+        archive = _credited_archive(db, tmp_path, monkeypatch, ARTWORK_CREDITS)
+        app = FastAPI()
+        app.add_middleware(ChaChaOperationMiddleware)
+        app.include_router(buddies.router, prefix="/api/v1/buddies")
+        app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+        app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="import-owner")
+        app.dependency_overrides[check_rate_limit] = lambda: None
+        path = "/api/v1/buddies"
+        files = {"archive": (archive.name, archive.read_bytes(), "application/zip")}
+        with TestClient(app) as client:
+            review = client.post(f"{path}/import-preview", files=files)
+            assert review.status_code == 200, review.text
+            assert review.json()["artwork"] == ARTWORK_CREDITS
+            assert review.json()["asset_count"] == 1
+            assert client.get(path).json() == {"buddies": []}
+
+            invalid = b"Invalid archive"
+            rejected = client.post(
+                f"{path}/import",
+                files={"archive": ("invalid.tldw-persona-vpack", invalid, "application/zip")},
+                data={"reviewed_sha256": sha256_bytes(invalid)},
+            )
+            assert rejected.status_code == 422
+            assert client.get(path).json() == {"buddies": []}
+
+            changed = client.post(f"{path}/import", files=files, data={"reviewed_sha256": "0" * 64})
+            assert changed.status_code == 409
+            assert client.get(path).json() == {"buddies": []}
+
+            imported = client.post(
+                f"{path}/import", files=files, data={"reviewed_sha256": review.json()["archive_sha256"]}
+            )
+            assert imported.status_code == 201, imported.text
+            profile = imported.json()
+            assert profile["optional_persona_id"] is None
+            assert profile["attribution"]["artwork"] == ARTWORK_CREDITS
+            assert profile["manifest"]["states"]["idle"]
+            assert client.get(profile["assets"][0]["content_url"]).content == _png_bytes()
+            assert client.get(f"{path}/attachment").json()["attachment"] is None
+
+            app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="other-owner")
+            assert client.get(profile["assets"][0]["content_url"]).status_code == 404
+    finally:
+        db.close_connection()
 
 
 def test_artwork_credits_survive_import_copy_source_deletion_and_export(

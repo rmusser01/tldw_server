@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 from .constants import (
     ALLOWED_TOP_LEVEL_DIRS,
@@ -11,16 +12,16 @@ from .constants import (
     REQUIRED_MEMBERS,
 )
 
-
 DEFAULT_MAX_MEMBER_SIZE_BYTES = 50 * 1024 * 1024
 DEFAULT_MAX_ARCHIVE_SIZE_BYTES = 500 * 1024 * 1024
 
 
 def validate_archive_members(
-    archive_path: Path,
+    archive_path: Path | BinaryIO,
     *,
     max_member_size_bytes: int = DEFAULT_MAX_MEMBER_SIZE_BYTES,
     max_archive_size_bytes: int = DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
+    max_members: int | None = None,
 ) -> list[str]:
     """Validate archive member names and size limits without extracting files."""
     normalized_members: list[str] = []
@@ -29,6 +30,8 @@ def validate_archive_members(
 
     try:
         with zipfile.ZipFile(archive_path, "r") as archive:
+            if max_members is not None and len(archive.infolist()) > max_members:
+                raise ValueError("too_many_archive_members")
             for info in archive.infolist():
                 raw_member_name = getattr(info, "orig_filename", info.filename)
                 if info.is_dir():

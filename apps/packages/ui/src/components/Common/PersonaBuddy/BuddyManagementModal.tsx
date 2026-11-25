@@ -8,9 +8,12 @@ import { listPersonaVisualStarterPacks } from "@/services/persona-visuals"
 import {
   buddyAssets,
   createBuddy,
+  importBuddyArchive,
+  previewBuddyArchive,
   putBuddyAttachment,
   resolveBuddyConversationTarget,
   type BuddyAttachmentState,
+  type ReviewedBuddyArchive,
   type BuddyProfile,
   type BuddyConversationSummary
 } from "@/services/buddies"
@@ -25,10 +28,12 @@ const fieldClass =
 const StarterChoice = ({
   starter,
   selected,
+  disabled,
   onSelect
 }: {
   starter: PersonaVisualStarterPackSummary
   selected: boolean
+  disabled: boolean
   onSelect: () => void
 }) => {
   const { t } = useTranslation("sidepanel")
@@ -70,7 +75,7 @@ const StarterChoice = ({
             </>
           ) : null}
         </div>
-        <Button disabled={!ready} onClick={onSelect}>
+        <Button disabled={disabled || !ready} onClick={onSelect}>
           {selected
             ? t("buddyManagement.selected", { defaultValue: "Selected" })
             : t("buddyManagement.useBuddy", { defaultValue: "Use this avatar" })}
@@ -108,18 +113,22 @@ export const BuddyManagementModal = ({
   const label = (key: string, text: string) =>
     t(`buddyManagement.${key}`, { defaultValue: text })
   const mounted = React.useRef(true)
+  const uploadLifetime = React.useRef<AbortController | null>(null)
   const targetGeneration = React.useRef(0)
   React.useLayoutEffect(() => {
     targetGeneration.current += 1
   }, [target?.scope_type, target?.scope_id])
   React.useEffect(() => {
+    const controller = new AbortController()
+    uploadLifetime.current = controller
     mounted.current = true
     return () => {
       mounted.current = false
+      controller.abort()
     }
   }, [])
   const [createdArtwork, setCreatedArtwork] = React.useState<{
-    starterId: string
+    sourceKey: string
     profile: BuddyProfile
   } | null>(null)
   const createdProfile = createdArtwork?.profile
@@ -132,6 +141,8 @@ export const BuddyManagementModal = ({
   )
   const [starter, setStarter] =
     React.useState<PersonaVisualStarterPackSummary | null>(null)
+  const [reviewedArchive, setReviewedArchive] = React.useState<ReviewedBuddyArchive | null>(null)
+  const [reviewingArchive, setReviewingArchive] = React.useState(false)
   const [starters, setStarters] = React.useState<
     PersonaVisualStarterPackSummary[]
   >([])
@@ -167,7 +178,11 @@ export const BuddyManagementModal = ({
   )
   const [defaultPersona, setDefaultPersona] = React.useState("")
   const [defaultDirty, setDefaultDirty] = React.useState(false)
-  const [busy, setBusy] = React.useState(false)
+  const [applyAttempt, setApplyAttempt] = React.useState<{ target: BuddyManagementTarget | null } | null>(null)
+  const busy = applyAttempt !== null
+  const draftLocked = busy &&
+    applyAttempt.target?.scope_type === target?.scope_type &&
+    applyAttempt.target?.scope_id === target?.scope_id
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [notice, setNotice] = React.useState<string | null>(null)
@@ -306,17 +321,38 @@ export const BuddyManagementModal = ({
       active = false
     }
   }, [scope, scopeId])
+  const reviewArchive = async (file: File) => {
+    setReviewedArchive(null)
+    setReviewingArchive(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const reviewed = await previewBuddyArchive(file, uploadLifetime.current?.signal)
+      if (!mounted.current) return
+      setReviewedArchive(reviewed)
+      setStarter(null)
+      setSelected("")
+      setSearch("")
+    } catch (e) {
+      if (mounted.current) {
+        setError(e instanceof Error ? e.message : label("reviewFailed", "Could not review the avatar pack."))
+      }
+    } finally {
+      if (mounted.current) setReviewingArchive(false)
+    }
+  }
   const apply = async () => {
     if (
       busy ||
+      reviewingArchive ||
       resolvingTarget ||
       !scopeId ||
-      (!selected && !starter) ||
+      (!selected && !starter && !reviewedArchive) ||
       (scope === "conversation" &&
         (loadingChats || !chats.some((c) => c.id === scopeId)))
     )
       return
-    setBusy(true)
+    setApplyAttempt({ target })
     setError(null)
     setNotice(null)
     const generation = targetGeneration.current
@@ -354,23 +390,30 @@ export const BuddyManagementModal = ({
     }
     try {
       let buddyId = selected
-      if (starter) {
-        const created =
-          createdArtwork?.starterId === starter.id
-            ? createdArtwork.profile
-            : await createBuddy({
-                name: starter.title,
-                source: { kind: "starter", starter_id: starter.id },
-                optional_persona_id: null
-              })
-        if (!mounted.current) return
+      if (starter || reviewedArchive) {
+        const sourceKey = reviewedArchive
+          ? "archive:" + reviewedArchive.preview.archive_sha256
+          : "starter:" + starter?.id
+        let created = createdArtwork?.sourceKey === sourceKey ? createdArtwork.profile : null
+        if (!created && reviewedArchive) {
+          created = await importBuddyArchive(reviewedArchive, uploadLifetime.current?.signal)
+        }
+        if (!created && starter) {
+          created = await createBuddy({
+            name: starter.title,
+            source: { kind: "starter", starter_id: starter.id },
+            optional_persona_id: null
+          })
+        }
+        if (!mounted.current || !created) return
         artworkSaved = true
-        setCreatedArtwork({ starterId: starter.id, profile: created })
+        setCreatedArtwork({ sourceKey, profile: created })
         if (stopForRetarget()) return
         buddyId = created.id
         // Retain the created profile on retry rather than creating duplicates.
         setSelected(created.id)
         setStarter(null)
+        setReviewedArchive(null)
       }
       if (scope === "workspace" && defaultDirty && workspace) {
         const updated = await tldwClient.patchWorkspace(scopeId, {
@@ -406,6 +449,9 @@ export const BuddyManagementModal = ({
       onClose()
     } catch (e) {
       if (stopForRetarget(e)) return
+      if (reviewedArchive && artworkSaved && !attachmentSaved) {
+        onRetryCollections?.()
+      }
       const savedMessage = attachmentSaved
         ? label("attachmentSaved", "Avatar attachment saved. Refresh failed: ")
         : defaultSaved
@@ -413,16 +459,23 @@ export const BuddyManagementModal = ({
               "defaultSaved",
               "Workspace default saved. Avatar attachment was not confirmed: "
             )
-          : ""
+          : artworkSaved
+            ? label(
+                "artworkSavedRetry",
+                "Avatar saved to Your avatars. Refresh and try attaching it again. "
+              )
+            : ""
       setError(
         `${savedMessage}${e instanceof Error ? e.message : label("saveFailed", "Could not apply. Your selection is retained; refresh and retry.")}`
       )
     } finally {
-      if (mounted.current) setBusy(false)
+      if (mounted.current) setApplyAttempt(null)
     }
   }
   const stagedChanges = Boolean(
     starter ||
+    reviewingArchive ||
+    reviewedArchive ||
     selected !== (attachment.attachment?.buddy_id ?? "") ||
     scope !==
       (target?.scope_type ??
@@ -465,7 +518,8 @@ export const BuddyManagementModal = ({
               loading ||
               resolvingTarget ||
               !scopeId ||
-              (!selected && !starter) ||
+              reviewingArchive ||
+              (!selected && !starter && !reviewedArchive) ||
               (scope === "conversation" &&
                 (loadingChats || !chats.some((c) => c.id === scopeId))) ||
               (scope === "workspace" && !workspace)
@@ -559,11 +613,13 @@ export const BuddyManagementModal = ({
                 <button
                   key={p.id}
                   type="button"
+                  disabled={draftLocked || reviewingArchive}
                   aria-pressed={selected === p.id && !starter}
                   aria-label={`${label("use", "Use")} ${p.name}`}
                   onClick={() => {
                     setSelected(p.id)
                     setStarter(null)
+                    setReviewedArchive(null)
                   }}
                   className={`min-w-0 rounded-md border p-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${selected === p.id && !starter ? "border-primary bg-primary/10" : "border-border bg-surface"}`}
                 >
@@ -606,14 +662,88 @@ export const BuddyManagementModal = ({
                   key={s.id}
                   starter={s}
                   selected={starter?.id === s.id}
+                  disabled={draftLocked || reviewingArchive}
                   onSelect={() => {
                     setStarter(s)
                     setSelected("")
+                    setReviewedArchive(null)
                   }}
                 />
               ))}
           </div>
         </details>
+        <section className="space-y-2 border-t border-border pt-4">
+          <h3 className="text-base font-semibold">
+            {label("importAvatarPack", "Import an avatar pack")}
+          </h3>
+          <label className="block text-sm">
+            {label("chooseAvatarPack", "Choose avatar pack")}
+            <input
+              type="file"
+              accept=".tldw-persona-vpack"
+              className={fieldClass}
+              disabled={busy || reviewingArchive}
+              onChange={(e) => {
+                const file = e.currentTarget.files?.[0]
+                e.currentTarget.value = ""
+                if (file) void reviewArchive(file)
+              }}
+            />
+          </label>
+          <p className="text-sm text-text-muted">
+            {label("importAvatarHelp", "Choose a .tldw-persona-vpack file, review it, then select Apply.")}
+          </p>
+          {reviewingArchive ? (
+            <p role="status">{label("reviewingArchive", "Checking avatar pack…")}</p>
+          ) : null}
+          {reviewedArchive ? (
+            <div className="space-y-2 rounded-md border border-primary bg-primary/10 p-3 text-sm">
+              <p role="status" className="break-words font-medium">
+                {reviewedArchive.preview.name}
+              </p>
+              <p>
+                {t("buddyManagement.importAvatarContents", {
+                  defaultValue: "{{assets}} artwork files · {{states}} states",
+                  assets: reviewedArchive.preview.asset_count,
+                  states: reviewedArchive.preview.state_count
+                })}
+              </p>
+              {reviewedArchive.preview.artwork ? (
+                <dl className="grid gap-x-3 gap-y-1 break-words sm:grid-cols-[max-content_minmax(0,1fr)]">
+                  {reviewedArchive.preview.artwork.creator ? (
+                    <>
+                      <dt>{label("artworkCreator", "Creator")}</dt>
+                      <dd>{reviewedArchive.preview.artwork.creator}</dd>
+                    </>
+                  ) : null}
+                  {reviewedArchive.preview.artwork.license ? (
+                    <>
+                      <dt>{label("artworkLicense", "Licence")}</dt>
+                      <dd>{reviewedArchive.preview.artwork.license}</dd>
+                    </>
+                  ) : null}
+                  {reviewedArchive.preview.artwork.source_url ? (
+                    <>
+                      <dt>{label("artworkSource", "Source")}</dt>
+                      <dd className="break-all">{reviewedArchive.preview.artwork.source_url}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              ) : null}
+              {reviewedArchive.preview.artwork?.notices ? (
+                <details>
+                  <summary className="cursor-pointer">{label("artworkNotices", "Artwork notices")}</summary>
+                  <p className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words">
+                    {reviewedArchive.preview.artwork.notices}
+                  </p>
+                </details>
+              ) : null}
+              <Button size="small" disabled={busy} onClick={() => setReviewedArchive(null)}>
+                {label("clearAvatarPack", "Remove pack selection")}
+              </Button>
+            </div>
+          ) : null}
+        </section>
         <section className="space-y-3 border-t border-border pt-4">
           <h3 className="text-base font-semibold">
             {label("attachment", "Attach to")}
@@ -622,6 +752,7 @@ export const BuddyManagementModal = ({
             {label("scope", "Scope")}
             <select
               aria-label={label("scope", "Scope")}
+              disabled={draftLocked}
               className={fieldClass}
               value={scope}
               onChange={(e) => {
@@ -643,6 +774,7 @@ export const BuddyManagementModal = ({
                 {label("location", "Conversation location")}
                 <select
                   aria-label={label("location", "Conversation location")}
+                  disabled={draftLocked}
                   className={fieldClass}
                   value={location}
                   onChange={(e) => {
@@ -666,7 +798,7 @@ export const BuddyManagementModal = ({
                 {label("conversation", "Conversation")}
                 <select
                   aria-label={label("conversation", "Conversation")}
-                  disabled={loadingChats}
+                  disabled={draftLocked || loadingChats}
                   className={fieldClass}
                   value={scopeId}
                   onChange={(e) => setScopeId(e.target.value)}
@@ -711,6 +843,7 @@ export const BuddyManagementModal = ({
                 {label("workspace", "Workspace")}
                 <select
                   aria-label={label("workspace", "Workspace")}
+                  disabled={draftLocked}
                   className={fieldClass}
                   value={scopeId}
                   onChange={(e) => setScopeId(e.target.value)}
@@ -738,6 +871,7 @@ export const BuddyManagementModal = ({
                         "Default Persona for new conversations"
                       )}
                       className={fieldClass}
+                      disabled={draftLocked}
                       value={defaultPersona}
                       onChange={(e) => {
                         setDefaultPersona(e.target.value)

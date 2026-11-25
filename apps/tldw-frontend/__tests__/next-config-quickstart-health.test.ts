@@ -35,11 +35,17 @@ describe('quickstart public health routing', () => {
     }
   );
 
+  it('allows the complete Buddy multipart body through the quickstart proxy', async () => {
+    const config = await loadConfig('quickstart', 'http://app:8000');
+    expect(config.experimental.proxyClientMaxBodySize).toBe(69 * 1024 * 1024);
+  });
+
   it.each(['', 'http://app:8000'])(
     'does not proxy advanced mode (internal origin: %s)',
     async (origin) => {
       const config = await loadConfig('advanced', origin);
       expect(await config.rewrites()).toEqual([]);
+      expect(config.experimental.proxyClientMaxBodySize).toBeUndefined();
     }
   );
 

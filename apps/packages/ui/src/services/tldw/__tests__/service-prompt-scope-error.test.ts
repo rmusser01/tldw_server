@@ -21,6 +21,16 @@ describe("B09 scoped analysis versions", () => {
 })
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/buddies/import-preview", "POST", true],
+    ["/api/v1/buddies/import", "POST", true],
+    ["/api/v1/buddies/import", "GET", false],
+    ["/api/v1/buddies/import/extra", "POST", false],
+    ["https://other.invalid/api/v1/buddies/import", "POST", false]
+  ])("bounds reviewed Buddy archive upload %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
     ["/api/v1/config/docs-info", "GET", true],
     ["/api/v1/config/docs-info", "POST", false],
     ["/api/v1/config/docs-info/extra", "GET", false],

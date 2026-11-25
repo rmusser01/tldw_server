@@ -403,7 +403,7 @@ def _validate_state_catalog(state_catalog: dict[str, Any]) -> None:
             )
 
         kind = entry.get("kind")
-        if kind not in SUPPORTED_STATE_CATALOG_KINDS:
+        if not isinstance(kind, str) or kind not in SUPPORTED_STATE_CATALOG_KINDS:
             raise PersonaVisualManifestError(
                 f"state_catalog[{state_id}].kind must be one of " f"{sorted(SUPPORTED_STATE_CATALOG_KINDS)}"
             )
@@ -515,6 +515,8 @@ def _validate_fallbacks(
         if not isinstance(fallback_chain, list):
             raise PersonaVisualManifestError(f"Fallback {state} must be a list")
         for fallback_state in fallback_chain:
+            if not isinstance(fallback_state, str):
+                raise PersonaVisualManifestError(f"Fallback {state} entries must be strings")
             if fallback_state not in allowed_states:
                 raise PersonaVisualManifestError(f"Fallback {state} references unknown state {fallback_state}")
 
@@ -554,7 +556,7 @@ def _validate_authored_triggers(
         if not isinstance(trigger_id, str) or not trigger_id:
             raise PersonaVisualManifestError(f"authored_triggers[{index}].id is required")
         source = trigger.get("source")
-        if source not in SUPPORTED_TRIGGER_SOURCES:
+        if not isinstance(source, str) or source not in SUPPORTED_TRIGGER_SOURCES:
             raise PersonaVisualManifestError(
                 f"authored_triggers[{index}].source must be one of " f"{sorted(SUPPORTED_TRIGGER_SOURCES)}"
             )
@@ -562,7 +564,7 @@ def _validate_authored_triggers(
         if not isinstance(match, str) or not match:
             raise PersonaVisualManifestError(f"authored_triggers[{index}].match is required")
         state = trigger.get("state")
-        if state not in allowed_states:
+        if not isinstance(state, str) or state not in allowed_states:
             raise PersonaVisualManifestError(f"authored_triggers[{index}].state must be a known visual state")
         duration_ms = trigger.get("duration_ms")
         if not isinstance(duration_ms, int) or not MIN_TRIGGER_DURATION_MS <= duration_ms <= MAX_TRIGGER_DURATION_MS:

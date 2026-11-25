@@ -7,13 +7,13 @@ import re
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
-from tldw_Server_API.app.core.Persona.visual_artwork import artwork_manifest_for_import
 from tldw_Server_API.app.core.Persona.companion_behavior import (
     CompanionBehaviorValidationError,
     normalize_companion_behavior,
 )
+from tldw_Server_API.app.core.Persona.visual_artwork import artwork_manifest_for_import
 from tldw_Server_API.app.core.Persona.visual_import_preview_validators import (
     preview_renderer_import,
 )
@@ -50,6 +50,46 @@ from .fingerprints import canonical_payload_fingerprint, sha256_file, sha256_str
 _INTEGER_TEXT_RE = re.compile(r"^[+-]?[0-9]+$")
 
 
+class NativeVisualContents(NamedTuple):
+    """Metadata and lookup for a native archive whose ZIP members were checked."""
+
+    manifest: Mapping[str, Any]
+    pack: dict[str, Any]
+    assets: list[dict[str, Any]]
+    members: dict[str, zipfile.ZipInfo]
+    asset_summary: dict[str, int]
+
+
+def read_native_visual_contents(
+    archive: zipfile.ZipFile,
+    *,
+    progress: Callable[[str, dict[str, Any]], None] | None = None,
+    max_asset_items: int | None = None,
+    max_asset_bytes: int | None = None,
+) -> NativeVisualContents:
+    """Read the native metadata and verify the declared archive and asset checksums."""
+    members = _archive_members_by_normalized_name(archive)
+    manifest = _require_mapping(_read_required_json(archive, members, MANIFEST_PATH), MANIFEST_PATH)
+    if manifest.get("schema_version") != PERSONA_VISUAL_PACK_SCHEMA_VERSION:
+        raise ValueError("unsupported_persona_visual_pack_schema")
+    checksums = _require_mapping(_read_required_json(archive, members, CHECKSUMS_PATH), CHECKSUMS_PATH)
+    if progress is not None:
+        progress("validating_checksums", {"member_count": len(members)})
+    _validate_checksums(archive, members, checksums)
+    pack = _section_record(
+        _read_required_json(archive, members, "metadata/pack.json"), key="pack", path="metadata/pack.json"
+    )
+    assets = _section_list(
+        _read_required_json(archive, members, "metadata/assets.json"), key="assets", path="metadata/assets.json"
+    )
+    if max_asset_items is not None and len(assets) > max_asset_items:
+        raise ValueError("too_many_archive_assets")
+    if progress is not None:
+        progress("validating_assets", {"asset_count": len(assets)})
+    asset_summary = _validate_assets(archive, members, assets=assets, max_present_bytes=max_asset_bytes)
+    return NativeVisualContents(manifest, pack, assets, members, asset_summary)
+
+
 class PersonaVisualPackImportPreviewer:
     """Validate a persona visual pack archive and produce a review plan."""
 
@@ -75,24 +115,7 @@ class PersonaVisualPackImportPreviewer:
         archive_sha256 = sha256_file(archive_path)
 
         with zipfile.ZipFile(archive_path, "r") as archive:
-            members = _archive_members_by_normalized_name(archive)
-            manifest = _read_required_json(archive, members, MANIFEST_PATH)
-            _require_mapping(manifest, MANIFEST_PATH)
-            if manifest.get("schema_version") != PERSONA_VISUAL_PACK_SCHEMA_VERSION:
-                raise ValueError("unsupported_persona_visual_pack_schema")
-
-            checksums = _read_required_json(archive, members, CHECKSUMS_PATH)
-            _require_mapping(checksums, CHECKSUMS_PATH)
-            self._progress(progress, "validating_checksums", {"member_count": len(members)})
-            _validate_checksums(archive, members, checksums)
-
-            pack_payload = _read_required_json(archive, members, "metadata/pack.json")
-            assets_payload = _read_required_json(archive, members, "metadata/assets.json")
-            pack = _section_record(pack_payload, key="pack", path="metadata/pack.json")
-            assets = _section_list(assets_payload, key="assets", path="metadata/assets.json")
-
-            self._progress(progress, "validating_assets", {"asset_count": len(assets)})
-            asset_summary = _validate_assets(archive, members, assets=assets)
+            manifest, pack, assets, _, asset_summary = read_native_visual_contents(archive, progress=progress)
             visual_manifest = artwork_manifest_for_import(pack)
             renderer_import_preview: dict[str, Any] | None = None
             resolved_required_states: Mapping[str, str] = {}
@@ -321,7 +344,8 @@ class PersonaVisualPackImportPreviewer:
 def _archive_members_by_normalized_name(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     members: dict[str, zipfile.ZipInfo] = {}
     for info in archive.infolist():
-        members[normalize_member_name(info.filename)] = info
+        if not info.is_dir():
+            members[normalize_member_name(info.filename)] = info
     return members
 
 
@@ -392,8 +416,12 @@ def _validate_checksums(
     members: Mapping[str, zipfile.ZipInfo],
     checksums: Mapping[str, Any],
 ) -> None:
+    seen_paths: set[str] = set()
     for path, expected in sorted(checksums.items()):
         normalized_path = normalize_member_name(str(path))
+        if normalized_path in seen_paths:
+            raise ValueError("duplicate_checksum_path")
+        seen_paths.add(normalized_path)
         if normalized_path == CHECKSUMS_PATH:
             continue
         if normalized_path not in members:
@@ -411,6 +439,7 @@ def _validate_assets(
     members: Mapping[str, zipfile.ZipInfo],
     *,
     assets: list[dict[str, Any]],
+    max_present_bytes: int | None = None,
 ) -> dict[str, int]:
     present_asset_items = 0
     missing_asset_items = 0
@@ -428,13 +457,15 @@ def _validate_assets(
             if normalized_path not in members:
                 raise ValueError(f"missing_asset_file: {normalized_path}")
             asset_info = members[normalized_path]
+            present_asset_bytes += asset_info.file_size
+            if max_present_bytes is not None and present_asset_bytes > max_present_bytes:
+                raise ValueError("archive_assets_too_large")
             asset_sha256 = asset.get("asset_sha256")
             if asset_sha256:
                 with archive.open(asset_info) as stream:
                     if sha256_stream(stream) != str(asset_sha256):
                         raise ValueError(f"asset_checksum_mismatch: {normalized_path}")
             present_asset_items += 1
-            present_asset_bytes += int(asset_info.file_size)
         else:
             asset["asset_bytes_status"] = ASSET_BYTES_STATUS_MISSING
             asset.pop("asset_path", None)

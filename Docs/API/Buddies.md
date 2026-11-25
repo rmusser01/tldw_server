@@ -8,6 +8,8 @@ All routes below require the current server user. Client slots identify preferen
 | --- | --- |
 | `GET` base path | `{buddies: BuddyProfile[]}`; `limit` defaults to 50, maximum 100; `offset` defaults to 0. |
 | `POST` base path | Create an immutable art snapshot with `{name, source, optional_persona_id?, display_mode?}`. `source` is `{kind:"starter",starter_id}` or `{kind:"persona_pack",persona_id,pack_id}`. Returns a profile, status 201. |
+| `POST /import-preview` | Review multipart `archive`. Returns `{archive_sha256,name,asset_count,state_count,artwork}` without saving. |
+| `POST /import` | Import multipart `archive` and `reviewed_sha256`. Returns an independent, unattached profile, status 201. |
 | `GET /{buddy_id}` | Owner's active profile. |
 | `PATCH /{buddy_id}` | `{expected_version, name?, optional_persona_id?, display_mode?}`. Explicit `optional_persona_id:null` clears the optional association. |
 | `DELETE /{buddy_id}?expected_version=N` | Soft-delete the profile, status 204. |
@@ -44,6 +46,13 @@ An explicit provider/model selection in ordinary neutral workspace Chat is merge
 
 ## Imported artwork credits
 
+The independent import endpoints work on SQLite and PostgreSQL. Upload a complete
+native `.tldw-persona-vpack` up to 68 MiB, using the existing 256-asset, 10 MiB
+per asset and 64 MiB artwork limits. Send the reviewed digest and the same file
+to commit. Oversized multipart requests return 413, invalid or incomplete
+packs return 422, and a digest mismatch returns 409. Use the existing attachment
+endpoint to select the saved artwork for a conversation or workspace.
+
 Native `source_context.artwork` is a canonical JSON string containing the
 version-1 `creator`, `license`, `source_url` and `notices` record. Import validates
 and stores it in the pack's existing manifest JSON under `tldw/artwork`.
@@ -60,5 +69,5 @@ limits are recorded in [ADR-006](../../backlog/decisions/006-buddy-artwork-credi
 Earlier imports may already have lost their credits. Re-import the credited
 original archive and create a new independent Buddy; existing immutable copies
 are not silently rewritten. Keep original notice files for archives which did
-not embed credits. The existing import-job repository supports SQLite only;
-PostgreSQL artwork snapshot and native export paths preserve the same credits.
+not embed credits. Persona visual-pack import jobs support SQLite. The independent
+import and existing PostgreSQL native export paths preserve the same credits.

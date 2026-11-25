@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   locale: "en-US",
   t: (_key: string, options: { defaultValue: string }) => options.defaultValue,
   createBuddy: vi.fn(),
+  previewBuddyArchive: vi.fn(),
+  importBuddyArchive: vi.fn(),
   putBuddyAttachment: vi.fn(),
   listChats: vi.fn(),
   listWorkspaces: vi.fn(),
@@ -31,6 +33,8 @@ vi.mock("react-i18next", () => ({
 }))
 vi.mock("@/services/buddies", () => ({
   createBuddy: mocks.createBuddy,
+  previewBuddyArchive: mocks.previewBuddyArchive,
+  importBuddyArchive: mocks.importBuddyArchive,
   putBuddyAttachment: mocks.putBuddyAttachment,
   resolveBuddyConversationTarget: mocks.resolveBuddyConversationTarget,
   buddyAssets: () => ({})
@@ -118,6 +122,78 @@ it("attaches existing artwork to a named conversation without requiring a Person
     })
   )
   expect(mocks.createBuddy).not.toHaveBeenCalled()
+})
+
+it("reviews a downloaded pack and reuses the saved avatar after attachment fails", async () => {
+  const digest = "a".repeat(64)
+  const file = new File(["archive"], "moss.tldw-persona-vpack")
+  const reviewed = {
+    file,
+    preview: {
+      name: "Moss",
+      archive_sha256: digest,
+      asset_count: 1,
+      state_count: 9,
+      artwork: {
+        creator: "tldw-project",
+        license: "Apache-2.0",
+        source_url: "https://example.com/moss"
+      }
+    },
+    requestScope: {
+      config: { serverUrl: "https://example.com", authMode: "single-user" },
+      scopeKey: "test-scope",
+      userId: null,
+      clientPrincipalVerified: true
+    }
+  }
+  mocks.previewBuddyArchive.mockResolvedValue(reviewed)
+  const imported = { ...profile, id: "moss", name: "Moss" }
+  let finishUpload!: (result: BuddyProfile) => void
+  const pendingUpload = new Promise<BuddyProfile>((resolve) => { finishUpload = resolve })
+  mocks.importBuddyArchive.mockReturnValueOnce(pendingUpload)
+  mocks.putBuddyAttachment.mockRejectedValueOnce(new Error("Stale attachment"))
+  const refresh = vi.fn()
+  const { rerender } = render(<BuddyManagementModal {...props} onRetryCollections={refresh} />)
+  await screen.findByRole("option", { name: "Research" })
+  fireEvent.change(screen.getByLabelText("Choose avatar pack"), {
+    target: { files: [file] }
+  })
+  expect(await screen.findByText("tldw-project")).toBeInTheDocument()
+  expect(screen.getByText("https://example.com/moss")).toBeInTheDocument()
+  expect(mocks.previewBuddyArchive).toHaveBeenCalledWith(file, expect.any(AbortSignal))
+  expect(mocks.importBuddyArchive).not.toHaveBeenCalled()
+
+  fireEvent.change(screen.getByLabelText("Conversation"), { target: { value: "chat" } })
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+  expect(screen.getByLabelText("Scope")).toBeDisabled()
+  expect(screen.getByLabelText("Conversation location")).toBeDisabled()
+  expect(screen.getByLabelText("Conversation")).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Use Duck" })).toBeDisabled()
+  expect(mocks.putBuddyAttachment).not.toHaveBeenCalled()
+  await act(async () => { finishUpload(imported) })
+  expect(await screen.findByRole("alert")).toHaveTextContent("Stale attachment")
+  expect(screen.getByLabelText("Scope")).toBeEnabled()
+  expect(refresh).toHaveBeenCalledOnce()
+  expect(mocks.importBuddyArchive).toHaveBeenCalledWith(reviewed, expect.any(AbortSignal))
+  expect(screen.getByRole("button", { name: "Use Moss" })).toHaveAttribute("aria-pressed", "true")
+
+  rerender(
+    <BuddyManagementModal
+      {...props}
+      attachment={{ ...props.attachment, version: 1 }}
+      onRetryCollections={refresh}
+    />
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+  await waitFor(() => expect(mocks.putBuddyAttachment).toHaveBeenCalledTimes(2))
+  expect(mocks.putBuddyAttachment).toHaveBeenLastCalledWith({
+    expected_version: 1,
+    buddy_id: "moss",
+    scope_type: "conversation",
+    scope_id: "chat"
+  })
+  expect(mocks.importBuddyArchive).toHaveBeenCalledTimes(1)
 })
 
 it("resolves a composer conversation into its workspace before allowing Apply", async () => {

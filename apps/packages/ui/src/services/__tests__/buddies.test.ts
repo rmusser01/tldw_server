@@ -1,16 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   getBuddyAttachment,
+  importBuddyArchive,
   listBuddies,
   listBuddyConversations,
   listBuddyActivity,
   listBuddyTurns,
+  previewBuddyArchive,
   putBuddyAttachment,
   readBuddyConversation
 } from "../buddies"
 
 const mocks = vi.hoisted(() => ({
   fetchWithAuth: vi.fn(),
+  upload: vi.fn(),
+  initialize: vi.fn(),
+  ensureConfigForRequest: vi.fn(),
   requestWithCurrentConfig: vi.fn(),
   getChat: vi.fn(),
   listChatMessages: vi.fn(),
@@ -21,12 +26,55 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: mocks }))
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.initialize.mockResolvedValue(undefined)
+  mocks.ensureConfigForRequest.mockResolvedValue({
+    serverUrl: "https://first.invalid",
+    authMode: "single-user",
+    authSource: "manual",
+    apiKey: "synthetic-first-key"
+  })
   mocks.getConfig.mockResolvedValue({
     serverUrl: "https://first.invalid",
     accessToken: "first"
   })
 })
 describe("independent Buddy authority", () => {
+  it("keeps the native file on the direct upload transport for review and import", async () => {
+    const file = new File(["archive"], "moss.tldw-persona-vpack")
+    const digest = "a".repeat(64)
+    mocks.upload.mockResolvedValueOnce({ archive_sha256: digest }).mockResolvedValueOnce({ id: "moss" })
+    const reviewed = await previewBuddyArchive(file)
+    expect(reviewed.preview).toEqual({ archive_sha256: digest })
+    mocks.ensureConfigForRequest.mockResolvedValue({ serverUrl: "https://second.invalid", authMode: "single-user", apiKey: "synthetic-new-key" })
+    await expect(importBuddyArchive(reviewed)).resolves.toEqual({ id: "moss" })
+    expect(mocks.upload).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      path: "/api/v1/buddies/import-preview",
+      directFile: file,
+      fileFieldName: "archive"
+    }))
+    expect(mocks.upload).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      path: "/api/v1/buddies/import",
+      directFile: file,
+      fileFieldName: "archive",
+      fields: { reviewed_sha256: digest },
+      servicePromptConfig: expect.objectContaining({ serverUrl: "https://first.invalid", expectedUserId: null }),
+      abortSignal: expect.any(AbortSignal)
+    }))
+    expect(mocks.fetchWithAuth).not.toHaveBeenCalled()
+  })
+
+  it("cancels archive review when credentials change during scope discovery", async () => {
+    const file = new File(["archive"], "moss.tldw-persona-vpack")
+    let finishInitialization!: () => void
+    mocks.initialize.mockReturnValueOnce(new Promise<void>((resolve) => { finishInitialization = resolve }))
+    const pending = previewBuddyArchive(file)
+    const cancelled = expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+    finishInitialization()
+    await cancelled
+    expect(mocks.upload).not.toHaveBeenCalled()
+  })
+
   it("sends attachment version and scope without interpreting the client slot as authority", async () => {
     mocks.fetchWithAuth.mockResolvedValue({
       ok: true,

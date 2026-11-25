@@ -53,6 +53,46 @@ def _create(client, **updates):
     return response.json()
 
 
+@pytest.mark.parametrize("route", ["import-preview", "import"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_buddy_upload_rejects_oversized_multipart_request(db, monkeypatch, route, stream):
+    parts = [
+        b'--pack\r\nContent-Disposition: form-data; name="archive"; filename="pack.zip"\r\n\r\n',
+        b"x" * (2 * 1024 * 1024),
+        b"\r\n--pack--\r\n",
+    ]
+    with _client(db) as client:
+        monkeypatch.setattr("tldw_Server_API.app.core.Buddy.native_pack.MAX_BUDDY_ARCHIVE_BYTES", 1024)
+        response = client.post(
+            f"/api/v1/buddies/{route}",
+            content=iter(parts) if stream else b"".join(parts),
+            headers={"Content-Type": "multipart/form-data; boundary=pack"},
+        )
+        assert response.status_code == 413, response.text
+        assert client.get("/api/v1/buddies").json() == {"buddies": []}
+
+
+@pytest.mark.parametrize("route", ["import-preview", "import"])
+def test_buddy_upload_rejects_a_stale_account_scope(db, monkeypatch, route):
+    async def current_principal(_request):
+        return SimpleNamespace(user_id=1)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal",
+        current_principal,
+    )
+    with _client(db) as client:
+        response = client.post(
+            f"/api/v1/buddies/{route}",
+            files={"archive": ("pack.tldw-persona-vpack", b"archive", "application/zip")},
+            data={"reviewed_sha256": "0" * 64},
+            headers={"X-TLDW-Expected-User-ID": "2"},
+        )
+        assert response.status_code == 412, response.text
+        assert response.json()["detail"]["code"] == "request_config_scope_changed"
+        assert client.get("/api/v1/buddies").json() == {"buddies": []}
+
+
 def _seed_v65_conversation(database: CharactersRAGDB, title: str) -> str:
     """Insert a row using only columns that existed in the v65 schema."""
     conversation_id = "retained-v65"

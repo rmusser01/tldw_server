@@ -1,5 +1,11 @@
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
+import {
+  createServicePromptScopeLease,
+  resolveServicePromptScope,
+  type ServicePromptScope
+} from "@/services/service-prompts"
 import { toAllowedPath } from "@/services/tldw/path-utils"
 import type {
   PersonaVisualAsset,
@@ -36,6 +42,25 @@ export type BuddyAttachmentState = {
 export type BuddySource =
   | { kind: "starter"; starter_id: string }
   | { kind: "persona_pack"; persona_id: string; pack_id: string }
+
+export type BuddyImportPreview = {
+  name: string
+  archive_sha256: string
+  asset_count: number
+  state_count: number
+  artwork: {
+    creator?: string
+    license?: string
+    source_url?: string
+    notices?: string
+  } | null
+}
+
+export type ReviewedBuddyArchive = {
+  file: File
+  preview: BuddyImportPreview
+  requestScope: ServicePromptScope
+}
 
 type BuddyReadOptions = { suppressBackendUnavailableEvent?: boolean }
 
@@ -87,6 +112,48 @@ export const createBuddy = (body: {
   optional_persona_id?: string | null
   display_mode?: "dynamic" | "static"
 }) => buddyRequest<BuddyProfile>("", "POST", body)
+const uploadBuddyArchive = async <T>(
+  path: "/api/v1/buddies/import-preview" | "/api/v1/buddies/import",
+  file: File,
+  options: {
+    fields?: { reviewed_sha256: string }
+    requestScope?: ServicePromptScope
+    signal?: AbortSignal
+  }
+) => {
+  const lease = createServicePromptScopeLease(options.signal)
+  try {
+    const requestScope = options.requestScope ?? await resolveServicePromptScope({ signal: lease.signal })
+    lease.bind(requestScope)
+    lease.signal.throwIfAborted()
+    const result = await tldwClient.upload<T>({
+      ...requestScopeFields(requestScope),
+      path,
+      method: "POST",
+      directFile: file,
+      fileFieldName: "archive",
+      fields: options.fields,
+      timeoutMs: 130_000,
+      abortSignal: lease.signal
+    })
+    lease.signal.throwIfAborted()
+    return { result, requestScope }
+  } finally {
+    lease.release()
+  }
+}
+export const previewBuddyArchive = async (file: File, signal?: AbortSignal): Promise<ReviewedBuddyArchive> => {
+  const { result, requestScope } = await uploadBuddyArchive<BuddyImportPreview>("/api/v1/buddies/import-preview", file, { signal })
+  return { file, preview: result, requestScope }
+}
+export const importBuddyArchive = async (reviewed: ReviewedBuddyArchive, signal?: AbortSignal) => {
+  const { result } = await uploadBuddyArchive<BuddyProfile>("/api/v1/buddies/import", reviewed.file, {
+    fields: { reviewed_sha256: reviewed.preview.archive_sha256 },
+    requestScope: reviewed.requestScope,
+    signal
+  })
+  return result
+}
 export const updateBuddy = (
   id: string,
   body: {
