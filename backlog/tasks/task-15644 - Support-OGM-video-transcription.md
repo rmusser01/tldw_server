@@ -8,6 +8,7 @@ labels:
 references:
 - Docs/Code_Documentation/Ingestion_Pipeline_Video.md
 - Docs/ADR/022-embeddings-api-and-media-pipeline.md
+- https://github.com/rmusser01/tldw_server/pull/3624
 ---
 
 ## Description
