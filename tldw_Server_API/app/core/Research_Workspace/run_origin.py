@@ -111,7 +111,7 @@ def validate_workspace_launch(db: CharactersRAGDB, origin: WorkspaceRunOrigin) -
             if artifact is None or artifact["version"] != output.owner_version:
                 raise WorkspaceRunOriginConflict("The initiating workspace artifact changed")
         if launch.server_chat_id:
-            chat = db.get_conversation_by_id(launch.server_chat_id)
+            chat = db.conversation_store.get_conversation_by_id(launch.server_chat_id)
             if (
                 chat is None
                 or chat.get("scope_type") != "workspace"
@@ -119,8 +119,9 @@ def validate_workspace_launch(db: CharactersRAGDB, origin: WorkspaceRunOrigin) -
                 or str(chat.get("client_id")) != origin.owner_user_id
             ):
                 raise WorkspaceRunOriginConflict("The initiating conversation is unavailable")
+            message_id = launch.initiating_message_id
             if (
-                launch.initiating_message_id
-                and db.get_message_conversation_id(launch.initiating_message_id) != launch.server_chat_id
+                message_id
+                and db.message_store.get_message_conversation_id(message_id) != launch.server_chat_id
             ):
                 raise WorkspaceRunOriginConflict("The initiating message is unavailable")

@@ -1605,8 +1605,10 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_context_api.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_job_status.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_research_runs.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_study_outputs.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_upsert_owner_boundary.py",
         }
         auth_db_files = {

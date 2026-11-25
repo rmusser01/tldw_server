@@ -322,6 +322,20 @@ def read_workspace_table_media(db: Any, media_id: int, version: int, owner: str)
     return text, hashlib.sha256(text.encode()).hexdigest()
 
 
+def _read_admitted_workspace_source(
+    db: Any, source: dict[str, Any], *, source_type: str, source_id: str, owner: str,
+) -> tuple[str, dict[str, Any]]:
+    """Read and verify the Media evidence admitted for Workspace generation."""
+    revision = source.get("media_version")
+    if source_type != "document" or type(revision) is not int or revision < 1:
+        raise DataTablesJobError("workspace_table_source_changed", retryable=False)
+    text, fingerprint = read_workspace_table_media(db, int(source_id), revision, owner)
+    retrieval_params = source.get("retrieval_params_json")
+    if not isinstance(retrieval_params, dict) or retrieval_params.get("workspace_source_sha256") != fingerprint:
+        raise DataTablesJobError("workspace_table_source_changed", retryable=False)
+    return text, retrieval_params
+
+
 def _truncate_text(text: str, limit: int) -> str:
     if limit <= 0 or len(text) <= limit:
         return text
@@ -1192,13 +1206,9 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             updated_snapshot = snapshot
 
             if workspace_provider is not None:
-                revision = source.get("media_version")
-                if source_type != "document" or type(revision) is not int or revision < 1:
-                    raise DataTablesJobError("workspace_table_source_changed", retryable=False)
-                text, fingerprint = read_workspace_table_media(db, int(source_id), revision, user_id)
-                retrieval_params = source.get("retrieval_params_json")
-                if not isinstance(retrieval_params, dict) or retrieval_params.get("workspace_source_sha256") != fingerprint:
-                    raise DataTablesJobError("workspace_table_source_changed", retryable=False)
+                text, retrieval_params = _read_admitted_workspace_source(
+                    db, source, source_type=source_type, source_id=source_id, owner=user_id,
+                )
                 updated_snapshot = None
             elif source_type == "chat":
                 if not text:
