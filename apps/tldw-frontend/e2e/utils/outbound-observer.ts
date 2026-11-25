@@ -10,12 +10,13 @@ export function fixtureSetting(name: string): string {
   return value
 }
 
-export function chromiumFixtureOptions() {
-  const executablePath = process.env.OUTBOUND_CHROMIUM_WRAPPER
-  if (!executablePath) return { args: [] }
+export function chromiumFixtureOptions({ trace = true } = {}) {
+  const wrapper = process.env.OUTBOUND_CHROMIUM_WRAPPER
+  if (!wrapper) return { args: [] }
+  const binary = chromium.executablePath()
   return {
-    executablePath,
-    env: { ...process.env, OUTBOUND_CHROMIUM_BINARY: chromium.executablePath() },
+    executablePath: trace ? wrapper : binary,
+    env: trace ? { ...process.env, OUTBOUND_CHROMIUM_BINARY: binary } : undefined,
     args: [
       "--no-proxy-server",
       "--host-resolver-rules=EXCLUDE 127.0.0.1, MAP * ~NOTFOUND",

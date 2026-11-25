@@ -37,7 +37,7 @@ async function listen(port: number, handler: RequestListener) {
 async function launch(
   profileRoot: string,
   apiFixture: boolean,
-  netLog = fixtureSetting("OUTBOUND_CHROMIUM_NETLOG")
+  { websocketControl = false } = {}
 ) {
   const built = path.resolve("build/chrome-mv3")
   const manifest = JSON.parse(await readFile(path.join(built, manifestFile), "utf8"))
@@ -56,7 +56,11 @@ async function launch(
     await writeFile(path.join(copy, manifestFile), JSON.stringify(manifest))
   }
 
-  const launchOptions = chromiumFixtureOptions()
+  // The control uses its own NetLog and the same network containment as the traced app.
+  const netLog = fixtureSetting(
+    websocketControl ? "OUTBOUND_WEBSOCKET_CONTROL_NETLOG" : "OUTBOUND_CHROMIUM_NETLOG"
+  )
+  const launchOptions = chromiumFixtureOptions({ trace: !websocketControl })
   const context = await chromium.launchPersistentContext(path.join(profileRoot, "profile"), {
     ...launchOptions,
     channel: "chromium",
@@ -99,7 +103,7 @@ async function launch(
 }
 
 async function checkWorkerWebSocketControl(profileRoot: string) {
-  const { context, worker } = await launch(profileRoot, true, fixtureSetting("OUTBOUND_WEBSOCKET_CONTROL_NETLOG"))
+  const { context, worker } = await launch(profileRoot, true, { websocketControl: true })
   try {
     const blocked = await worker.evaluate(url => new Promise<boolean>(resolve => {
       const socket = new WebSocket(url)

@@ -33,8 +33,24 @@ def test_check_attempts_does_not_infer_coverage_for_unfinished_or_malformed_trac
         encoding="utf-8",
     )
     assert check_attempts(tmp_path / "browser", {18082}, required_port=18082) == {
+        "trace_fixture_unobserved",
         "trace_incomplete",
         "trace_unclassified",
+    }
+
+
+def test_check_attempts_reports_missing_trace_files(tmp_path: Path):
+    assert check_attempts(tmp_path / "browser", {18082}, required_port=18082) == {"trace_missing"}
+
+
+def test_check_attempts_reports_missing_successful_fixture_contact(tmp_path: Path):
+    (tmp_path / "browser.12").write_text(
+        'connect(9, {sa_family=AF_INET, sin_port=htons(18082), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 ECONNREFUSED\n'
+        "+++ exited with 0 +++\n",
+        encoding="utf-8",
+    )
+    assert check_attempts(tmp_path / "browser", {18082}, required_port=18082) == {
+        "trace_fixture_unobserved",
     }
 
 

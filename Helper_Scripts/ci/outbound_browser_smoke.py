@@ -88,7 +88,9 @@ VIOLATION_CODES = frozenset(
         "playwright_evidence_missing",
         "playwright_failed",
         "setup_setting_not_persisted",
+        "trace_fixture_unobserved",
         "trace_incomplete",
+        "trace_missing",
         "trace_unclassified",
         "unapproved_browser_request",
         "unapproved_extension_websocket",
@@ -136,7 +138,7 @@ def check_attempts(
     errors: set[str] = set()
     observed: set[int] = set()
     if not paths:
-        return {"trace_incomplete"}
+        return {"trace_missing"}
     for path in paths:
         finalized = False
         with path.open(encoding="utf-8", errors="replace") as trace:
@@ -189,7 +191,7 @@ def check_attempts(
         if not finalized:
             errors.add("trace_incomplete")
     if required_port is not None and required_port not in observed:
-        errors.add("trace_incomplete")
+        errors.add("trace_fixture_unobserved")
     return errors
 
 
