@@ -1090,7 +1090,7 @@ def test_part_2_and_3_manifest_keys_are_refused(tmp_path: Path, key: str) -> Non
         rag_split.load_manifest(t.manifest_path)
 
 
-@pytest.mark.parametrize(("key", "hint"), [("args", "not supported yet"), ("typo", "unknown")])
+@pytest.mark.parametrize(("key", "hint"), [("rewrite_in", "not supported yet"), ("typo", "unknown")])
 def test_unsupported_move_keys_are_refused(tmp_path: Path, key: str, hint: str) -> None:
     mv = {**moves()[0], key: ["e"]}
     t = Tree(tmp_path, moves=[mv])
@@ -1519,3 +1519,78 @@ def test_lift_needs_pkg_empty(tmp_path: Path) -> None:
     t = Tree(tmp_path, lift={"_h": "stage_a"})
     with pytest.raises(rag_split.SplitError, match="lift needs pkg ''"):
         rag_split.load_manifest(t.manifest_path)
+
+
+# --- args ---
+
+ARGS_BASE = textwrap.dedent(
+    '''\
+    import os
+    import time
+    from typing import Any
+
+    LIMIT = 5
+
+
+    def audit(*args):
+        return args
+
+
+    async def call(a):
+        """Doc."""
+        cst = make(a)
+        try:
+            cst.n = int(a)
+        except ValueError as e:
+            text = str(e)
+            audit(text, LIMIT)
+            cst.err = os.getenv(text)
+        return cst
+    '''
+)
+
+
+def args_tree(tmp: Path, src: str = ARGS_BASE, args: list[str] | None = None, **extra: object) -> Tree:
+    mv = {"name": "fail", "module": "stage_a", "span": [row(src, "text = str"), row(src, "cst.err = ")], "args": ["e"] if args is None else args}
+    return sib_tree(tmp, src, moves=[mv], **extra)
+
+
+def test_move_args_are_parameters_after_the_ctx(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = args_tree(tmp_path)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert 'def fail(cst: "Call", e) -> None:\n    text = str(e)' in t.text("mini/stage_a.py")
+    assert "        _stage_a.fail(cst, e)\n" in t.text(SIB_FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_without_args_the_handler_variable_crosses(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = args_tree(tmp_path, args=[])
+    assert t.run("apply") == 1 and "V4: crossing local e" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("src_edit", "args", "needle"),
+    [
+        (("audit(text, LIMIT)", "e = 1\n        audit(text, LIMIT)"), ["e"], "V3: fail: args e is rebound inside the span"),
+        (None, ["zz"], "V3: fail: args zz is not read in the span"),
+        (("str(e)", "str(e) + str(LIMIT)"), ["LIMIT"], "V3: fail: args LIMIT is not read in the span"),
+        (None, ["cst"], "V3: fail: args cst is a ctx or lifted name"),
+    ],
+)
+def test_move_args_refusals(tmp_path: Path, capsys: pytest.CaptureFixture, src_edit: tuple[str, str] | None, args: list[str], needle: str) -> None:
+    src = ARGS_BASE.replace(*src_edit) if src_edit else ARGS_BASE
+    t = args_tree(tmp_path, src, args=args)
+    assert t.run("apply") == 1 and needle in capsys.readouterr().out
+
+
+def test_move_args_must_be_distinct_names(tmp_path: Path) -> None:
+    t = args_tree(tmp_path, args=["e", "e"])
+    with pytest.raises(rag_split.SplitError, match="args must be a list of distinct names"):
+        rag_split.load_manifest(t.manifest_path)
+
+
+def test_verify_rejects_a_changed_args_signature(tmp_path: Path) -> None:
+    t = args_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, "mini/stage_a.py", "cst: \"Call\", e)", "cst: \"Call\", f)")
+    assert t.run("verify") == 1

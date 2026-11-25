@@ -86,7 +86,7 @@ FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
 PART2_KEYS = {"entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"}
 PART3_KEYS = {"rewrite_in", "free_imports", "relocate"}
-MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals"}
+MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals", "args"}
 LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
 DEFAULTS: dict[str, Any] = {
     "base": "",
@@ -391,9 +391,12 @@ def load_manifest(path: Path) -> dict[str, Any]:
                 if m[key] and len(ast.parse(m[key]).body) != 1:
                     raise SplitError(f"{path}: {key} must be exactly one statement")
             for spec in m["moves"]:
+                args = spec.get("args", [])
+                if not (isinstance(args, list) and all(isinstance(a, str) and a.isidentifier() for a in args)) or len(set(args)) != len(args):
+                    raise SplitError(f"{path}: move {spec.get('name')}: args must be a list of distinct names")
                 extra = sorted(set(spec) - MOVE_KEYS)
                 if extra:
-                    hint = "not supported yet (TASK-13950.25 part 2/3)" if set(extra) <= PART2_KEYS | {"args"} else "unknown"
+                    hint = "not supported yet (TASK-13950.25 part 2/3)" if set(extra) <= PART2_KEYS else "unknown"
                     raise SplitError(f"{path}: move {spec.get('name')}: keys {extra} are {hint}")
             if m["pkg"] == "":
                 bad = [k for k in ("publish", "hoist", "classes", "entry_split", "prologue", "state_init", "hidden") if m[k]]
@@ -494,6 +497,7 @@ class Move:
         self.doc: str | None = spec.get("doc")
         self.noqa: list[int] = list(spec.get("noqa", []))
         self.allow_locals: bool = bool(spec.get("allow_locals", False))
+        self.args: list[str] = list(spec.get("args", []))
         self.block: list[ast.stmt] = []
         self.members: list[ast.stmt] = []
         self.parent: Move | None = None
@@ -557,6 +561,41 @@ def plan_moves(src: Src, specs: list[dict], lines: list[str]) -> list[Move]:
 INTROSPECTION = {"locals", "vars", "globals"}
 
 
+def f_bound(root: ast.AST, key: Any) -> set[str]:
+    """Names the function's own scope binds anywhere in ``root`` (stores, handlers, imports, defs, parameters)."""
+    out: set[str] = set()
+    for n in ast.walk(root):
+        if isinstance(n, ast.Name) and is_f(n, key) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            out.add(n.id)
+        elif isinstance(n, ast.ExceptHandler) and n.name and is_f(n, key):
+            out.add(n.name)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            out.update(_bound(a) for a, r in zip(n.names, n._rs) if r is key)  # type: ignore[attr-defined]
+        elif isinstance(n, SCOPE_NODES) and getattr(n, "name", None) and is_f(n, key):
+            out.add(n.name)
+    return out
+
+
+def check_args(mv: Move, fn: Any, key: Any, ctx: list[str], lifted: set[str]) -> list[str]:
+    """V3: a name a span takes as a parameter is read, never rebound, in it, and is bound by the code around it."""
+    errs: list[str] = []
+    reads = {n.id for s in mv.members for n in ast.walk(s) if isinstance(n, ast.Name) and is_f(n, key) and isinstance(n.ctx, ast.Load)}
+    inside = f_bound(ast.Module(body=mv.members, type_ignores=[]), key)
+    outer = f_bound(fn, key) - inside | {x.arg for x in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs + [fn.args.vararg, fn.args.kwarg] if x}
+    if mv.parent:
+        outer |= set(mv.parent.args) | f_bound(ast.Module(body=mv.parent.members, type_ignores=[]), key)
+    for a in mv.args:
+        if a in ctx or a in lifted:
+            errs.append(f"V3: {mv.name}: args {a} is a ctx or lifted name")
+        elif a in inside:
+            errs.append(f"V3: {mv.name}: args {a} is rebound inside the span; a parameter must be read-only there")
+        elif a not in reads:
+            errs.append(f"V3: {mv.name}: args {a} is not read in the span")
+        elif a not in outer:
+            errs.append(f"V3: {mv.name}: args {a} is not bound by the code around the span")
+    return errs
+
+
 def check_span(m: Move, notes: list[str] | None = None) -> list[str]:
     """V1: whole statements, no return/yield/global/nonlocal, no break/continue leaving the span,
     and no locals()/vars()/globals()/__name__/__file__ unless the move says ``allow_locals``."""
@@ -606,8 +645,9 @@ def meet(a: set | None, b: set | None) -> set | None:
 class Cells:
     """Liveness of F's locals across cells: each span, plus the residual function."""
 
-    def __init__(self, fn: Any, key: Any, spans: list[tuple[str, list[ast.stmt]]], skip: tuple[str, ...] = ("rcfg", "state")) -> None:
+    def __init__(self, fn: Any, key: Any, spans: list[tuple[str, list[ast.stmt]]], skip: tuple[str, ...] = ("rcfg", "state"), args: dict[str, list[str]] | None = None) -> None:
         self.skip = skip
+        self.args = args or {}  # span label -> names it takes as parameters, so they do not cross
         self.fn, self.key = fn, key
         self.labels = [s[0] for s in spans] + ["<rest>"]
         n = len(spans)
@@ -807,6 +847,8 @@ class Cells:
         n = len(self.labels)
         for j in range(n):
             for name in self.live[j]:
+                if name in self.args.get(self.labels[j], ()):
+                    continue
                 for i in range(n):
                     if i != j and name in self.bound[i] and not (name in self.idem and self.first_import[j].get(name, 10**9) < self.first_read[j].get(name, 0)):
                         out[name].append(f"bound in {self.labels[i]}, live-in at {self.labels[j]}")
@@ -814,6 +856,8 @@ class Cells:
             for d in (x for x in self.nodes[c] if isinstance(x, DEFS) and is_f(x, self.key)):
                 free = {m.id for st in d.body for m in ast.walk(st) if isinstance(m, ast.Name) and is_f(m, self.key)}
                 for name in free:
+                    if name in self.args.get(self.labels[c], ()):
+                        continue
                     others = [o for o in range(n) if o != c and name in self.refs[o]]
                     if not others:
                         continue
@@ -1269,6 +1313,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             out.errors.append(f"V6: {name} has a nonlocal outside rewrite")
     for mv in moves:
         out.errors += check_span(mv, notes)
+        out.errors += check_args(mv, fn, key, ctx_names(m), {lf.name for lf in lifts})
     if out.errors:
         return out
     lifted = tuple(lf.name for lf in lifts)
@@ -1309,7 +1354,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # cells and crossings (V4)
     cell_spans = [(mv.name, mv.members) for mv in sorted(moves, key=lambda x: x.a - x.b)]
     if cell_spans:
-        for name, why in sorted(Cells(fn, key, cell_spans, tuple(ctx_names(m)) + lifted).crossing().items()):
+        for name, why in sorted(Cells(fn, key, cell_spans, tuple(ctx_names(m)) + lifted, {mv.name: mv.args for mv in moves}).crossing().items()):
             out.errors.append(f"V4: crossing local {name}: {'; '.join(why[:2])}")
 
     # lifts: reads of lifted names first (in every body), then each def becomes a module function and its site a partial
@@ -1341,12 +1386,12 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # moves, inside out
     for mv in sorted(moves, key=lambda x: x.b - x.a):
         mv.is_async = contains_await(mv.members)
-        d = func_template(mv.name, mv.is_async, ctx_sig(m))
+        d = func_template(mv.name, mv.is_async, ", ".join([ctx_sig(m), *mv.args]))
         for i, s in enumerate(mv.members):
             mv.members[i] = up.visit(s)
         d.body = ([ast.Expr(ast.Constant(mv.doc))] if mv.doc else []) + mv.members
         out.defs[(mv.module, mv.name)] = d
-        call = call_stmt(mv, "", call_args(m))
+        call = call_stmt(mv, "", ", ".join([call_args(m), *mv.args]))
         i = next(i for i, x in enumerate(mv.block) if x is mv.members[0])
         mv.block[i : i + len(mv.members)] = [call]
         if mv.parent and mv.parent.block is mv.block:
@@ -1846,7 +1891,7 @@ def run_apply(root: Path, m: dict) -> list[str]:
     move_cuts: dict[str, Cut] = {}
     for mv in moves:
         recv = "" if mv.parent and mv.parent.module == mv.module else f"_{mv.module}."
-        call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({call_args(m)})"
+        call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({', '.join([call_args(m), *mv.args])})"
         move_cuts[mv.name] = Cut(mv.a, mv.b, call, mv.members[0].col_offset)
     cuts += list(hoist_cuts.values()) + list(move_cuts.values())
 
@@ -1868,7 +1913,7 @@ def run_apply(root: Path, m: dict) -> list[str]:
             if '"""' in mv.doc or "\\" in mv.doc:
                 return [f"{mv.name}: doc must not contain triple quotes or backslashes"]
             body = f'    """{mv.doc}"""\n' + body
-        head = ("async " if mv.is_async else "") + f"def {mv.name}({ctx_sig(m)}) -> None:\n"
+        head = ("async " if mv.is_async else "") + f"def {mv.name}({', '.join([ctx_sig(m), *mv.args])}) -> None:\n"
         target = pkg_dir / f"{mv.module}.py"
         outputs[target].append(head + body)
         mine = [n for n in (x for s in mv.members for x in ast.walk(s)) if live(getattr(n, "lineno", mv.a))]
@@ -2250,7 +2295,7 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
     move_cuts: dict[str, Cut] = {}
     for mv in moves:
         recv = "" if mv.parent and mv.parent.module == mv.module else f"_{mv.module}."
-        call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({ctx})"
+        call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({', '.join([ctx, *mv.args])})"
         move_cuts[mv.name] = Cut(mv.a, mv.b, call, mv.members[0].col_offset)
     cuts += list(lift_cuts.values()) + list(move_cuts.values())
     made: dict[tuple[str, str], str] = {}
@@ -2272,7 +2317,7 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
             if '"""' in mv.doc or "\\" in mv.doc:
                 return [f"{mv.name}: doc must not contain triple quotes or backslashes"]
             body = f'    """{mv.doc}"""\n' + body
-        head = ("async " if mv.is_async else "") + f"def {mv.name}({ctx_sig(m)}) -> None:\n"
+        head = ("async " if mv.is_async else "") + f"def {mv.name}({', '.join([ctx_sig(m), *mv.args])}) -> None:\n"
         made[(mv.module, mv.name)] = head + body
     f_lo, f_hi = stmt_start(fn), fn.end_lineno
     new_f = render(lines, cont, f_lo, f_hi, 0, edits, cuts)
