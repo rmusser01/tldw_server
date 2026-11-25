@@ -548,14 +548,14 @@ class RAGStateMachine(RuleBasedStateMachine):
     )
     def update_config(self, top_k):
         """Update configuration."""
-        self.config["top_k"] = top_k
-        # Config changes might invalidate cache
+        # Config changes might invalidate cache: compare with the old top_k before replacing it
         if top_k < self.config.get("top_k", 10):
             # Truncate cached results
             self.cache = {
                 q: docs[:top_k]
                 for q, docs in self.cache.items()
             }
+        self.config["top_k"] = top_k
 
     @invariant()
     def cache_consistency(self):
