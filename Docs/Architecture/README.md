@@ -1,6 +1,16 @@
 # Architecture docs
 
-This folder is the **living internals reference** for tldw_server: one document per subsystem, describing how it actually works — authoritative files, dataflows, boundaries, failure behavior, and verified gotchas — anchored to the current code rather than to point-in-time plans. It follows the same conventions as the chatbook's `Docs/Architecture/` reference.
+Start with [tldw_server architecture with C4](./c4.md) to see the system's users, runtime boundaries, and how requests reach FastAPI. The component views give you a place to start reading code.
+
+| If you are working on | Start here |
+| --- | --- |
+| An API, backend service or worker | [FastAPI server components](./server.md) |
+| A user-facing route, shared React feature or WebUI connection | [WebUI architecture](./webui.md) |
+| The standalone operator console or a privileged API request | [Admin Panel architecture](./admin-ui.md) |
+| A known subsystem | [Subsystem index](#index) |
+| The rationale for an existing decision | [ADR index](../ADR/README.md) |
+
+The subsystem guides describe current behavior and link to authoritative code, data flows and failure behavior. Use the [backend code map](../Code_Documentation/Code_Map.md) to locate modules that do not have a dedicated guide below.
 
 It complements the other doc families:
 
@@ -45,7 +55,8 @@ It complements the other doc families:
 
 ### Client surfaces and remaining cores
 
-- [admin-ui.md](./admin-ui.md) — the sysadmin console: separate stack, same-origin token-stripping proxy, edge-middleware auth, triple-gated API-key login, E2E lanes
+- [webui.md](./webui.md) — the end-user WebUI, shared workspaces, client state, and connection modes
+- [admin-ui.md](./admin-ui.md) — the standalone Admin Panel, same-origin proxy, page authentication, and backend authorization
 - [sdks.md](./sdks.md) — client packages: voice SDKs (with honest maintenance states), the ADR-065 api-types drift gate, the shared UI workspace, the personal-context contract library
 - [watchlists.md](./watchlists.md) — feed/site monitoring core: sources, checks, runs, alert rules, the chatbook sync surface
 - [claims-extraction.md](./claims-extraction.md) — claims engine: extractors, verifiers, ingestion-time claims storage, relation to RAG claims
@@ -91,4 +102,4 @@ In-module READMEs (`app/core/*/README.md`) were consistently current and are the
 
 ## Not yet covered
 
-Areas without a doc here yet (candidates): the `apps/` monorepo apps in depth (WebUI beyond the port map, the browser extension), Flashcards/Audiobooks/Audio_Studio cores, Explainer, File_Artifacts, Data_Tables, Collections, Chat_Workflows deep-dives, Integrations, and the Setup UI. Until a doc exists here, the ADR set, module READMEs, and `Docs/Code_Documentation/` are the reference for those areas.
+Areas without a doc here yet (candidates): the browser extension, Flashcards/Audiobooks/Audio_Studio cores, Explainer, File_Artifacts, Data_Tables, Collections, Chat_Workflows deep-dives, Integrations, and the Setup UI. Until a doc exists here, the ADR set, module READMEs, and `Docs/Code_Documentation/` are the reference for those areas.
