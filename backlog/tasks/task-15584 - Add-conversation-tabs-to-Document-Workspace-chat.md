@@ -37,6 +37,7 @@ The requester selected browser-scoped tabs. The design applies ADR-049 to the ex
 Local Next preview rendered the workspace. The synthetic API fixture has not opened the PDF yet, so the browser overflow check remains pending.
 The frontend gate on Dev PR #3534 reproduced two fixture failures. The document chat scene test now uses the existing durable Plasmo storage fixture, and the EPUB alert test models a failed open call. On current Dev the two package-owned suites passed 22 tests, WebUI passed 30 focused tests, and the Translate and expected-account backend suites passed 16 tests.
 Re-ran shared UI coverage shard 2 of 32, which previously failed in PR #3534. All 988 tests in 93 files passed.
+The Dev merge queue twice failed to rebase PR #3534. Combined the existing branch with current Dev using a normal merge. Added empty source lists to two test message fixtures for the restored shared UI typecheck. All 277 targeted shared UI tests passed, along with the OpenAPI drift check.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

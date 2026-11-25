@@ -289,7 +289,8 @@ describe("document Chat fallback ownership", () => {
       view.result.current.trackTurn(() => new Promise<void>(resolve => { finish = resolve }))
       useStoreMessageOption.setState({
         messages: [{
-          id: "temp_reply", name: "Model", role: "assistant", message: "Outdated stream buffer", isBot: true
+          id: "temp_reply", name: "Model", role: "assistant", message: "Outdated stream buffer", isBot: true,
+          sources: []
         }]
       })
       view.result.current.selectConversation(existing.id)
@@ -334,7 +335,10 @@ describe("document Chat fallback ownership", () => {
     const { result } = renderHook(() => useDocumentChat(1, operation))
     await waitFor(() => expect(result.current.isChatReady).toBe(true))
     const source = result.current.activeConversationKey!
-    const completed = { id: "existing", name: "Model", role: "assistant" as const, message: "Finished reply", isBot: true }
+    const completed = {
+      id: "existing", name: "Model", role: "assistant" as const, message: "Finished reply", isBot: true,
+      sources: []
+    }
     let finish!: () => void
     act(() => {
       useStoreMessageOption.setState({ historyId: "temp", messages: [completed] })
