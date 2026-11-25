@@ -386,46 +386,146 @@ async def test_a_loading_redis_does_not_start_the_cooldown(answers, expected_sen
 
 @contextlib.asynccontextmanager
 async def _redis_that_closes_its_first_connection():
-    """Yield ``host:port`` of a Redis stand-in that answers every command +PONG, and closes its first connection after
+    """Yield ``host:port`` of a Redis stand-in that handles the client handshake, and closes its first connection after
     the first PING, as Redis's ``timeout`` setting (or a proxy's idle timeout) closes an idle client."""
     connections = []
+    handlers = []
+    closing = False
 
-    async def _serve(reader, writer):
+    async def _serve(reader, writer, first):
+        # Decode complete command frames with redis-py, including split/coalesced TCP reads.
+        incoming = aioredis.Connection()
+        incoming._reader = reader
+        incoming._parser.on_connect(incoming)
+        try:
+            while True:
+                command = await incoming.read_response()
+                name = command[0].upper()
+                if name == b"HELLO":
+                    reply = b"%1\r\n+proto\r\n:3\r\n" if command[1] == b"3" else b"*2\r\n+proto\r\n:2\r\n"
+                elif name == b"PING":
+                    reply = b"+PONG\r\n"
+                else:
+                    reply = b"+OK\r\n"
+                writer.write(reply)
+                await writer.drain()
+                if first and name == b"PING":
+                    break
+        except (RedisConnectionError, ConnectionError):
+            pass  # The peer closed or reset its socket.
+        finally:
+            writer.close()
+            await asyncio.wait_for(writer.wait_closed(), timeout=1)
+
+    def accept(reader, writer):
+        first = not connections
+        # Own the socket and task before the asynchronous handler can be delayed.
         connections.append(writer)
-        first = len(connections) == 1
-        while data := await reader.read(65536):
-            writer.write(b"+PONG\r\n" * data.count(b"*"))  # one reply per command; redis-py's connect handshake accepts it
-            await writer.drain()
-            if first and b"PING" in data:
-                break
-        writer.close()
+        handlers.append(asyncio.create_task(_serve(reader, writer, first)))
+        if closing:
+            writer.close()
 
-    server = await asyncio.start_server(_serve, "127.0.0.1", 0)
+    server = await asyncio.start_server(accept, "127.0.0.1", 0)
     try:
         yield f"127.0.0.1:{server.sockets[0].getsockname()[1]}"
     finally:
+        closing = True
         server.close()
+        for writer in connections:
+            writer.close()
+
+        async def drain():
+            await server.wait_closed()
+            return await asyncio.gather(*handlers, return_exceptions=True)
+
+        results = await asyncio.wait_for(drain(), timeout=1)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
 
 @pytest.mark.asyncio
-async def test_a_connection_redis_closed_while_idle_does_not_start_the_cooldown():
+@pytest.mark.parametrize("protocol", [None, 2, 3], ids=["default", "resp2", "resp3"])
+async def test_a_connection_redis_closed_while_idle_does_not_start_the_cooldown(protocol):
     """Redis closed the pooled connection while it sat idle: that command may fail, as before, but the PING after it gets
     an answer, so RG keeps calling Redis. Starting the cooldown here would refuse every user under fail_closed (TASK-13882)."""
     from tldw_Server_API.app.core.Resource_Governance import governor_redis
 
     async with _redis_that_closes_its_first_connection() as address:
-        raw = aioredis.from_url(f"redis://{address}", socket_timeout=1)
-        client = governor_redis._stop_calling_redis_while_unreachable(raw, cooldown_s=10)
-        assert await client.ping()  # the connection the stand-in then closes
-        await asyncio.sleep(0.05)
-        # redis-py 8.1 sends this on the closed connection, so it fails, as without the cooldown; a redis-py that
-        # notices the close first reconnects instead. Either way the next command must reach Redis.
-        with contextlib.suppress(RedisConnectionError):
-            await client.ping()
-        answered = await client.ping()
-        await raw.aclose()
+        options = {} if protocol is None else {"protocol": protocol}
+        raw = aioredis.from_url(f"redis://{address}", socket_timeout=1, **options)
+        try:
+            client = governor_redis._stop_calling_redis_while_unreachable(raw, cooldown_s=10)
+            assert await client.ping()  # the connection the stand-in then closes
+            await asyncio.sleep(0.05)
+            # redis-py 8.1 sends this on the closed connection, so it fails, as without the cooldown; a redis-py that
+            # notices the close first reconnects instead. Either way the next command must reach Redis.
+            with contextlib.suppress(RedisConnectionError):
+                await client.ping()
+            answered = await client.ping()
+        finally:
+            await asyncio.wait_for(raw.aclose(), timeout=1)
 
     assert answered is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body_error", [False, True], ids=["normal-exit", "original-error"])
+async def test_idle_disconnect_fixture_closes_handlers_before_their_first_step(monkeypatch, body_error):
+    loop = asyncio.get_running_loop()
+    create_task = loop.create_task
+    accepted, release = asyncio.Event(), asyncio.Event()
+    handlers, clients = [], []
+
+    def defer_handler(coro, *args, **kwargs):
+        if getattr(getattr(coro, "cr_code", None), "co_name", None) != "_serve":
+            return create_task(coro, *args, **kwargs)
+
+        async def delayed():
+            try:
+                await release.wait()
+                return await coro
+            finally:
+                coro.close()
+
+        task = create_task(delayed(), *args, **kwargs)
+        handlers.append(task)
+        accepted.set()
+        return task
+
+    monkeypatch.setattr(loop, "create_task", defer_handler)
+    original_error = RuntimeError("original fixture body failure")
+
+    async def use_fixture():
+        async with _redis_that_closes_its_first_connection() as address:
+            host, port = address.split(":")
+            clients.append(await asyncio.wait_for(asyncio.open_connection(host, int(port)), timeout=1))
+            await asyncio.wait_for(accepted.wait(), timeout=1)
+            loop.call_soon(release.set)
+            if body_error:
+                raise original_error
+
+    try:
+        if body_error:
+            with pytest.raises(RuntimeError, match="original fixture body failure") as caught:
+                await use_fixture()
+            assert caught.value is original_error
+        else:
+            await use_fixture()
+        assert handlers and all(task.done() and not task.cancelled() for task in handlers)
+        assert all(task.exception() is None for task in handlers)
+        for reader, _writer in clients:
+            with contextlib.suppress(ConnectionResetError):
+                assert await asyncio.wait_for(reader.read(), timeout=1) == b""
+    finally:
+        release.set()
+        for _reader, writer in clients:
+            writer.close()
+            await asyncio.wait_for(writer.wait_closed(), timeout=1)
+        for task in handlers:
+            if not task.done():
+                task.cancel()
+        await asyncio.wait_for(asyncio.gather(*handlers, return_exceptions=True), timeout=1)
 
 
 @pytest.mark.asyncio
@@ -434,9 +534,14 @@ async def test_a_redis_outage_is_logged_as_a_warning_once_a_minute(monkeypatch):
 
     from tldw_Server_API.app.core.Resource_Governance import policy_eval
 
+    async def _connection_refused(*_args, **_kwargs):
+        raise RedisConnectionError("Connection refused")
+
     monkeypatch.setattr(policy_eval, "_last_redis_warning", {}, raising=False)  # no warning sent yet
     rg = _governor({"requests": {"rpm": 5}, "scopes": ["user"], "fail_mode": "fail_open"}, ns="rg_down_warn")
     rg._client = _redis_down_client()
+    # Fix the logging stimulus, not the OS-dependent connect outcome.
+    monkeypatch.setattr(rg._client, "execute_command", _connection_refused)
     req = RGRequest(entity="user:x", categories={"requests": {"units": 1}}, tags={"policy_id": "p"})
     seen = []
     sink = logger.add(lambda m: seen.append(m.record["message"]), level="WARNING")

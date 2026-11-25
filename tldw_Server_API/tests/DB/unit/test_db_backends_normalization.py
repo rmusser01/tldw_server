@@ -24,15 +24,17 @@ def test_sqlite_memory_url_remains_memory(monkeypatch):
     assert cfg.sqlite_path == ":memory:"
 
 
-def test_sqlite_file_memory_uri_uses_memory(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
+def test_sqlite_file_memory_uri_uses_memory():
     cfg = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path="file::memory:?cache=shared")
     backend = SQLiteBackend(cfg)
     conn = backend.connect()
-    conn.execute("CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)")
-    conn.execute("INSERT INTO items(name) VALUES ('alpha')")
-    conn.close()
-    assert not [path for path in tmp_path.rglob("*") if path.is_file()]
+    try:
+        conn.execute("CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)")
+        conn.execute("INSERT INTO items(name) VALUES ('alpha')")
+        # Inspect SQLite directly; background logging can write unrelated files.
+        assert conn.execute("PRAGMA database_list").fetchone()["file"] == ""
+    finally:
+        conn.close()
 
 
 def test_from_env_accepts_y_for_sqlite_flags(monkeypatch):

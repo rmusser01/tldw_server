@@ -133,6 +133,7 @@ async def _validate_pg_serving_schema(db_pool: DatabasePool) -> bool:
         validate_postgres_startup_timestamps,
     )
     from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import postgres_sharing_schema_issues
+    from tldw_Server_API.app.core.DB_Management.calendar_permission_schema import postgres_calendar_permissions_ready
 
     readiness_error = "AUTHNZ_CORE_SCHEMA_NOT_READY"
     try:
@@ -146,6 +147,9 @@ async def _validate_pg_serving_schema(db_pool: DatabasePool) -> bool:
             ):
                 readiness_error = failure_reason
                 await validator(conn)
+            readiness_error = "AUTHNZ_CALENDAR_PERMISSIONS_NOT_READY"
+            if not await postgres_calendar_permissions_ready(conn):
+                raise AuthStartupError(readiness_error)
         # This validator acquires its own connection; release ours even for a one-slot pool.
         readiness_error = "AUTHNZ_PG_SHARING_SCHEMA_NOT_READY"
         if await postgres_sharing_schema_issues(db_pool):
@@ -181,6 +185,7 @@ async def _ensure_pg_extras(db_pool: DatabasePool) -> None:
             ensure_authnz_core_tables_pg,
             ensure_authnz_lockout_tables_pg,
             ensure_authnz_token_blacklist_pg,
+            ensure_calendar_permissions_pg,
             ensure_generated_files_table_pg,
             ensure_llm_provider_overrides_pg,
             ensure_notification_permissions_pg,
@@ -243,6 +248,7 @@ async def _ensure_pg_extras(db_pool: DatabasePool) -> None:
                 "AUTHNZ_PG_SHARING_SCHEMA_NOT_READY",
             ),
             ("notification permissions", ensure_notification_permissions_pg, None),
+            ("calendar permissions", ensure_calendar_permissions_pg, "AUTHNZ_CALENDAR_PERMISSIONS_NOT_READY"),
             ("generated_files table", ensure_generated_files_table_pg, None),
             ("tool catalogs tables", ensure_tool_catalogs_tables_pg, None),
             ("privilege_snapshots table", ensure_privilege_snapshots_table_pg, None),

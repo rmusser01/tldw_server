@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import BinaryIO
 from unittest.mock import MagicMock
@@ -105,6 +106,7 @@ def test_seatbelt_start_run_executes_real_subprocess_and_collects_artifacts(monk
             del stdin, start_new_session
             assert argv[0] == "/usr/bin/sandbox-exec"
             assert argv[1] == "-f"
+            assert argv[3:] == [sys.executable, "ok"]
             profile_path = Path(argv[2])
             assert profile_path.parent == control_root
             assert cwd == str(workspace_root)
@@ -140,7 +142,7 @@ def test_seatbelt_start_run_executes_real_subprocess_and_collects_artifacts(monk
             session_id=None,
             runtime=RuntimeType.seatbelt,
             base_image="host-local",
-            command=["/bin/echo", "ok"],
+            command=[sys.executable, "ok"],
             network_policy="deny_all",
             trust_level=TrustLevel.trusted,
             timeout_sec=7,
@@ -218,7 +220,7 @@ def test_seatbelt_start_run_applies_artifact_and_log_caps(
             session_id=None,
             runtime=RuntimeType.seatbelt,
             base_image="host-local",
-            command=["/bin/echo", "ok"],
+            command=[sys.executable, "ok"],
             network_policy="deny_all",
             trust_level=TrustLevel.trusted,
             timeout_sec=7,
@@ -285,7 +287,7 @@ def test_seatbelt_cancelled_run_drops_artifact_counters(
             session_id=None,
             runtime=RuntimeType.seatbelt,
             base_image="host-local",
-            command=["/bin/echo", "ok"],
+            command=[sys.executable, "ok"],
             network_policy="deny_all",
             trust_level=TrustLevel.trusted,
             timeout_sec=7,
@@ -297,6 +299,8 @@ def test_seatbelt_cancelled_run_drops_artifact_counters(
     assert status.phase == RunPhase.killed
     assert status.artifacts is None
     assert "artifact_files_collected" not in status.resource_usage
+    frames = get_hub().get_buffer_snapshot("run-seatbelt-cancel-counters")
+    assert any(frame.get("type") == "stdout" and frame.get("data") == "ok" for frame in frames)
 
 
 def test_seatbelt_start_run_times_out_and_cleans_up(monkeypatch, tmp_path: Path) -> None:
@@ -356,7 +360,7 @@ def test_seatbelt_start_run_times_out_and_cleans_up(monkeypatch, tmp_path: Path)
             session_id=None,
             runtime=RuntimeType.seatbelt,
             base_image="host-local",
-            command=["/bin/echo", "ok"],
+            command=[sys.executable, "ok"],
             network_policy="deny_all",
             trust_level=TrustLevel.trusted,
             timeout_sec=3,

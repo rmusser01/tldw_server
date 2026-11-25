@@ -2,15 +2,14 @@ import asyncio
 import importlib
 import json
 import os
-import shutil
-from typing import Optional
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from typing import Optional
+from zoneinfo import ZoneInfo
 
 import pytest
-from fastapi.testclient import TestClient
 from apscheduler.triggers.cron import CronTrigger
-from zoneinfo import ZoneInfo
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Collections.reading_digest_jobs import (
@@ -23,19 +22,17 @@ from tldw_Server_API.app.core.Collections.reading_digest_jobs import (
     handle_reading_digest_job,
     reading_digest_queue,
 )
-from tldw_Server_API.app.services.reading_digest_scheduler import _ReadingDigestScheduler
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.Collections_DB import ContentItemRow
+from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, ContentItemRow
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.config import settings
-
+from tldw_Server_API.app.services.reading_digest_scheduler import _ReadingDigestScheduler
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture()
-def client_with_user(monkeypatch):
+def client_with_user(monkeypatch, tmp_path):
     async def override_user():
         return User(id=222, username="reader", email=None, is_active=True)
 
@@ -43,9 +40,8 @@ def client_with_user(monkeypatch):
     monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
     monkeypatch.setenv("ROUTES_ENABLE", "reading")
 
-    base_dir = Path.cwd() / "Databases" / "test_reading_digest"
-    shutil.rmtree(base_dir, ignore_errors=True)
-    base_dir.mkdir(parents=True, exist_ok=True)
+    # An open SQLite handle can prevent Windows from deleting a reused database.
+    base_dir = tmp_path
     prev_base_dir = settings.get("USER_DB_BASE_DIR")
     settings.USER_DB_BASE_DIR = str(base_dir)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
@@ -83,6 +79,42 @@ def _run_digest_job(job_id: int) -> None:
         jm.complete_job(job_id, result=result, enforce=False)
 
     asyncio.run(_runner())
+
+
+def _digest_output_count_failure(
+    before_count: int | None,
+    before_ids: set[int],
+    outputs: list[CollectionsDatabase.OutputArtifactRow],
+    total: int,
+    job_id: int,
+    schedule_id: str,
+) -> str:
+    """Report bounded comparisons, never artifact fields or diagnostic exceptions."""
+    try:
+        provenance = []
+        for row in outputs[:10]:
+            metadata_json = row.metadata_json
+            if metadata_json is None:
+                metadata_json = "{}"
+            metadata = None
+            if isinstance(metadata_json, str) and len(metadata_json) <= 4096:
+                try:
+                    metadata = json.loads(metadata_json or "{}")
+                except (TypeError, ValueError, RecursionError):
+                    metadata = None
+            metadata_valid = isinstance(metadata, dict)
+            provenance.append((
+                row.id in before_ids,
+                row.job_id == job_id,
+                isinstance(metadata, dict) and metadata.get("schedule_id") == schedule_id,
+                metadata_valid,
+            ))
+        return (
+            f"before_count={before_count} after_count={total} "
+            f"rows(existed_before,current_job,current_schedule,metadata_valid)={tuple(provenance)}"
+        )
+    except Exception:
+        return f"after_count={total} provenance_available=False"
 
 
 def _make_content_item_row(
@@ -375,10 +407,19 @@ def test_reading_digest_job_includes_suggestions(client_with_user):
         payload={"schedule_id": schedule_id, "user_id": 222},
         owner_user_id=222,
     )
+    before_count: int | None = None
+    before_ids: set[int] = set()
+    try:
+        before_outputs, before_count = db.list_output_artifacts(type_="reading_digest", limit=10, offset=0)
+        before_ids = {row.id for row in before_outputs[:10]}
+    except Exception:
+        before_count = None
     _run_digest_job(job["id"])
 
     outputs, total = db.list_output_artifacts(type_="reading_digest", limit=10, offset=0)
-    assert total == 1
+    assert total == 1, _digest_output_count_failure(
+        before_count, before_ids, outputs, total, job["id"], schedule_id,
+    )
     row = outputs[0]
     meta = json.loads(row.metadata_json or "{}")
     assert meta.get("suggestions_count") == 2
@@ -391,6 +432,107 @@ def test_reading_digest_job_includes_suggestions(client_with_user):
     assert suggestion_a["title"] in content
     assert suggestion_b["title"] in content
     assert suggestion_c["title"] not in content
+
+
+@pytest.mark.parametrize(
+    ("scenario", "before_count", "after_count", "expected_rows"),
+    [
+        ("preexisting-row", 1, 2, ((False, True, True, True), (True, False, False, True))),
+        ("duplicate-current-job", 0, 2, ((False, True, True, True), (False, True, True, True))),
+        ("malformed-json", 0, 2, ((False, True, True, True), (False, True, False, False))),
+        ("non-object-json", 0, 2, ((False, True, True, True), (False, True, False, False))),
+        ("snapshot-error", None, 2, ((False, True, True, True), (False, True, True, True))),
+        ("formatter-error", 0, 2, None),
+        ("capped-rows", 0, 12, ((False, True, True, True),) * 10),
+        ("oversized-document", 0, 2, ((False, True, False, False), (False, True, False, False))),
+        ("non-string-metadata", 0, 2, ((False, True, False, False), (False, True, False, False))),
+        ("metadata-size-boundary", 0, 2, ((False, True, True, True), (False, True, True, True))),
+    ],
+)
+def test_reading_digest_count_failure_has_private_bounded_provenance(
+    mocker, scenario, before_count, after_count, expected_rows,
+):
+    """Catch missing diagnostics, lost provenance, unbounded rows, and private-field leaks."""
+    private = "PRIVATE_DIGEST_SENTINEL"
+    job_id = 874623901
+    row = CollectionsDatabase.OutputArtifactRow(
+        id=987654321,
+        user_id=private,
+        job_id=job_id,
+        run_id=765432109,
+        type="reading_digest",
+        title=private,
+        format="md",
+        storage_path=f"/{private}/output.md",
+        metadata_json=json.dumps({
+            "schedule_id": "digest_suggestions",
+            "content": private,
+            "url": f"https://{private}/?key={private}",
+        }),
+        workspace_tag=private,
+        created_at=f"{private}_timestamp",
+        media_item_id=654321098,
+        chatbook_path=f"/{private}/chatbook",
+        idempotency_key=private,
+    )
+    other = replace(row, id=987654322)
+    before_rows = []
+    if scenario == "preexisting-row":
+        other = replace(other, job_id=874623902, metadata_json=json.dumps({"schedule_id": private}))
+        before_rows = [other]
+    elif scenario == "malformed-json":
+        other = replace(other, metadata_json=f"{{{private}")
+    elif scenario == "non-object-json":
+        other = replace(other, metadata_json=json.dumps([private]))
+    outputs = [row, other]
+    if scenario == "capped-rows":
+        outputs = [replace(row, id=row.id + i) for i in range(12)]
+    elif scenario == "oversized-document":
+        metadata = json.dumps([private] + [0] * 100000)
+        outputs = [replace(item, metadata_json=metadata) for item in outputs]
+    elif scenario == "non-string-metadata":
+        outputs = [replace(item, metadata_json={"private": private}) for item in outputs]
+    elif scenario == "metadata-size-boundary":
+        metadata = row.metadata_json.ljust(4096)
+        outputs = [replace(item, metadata_json=metadata) for item in outputs]
+
+    db = mocker.Mock()
+    snapshot = RuntimeError(private) if scenario == "snapshot-error" else (before_rows, before_count)
+    db.list_output_artifacts.side_effect = [snapshot, (outputs, after_count)]
+    mocker.patch.object(CollectionsDatabase, "for_user", return_value=db)
+    jobs = mocker.Mock()
+    jobs.create_job.return_value = {"id": job_id}
+    mocker.patch(f"{__name__}.JobManager", return_value=jobs)
+    mocker.patch(f"{__name__}._run_digest_job")
+    client = mocker.Mock()
+    client.post.return_value.json.side_effect = [{"id": i, "title": private} for i in range(5)]
+    if scenario == "formatter-error":
+        mocker.patch(f"{__name__}.json.loads", side_effect=RuntimeError(private))
+    decoder = None
+    if scenario in {"oversized-document", "non-string-metadata", "metadata-size-boundary"}:
+        decoder = mocker.patch.object(json, "loads", wraps=json.loads)
+
+    with pytest.raises(AssertionError) as failure:
+        test_reading_digest_job_includes_suggestions(client)
+
+    if decoder is not None:
+        assert decoder.call_count == (2 if scenario == "metadata-size-boundary" else 0)
+    message = str(failure.value)
+    expected_message = (
+        "after_count=2 provenance_available=False"
+        if scenario == "formatter-error"
+        else (
+            f"before_count={before_count} after_count={after_count} "
+            f"rows(existed_before,current_job,current_schedule,metadata_valid)={expected_rows}"
+        )
+    )
+    assert message.splitlines()[0] == expected_message
+    assert private not in message
+    assert all(str(value) not in message for value in (row.id, other.id, job_id, other.job_id, row.run_id, row.media_item_id))
+    assert db.list_output_artifacts.call_args_list == [
+        mocker.call(type_="reading_digest", limit=10, offset=0),
+        mocker.call(type_="reading_digest", limit=10, offset=0),
+    ]
 
 
 def test_reading_digest_scheduler_claims_single_enqueue(client_with_user):

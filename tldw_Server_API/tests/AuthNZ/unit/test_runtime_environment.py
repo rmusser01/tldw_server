@@ -10,6 +10,7 @@ tests/lint/test_production_detector_single_source.py bans the key reads elsewher
 from __future__ import annotations
 
 import os
+import sys
 from types import SimpleNamespace
 from typing import Any, Callable, cast
 
@@ -213,7 +214,31 @@ def test_production_flag_keys_also_accept_truthy_values(
     neutral_env.setenv(key, value)
 
     assert runtime_environment().is_production is True
-    assert runtime_environment().source_key == key
+    # Windows resolves both spellings, so the detector's first matching alias wins.
+    expected_source = "tldw_production" if os.environ.get("tldw_production") is not None else key
+    assert runtime_environment().source_key == expected_source
+    explicit = runtime_environment({key: value})
+    assert explicit.is_production is True
+    assert explicit.source_key == key
+
+
+@pytest.mark.parametrize("value", ("1", "true", "yes", "on"))
+def test_production_flag_source_respects_case_insensitive_environment(
+    monkeypatch: pytest.MonkeyPatch, value: str,
+) -> None:
+    """Windows finds the first alias even when the caller sets its uppercase spelling."""
+    from tldw_Server_API.app.core import testing
+
+    class CaseInsensitiveEnv(dict):
+        def get(self, key, default=None):
+            return super().get(key.upper(), default)
+
+    environment = CaseInsensitiveEnv()
+    namespace = SimpleNamespace(environ=environment)
+    monkeypatch.setattr(testing, "os", namespace)
+    monkeypatch.setattr(sys.modules[__name__], "os", namespace)
+    setter = SimpleNamespace(setenv=lambda name, text: environment.__setitem__(name.upper(), text))
+    test_production_flag_keys_also_accept_truthy_values(cast(pytest.MonkeyPatch, setter), "TLDW_PRODUCTION", value)
 
 
 def test_runtime_environment_sees_env_changes_without_a_cache_reset(neutral_env: pytest.MonkeyPatch) -> None:

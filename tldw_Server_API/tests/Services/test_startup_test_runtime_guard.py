@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -132,8 +135,6 @@ _GUARDED_SEAMS = {
 
 @pytest.fixture()
 def no_seams(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
-    import os
-
     for key in _PRODUCTION_KEYS + tuple(_GUARDED_SEAMS):
         monkeypatch.delenv(key, raising=False)
     for key in list(os.environ):
@@ -160,13 +161,45 @@ def test_guard_refuses_an_armed_seam_in_production_even_under_pytest(
 def test_guard_refuses_test_fallback_keys_for_every_production_marker(
     no_seams: pytest.MonkeyPatch, key: str
 ) -> None:
-    from tldw_Server_API.app.core.testing import validate_test_runtime_flags
+    from tldw_Server_API.app.core.testing import runtime_environment, validate_test_runtime_flags
 
     no_seams.setenv(key, "production")
     no_seams.setenv("TLDW_ALLOW_TEST_FALLBACK_KEYS", "1")
 
-    with pytest.raises(RuntimeError, match=f"production-like runtime \\({key}\\)"):
+    # Windows resolves both spellings, so the detector's first matching alias wins.
+    expected_source = (
+        "tldw_production"
+        if key == "TLDW_PRODUCTION" and os.environ.get("tldw_production") is not None
+        else key
+    )
+    with pytest.raises(
+        RuntimeError,
+        match=rf"production-like runtime \({expected_source}\): TLDW_ALLOW_TEST_FALLBACK_KEYS\.",
+    ):
         validate_test_runtime_flags()
+
+    explicit = runtime_environment({key: "production"})
+    assert explicit.is_production is True
+    assert explicit.source_key == key
+
+
+@pytest.mark.parametrize("key", _PRODUCTION_KEYS)
+def test_guard_source_respects_case_insensitive_environment(
+    monkeypatch: pytest.MonkeyPatch, key: str,
+) -> None:
+    """Only the OS mapping's two production flag aliases share a diagnostic source."""
+    from tldw_Server_API.app.core import testing
+
+    class CaseInsensitiveEnv(dict):
+        def get(self, key, default=None):
+            return super().get(key.upper(), default)
+
+    environment = CaseInsensitiveEnv()
+    namespace = SimpleNamespace(environ=environment, getenv=environment.get)
+    monkeypatch.setattr(testing, "os", namespace)
+    monkeypatch.setattr(sys.modules[__name__], "os", namespace)
+    setter = SimpleNamespace(setenv=lambda name, text: environment.__setitem__(name.upper(), text))
+    test_guard_refuses_test_fallback_keys_for_every_production_marker(cast(pytest.MonkeyPatch, setter), key)
 
 
 # Value seams are armed by any non-empty value; switch seams only by a non-falsy one.

@@ -22,6 +22,41 @@ from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_e
 API_V1_PREFIX = "/api/v1"
 
 
+def _append_media_and_calendar_router_specs(specs: list[RouterSpec]) -> None:
+    """Append media and optional Calendar routers in their established order."""
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.media",
+            log_name="media",
+            prefix=f"{API_V1_PREFIX}/media",
+            tags=("media",),
+            route_key="media",
+        ),
+    )
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs",
+            log_name="media_ingest_jobs",
+            prefix=f"{API_V1_PREFIX}/media",
+            tags=("media",),
+            route_key="media-ingest-jobs",
+        ),
+    )
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.calendar",
+            log_name="calendar",
+            prefix=API_V1_PREFIX,
+            tags=("calendar",),
+            route_key="calendar",
+            default_stable=False,
+        ),
+    )
+
+
 def iter_content_router_specs() -> Iterable[RouterSpec]:
     """Yield content/media-focused router specs."""
     specs: list[RouterSpec] = []
@@ -124,27 +159,7 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         ),
     )
 
-    # Media endpoints
-    append_imported_router_spec(
-        specs,
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.media",
-            log_name="media",
-            prefix=f"{API_V1_PREFIX}/media",
-            tags=("media",),
-            route_key="media",
-        ),
-    )
-    append_imported_router_spec(
-        specs,
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs",
-            log_name="media_ingest_jobs",
-            prefix=f"{API_V1_PREFIX}/media",
-            tags=("media",),
-            route_key="media-ingest-jobs",
-        ),
-    )
+    _append_media_and_calendar_router_specs(specs)
 
     # Audio endpoints can import heavyweight optional transcriber dependencies.
     if audio_imports_enabled_for_runtime():

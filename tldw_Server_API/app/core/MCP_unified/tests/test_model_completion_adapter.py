@@ -986,6 +986,201 @@ async def test_success_leaves_no_live_adapter_owned_tasks(harness):
     assert not any(task.get_name().startswith("mcp-model-") for task in asyncio.all_tasks())
 
 
+def _observe_mark_used(original, usage_tasks):
+    """Observe one await without inspecting private values or adding checkpoints."""
+    flags = {
+        "outcome": "not_called",
+        "calls": 0,
+        "calls_truncated": False,
+        "usage_tasks": 0,
+        "usage_done": 0,
+        "usage_cancelled": 0,
+        "usage_truncated": False,
+    }
+
+    async def observed(*args, **kwargs):
+        flags["calls_truncated"] |= flags["calls"] == 4
+        flags["calls"] = min(4, flags["calls"] + 1)
+        flags["outcome"] = "pending"
+        try:
+            result = await original(*args, **kwargs)
+        except asyncio.CancelledError:
+            flags["outcome"] = "CancelledError"
+            raise
+        except TimeoutError:
+            flags["outcome"] = "TimeoutError"
+            raise
+        except Exception:  # noqa: BLE001 - record only a static category, preserving the exact exception
+            flags["outcome"] = "ordinary_exception"
+            raise
+        else:
+            flags["outcome"] = "return_true" if result is True else "return_false" if result is False else "return_other"
+            return result
+        finally:
+            snapshot = usage_tasks[:4]
+            flags["usage_tasks"] = len(snapshot)
+            flags["usage_done"] = sum(task.done() for task in snapshot)
+            flags["usage_cancelled"] = sum(task.cancelled() for task in snapshot)
+            flags["usage_truncated"] = len(usage_tasks) > len(snapshot)
+
+    return observed, flags
+
+
+@pytest_asyncio.fixture
+async def usage_diagnostic_tasks():
+    """Provide live, completed, and cancelled tasks without exposing their labels."""
+    completed = asyncio.create_task(asyncio.sleep(0), name=PRIVATE)
+    await completed
+    cancelled = asyncio.create_task(asyncio.sleep(0), name=PRIVATE)
+    cancelled.cancel(PRIVATE)
+    await asyncio.gather(cancelled, return_exceptions=True)
+    live = asyncio.create_task(asyncio.Event().wait(), name=PRIVATE)
+    try:
+        yield [live, completed, cancelled, completed, live]
+    finally:
+        live.cancel(PRIVATE)
+        await asyncio.gather(live, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,category", [("true", "return_true"), ("false", "return_false"), ("other", "return_other")])
+async def test_native_usage_diagnostic_preserves_return_identity_and_task_state(usage_diagnostic_tasks, kind, category):
+    value = {"true": True, "false": False, "other": SimpleNamespace(private=PRIVATE)}[kind]
+    credential = SimpleNamespace(private=PRIVATE)
+    caller = asyncio.current_task()
+    cancelling = caller.cancelling()
+    calls = 0
+
+    async def original(handle):
+        nonlocal calls
+        calls += 1
+        assert handle is credential
+        assert asyncio.current_task() is caller
+        return value
+
+    observed, flags = _observe_mark_used(original, usage_diagnostic_tasks)
+    assert await observed(credential) is value
+    assert calls == 1
+    assert caller.cancelling() == cancelling
+    assert flags == {
+        "outcome": category,
+        "calls": 1,
+        "calls_truncated": False,
+        "usage_tasks": 4,
+        "usage_done": 3,
+        "usage_cancelled": 1,
+        "usage_truncated": True,
+    }
+    assert all(type(value) in (str, int, bool) for value in flags.values())
+    assert PRIVATE not in f"native_usage={flags}"
+    assert not usage_diagnostic_tasks[0].done()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,category", [("cancel", "CancelledError"), ("timeout", "TimeoutError"), ("ordinary", "ordinary_exception")])
+async def test_native_usage_diagnostic_preserves_exception_identity_and_privacy(usage_diagnostic_tasks, kind, category):
+    error = {
+        "cancel": asyncio.CancelledError(PRIVATE),
+        "timeout": TimeoutError(PRIVATE),
+        "ordinary": type(PRIVATE, (RuntimeError,), {})(PRIVATE),
+    }[kind]
+    credential = SimpleNamespace(private=PRIVATE)
+    caller = asyncio.current_task()
+    cancelling = caller.cancelling()
+    calls = 0
+
+    async def original(handle):
+        nonlocal calls
+        calls += 1
+        assert handle is credential
+        assert asyncio.current_task() is caller
+        raise error
+
+    observed, flags = _observe_mark_used(original, usage_diagnostic_tasks)
+    with pytest.raises(type(error)) as caught:
+        await observed(credential)
+    assert caught.value is error
+    assert calls == 1
+    assert caller.cancelling() == cancelling
+    assert flags == {
+        "outcome": category,
+        "calls": 1,
+        "calls_truncated": False,
+        "usage_tasks": 4,
+        "usage_done": 3,
+        "usage_cancelled": 1,
+        "usage_truncated": True,
+    }
+    assert all(type(value) in (str, int, bool) for value in flags.values())
+    assert PRIVATE not in f"native_usage={flags}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deliver,category", [(False, "return_other"), (True, "CancelledError")])
+async def test_native_usage_diagnostic_preserves_self_cancellation(usage_diagnostic_tasks, deliver, category):
+    calls, cancellations = [], []
+    value = SimpleNamespace(private=PRIVATE)
+
+    async def original():
+        task = asyncio.current_task()
+        calls.append(task)
+        task.cancel(PRIVATE)
+        if deliver:
+            try:
+                await asyncio.sleep(0)
+            except asyncio.CancelledError as error:
+                cancellations.append(error)
+                raise
+        return value
+
+    observed, flags = _observe_mark_used(original, usage_diagnostic_tasks)
+    task = asyncio.create_task(observed())
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await task
+    assert calls == [task]
+    assert task.done() and task.cancelled()
+    assert task.cancelling() == 1
+    if deliver:
+        assert cancellations == [caught.value]
+    assert flags["outcome"] == category
+    assert flags["calls"] == 1
+    assert PRIVATE not in f"native_usage={flags}"
+
+
+@pytest.mark.asyncio
+async def test_native_usage_diagnostic_preserves_caller_cancellation(usage_diagnostic_tasks):
+    started, finish = asyncio.Event(), asyncio.Event()
+    calls, cancellations = [], []
+
+    async def original():
+        calls.append(asyncio.current_task())
+        started.set()
+        try:
+            await finish.wait()
+        except asyncio.CancelledError as error:
+            cancellations.append(error)
+            raise
+
+    observed, flags = _observe_mark_used(original, usage_diagnostic_tasks)
+    task = asyncio.create_task(observed())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel(PRIVATE)
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await task
+        assert cancellations == [caught.value]
+        assert calls == [task]
+        assert task.done() and task.cancelled()
+        assert task.cancelling() == 1
+        assert flags["outcome"] == "CancelledError"
+        assert flags["calls"] == 1
+        assert PRIVATE not in f"native_usage={flags}"
+    finally:
+        finish.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 @pytest.fixture
 def native_runtime(harness, monkeypatch):
     """Use the actual default authoritative runtime with only its resolver gated."""
@@ -1053,18 +1248,26 @@ async def test_native_usage_self_cancel_after_paid_receipt_is_not_public_cancell
     cancel_kind,
     outcome,
     asyncio_diagnostics,
+    monkeypatch,
 ):
     from loguru import logger
+
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import ProviderCredentialRuntime
 
     h, native = harness, native_runtime
     native.phase = "usage"
     native.usage_cancel_kind = cancel_kind
+    observed, usage_flags = _observe_mark_used(ProviderCredentialRuntime.mark_used, native.tasks)
+    monkeypatch.setattr(ProviderCredentialRuntime, "mark_used", observed)
 
     async def transport(request, credentials, *, on_receipt=None, on_native_ready=None):
         await on_native_ready()
         h.transport.calls += 1
         if on_receipt is not None:
             on_receipt("valid content")
+        if outcome == "paid":
+            # Let usage self-cancel without waiting for the test to wake inside the 10 ms usage wait.
+            native.finish.set()
         return NormalizedModelCompletion("valid content", 3, 4)
 
     h.transport.complete = transport
@@ -1080,13 +1283,15 @@ async def test_native_usage_self_cancel_after_paid_receipt_is_not_public_cancell
             call.cancel("second-native-usage-human-cancel")
         elif outcome == "shutdown":
             await adapter.shutdown()
-        native.finish.set()
         if outcome == "paid":
             assert call.cancelling() == 0
             assert (await call).content == "valid content"
             assert call.cancelling() == 0
             assert not call.cancelled()
+            # If the usage wait expired, release any pending cleanup before checking warnings.
+            native.finish.set()
         else:
+            native.finish.set()
             with pytest.raises(asyncio.CancelledError) as cancellation:
                 await call
             if outcome == "cancel":
@@ -1100,7 +1305,7 @@ async def test_native_usage_self_cancel_after_paid_receipt_is_not_public_cancell
         assert h.accounting.state == "ambiguous"
         assert sum(message == "MCP completion post-call bookkeeping cancelled" for message in messages) == (
             1 if outcome == "paid" else 0
-        )
+        ), f"native_usage={usage_flags}"
         assert all(PRIVATE not in message and len(message) < 100 for message in messages)
         assert asyncio_diagnostics == ([], [])
     finally:

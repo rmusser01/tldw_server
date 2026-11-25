@@ -15,6 +15,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import validate_ids
@@ -307,7 +308,8 @@ class ExistingClient:
             sqlite_db_config=bindings.SqliteDBConfig(
                 hash_type=bindings.MigrationHash.MD5,
                 migration_mode=bindings.MigrationMode.Validate,
-                url=(self.session.path / "chroma.sqlite3").as_uri() + "?mode=rw",
+                # Chroma mkdirs this URL's filesystem parent before SQLite parses it.
+                url="file:" + quote(str(self.session.path / "chroma.sqlite3"), safe="") + "?mode=rw",
             ),
             hnsw_cache_size=5,
             persist_path=str(self.session.path),

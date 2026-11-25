@@ -106,6 +106,8 @@ def test_worker_preserves_canonical_owner(request, tmp_path, monkeypatch, kind, 
 
     async def model(self, *, system_prompt, user_prompt):
         assert EVIDENCE in user_prompt
+        if system_prompt.startswith("Verify each flashcard"):
+            return '{"supported":[true]}'
         return json.dumps(
             {
                 "cards": [

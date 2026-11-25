@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-RESULT_PREFIX = "RUNTIME_RESULT="
+RESULT_PREFIX = b"RUNTIME_RESULT="
 
 
 def _runtime_env(tmp_path, database_url, *, backend=None, mode="single_user"):
@@ -42,12 +42,13 @@ def _runtime_env(tmp_path, database_url, *, backend=None, mode="single_user"):
 
 
 def _run_runtime(tmp_path, env, script):
+    # Keep script size off the Windows command line and diagnostic bytes undecoded.
     result = subprocess.run(
-        [sys.executable, "-c", script],
+        [sys.executable, "-"],
+        input=script.encode("utf-8"),
         cwd=tmp_path,
         env=env,
         capture_output=True,
-        text=True,
         timeout=120,
         check=False,
     )
@@ -72,6 +73,47 @@ print('RUNTIME_RESULT=' + json.dumps({
     'fallback': _apply_single_user_fallback(settings.DATABASE_URL, settings.AUTH_MODE) != settings.DATABASE_URL,
 }))
 """
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("output_encoding", ["utf-8", "cp1252"])
+def test_runtime_accepts_large_unicode_script_without_long_command_line(
+    tmp_path, monkeypatch, output_encoding
+):
+    run = subprocess.run
+
+    def windows_length_limited_run(args, **kwargs):
+        command = subprocess.list2cmdline(args)
+        assert len(command.encode("utf-16-le")) // 2 < 32767
+        return run(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", windows_length_limited_run)
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "must-not-reach-child")
+    env = _runtime_env(tmp_path, "sqlite:///:memory:")
+    env["PYTHONIOENCODING"] = output_encoding
+    script = "#" + "x" * 40000 + "\n" + """
+import json
+import os
+import sys
+assert 'PYTEST_CURRENT_TEST' not in os.environ
+assert os.getcwd() == os.environ['HOME']
+sys.stderr.buffer.write(b'non-UTF8 diagnostic: \\xe9')
+print('RUNTIME_RESULT=' + json.dumps({'value': '\u00e9\U0001f600'}))
+"""
+
+    assert _run_runtime(tmp_path, env, script) == {"value": "\u00e9\U0001f600"}
+
+
+@pytest.mark.unit
+def test_runtime_failure_withholds_subprocess_diagnostics(tmp_path):
+    env = _runtime_env(tmp_path, "sqlite:///:memory:")
+    script = "import sys; print('private-dsn'); sys.exit(1)"
+
+    with pytest.raises(AssertionError) as failure:
+        _run_runtime(tmp_path, env, script)
+
+    assert "Runtime subprocess failed (diagnostics withheld)" in str(failure.value)
+    assert "private-dsn" not in str(failure.value)
 
 
 @pytest.mark.parametrize("root_exists", [True, False])

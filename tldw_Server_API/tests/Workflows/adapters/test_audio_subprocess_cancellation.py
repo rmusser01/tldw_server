@@ -3,12 +3,13 @@
 import ast
 import asyncio
 import contextlib
-import os
-import signal
+import sys
 from pathlib import Path
 
+import psutil
 import pytest
 
+from tldw_Server_API.app.core.Workflows import subprocess_utils
 from tldw_Server_API.app.core.Workflows.adapters.audio import multi_voice_tts
 from tldw_Server_API.app.core.Workflows.adapters.audio import tts as tts_adapter
 
@@ -22,42 +23,56 @@ def slow_ffmpeg(tmp_path, monkeypatch):
     """An "ffmpeg" that writes its pid, then runs until it is killed."""
     pid_file = tmp_path / "ffmpeg.pid"
     script = tmp_path / "ffmpeg"
-    script.write_text(f'#!/bin/sh\necho $$ > "{pid_file}"\nexec sleep 30\n')
-    script.chmod(0o755)
+    script.write_text(
+        "import os, pathlib, sys, time\npathlib.Path(sys.argv[1]).write_text(str(os.getpid()))\ntime.sleep(30)\n"
+    )
+    children: list[psutil.Process] = []
+
+    async def run_ffmpeg(cmd, **kwargs):
+        # Only substitute the command; production still owns cancellation and reaping.
+        return await subprocess_utils.run_checked_async(
+            [sys.executable, str(script), str(pid_file), *cmd[1:]], **kwargs
+        )
+
     monkeypatch.setattr("shutil.which", lambda name: str(script) if name == "ffmpeg" else None)
-    yield pid_file
-    with contextlib.suppress(FileNotFoundError, ProcessLookupError, ValueError):
-        os.kill(int(pid_file.read_text()), signal.SIGKILL)  # dev leaves it running
+    monkeypatch.setattr(multi_voice_tts, "run_checked_async", run_ffmpeg)
+    monkeypatch.setattr(tts_adapter, "run_checked_async", run_ffmpeg)
+    yield pid_file, children
+    for child in children:
+        with contextlib.suppress(psutil.NoSuchProcess):
+            child.kill()  # A regression can leave the child running.
+            child.wait(timeout=5)
 
 
-async def _cancel_once_ffmpeg_runs(step, pid_file: Path) -> int:
-    """Run the step until its ffmpeg has started, cancel it, and return ffmpeg's pid."""
+async def _cancel_once_ffmpeg_runs(step, ffmpeg: tuple[Path, list[psutil.Process]]) -> psutil.Process:
+    """Cancel after the real child starts, retaining its identity for safe liveness checks."""
+    pid_file, children = ffmpeg
     task = asyncio.create_task(step)
-    for _ in range(500):
-        if pid_file.exists() and pid_file.read_text().strip():
-            break
-        await asyncio.sleep(0.01)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    return int(pid_file.read_text())
-
-
-def _is_running(pid: int) -> bool:
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
+        for _ in range(500):
+            if pid_file.exists() and pid_file.read_text().strip():
+                break
+            await asyncio.sleep(0.01)
+        child = psutil.Process(int(pid_file.read_text()))
+        children.append(child)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return child
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 async def test_a_cancelled_multi_voice_tts_step_kills_its_ffmpeg(slow_ffmpeg, tmp_path) -> None:
     """On dev the cancel left ffmpeg running to its end, past the step's timeout."""
-    pid = await _cancel_once_ffmpeg_runs(
+    child = await _cancel_once_ffmpeg_runs(
         multi_voice_tts._normalize_audio(tmp_path / "in.mp3", tmp_path / "out.mp3"), slow_ffmpeg
     )
 
-    assert not _is_running(pid)
+    assert not child.is_running()
 
 
 async def test_a_cancelled_tts_step_kills_its_ffmpeg(slow_ffmpeg, tmp_path, monkeypatch) -> None:
@@ -80,9 +95,9 @@ async def test_a_cancelled_tts_step_kills_its_ffmpeg(slow_ffmpeg, tmp_path, monk
         "post_process": {"normalize": True},
     }
 
-    pid = await _cancel_once_ffmpeg_runs(tts_adapter.run_tts_adapter(config, {}), slow_ffmpeg)
+    child = await _cancel_once_ffmpeg_runs(tts_adapter.run_tts_adapter(config, {}), slow_ffmpeg)
 
-    assert not _is_running(pid)
+    assert not child.is_running()
 
 
 _SPAWNS = {"create_subprocess_exec", "create_subprocess_shell", "subprocess_exec", "subprocess_shell"}

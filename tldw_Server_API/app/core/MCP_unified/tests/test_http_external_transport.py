@@ -523,16 +523,34 @@ class TestStreamableHttpTransport:
         assert "ping" in stub.seen_methods
 
     @pytest.mark.asyncio
-    async def test_connect_failure_maps_reason_code(self) -> None:
-        """Connect failure maps reason code."""
-        import socket
+    @pytest.mark.parametrize("refuse_connect,reason_code,cause_type", [
+        pytest.param(True, "connect_failed", httpx.ConnectError, id="refused"),
+        pytest.param(False, "request_timeout", TimeoutError, id="pending"),
+    ])
+    async def test_connect_failure_maps_reason_code(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        refuse_connect: bool,
+        reason_code: str,
+        cause_type: type[Exception],
+    ) -> None:
+        """Distinguish OS refusal from a connect still pending at the deadline."""
+        import errno
+        from time import monotonic
 
-        probe = socket.socket()
-        probe.bind(("127.0.0.1", 0))
-        closed_port = probe.getsockname()[1]
-        probe.close()
+        started = monotonic()
+        connect_entries: list[float] = []
+
+        async def connect_tcp(*args: Any, **kwargs: Any) -> None:
+            connect_entries.append(monotonic() - started)
+            if refuse_connect:
+                raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+            await asyncio.Future()
+
+        # Closed-port refusal can outlast the deadline on Windows; keep HTTP real.
+        monkeypatch.setattr(asyncio.get_running_loop(), "create_connection", connect_tcp)
         transport = StreamableHttpExternalTransport(
-            _http_server_definition(f"http://127.0.0.1:{closed_port}"),
+            _http_server_definition("http://127.0.0.1:12345"),
             connect_timeout_s=2.0,
             request_timeout_s=2.0,
         )
@@ -541,7 +559,24 @@ class TestStreamableHttpTransport:
                 await transport.connect()
         finally:
             await transport.close()
-        assert excinfo.value.reason_code == "connect_failed"
+        # Report types/codes only, never exception messages or request credentials.
+        cause: BaseException | None = excinfo.value
+        chain: list[dict[str, Any]] = []
+        while cause is not None and len(chain) < 8:
+            error_number = getattr(cause, "errno", None)
+            windows_error = getattr(cause, "winerror", None)
+            chain.append({
+                "type": f"{type(cause).__module__}.{type(cause).__qualname__}",
+                "errno": error_number if isinstance(error_number, int) else None,
+                "winerror": windows_error if isinstance(windows_error, int) else None,
+            })
+            cause = cause.__cause__
+        assert excinfo.value.reason_code == reason_code, {
+            "connect_entries_s": connect_entries,
+            "connect_and_close_s": monotonic() - started,
+            "cause_chain": chain,
+        }
+        assert isinstance(excinfo.value.__cause__, cause_type)
 
     def test_constructor_rejects_mismatched_definition(self) -> None:
         """Constructor rejects mismatched definition."""
@@ -664,6 +699,7 @@ class TestStreamableHttpTransport:
         from mcp_unified.federation.http_transport import _reason_code_for_transport_error
 
         assert _reason_code_for_transport_error(httpx.ConnectError("boom")) == "connect_failed"
+        assert _reason_code_for_transport_error(httpx.ConnectTimeout("slow connect")) == "connect_failed"
         tls_exc = httpx.ConnectError("boom")
         tls_exc.__cause__ = ssl.SSLError("bad handshake")
         assert _reason_code_for_transport_error(tls_exc) == "tls_failed"

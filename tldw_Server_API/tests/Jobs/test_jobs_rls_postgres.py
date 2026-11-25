@@ -29,6 +29,53 @@ pytestmark = [pytest.mark.integration, pytest.mark.pg_jobs]
 RLS_NOW = datetime(2026, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
 
 
+def test_calendar_admission_and_recovery_bind_real_postgres_owner_scope(monkeypatch, tmp_path):
+    """Calendar Jobs work under forced RLS without inheriting another caller's owner."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import (
+        queue_calendar_binding_sync,
+        recover_calendar_sync_admission,
+    )
+    from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
+
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    manager = JobManager(backend="postgres", db_url=rls_dsn)
+    calendar = CalendarDatabase(db_path=tmp_path / "calendar.db")
+    calendar.ensure_schema()
+    queued = []
+    with manager.scoped_rls_context(is_admin=False, domain_allowlist="unrelated", owner_user_id="77"):
+        for owner in (1, 2):
+            row = calendar.create_calendar(
+                tenant_id="default", owner_user_id=owner, org_id=None,
+                name="RLS Calendar", timezone="UTC", color=None,
+            )
+            account = calendar.create_external_account(
+                tenant_id="default", user_id=owner, provider="caldav", display_name="Fixture",
+                secret_ref=None, account_metadata_json={"server_url": "https://calendar.example.test/"},
+            )
+            binding = calendar.create_external_binding(
+                account_id=account.id, calendar_id=row.id, remote_calendar_id="https://calendar.example.test/events/",
+                remote_display_name="Fixture", lookback_days=14, lookahead_days=30,
+            )
+            result = queue_calendar_binding_sync(
+                db=calendar, job_manager=manager, actor_user_id=owner, tenant_id="default",
+                binding_id=binding.id, reason="manual",
+                window_start="2026-06-01T00:00:00+00:00", window_end="2026-07-01T00:00:00+00:00",
+            )
+            assert result.queued
+            queued.append(result)
+        assert manager.list_jobs(domain="calendar") == []
+    with manager.scoped_rls_context(is_admin=False, domain_allowlist="calendar", owner_user_id="1"):
+        assert manager.get_job(queued[0].job_id) is not None
+        assert manager.get_job(queued[1].job_id) is None
+        restored = recover_calendar_sync_admission(
+            db=calendar, job_manager=manager, admission=calendar.get_sync_admission(queued[1].binding_id),
+        )
+        assert restored is not None and restored.job_id == queued[1].job_id
+        assert manager.get_job(queued[1].job_id) is None
+
+
 def _dsn_or_skip(monkeypatch):
 
 

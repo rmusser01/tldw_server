@@ -133,6 +133,8 @@ def install_model(f, monkeypatch, *, fail=False):
 
     async def model(self, *, system_prompt, user_prompt):
         assert EVIDENCE in user_prompt
+        if system_prompt.startswith("Verify each flashcard"):
+            return '{"supported":[true]}'
         prompts.append(user_prompt)
         if fail:
             raise RuntimeError("controlled model failure")

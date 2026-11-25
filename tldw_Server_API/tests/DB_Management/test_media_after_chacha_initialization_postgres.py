@@ -220,6 +220,8 @@ def test_actual_worker_keeps_pack_membership_citation_and_sync_owner(request, tm
 
         async def model(self, *, system_prompt, user_prompt):
             assert "Synthetic evidence" in user_prompt
+            if system_prompt.startswith("Verify each flashcard"):
+                return '{"supported":[true]}'
             return json.dumps(
                 {
                     "cards": [

@@ -699,7 +699,11 @@ class TestMockedFlow:
     @pytest.mark.unit
     def test_caching_behavior_mocked(self, setup):
         """Test caching behavior with mocked API calls"""
+        override_entries = 0
+
         def override_user():
+            nonlocal override_entries
+            override_entries += 1
             return setup.regular_user
 
         app.dependency_overrides[get_request_user] = override_user
@@ -735,6 +739,7 @@ class TestMockedFlow:
             )
 
             assert response1.status_code == 200
+            override_entries_after_first = override_entries
 
             # Second request with same input (should hit cache)
             response2 = setup.client.post(
@@ -746,7 +751,13 @@ class TestMockedFlow:
                 }
             )
 
-            assert response2.status_code == 200
+            assert response2.status_code == 200, (
+                "cache_request2_auth: "
+                f"override_entries_after_first={override_entries_after_first}; "
+                f"override_entries_after_second={override_entries}; "
+                f"request_user_override_same={app.dependency_overrides.get(get_request_user) is override_user}; "
+                f"client_app_same={setup.client.app is app}"
+            )
 
             # Verify embeddings are the same (from cache)
             emb1 = response1.json()["data"][0]["embedding"]
@@ -757,6 +768,58 @@ class TestMockedFlow:
             # Note: The exact call count depends on the cache implementation
             # The important thing is that the responses are identical
             assert call_count <= 2  # At most 2 calls (cache might not be perfect in test env)
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("keep_override", "client_app_same"),
+        [(True, True), (False, True), (True, False)],
+    )
+    def test_caching_failure_diagnostics_are_private(
+        self, monkeypatch, keep_override, client_app_same
+    ):
+        """Expose only bounded auth facts when the original second status fails."""
+        from types import SimpleNamespace
+
+        from httpx import Request as HTTPRequest
+        from httpx import Response
+
+        private = "private-diagnostic-sentinel"
+        monkeypatch.setattr(app, "dependency_overrides", {})
+        responses = iter((
+            Response(200),
+            Response(
+                401,
+                headers={"X-Private": private},
+                text=private,
+                request=HTTPRequest("POST", f"https://private.invalid/{private}"),
+            ),
+        ))
+
+        def post(_path, **_kwargs):
+            response = next(responses)
+            if response.status_code == 401 and not keep_override:
+                app.dependency_overrides.pop(get_request_user)
+            else:
+                app.dependency_overrides[get_request_user]()
+            return response
+
+        fake_setup = SimpleNamespace(
+            client=SimpleNamespace(app=app if client_app_same else object(), post=post),
+            auth_headers={"Authorization": f"Bearer {private}", "X-CSRF-Token": private},
+            regular_user=object(),
+        )
+        with pytest.raises(AssertionError) as failure:
+            self.test_caching_behavior_mocked(fake_setup)
+
+        message = str(failure.value)
+        assert message.splitlines()[0] == (
+            "cache_request2_auth: override_entries_after_first=1; "
+            f"override_entries_after_second={2 if keep_override else 1}; "
+            f"request_user_override_same={keep_override}; "
+            f"client_app_same={client_app_same}"
+        )
+        assert "assert 401 == 200" in message
+        assert private not in message
 
 
 class TestLLMBudgetGuardrails:

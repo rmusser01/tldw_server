@@ -53,6 +53,8 @@ async def admin_connection() -> asyncpg.Connection:
 
 
 async def setup() -> None:
+    if os.name != "posix":
+        raise ValueError("PostgreSQL probes require POSIX owner-only file permissions")
     if MANIFEST.exists():
         raise RuntimeError("probe manifest already exists")
     suffix = token_hex(5)

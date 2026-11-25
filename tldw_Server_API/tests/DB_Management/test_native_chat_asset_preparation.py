@@ -37,11 +37,27 @@ def pdf() -> bytes:
         return document.tobytes()
 
 
-def case(db, tmp_path, monkeypatch, payload, mime, representation):
+def case(db, tmp_path, monkeypatch, payload, mime, representation, *, require_storage=True):
     generation = _reserve(db, payload=payload, mime_type=mime, representation=representation)
     root = tmp_path / "user"
     root.mkdir()
-    return _io(db, root, monkeypatch), generation, root
+    return _io(db, root, monkeypatch, require_storage=require_storage), generation, root
+
+
+@pytest.mark.parametrize("require_storage", [True, False])
+def test_case_preserves_storage_requirement(tmp_path, monkeypatch, require_storage):
+    sentinel = object()
+    requirements = []
+    monkeypatch.setitem(globals(), "_reserve", lambda *args, **kwargs: 1)
+
+    def adapter(*args, **kwargs):
+        requirements.append(kwargs["require_storage"])
+        return sentinel
+
+    monkeypatch.setitem(globals(), "_io", adapter)
+    result = case(object(), tmp_path, monkeypatch, b"text", "text/plain", "document_text_v1", require_storage=require_storage)
+    assert result == (sentinel, 1, tmp_path / "user")
+    assert requirements == [require_storage]
 
 
 def row(db):
@@ -105,15 +121,15 @@ async def test_prepares_actual_pdf_original(native_fork_db, tmp_path, monkeypatc
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "payload,mime,representation,filename",
+    "payload,mime,representation,filename,require_storage",
     [
-        (b"extracted words only", "application/pdf", "document_original_v1", "source.pdf"),
-        (png(), "image/jpeg", "embedded_image_v1", "source.jpg"),
-        (b"\x89PNG\r\n\x1a\ntruncated", "image/png", "embedded_image_v1", "source.png"),
-        (b"\xff\xfeinvalid utf8", "text/plain", "document_text_v1", "processed.txt"),
-        (b"words", "application/pdf", "document_text_v1", "processed.pdf"),
-        (b"words", "text/plain", "file_v1", "processed.txt"),
-        (b"words", "text/plain", "unavailable_v1", "processed.txt"),
+        (b"extracted words only", "application/pdf", "document_original_v1", "source.pdf", False),
+        (png(), "image/jpeg", "embedded_image_v1", "source.jpg", True),
+        (b"\x89PNG\r\n\x1a\ntruncated", "image/png", "embedded_image_v1", "source.png", True),
+        (b"\xff\xfeinvalid utf8", "text/plain", "document_text_v1", "processed.txt", True),
+        (b"words", "application/pdf", "document_text_v1", "processed.pdf", False),
+        (b"words", "text/plain", "file_v1", "processed.txt", False),
+        (b"words", "text/plain", "unavailable_v1", "processed.txt", False),
     ],
     ids=[
         "text-as-pdf",
@@ -126,9 +142,11 @@ async def test_prepares_actual_pdf_original(native_fork_db, tmp_path, monkeypatc
     ],
 )
 async def test_refuses_spoofed_or_unsupported_representation(
-    native_fork_db, tmp_path, monkeypatch, payload, mime, representation, filename
+    native_fork_db, tmp_path, monkeypatch, payload, mime, representation, filename, require_storage
 ):
-    adapter, generation, root = case(native_fork_db, tmp_path, monkeypatch, payload, mime, representation)
+    adapter, generation, root = case(
+        native_fork_db, tmp_path, monkeypatch, payload, mime, representation, require_storage=require_storage
+    )
     with pytest.raises(ValueError, match="native_asset_|native_upload_"):
         await prepare(adapter, generation, payload, filename)
     assert row(native_fork_db)["state"] == "reserved"
@@ -243,7 +261,9 @@ async def test_publication_failure_retries_same_candidate(native_fork_db, tmp_pa
 @pytest.mark.asyncio
 async def test_cancelled_request_keeps_staging_until_worker_drains(native_fork_db, tmp_path, monkeypatch):
     payload = b"exact text"
-    adapter, generation, root = case(native_fork_db, tmp_path, monkeypatch, payload, "text/plain", "document_text_v1")
+    adapter, generation, root = case(
+        native_fork_db, tmp_path, monkeypatch, payload, "text/plain", "document_text_v1", require_storage=False
+    )
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     paths = []
     original = adapter._prepare_upload
@@ -324,7 +344,9 @@ async def test_reloaded_document_limit_prevents_prepared_cas(native_fork_db, tmp
 @pytest.mark.asyncio
 async def test_actual_sink_reads_are_bounded_by_reserved_native_bytes(native_fork_db, tmp_path, monkeypatch):
     payload = b"first"
-    adapter, generation, root = case(native_fork_db, tmp_path, monkeypatch, payload, "text/plain", "document_text_v1")
+    adapter, generation, root = case(
+        native_fork_db, tmp_path, monkeypatch, payload, "text/plain", "document_text_v1", require_storage=False
+    )
     requests = []
 
     class OversizedUpload:
@@ -446,7 +468,7 @@ async def test_real_epub_container_preserves_house_marker_validation(native_fork
     monkeypatch.setattr(sink.puremagic, "from_file", lambda *args, **kwargs: "application/zip")
     monkeypatch.setattr(sink, "_default_file_validator", sink.FileValidator())
     adapter, generation, root = case(
-        native_fork_db, tmp_path, monkeypatch, payload, "application/epub+zip", "document_original_v1"
+        native_fork_db, tmp_path, monkeypatch, payload, "application/epub+zip", "document_original_v1", require_storage=marker
     )
     if marker:
         assert (await prepare(adapter, generation, payload, "source.epub")).state == "prepared"

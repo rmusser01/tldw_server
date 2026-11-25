@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.config_sections.calendar import load_calendar_sync_startup_config
 from tldw_Server_API.app.services.lifecycle_worker_specs import (
     ShutdownPhase,
     WorkerLifecycleContext,
@@ -133,6 +134,20 @@ def _standalone_html_worker_enabled(context: WorkerLifecycleContext) -> bool:
     """Keep cleanup/handler ownership aligned with the existing Slides route."""
 
     return bool(context.route_enabled("slides"))
+
+
+def _calendar_sync_jobs_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    """Require the typed opt-in and the existing Calendar lifecycle route gate."""
+    return load_calendar_sync_startup_config().jobs_worker_enabled and bool(
+        context.route_enabled("calendar", default_stable=False)
+    )
+
+
+def _calendar_sync_scheduler_enabled(context: WorkerLifecycleContext) -> bool:
+    """Require the scheduler opt-in without changing route or test-mode policy."""
+    return load_calendar_sync_startup_config().scheduler_enabled and bool(
+        context.route_enabled("calendar", default_stable=False)
+    )
 
 
 def _standalone_html_worker_factory(
@@ -256,6 +271,20 @@ def provide_content_jobs_worker_specs(
                 "READING_DIGEST_JOBS_WORKER_ENABLED",
                 "reading",
             ),
+        ),
+        stop_event_worker_spec(
+            name="calendar_sync_jobs_task",
+            worker_service=_run_calendar_sync_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=_calendar_sync_jobs_worker_enabled,
+        ),
+        stop_event_worker_spec(
+            name="calendar_sync_scheduler_task",
+            worker_service=_run_calendar_sync_scheduler_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=_calendar_sync_scheduler_enabled,
         ),
         stop_event_worker_spec(
             name="chat_macros_jobs_task",
@@ -1207,6 +1236,22 @@ def _run_reading_digest_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_reading_digest_jobs_worker(stop_event)
+
+
+def _run_calendar_sync_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import (
+        run_calendar_sync_worker as _run_calendar_sync_worker,
+    )
+
+    return _run_calendar_sync_worker(stop_event)
+
+
+def _run_calendar_sync_scheduler_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.calendar_sync_scheduler import (
+        run_calendar_sync_scheduler as _run_calendar_sync_scheduler,
+    )
+
+    return _run_calendar_sync_scheduler(stop_event)
 
 
 def _run_chat_macros_jobs_worker_service(stop_event: Any) -> Any:

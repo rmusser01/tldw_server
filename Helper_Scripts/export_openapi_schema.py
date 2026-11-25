@@ -46,7 +46,8 @@ _CANONICAL_ENV = {
     # explicitly UNSET the minimizers so every router is registered
     "MINIMAL_TEST_APP": "",
     "ULTRA_MINIMAL_APP": "",
-    "ROUTES_ENABLE": "",
+    # Include Calendar in the contract without changing its deployed opt-in default.
+    "ROUTES_ENABLE": "calendar",
     "ROUTES_DISABLE": "",
     # pin the deployment profile so environment-derived toggles are stable
     "ENVIRONMENT": "test",

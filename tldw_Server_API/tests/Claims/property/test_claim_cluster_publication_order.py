@@ -7,6 +7,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import ClusterCalculation
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.tests.DB_Management.test_claim_cluster_rebuild_publication import request, state
@@ -63,3 +64,4 @@ def test_arbitrary_publication_order_never_regresses_head_or_rewrites_replays(or
             )
         finally:
             db.close_connection()
+            reset_managed_sqlite_backends(mode="hard", backends=[db.backend])

@@ -52,16 +52,18 @@ def test_session_manager_plan_lookup_rejects_session_or_user_mismatch():
     assert manager.get_plan(session_id="sess_1", plan_id="plan_1", user_id="user_2") is None
 
 
-def test_session_manager_rejects_resume_session_owner_mismatch():
-    manager = SessionManager()
+@pytest.mark.parametrize("max_sessions_per_user", [1, 200])
+def test_session_manager_rejects_resume_session_owner_mismatch(max_sessions_per_user):
+    manager = SessionManager(max_sessions_per_user=max_sessions_per_user)
     _ = manager.create(user_id="user_1", persona_id="research_assistant", resume_session_id="sess_1")
 
     with pytest.raises(ValueError, match="ownership mismatch"):
         manager.create(user_id="user_2", persona_id="research_assistant", resume_session_id="sess_1")
 
 
-def test_session_manager_rejects_resume_session_persona_mismatch():
-    manager = SessionManager()
+@pytest.mark.parametrize("max_sessions_per_user", [1, 200])
+def test_session_manager_rejects_resume_session_persona_mismatch(max_sessions_per_user):
+    manager = SessionManager(max_sessions_per_user=max_sessions_per_user)
     _ = manager.create(user_id="user_1", persona_id="research_assistant", resume_session_id="sess_1")
 
     with pytest.raises(ValueError, match="persona mismatch"):
@@ -244,6 +246,82 @@ def test_session_manager_prunes_expired_sessions_on_access():
     manager._sessions["sess_ttl"].updated_at = datetime.now(timezone.utc) - timedelta(seconds=5)  # noqa: SLF001
 
     assert manager.get("sess_ttl") is None
+
+
+@pytest.fixture
+def session_clock(monkeypatch):
+    now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+
+    class ControlledDatetime:
+        @staticmethod
+        def now(tz):
+            return now[0]
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.datetime", ControlledDatetime)
+    return now
+
+
+@pytest.mark.parametrize("clock_step", [0, -1, 1], ids=["frozen", "backward", "increasing"])
+@pytest.mark.parametrize("cap", [1, 2])
+@pytest.mark.parametrize("resume_session_id", [None, "requested"])
+def test_session_cap_retains_created_session_under_clock_boundaries(session_clock, clock_step, cap, resume_session_id):
+    manager = SessionManager(max_sessions_per_user=cap)
+    other = manager.create("other", "persona")
+    existing = [manager.create("owner", "persona") for _ in range(cap)]
+    session_clock[0] += timedelta(seconds=clock_step)
+
+    created = manager.create("owner", "persona", resume_session_id, persisted=True)
+
+    assert manager.get(created.session_id) is created
+    assert created.persisted
+    assert len(manager.list_sessions(user_id="owner")) == cap
+    assert manager.get(other.session_id) is other
+    evicted = [session for session in existing if manager.get(session.session_id) is None]
+    assert len(evicted) == 1
+    assert not manager.publish_transcript(
+        user_id="owner",
+        snapshot={
+            "session_id": evicted[0].session_id,
+            "persona_id": "persona",
+            "revision": 1,
+            "turns": [manager.prepare_turn(role="assistant", content="Late")],
+        },
+    )
+    assert manager.get(evicted[0].session_id) is None
+
+
+def test_session_cap_preserves_recently_resumed_existing_session(session_clock):
+    manager = SessionManager(max_sessions_per_user=2)
+    first = manager.create("owner", "persona", "first")
+    session_clock[0] += timedelta(seconds=1)
+    second = manager.create("owner", "persona", "second")
+    session_clock[0] += timedelta(seconds=1)
+    assert manager.create("owner", "persona", "first", persisted=True) is first
+    session_clock[0] += timedelta(seconds=1)
+
+    third = manager.create("owner", "persona", "third")
+
+    assert manager.get(first.session_id) is first
+    assert first.persisted
+    assert manager.get(second.session_id) is None
+    assert manager.get(third.session_id) is third
+
+
+def test_session_cap_replacement_rejects_old_preflight_identity_with_frozen_clock(session_clock):
+    manager = SessionManager(max_sessions_per_user=1)
+    original = manager.create("owner", "persona", "reviewed")
+    manager.put_plan(
+        session_id="reviewed", user_id="owner", persona_id="persona", plan_id="plan",
+        steps=[{"idx": 0, "tool": "rag_search"}],
+    )
+    manager.create("owner", "persona", "replacement")
+    recreated = manager.create("owner", "persona", "reviewed")
+
+    assert recreated is not original
+    assert manager.get("reviewed") is recreated
+    assert manager.get("replacement") is None
+    assert manager.get_plan(session_id="reviewed", plan_id="plan", user_id="owner") is None
+    assert not manager.admit_tool_session(original, user_id="owner", persona_id="persona", persisted=False)
 
 
 def test_session_manager_applies_payload_caps_with_truncation_markers():

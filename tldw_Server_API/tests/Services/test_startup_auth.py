@@ -216,6 +216,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
             "admin_webhook_canonical"
         ),
         ensure_notification_permissions_pg=_make_pg_ensure("notification_permissions"),
+        ensure_calendar_permissions_pg=_make_pg_ensure("calendar_permissions"),
         ensure_sharing_tables_pg=_make_pg_ensure("sharing"),
         ensure_generated_files_table_pg=_make_pg_ensure("generated_files"),
         ensure_tool_catalogs_tables_pg=_make_pg_ensure("tool_catalogs"),
@@ -244,6 +245,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         "admin_webhook_canonical",
         "sharing",
         "notification_permissions",
+        "calendar_permissions",
         "generated_files",
         "tool_catalogs",
         "privilege_snapshots",
@@ -392,6 +394,7 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
         "ensure_admin_webhook_canonical_tables_pg",
         "ensure_sharing_tables_pg",
         "ensure_notification_permissions_pg",
+        "ensure_calendar_permissions_pg",
         "ensure_generated_files_table_pg",
         "ensure_tool_catalogs_tables_pg",
         "ensure_privilege_snapshots_table_pg",
@@ -486,6 +489,7 @@ async def test_pg_ensure_false_emits_high_signal_warning(
         "ensure_admin_monitoring_tables_pg": _successful_ensure,
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _failed_ensure,
+        "ensure_calendar_permissions_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
         "ensure_tool_catalogs_tables_pg": _successful_ensure,
@@ -515,6 +519,49 @@ async def test_pg_ensure_false_emits_high_signal_warning(
 
 
 @pytest.mark.unit
+async def test_pg_calendar_permissions_readiness_failure_blocks_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _success(_pool: object) -> bool:
+        return True
+
+    async def _calendar_failure(_pool: object) -> bool:
+        return False
+
+    names = (
+        "ensure_user_timestamp_timezones_pg",
+        "ensure_authnz_core_tables_pg",
+        "ensure_authnz_lockout_tables_pg",
+        "ensure_authnz_token_blacklist_pg",
+        "ensure_resource_daily_ledger_pg",
+        "ensure_org_stt_settings_pg",
+        "ensure_admin_monitoring_tables_pg",
+        "ensure_storage_quota_overrides_backfill_pg",
+        "ensure_admin_webhook_canonical_tables_pg",
+        "ensure_sharing_tables_pg",
+        "ensure_notification_permissions_pg",
+        "ensure_calendar_permissions_pg",
+        "ensure_generated_files_table_pg",
+        "ensure_tool_catalogs_tables_pg",
+        "ensure_privilege_snapshots_table_pg",
+        "ensure_api_keys_tables_pg",
+        "ensure_usage_tables_pg",
+        "ensure_virtual_key_counters_pg",
+        "ensure_llm_provider_overrides_pg",
+    )
+    ensures = dict.fromkeys(names, _success)
+    ensures["ensure_calendar_permissions_pg"] = _calendar_failure
+    _install_module(
+        monkeypatch, "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
+        PGUsageSchemaError=PGUsageSchemaError, **ensures,
+    )
+    startup_auth = _import_startup_auth()
+
+    with pytest.raises(startup_auth.AuthStartupError, match="AUTHNZ_CALENDAR_PERMISSIONS_NOT_READY"):
+        await startup_auth._ensure_pg_extras(_owner_pg_pool())
+
+
+@pytest.mark.unit
 async def test_pg_authnz_core_readiness_failure_blocks_startup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -535,6 +582,7 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
+        "ensure_calendar_permissions_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
         "ensure_tool_catalogs_tables_pg": _successful_ensure,
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
@@ -599,6 +647,7 @@ async def test_pg_required_schema_readiness_failure_blocks_startup(
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
+        "ensure_calendar_permissions_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
         "ensure_tool_catalogs_tables_pg": _successful_ensure,
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
@@ -651,6 +700,7 @@ async def test_pg_sharing_readiness_failure_blocks_startup(
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _failed_sharing_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
+        "ensure_calendar_permissions_pg": _successful_ensure,
         "ensure_generated_files_table_pg": _successful_ensure,
         "ensure_tool_catalogs_tables_pg": _successful_ensure,
         "ensure_privilege_snapshots_table_pg": _successful_ensure,

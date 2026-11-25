@@ -218,6 +218,14 @@ class TestEvaluationMetricInvariants:
         assert abs(overall - score_value) < 0.0001  # Account for float precision
 
 
+@pytest.fixture
+def uniqueness_timings():
+    slowest: dict[str, list[float]] = {}
+    yield slowest
+    # Emit outside the Hypothesis deadline, retaining the slow sample after replay.
+    print("[evaluation-unique-id] " + json.dumps(slowest))
+
+
 @pytest.mark.property
 class TestEvaluationStorageInvariants:
     """Test invariants for evaluation storage."""
@@ -253,23 +261,40 @@ class TestEvaluationStorageInvariants:
             unique=True
         )
     )
-    def test_unique_id_constraint(self, evaluation_manager, eval_ids):
+    def test_unique_id_constraint(self, evaluation_manager, uniqueness_timings, eval_ids):
         """Each evaluation ID must be unique in storage."""
         import asyncio
+        from time import perf_counter
+
         stored_ids = set()
+        store_ms: list[float] = []
+        runner_ms: list[float] = []
 
-        for _ in eval_ids:
-            # Don't pass evaluation_id - let store_evaluation generate it
-            eval_id = asyncio.run(evaluation_manager.store_evaluation(
-                evaluation_type="test",
-                input_data={"test": True},
-                results={"score": 0.5}
-            ))
+        async def store() -> str | None:
+            started = perf_counter()
+            try:
+                # Let store_evaluation generate the ID.
+                return await evaluation_manager.store_evaluation(
+                    evaluation_type="test",
+                    input_data={"test": True},
+                    results={"score": 0.5},
+                )
+            finally:
+                store_ms.append(round((perf_counter() - started) * 1000, 3))
 
-            if eval_id:
-                # Generated IDs should always be unique
-                assert eval_id not in stored_ids
-                stored_ids.add(eval_id)
+        try:
+            for _ in eval_ids:
+                started = perf_counter()
+                try:
+                    eval_id = asyncio.run(store())
+                finally:
+                    runner_ms.append(round((perf_counter() - started) * 1000, 3))
+                if eval_id:
+                    assert eval_id not in stored_ids
+                    stored_ids.add(eval_id)
+        finally:
+            if sum(runner_ms) > sum(uniqueness_timings.get("runner_ms", ())):
+                uniqueness_timings.update(store_ms=store_ms, runner_ms=runner_ms)
 
     @settings(max_examples=10, deadline=5000, suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])  # Reduce examples and increase deadline
     @given(
@@ -279,20 +304,41 @@ class TestEvaluationStorageInvariants:
     def test_list_pagination_invariant(self, evaluation_manager, num_evaluations, limit):
         """Pagination must return correct number of results."""
         import asyncio
+        from time import perf_counter
+
+        started = perf_counter()
+        phases = {"store_s": [], "list_s": None}
 
         async def _run():
             # Create evaluations
             for i in range(num_evaluations):
-                await evaluation_manager.store_evaluation(
-                    evaluation_type="test",
-                    input_data={"index": i},
-                    results={"score": i / (num_evaluations + 1)}
-                )
+                store_started = perf_counter()
+                try:
+                    await evaluation_manager.store_evaluation(
+                        evaluation_type="test",
+                        input_data={"index": i},
+                        results={"score": i / (num_evaluations + 1)}
+                    )
+                finally:
+                    phases["store_s"].append(perf_counter() - store_started)
 
             # Test pagination
-            return await evaluation_manager.list_evaluations(limit=limit)
+            list_started = perf_counter()
+            try:
+                return await evaluation_manager.list_evaluations(limit=limit)
+            finally:
+                phases["list_s"] = perf_counter() - list_started
 
-        results = asyncio.run(_run())
+        try:
+            results = asyncio.run(_run())
+        finally:
+            # Pytest retains these scalar timings when Hypothesis reports a deadline.
+            print("[evaluation-pagination] " + json.dumps({
+                "num_evaluations": num_evaluations,
+                "limit": limit,
+                "runner_s": perf_counter() - started,
+                **phases,
+            }))
 
         # Handle both list and dict response formats
         if isinstance(results, dict) and "items" in results:

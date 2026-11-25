@@ -183,7 +183,7 @@ class SessionManager:
         for plan_id in drop_ids:
             session.pending_plans.pop(plan_id, None)
 
-    def _enforce_user_session_cap_locked(self, user_id: str) -> None:
+    def _enforce_user_session_cap_locked(self, user_id: str, *, keep_session_id: str) -> None:
         user_sessions = [
             session
             for session in self._sessions.values()
@@ -191,7 +191,8 @@ class SessionManager:
         ]
         if len(user_sessions) <= self._max_sessions_per_user:
             return
-        user_sessions.sort(key=lambda s: s.updated_at, reverse=True)
+        # Admission must survive even when the wall clock ties or moves backward.
+        user_sessions.sort(key=lambda s: (s.session_id == keep_session_id, s.updated_at), reverse=True)
         keep_ids = {session.session_id for session in user_sessions[: self._max_sessions_per_user]}
         drop_ids = [
             session.session_id
@@ -224,7 +225,7 @@ class SessionManager:
                 persisted=persisted,
             )
             self._sessions[sid] = sess
-            self._enforce_user_session_cap_locked(user_id)
+            self._enforce_user_session_cap_locked(user_id, keep_session_id=sid)
             return self._sessions[sid]
 
     def get(self, session_id: str) -> Session | None:

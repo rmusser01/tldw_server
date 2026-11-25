@@ -468,6 +468,18 @@ def _startup_snapshot(owner):
             "DELETE FROM public.role_permissions WHERE role_id = (SELECT id FROM public.roles WHERE name='user') AND permission_id = (SELECT id FROM public.permissions WHERE name='prompts.read')",
             "AUTHNZ_CORE_SCHEMA_NOT_READY",
         ),
+        (
+            "DELETE FROM public.permissions WHERE name='calendar.admin'",
+            "AUTHNZ_CALENDAR_PERMISSIONS_NOT_READY",
+        ),
+        (
+            "DELETE FROM public.role_permissions WHERE role_id = (SELECT id FROM public.roles WHERE name='user') AND permission_id = (SELECT id FROM public.permissions WHERE name='calendar.sync')",
+            "AUTHNZ_CALENDAR_PERMISSIONS_NOT_READY",
+        ),
+        (
+            "DELETE FROM public.role_permissions WHERE role_id = (SELECT id FROM public.roles WHERE name='viewer') AND permission_id = (SELECT id FROM public.permissions WHERE name='calendar.read')",
+            "AUTHNZ_CALENDAR_PERMISSIONS_NOT_READY",
+        ),
     ],
     ids=[
         "session-refresh",
@@ -484,6 +496,9 @@ def _startup_snapshot(owner):
         "user-timestamp",
         "sharing",
         "mcp-default-grant",
+        "calendar-catalog",
+        "calendar-user-grant",
+        "calendar-viewer-grant",
     ],
 )
 @pytest.mark.asyncio

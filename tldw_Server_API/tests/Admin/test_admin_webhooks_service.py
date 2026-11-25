@@ -302,11 +302,12 @@ def _hook(url: str, *, retry_count: int = 0) -> WebhookRecord:
 
 
 @pytest.fixture
-def http_route(monkeypatch: pytest.MonkeyPatch, svc: AdminWebhooksService):
+async def http_route(monkeypatch: pytest.MonkeyPatch, svc: AdminWebhooksService):
     """Deliver through the default client factory and the real afetch over a MockTransport.
 
     Egress and redirect handling run for real; only the socket layer is replaced, and any
-    real connection attempt fails loudly. ``replies`` holds (status, headers, body) or an
+    real connection attempt fails loudly. The async fixture lets the loop initialize
+    its own socket pair before installing the tripwire. ``replies`` holds (status, headers, body) or an
     exception to raise, per request; the delivery log row is captured instead of written.
     """
     import socket
@@ -340,6 +341,18 @@ def http_route(monkeypatch: pytest.MonkeyPatch, svc: AdminWebhooksService):
     log = AsyncMock(return_value=MagicMock())
     svc._log_delivery = log  # type: ignore[method-assign]
     return requests, replies, log
+
+
+@pytest.mark.unit
+async def test_http_route_still_refuses_raw_socket_connections(http_route):
+    """Loop initialization must not exempt delivery-time raw socket connects."""
+    import socket
+
+    with pytest.raises(AssertionError, match="admin webhook delivery bypassed core.http_client"):
+        socket.create_connection(("127.0.0.1", 1))
+    with socket.socket() as connection:
+        with pytest.raises(AssertionError, match="admin webhook delivery bypassed core.http_client"):
+            connection.connect(("127.0.0.1", 1))
 
 
 @pytest.mark.unit

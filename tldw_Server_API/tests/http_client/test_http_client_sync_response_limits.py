@@ -29,6 +29,7 @@ def test_sync_deadline_bounds_certificate_pinning(
 ) -> None:
     """Pin preflight cannot consume an independent connect/handshake budget."""
     budgets: list[float] = []
+    waits: list[tuple[float, float, float]] = []
 
     class Socket:
         """Synthetic pinning socket recording each timeout."""
@@ -44,17 +45,23 @@ def test_sync_deadline_bounds_certificate_pinning(
         def __exit__(self, *_args: Any) -> None:
             return None
 
+    def sleep_for_socket_timeout(timeout: float) -> None:
+        before = time.monotonic()
+        time.sleep(min(timeout, UNCUT_SECONDS))
+        after = time.monotonic()
+        waits.append((timeout, after - before, deadline - after))
+
     def connect(_address: Any, *, timeout: float) -> Socket:
         """Never create a real network socket."""
         budgets.append(timeout)
         if phase == "connect":
-            time.sleep(min(timeout, UNCUT_SECONDS))
+            sleep_for_socket_timeout(timeout)
             raise TimeoutError("synthetic sensitive connect failure")
         return Socket()
 
     def handshake(sock: Socket, **_kwargs: Any) -> None:
         """Simulate a handshake that exhausts its socket timeout."""
-        time.sleep(min(sock.timeout, UNCUT_SECONDS))
+        sleep_for_socket_timeout(sock.timeout)
         raise TimeoutError("synthetic sensitive handshake failure")
 
     monkeypatch.setattr(hc.socket, "create_connection", connect)
@@ -63,14 +70,18 @@ def test_sync_deadline_bounds_certificate_pinning(
         lambda **_kwargs: types.SimpleNamespace(minimum_version=None, wrap_socket=handshake),
     )
     started = time.monotonic()
-    with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
-        hc.fetch(
-            method="GET", url="https://93.184.216.34/models",
-            max_response_bytes=4, deadline=started + 0.1,
-            cert_pinning={"93.184.216.34": {"0" * 64}}, sensitive_observability=True,
-        )
-    assert time.monotonic() - started < CUT_BOUND_SECONDS
-    assert budgets and all(0 < budget <= 0.1 for budget in budgets)
+    deadline = started + 0.1
+    try:
+        with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
+            hc.fetch(
+                method="GET", url="https://93.184.216.34/models",
+                max_response_bytes=4, deadline=deadline,
+                cert_pinning={"93.184.216.34": {"0" * 64}}, sensitive_observability=True,
+            )
+        assert time.monotonic() - started < CUT_BOUND_SECONDS
+        assert budgets and all(0 < budget <= 0.1 for budget in budgets)
+    finally:
+        print(f"[pinning-timeout] {phase}: (timeout_s, slept_s, remaining_s)={waits}")
 
 
 @pytest.mark.parametrize("slow_lookup", [1, 2])
@@ -136,6 +147,81 @@ def test_sync_deadline_bounds_retry_sleep_without_late_dispatch(monkeypatch, fai
     assert time.monotonic() - started < CUT_BOUND_SECONDS
     assert len(calls) == 1
     assert clients and all(client.is_closed for client in clients)
+
+
+@pytest.mark.parametrize("failure", ["network", "retry_after", "redirect_without_location"])
+@pytest.mark.parametrize(
+    "case", ["equal", "clipped", "fitting", "zero", "oversleep", "expired", "unbounded", "negative", "nan"],
+)
+def test_sync_retry_sleep_preserves_budget_and_error_semantics(
+    monkeypatch: pytest.MonkeyPatch, failure: str, case: str,
+) -> None:
+    """A clipped wait ends the request even if the next clock sample is early."""
+    hc._get_httpx_client()  # Keep cold client construction outside the retry clock.
+    clock = time.monotonic()
+    deadline = clock + 0.15
+    remaining = deadline - clock
+    delay = {
+        "equal": remaining, "clipped": UNCUT_SECONDS, "fitting": 0.01,
+        "zero": 0.0, "oversleep": 0.01, "expired": 0.01,
+        "unbounded": UNCUT_SECONDS, "negative": -1.0, "nan": float("nan"),
+    }[case]
+    calls: list[httpx.Request] = []
+    clients: list[httpx.AsyncClient] = []
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        nonlocal clock
+        sleeps.append(seconds)
+        if case in {"negative", "nan"}:
+            time.sleep(seconds)
+        clock += remaining if case == "oversleep" else min(seconds, 0.14)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal clock
+        calls.append(request)
+        if len(calls) > 1:
+            return httpx.Response(200, stream=httpx.ByteStream(b"safe"))
+        if case == "expired":
+            clock = deadline
+        if failure == "network":
+            raise httpx.ReadError("synthetic-secret must not escape", request=request)
+        status = 429 if failure == "retry_after" else 302
+        return httpx.Response(status, headers={"Retry-After": str(delay)}, content=b"synthetic-secret")
+
+    create_async_client = hc.create_async_client
+
+    def owned_client(**kwargs: Any) -> httpx.AsyncClient:
+        client = create_async_client(transport=httpx.MockTransport(handler), **kwargs)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(hc, "create_async_client", owned_client)
+    monkeypatch.setattr(hc, "_decorrelated_jitter_sleep", lambda *_args: delay)
+    # Do not alter asyncio's clock or the egress policy's independent clock.
+    monkeypatch.setattr(hc, "time", types.SimpleNamespace(monotonic=lambda: clock, time=time.time, sleep=sleep))
+    timeout_expected = case in {"equal", "clipped", "oversleep", "expired"}
+    with hc.create_client(transport=httpx.MockTransport(handler)) as sync_client:
+        options = {"client": sync_client} if case == "unbounded" else {"deadline": deadline}
+        kwargs = {"method": "GET", "url": URL, "max_response_bytes": 4, "sensitive_observability": True, **options}
+        if timeout_expected:
+            with pytest.raises(hc.NetworkError, match="^TimeoutError$"):
+                hc.fetch(**kwargs)
+        elif case in {"negative", "nan"}:
+            with pytest.raises(ValueError):
+                hc.fetch(**kwargs)
+        else:
+            assert hc.fetch(**kwargs).content == b"safe"
+
+    assert len(calls) == (1 if timeout_expected or case in {"negative", "nan"} else 2)
+    if case == "expired":
+        assert sleeps == []
+    else:
+        expected_sleep = delay if case == "unbounded" else min(delay, remaining)
+        assert sleeps == pytest.approx([expected_sleep], nan_ok=True)
+    assert sync_client.is_closed
+    assert all(client.is_closed for client in clients)
+    assert bool(clients) is (case != "unbounded")
 
 
 @pytest.mark.parametrize("failure", ["network", "retry_after", "redirect_without_location"])

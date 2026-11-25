@@ -36,6 +36,10 @@ def test_separate_configured_stores_do_not_share_user_flags(tmp_path: Path) -> N
         path = tmp_path / name / "system_ops.json"
         key = "synthetic." + name
         env = {key: value for key, value in os.environ.items() if key in {"HOME", "USER", "PATH", "LANG", "LC_ALL"}}
+        # Windows socket-provider initialization needs its inherited system directory.
+        system_root = os.environ.get("SystemRoot")
+        if system_root and Path(system_root).is_dir():
+            env["SystemRoot"] = system_root
         env.update(PYTHONPATH=str(ROOT), PYTHONDONTWRITEBYTECODE="1", SYSTEM_OPS_STORE_PATH=str(path))
         child = subprocess.run(  # nosec B603 -- Fixed interpreter/script and controlled private fixture paths.
             [sys.executable, "-B", "-c", CHILD, str(path), key, str(ROOT)],
@@ -78,3 +82,36 @@ def test_configured_store_does_not_consult_legacy_root(monkeypatch: pytest.Monke
     monkeypatch.setattr(service, "get_database_dir", unexpected_legacy_root)
     if service._default_store_path() != path:
         raise AssertionError("Configured Admin store path changed")
+
+
+@pytest.mark.parametrize("root_kind", ["directory", "file", "missing", "absent"])
+def test_configured_store_child_env_keeps_only_valid_system_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, root_kind: str,
+) -> None:
+    """Observe launch inputs without running Windows with a synthetic system root."""
+    candidate = tmp_path / "system root"
+    if root_kind == "directory":
+        candidate.mkdir()
+    elif root_kind == "file":
+        candidate.touch()
+    if root_kind == "absent":
+        monkeypatch.delenv("SystemRoot", raising=False)
+    else:
+        monkeypatch.setenv("SystemRoot", str(candidate))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "parent profile"))
+    monkeypatch.setenv("TLDW_CONFIG_DIR", str(tmp_path / "parent config"))
+    monkeypatch.setenv("PARENT_ONLY_SENTINEL", "must-not-inherit")
+
+    class ChildEnvironmentObserved(Exception):
+        pass
+
+    def inspect_child(_command, *, env, **_kwargs):
+        assert env.get("SystemRoot") == (str(candidate) if root_kind == "directory" else None)
+        assert not {"USERPROFILE", "TLDW_CONFIG_DIR", "PARENT_ONLY_SENTINEL"}.intersection(env)
+        assert set(env) <= {"HOME", "USER", "PATH", "LANG", "LC_ALL", "SystemRoot",
+                            "PYTHONPATH", "PYTHONDONTWRITEBYTECODE", "SYSTEM_OPS_STORE_PATH"}
+        raise ChildEnvironmentObserved
+
+    monkeypatch.setattr(subprocess, "run", inspect_child)
+    with pytest.raises(ChildEnvironmentObserved):
+        test_separate_configured_stores_do_not_share_user_flags(tmp_path)

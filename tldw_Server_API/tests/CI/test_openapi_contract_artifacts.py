@@ -73,6 +73,23 @@ def test_empty_contract_cannot_generate_a_path_union(exporter, monkeypatch, tmp_
     assert exporter.main(["--paths", str(tmp_path / "paths.d.ts")]) == 2
 
 
+@pytest.mark.parametrize("inherited_enable", ["", "media", "calendar"])
+def test_canonical_inventory_includes_opt_in_calendar(exporter, monkeypatch, inherited_enable):
+    from tldw_Server_API.app.core import config
+
+    for key in exporter._CANONICAL_ENV:
+        monkeypatch.setenv(key, "inherited")
+    monkeypatch.setenv("ROUTES_ENABLE", inherited_enable)
+    exporter._apply_canonical_env()
+    config._route_toggle_policy.cache_clear()
+    try:
+        assert config.route_enabled("calendar", default_stable=False) is True
+        assert config.route_enabled("media", default_stable=True) is True
+        assert config.route_enabled("unknown-optional-route", default_stable=False) is False
+    finally:
+        config._route_toggle_policy.cache_clear()
+
+
 def test_required_drift_gate_checks_committed_path_union():
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/backend-required.yml").read_text()

@@ -105,11 +105,11 @@ class FileSystemStorage(StorageBackend):
             resolved = _ordinary_windows_path(path.resolve())
             try:
                 resolved.relative_to(_ordinary_windows_path(self.base_path))
-            except ValueError:
+            except ValueError as exc:
                 raise StorageError(
                     f"Path escapes base directory: {path}",
                     path=str(path),
-                ) from None
+                ) from exc
             return resolved
         except Exception as e:
             if isinstance(e, StorageError):
@@ -248,7 +248,18 @@ class FileSystemStorage(StorageBackend):
             True if the file was deleted, False if it didn't exist
         """
         full_path = self.base_path / path
-        self._validate_path(full_path)
+        try:
+            self._validate_path(full_path)
+        except StorageError:
+            # Windows can resolve a concurrently unlinked leaf to an NTFS tombstone.
+            try:
+                self._validate_path(full_path.parent)
+                full_path.lstat()
+            except FileNotFoundError:
+                return False
+            except (StorageError, OSError, ValueError):
+                pass
+            raise
 
         if not full_path.exists():
             logger.debug(f"File already deleted or not found: {path}")

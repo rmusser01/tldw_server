@@ -167,12 +167,18 @@ async def test_existing_complete_history_overlap_still_saves_one_new_turn(queued
 
 @pytest.mark.asyncio
 async def test_foreign_conversation_is_not_used_as_history_evidence(queued_chat: SimpleNamespace) -> None:
-    foreign = queued_chat.db.add_conversation({"client_id": "2", "title": "Other owner"})
-    for message in PREFIX:
-        queued_chat.db.add_message({"conversation_id": foreign, "sender": message["role"], "content": message["content"]})
-    foreign_before = queued_chat.db.get_messages_for_conversation(foreign)
-    queued_chat.conversation_id = queued_chat.db.add_conversation({"client_id": "1", "title": "Empty owned chat"})
-    queued_chat.db.close_connection()
-    await resume(queued_chat, [*PREFIX, {"role": "user", "content": "Queued question"}])
-    assert [row["content"] for row in rows(queued_chat)] == [message["content"] for message in PREFIX] + ["Queued question"]
-    assert queued_chat.db.get_messages_for_conversation(foreign) == foreign_before
+    foreign_db = CharactersRAGDB(queued_chat.db.db_path, client_id="2", backend=queued_chat.db.backend)
+    try:
+        foreign = foreign_db.add_conversation({"client_id": "2", "title": "Other owner"})
+        for message in PREFIX:
+            foreign_db.add_message({"conversation_id": foreign, "sender": message["role"], "content": message["content"]})
+        foreign_before = foreign_db.get_messages_for_conversation(foreign)
+        assert [row["content"] for row in foreign_before] == [message["content"] for message in PREFIX]
+        foreign_db.close_connection()
+        queued_chat.conversation_id = queued_chat.db.add_conversation({"client_id": "1", "title": "Empty owned chat"})
+        queued_chat.db.close_connection()
+        await resume(queued_chat, [*PREFIX, {"role": "user", "content": "Queued question"}])
+        assert [row["content"] for row in rows(queued_chat)] == [message["content"] for message in PREFIX] + ["Queued question"]
+        assert queued_chat.db.get_messages_for_conversation(foreign) == foreign_before
+    finally:
+        foreign_db.close_all_connections()
