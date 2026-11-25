@@ -7,6 +7,7 @@ there, and checks the result with ``verify --base-dir`` or by reading the text. 
 from __future__ import annotations
 
 import ast
+import hashlib
 import os
 import subprocess
 import sys
@@ -95,7 +96,7 @@ class Tree:
         self.base, self.head = tmp / "base", tmp / "head"
         for d in (self.base, self.head):
             (d / "mini").mkdir(parents=True)
-            (d / FILE).write_text(src)
+            (d / str(manifest.get("file", FILE))).write_text(src)
         self.manifest_path = tmp / "m.py"
         self.set(**manifest)
 
@@ -946,3 +947,247 @@ def test_prologue_and_state_init_must_be_one_statement(tmp_path: Path) -> None:
 def test_refuses_python_older_than_3_12(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "version_info", (3, 11, 9, "final", 0))
     assert rag_split.main(["verify", "x.py", "--base", "HEAD"]) == 2
+
+
+# --- TASK-13950.25 part 1: the tool is parametrised for chat code, and every RAG default is unchanged ---
+
+RAG_MANIFESTS = sorted((REPO_ROOT / "Helper_Scripts/rag_split/manifests").glob("t*.py"))
+
+
+def test_every_rag_manifest_still_verifies_after_generalisation() -> None:
+    """Each RAG manifest verifies at its recorded base against the commit that last touched it, with 0 differences.
+
+    The ``base`` is the manifest's own record, so this needs no integration ref; it does need history
+    (CI checks out with ``fetch-depth: 0``).
+    """
+    if _git("rev-parse", "--is-shallow-repository").strip() == "true":
+        pytest.skip("shallow clone: the recorded bases are not reachable")
+    assert len(RAG_MANIFESTS) >= 13
+    failed = []
+    for mf in RAG_MANIFESTS:
+        base = rag_split.load_manifest(mf)["base"]
+        head = _git("log", "-1", "--format=%H", "HEAD", "--", str(mf.relative_to(REPO_ROOT))).strip()
+        assert base and head, mf
+        if rag_split.main(["verify", "--root", str(REPO_ROOT), str(mf), "--base", base, "--head", head]) != 0:
+            failed.append(mf.name)
+    assert failed == []
+
+
+CHAT_FILE = "mini/chat_service.py"
+CHAT_BASE = textwrap.dedent(
+    """\
+    import os
+    import time
+
+    LIMIT = 5
+
+
+    def audit(*args):
+        return args
+
+
+    async def call(a):
+        \"\"\"Doc.\"\"\"
+        x = os.getenv("A")
+        t0 = time.time()
+        audit(LIMIT, x, t0)
+        return a
+    """
+)
+CHAT = {
+    "file": CHAT_FILE,
+    "func": "call",
+    "ctx": [["cst", "Call"]],
+    "ctx_import": ["from .types import Call"],
+    "facade": "cs",
+    "facade_stdlib": ["time"],
+    "task": "TASK-X",
+    "prologue": "cst = Call()",
+}
+
+
+def chat_tree(tmp: Path, src: str = CHAT_BASE, noqa: list[int] | None = None, **extra: object) -> Tree:
+    mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(LIMIT")], "doc": "Step."}
+    if noqa:
+        mv["noqa"] = noqa
+    return Tree(tmp, src, **{**CHAT, "moves": [mv], **extra})
+
+
+def test_chat_keys_apply_and_verify(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = chat_tree(tmp_path)
+    assert t.run("apply") == 0
+    stage = t.text(f"{PKG}/stage_a.py")
+    assert stage.startswith('"""stage_a code moved from chat_service.py (TASK-X)."""')
+    assert 'def step(cst: "Call") -> None:' in stage
+    assert "cs.audit(cs.LIMIT, x, t0)" in stage and "t0 = cs.time.time()" in stage
+    assert 'os.getenv("A")' in stage and "cs.os" not in stage
+    assert "from mini import chat_service as cs" in stage and "\nimport os\n" in stage and "\nimport time\n" not in stage
+    assert "if TYPE_CHECKING:\n    from .types import Call\n" in stage
+    assert "from .run_config" not in stage and "PipelineState" not in stage
+    assert "cst = Call()" in t.text(CHAT_FILE) and "_stage_a.step(cst)" in t.text(CHAT_FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_chat_noqa_text_uses_the_file_and_task(tmp_path: Path) -> None:
+    t = chat_tree(tmp_path, noqa=[row(CHAT_BASE, "x = os")])
+    assert t.run("apply") == 0
+    assert '  # noqa: BLE001 - moved from chat_service.py (TASK-X)' in t.text(f"{PKG}/stage_a.py")
+
+
+def test_chat_verify_rejects_a_bare_facade_stdlib_read(tmp_path: Path) -> None:
+    t = chat_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, f"{PKG}/stage_a.py", "cs.time.time()", "time.time()")
+    assert t.run("verify") == 1
+
+
+def test_chat_verify_rejects_the_rag_facade_name(tmp_path: Path) -> None:
+    t = chat_tree(tmp_path)
+    assert t.run("apply") == 0
+    _edit(t, f"{PKG}/stage_a.py", "cs.audit(", "up.audit(")
+    assert t.run("verify") == 1
+
+
+@pytest.mark.parametrize("name", ["cst", "cs"])
+def test_v8_reserves_the_ctx_names_and_the_facade(tmp_path: Path, capsys: pytest.CaptureFixture, name: str) -> None:
+    t = chat_tree(tmp_path, CHAT_BASE.replace("return a", f"{name} = 1\n    return a"))
+    assert t.run("apply") == 1
+    assert f"V8: {name} is already a name" in capsys.readouterr().out
+
+
+def test_ctx_names_are_not_reported_as_crossing_locals(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = CHAT_BASE.replace('x = os.getenv("A")', 'cst = 1\n    x = os.getenv("A")').replace("audit(LIMIT, x, t0)", "audit(LIMIT, x, t0, cst)")
+    mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = os"), row(src, "audit(LIMIT")]}
+    t = Tree(tmp_path, src, **{**CHAT, "prologue": "", "moves": [mv]})
+    assert t.run("shared") == 0
+    assert "cst" not in capsys.readouterr().out
+
+
+def test_state_class_and_state_module_are_parametrised(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = "def helper2():\n    pass\n\n\nasync def pipe(q):\n    def _h():\n        return helper2()\n\n    return _h()\n"
+    t = Tree(tmp_path, src, rewrite={"_h": "state.h"}, hoist={"_h": "h"}, state_class="ChatState", state_module="chat_state")
+    assert t.run("apply") == 0
+    state = t.text(f"{PKG}/chat_state.py")
+    assert "class ChatState:" in state and "def h(self)" in state and "run_state" not in t.text(FILE)
+    assert "from .pipeline import chat_state as _chat_state" in t.text(FILE)
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_is_pkg_uses_the_manifests_package_name() -> None:
+    text = "from .chatpkg import thing\n\n\ndef f():\n    return thing\n"
+    assert "thing" in rag_split.Src(text, "f", pkg="chatpkg").exempt
+    assert "thing" not in rag_split.Src(text, "f").exempt
+
+
+# --- fix round 1: refusals ---
+
+
+@pytest.mark.parametrize("key", ["lift", "entry", "drop", "late_imports", "rewrite_in", "free_imports", "relocate"])
+def test_part_2_and_3_manifest_keys_are_refused(tmp_path: Path, key: str) -> None:
+    t = Tree(tmp_path, **{key: {}})
+    with pytest.raises(rag_split.SplitError, match=rf"{key}.*not supported yet \(TASK-13950.25 part 2/3\)"):
+        rag_split.load_manifest(t.manifest_path)
+
+
+@pytest.mark.parametrize(("key", "hint"), [("args", "not supported yet"), ("typo", "unknown")])
+def test_unsupported_move_keys_are_refused(tmp_path: Path, key: str, hint: str) -> None:
+    mv = {**moves()[0], key: ["e"]}
+    t = Tree(tmp_path, moves=[mv])
+    with pytest.raises(rag_split.SplitError, match=rf"move step_one: keys \['{key}'\] are {hint}"):
+        rag_split.load_manifest(t.manifest_path)
+    assert t.run("apply") == 1
+
+
+def test_publish_is_refused_when_the_facade_is_cs(tmp_path: Path) -> None:
+    t = Tree(tmp_path, publish=["_fmt"], facade="cs")
+    with pytest.raises(rag_split.SplitError, match="publish is refused when facade is 'cs'"):
+        rag_split.load_manifest(t.manifest_path)
+
+
+# --- fix round 1: apply's RAG output is pinned against the pre-generalisation tool ---
+
+# sha256 of every file each RAG manifest's apply writes or changes, run on the files at the manifest's recorded base.
+# The digests were computed with the tool as of b768507f15 (before TASK-13950.25 part 1), never with the current
+# one. They must only change with a deliberate, reviewed change to RAG's apply output.
+RAG_APPLY_DIGESTS: dict[str, dict[str, str]] = {
+    "t03_config": {
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "8f6e43b07719551bac6ea2d9638ca328a27b0a1c86a3aa88e1bb654f03527e1a",
+    },
+    "t04a_state": {
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "5611c65df704abff3191b270129cdb70284df1bcaf14fcb623e46de99f6dcba4",
+    },
+    "t04b_hoist": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/run_state.py": "d746ccf055842f34c2a1082f03c028d9c258d0837e247b9d86207281a5820dfa",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "f9fb09e3dbda4e72dee75e7d11ff08e4a0f2ab8d5019feb2d76041b7b48c2513",
+    },
+    "t04c_shared": {
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "377b25c7e148bf24ef0f634924be791c049d100334facb7ae0d2090d386673c6",
+    },
+    "t05e_post_processing": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/post_processing.py": "faea942e00a6ddd4064ee00c7492432997bca2b4386f13a0ecb4525ed2fc7350",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "4c973a497375494132b96d338eb2c9a0a46a55a56318cb2a209b940ba7db1cf3",
+    },
+    "t05f_verification_claims": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/claims.py": "32d5e7fe0eb2b510ccddbed5d6ef0c255b5347e88ea248d6acd312368290ab1d",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/verification.py": "b1f94ca8245d35f7ad36443f4a777af96942521ff989f66d43243b2d43513ded",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "a6a711dfee8d95074f58c3184d434b2837d4689106225dadbb0c92bac47c79b5",
+    },
+    "t06g_generation": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/generation.py": "e5274ee30c84692cf1ada9660a5c0099708c90735bd9b9cc7493cf5499339293",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "02a18dc515602db99e8a39a2f3d3496ffe54cb0d98f4c84f09de0f01d83b051c",
+    },
+    "t06h_rerank_post_retrieval": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/post_retrieval.py": "8c74cfd995dd8a6b19f3188bc911227fd5aeb0f12f5f62e67f8dbfe665f75817",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/rerank.py": "51b3fa65de2fc114e4844fe1d81e39f94a3d428bfd23251609f268ec101915e4",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "2b7651c819c9254340d6fb36b8c66cd33a91268741c4a701ceeea3009c6b7292",
+    },
+    "t07i1_documents": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/processing.py": "e60bfb2fa114c5be42a979235ddaa6837b5422ccb2450ac461985caa972435bf",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/self_correct.py": "cc8a45ae8c72c2ec2dcd62c7b1315e4c2067e36520877e4b20e0ce754473a153",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "8b8853c747dff907693dd0219586bdccf6e73d54a26e6b5b3926fe4e3dc7362e",
+    },
+    "t07i2_augment_filters": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/augment.py": "1fda7c28cd79bde5e67e3416f5efa80996f0bebd116b927cfb48796417d15f45",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/filters.py": "6959ca8fa382c6327bcdbc2d76ab2d4bda84ba3c571bde8be877c53278af90d6",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "35923d0acb8d9f561d356eea08e8a5da31a4d80f61e60c1651f83ee81f7477b0",
+    },
+    "t08j_retrieval": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/retrieval.py": "a80ccbc6ddb8891673b33d1fdffb963a0be09beddbf7518ec60d7c86e0839f3c",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "2e4571d108402b314aa27069531367bd8916c47fbfb85568826a2cdbd699c46c",
+    },
+    "t09k_scope_query_prep_research": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/query_prep.py": "b9ff6fedcc72f94a978c11ac1aad7e07923e786d7ff15c4311346039d497b192",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/research.py": "4bc3203243b5c1bb29ee94c36c3bce1c8fd8fc143ff3846202657bb05cfbb6ae",
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/scope.py": "75eaeb297698f22dd9762da6952e55262ec5ad63d7932d73743164e47407a947",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "7f69b9a015aed450ffc7de86789dc0d558ba53d4097ceb6779e431f168c58c77",
+    },
+    "t10l_entry": {
+        "tldw_Server_API/app/core/RAG/rag_service/pipeline/prepare.py": "9816484eea093d1b6683cf1121e382f134a25dd97ea0d8013632abac97da5e97",
+        "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py": "c7144027eb500cc90065573bde150924f091f556f5eb0dd4a0714b7912b51b73",
+    },
+}
+
+
+def _have(ref: str) -> bool:
+    return subprocess.run(["git", "cat-file", "-e", f"{ref}^{{commit}}"], cwd=REPO_ROOT, capture_output=True).returncode == 0  # noqa: S603, S607  # nosec B603 B607
+
+
+@pytest.mark.parametrize("mf", RAG_MANIFESTS, ids=lambda p: p.stem)
+def test_rag_apply_output_is_unchanged_by_generalisation(mf: Path, tmp_path: Path) -> None:
+    m = rag_split.load_manifest(mf)
+    if not _have(m["base"]):
+        pytest.skip(f"base {m['base']} is not available locally; fetch full history (CI uses fetch-depth: 0)")
+    pkg = rag_split.pkg_rel(m).as_posix()
+    before: dict[str, str] = {}
+    for rel in sorted({m["file"], *_git("ls-tree", "-r", "--name-only", m["base"], "--", pkg).split()}):
+        before[rel] = _git("show", f"{m['base']}:{rel}")
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(before[rel], encoding="utf-8")
+    assert rag_split.main(["apply", "--root", str(tmp_path), str(mf)]) == 0
+    got = {}
+    for p in sorted(tmp_path.rglob("*.py")):
+        rel = p.relative_to(tmp_path).as_posix()
+        text = p.read_text(encoding="utf-8")
+        if before.get(rel) != text:
+            got[rel] = hashlib.sha256(text.encode()).hexdigest()
+    assert got == RAG_APPLY_DIGESTS[mf.stem]
