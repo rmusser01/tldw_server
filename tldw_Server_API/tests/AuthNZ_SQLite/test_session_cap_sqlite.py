@@ -200,7 +200,6 @@ async def test_workflows_require_online_uses_live_predicate(
 
     monkeypatch.setattr(mod, "get_session_manager", _sm)
     schedule = dataclasses.replace(_schedule("s1", user_id=str(uid)), require_online=True)
-    captured: dict[str, Any] = {}
     history: list[dict[str, Any]] = []
 
     class _StubDB:
@@ -210,25 +209,14 @@ async def test_workflows_require_online_uses_live_predicate(
         def set_history(self, _sid, **kwargs):
             history.append(kwargs)
 
-    class _StubScheduler:
-        def __init__(self):
-            self.worker_pool = self
-
-        def get_status(self):
-            return {"workers_by_queue": {"workflows": 1}}
-
-        async def submit(self, *args, **kwargs):
-            captured["payload"] = kwargs.get("payload")
-            return "task-1"
-
     svc = mod._WFRecurringScheduler()
     monkeypatch.setattr(svc, "_get_db", lambda _uid: _StubDB())
-    monkeypatch.setattr(svc, "_core_scheduler", _StubScheduler(), raising=False)
 
+    # No core scheduler is attached: a schedule that passes the presence gate stops at
+    # "pending" (nothing to submit to); one that fails it is marked "skipped_offline".
     await svc._run_schedule("s1", user_id=uid)  # type: ignore[attr-defined]
 
-    assert ("payload" in captured) is expect_run
-    assert (history[-1].get("last_status") == "skipped_offline") is (not expect_run)
+    assert history[-1].get("last_status") == ("pending" if expect_run else "skipped_offline")
 
 
 @pytest.mark.parametrize("with_idle,expect_run", [(False, False), (True, True)])
