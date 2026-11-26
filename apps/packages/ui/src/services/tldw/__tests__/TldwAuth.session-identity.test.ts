@@ -101,4 +101,41 @@ describe("TldwAuthService session identity", () => {
     )
     expect(hasSessionReplacedNotice()).toBe(true)
   })
+
+  it("does not record session_replaced when the invalidation did not apply", async () => {
+    mocks.invalidateRefreshSession.mockResolvedValue(false)
+    mocks.bgRequest.mockRejectedValue({
+      status: 401,
+      details: { detail: { code: "session_replaced" } }
+    })
+    const auth = await makeAuth()
+    await expect(auth.refreshToken()).rejects.toBeTruthy()
+    const { hasSessionReplacedNotice } = await import(
+      "@/services/tldw/session-identity"
+    )
+    expect(hasSessionReplacedNotice()).toBe(false)
+  })
+
+  it("clears the replaced-session notice on logout", async () => {
+    localStorage.setItem("tldw:session-replaced", "1")
+    const auth = await makeAuth()
+    await auth.logout()
+    const { hasSessionReplacedNotice } = await import(
+      "@/services/tldw/session-identity"
+    )
+    expect(hasSessionReplacedNotice()).toBe(false)
+  })
+
+  it("clears a notice set while the remote logout was in flight", async () => {
+    const { hasSessionReplacedNotice } = await import(
+      "@/services/tldw/session-identity"
+    )
+    mocks.bgRequest.mockImplementation(async () => {
+      localStorage.setItem("tldw:session-replaced", "1")
+      throw { status: 401 }
+    })
+    const auth = await makeAuth()
+    await auth.logout()
+    expect(hasSessionReplacedNotice()).toBe(false)
+  })
 })
