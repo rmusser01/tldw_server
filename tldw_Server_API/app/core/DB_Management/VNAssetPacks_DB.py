@@ -856,6 +856,8 @@ class VNAssetPacksRepository:
             where_clause = "id = ? AND status <> 'deleted'"
             if fields.get("status") != "deleted":
                 where_clause += " AND status <> 'deleting'"
+            if fields.get("status") not in {"expired", "deleting", "deleted"}:
+                where_clause += " AND status <> 'expired'"
             where_params: list[Any] = [preview_id]
             if owner_user_id is not None:
                 where_clause += " AND owner_user_id = ?"
@@ -874,12 +876,50 @@ class VNAssetPacksRepository:
         self._ensure_schema_initialized()
         rows = self.db.execute_query(
             """
-            SELECT job_id, status FROM vn_pack_import_journal
+            SELECT id, job_id, status FROM vn_pack_import_journal
             WHERE preview_id = ? AND owner_user_id = ? AND status <> 'completed'
             """,
             (preview_id, owner_user_id),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def list_expired_import_previews(self, *, owner_user_id: int, limit: int = 20) -> list[dict[str, Any]]:
+        """Return staged archives due for removal within the owner's database."""
+        self._ensure_schema_initialized()
+        rows = self.db.execute_query(
+            """
+            SELECT * FROM vn_pack_import_previews
+            WHERE owner_user_id = ? AND archive_path <> '' AND status NOT IN ('deleting', 'deleted')
+              AND COALESCE(datetime(expires_at), datetime(created_at, '+7 days')) <= CURRENT_TIMESTAMP
+            ORDER BY COALESCE(datetime(expires_at), datetime(created_at, '+7 days')), id LIMIT ?
+            """,
+            (owner_user_id, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def import_staging_ids(self, *, pack_id: int | None = None) -> dict[str, set[int]]:
+        """Read local row IDs that remain private until their import journal commits."""
+        self._ensure_schema_initialized()
+        rows = self.db.execute_query(
+            """
+            SELECT target_mode, created_records_json FROM vn_pack_import_journal
+            WHERE completed_at IS NULL
+              AND json_extract(created_records_json, '$.checkpoint_version') = 1
+              AND COALESCE(json_extract(cleanup_status_json, '$.status'), '') NOT IN ('completed', 'discarded')
+              AND (? IS NULL OR json_extract(created_records_json, '$.pack_id') = ?)
+            """,
+            (pack_id, pack_id),
+        ).fetchall()
+        staging: dict[str, set[int]] = {"packs": set(), "slots": set(), "items": set(), "targets": set()}
+        for row in rows:
+            records = json.loads(row["created_records_json"])
+            target_id = int(records["pack_id"])
+            staging["targets"].add(target_id)
+            if row["target_mode"] == "create_new":
+                staging["packs"].add(target_id)
+            staging["slots"].update(records["slot_ids"])
+            staging["items"].update(records["item_ids"])
+        return staging
 
     def create_import_journal(
         self,
@@ -906,7 +946,7 @@ class VNAssetPacksRepository:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
             preview = self.get_import_preview(preview_id, owner_user_id=owner_user_id)
-            if preview is None or preview["status"] in {"deleting", "deleted"}:
+            if preview is None or preview["status"] in {"expired", "deleting", "deleted"}:
                 raise ValueError("import_preview_unavailable")
             cursor = conn.execute(
                 """
@@ -1007,6 +1047,8 @@ class VNAssetPacksRepository:
                 return current
             # A concurrent completion must survive stale status and cancel writes.
             where_clause = "id = ? AND status <> 'completed'"
+            if fields.get("status") != "completed":
+                where_clause += " AND completed_at IS NULL"
             where_params: list[Any] = [import_id]
             if owner_user_id is not None:
                 where_clause += " AND owner_user_id = ?"
@@ -1115,7 +1157,8 @@ class VNAssetPacksRepository:
                 """,
                 (owner_user_id,),
             )
-        return [dict(row) for row in cursor.fetchall()]
+        staged = self.import_staging_ids()["packs"]
+        return [dict(row) for row in cursor.fetchall() if row["id"] not in staged]
 
     def list_packs_for_setup(
         self,
@@ -1132,6 +1175,11 @@ class VNAssetPacksRepository:
 
         filters = ["deleted = 0", "owner_user_id = ?"]
         params: list[Any] = [owner_user_id]
+        hidden_packs = self.import_staging_ids()["packs"]
+        if hidden_packs:
+            placeholders = ",".join("?" for _ in hidden_packs)
+            filters.append(f"id NOT IN ({placeholders})")
+            params.extend(hidden_packs)
         normalized_query = (query or "").strip().lower()
         if normalized_query:
             like_value = f"%{normalized_query}%"
@@ -1422,13 +1470,14 @@ class VNAssetPacksRepository:
         row = cursor.fetchone()
         return dict(row) if row is not None else None
 
-    def list_slots(self, pack_id: int) -> list[dict[str, Any]]:
+    def list_slots(self, pack_id: int, *, include_import_staging: bool = False) -> list[dict[str, Any]]:
         self._ensure_schema_initialized()
         cursor = self.db.execute_query(
             "SELECT * FROM vn_asset_slots WHERE pack_id = ? ORDER BY id ASC",
             (pack_id,),
         )
-        return [dict(row) for row in cursor.fetchall()]
+        staged = set() if include_import_staging else self.import_staging_ids(pack_id=pack_id)["slots"]
+        return [dict(row) for row in cursor.fetchall() if row["id"] not in staged]
 
     def existing_slot_keys(self, pack_id: int, slot_keys: list[str]) -> set[str]:
         self._ensure_schema_initialized()
@@ -1663,7 +1712,7 @@ class VNAssetPacksRepository:
         return dict(row) if row is not None else None
 
     def item_is_unpublished(self, item_id: int) -> bool:
-        """Return whether item_id is linked to any non-completed recipe.
+        """Return whether item_id belongs to a generation or import awaiting publication.
 
         Planned, failed and cancelled reservations are not reviewable, even if
         file metadata is attached. False does not establish item existence or
@@ -1674,9 +1723,15 @@ class VNAssetPacksRepository:
         row = self.db.execute_query(
             """
             SELECT 1 FROM vn_asset_generation_recipes
-            WHERE item_id = ? AND outcome_status != 'completed' LIMIT 1
+            WHERE item_id = ? AND outcome_status != 'completed'
+            UNION ALL
+            SELECT 1 FROM vn_asset_items AS item
+            JOIN vn_pack_import_journal AS journal ON journal.id = CASE WHEN json_valid(item.source_context_snapshot_json)
+                THEN json_extract(item.source_context_snapshot_json, '$.vnpack_import.import_id') END
+            WHERE item.id = ? AND journal.completed_at IS NULL
+            LIMIT 1
             """,
-            (item_id,),
+            (item_id, item_id),
         ).fetchone()
         return row is not None
 
@@ -1819,7 +1874,7 @@ class VNAssetPacksRepository:
             )
         return self.get_item(item_id)
 
-    def list_items(self, pack_id: int) -> list[dict[str, Any]]:
+    def list_items(self, pack_id: int, *, include_import_staging: bool = False) -> list[dict[str, Any]]:
         self._ensure_schema_initialized()
         cursor = self.db.execute_query(
             """
@@ -1831,7 +1886,8 @@ class VNAssetPacksRepository:
             """,
             (pack_id,),
         )
-        return [dict(row) for row in cursor.fetchall()]
+        staged = set() if include_import_staging else self.import_staging_ids(pack_id=pack_id)["items"]
+        return [dict(row) for row in cursor.fetchall() if row["id"] not in staged]
 
     def count_items_for_generation(self, pack_id: int) -> int:
         """Count visible items and active reservations, excluding terminal reservations."""

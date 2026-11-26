@@ -49,6 +49,14 @@ If a new-pack import fails its storage quota check before any attempt starts wri
 
 Use **Remove staged archive** after validation or restore finishes to free the server's staging copy before uploading a replacement. The server blocks removal during an active restore and returns `vn_status: deleted` once the staged copy is removed.
 
+## Interrupted imports
+
+Redelivery of an interrupted import reuses its journal and staged pack and item IDs. The importer stages hidden items and records their IDs before registering images. It publishes their review state and completes the journal together after the images are attached. The Storage API protects staged files from deletion until publication or restore cleanup. An update keeps the target's existing assets and preferred variants.
+
+The status API reports `import_interrupted` when a terminal job still has staged assets. Job redelivery can resume the restore. To abandon it, call `POST /portability/imports/{import_id}/cleanup` as the owner. Cleanup removes the journal's staged items, registrations and bytes and can resume after another interruption. Earlier imports with incomplete ownership records may require manual recovery.
+
+The preview's `expires_at` timestamp is the deadline for starting a new restore. An already accepted restore can resume while its archive remains staged. Cleanup of the related interrupted restore and subsequent uploads for the same owner remove eligible expired archives. Replaying an accepted commit request returns its original receipt after preview expiry.
+
 ## Endpoint Summary
 
 | Method | Path | Purpose |
@@ -71,6 +79,7 @@ Use **Remove staged archive** after validation or restore finishes to free the s
 | `POST` | `/import/commit` | Start an import commit job from a completed preview. |
 | `GET` | `/portability/imports/{job_id}` | Read import commit status. |
 | `POST` | `/portability/imports/{job_id}/cancel` | Cancel an import commit job. |
+| `POST` | `/portability/imports/{import_id}/cleanup` | Discard staged assets from a failed, cancelled, or quarantined restore owned by the authenticated user. |
 | `POST` | `/packs/{pack_id}/matrix/apply` | Expand a starter matrix into slots. |
 | `GET` | `/packs/{pack_id}/slots` | List slots. |
 | `POST` | `/packs/{pack_id}/slots` | Create a custom slot. |

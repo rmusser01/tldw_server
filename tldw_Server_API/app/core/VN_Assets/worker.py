@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from hashlib import sha256
@@ -77,6 +77,7 @@ class VNAssetGenerationWorker:
         export_staging_root: Path | None = None,
         unregister_generated_file: Any | None = None,
         preflight_storage_quota: Any | None = None,
+        import_storage: Any | None = None,
     ) -> None:
         self.repo = repo
         self.jobs_manager = jobs_manager
@@ -90,6 +91,7 @@ class VNAssetGenerationWorker:
         self.export_staging_root = export_staging_root
         self.unregister_generated_file = unregister_generated_file
         self.preflight_storage_quota = preflight_storage_quota
+        self.import_storage = import_storage
 
     def handle_enqueue_batch(
         self,
@@ -730,7 +732,7 @@ class VNAssetGenerationWorker:
         job_id = str(preview["job_id"])
         portability_job = self.repo.get_portability_job_by_job_id(job_id, owner_user_id=user_id)
         preview_status = str(preview["status"])
-        if preview_status in {"deleting", "deleted", "cancelled"}:
+        if preview_status in {"deleting", "deleted", "cancelled", "expired"}:
             if portability_job is not None and (
                 str(portability_job["status"]) != "cancelled"
                 or str(portability_job["stage"]) != preview_status
@@ -795,7 +797,7 @@ class VNAssetGenerationWorker:
             )
             raise
 
-        expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        expires_at = preview.get("expires_at") or (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
         self.repo.update_import_preview(
             preview_id,
             {
@@ -851,6 +853,10 @@ class VNAssetGenerationWorker:
         conflict_decisions = payload.get("conflict_decisions")
         if not isinstance(conflict_decisions, Mapping):
             conflict_decisions = {}
+        require_delivery = None
+        if job is not None and (self.worker_config is not None or job.get("lease_id")):
+            require_delivery = partial(self._require_current_job_lease, job, user_id=user_id)
+            require_delivery()
 
         journal = self.repo.get_import_journal(import_id, owner_user_id=user_id)
         if journal is None or int(journal["preview_id"]) != preview_id:
@@ -878,6 +884,8 @@ class VNAssetGenerationWorker:
             if pack_id <= 0:
                 raise ValueError("vn_pack_import_completed_result_missing")
             if legacy_completion:
+                if require_delivery is not None:
+                    require_delivery()
                 self.repo.update_import_journal(
                     import_id,
                     {"status": "completed", "stage": "completed", "error_code": None, "error_message": None},
@@ -894,6 +902,7 @@ class VNAssetGenerationWorker:
                     "id_maps": _loads_json(journal["id_maps_json"], {}),
                     "created_records": _loads_json(journal["created_records_json"], {}),
                 },
+                require_delivery=require_delivery,
             )
 
         if self.repo.get_import_preview(preview_id, owner_user_id=user_id) is None:
@@ -918,6 +927,8 @@ class VNAssetGenerationWorker:
             # Publish completion after the importer has returned its durable result.
             if stage == "completed":
                 return
+            if require_delivery is not None:
+                require_delivery()
             self.repo.update_portability_job(
                 job_id,
                 {"status": "processing", "stage": stage, "progress": progress},
@@ -931,6 +942,8 @@ class VNAssetGenerationWorker:
                 save_vn_asset_image=self.save_vn_asset_image,
                 unregister_generated_file=self.unregister_generated_file,
                 preflight_storage_quota=self.preflight_storage_quota,
+                import_storage=self.import_storage,
+                require_delivery=require_delivery,
             )
             result = await importer.import_pack(
                 preview_id=preview_id,
@@ -945,6 +958,11 @@ class VNAssetGenerationWorker:
                 progress=_progress,
             )
         except Exception as exc:
+            if require_delivery is not None:
+                require_delivery()
+            current = self.repo.get_import_journal(import_id, owner_user_id=user_id)
+            if current and current["completed_at"]:
+                raise
             self.repo.update_import_journal(
                 import_id,
                 {
@@ -967,15 +985,19 @@ class VNAssetGenerationWorker:
             )
             raise
 
-        return self._publish_import_commit_result(job_id, user_id, result)
+        return self._publish_import_commit_result(job_id, user_id, result, require_delivery=require_delivery)
 
     def _publish_import_commit_result(
         self,
         job_id: str,
         user_id: int,
         result: dict[str, Any],
+        *,
+        require_delivery: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         """Publish a completed import using the same result on initial delivery and retry."""
+        if require_delivery is not None:
+            require_delivery()
         self.repo.update_portability_job(
             job_id,
             {

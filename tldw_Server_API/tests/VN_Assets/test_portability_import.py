@@ -38,14 +38,26 @@ USER_ID = 42
 PNG_BYTES = b"\x89PNG\r\n\x1a\nimport-test-png"
 
 
+class ImportWorkerStopped(BaseException):
+    """Simulate a worker stop that bypasses ordinary exception cleanup."""
+
+
 class FakeGeneratedFileSaver:
-    def __init__(self, *, fail_on_call: int | None = None) -> None:
+    def __init__(self, *, fail_on_call: int | None = None, interruption: str | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self.records: list[dict[str, Any]] = []
         self.fail_on_call = fail_on_call
+        self.interruption = interruption
 
     async def __call__(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(dict(kwargs))
+        interruption, self.interruption = self.interruption, None
+        if interruption == "before_registration":
+            raise ImportWorkerStopped
+        source_ref = f"vn_asset_item:{kwargs['item_id']}"
+        for record in self.records:
+            if record["user_id"] == kwargs["user_id"] and record["source_ref"] == source_ref:
+                return record
         call_number = len(self.calls)
         if self.fail_on_call == call_number:
             raise RuntimeError("save_failed")
@@ -55,10 +67,12 @@ class FakeGeneratedFileSaver:
             "storage_path": f"vn_assets/imported-{kwargs['item_id']}.png",
             "mime_type": "image/png",
             "source_feature": "vn_assets",
-            "source_ref": f"vn_asset_item:{kwargs['item_id']}",
+            "source_ref": source_ref,
             "file_size_bytes": len(kwargs["image_bytes"]),
         }
         self.records.append(record)
+        if interruption == "after_registration":
+            raise ImportWorkerStopped
         return record
 
 
@@ -377,6 +391,47 @@ async def test_import_commit_preflights_total_asset_quota_before_creating_pack(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_status", [{}, {"status": "completed"}])
+async def test_legacy_import_with_writes_started_requires_manual_recovery(
+    repo: VNAssetPacksRepository,
+    target_character_id: int,
+    tmp_path: Path,
+    cleanup_status: dict[str, str],
+) -> None:
+    preview = await _create_completed_preview(repo, _write_import_archive(tmp_path / "legacy.tldw-vnpack"))
+    preview_id = int(preview["id"])
+    journal = repo.create_import_journal(
+        owner_user_id=USER_ID,
+        preview_id=preview_id,
+        job_id="legacy-import",
+        status="failed",
+        stage="failed",
+        trust_mode=TRUST_MODE_TRUSTED_RESTORE,
+        target_mode="create_new",
+        created_records={"writes_started": True},
+        cleanup_status=cleanup_status,
+    )
+    saver = FakeGeneratedFileSaver()
+    importer = VNPackImporter(repo=repo, owner_user_id=USER_ID, save_vn_asset_image=saver)
+
+    with pytest.raises(ValueError, match="import_legacy_checkpoint_incomplete"):
+        await importer.import_pack(
+            preview_id=preview_id,
+            job_id="legacy-import",
+            trust_mode=TRUST_MODE_TRUSTED_RESTORE,
+            target_mode="create_new",
+            character_action="link_existing_character",
+            target_character_id=target_character_id,
+            journal_id=journal["id"],
+        )
+
+    current = repo.get_import_journal(journal["id"], owner_user_id=USER_ID)
+    assert json.loads(current["cleanup_status_json"]) == {"status": "manual_required"}
+    assert repo.list_packs(owner_user_id=USER_ID) == []
+    assert saver.calls == []
+
+
+@pytest.mark.asyncio
 async def test_create_new_trusted_restore_imports_pack_items_and_journal(
     repo: VNAssetPacksRepository,
     target_character_id: int,
@@ -653,6 +708,119 @@ async def test_worker_recovers_completed_import_after_interrupted_delivery(
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", ["before_registration", "after_registration"])
+async def test_create_new_reuses_interrupted_pack_and_asset_registration(
+    repo: VNAssetPacksRepository,
+    target_character_id: int,
+    tmp_path: Path,
+    interruption: str,
+) -> None:
+    archive_path = _write_import_archive(tmp_path / "resume.tldw-vnpack")
+    preview = await _create_completed_preview(repo, archive_path)
+    saver = FakeGeneratedFileSaver(interruption=interruption)
+    request = {
+        "preview_id": int(preview["id"]),
+        "job_id": "resume-new",
+        "trust_mode": TRUST_MODE_TRUSTED_RESTORE,
+        "target_mode": "create_new",
+        "character_action": "link_existing_character",
+        "target_character_id": target_character_id,
+    }
+
+    with pytest.raises(ImportWorkerStopped):
+        await VNPackImporter(repo=repo, owner_user_id=USER_ID, save_vn_asset_image=saver).import_pack(**request)
+
+    staged = json.loads(repo.get_import_journal(1, owner_user_id=USER_ID)["created_records_json"])
+    partial_pack = repo.get_pack(staged["pack_id"])
+    assert repo.list_packs(owner_user_id=USER_ID) == []
+    pending_item_id = saver.calls[0]["item_id"]
+    assert repo.get_item(pending_item_id)["review_status"] == "hidden"
+    repo.update_import_preview(
+        request["preview_id"], {"expires_at": datetime.now(timezone.utc).isoformat()}, owner_user_id=USER_ID,
+    )
+    result = await VNPackImporter(repo=repo, owner_user_id=USER_ID, save_vn_asset_image=saver).import_pack(
+        **request, journal_id=1,
+    )
+
+    assert [row["id"] for row in repo.list_packs(owner_user_id=USER_ID)] == [partial_pack["id"]]
+    assert result["pack_id"] == partial_pack["id"]
+    assert {call["item_id"] for call in saver.calls} == {pending_item_id}
+    assert len(saver.records) == 1
+    assert repo.get_item(pending_item_id)["generated_file_id"] == saver.records[0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_import_losing_its_delivery_keeps_checkpoint_for_successor(
+    repo: VNAssetPacksRepository, target_character_id: int, tmp_path: Path,
+) -> None:
+    archive_path = _write_import_archive(tmp_path / "lost-lease.tldw-vnpack")
+    preview = await _create_completed_preview(repo, archive_path)
+    saver = FakeGeneratedFileSaver()
+
+    def require_delivery() -> None:
+        if saver.records:
+            raise ValueError("import lease lost after registration")
+
+    would_unregister = []
+
+    async def unregister(file_id: int, *, hard_delete: bool) -> bool:
+        would_unregister.append(file_id)
+        return True
+
+    request = {
+        "preview_id": int(preview["id"]), "job_id": "lost-lease", "trust_mode": TRUST_MODE_TRUSTED_RESTORE,
+        "target_mode": "create_new", "character_action": "link_existing_character", "target_character_id": target_character_id,
+    }
+    importer = VNPackImporter(
+        repo=repo, owner_user_id=USER_ID, save_vn_asset_image=saver,
+        require_delivery=require_delivery, unregister_generated_file=unregister,
+    )
+    with pytest.raises(ValueError, match="import lease lost"):
+        await importer.import_pack(**request)
+
+    assert not would_unregister
+    journal = repo.get_import_journal(1, owner_user_id=USER_ID)
+    assert journal["status"] == "processing"
+    result = await VNPackImporter(repo=repo, owner_user_id=USER_ID, save_vn_asset_image=saver).import_pack(
+        **request, journal_id=1,
+    )
+    assert result["created_records"]["generated_file_ids"] == [saver.records[0]["id"]]
+
+
+@pytest.mark.asyncio
+async def test_retry_repairs_an_attached_item_whose_registration_was_removed(
+    repo: VNAssetPacksRepository, target_character_id: int, tmp_path: Path,
+) -> None:
+    archive_path = _write_import_archive(tmp_path / "retry-removed-file.tldw-vnpack")
+    preview = await _create_completed_preview(repo, archive_path)
+    saver = FakeGeneratedFileSaver()
+
+    def stop_after_attach(stage: str, _details: dict[str, Any]) -> None:
+        if stage == "creating_items":
+            raise ImportWorkerStopped
+
+    request = {
+        "preview_id": int(preview["id"]), "job_id": "removed-file", "trust_mode": TRUST_MODE_TRUSTED_RESTORE,
+        "target_mode": "create_new", "character_action": "link_existing_character", "target_character_id": target_character_id,
+    }
+    with pytest.raises(ImportWorkerStopped):
+        await VNPackImporter(repo=repo, owner_user_id=USER_ID, save_vn_asset_image=saver).import_pack(
+            **request, progress=stop_after_attach,
+        )
+    item_id = saver.calls[0]["item_id"]
+    removed_file_id = saver.records.pop()["id"]
+    assert repo.get_item(item_id)["generated_file_id"] == removed_file_id
+
+    result = await VNPackImporter(repo=repo, owner_user_id=USER_ID, save_vn_asset_image=saver).import_pack(
+        **request, journal_id=1,
+    )
+
+    assert {call["item_id"] for call in saver.calls} == {item_id}
+    assert repo.get_item(item_id)["generated_file_id"] == saver.records[0]["id"] != removed_file_id
+    assert result["created_records"]["generated_file_ids"] == [saver.records[0]["id"]]
+
+
 def test_pack_import_commit_job_helpers_use_import_group() -> None:
     jobs = FakeJobs()
 
@@ -697,10 +865,12 @@ def test_pack_import_commit_job_helpers_use_import_group() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", [None, "before_registration", "after_registration"])
 async def test_update_existing_non_destructive(
     repo: VNAssetPacksRepository,
     target_character_id: int,
     tmp_path: Path,
+    interruption: str | None,
 ) -> None:
     existing_pack = repo.create_pack(
         owner_user_id=USER_ID,
@@ -783,7 +953,7 @@ async def test_update_existing_non_destructive(
         asset_payloads={"assets/items/smile.png": PNG_BYTES},
     )
     preview = await _create_completed_preview(repo, archive_path)
-    saver = FakeGeneratedFileSaver()
+    saver = FakeGeneratedFileSaver(interruption=interruption)
     unregistered: list[int] = []
 
     async def unregister(file_id: int, *, hard_delete: bool = False) -> bool:
@@ -797,16 +967,24 @@ async def test_update_existing_non_destructive(
         unregister_generated_file=unregister,
     )
 
-    result = await importer.import_pack(
-        preview_id=int(preview["id"]),
-        job_id="job-update-existing",
-        trust_mode=TRUST_MODE_TRUSTED_RESTORE,
-        target_mode="update_existing",
-        character_action="link_existing_character",
-        target_character_id=target_character_id,
-        target_pack_id=int(existing_pack["id"]),
-        conflict_decisions={"confirm_diff_ids": []},
-    )
+    request = {
+        "preview_id": int(preview["id"]),
+        "job_id": "job-update-existing",
+        "trust_mode": TRUST_MODE_TRUSTED_RESTORE,
+        "target_mode": "update_existing",
+        "character_action": "link_existing_character",
+        "target_character_id": target_character_id,
+        "target_pack_id": int(existing_pack["id"]),
+        "conflict_decisions": {"confirm_diff_ids": []},
+    }
+    if interruption:
+        with pytest.raises(ImportWorkerStopped):
+            await importer.import_pack(**request)
+        assert repo.get_item(saver.calls[0]["item_id"])["review_status"] == "hidden"
+        importer = VNPackImporter(
+            repo=repo, owner_user_id=USER_ID, save_vn_asset_image=saver, unregister_generated_file=unregister,
+        )
+    result = await importer.import_pack(**request, journal_id=1 if interruption else None)
 
     assert result["pack_id"] == existing_pack["id"]
     refreshed_existing_item = repo.get_item(int(existing_item["id"]))
@@ -823,7 +1001,8 @@ async def test_update_existing_non_destructive(
     assert len(all_items) == 2
     added_item = next(item for item in all_items if item["id"] != existing_item["id"])
     assert added_item["generated_file_id"] == saver.records[0]["id"]
-    assert saver.calls[0]["item_id"] == added_item["id"]
+    assert {call["item_id"] for call in saver.calls} == {added_item["id"]}
+    assert len(saver.records) == 1
     assert unregistered == []
 
     journal = repo.get_import_journal(result["import_id"], owner_user_id=USER_ID)
@@ -834,7 +1013,6 @@ async def test_update_existing_non_destructive(
     assert id_maps["items"]["401"] == added_item["id"]
     assert created_records["slot_ids"] == [next(slot["id"] for slot in all_slots if slot["slot_key"].endswith("smile"))]
     assert created_records["item_ids"] == [added_item["id"]]
-
 
     # Simulate redelivery before the worker publishes the durable update result.
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
@@ -871,8 +1049,9 @@ async def test_update_existing_non_destructive(
     worker = VNAssetGenerationWorker(repo=repo, jobs_manager=FakeJobs(), save_vn_asset_image=saver)
     with pytest.raises(ValueError, match="vn_pack_import_commit_job_not_found"):
         await worker.handle_job_async({**job, "id": "other-job"})
+    calls_before_replay = len(saver.calls)
     assert await worker.handle_job_async(job) == result
-    assert len(saver.calls) == 1
+    assert len(saver.calls) == calls_before_replay
     assert repo.get_import_journal(import_id, owner_user_id=USER_ID) == journal
 
 

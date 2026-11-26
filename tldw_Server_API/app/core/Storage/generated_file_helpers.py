@@ -31,8 +31,10 @@ import asyncio
 import contextlib
 import hashlib
 import re
+import tempfile
 import traceback
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -431,6 +433,52 @@ async def _cleanup_unregistered_vn_file(
         )
 
 
+def vn_import_asset_storage_ref(import_id: int, item_id: int, image_format: str) -> str:
+    """Give a prepared VN import item a path that survives worker restarts."""
+    return f"vn_assets/imports/{import_id}/vn_asset_{item_id}.{_normalize_extension(image_format)}"
+
+
+def _write_vn_import_bytes(user_id: int, storage_ref: str, data: bytes) -> Path:
+    """Write an import asset atomically in its journal-owned directory."""
+    root = _get_user_outputs_dir(user_id)
+    resolved = safe_join(str(root), storage_ref)
+    if resolved is None or Path(resolved) != root / storage_ref:
+        raise AuthNZStorageError("Invalid VN import asset path")
+    path = Path(resolved)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", suffix=".part", delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(data)
+        temporary.replace(path)
+        remove_stale_vn_import_parts(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return path
+
+
+async def _write_vn_import_bytes_with_lock(user_id: int, storage_ref: str, data: bytes) -> None:
+    """Drain the write before cancellation releases the caller's publication lock."""
+    writing = asyncio.create_task(asyncio.to_thread(_write_vn_import_bytes, user_id, storage_ref, data))
+    cancelled = False
+    while not writing.done():
+        try:
+            await asyncio.shield(writing)
+        except asyncio.CancelledError:
+            cancelled = True
+    await writing
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+def remove_stale_vn_import_parts(path: Path) -> None:
+    """Remove abandoned atomic writes for one journal-owned asset."""
+    for partial in path.parent.glob(f".{path.name}.*.part"):
+        partial.unlink(missing_ok=True)
+
+
 async def save_and_register_vn_asset_image(
     *,
     user_id: int,
@@ -446,6 +494,8 @@ async def save_and_register_vn_asset_image(
     is_transient: bool = False,
     expires_at: datetime | None = None,
     check_quota: bool = True,
+    import_id: int | None = None,
+    publication_guard: Callable[[], object] | None = None,
 ) -> dict[str, Any]:
     """
     Save a generated VN asset image and register it as durable AuthNZ storage.
@@ -456,6 +506,8 @@ async def save_and_register_vn_asset_image(
     service = await get_storage_service()
     existing = await service.get_vn_generated_file(user_id=user_id, source_ref=f"vn_asset_item:{item_id}")
     if existing is not None:
+        if import_id is not None and existing.get("storage_path") != vn_import_asset_storage_ref(import_id, item_id, image_format):
+            raise AuthNZStorageError("VN import registration belongs to a different storage path")
         return existing
     service = await _preflight_generated_file_write(
         user_id=user_id,
@@ -467,12 +519,20 @@ async def save_and_register_vn_asset_image(
         service=service,
     )
 
-    filename = _generate_filename(f"vn_asset_{item_id}", image_format)
-    category_folder = "vn_assets"
-
-    file_path = await _save_file(user_id, image_bytes, category_folder, filename)
     outputs_dir = _get_user_outputs_dir(user_id)
-    relative_path = str(file_path.relative_to(outputs_dir))
+    publication_options: dict[str, Any] = {}
+    if import_id is None:
+        filename = _generate_filename(f"vn_asset_{item_id}", image_format)
+        file_path = await _save_file(user_id, image_bytes, "vn_assets", filename)
+        relative_path = str(file_path.relative_to(outputs_dir))
+    else:
+        relative_path = vn_import_asset_storage_ref(import_id, item_id, image_format)
+        file_path = outputs_dir / relative_path
+        filename = file_path.name
+        publication_options = {
+            "prepare_vn_import_bytes": lambda: _write_vn_import_bytes_with_lock(user_id, relative_path, image_bytes),
+            "publication_guard": publication_guard,
+        }
 
     file_tags = list(tags) if tags else []
     file_tags.extend(
@@ -506,9 +566,12 @@ async def save_and_register_vn_asset_image(
             is_transient=is_transient,
             expires_at=expires_at,
             check_quota=check_quota,
+            **publication_options,
         )
 
         if file_record.get("storage_path") and file_record["storage_path"] != relative_path:
+            if import_id is not None:
+                raise AuthNZStorageError("VN import registration belongs to a different storage path")
             await _cleanup_unregistered_vn_file(
                 service, user_id=user_id, source_ref=f"vn_asset_item:{item_id}",
                 storage_path=relative_path, file_path=file_path,
@@ -517,10 +580,12 @@ async def save_and_register_vn_asset_image(
         return file_record
 
     except BaseException:  # Cleanup must also handle cancellation after a commit.
-        await _cleanup_unregistered_vn_file(
-            service, user_id=user_id, source_ref=f"vn_asset_item:{item_id}",
-            storage_path=relative_path, file_path=file_path,
-        )
+        # Deterministic import paths stay with the journal and its guarded cleanup.
+        if import_id is None:
+            await _cleanup_unregistered_vn_file(
+                service, user_id=user_id, source_ref=f"vn_asset_item:{item_id}",
+                storage_path=relative_path, file_path=file_path,
+            )
         raise
 
 

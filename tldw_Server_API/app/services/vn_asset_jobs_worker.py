@@ -122,6 +122,7 @@ async def _import_commit_dependencies() -> dict[str, Any]:
     return {
         "unregister_generated_file": storage_service.unregister_generated_file,
         "preflight_storage_quota": storage_service.check_combined_quota,
+        "import_storage": storage_service,
     }
 
 
