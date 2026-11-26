@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Iterable
 from typing import Any
+from urllib.parse import urlsplit
 
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.exceptions import ChatConfigurationError, raise_detached_error
@@ -28,6 +29,29 @@ from tldw_Server_API.app.core.LLM_Calls.streaming import iter_sse_lines_requests
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 from .base import ChatProvider, apply_tool_choice, raise_if_in_band_provider_error
+
+
+def _moonshot_api_config(app_config: Any, credentials_resolved: bool) -> dict[str, Any]:
+    config = app_config if credentials_resolved else app_config or load_and_log_configs()
+    section = config.get("moonshot_api") if isinstance(config, dict) else None
+    return section if isinstance(section, dict) else {}
+
+
+def _moonshot_base_url(config: dict[str, Any], base_url: str | None) -> str:
+    return base_url or config.get("api_base_url", "https://api.moonshot.cn/v1")
+
+
+def is_official_moonshot_endpoint(base_url: str) -> bool:
+    from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import _safe_base_url
+
+    if not _safe_base_url(base_url):
+        return False
+    parsed = urlsplit(base_url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname in {"api.moonshot.cn", "api.moonshot.ai"}
+        and parsed.port in (None, 443)
+    )
 
 
 def _moonshot_request(
@@ -57,13 +81,7 @@ def _moonshot_request(
     credentials_resolved: bool = False,
     max_completion_tokens: int | None = None,
 ):
-    if credentials_resolved:
-        loaded_config_data = app_config if isinstance(app_config, dict) else {}
-    else:
-        loaded_config_data = app_config or load_and_log_configs() or {}
-    if not isinstance(loaded_config_data, dict):
-        loaded_config_data = {}
-    moonshot_config = loaded_config_data.get("moonshot_api", {})
+    moonshot_config = _moonshot_api_config(app_config, credentials_resolved)
 
     final_api_key = api_key or moonshot_config.get("api_key")
     if not final_api_key:
@@ -159,7 +177,7 @@ def _moonshot_request(
 
     from tldw_Server_API.app.core.LLM_Calls.commercial_model_defaults import is_bundled_model_endpoint
 
-    api_base_url = base_url or moonshot_config.get("api_base_url", "https://api.moonshot.cn/v1")
+    api_base_url = _moonshot_base_url(moonshot_config, base_url)
     fixed_sampling = is_bundled_model_endpoint("moonshot", final_model, api_base_url)
     payload: dict[str, Any] = {
         "model": final_model,
@@ -243,7 +261,14 @@ def _moonshot_request(
             total=_safe_cast(moonshot_config.get("api_retries"), int, 1)
         )
         try:
-            response = session.post(api_url, headers=headers, json=payload, timeout=effective_timeout)
+            redirect_options = (
+                {"allow_redirects": False}
+                if is_official_moonshot_endpoint(api_base_url) or any("reasoning_content" in message for message in api_messages)
+                else {}
+            )
+            response = session.post(
+                api_url, headers=headers, json=payload, timeout=effective_timeout, **redirect_options
+            )
             logging.debug(f"Moonshot: Full API response status: {response.status_code}")
             response.raise_for_status()
             try:
