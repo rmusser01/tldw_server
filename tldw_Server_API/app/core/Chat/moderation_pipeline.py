@@ -25,6 +25,12 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.Chat.knowledge_save import split_reasoning_text
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
+from tldw_Server_API.app.core.Chat.streaming_utils import StopStreamWithError
+from typing import TYPE_CHECKING
+import contextlib
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Chat.call_state import StreamCall
 
 _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ChatAPIError,
@@ -594,6 +600,347 @@ def _emit_completion_metric(runtime: OutputModerationRuntime, outcome: str) -> N
         logger.warning("Chat output safety completion metric failed: {}", exc)
 
 
+def _out_transform(cst: "StreamCall", s: str) -> str:
+    if cst.stream_mod_state.get("pending_stop_error") is not None:
+        return ""
+    try:
+        mon = None
+        try:
+            mon = cs.get_topic_monitoring_service()
+        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+            mon = None
+        team_ids = None
+        org_ids = None
+        try:
+            if cst.request is not None and hasattr(cst.request, "state"):
+                team_ids = getattr(cst.request.state, "team_ids", None)
+                org_ids = getattr(cst.request.state, "org_ids", None)
+        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+        if mon is not None and s:
+            cst.chunk_seq += 1
+            chunk_id = f"{cst.stream_id}:{cst.chunk_seq}"
+            mon.schedule_evaluate_and_alert(
+                user_id=str(cst.req_user_id or cst.client_id) if (cst.req_user_id or cst.client_id) else None,
+                text=s,
+                source="chat.output",
+                scope_type="user",
+                scope_id=str(cst.req_user_id or cst.client_id) if (cst.req_user_id or cst.client_id) else None,
+                team_ids=team_ids,
+                org_ids=org_ids,
+                source_id=cst.stream_id,
+                chunk_id=chunk_id,
+                chunk_seq=cst.chunk_seq,
+            )
+    except cs._CHAT_NONCRITICAL_EXCEPTIONS as _e:
+        cs.logger.debug("Topic monitoring (stream chunk) skipped: {}", cs.exception_summary(_e))
+    if not cst.eff_policy.enabled or not cst.eff_policy.output_enabled:
+        if cst.stream_holdback:
+            out = f"{cst.stream_holdback}{s}"
+            _streaming_pipeline._flush_holdback(cst)
+            return out
+        return s
+    combined = f"{cst.stream_holdback}{s}" if cst.stream_holdback else s
+    resolved_action = None
+    matched_pattern = None
+    sample = None
+    redacted_combined = None
+    out_category = None
+    match_span = None
+    if hasattr(cst.moderation, "evaluate_action_with_match"):
+        try:
+            eval_res = cst.moderation.evaluate_action_with_match(combined, cst.eff_policy, "output")
+            if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                resolved_action, redacted_combined, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                out_category = eval_res[3] if len(eval_res) >= 4 else None
+                match_span = eval_res[4] if len(eval_res) >= 5 else None
+            else:
+                resolved_action, redacted_combined, matched_pattern = eval_res  # type: ignore
+        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+            resolved_action = None
+        if match_span and hasattr(cst.moderation, "build_sanitized_snippet"):
+            try:
+                sample = cst.moderation.build_sanitized_snippet(combined, cst.eff_policy, match_span, matched_pattern)
+            except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+                sample = None
+    elif hasattr(cst.moderation, "evaluate_action"):
+        try:
+            eval_res = cst.moderation.evaluate_action(combined, cst.eff_policy, "output")
+            if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                resolved_action, redacted_combined, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                out_category = eval_res[3] if len(eval_res) >= 4 else None
+            else:
+                resolved_action, redacted_combined, matched_pattern = eval_res  # type: ignore
+        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+            resolved_action = None
+    if resolved_action and resolved_action != "pass" and sample is None:
+        try:
+            _, sample = cst.moderation.check_text(combined, cst.eff_policy, "output")
+        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+            sample = None
+    if not resolved_action:
+        flagged, sample = cst.moderation.check_text(combined, cst.eff_policy, "output")
+        if not flagged:
+            return _streaming_pipeline._emit_with_holdback(cst, combined)
+        resolved_action = cst.eff_policy.output_action
+        redacted_combined = cst.moderation.redact_text(combined, cst.eff_policy) if resolved_action == "redact" else None
+    if resolved_action == "block":
+        if not cst.stream_mod_state["block_logged"]:
+            with contextlib.suppress(cs._CHAT_NONCRITICAL_EXCEPTIONS):
+                cst.metrics.track_moderation_stream_block(str(cst.req_user_id or cst.client_id), category=(out_category or "default"))
+            cst.mandatory_moderation_audit_tasks.append(
+                asyncio.create_task(
+                    cs.write_mandatory_moderation_audit(
+                        audit_service=cst.audit_service,
+                        audit_context=cst.audit_context,
+                        audit_event_type=cs.AuditEventType.SECURITY_VIOLATION,
+                        action="moderation.output",
+                        result="failure",
+                        metadata={
+                            "phase": "output",
+                            "streaming": True,
+                            "action": "block",
+                            "pattern": sample,
+                        },
+                    )
+                )
+            )
+            cst.stream_mod_state["block_logged"] = True
+        cst.stream_holdback = ""
+        cst.stream_mod_state["pending_stop_error"] = StopStreamWithError(
+            message="Output violates moderation policy",
+            error_type="output_moderation_block",
+        )
+        return ""
+    if resolved_action == "redact":
+        if not cst.stream_mod_state["redact_logged"]:
+            with contextlib.suppress(cs._CHAT_NONCRITICAL_EXCEPTIONS):
+                cst.metrics.track_moderation_output(str(cst.req_user_id or cst.client_id), "redact", streaming=True, category=(out_category or "default"))
+            cst.mandatory_moderation_audit_tasks.append(
+                asyncio.create_task(
+                    cs.write_mandatory_moderation_audit(
+                        audit_service=cst.audit_service,
+                        audit_context=cst.audit_context,
+                        audit_event_type=cs.AuditEventType.SECURITY_VIOLATION,
+                        action="moderation.output",
+                        result="success",
+                        metadata={
+                            "phase": "output",
+                            "streaming": True,
+                            "action": "redact",
+                            "pattern": sample,
+                        },
+                    )
+                )
+            )
+            cst.stream_mod_state["redact_logged"] = True
+        redacted_out = (
+            redacted_combined
+            if isinstance(redacted_combined, str)
+            else cst.moderation.redact_text(combined, cst.eff_policy)
+        )
+        return _streaming_pipeline._emit_with_holdback(cst, redacted_out)
+    return _streaming_pipeline._emit_with_holdback(cst, combined)
+
+
+async def _apply_stream_output_policies(
+    cst: "StreamCall",
+    full_reply: str, *, enforce_resolved_action: bool = False
+) -> tuple[str | None, bool]:
+    """Run self-monitoring and output moderation on a reply before it is saved.
+
+        Shared by complete and partial settlement so both store the same text.
+
+        Returns:
+            The text to save (None when blocked) and whether the reply was blocked.
+        """
+    full_reply_to_save: str | None = full_reply
+    post_stream_blocked = False
+
+    # Self-monitoring output check (streaming)
+    if cst.self_monitoring_service and full_reply:
+        try:
+            _sm_uid_s = None
+            try:
+                if cst.request is not None and hasattr(cst.request, "state"):
+                    _sm_uid_s = getattr(cst.request.state, "user_id", None)
+            except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+                _sm_uid_s = None
+            _sm_user_s = str(_sm_uid_s or cst.client_id)
+            _sm_loop_s = asyncio.get_running_loop()
+            sm_result_s = await _sm_loop_s.run_in_executor(
+                None,
+                lambda: cst.self_monitoring_service.check_text(
+                    text=full_reply,
+                    user_id=_sm_user_s,
+                    phase="output",
+                    conversation_id=str(cst.final_conversation_id) if cst.final_conversation_id else None,
+                ),
+            )
+            if sm_result_s.action == "block":
+                post_stream_blocked = True
+                full_reply_to_save = None
+            elif sm_result_s.action == "redact" and sm_result_s.redacted_text is not None:
+                full_reply_to_save = sm_result_s.redacted_text
+        except cs._CHAT_NONCRITICAL_EXCEPTIONS as e:
+            cs.logger.debug(
+                "Self-monitoring output check (streaming) skipped error_type={}",
+                type(e).__name__,
+            )
+            if enforce_resolved_action:
+                return None, True
+
+    try:
+        _get_mod = cst.moderation_getter or cs.get_moderation_service
+        moderation = _get_mod()
+        req_user_id = None
+        try:
+            if cst.request is not None and hasattr(cst.request, "state"):
+                req_user_id = getattr(cst.request.state, "user_id", None)
+        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+            req_user_id = None
+        eff_policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else cst.client_id)
+        if full_reply and eff_policy.enabled and eff_policy.output_enabled:
+            action = None
+            redacted = None
+            sample = None
+            category = None
+            matched_pattern = None
+            match_span = None
+            if hasattr(moderation, "evaluate_action_with_match"):
+                eval_res = moderation.evaluate_action_with_match(full_reply, eff_policy, "output")
+                if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                    action, redacted, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                    category = eval_res[3] if len(eval_res) >= 4 else None
+                    match_span = eval_res[4] if len(eval_res) >= 5 else None
+                else:
+                    action, redacted, matched_pattern = eval_res  # type: ignore
+                if match_span and hasattr(moderation, "build_sanitized_snippet"):
+                    try:
+                        sample = moderation.build_sanitized_snippet(full_reply, eff_policy, match_span, matched_pattern)
+                    except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+                        sample = None
+            elif hasattr(moderation, "evaluate_action"):
+                eval_res = moderation.evaluate_action(full_reply, eff_policy, "output")
+                if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                    action, redacted, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                    category = eval_res[3] if len(eval_res) >= 4 else None
+                else:
+                    action, redacted, matched_pattern = eval_res  # type: ignore
+            if action and action != "pass" and sample is None:
+                try:
+                    _, sample = moderation.check_text(full_reply, eff_policy, "output")
+                except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+                    sample = None
+            if action is None or enforce_resolved_action:
+                if action is None:
+                    flagged, sample = moderation.check_text(full_reply, eff_policy, "output")
+                    if flagged:
+                        action = eff_policy.output_action
+
+                if action == "block":
+                    if not cst.stream_mod_state["block_logged"]:
+                        with contextlib.suppress(cs._CHAT_NONCRITICAL_EXCEPTIONS):
+                            cst.metrics.track_moderation_stream_block(
+                                str(req_user_id or cst.client_id),
+                                category=(category or "default"),
+                            )
+                        try:
+                            if cst.audit_service and cst.audit_context:
+                                cs._schedule_background_task(
+                                    cst.audit_service.log_event(
+                                        event_type=cs.AuditEventType.SECURITY_VIOLATION,
+                                        context=cst.audit_context,
+                                        action="moderation.output",
+                                        result="failure",
+                                        metadata={
+                                            "phase": "output",
+                                            "streaming": True,
+                                            "action": "block",
+                                            "pattern": sample,
+                                        },
+                                    ),
+                                    task_name="chat.stream.save.output.block.audit",
+                                )
+                        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+                            pass
+                        cst.stream_mod_state["block_logged"] = True
+                    if not cst.stream_mod_state["block_capture_logged"]:
+                        await cs._capture_moderation_review_item_safely_async(
+                            phase="output",
+                            action="block",
+                            excerpt=sample,
+                            category=category,
+                            matched_pattern=matched_pattern,
+                            effective_policy=eff_policy,
+                            source_id=str(cst.final_conversation_id) if cst.final_conversation_id else None,
+                            user_id=str(req_user_id or cst.client_id) if (req_user_id or cst.client_id) else None,
+                        )
+                        cst.stream_mod_state["block_capture_logged"] = True
+                    post_stream_blocked = True
+                    full_reply_to_save = None
+                elif action == "redact":
+                    if not cst.stream_mod_state["redact_logged"]:
+                        with contextlib.suppress(cs._CHAT_NONCRITICAL_EXCEPTIONS):
+                            cst.metrics.track_moderation_output(
+                                str(req_user_id or cst.client_id),
+                                "redact",
+                                streaming=True,
+                                category=(category or "default"),
+                            )
+                        try:
+                            if cst.audit_service and cst.audit_context:
+                                cs._schedule_background_task(
+                                    cst.audit_service.log_event(
+                                        event_type=cs.AuditEventType.SECURITY_VIOLATION,
+                                        context=cst.audit_context,
+                                        action="moderation.output",
+                                        result="success",
+                                        metadata={
+                                            "phase": "output",
+                                            "streaming": True,
+                                            "action": "redact",
+                                            "pattern": sample,
+                                        },
+                                    ),
+                                    task_name="chat.stream.save.output.redact.audit",
+                                )
+                        except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+                            pass
+                        cst.stream_mod_state["redact_logged"] = True
+                    if not cst.stream_mod_state["redact_capture_logged"]:
+                        await cs._capture_moderation_review_item_safely_async(
+                            phase="output",
+                            action="redact",
+                            excerpt=sample,
+                            category=category,
+                            matched_pattern=matched_pattern,
+                            effective_policy=eff_policy,
+                            source_id=str(cst.final_conversation_id) if cst.final_conversation_id else None,
+                            user_id=str(req_user_id or cst.client_id) if (req_user_id or cst.client_id) else None,
+                        )
+                        cst.stream_mod_state["redact_capture_logged"] = True
+                    full_reply_to_save = moderation.redact_text(full_reply, eff_policy)
+                elif action == "warn":
+                    if not cst.stream_mod_state["warn_capture_logged"]:
+                        await cs._capture_moderation_review_item_safely_async(
+                            phase="output",
+                            action="warn",
+                            excerpt=sample,
+                            category=category,
+                            matched_pattern=matched_pattern,
+                            effective_policy=eff_policy,
+                            source_id=str(cst.final_conversation_id) if cst.final_conversation_id else None,
+                            user_id=str(req_user_id or cst.client_id) if (req_user_id or cst.client_id) else None,
+                        )
+                        cst.stream_mod_state["warn_capture_logged"] = True
+    except cs._CHAT_NONCRITICAL_EXCEPTIONS:
+        if enforce_resolved_action:
+            return None, True
+
+    return full_reply_to_save, post_stream_blocked
+
+
 # late imports: moved code reads these at call time (TASK-13950.25 R5)
 from tldw_Server_API.app.core.Chat.response_processor import (
     NonStreamChoice,
@@ -602,3 +949,5 @@ from tldw_Server_API.app.core.Chat.response_processor import (
     primary_choice,
     set_choice_content,
 )
+from tldw_Server_API.app.core.Chat import streaming_pipeline as _streaming_pipeline
+from tldw_Server_API.app.core.Chat import chat_service as cs
