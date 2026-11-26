@@ -633,6 +633,7 @@ jobs:
           printf 'Bun install exited with status %s\n' "$install_status"
           exit "$install_status"
       - name: Run shared UI coverage shard
+        id: coverage
         working-directory: apps/packages/ui
         timeout-minutes: 17
         run: |
@@ -641,7 +642,8 @@ jobs:
         if: always() && !cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: shared-ui-coverage-blob-${{ matrix.shard }}
+          # A failed attempt must not shadow a passing rerun in the summary download.
+          name: ${{ steps.coverage.outcome == 'success' && 'shared-ui-coverage-blob' || 'failed-shared-ui-coverage-blob' }}-${{ matrix.shard }}
           path: apps/packages/ui/.vitest-reports/blob-${{ matrix.shard }}-32.json
           include-hidden-files: true
           if-no-files-found: error
