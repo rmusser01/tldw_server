@@ -5224,8 +5224,8 @@ async def execute_streaming_call(
             rg_commit_cb=cst.rg_commit_cb,
         )
 
-    client_moonshot_history = not cst.should_persist and cst.cleaned_args.get("_chat_moonshot_reasoning_history") is True
-    capture_moonshot_reasoning = bool(cst.should_persist and cst.final_conversation_id) or client_moonshot_history
+    cst.client_moonshot_history = not cst.should_persist and cst.cleaned_args.get("_chat_moonshot_reasoning_history") is True
+    cst.capture_moonshot_reasoning = bool(cst.should_persist and cst.final_conversation_id) or cst.client_moonshot_history
 
     async def save_callback(
         full_reply: str,
@@ -5307,7 +5307,7 @@ async def execute_streaming_call(
             outcome="blocked" if post_stream_blocked else "success",
         )
 
-        if moonshot_reasoning and client_moonshot_history:
+        if moonshot_reasoning and cst.client_moonshot_history:
             structured_events.append(moonshot_reasoning_event(moonshot_reasoning))
 
         if cst.should_persist and cst.final_conversation_id and not post_stream_blocked and (
@@ -5732,7 +5732,7 @@ async def execute_streaming_call(
                     continuation_metadata=cst.normalized_continuation_metadata,
                     history_persistence_ack=bool(cst.native_persistence) or None,
                     forward_usage_chunk=cst.forward_usage_chunk,
-                    capture_provider_reasoning=capture_moonshot_reasoning or None,
+                    capture_provider_reasoning=cst.capture_moonshot_reasoning or None,
                     retain_reasoning=_retain_stream_reasoning() or None,
                 ),
                 stream_factory=create_streaming_response_with_timeout,

@@ -144,9 +144,11 @@ STREAM_PARAMS: tuple[str, ...] = (
 
 STREAM_LOCALS: tuple[str, ...] = (
     "_fallback_stream_ok",
+    "capture_moonshot_reasoning",
     "chunk_seq",
     "clean_success_lock",
     "clean_success_recorded",
+    "client_moonshot_history",
     "done_seen",
     "eff_policy",
     "error_payload",
