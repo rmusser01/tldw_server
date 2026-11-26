@@ -788,20 +788,6 @@ jobs:
           echo "::error::Change detection (the 'changes' job) ended as '${CHANGES_RESULT}', not 'success', so this gate cannot tell what the head changed and ran nothing. If its 'Check backlog task ids are unique' step failed, renumber the file it names; otherwise re-run the workflow."
           exit 1
 
-      - name: Require outbound privacy to have passed
-        shell: bash
-        env:
-          OUTBOUND_DUE: ${{ needs.changes.outputs.backend_changed }}
-          OUTBOUND_RESULT: ${{ needs.outbound-backend.result }}
-        run: |
-          case "$OUTBOUND_DUE:$OUTBOUND_RESULT" in
-            true:success|false:skipped) ;;
-            *)
-              echo "::error::Backend outbound privacy ended as '$OUTBOUND_RESULT' with backend_changed='$OUTBOUND_DUE'."
-              exit 1
-              ;;
-          esac
-
       - name: Require non-UTC timestamp tests to have passed
         env:
           BACKEND_CHANGED: ${{ needs.changes.outputs.backend_changed }}
@@ -812,6 +798,20 @@ jobs:
             true:success|false:skipped) ;;
             *)
               echo "::error::Non-UTC timestamp tests ended as '$TIMEZONE_RESULT' for backend_changed='$BACKEND_CHANGED'."
+              exit 1
+              ;;
+          esac
+
+      - name: Require outbound privacy to have passed
+        shell: bash
+        env:
+          OUTBOUND_DUE: ${{ needs.changes.outputs.backend_changed }}
+          OUTBOUND_RESULT: ${{ needs.outbound-backend.result }}
+        run: |
+          case "$OUTBOUND_DUE:$OUTBOUND_RESULT" in
+            true:success|false:skipped) ;;
+            *)
+              echo "::error::Backend outbound privacy ended as '$OUTBOUND_RESULT' with backend_changed='$OUTBOUND_DUE'."
               exit 1
               ;;
           esac

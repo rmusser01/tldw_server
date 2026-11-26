@@ -874,6 +874,27 @@ def _resolve_commercial_listings(
         return None
 
 
+def _evaluate_catalog_endpoint(
+    provider_name: str,
+    endpoint_url: str | None,
+    api_key_value: str | None,
+) -> tuple[ConfiguredEndpointScope | None, URLPolicyResult | None]:
+    """Check a configured endpoint's egress policy when it can be used."""
+    # Skip DNS when the catalog already knows the endpoint needs credentials.
+    if not endpoint_url or __provider_readiness.custom_openai_endpoint_requires_credentials(
+        _normalize_catalog_provider_for_chat(provider_name), endpoint_url, api_key_value,
+    ):
+        return None, None
+
+    endpoint_scope = None
+    try:
+        endpoint_scope = ConfiguredEndpointScope.from_url(endpoint_url)
+        endpoint_policy = _egress.evaluate_url_policy(endpoint_url, configured_endpoint=endpoint_scope)
+    except (TypeError, ValueError):
+        endpoint_policy = URLPolicyResult(False, "Invalid configured endpoint", reason_code="invalid_url")
+    return endpoint_scope, endpoint_policy
+
+
 def get_configured_providers(
     include_deprecated: bool = False,
     refresh_openrouter: bool = False,
@@ -1267,25 +1288,9 @@ def get_configured_providers(
             configured_model_names = {str(m).strip() for m in models if str(m).strip()}
             provider_envelope = registry_capability_envelopes.get(provider_name)
 
-            endpoint_scope: ConfiguredEndpointScope | None = None
-            endpoint_policy: URLPolicyResult | None = None
-            # Credential-free catalog views must not resolve endpoints they already know are unusable.
-            needs_credentials = __provider_readiness.custom_openai_endpoint_requires_credentials(
-                _normalize_catalog_provider_for_chat(provider_name), endpoint_url, api_key_value,
+            endpoint_scope, endpoint_policy = _evaluate_catalog_endpoint(
+                provider_name, endpoint_url, api_key_value,
             )
-            if endpoint_url and not needs_credentials:
-                try:
-                    endpoint_scope = ConfiguredEndpointScope.from_url(endpoint_url)
-                    endpoint_policy = _egress.evaluate_url_policy(
-                        endpoint_url,
-                        configured_endpoint=endpoint_scope,
-                    )
-                except (TypeError, ValueError):
-                    endpoint_policy = URLPolicyResult(
-                        False,
-                        "Invalid configured endpoint",
-                        reason_code="invalid_url",
-                    )
 
             discovery_result: ModelDiscoveryResult | None = commercial_discovery
             listed_inventory = provider_info['type'] == 'commercial' and has_model_listing(provider_name)

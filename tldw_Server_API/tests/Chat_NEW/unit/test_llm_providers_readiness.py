@@ -663,7 +663,7 @@ def test_llm_provider_readiness_marks_external_custom_openai_without_key_unavail
         }
     )
     resolver = Mock(return_value=("93.184.216.34",))
-    monkeypatch.setattr(llm_providers._egress, "resolve_host_ips", resolver)
+    monkeypatch.setattr("tldw_Server_API.app.core.Utils.egress.resolve_host_ips", resolver)
 
     with _client_for_config(monkeypatch, parser) as client:
         response = client.get("/api/v1/llm/providers")
