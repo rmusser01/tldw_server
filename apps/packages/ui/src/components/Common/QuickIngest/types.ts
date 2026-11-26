@@ -208,6 +208,7 @@ export type QueueItemValidation = {
 export type PlaylistQueueMetadata = {
   playlistId?: string | null
   playlistTitle?: string | null
+  sourceTitle?: string
   ordinal?: number
   normalizedSourceId?: string | null
   duplicateStatus?: "new" | "duplicate_in_batch" | "duplicate_existing" | "unknown"
@@ -246,6 +247,8 @@ export type WizardQueueItem = {
   id: string
   /** Persisted queue item kind for refresh restore. */
   kind?: "url" | "file"
+  /** How file-backed content entered the queue. Older sessions may omit this. */
+  fileOrigin?: "upload" | "paste"
   /** Original file name (for file uploads). */
   fileName?: string
   /** URL string (for URL-based items). */
@@ -280,6 +283,7 @@ export type WizardQueueItem = {
  * Processing status for a single item during the wizard's processing step.
  */
 export type ItemProgressStatus =
+  | "unknown"
   | "queued"
   | "uploading"
   | "processing"
@@ -332,6 +336,8 @@ export type ErrorClassification =
  * Extended result item with error classification for the wizard.
  */
 export type WizardResultItem = ResultItem & {
+  /** Readable extract-only payloads stay in memory for the current WebUI run. */
+  omitDataOnReload?: boolean
   /** Classification of the error, if status is "error". */
   errorClassification?: ErrorClassification
   /** Duration of processing in milliseconds. */
@@ -356,6 +362,10 @@ export type WizardResultItem = ResultItem & {
 export type WizardProcessingState = {
   /** Overall status. */
   status: ProcessingStatus
+  /** A bulk request is separate from the authoritative outcome of each job. */
+  bulkStop?: "requested" | "unconfirmed"
+  /** Failed sources selected for correction before starting the next attempt. */
+  correctionItemIds?: string[]
   /** Per-item progress entries. */
   perItemProgress: ItemProgress[]
   /** Elapsed time in seconds since processing started. */

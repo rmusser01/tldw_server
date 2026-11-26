@@ -95,6 +95,7 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
   const displayName = item.fileName || item.url || item.id
   const isTerminal = TERMINAL_STATUSES.has(progress.status)
   const isActive =
+    progress.status !== "unknown" &&
     progress.status !== "queued" &&
     progress.status !== "complete" &&
     progress.status !== "failed" &&
@@ -102,6 +103,8 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
 
   const statusLabel = useMemo(() => {
     switch (progress.status) {
+      case "unknown":
+        return qi("processing.status.unknown", "Status unavailable")
       case "queued":
         return qi("processing.status.queued", "Queued")
       case "uploading":
@@ -259,15 +262,17 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
 // ---------------------------------------------------------------------------
 
 type ProcessingStepProps = {
+  oneScreen?: boolean
   onCancelAll?: () => void
   jobStatusUnavailable?: boolean
+  stopRequestInFlight?: boolean
   onCancelItem?: ItemRowProps["onCancel"]
   trackedJobIdsByItem?: ReadonlyMap<string, readonly number[]>
   localItemCancellation?: boolean
   onMinimize?: () => void
 }
 
-export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, jobStatusUnavailable, onCancelItem, trackedJobIdsByItem, localItemCancellation = true, onMinimize }) => {
+export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = false, onCancelAll, jobStatusUnavailable, stopRequestInFlight, onCancelItem, trackedJobIdsByItem, localItemCancellation = true, onMinimize }) => {
   const { t } = useTranslation(["option"])
   const { state, cancelProcessing, cancelItem, minimize } = useIngestWizard()
   const { processingState, queueItems } = state
@@ -370,9 +375,12 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, job
 
   // Compute summary counts
   const counts = useMemo(() => {
-    const result = { completed: 0, processing: 0, queued: 0, failed: 0, cancelled: 0 }
+    const result = { completed: 0, processing: 0, queued: 0, failed: 0, cancelled: 0, unknown: 0 }
     for (const p of processingState.perItemProgress) {
       switch (p.status) {
+        case "unknown":
+          result.unknown++
+          break
         case "complete":
           result.completed++
           break
@@ -470,7 +478,8 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, job
   }, [failedItems, qi])
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <>
+    <div className={oneScreen ? "qi-web-scroll flex flex-col gap-4" : "flex flex-col gap-4 p-4"}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-text">
@@ -532,6 +541,16 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, job
         </div>
       )}
 
+      {processingState.bulkStop === "requested" && (
+        <p role="status" className="text-sm text-text">
+          {qi("processing.stopRequested", "Stop requested. Waiting for the server to confirm each outcome.")}
+        </p>
+      )}
+      {processingState.bulkStop === "unconfirmed" && (
+        <p role="alert" className="text-sm text-danger">
+          {qi("processing.stopUnconfirmed", "Could not confirm the stop for all sources. You can try again while Quick Ingest checks their status.")}
+        </p>
+      )}
       {jobStatusUnavailable && (
         <p role="status" className="text-sm text-text-muted">
           {qi("processing.statusUnavailable", "Server job status is unavailable. Quick Ingest shows the latest reported progress.")}
@@ -620,6 +639,12 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, job
           <span>
             {qi("processing.queued", "Queued")}: {counts.queued}
           </span>
+          {counts.unknown > 0 && (
+            <span>{qi("widget.unknownCount", "{{count}} awaiting status", { count: counts.unknown })}</span>
+          )}
+          {counts.cancelled > 0 && (
+            <span>{qi("processing.status.cancelled", "Cancelled")}: {counts.cancelled}</span>
+          )}
           {counts.failed > 0 && (
             <>
               <span className="text-border">|</span>
@@ -675,13 +700,14 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, job
         </div>
       )}
 
-      {/* Action buttons */}
-      <div className="flex items-center justify-end gap-2">
+    </div>
+      <div className={oneScreen ? "qi-web-footer" : "flex items-center justify-end gap-2 px-4 pb-4"}>
         {(processingState.status === "running" ||
           processingState.status === "idle") && (
           <button
             type="button"
             onClick={handleCancelAll}
+            disabled={stopRequestInFlight}
             className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-medium text-danger transition hover:bg-danger/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus"
           >
             {qi("processing.cancelAll", "Cancel All")}
@@ -698,7 +724,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, job
           </button>
         )}
       </div>
-    </div>
+    </>
   )
 }
 
