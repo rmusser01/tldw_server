@@ -16,6 +16,7 @@ import {
   MessageSquare,
   MicIcon,
   Microscope,
+  MonitorSmartphone,
   OrbitIcon,
   ServerIcon,
   ShareIcon,
@@ -71,6 +72,13 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
     labelToken: "settings:providerKeys.navTitle",
     icon: ServerIcon,
     order: 3
+  },
+  {
+    path: "/settings/sessions",
+    group: "setupRecovery",
+    labelToken: "settings:activeSessions.navTitle",
+    icon: MonitorSmartphone,
+    order: 3.5
   },
   {
     path: "/settings/data",

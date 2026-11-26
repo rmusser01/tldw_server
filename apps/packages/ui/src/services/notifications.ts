@@ -296,6 +296,7 @@ export async function listNotifications(params?: {
   offset?: number
   include_archived?: boolean
   only_snoozed?: boolean
+  kind?: string
 }, options?: Pick<BgRequestInit,
   "abortSignal" | "servicePromptConfig" | "headers" | "suppressBackendUnavailableEvent" | "expectedStatuses"
 >): Promise<NotificationsListResponse> {
@@ -313,8 +314,10 @@ export async function getUnreadCount(): Promise<NotificationsUnreadCountResponse
   })
 }
 
-export async function markNotificationsRead(ids: number[]): Promise<{ updated: number }> {
-  return bgRequest<{ updated: number }>({
+export async function markNotificationsRead(
+  ids: number[]
+): Promise<{ updated: number; refused_ids?: number[] }> {
+  return bgRequest<{ updated: number; refused_ids?: number[] }>({
     path: "/api/v1/notifications/mark-read" as any,
     method: "POST",
     headers: { "Content-Type": "application/json" },
