@@ -508,6 +508,9 @@ class ChatCompletionAssistantMessageParam(BaseMessage):
     reasoning_content: Optional[str] = Field(
         None, max_length=MAX_MESSAGE_CONTENT_LENGTH, description="Provider reasoning to echo during a Moonshot tool continuation."
     )
+    moonshot_reasoning_content: Optional[str] = Field(
+        None, max_length=MAX_MESSAGE_CONTENT_LENGTH, description="History reasoning scoped to direct Moonshot requests."
+    )
     # Deprecated function_call - include for compatibility if needed, but prefer tool_calls
     function_call: Optional[FunctionCall] = Field(
         None, deprecated=True, description="Deprecated and replaced by `tool_calls`."

@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-import html
 import inspect
 import json as _json
 import os
@@ -76,6 +75,7 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
     GENERATION_STATUS_COMPLETE,
     GENERATION_STATUS_LENGTH,
     build_generation_metadata,
+    moonshot_reasoning_event,
 )
 from tldw_Server_API.app.core.Chat.history_selection import (
     REPLY_ACTION_REFUSED_QUESTION,
@@ -84,11 +84,12 @@ from tldw_Server_API.app.core.Chat.history_selection import (
     HistorySelectionSnapshotV1,
     reply_action_refusal,
 )
-from tldw_Server_API.app.core.Chat.knowledge_save import split_reasoning_text, strip_reasoning_blocks
+from tldw_Server_API.app.core.Chat.knowledge_save import strip_reasoning_blocks
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
     apply_output_safety_to_choices,
+    prepare_saved_stream_reply,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
     NativeStreamPersistence,
@@ -193,6 +194,7 @@ from tldw_Server_API.app.core.LLM_Calls.gateway import (  # used by build_call_p
     CHAT_COMPLETIONS_SURFACE,
     _provider_inventory_endpoint,
     _raise_inventory_failure,
+    official_moonshot_chat_base_url,
 )
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
@@ -207,6 +209,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
     resolve_provider_model_selection,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
+from tldw_Server_API.app.core.LLM_Calls.provider_results import MOONSHOT_REASONING_KEY, bounded_moonshot_reasoning
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
@@ -239,8 +242,6 @@ from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
 from tldw_Server_API.app.core.Chat import call_state as _call_state
 from tldw_Server_API.app.core.Chat import completion_pipeline as _completion_pipeline
-import functools
-from tldw_Server_API.app.core.Chat import streaming_pipeline as _streaming_pipeline
 
 _CHAT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ChatAPIError,
@@ -1675,6 +1676,10 @@ def build_call_params_from_request(
             and (not isinstance(declared_fields, Mapping) or key in declared_fields)
         )
     }
+    request_metadata = getattr(request_data, "metadata", None)
+    if isinstance(request_metadata, dict) and request_metadata.get("tldw_moonshot_reasoning_history_v1") is True:
+        call_params["_chat_moonshot_reasoning_history"] = True
+
     call_model = resolved_model if resolved_model is not None else call_params.get("model")
     if isinstance(call_model, str) and call_model.strip():
         call_params["model"] = call_model.strip()
@@ -2390,6 +2395,7 @@ def _build_assistant_message_payload(
     tool_calls: Any | None,
     function_call: Any | None,
     generation_metadata: dict[str, Any] | None = None,
+    moonshot_reasoning: str | None = None,
 ) -> dict[str, Any]:
     """Compatibility wrapper for tests/imports that use the old local helper."""
 
@@ -2400,6 +2406,21 @@ def _build_assistant_message_payload(
         tool_calls=tool_calls,
         function_call=function_call,
         generation_metadata=generation_metadata,
+        moonshot_reasoning=moonshot_reasoning,
+    )
+
+
+def _stream_generation_metadata(
+    generation: dict[str, Any] | None, *, model: str, provider: str
+) -> dict[str, Any]:
+    """Combine what the stream observed with the model and provider that produced it."""
+    observed = generation if isinstance(generation, dict) else {}
+    return build_generation_metadata(
+        generation_status=observed.get("generation_status", GENERATION_STATUS_COMPLETE),
+        model_id=model,
+        provider=provider,
+        finish_reason=observed.get("finish_reason"),
+        usage=observed.get("usage"),
     )
 
 
@@ -3004,6 +3025,15 @@ def _history_for_request(
     return formatted
 
 
+def _attach_saved_moonshot_reasoning(message: dict[str, Any], extra: Mapping[str, Any]) -> None:
+    """Carry approved reasoning only from stored Moonshot assistant turns."""
+    if message["role"] != "assistant" or extra.get("provider") != "moonshot":
+        return
+    reasoning = bounded_moonshot_reasoning(extra.get(MOONSHOT_REASONING_KEY))
+    if reasoning is not None:
+        message[MOONSHOT_REASONING_KEY] = reasoning
+
+
 def _format_selected_history_messages(
     snapshot: Any,
     content: Any,
@@ -3061,6 +3091,7 @@ def _format_selected_history_messages(
             ]
         if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
             entry["content"] = None
+        _attach_saved_moonshot_reasoning(entry, extra)
         if item.get("tool_calls") is not None:
             entry["tool_calls"] = item["tool_calls"]
         for key in ("function_call", "tool_call_id"):
@@ -3459,21 +3490,15 @@ async def build_context_and_messages(
             except _CHAT_NONCRITICAL_EXCEPTIONS as meta_err:
                 logger.debug("Metadata lookup failed for message {}: {}", db_msg.get("id"), meta_err)
 
-            tool_calls_meta = None
-            function_call_meta = None
-            content_placeholder_reason = None
-            tool_call_id_meta = None
-            stored_role = None
-            stored_name = None
-            if metadata:
-                tool_calls_meta = metadata.get("tool_calls")
-                extra_meta = metadata.get("extra") or {}
-                if isinstance(extra_meta, dict):
-                    function_call_meta = extra_meta.get("function_call")
-                    content_placeholder_reason = extra_meta.get("content_placeholder_reason")
-                    tool_call_id_meta = extra_meta.get("tool_call_id")
-                    stored_role = extra_meta.get("sender_role")
-                    stored_name = extra_meta.get("sender_name")
+            tool_calls_meta = metadata.get("tool_calls") if metadata else None
+            extra_meta = metadata.get("extra") if metadata else None
+            if not isinstance(extra_meta, dict):
+                extra_meta = {}
+            function_call_meta = extra_meta.get("function_call")
+            content_placeholder_reason = extra_meta.get("content_placeholder_reason")
+            tool_call_id_meta = extra_meta.get("tool_call_id")
+            stored_role = extra_meta.get("sender_role")
+            stored_name = extra_meta.get("sender_name")
 
             role_initial = map_sender_to_role(sender_val, character_card.get("name") if character_card else None)
             role = stored_role if stored_role in {"user", "assistant", "system", "tool"} else role_initial
@@ -3532,6 +3557,7 @@ async def build_context_and_messages(
                     hist_entry["content"] = msg_parts[0].get("text", "")
                 else:
                     hist_entry["content"] = msg_parts or None
+                _attach_saved_moonshot_reasoning(hist_entry, extra_meta)
                 if role == "assistant":
                     name_source = stored_name or (character_card.get("name") if character_card else None)
                     if name_source:
@@ -4561,6 +4587,7 @@ async def execute_streaming_call(
                                     )
                                     if not hasattr(result, "__aiter__") and hasattr(result, "__iter__"):
                                         result = wrap_sync_stream(result)
+                                    cst.cleaned_args = refreshed_args
                                     cst.selected_provider = fallback_provider
                                     cst.usage_credential_source = call_credential_source(refreshed_args)
                                     # Update run-first metric context to reflect fallback provider/model
@@ -4900,6 +4927,38 @@ async def execute_streaming_call(
     cst.clean_success_recorded = False
     cst.clean_success_lock = asyncio.Lock()
 
+    async def _record_provider_output_once() -> bool:
+        """Record validated provider output once, retaining a clean-end retry."""
+
+        if not callable(cst.on_provider_output):
+            return False
+        async with cst.provider_output_lock:
+            if cst.provider_output_recorded:
+                return True
+            try:
+                persisted = await cst.on_provider_output(cst.selected_provider)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                return False
+            if persisted is not False:
+                cst.provider_output_recorded = True
+            return cst.provider_output_recorded
+
+    async def _record_clean_success_once() -> bool:
+        """Invoke the clean-completion callback at most once per stream."""
+
+        if not callable(cst.on_success):
+            return False
+        async with cst.clean_success_lock:
+            if cst.clean_success_recorded:
+                return True
+            try:
+                persisted = await cst.on_success(cst.selected_provider)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                return False
+            if persisted is not False:
+                cst.clean_success_recorded = True
+            return cst.clean_success_recorded
+
     cst.loop_compat_enabled = False
     cst.loop_compat_run_id = str(cst.final_conversation_id or f"run_{_uuid.uuid4().hex[:12]}")
     try:
@@ -4908,13 +4967,786 @@ async def execute_streaming_call(
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         cst.loop_compat_enabled = False
 
+    async def _apply_stream_output_policies(
+        full_reply: str, *, enforce_resolved_action: bool = False
+    ) -> tuple[str | None, bool]:
+        """Run self-monitoring and output moderation on a reply before it is saved.
+
+        Shared by complete and partial settlement so both store the same text.
+
+        Returns:
+            The text to save (None when blocked) and whether the reply was blocked.
+        """
+        full_reply_to_save: str | None = full_reply
+        post_stream_blocked = False
+
+        # Self-monitoring output check (streaming)
+        if cst.self_monitoring_service and full_reply:
+            try:
+                _sm_uid_s = None
+                try:
+                    if cst.request is not None and hasattr(cst.request, "state"):
+                        _sm_uid_s = getattr(cst.request.state, "user_id", None)
+                except _CHAT_NONCRITICAL_EXCEPTIONS:
+                    _sm_uid_s = None
+                _sm_user_s = str(_sm_uid_s or cst.client_id)
+                _sm_loop_s = asyncio.get_running_loop()
+                sm_result_s = await _sm_loop_s.run_in_executor(
+                    None,
+                    lambda: cst.self_monitoring_service.check_text(
+                        text=full_reply,
+                        user_id=_sm_user_s,
+                        phase="output",
+                        conversation_id=str(cst.final_conversation_id) if cst.final_conversation_id else None,
+                    ),
+                )
+                if sm_result_s.action == "block":
+                    post_stream_blocked = True
+                    full_reply_to_save = None
+                elif sm_result_s.action == "redact" and sm_result_s.redacted_text is not None:
+                    full_reply_to_save = sm_result_s.redacted_text
+            except _CHAT_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(
+                    "Self-monitoring output check (streaming) skipped error_type={}",
+                    type(e).__name__,
+                )
+                if enforce_resolved_action:
+                    return None, True
+
+        try:
+            _get_mod = cst.moderation_getter or get_moderation_service
+            moderation = _get_mod()
+            req_user_id = None
+            try:
+                if cst.request is not None and hasattr(cst.request, "state"):
+                    req_user_id = getattr(cst.request.state, "user_id", None)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                req_user_id = None
+            eff_policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else cst.client_id)
+            if full_reply and eff_policy.enabled and eff_policy.output_enabled:
+                action = None
+                redacted = None
+                sample = None
+                category = None
+                matched_pattern = None
+                match_span = None
+                if hasattr(moderation, "evaluate_action_with_match"):
+                    eval_res = moderation.evaluate_action_with_match(full_reply, eff_policy, "output")
+                    if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                        action, redacted, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                        category = eval_res[3] if len(eval_res) >= 4 else None
+                        match_span = eval_res[4] if len(eval_res) >= 5 else None
+                    else:
+                        action, redacted, matched_pattern = eval_res  # type: ignore
+                    if match_span and hasattr(moderation, "build_sanitized_snippet"):
+                        try:
+                            sample = moderation.build_sanitized_snippet(full_reply, eff_policy, match_span, matched_pattern)
+                        except _CHAT_NONCRITICAL_EXCEPTIONS:
+                            sample = None
+                elif hasattr(moderation, "evaluate_action"):
+                    eval_res = moderation.evaluate_action(full_reply, eff_policy, "output")
+                    if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                        action, redacted, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                        category = eval_res[3] if len(eval_res) >= 4 else None
+                    else:
+                        action, redacted, matched_pattern = eval_res  # type: ignore
+                if action and action != "pass" and sample is None:
+                    try:
+                        _, sample = moderation.check_text(full_reply, eff_policy, "output")
+                    except _CHAT_NONCRITICAL_EXCEPTIONS:
+                        sample = None
+                if action is None or enforce_resolved_action:
+                    if action is None:
+                        flagged, sample = moderation.check_text(full_reply, eff_policy, "output")
+                        if flagged:
+                            action = eff_policy.output_action
+
+                    if action == "block":
+                        if not cst.stream_mod_state["block_logged"]:
+                            with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                                cst.metrics.track_moderation_stream_block(
+                                    str(req_user_id or cst.client_id),
+                                    category=(category or "default"),
+                                )
+                            try:
+                                if cst.audit_service and cst.audit_context:
+                                    _schedule_background_task(
+                                        cst.audit_service.log_event(
+                                            event_type=AuditEventType.SECURITY_VIOLATION,
+                                            context=cst.audit_context,
+                                            action="moderation.output",
+                                            result="failure",
+                                            metadata={
+                                                "phase": "output",
+                                                "streaming": True,
+                                                "action": "block",
+                                                "pattern": sample,
+                                            },
+                                        ),
+                                        task_name="chat.stream.save.output.block.audit",
+                                    )
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                pass
+                            cst.stream_mod_state["block_logged"] = True
+                        if not cst.stream_mod_state["block_capture_logged"]:
+                            await _capture_moderation_review_item_safely_async(
+                                phase="output",
+                                action="block",
+                                excerpt=sample,
+                                category=category,
+                                matched_pattern=matched_pattern,
+                                effective_policy=eff_policy,
+                                source_id=str(cst.final_conversation_id) if cst.final_conversation_id else None,
+                                user_id=str(req_user_id or cst.client_id) if (req_user_id or cst.client_id) else None,
+                            )
+                            cst.stream_mod_state["block_capture_logged"] = True
+                        post_stream_blocked = True
+                        full_reply_to_save = None
+                    elif action == "redact":
+                        if not cst.stream_mod_state["redact_logged"]:
+                            with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                                cst.metrics.track_moderation_output(
+                                    str(req_user_id or cst.client_id),
+                                    "redact",
+                                    streaming=True,
+                                    category=(category or "default"),
+                                )
+                            try:
+                                if cst.audit_service and cst.audit_context:
+                                    _schedule_background_task(
+                                        cst.audit_service.log_event(
+                                            event_type=AuditEventType.SECURITY_VIOLATION,
+                                            context=cst.audit_context,
+                                            action="moderation.output",
+                                            result="success",
+                                            metadata={
+                                                "phase": "output",
+                                                "streaming": True,
+                                                "action": "redact",
+                                                "pattern": sample,
+                                            },
+                                        ),
+                                        task_name="chat.stream.save.output.redact.audit",
+                                    )
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                pass
+                            cst.stream_mod_state["redact_logged"] = True
+                        if not cst.stream_mod_state["redact_capture_logged"]:
+                            await _capture_moderation_review_item_safely_async(
+                                phase="output",
+                                action="redact",
+                                excerpt=sample,
+                                category=category,
+                                matched_pattern=matched_pattern,
+                                effective_policy=eff_policy,
+                                source_id=str(cst.final_conversation_id) if cst.final_conversation_id else None,
+                                user_id=str(req_user_id or cst.client_id) if (req_user_id or cst.client_id) else None,
+                            )
+                            cst.stream_mod_state["redact_capture_logged"] = True
+                        full_reply_to_save = moderation.redact_text(full_reply, eff_policy)
+                    elif action == "warn":
+                        if not cst.stream_mod_state["warn_capture_logged"]:
+                            await _capture_moderation_review_item_safely_async(
+                                phase="output",
+                                action="warn",
+                                excerpt=sample,
+                                category=category,
+                                matched_pattern=matched_pattern,
+                                effective_policy=eff_policy,
+                                source_id=str(cst.final_conversation_id) if cst.final_conversation_id else None,
+                                user_id=str(req_user_id or cst.client_id) if (req_user_id or cst.client_id) else None,
+                            )
+                            cst.stream_mod_state["warn_capture_logged"] = True
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            if enforce_resolved_action:
+                return None, True
+
+        return full_reply_to_save, post_stream_blocked
+
     # Partial replies are kept only for turns admitted through native history
     # selection, where the server owns settlement. Other save_to_db clients
     # retry an unanswered turn with tldw_retry_failed_turn, and that contract
     # needs the failed turn to have no saved reply.
     cst.keep_partial_replies = bool(cst.should_persist and cst.native_persistence)
 
-    tracked_streaming_generator = functools.partial(_streaming_pipeline.tracked_streaming_generator, cst)
+    def _retain_stream_reasoning() -> bool:
+        return cst.keep_partial_replies and cst.native_persistence == "retain_reasoning" and cst.structured_request_context is None
+
+    async def partial_save_callback(full_reply: str, *, generation: dict[str, Any]) -> str | None:
+        """Keep an unfinished reply after a disconnect, stop or provider failure (D7 S3-1).
+
+        Only the text is kept: partial tool calls are incomplete, and tool
+        execution, success accounting and audit success belong to complete
+        replies. A reply blocked by output policy is never saved.
+        """
+        if not cst.keep_partial_replies or not cst.final_conversation_id:
+            return None
+        if cst.stream_mod_state.get("pending_stop_error") is not None:
+            return None
+        full_reply_to_save, post_stream_blocked, _ = await prepare_saved_stream_reply(
+            full_reply, _apply_stream_output_policies, retain_reasoning=_retain_stream_reasoning(),
+        )
+        if post_stream_blocked or not isinstance(full_reply_to_save, str) or not full_reply_to_save.strip():
+            return None
+        message_payload = build_assistant_message_payload(
+            character_card_for_context=cst.character_card_for_context,
+            assistant_parent_message_id=cst.assistant_parent_message_id,
+            content=full_reply_to_save,
+            tool_calls=None,
+            function_call=None,
+            generation_metadata=_stream_generation_metadata(generation, model=cst.model, provider=cst.selected_provider),
+        )
+        return await save_assistant_message(
+            chat_db=cst.chat_db,
+            conversation_id=cst.final_conversation_id,
+            save_message_fn=cst.save_message_fn,
+            payload=message_payload,
+        )
+
+    def _stream_usage_recorder(
+        stream_usage: _StreamUsage | None, full_reply: str = ""
+    ) -> Callable[[], Awaitable[None]] | None:
+        """The write of this stream's one usage row and token commit, or None once it is claimed (TASK-13953)."""
+        if cst.stream_usage_recorded:
+            return None
+        cst.stream_usage_recorded = True
+        return partial(
+            _record_stream_usage,
+            request=cst.request,
+            provider=cst.selected_provider,
+            model=cst.model,
+            templated_llm_payload=cst.templated_llm_payload,
+            conversation_id=cst.final_conversation_id,
+            llm_start_time=cst.llm_start_time,
+            credential_source=cst.usage_credential_source,
+            stream_usage=stream_usage,
+            full_reply=full_reply,
+            rg_commit_cb=cst.rg_commit_cb,
+        )
+
+    client_moonshot_history = not cst.should_persist and cst.cleaned_args.get("_chat_moonshot_reasoning_history") is True
+    capture_moonshot_reasoning = bool(cst.should_persist and cst.final_conversation_id) or client_moonshot_history
+
+    async def save_callback(
+        full_reply: str,
+        tool_calls: list[dict[str, Any]] | None,
+        function_call: dict[str, Any] | None,
+        *,
+        generation: dict[str, Any] | None = None,
+        stream_usage: _StreamUsage | None = None,
+        provider_reasoning: str | None = None,
+    ):
+        # The usage row and the token commit, once per stream, detached: a client drop or a failure during the
+        # save below must not lose it (an early end records in _finalize_stream)
+        record = _stream_usage_recorder(stream_usage, full_reply)
+        if record is not None:
+            submit_accounting(record)
+        saved_message_id: str | None = None
+        tool_execution_payload: list[dict[str, Any]] | None = None
+        structured_events: list[dict[str, Any]] = []
+        full_reply_to_save, post_stream_blocked, moonshot_reasoning = await prepare_saved_stream_reply(
+            full_reply, _apply_stream_output_policies, retain_reasoning=_retain_stream_reasoning(),
+            provider_reasoning=provider_reasoning
+            if provider_reasoning and official_moonshot_chat_base_url(cst.selected_provider, cst.cleaned_args) else None,
+        )
+
+        if cst.structured_request_context is not None:
+            try:
+                structured_metadata = validate_structured_response(
+                    raw_text=full_reply_to_save,
+                    structured_request_context=cst.structured_request_context,
+                )
+                structured_events.append(
+                    {
+                        "event": "structured_result",
+                        "data": structured_metadata,
+                    }
+                )
+            except (
+                StructuredGenerationCapabilityError,
+                StructuredGenerationParseError,
+                StructuredGenerationSchemaError,
+            ) as structured_exc:
+                structured_events.append(
+                    {
+                        "event": "structured_error",
+                        "data": _structured_error_detail(structured_exc),
+                    }
+                )
+
+        if callable(cst.on_stream_full_reply):
+            try:
+                maybe_result = cst.on_stream_full_reply(strip_reasoning_blocks(full_reply))
+                if hasattr(maybe_result, "__await__"):
+                    await maybe_result  # type: ignore[misc]
+            except _CHAT_NONCRITICAL_EXCEPTIONS as stream_callback_err:
+                logger.debug(
+                    "on_stream_full_reply callback skipped error_type={}",
+                    type(stream_callback_err).__name__,
+                )
+
+        if not cst.stream_metrics_recorded:
+            try:
+                latency = time.time() - cst.llm_start_time
+                cst.metrics.track_llm_call(cst.selected_provider, cst.model, latency, success=True)
+                if cst.provider_manager:
+                    cst.provider_manager.record_success(cst.selected_provider, latency)
+                cst.stream_metrics_recorded = True
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                pass
+
+        _emit_chat_run_first_tool_path_metrics(
+            cst.metrics,
+            context=cst.run_first_metric_context,
+            tool_calls=tool_calls,
+            function_call=function_call,
+        )
+        _emit_chat_run_first_completion_metric(
+            cst.metrics,
+            context=cst.run_first_metric_context,
+            outcome="blocked" if post_stream_blocked else "success",
+        )
+
+        if moonshot_reasoning and client_moonshot_history:
+            structured_events.append(moonshot_reasoning_event(moonshot_reasoning))
+
+        if cst.should_persist and cst.final_conversation_id and not post_stream_blocked and (
+            full_reply_to_save or tool_calls or function_call
+        ):
+            message_payload = build_assistant_message_payload(
+                character_card_for_context=cst.character_card_for_context,
+                assistant_parent_message_id=cst.assistant_parent_message_id,
+                content=full_reply_to_save,
+                tool_calls=tool_calls,
+                function_call=function_call,
+                generation_metadata=_stream_generation_metadata(generation, model=cst.model, provider=cst.selected_provider),
+                moonshot_reasoning=moonshot_reasoning,
+            )
+            saved_message_id = await save_assistant_message(
+                chat_db=cst.chat_db,
+                conversation_id=cst.final_conversation_id,
+                save_message_fn=cst.save_message_fn,
+                payload=message_payload,
+            )
+
+        if (
+            not post_stream_blocked
+            and should_run_legacy_tool_autoexec(cst.cleaned_args)
+            and isinstance(tool_calls, list)
+            and tool_calls
+        ):
+            try:
+                req_user_id = None
+                try:
+                    if cst.request is not None and hasattr(cst.request, "state"):
+                        req_user_id = getattr(cst.request.state, "user_id", None)
+                except _CHAT_NONCRITICAL_EXCEPTIONS:
+                    req_user_id = None
+
+                autoexec_result = await execute_assistant_tool_calls(
+                    tool_calls=tool_calls,
+                    user_id=str(req_user_id) if req_user_id is not None else None,
+                    client_id=cst.client_id,
+                    max_tool_calls=get_chat_max_tool_calls(),
+                    timeout_ms=get_chat_tool_timeout_ms(),
+                    allow_catalog=_resolve_chat_autoexec_allow_catalog(cst.cleaned_args),
+                    attach_idempotency=should_attach_tool_idempotency(),
+                    idempotency_seed=str(cst.final_conversation_id) if cst.final_conversation_id else None,
+                )
+                tool_execution_payload = autoexec_result.event_payload().get("tool_results", [])
+
+                if cst.should_persist and cst.final_conversation_id:
+                    await save_tool_messages(
+                        chat_db=cst.chat_db,
+                        conversation_id=cst.final_conversation_id,
+                        save_message_fn=cst.save_message_fn,
+                        tool_messages=autoexec_result.tool_messages(),
+                    )
+            except _CHAT_NONCRITICAL_EXCEPTIONS as autoexec_err:
+                logger.warning(
+                    "Streaming chat tool auto-execution skipped error_type={}",
+                    type(autoexec_err).__name__,
+                )
+        # Audit success
+        try:
+            if cst.audit_service and cst.audit_context:
+                await cst.audit_service.log_event(
+                    event_type=AuditEventType.API_RESPONSE,
+                    context=cst.audit_context,
+                    action="chat_completion_success",
+                    result="success",
+                    metadata={
+                        "conversation_id": cst.final_conversation_id,
+                        "provider": cst.selected_provider,
+                        "model": cst.model,
+                        "streaming": True,
+                    },
+                )
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+        # Retry any failed first-output accounting at the last clean boundary,
+        # then notify consumers that the complete stream succeeded.
+        try:
+            await _record_provider_output_once()
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+        try:
+            await _record_clean_success_once()
+        except _CHAT_NONCRITICAL_EXCEPTIONS:
+            pass
+        events: list[dict[str, Any]] = list(structured_events)
+        if tool_execution_payload is not None:
+            events.append(
+                {
+                    "event": "tool_results",
+                    "data": {"tool_results": tool_execution_payload},
+                }
+            )
+            if cst.loop_compat_enabled:
+                seq = 1
+                events.append(
+                    {
+                        "event": "run_started",
+                        "data": {"run_id": cst.loop_compat_run_id, "seq": seq},
+                    }
+                )
+                seq += 1
+                if isinstance(tool_calls, list) and tool_calls:
+                    events.append(
+                        {
+                            "event": "tool_proposed",
+                            "data": {"run_id": cst.loop_compat_run_id, "seq": seq, "tool_calls": tool_calls},
+                        }
+                    )
+                    seq += 1
+                events.append(
+                    {
+                        "event": "tool_finished",
+                        "data": {"run_id": cst.loop_compat_run_id, "seq": seq, "tool_results": tool_execution_payload},
+                    }
+                )
+                seq += 1
+                events.append(
+                    {
+                        "event": "run_complete",
+                        "data": {"run_id": cst.loop_compat_run_id, "seq": seq},
+                    }
+                )
+        elif cst.loop_compat_enabled:
+            events.extend(
+                [
+                    {
+                        "event": "run_started",
+                        "data": {"run_id": cst.loop_compat_run_id, "seq": 1},
+                    },
+                    {
+                        "event": "run_complete",
+                        "data": {"run_id": cst.loop_compat_run_id, "seq": 2},
+                    },
+                ]
+            )
+
+        if events:
+            return {
+                "saved_message_id": saved_message_id,
+                "events": events,
+            }
+        return saved_message_id
+
+    async def tracked_streaming_generator():
+        async with cst.metrics.track_streaming(cst.final_conversation_id) as stream_tracker:
+            _get_mod = cst.moderation_getter or get_moderation_service
+            cst.moderation = _get_mod()
+            cst.req_user_id = None
+            try:
+                if cst.request is not None and hasattr(cst.request, "state"):
+                    cst.req_user_id = getattr(cst.request.state, "user_id", None)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                cst.req_user_id = None
+            cst.eff_policy = cst.moderation.get_effective_policy(str(cst.req_user_id) if cst.req_user_id is not None else cst.client_id)
+
+            from tldw_Server_API.app.core.Chat.streaming_utils import StopStreamWithError
+
+            cst.mandatory_moderation_audit_tasks: list[asyncio.Task[Any]] = []
+            cst.stream_id = _uuid.uuid4().hex
+            cst.chunk_seq = 0
+
+            cst.stream_holdback = ""
+            if CHAT_STREAM_INCLUDE_METADATA and cst.final_conversation_id:
+                metadata_payload = {
+                    "event": "tldw_metadata",
+                    "conversation_id": cst.final_conversation_id,
+                    "tldw_conversation_id": cst.final_conversation_id,
+                }
+                if cst.user_message_id:
+                    metadata_payload["tldw_user_message_id"] = cst.user_message_id
+                if cst.system_message_id:
+                    metadata_payload["tldw_system_message_id"] = cst.system_message_id
+                if cst.normalized_continuation_metadata:
+                    metadata_payload["tldw_continuation"] = cst.normalized_continuation_metadata
+                yield sse_data(metadata_payload)
+            try:
+                cst.stream_buffer_limit = int(os.getenv("MODERATION_STREAM_BUFFER_CHARS", "1024"))
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                cst.stream_buffer_limit = 1024
+            if cst.stream_buffer_limit < 0:
+                cst.stream_buffer_limit = 0
+
+            def _emit_with_holdback(text: str) -> str:
+                if cst.stream_buffer_limit <= 0:
+                    cst.stream_holdback = ""
+                    return text
+                if not text:
+                    return ""
+                if len(text) <= cst.stream_buffer_limit:
+                    cst.stream_holdback = text
+                    return ""
+                emit = text[:-cst.stream_buffer_limit]
+                cst.stream_holdback = text[-cst.stream_buffer_limit:]
+                return emit
+
+            def _flush_holdback() -> str:
+                if not cst.stream_holdback:
+                    return ""
+                out = cst.stream_holdback
+                cst.stream_holdback = ""
+                return out
+
+            async def _await_mandatory_moderation_audits() -> None:
+                pending_tasks = list(cst.mandatory_moderation_audit_tasks)
+                cst.mandatory_moderation_audit_tasks.clear()
+                failures: list[BaseException] = []
+                if pending_tasks:
+                    results = await asyncio.gather(
+                        *pending_tasks,
+                        return_exceptions=True,
+                    )
+                    failures = [result for result in results if isinstance(result, BaseException)]
+                if failures:
+                    for failure in failures:
+                        logger.error(
+                            "Mandatory moderation audit task failed for {} error_type={}",
+                            cst.final_conversation_id,
+                            type(failure).__name__,
+                        )
+                    raise StopStreamWithError(
+                        message="Mandatory audit persistence unavailable",
+                        error_type="audit_persistence_failure",
+                    ) from failures[0]
+                pending_stopper = cst.stream_mod_state.pop("pending_stop_error", None)
+                if pending_stopper is not None:
+                    raise pending_stopper
+
+            def _out_transform(s: str) -> str:
+                if cst.stream_mod_state.get("pending_stop_error") is not None:
+                    return ""
+                try:
+                    mon = None
+                    try:
+                        mon = get_topic_monitoring_service()
+                    except _CHAT_NONCRITICAL_EXCEPTIONS:
+                        mon = None
+                    team_ids = None
+                    org_ids = None
+                    try:
+                        if cst.request is not None and hasattr(cst.request, "state"):
+                            team_ids = getattr(cst.request.state, "team_ids", None)
+                            org_ids = getattr(cst.request.state, "org_ids", None)
+                    except _CHAT_NONCRITICAL_EXCEPTIONS:
+                        pass
+                    if mon is not None and s:
+                        cst.chunk_seq += 1
+                        chunk_id = f"{cst.stream_id}:{cst.chunk_seq}"
+                        mon.schedule_evaluate_and_alert(
+                            user_id=str(cst.req_user_id or cst.client_id) if (cst.req_user_id or cst.client_id) else None,
+                            text=s,
+                            source="chat.output",
+                            scope_type="user",
+                            scope_id=str(cst.req_user_id or cst.client_id) if (cst.req_user_id or cst.client_id) else None,
+                            team_ids=team_ids,
+                            org_ids=org_ids,
+                            source_id=cst.stream_id,
+                            chunk_id=chunk_id,
+                            chunk_seq=cst.chunk_seq,
+                        )
+                except _CHAT_NONCRITICAL_EXCEPTIONS as _e:
+                    logger.debug("Topic monitoring (stream chunk) skipped: {}", exception_summary(_e))
+                if not cst.eff_policy.enabled or not cst.eff_policy.output_enabled:
+                    if cst.stream_holdback:
+                        out = f"{cst.stream_holdback}{s}"
+                        _flush_holdback()
+                        return out
+                    return s
+                combined = f"{cst.stream_holdback}{s}" if cst.stream_holdback else s
+                resolved_action = None
+                matched_pattern = None
+                sample = None
+                redacted_combined = None
+                out_category = None
+                match_span = None
+                if hasattr(cst.moderation, "evaluate_action_with_match"):
+                    try:
+                        eval_res = cst.moderation.evaluate_action_with_match(combined, cst.eff_policy, "output")
+                        if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                            resolved_action, redacted_combined, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                            out_category = eval_res[3] if len(eval_res) >= 4 else None
+                            match_span = eval_res[4] if len(eval_res) >= 5 else None
+                        else:
+                            resolved_action, redacted_combined, matched_pattern = eval_res  # type: ignore
+                    except _CHAT_NONCRITICAL_EXCEPTIONS:
+                        resolved_action = None
+                    if match_span and hasattr(cst.moderation, "build_sanitized_snippet"):
+                        try:
+                            sample = cst.moderation.build_sanitized_snippet(combined, cst.eff_policy, match_span, matched_pattern)
+                        except _CHAT_NONCRITICAL_EXCEPTIONS:
+                            sample = None
+                elif hasattr(cst.moderation, "evaluate_action"):
+                    try:
+                        eval_res = cst.moderation.evaluate_action(combined, cst.eff_policy, "output")
+                        if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                            resolved_action, redacted_combined, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                            out_category = eval_res[3] if len(eval_res) >= 4 else None
+                        else:
+                            resolved_action, redacted_combined, matched_pattern = eval_res  # type: ignore
+                    except _CHAT_NONCRITICAL_EXCEPTIONS:
+                        resolved_action = None
+                if resolved_action and resolved_action != "pass" and sample is None:
+                    try:
+                        _, sample = cst.moderation.check_text(combined, cst.eff_policy, "output")
+                    except _CHAT_NONCRITICAL_EXCEPTIONS:
+                        sample = None
+                if not resolved_action:
+                    flagged, sample = cst.moderation.check_text(combined, cst.eff_policy, "output")
+                    if not flagged:
+                        return _emit_with_holdback(combined)
+                    resolved_action = cst.eff_policy.output_action
+                    redacted_combined = cst.moderation.redact_text(combined, cst.eff_policy) if resolved_action == "redact" else None
+                if resolved_action == "block":
+                    if not cst.stream_mod_state["block_logged"]:
+                        with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                            cst.metrics.track_moderation_stream_block(str(cst.req_user_id or cst.client_id), category=(out_category or "default"))
+                        cst.mandatory_moderation_audit_tasks.append(
+                            asyncio.create_task(
+                                write_mandatory_moderation_audit(
+                                    audit_service=cst.audit_service,
+                                    audit_context=cst.audit_context,
+                                    audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                                    action="moderation.output",
+                                    result="failure",
+                                    metadata={
+                                        "phase": "output",
+                                        "streaming": True,
+                                        "action": "block",
+                                        "pattern": sample,
+                                    },
+                                )
+                            )
+                        )
+                        cst.stream_mod_state["block_logged"] = True
+                    cst.stream_holdback = ""
+                    cst.stream_mod_state["pending_stop_error"] = StopStreamWithError(
+                        message="Output violates moderation policy",
+                        error_type="output_moderation_block",
+                    )
+                    return ""
+                if resolved_action == "redact":
+                    if not cst.stream_mod_state["redact_logged"]:
+                        with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                            cst.metrics.track_moderation_output(str(cst.req_user_id or cst.client_id), "redact", streaming=True, category=(out_category or "default"))
+                        cst.mandatory_moderation_audit_tasks.append(
+                            asyncio.create_task(
+                                write_mandatory_moderation_audit(
+                                    audit_service=cst.audit_service,
+                                    audit_context=cst.audit_context,
+                                    audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                                    action="moderation.output",
+                                    result="success",
+                                    metadata={
+                                        "phase": "output",
+                                        "streaming": True,
+                                        "action": "redact",
+                                        "pattern": sample,
+                                    },
+                                )
+                            )
+                        )
+                        cst.stream_mod_state["redact_logged"] = True
+                    redacted_out = (
+                        redacted_combined
+                        if isinstance(redacted_combined, str)
+                        else cst.moderation.redact_text(combined, cst.eff_policy)
+                    )
+                    return _emit_with_holdback(redacted_out)
+                return _emit_with_holdback(combined)
+
+            # Allow streaming handler to flush any held-back tail at stream end
+            with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                _out_transform.flush = _flush_holdback
+
+            async def _finalize_stream(
+                *, success: bool, cancelled: bool, error: bool, stream_usage: _StreamUsage | None = None
+            ) -> None:
+                if not success and not cst.stream_failure_recorded and not cst.stream_metrics_recorded:
+                    try:
+                        latency = time.time() - cst.llm_start_time
+                        error_type = "stream_cancelled" if cancelled else "stream_error" if error else "stream_incomplete"
+                        cst.metrics.track_llm_call(
+                            cst.selected_provider,
+                            cst.model,
+                            latency,
+                            success=False,
+                            error_type=error_type,
+                        )
+                        if cst.provider_manager and error and not cancelled:
+                            cst.provider_manager.record_failure(cst.selected_provider, RuntimeError(error_type))
+                        cst.stream_failure_recorded = True
+                    except _CHAT_NONCRITICAL_EXCEPTIONS:
+                        pass
+                if success:
+                    return
+                if not (stream_usage and (stream_usage.usage is not None or stream_usage.chars)):
+                    # Nothing came back (the endpoint may be retrying this attempt): refund, as before (TASK-13953)
+                    await _maybe_refund_streaming_rg(cst.rg_refund_cb, cancelled=cancelled, error=error)
+                    return
+                # Recorded and committed, never refunded: the stream was read (TASK-13953). Detached, because a
+                # cancelled stream's teardown may cut any await here.
+                record = _stream_usage_recorder(stream_usage)
+                if record is not None:
+                    submit_accounting(record)
+
+            generator = create_chat_streaming_response(
+                request=StreamingPipelineRequest(
+                    stream=cst.raw_stream_iter,  # type: ignore[arg-type]
+                    conversation_id=cst.final_conversation_id,
+                    model_name=cst.model,
+                    save_callback=save_callback,
+                    partial_save_callback=partial_save_callback if cst.keep_partial_replies else None,
+                    finalize_callback=_finalize_stream,
+                    on_first_output=_record_provider_output_once,
+                    idle_timeout=CHAT_IDLE_TIMEOUT,
+                    heartbeat_interval=CHAT_HEARTBEAT_INTERVAL,
+                    text_transform=_out_transform,
+                    before_success_callback=_await_mandatory_moderation_audits,
+                    system_message_id=cst.system_message_id,
+                    user_message_id=cst.user_message_id,
+                    continuation_metadata=cst.normalized_continuation_metadata,
+                    history_persistence_ack=bool(cst.native_persistence) or None,
+                    forward_usage_chunk=cst.forward_usage_chunk,
+                    capture_provider_reasoning=capture_moonshot_reasoning or None,
+                    retain_reasoning=_retain_stream_reasoning() or None,
+                ),
+                stream_factory=create_streaming_response_with_timeout,
+            )
+            try:
+                async for chunk in generator:
+                    if "heartbeat" in chunk:
+                        stream_tracker.add_heartbeat()
+                    else:
+                        stream_tracker.add_chunk()
+                    yield chunk
+            finally:
+                if cst.mandatory_moderation_audit_tasks:
+                    await asyncio.gather(*cst.mandatory_moderation_audit_tasks, return_exceptions=True)
 
     cst.streaming_generator = tracked_streaming_generator()
 
