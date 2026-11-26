@@ -7268,6 +7268,30 @@
   "quickIngest_web_editSources": {
     "message": "Back to sources"
   },
+  "quickIngest_web_oneSourceWillRun": {
+    "message": "1 source will run"
+  },
+  "quickIngest_web_sourcesWillRun": {
+    "message": "{{count}} sources will run"
+  },
+  "quickIngest_web_onePossibleReplacement": {
+    "message": "1 existing Media item may be replaced."
+  },
+  "quickIngest_web_possibleReplacements": {
+    "message": "Up to {{count}} existing Media items may be replaced."
+  },
+  "quickIngest_web_existingMatch": {
+    "message": "Match found in Media"
+  },
+  "quickIngest_web_replaceIfMatched": {
+    "message": "Replaces an item only if a match is found"
+  },
+  "quickIngest_web_oneOtherSource": {
+    "message": "The other source will run without replacing an item."
+  },
+  "quickIngest_web_otherSources": {
+    "message": "The other {{count}} sources will run without replacing an item."
+  },
   "quickIngest_web_confirmSave": {
     "message": "Confirm and save 1 source"
   },
@@ -7366,6 +7390,12 @@
   },
   "quickIngest_source_addLinks": {
     "message": "Add links"
+  },
+  "quickIngest_source_undo": {
+    "message": "Undo"
+  },
+  "quickIngest_source_cleared": {
+    "message": "{count, plural, one {# source cleared.} other {# sources cleared.}}"
   },
   "quickIngest_source_readyCount": {
     "message": "{{count}} ready"

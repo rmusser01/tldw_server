@@ -75,15 +75,39 @@ export function WebIngestDraft({
       </section>}
     </div>
     {showReview ? <>
-      <section className="qi-web-scroll space-y-3" aria-label={t("replaceTitle", "Review replacements")}>
-        <h3 ref={reviewHeading} tabIndex={-1} className="text-base font-semibold">{t("replaceTitle", "Review replacements")}</h3>
-        <p className="text-sm text-text-muted">{t("replaceHelp", "Existing Media items that match these sources may be replaced.")}</p>
-        <ul className="space-y-1 text-sm">{replacementItems.map(item =>
-          <li className="break-words" key={item.id}>{item.fileName || item.url}</li>
-        )}</ul>
-        <p className="text-sm">{destination} · {analysis}</p>
+      <section className="qi-web-scroll" aria-labelledby={settingsId + "-review"}>
+        <h3 id={settingsId + "-review"} ref={reviewHeading} tabIndex={-1} className="text-xl font-semibold text-text">
+          {t("replaceTitle", "Review replacements")}
+        </h3>
+        <p className="mt-2 text-base font-medium text-text">
+          {count === 1 ? t("oneSourceWillRun", "1 source will run") : t("sourcesWillRun", { defaultValue: "{{count}} sources will run", count })}
+        </p>
+        <p className="mt-1 text-sm text-text-muted">
+          {replacementItems.length === 1
+            ? t("onePossibleReplacement", "1 existing Media item may be replaced.")
+            : t("possibleReplacements", { defaultValue: "Up to {{count}} existing Media items may be replaced.", count: replacementItems.length })}
+        </p>
+        <ul className="my-4 divide-y divide-border border-y border-border">
+          {replacementItems.map(item => {
+            const source = item.url || item.fileName
+            const title = item.conferenceOverride?.title || item.playlist?.sourceTitle
+            return <li key={item.id} className="space-y-1 py-3">
+              <p className="break-words font-medium text-text">{title || source}</p>
+              {title && source && title !== source && <p className="break-words text-sm text-text-muted">{source}</p>}
+              <p className="text-xs text-text-muted">{item.playlist?.duplicateStatus === "duplicate_existing"
+                ? t("existingMatch", "Match found in Media")
+                : t("replaceIfMatched", "Replaces an item only if a match is found")}</p>
+            </li>
+          })}
+        </ul>
+        {count > replacementItems.length && <p className="mb-3 text-sm text-text">
+          {count - replacementItems.length === 1
+            ? t("oneOtherSource", "The other source will run without replacing an item.")
+            : t("otherSources", { defaultValue: "The other {{count}} sources will run without replacing an item.", count: count - replacementItems.length })}
+        </p>}
+        <p className="text-sm text-text-muted">{destination} · {analysis}</p>
       </section>
-      <div className="qi-web-footer">
+      <div className="qi-web-footer qi-replacement-footer">
         <Button onClick={() => setReviewing(false)}>{t("editSources", "Back to sources")}</Button>
         <Button type="primary" disabled={disabled} onClick={onProcess}>
           {count === 1 ? t("confirmSave", "Confirm and save 1 source") : t("confirmSaves", { defaultValue: "Confirm and save {{count}} sources", count })}
