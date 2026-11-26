@@ -41,7 +41,7 @@ def _two_cookies(client, api_key, device1=None, device2=None):
     return c1, c2
 
 
-def test_cookie_session_lists_itself_as_current_and_api_key_does_not(single_user_cookie_client):
+def test_cookie_session_lists_itself_as_current_and_api_key_does_not(single_user_cookie_client):  # noqa: F811
     client, api_key = single_user_cookie_client
     c1, c2 = _two_cookies(client, api_key, "dev-cookie-0001", "dev-cookie-0002")
     rows = client.get(LIST).json()
@@ -56,7 +56,7 @@ def test_cookie_session_lists_itself_as_current_and_api_key_does_not(single_user
     assert len(keyed) == 2 and not any(r["is_current"] for r in keyed)
 
 
-def test_cookie_session_ends_another_cookie_session(single_user_cookie_client):
+def test_cookie_session_ends_another_cookie_session(single_user_cookie_client):  # noqa: F811
     client, api_key = single_user_cookie_client
     c1, c2 = _two_cookies(client, api_key, "dev-cookie-0001", "dev-cookie-0002")
     _use(client, c2)
@@ -68,7 +68,7 @@ def test_cookie_session_ends_another_cookie_session(single_user_cookie_client):
     assert client.get(LIST).status_code == 401
 
 
-def test_api_key_cannot_end_single_user_sessions(single_user_cookie_client):
+def test_api_key_cannot_end_single_user_sessions(single_user_cookie_client):  # noqa: F811
     client, api_key = single_user_cookie_client
     c1, c2 = _two_cookies(client, api_key, "dev-cookie-0001", "dev-cookie-0002")
     key = {"X-API-KEY": api_key}
@@ -83,7 +83,7 @@ def test_api_key_cannot_end_single_user_sessions(single_user_cookie_client):
         assert len(client.get(LIST).json()) == 2
 
 
-def test_cookie_revoke_all_keep_current(single_user_cookie_client):
+def test_cookie_revoke_all_keep_current(single_user_cookie_client):  # noqa: F811
     client, api_key = single_user_cookie_client
     c1, c2 = _two_cookies(client, api_key, "dev-cookie-0001", "dev-cookie-0002")
     r = client.post(f"{LIST}/revoke-all?keep_current=true", headers=_csrf(client))
@@ -93,7 +93,7 @@ def test_cookie_revoke_all_keep_current(single_user_cookie_client):
     assert client.get(LIST).status_code == 401
 
 
-def test_cookie_sessions_without_an_install_header_are_never_same_install(single_user_cookie_client):
+def test_cookie_sessions_without_an_install_header_are_never_same_install(single_user_cookie_client):  # noqa: F811
     client, api_key = single_user_cookie_client
     _two_cookies(client, api_key)
     rows = client.get(LIST).json()
@@ -115,7 +115,7 @@ def _single_user_alerts(user_id: int) -> list:
 
 
 @pytest.mark.sign_in_alerts
-async def test_single_user_cookie_mint_alerts_the_other_install(single_user_cookie_client, tmp_path, monkeypatch):
+async def test_single_user_cookie_mint_alerts_the_other_install(single_user_cookie_client, tmp_path, monkeypatch):  # noqa: F811
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     from tldw_Server_API.app.core.AuthNZ.sign_in_alert import drain_pending_alerts
 
@@ -132,7 +132,7 @@ async def test_single_user_cookie_mint_alerts_the_other_install(single_user_cook
 
 
 @pytest.mark.sign_in_alerts
-async def test_cookie_mints_without_an_install_header_still_alert(single_user_cookie_client, tmp_path, monkeypatch):
+async def test_cookie_mints_without_an_install_header_still_alert(single_user_cookie_client, tmp_path, monkeypatch):  # noqa: F811
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     from tldw_Server_API.app.core.AuthNZ.sign_in_alert import drain_pending_alerts
 
@@ -150,7 +150,7 @@ def _alert_ids(user_id: int) -> list[int]:
 
 
 @pytest.mark.sign_in_alerts
-async def test_older_cookie_session_dismisses_the_new_sign_in_alert(single_user_cookie_client, tmp_path, monkeypatch):
+async def test_older_cookie_session_dismisses_the_new_sign_in_alert(single_user_cookie_client, tmp_path, monkeypatch):  # noqa: F811
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     from tldw_Server_API.app.core.AuthNZ.sign_in_alert import drain_pending_alerts
 
@@ -165,7 +165,7 @@ async def test_older_cookie_session_dismisses_the_new_sign_in_alert(single_user_
 
 
 @pytest.mark.sign_in_alerts
-async def test_api_key_cannot_dismiss_the_new_sign_in_alert(single_user_cookie_client, tmp_path, monkeypatch):
+async def test_api_key_cannot_dismiss_the_new_sign_in_alert(single_user_cookie_client, tmp_path, monkeypatch):  # noqa: F811
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     from tldw_Server_API.app.core.AuthNZ.sign_in_alert import drain_pending_alerts
 
