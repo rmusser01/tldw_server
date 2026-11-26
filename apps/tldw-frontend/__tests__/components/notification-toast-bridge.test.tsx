@@ -227,4 +227,42 @@ describe("NotificationToastBridge", () => {
     expect(mocks.showToast).not.toHaveBeenCalled()
     vi.useRealTimers()
   })
+
+  it("queues no toast for a new_sign_in notification but still toasts other kinds", async () => {
+    vi.useFakeTimers()
+    let onEvent: ((event: { event: string; id?: number; payload?: unknown }) => void) | undefined
+    mocks.subscribeNotificationsStream.mockImplementation(
+      (options: { onEvent: typeof onEvent }) => {
+        onEvent = options.onEvent
+        return vi.fn()
+      }
+    )
+    render(
+      <NotificationLifecycleProvider scopeKey="notifications:server-a:user-a">
+        <NotificationToastBridge />
+      </NotificationLifecycleProvider>
+    )
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+
+    act(() =>
+      onEvent?.({
+        event: "notification",
+        id: 51,
+        payload: { notification_id: 51, kind: "new_sign_in", title: "New sign-in", message: "m", severity: "warning" }
+      })
+    )
+    await act(async () => vi.advanceTimersByTimeAsync(800))
+    expect(mocks.showToast).not.toHaveBeenCalled()
+
+    act(() =>
+      onEvent?.({
+        event: "notification",
+        id: 52,
+        payload: { notification_id: 52, kind: "job_completed", title: "Job done", message: "ok", severity: "info" }
+      })
+    )
+    await act(async () => vi.advanceTimersByTimeAsync(800))
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Job done" }))
+    vi.useRealTimers()
+  })
 })

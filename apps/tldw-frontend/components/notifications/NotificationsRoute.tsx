@@ -15,9 +15,12 @@ import {
 } from '@web/lib/api/notifications';
 import { formatRelativeTime } from '@web/lib/utils';
 import { classifyNotificationError } from '@/services/notification-lifecycle';
+import { isProtectedAlertError, NEW_SIGN_IN_KIND } from '@/services/sign-in-alert';
 
 const DEFAULT_SNOOZE_MINUTES = 15;
 const NOTIFICATIONS_FETCH_LIMIT = 100;
+const PROTECTED_ALERT_MESSAGE =
+  'This alert can be dismissed from a browser that was signed in before it, or after 24 hours.';
 type PreferenceKey = 'reminder_enabled' | 'job_completed_enabled' | 'job_failed_enabled';
 type FailedMutationCommand =
   | { kind: 'mark-read'; notificationId: number }
@@ -388,8 +391,9 @@ export default function NotificationsPage() {
     setFailedMutation(null);
     const requestGeneration = pageGenerationRef.current;
     try {
-      await markNotificationsRead([notificationId]);
+      const result = await markNotificationsRead([notificationId]);
       if (requestGeneration !== pageGenerationRef.current) return;
+      if (result?.refused_ids?.includes(notificationId)) return;
       setItems((previous) =>
         previous.map((item) =>
           item.id === notificationId
@@ -400,6 +404,11 @@ export default function NotificationsPage() {
       setUnreadCount((count) => Math.max(0, count - 1));
     } catch (markError) {
       if (requestGeneration !== pageGenerationRef.current) return;
+      if (isProtectedAlertError(markError)) {
+        // A refusal is an answer, not an outage: reporting it would stop the notification runtime.
+        show({ title: 'Alert not marked read', description: PROTECTED_ALERT_MESSAGE, variant: 'warning' });
+        return;
+      }
       reportMutationError(markError);
       const message = markError instanceof Error ? markError.message : 'Failed to mark notification as read';
       recordFailedMutation(
@@ -427,6 +436,10 @@ export default function NotificationsPage() {
       });
     } catch (dismissError) {
       if (requestGeneration !== pageGenerationRef.current) return;
+      if (isProtectedAlertError(dismissError)) {
+        show({ title: 'Alert not dismissed', description: PROTECTED_ALERT_MESSAGE, variant: 'warning' });
+        return;
+      }
       reportMutationError(dismissError);
       const message = dismissError instanceof Error ? dismissError.message : 'Failed to dismiss notification';
       recordFailedMutation(
@@ -743,6 +756,7 @@ export default function NotificationsPage() {
                       Mark read
                     </button>
                   )}
+                  {item.kind !== NEW_SIGN_IN_KIND && (
                   <button
                     type="button"
                     className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
@@ -751,6 +765,7 @@ export default function NotificationsPage() {
                   >
                     Snooze {DEFAULT_SNOOZE_MINUTES}m
                   </button>
+                  )}
                   <button
                     type="button"
                     className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
