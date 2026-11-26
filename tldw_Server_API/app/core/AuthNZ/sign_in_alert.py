@@ -13,6 +13,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
@@ -31,6 +32,7 @@ NEW_SIGN_IN_SOURCE_DOMAIN = "auth_session"
 NEW_SIGN_IN_LINK_URL = "/settings/sessions"
 NEW_SIGN_IN_DEDUPE_BUCKET_SECONDS = 600
 NEW_SIGN_IN_OPEN_AFTER = timedelta(hours=24)
+NEW_SIGN_IN_PROTECTED_CODE = "new_sign_in_protected"
 
 SIGN_IN_ALERT_NONCRITICAL_EXCEPTIONS = (
     AuthnzDatabaseError,
@@ -54,6 +56,43 @@ def _install_id(device_id: str | None) -> str | None:
     from tldw_Server_API.app.core.AuthNZ.interactive_session import install_id_or_none
 
     return install_id_or_none(device_id)
+
+
+def new_sign_in_protected_http_exception() -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={
+            "code": NEW_SIGN_IN_PROTECTED_CODE,
+            "message": "A new sign-in alert can only be dismissed from a browser that was signed in before it, or after 24 hours.",
+        },
+    )
+
+
+def caller_may_silence(row: UserNotificationRow, caller_session_id: int | None, now: datetime | None = None) -> bool:
+    """Whether ``caller_session_id`` (None for an API key or other non-browser caller) may silence ``row``."""
+    if row.kind != NEW_SIGN_IN_KIND:
+        return True
+    if caller_session_id is None:
+        return False
+    created = CollectionsDatabase._parse_iso_utc(row.created_at)
+    if created is not None and (now or datetime.now(timezone.utc)) - created >= NEW_SIGN_IN_OPEN_AFTER:
+        return True
+    try:
+        # sessions.id is monotonic and never reused, so a lower id is an earlier session.
+        return caller_session_id < int(row.source_job_id)
+    except (TypeError, ValueError):
+        return False
+
+
+def split_silenceable(
+    rows: list[UserNotificationRow], caller_session_id: int | None, now: datetime | None = None
+) -> tuple[list[int], list[int]]:
+    """The (allowed, refused) ids among ``rows``."""
+    allowed: list[int] = []
+    refused: list[int] = []
+    for row in rows:
+        (allowed if caller_may_silence(row, caller_session_id, now) else refused).append(row.id)
+    return allowed, refused
 
 
 def new_sign_in_message(*, user_agent: str | None, ip_address: str | None, now: datetime) -> str:

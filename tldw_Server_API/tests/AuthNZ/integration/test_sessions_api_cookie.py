@@ -143,3 +143,39 @@ async def test_cookie_mints_without_an_install_header_still_alert(single_user_co
     _mint_cookie(client, api_key)
     await drain_pending_alerts()
     assert len(_single_user_alerts(uid)) == 1
+
+
+def _alert_ids(user_id: int) -> list[int]:
+    return [r.id for r in _single_user_alerts(user_id)]
+
+
+@pytest.mark.sign_in_alerts
+async def test_older_cookie_session_dismisses_the_new_sign_in_alert(single_user_cookie_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.AuthNZ.sign_in_alert import drain_pending_alerts
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    client, api_key = single_user_cookie_client
+    uid = int(get_settings().SINGLE_USER_FIXED_ID)
+    c1, c2 = _two_cookies(client, api_key, "dev-cookie-0001", "dev-cookie-0002")
+    await drain_pending_alerts()
+    (alert_id,) = _alert_ids(uid)
+    r = client.post(f"/api/v1/notifications/{alert_id}/dismiss", headers=_csrf(client))
+    assert r.json() == {"dismissed": True}
+
+
+@pytest.mark.sign_in_alerts
+async def test_api_key_cannot_dismiss_the_new_sign_in_alert(single_user_cookie_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.AuthNZ.sign_in_alert import drain_pending_alerts
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    client, api_key = single_user_cookie_client
+    uid = int(get_settings().SINGLE_USER_FIXED_ID)
+    _two_cookies(client, api_key, "dev-cookie-0001", "dev-cookie-0002")
+    await drain_pending_alerts()
+    (alert_id,) = _alert_ids(uid)
+    client.cookies.clear()
+    r = client.post(f"/api/v1/notifications/{alert_id}/dismiss", headers={"X-API-KEY": api_key})
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "new_sign_in_protected"
+    assert [x.dismissed_at for x in _single_user_alerts(uid)] == [None]

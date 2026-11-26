@@ -180,6 +180,7 @@ class NotificationsMarkReadResponse(BaseModel):
     """Result payload for mark-read operations."""
 
     updated: int
+    refused_ids: list[int] = Field(default_factory=list)
 
 
 class NotificationDismissResponse(BaseModel):
