@@ -310,14 +310,14 @@ When a user signs in while another live session exists, or while the sign-in evi
 | `severity` | `warning` |
 | `link_url` | `/settings/sessions` |
 | `dedupe_key` | `new_sign_in:<hash>`, bucketed in 10-minute windows (a sign-in storm is one alert; the key is a hash so the install id never leaves the server) |
-| `source_job_id` | the id of the new session (used only for ordering) |
+| `source_job_id` | the id of the new session. The server uses it for ordering; clients also match it against the sessions list to hide the alert on the browser that signed in |
 
 The message names the device label "as the browser reported it", the IP the server saw and the time. It carries no token, cookie or install id. `new_sign_in` notifications are pruned after 30 days.
 
 Who may silence it (mark read, dismiss or snooze):
 
 - Only an interactive session older than the alert (a lower `sessions.id` than the alert's `source_job_id`). A newer session cannot hide the alert of its own sign-in.
-- After 24 hours any interactive browser session may.
+- After 24 hours any interactive browser session may, including the one the alert is about. An owner who is signed out by the intruder and does not sign in again for a day may never see the alert.
 - API keys and other non-browser credentials never may.
 
 Refusals: dismiss and snooze answer 403 `new_sign_in_protected`. `POST /notifications/mark-read` answers 200 with `refused_ids` listing the alerts it kept unread when other ids were allowed, and 403 `new_sign_in_protected` when every id was refused.
@@ -328,6 +328,8 @@ Refusals: dismiss and snooze answer 403 `new_sign_in_protected`. `POST /notifica
 
 - The IP in the alert and in the listing is the address the server saw. Behind the bundled Next.js proxy with no reverse proxy in front, that is the proxy's address, because Next's rewrite proxy cannot forward the browser's IP. A reverse proxy that sets `X-Forwarded-For` is honoured only when `AUTH_TRUST_X_FORWARDED_FOR=true` and the physical peer is listed in `AUTH_TRUSTED_PROXY_IPS`.
 - Single-user mode: the protection is the alert plus the session cap, not isolation from a holder of the API key. `POST /auth/single-user/session` mints a cookie session for anyone with the key, and that session counts as interactive. "Sign out all other sessions" ends other browsers, not a script that holds the key. The remedy is to rotate the API key.
+- Sign-ins without an install id (scripts, OIDC) are grouped for the 10-minute dedupe window by IP address and user agent. A repeat from the same address with the same user agent can therefore fold into an alert the owner already dismissed, and write no new one.
+- Cancelling a snooze ("remind me later") is not covered by the silence rule. Snoozing dismisses the alert, and only an allowed session can snooze, so the owner has already seen it. The snooze's reminder task can be changed or deleted with any credential through `PATCH` and `DELETE /api/v1/reminders/tasks/{id}`, and when it fires it is an ordinary `reminder_due` notification that anyone may dismiss. Gating cancel-snooze alone would close nothing; protecting "remind me later" would mean gating reminder tasks derived from an alert.
 - PostgreSQL session ids are not commit-ordered, so two sign-ins racing within milliseconds can invert by one id in the silence rule.
 
 ## Request Examples

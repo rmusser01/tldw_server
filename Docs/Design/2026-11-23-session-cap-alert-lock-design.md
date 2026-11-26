@@ -215,6 +215,7 @@ An independent reviewer checked the first draft against the code. What changed:
 - `revoke_all_sessions_for_user` counts and updates live rows only, so "Signed out N other sessions" is accurate and `revoke_reason` of dead rows is kept.
 - The WebUI already toasts every stream notification (`NotificationToastBridge`); the toast is skipped for `new_sign_in` so the banner is the one surface.
 - Mark-read returns `refused_ids`; all-refused is 403 `new_sign_in_protected`.
+- Known limit: cancelling a snooze is not covered by the silence rule. Snoozing dismisses the alert and only an allowed session can snooze; the reminder task can be changed or deleted with any credential through `PATCH`/`DELETE /api/v1/reminders/tasks/{id}`, and the fired reminder is an ordinary `reminder_due` notification, so gating the one route would close nothing.
 
 ## Left to the builder
 
