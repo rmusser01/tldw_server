@@ -67,14 +67,11 @@ export function createSeedApi(
 let backendWarmed: Promise<void> | null = null
 
 /**
- * Pay the backend's cold-start costs once per worker before a spec drives the
- * UI. The first /openapi.json build freezes a cold backend for ~30 s and makes
- * concurrent page requests fail (#3135), which would otherwise make whichever
- * spec runs first flaky.
+ * Prime model discovery once per worker for specs that need repeatable timing.
+ * The backend builds OpenAPI during startup.
  */
 export function warmBackendOnce(api: SeedApi): Promise<void> {
   backendWarmed ??= (async () => {
-    await expectOk(await api.get("/openapi.json", { timeout: 120_000 }), "Warming the OpenAPI schema")
     await expectOk(await api.get("/api/v1/llm/models/metadata", { timeout: 60_000 }), "Warming the model catalog")
   })()
   return backendWarmed

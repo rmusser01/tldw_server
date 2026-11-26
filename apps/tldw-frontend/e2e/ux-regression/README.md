@@ -68,8 +68,9 @@ backend, not the smoke route mocks.
 ## Writing a reproduction
 
 1. Do setup through the API (`e2e/utils/seed-api.ts`) and the page objects.
-   Call `warmBackendOnce(api)` first: a cold backend freezes for ~30 s on its
-   first `/openapi.json` build (#3135), which would make the first spec flaky.
+   Use `warmBackendOnce(api)` first when the test needs stable model discovery.
+   The cold-start Chat test compiles the HTML route with a plain Web UI request,
+   then exercises the first catalog read through Chromium.
 2. Keep preconditions as ordinary assertions, so a broken environment fails
    the test instead of looking like the defect.
 3. Wrap only the correct-behaviour assertion in `expectKnownDefect`
@@ -133,15 +134,16 @@ The comparison (`e2e/utils/ratchet.ts`) fails in both directions:
 
 Determinism:
 
-- Every test warms the backend (`warmBackendOnce`) and then loads /notes and
+- Each load-budget test warms the backend (`warmBackendOnce`) and then loads /notes and
   /chat once in its own page (`primeUxRoutes` in `ux-routes.ts`) before it
   measures. That keeps `next dev` compile time out of the measurement and
   puts the browser's cached responses in the same state on every run; a
   context's first visit requests more than later visits.
-- The specs never send chat messages (#3106).
+- The load-budget specs stop before sending chat messages (#3106).
 - The library size is fixed: the empty-library scan asserts 0 notes and the
   populated scan exactly 25. Both rely on the fresh backend the runner
-  starts, on its single worker, and on `a11y.spec.ts` sorting first.
+  starts and on its single worker. `a11y.spec.ts` runs before the note-seeding
+  specs. The cold-start Chat test runs first and only creates a chat.
 - Request counts come from `next dev`, where React StrictMode runs effects
   twice; the baseline notes which duplicates look dev-only. The request
   budget requires the page to be ready before `idleFromMs`, so a slow

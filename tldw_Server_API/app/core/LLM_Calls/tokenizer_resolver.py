@@ -1587,27 +1587,28 @@ def _load_mlx_artifact_tokenizer(model: str) -> Any:
         raise TokenizerUnavailable("MLX model path is required")
 
     try:
+        artifact_dirs = [candidate for candidate in candidates if candidate.is_dir()]
+    except OSError as exc:
+        raise TokenizerUnavailable("MLX tokenizer unavailable for model artifact") from exc
+    if not artifact_dirs:
+        raise TokenizerUnavailable("MLX model artifact path not found")
+
+    try:
         from transformers import AutoTokenizer  # type: ignore
     except Exception as exc:
         raise TokenizerUnavailable("MLX tokenizer loader unavailable") from exc
 
     last_error: Exception | None = None
-    for candidate in candidates:
+    for directory in artifact_dirs:
         try:
-            resolved = candidate.expanduser()
-            if not resolved.exists() or not resolved.is_dir():
-                continue
             return AutoTokenizer.from_pretrained(
-                str(resolved),
+                str(directory),
                 local_files_only=True,
             )  # nosec B615
         except Exception as exc:
             last_error = exc
-            continue
 
-    if last_error is not None:
-        raise TokenizerUnavailable("MLX tokenizer unavailable for model artifact") from last_error
-    raise TokenizerUnavailable("MLX model artifact path not found")
+    raise TokenizerUnavailable("MLX tokenizer unavailable for model artifact") from last_error
 
 
 def _resolve_mlx_tokenizer(

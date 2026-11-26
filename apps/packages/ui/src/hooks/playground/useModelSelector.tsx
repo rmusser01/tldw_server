@@ -366,6 +366,11 @@ export function useModelSelector({
           type: "divider" as const,
           key: "no-models-divider"
         },
+        ...(onRetryModels ? [{
+          key: "models-refresh",
+          label: t("playground:refreshModels", "Refresh models"),
+          onClick: onRetryModels
+        }] : []),
         {
           key: "open-model-settings",
           label: t(

@@ -45,15 +45,30 @@ it("withholds old account data and ignores a held old discovery", async () => {
   await waitFor(() => expect(result.current.data).toEqual([{ model: "account-b" }]))
 })
 
-it("retains failure state until an explicit Retry obtains an authoritative catalog", async () => {
-  io.fetch.mockRejectedValueOnce(new Error("Metadata unavailable"))
+it("retries a transient model discovery error on the first load", async () => {
+  io.fetch.mockRejectedValueOnce(Object.assign(new Error("Catalog unavailable"), { status: 503 }))
     .mockResolvedValueOnce([{ model: "configured" }])
   const { result } = setup()
-  await waitFor(() => expect(result.current.isError).toBe(true))
-  expect(result.current.data).toBeUndefined()
-  await act(async () => { await result.current.refetch() })
+
   await waitFor(() => expect(result.current.data).toEqual([{ model: "configured" }]))
+  expect(io.fetch).toHaveBeenCalledTimes(2)
 })
+
+it.each([[401, 1], [503, 3]])(
+  "offers manual recovery after catalog failure with status %d",
+  async (status, attempts) => {
+    io.fetch.mockRejectedValue(Object.assign(new Error("Metadata unavailable"), { status }))
+    const { result } = setup()
+
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 3_000 })
+    expect(io.fetch).toHaveBeenCalledTimes(attempts)
+    expect(result.current.data).toBeUndefined()
+
+    io.fetch.mockResolvedValue([{ model: "configured" }])
+    await act(async () => { await result.current.refetch() })
+    await waitFor(() => expect(result.current.data).toEqual([{ model: "configured" }]))
+  }
+)
 
 it("withholds retained successful data when rediscovery fails", async () => {
   io.fetch.mockResolvedValueOnce([{ model: "previously-verified" }])

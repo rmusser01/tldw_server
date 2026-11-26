@@ -36,7 +36,11 @@ export const useChatModelCatalog = (enabled = true) => {
     queryKey,
     queryFn: () => fetchChatModels({ requireFresh: true }),
     enabled,
-    retry: false,
+    retry: (failureCount, error) => {
+      const status = (error as { status?: unknown } | null)?.status
+      return failureCount < 2 && typeof status === "number" && status >= 500 && status < 600
+    },
+    retryDelay: (attempt) => 250 * 2 ** attempt,
     staleTime: CHAT_MODEL_CATALOG_STALE_MS,
     gcTime: CHAT_MODEL_CATALOG_STALE_MS
   })
