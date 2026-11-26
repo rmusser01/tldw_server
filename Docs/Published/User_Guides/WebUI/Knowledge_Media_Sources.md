@@ -31,7 +31,13 @@ Open **Quick Ingest** in Media. Choose **Files**, **Links**, or **Text**. You ca
 
 Check the destination above the main button. **Change settings** lets you save to Media, create drafts to review in this browser, or extract content without saving. If your preset uses AI analysis, choose a provider or select **Skip analysis for this import**. When an import can replace existing Media, review the sources and confirm.
 
-You can minimize an active import and reopen it to see progress. On completion, use **Open in Media** for a saved source, **Open drafts** for a review batch, or retry a failed source. Further actions are under **More actions**.
+Use **View extracted text** and **Copy text** to take text from an extract-only run. For a batch, choose **View text** next to a source. Copy any text you want to keep before leaving the session.
+
+Use **Edit link**, **Choose file**, or **Paste again** beside a source that needs repair. Quick Ingest retries the corrected source and keeps the other results. After a refresh, select the original file with the same name and size or paste the text again.
+
+Minimize an active import to keep working. The background indicator shows work still in progress alongside failures. If you stop an import, Quick Ingest waits for the server to confirm the outcome. When a job’s status is unavailable, use **Check status** or **Check Media** before trying again.
+
+On the receipt, choose **Open in Media** for a saved source or **Open drafts** for a review batch. Further actions are under **More actions**.
 
 ## Larger Systems
 

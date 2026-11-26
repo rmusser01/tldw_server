@@ -29,15 +29,18 @@ import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
 import { FileDropZone } from "./QueueTab/FileDropZone"
 import {
   getQuickIngestFileLimit,
+  QUICK_INGEST_ACCEPT_STRING,
   QUICK_INGEST_AV_LIMIT,
   QUICK_INGEST_DOCUMENT_LIMIT
 } from "./constants"
 import {
+  canPasteQueueItem,
   createUrlQueueItems,
   detectTypeFromUrl,
   getEligibleQueueItems,
   getQueueItemExclusionReason,
   isValidQueueUrl,
+  restoreQueueFile,
   validateQueueItem
 } from "./queue-items"
 import type {
@@ -204,7 +207,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   const showFiles = !oneScreen || sourceMode === "file_upload"
   const showLinks = !oneScreen || sourceMode === "web_url"
   const shouldShowPastedTextInput = (oneScreen ? sourceMode : firstSourceAddMode) === "paste_text"
-  const shouldFocusUrlInput = firstSourceAddMode === "web_url"
+  const repairId = oneScreen && state.currentStep === 1 ? state.processingState.correctionItemIds?.[0] : undefined
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -223,6 +226,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         const detectedType = detectTypeFromFile(file)
         const item: WizardQueueItem = {
           id: crypto.randomUUID(),
+          kind: "file",
+          fileOrigin: "upload",
           fileName: file.name,
           file,
           detectedType,
@@ -264,6 +269,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     const detectedType = detectTypeFromFile(file)
     const item: WizardQueueItem = {
       id: crypto.randomUUID(),
+      kind: "file",
+      fileOrigin: "paste",
       fileName: file.name,
       file,
       detectedType,
@@ -568,7 +575,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           onFilesAdded={handleFilesAdded}
           onFilesRejected={setFileRejections}
           isOnlineForIngest={isOnlineForIngest}
-          autoFocus={firstSourceAddMode === "file_upload"}
+          autoFocus={!repairId && firstSourceAddMode === "file_upload"}
         />
         {fileRejections.length > 0 && (
           <div role="alert" className="text-sm text-danger">
@@ -606,7 +613,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                   "Paste article text, notes, or a short document..."
                 )}
                 autoSize={{ minRows: 3, maxRows: 6 }}
-                autoFocus={!oneScreen || firstSourceAddMode === "paste_text"}
+                autoFocus={!repairId && (!oneScreen || firstSourceAddMode === "paste_text")}
                 aria-label={qi("pasteTextInputAria", "Pasted text input")}
                 className="flex-1"
               />
@@ -666,7 +673,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                 "https://example.com/article\nhttps://youtube.com/watch?v=..."
               )}
               autoSize={{ minRows: 2, maxRows: 4 }}
-              autoFocus={shouldFocusUrlInput}
+              autoFocus={!repairId && firstSourceAddMode === "web_url"}
               aria-label={qi("urlsInputAria", "URL input area")}
               className="flex-1"
             />
@@ -747,6 +754,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       {oneScreen && hasItems && (
         <SourceQueue
           items={queueItems}
+          repairId={repairId}
           processingItems={processingItems}
           setItems={setQueueItems}
           remove={handleRemoveItem}
@@ -947,6 +955,7 @@ export default AddContentStep
 
 type SourceQueueProps = {
   items: WizardQueueItem[]
+  repairId?: string
   processingItems?: WizardQueueItem[]
   setItems: (items: WizardQueueItem[]) => void
   remove: (id: string) => void
@@ -954,8 +963,11 @@ type SourceQueueProps = {
   qi: (key: string, fallback: string, values?: Record<string, unknown>) => string
 }
 
-function SourceQueue({ items, processingItems, setItems, remove, clear, qi }: SourceQueueProps) {
-  const [editing, setEditing] = useState<{ id: string; value: string } | null>(null)
+function SourceQueue({ items, repairId, processingItems, setItems, remove, clear, qi }: SourceQueueProps) {
+  const [editing, setEditing] = useState<{ id: string; value: string } | null>(() => {
+    const source = items.find(item => item.id === repairId && !item.validation.valid)
+    return source && (source.url || canPasteQueueItem(source)) ? { id: source.id, value: source.url ?? "" } : null
+  })
   const submittedIds = processingItems && new Set(processingItems.map(item => item.id))
   const counts = { ready: 0, duplicate: 0, invalid: 0, unselected: 0, outside: 0 }
   const rows = items.map(item => {
@@ -978,13 +990,26 @@ function SourceQueue({ items, processingItems, setItems, remove, clear, qi }: So
     unselected: qi("source.unselected", "Unselected · skipped"),
     outside: qi("source.outside", "Outside this run"),
   }
+  function replaceItem(updated: WizardQueueItem) {
+    setItems(items.map(current => current.id === updated.id ? updated : current))
+  }
+  function attachFile(item: WizardQueueItem, file: File, origin: "upload" | "paste") {
+    const detectedType = detectTypeFromFile(file)
+    const mismatch = qi("wizard.results.reattachMismatch", "Choose the original file with the same name and size.")
+    replaceItem(restoreQueueFile(item, file, origin, mismatch, { detectedType, icon: ICON_NAME_MAP[detectedType] }))
+  }
   function applyEdit(item: WizardQueueItem) {
-    if (editing?.id !== item.id || !isValidQueueUrl(editing.value)) return
-    const url = editing.value.trim()
-    const detectedType = detectTypeFromUrl(url)
-    const updated = { ...item, url, detectedType, icon: ICON_NAME_MAP[detectedType] }
-    updated.validation = validateQueueItem(updated)
-    setItems(items.map(current => current.id === item.id ? updated : current))
+    if (editing?.id !== item.id) return
+    if (item.url) {
+      const url = editing.value.trim()
+      if (!isValidQueueUrl(url) || url === item.url) return
+      const detectedType = detectTypeFromUrl(url)
+      const updated = { ...item, url, detectedType, icon: ICON_NAME_MAP[detectedType] }
+      replaceItem({ ...updated, validation: validateQueueItem(updated) })
+    } else {
+      if (!editing.value.trim() || !item.fileName) return
+      attachFile(item, new File([editing.value], item.fileName, { type: "text/plain" }), "paste")
+    }
     setEditing(null)
   }
   return (
@@ -999,8 +1024,9 @@ function SourceQueue({ items, processingItems, setItems, remove, clear, qi }: So
         {rows.map(({ item, status }) => {
           const name = item.fileName || item.url || qi("untitledItem", "Untitled")
           const isEditing = editing?.id === item.id
+          const needsRepair = status === "invalid" && (!repairId || repairId === item.id)
           return (
-            <li key={item.id} className="qi-source-row grid min-w-0 items-center gap-x-2 py-2">
+            <li key={item.id} tabIndex={-1} className="qi-source-row grid min-w-0 items-center gap-x-2 py-2">
               {MEDIA_TYPE_ICONS[item.detectedType]}
               <div className="min-w-0">
                 <p title={name} className="break-words text-sm font-medium text-text [overflow-wrap:anywhere]">{name}</p>
@@ -1008,12 +1034,17 @@ function SourceQueue({ items, processingItems, setItems, remove, clear, qi }: So
                   {rowLabels[status]}{item.fileSize > 0 && ` · ${formatFileSize(item.fileSize)}`}
                 </p>
                 {item.validation.errors?.filter(message => message !== "Invalid URL format").map(message =>
-                  <p key={message} className="text-xs text-danger">{message}</p>)}
+                  <p key={message} role="alert" className="text-xs text-danger">{message}</p>)}
                 {item.validation.warnings?.map(message => <p key={message} className="text-xs text-warn">{message}</p>)}
               </div>
-              {status === "invalid" && item.url && !isEditing && (
+              {needsRepair && item.url && !isEditing && (
                 <Button className="qi-source-repair" type="link" onClick={() => setEditing({ id: item.id, value: item.url! })}>
                   {qi("source.edit", "Edit link")}
+                </Button>
+              )}
+              {needsRepair && canPasteQueueItem(item) && !isEditing && (
+                <Button className="qi-source-repair" type="link" onClick={() => setEditing({ id: item.id, value: "" })}>
+                  {qi("source.pasteAgain", "Paste again")}
                 </Button>
               )}
               {status === "duplicate" && (
@@ -1027,18 +1058,45 @@ function SourceQueue({ items, processingItems, setItems, remove, clear, qi }: So
                 className="qi-source-remove inline-flex h-11 w-11 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-danger focus-visible:outline"
                 aria-label={qi("source.remove", "Remove {{name}}", { name })}
               ><X className="h-4 w-4" aria-hidden="true" /></button>
+              {needsRepair && item.fileName && item.fileOrigin !== "paste" && !isEditing && (
+                <label className="col-start-2 col-span-2 inline-flex min-h-11 cursor-pointer items-center justify-self-start rounded text-sm text-primary focus-within:outline">
+                  {qi("source.chooseFile", "Choose file")}
+                  <input type="file" accept={QUICK_INGEST_ACCEPT_STRING} autoFocus={repairId === item.id}
+                    aria-label={qi("source.chooseFileFor", "Choose file for {{name}}", { name })}
+                    className="sr-only"
+                    onChange={event => {
+                      const file = event.currentTarget.files?.[0]
+                      if (file) {
+                        event.currentTarget.closest("li")?.focus()
+                        attachFile(item, file, "upload")
+                      }
+                      event.currentTarget.value = ""
+                    }} />
+                </label>
+              )}
               {editing && isEditing && (
-                <form className="col-span-full space-y-1 py-1" onSubmit={event => { event.preventDefault(); applyEdit(item) }}>
+                <form className="col-span-full space-y-1 py-1" onSubmit={event => {
+                  event.preventDefault()
+                  event.currentTarget.closest("li")?.focus()
+                  applyEdit(item)
+                }}>
                   <label className="block text-sm">
-                    {qi("source.correctLink", "Correct link")}
-                    <input type="url" autoFocus value={editing.value}
+                    {item.url ? qi("source.correctLink", "Correct link") : qi("source.pasteAgain", "Paste again")}
+                    {item.url ? <input type="url" autoFocus value={editing.value}
                       onChange={event => setEditing({ id: item.id, value: event.target.value })}
                       className="mt-1 block w-full rounded border border-border bg-surface px-2 py-2 text-base text-text" />
+                      : <textarea autoFocus rows={4} value={editing.value}
+                        onChange={event => setEditing({ id: item.id, value: event.target.value })}
+                        className="mt-1 block w-full rounded border border-border bg-surface px-2 py-2 text-base text-text" />}
                   </label>
-                  <p className="text-xs text-text-muted">{qi("source.linkHelp", "Enter a full link starting with http:// or https://.")}</p>
+                  {item.url && <p className="text-xs text-text-muted">{qi("source.linkHelp", "Enter a full link starting with http:// or https://.")}</p>}
                   <div className="flex gap-2">
-                    <Button htmlType="submit" disabled={!isValidQueueUrl(editing.value)}>{qi("source.apply", "Apply link")}</Button>
-                    <Button type="text" onClick={() => setEditing(null)}>{qi("source.cancelEdit", "Cancel edit")}</Button>
+                    <Button htmlType="submit" disabled={item.url ? !isValidQueueUrl(editing.value) || editing.value.trim() === item.url : !editing.value.trim()}>
+                      {item.url ? qi("source.apply", "Apply link") : qi("source.applyText", "Apply text")}
+                    </Button>
+                    <Button type="text" onClick={event => { event.currentTarget.closest("li")?.focus(); setEditing(null) }}>
+                      {qi("source.cancelEdit", "Cancel edit")}
+                    </Button>
                   </div>
                 </form>
               )}
