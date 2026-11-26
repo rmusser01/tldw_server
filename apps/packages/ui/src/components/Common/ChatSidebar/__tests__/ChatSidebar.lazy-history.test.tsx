@@ -153,7 +153,7 @@ describe("ChatSidebar lazy history loading", () => {
     render(<MemoryRouter initialEntries={["/chat"]}><ChatSidebar collapsed={false} /></MemoryRouter>)
     const history = screen.getByRole("button", { name: /Recent conversations/i })
     expect(history).toHaveAttribute("aria-expanded", "false")
-    const folders = screen.getByRole("radio", { name: "Folders", exact: true })
+    const folders = screen.getByRole("radio", { name: "Folders" })
     expect(folders.closest("label")).toBeVisible()
     fireEvent.click(folders)
     await waitFor(() => expect(folders).toBeChecked())

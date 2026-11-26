@@ -521,6 +521,30 @@ async def fetch_password_hash(db_connection: Any, user_id: int, *, is_postgres: 
             value = None
     return str(value) if value else None
 
+
+async def fetch_email_and_password_hash(
+    db_connection: Any, user_id: int, *, is_postgres: bool
+) -> tuple[Optional[str], Optional[str]]:
+    """A user's ``(email, password_hash)``, or ``(None, None)`` when the row is missing.
+
+    Reads on the caller's connection only.
+    """
+    if is_postgres:
+        row = await db_connection.fetchrow("SELECT email, password_hash FROM users WHERE id = $1", user_id)
+    else:
+        cursor = await db_connection.execute("SELECT email, password_hash FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
+    if not row:
+        return None, None
+    if isinstance(row, dict):
+        email, password_hash = row.get("email"), row.get("password_hash")
+    else:
+        try:
+            email, password_hash = row[0], row[1]
+        except (IndexError, KeyError, TypeError):
+            return None, None
+    return (str(email) if email else None), (str(password_hash) if password_hash else None)
+
 # Global instance with thread-safe initialization
 _password_service: Optional[PasswordService] = None
 _password_service_lock = threading.Lock()

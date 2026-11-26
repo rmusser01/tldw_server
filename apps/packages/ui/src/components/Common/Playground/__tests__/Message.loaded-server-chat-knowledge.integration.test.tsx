@@ -24,6 +24,7 @@ import { useComposerEvents } from "@/hooks/useComposerEvents"
 import { useStoreMessageOption } from "@/store/option"
 import type {
   HistoryNodeV1,
+  HistorySelectedContentV1,
   HistorySelectionCaptureV1
 } from "@/types/history-selection"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
@@ -242,7 +243,9 @@ const node = (
 })
 
 /** A server chat opened from the sidebar, as captured by POST /api/v1/chat/conversations/{id}/history/selection. */
-const loadedServerChatCapture = (): HistorySelectionCaptureV1 => {
+const loadedServerChatCapture = (
+  assistantMetadata: HistorySelectedContentV1["extra_metadata"] = null
+): HistorySelectionCaptureV1 => {
   const nodes = [
     node(USER_ID, null, "user"),
     node(ASSISTANT_ID, USER_ID, "assistant")
@@ -262,7 +265,7 @@ const loadedServerChatCapture = (): HistorySelectionCaptureV1 => {
     rows: nodes,
     selected_content: [
       { id: USER_ID, revision: `digest-${USER_ID}`, message: "How do I undo a rebase?", images: [], tool_calls: null, extra_metadata: null },
-      { id: ASSISTANT_ID, revision: `digest-${ASSISTANT_ID}`, message: ANSWER, images: [], tool_calls: null, extra_metadata: null }
+      { id: ASSISTANT_ID, revision: `digest-${ASSISTANT_ID}`, message: ANSWER, images: [], tool_calls: null, extra_metadata: assistantMetadata }
     ],
     view: {
       view_session_id: "view-7",
@@ -376,8 +379,7 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
   })
 
   it.each(["stopped", "interrupted"])("B02 shows %s canonical partial status on a reloaded selected reply", async (status) => {
-    const capture = loadedServerChatCapture()
-    capture.selected_content.find(row => row.id === ASSISTANT_ID)!.extra_metadata = { generation_status: status }
+    const capture = loadedServerChatCapture({ generation_status: status })
     chatState.messages = formatSelectedHistory(capture).messages
     renderChat()
 

@@ -3,7 +3,14 @@ import { fireEvent, render as testingRender, screen, waitFor } from "@testing-li
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-const render: typeof testingRender = (ui, options) => testingRender(ui, { wrapper: ({ children }) => <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>, ...options });
+const render = (ui: React.ReactNode) =>
+  testingRender(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        {children}
+      </QueryClientProvider>
+    )
+  });
 
 const generationMocks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
@@ -1759,7 +1766,7 @@ describe("AudioStudioPage", () => {
     setActiveProject({ workflow: "narration", settings: { speech: { provider_hint: "pocket_tts", model: "", voice: "reference" } } });
     useAudioStudioStore.getState().setActiveWorkflow("narration");
     render(<AudioStudioPage />);
-    const field = await screen.findByRole("textbox", { name: "Speech model", exact: true });
+    const field = await screen.findByRole("textbox", { name: "Speech model" });
     fireEvent.change(field, { target: { value: "pocket_tts" } });
     expect(useAudioStudioStore.getState().activeProject?.settings.speech).toMatchObject({ model: "pocket_tts", voice: "" });
     expect(screen.getByText(/does not publish a model list/)).toBeInTheDocument();

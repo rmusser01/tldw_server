@@ -31,19 +31,19 @@ const nodes = [
   { path: "guide.py", type: "blob" }
 ]
 async function load() {
-  fireEvent.click(screen.getByRole("button", { name: "GitHub", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "GitHub" }))
   fireEvent.change(
     screen.getByPlaceholderText("https://github.com/owner/repo"),
     { target: { value: "https://github.com/test/public/tree/fixed" } }
   )
   fireEvent.click(
-    screen.getByRole("button", { name: "Load Source", exact: true })
+    screen.getByRole("button", { name: "Load Source" })
   )
   await screen.findByRole("checkbox", { name: "Select README.md" })
 }
 async function generate() {
   fireEvent.click(
-    screen.getByRole("button", { name: "Generate Output", exact: true })
+    screen.getByRole("button", { name: "Generate Output" })
   )
   await waitFor(() =>
     expect(
@@ -73,7 +73,7 @@ describe("Repo2Txt operation lifecycle", () => {
     await generate()
     fireEvent.click(screen.getByRole("checkbox", { name: "Select guide.py" }))
     expect(
-      screen.getByRole("button", { name: "Download", exact: true })
+      screen.getByRole("button", { name: "Download" })
     ).toBeDisabled()
     expect(
       screen.getByRole("textbox", { name: "Repo2txt output preview" })
@@ -85,11 +85,11 @@ describe("Repo2Txt operation lifecycle", () => {
     await generate()
     mocks.tree.mockRejectedValueOnce(new Error("Repository inaccessible"))
     fireEvent.click(
-      screen.getByRole("button", { name: "Load Source", exact: true })
+      screen.getByRole("button", { name: "Load Source" })
     )
     await screen.findByText("Repository inaccessible")
     expect(
-      screen.getByRole("button", { name: "Download", exact: true })
+      screen.getByRole("button", { name: "Download" })
     ).toBeDisabled()
     expect(
       screen.queryByRole("checkbox", { name: "Select README.md" })
@@ -106,10 +106,10 @@ describe("Repo2Txt operation lifecycle", () => {
     render(<Repo2TxtPage />)
     await load()
     fireEvent.click(
-      screen.getByRole("button", { name: "Generate Output", exact: true })
+      screen.getByRole("button", { name: "Generate Output" })
     )
     await waitFor(() => expect(mocks.file).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     await act(async () => {
       finishes.forEach((finish) =>
         finish({ path: "guide.py", text: "late output", lineCount: 1 })
@@ -119,7 +119,7 @@ describe("Repo2Txt operation lifecycle", () => {
       screen.getByRole("textbox", { name: "Repo2txt output preview" })
     ).toHaveValue("")
     expect(
-      screen.getByRole("button", { name: "Generate Output", exact: true })
+      screen.getByRole("button", { name: "Generate Output" })
     ).toBeEnabled()
     expect(screen.getByRole("status")).toHaveTextContent(/cancelled/i)
   })
@@ -132,16 +132,16 @@ describe("Repo2Txt operation lifecycle", () => {
         })
     )
     render(<Repo2TxtPage />)
-    fireEvent.click(screen.getByRole("button", { name: "GitHub", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "GitHub" }))
     fireEvent.change(
       screen.getByPlaceholderText("https://github.com/owner/repo"),
       { target: { value: "https://github.com/test/public" } }
     )
     fireEvent.click(
-      screen.getByRole("button", { name: "Load Source", exact: true })
+      screen.getByRole("button", { name: "Load Source" })
     )
     await waitFor(() => expect(mocks.tree).toHaveBeenCalled())
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     await act(async () => {
       finish(nodes)
     })
@@ -149,7 +149,7 @@ describe("Repo2Txt operation lifecycle", () => {
       screen.queryByRole("checkbox", { name: "Select README.md" })
     ).not.toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Generate Output", exact: true })
+      screen.getByRole("button", { name: "Generate Output" })
     ).toBeDisabled()
   })
 })

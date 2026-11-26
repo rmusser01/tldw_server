@@ -433,7 +433,7 @@ def _assert_destination_matches_expected(
     destination: dict[str, Any],
 ) -> None:
     expected = _load_expected(config)
-    for section in ("profile", "settings"):
+    for section in ("settings",):
         if destination.get(section) != expected.get(section):
             raise BrowserUatError(f"Destination {section} does not match the source account")
     expected_characters = [

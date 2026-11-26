@@ -9,10 +9,9 @@ import { ResearchWorkspace } from "../index"
 // per-source readiness checks) collapse into one scheduler that only ticks
 // while sources are processing and the page is visible.
 
-const render: typeof renderUI = (ui, options) =>
+const render = (ui: Parameters<typeof renderUI>[0]) =>
   renderUI(ui, {
-    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
-    ...options
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>
   })
 
 const {

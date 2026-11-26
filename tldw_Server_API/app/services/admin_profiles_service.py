@@ -817,6 +817,7 @@ async def update_user_profile(
         active_org_id=principal.active_org_id,
         active_team_id=principal.active_team_id,
         contract_mode=ProfileContractMode.LEGACY_V1,
+        current_password=payload.current_password.get_secret_value() if payload.current_password else None,
     )
     result = await ProfileCommandService(db_pool=db_pool).apply(
         command,

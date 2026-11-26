@@ -413,6 +413,7 @@ The following env vars are retained as **deprecated compatibility knobs** during
 - `JWT_SECRET_KEY`: JWT signing secret (>=32 chars). Required for `multi_user` in production.
 - `ACCESS_TOKEN_EXPIRE_MINUTES`: Access token lifetime (default 30).
 - `REFRESH_TOKEN_EXPIRE_DAYS`: Refresh token lifetime (default 7).
+- `MAX_SESSIONS_PER_USER`: Live signed-in sessions per user (default 4, minimum 1). One more sign-in revokes the least recently active session of the same browser install, else the user's least recently active session; sign-in is never refused. API keys are not sessions. Sign-ins that send no install id (scripts, the CLI wizard, the admin-ui login route, OIDC redirects) share one group and replace each other first, so scripts should use API keys.
 - `PUBLIC_WEB_BASE_URL`: Public web app origin used for hosted auth links (for example `https://app.example.com`). When unset, auth emails fall back to `BASE_URL`.
 - `PUBLIC_PASSWORD_RESET_PATH`: Public hosted path for password reset completion (default `/auth/reset-password`).
 - `PUBLIC_EMAIL_VERIFICATION_PATH`: Public hosted path for email verification completion (default `/auth/verify-email`).

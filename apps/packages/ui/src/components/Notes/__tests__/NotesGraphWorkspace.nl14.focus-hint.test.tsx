@@ -73,7 +73,8 @@ const graph: NotesGraphResponse = {
   radius_cap_applied: false,
   active_note_count: 1,
   all_notes_note_cap: 100,
-  all_notes_eligible: true
+  all_notes_eligible: true,
+  manual_link_authorized: false
 }
 
 const workspaceState = (overrides: Record<string, unknown> = {}) => ({

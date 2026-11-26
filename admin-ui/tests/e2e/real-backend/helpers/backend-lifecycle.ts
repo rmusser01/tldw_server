@@ -65,6 +65,8 @@ export const buildBackendEnv = (
   TEST_MODE: 'true',
   DEFER_HEAVY_STARTUP: 'true',
   ENABLE_ADMIN_E2E_TEST_MODE: 'true',
+  // Seeded principals sign in repeatedly; keep the per-user session cap out of the way.
+  MAX_SESSIONS_PER_USER: process.env.MAX_SESSIONS_PER_USER || '64',
   TLDW_ADMIN_E2E_SUPPORT_KEY:
     process.env.TLDW_ADMIN_E2E_SUPPORT_KEY || DEFAULT_ADMIN_E2E_SUPPORT_KEY,
   PYTEST_CURRENT_TEST: process.env.PYTEST_CURRENT_TEST || 'admin-ui-real-backend-e2e',

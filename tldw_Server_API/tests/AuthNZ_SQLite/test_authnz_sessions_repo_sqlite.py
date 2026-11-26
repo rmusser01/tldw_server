@@ -111,7 +111,7 @@ async def test_authnz_sessions_repo_basic_crud_sqlite(tmp_path, monkeypatch, fre
             "enc-old",
             "enc-refresh-old",
             (now - timedelta(days=2)),
-            (now - timedelta(days=1)),
+            (now - timedelta(days=2)),
             "127.0.0.1",
             "pytest-old",
             "device-old",
@@ -120,7 +120,7 @@ async def test_authnz_sessions_repo_basic_crud_sqlite(tmp_path, monkeypatch, fre
         )
 
     before_count = await pool.fetchval("SELECT COUNT(*) FROM sessions")
-    deleted = await repo.cleanup_expired_sessions()
+    deleted = await repo.cleanup_expired_sessions(session_cap_retention=timedelta(hours=1))
     after_count = await pool.fetchval("SELECT COUNT(*) FROM sessions")
 
     assert deleted >= 1

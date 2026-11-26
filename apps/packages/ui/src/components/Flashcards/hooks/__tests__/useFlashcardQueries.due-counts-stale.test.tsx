@@ -29,7 +29,7 @@ const emptyDueCounts = { items: [], count: 0, total: 0 }
 const makeClient = () =>
   new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
-const mountWith = (client: QueryClient, hook: () => unknown) =>
+const mountWith = <Result,>(client: QueryClient, hook: () => Result) =>
   renderHook(hook, {
     wrapper: ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>

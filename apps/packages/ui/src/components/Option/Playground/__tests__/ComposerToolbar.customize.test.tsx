@@ -541,7 +541,7 @@ describe("Casual task-based customization", () => {
         "Start dictation"
       ])
         expect(
-          screen.queryByRole("button", { name, exact: true })
+          screen.queryByRole("button", { name })
         ).not.toBeInTheDocument()
       const region = await openCustomize()
       const research = within(region).getByRole("region", {

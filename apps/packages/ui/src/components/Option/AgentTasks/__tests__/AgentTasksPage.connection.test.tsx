@@ -634,7 +634,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
       ["Open artifacts", "&view=artifacts"],
       ["Open audit", "&view=audit"]
     ]) {
-      fireEvent.click(screen.getByRole("button", { name: label, exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: label }))
       await waitFor(() => expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(`/acp-playground?session=sess-1${suffix}`))
     }
   })
@@ -1000,7 +1000,7 @@ describe("AgentTasksPage connection and payload normalization", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open research workspace/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open acp playground/i })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: label, exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: label }))
     await waitFor(() => expect(screen.getByTestId("agent-tasks-route")).toHaveTextContent(target))
   })
 
@@ -1148,14 +1148,14 @@ describe("AgentTasksPage connection and payload normalization", () => {
     vi.stubGlobal("fetch", fetchMock)
     renderAgentTasksPage()
     fireEvent.click(await screen.findByText("Research Project"))
-    fireEvent.click(await screen.findByRole("button", { name: "Retry", exact: true }))
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/tasks/11/run`, expect.objectContaining({ method: "POST", body: "{}" })))
-    expect(screen.getByRole("button", { name: "Running...", exact: true })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Running..." })).toBeDisabled()
     expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/tasks/11/run") && init?.method === "POST")).toHaveLength(1)
     dispatch.resolve({ ok: true, status: 200, json: async () => ({ status: "complete" }) } as Response)
     await screen.findByText("complete", { exact: true })
-    expect(screen.queryByRole("button", { name: "Retry", exact: true })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Run", exact: true })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument()
   })
 
 })

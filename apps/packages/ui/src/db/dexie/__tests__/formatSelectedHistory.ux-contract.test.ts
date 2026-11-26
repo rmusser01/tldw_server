@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type {
   HistoryNodeV1,
+  HistorySelectedContentV1,
   HistorySelectionCaptureV1
 } from "@/types/history-selection"
 
@@ -34,16 +35,26 @@ const node = (
 })
 
 /** A capture as returned by POST /api/v1/chat/conversations/{id}/history/selection (endpoints/chat.py:8249). */
-const buildNativeServerCapture = (): HistorySelectionCaptureV1 => {
+const buildNativeServerCapture = ({
+  ownerKey = NATIVE_OWNER_KEY,
+  firstRole = "user",
+  firstExtra = null,
+  assistantExtra = null
+}: {
+  ownerKey?: string
+  firstRole?: string
+  firstExtra?: HistorySelectedContentV1["extra_metadata"]
+  assistantExtra?: HistorySelectedContentV1["extra_metadata"]
+} = {}): HistorySelectionCaptureV1 => {
   const nodes = [
-    node("srv-msg-user-1", null, "user", "1"),
+    node("srv-msg-user-1", null, firstRole, "1"),
     node("srv-msg-assistant-1", "srv-msg-user-1", "assistant", "1")
   ]
   return {
     status: "captured",
     snapshot: {
       version: 1,
-      owner_key: NATIVE_OWNER_KEY,
+      owner_key: ownerKey,
       conversation_id: SERVER_CHAT_ID,
       fences: { conversation: "c1", history: "h1", settings: "s1" },
       nodes,
@@ -54,12 +65,12 @@ const buildNativeServerCapture = (): HistorySelectionCaptureV1 => {
     rows: nodes,
     // Server selected_content carries the stored message extra (often null), never local_history.
     selected_content: [
-      { id: "srv-msg-user-1", revision: "1", message: "What is RAG?", images: [], tool_calls: null, extra_metadata: null },
-      { id: "srv-msg-assistant-1", revision: "1", message: "Retrieval-augmented generation.", images: [], tool_calls: null, extra_metadata: null }
+      { id: "srv-msg-user-1", revision: "1", message: "What is RAG?", images: [], tool_calls: null, extra_metadata: firstExtra },
+      { id: "srv-msg-assistant-1", revision: "1", message: "Retrieval-augmented generation.", images: [], tool_calls: null, extra_metadata: assistantExtra }
     ],
     view: {
       view_session_id: "view-1",
-      owner_key: NATIVE_OWNER_KEY,
+      owner_key: ownerKey,
       conversation_id: SERVER_CHAT_ID,
       interpretation: { kind: "parent_graph_v1" },
       cursor: { kind: "after_message", message_id: "srv-msg-assistant-1" },
@@ -87,8 +98,14 @@ describe("formatSelectedHistory UX contract reproductions (#3109)", () => {
 
 describe("B02 canonical partial reply display", () => {
   it.each(["stopped", "interrupted"])("keeps %s native assistant status after selected-history reload", (status) => {
-    const capture = buildNativeServerCapture()
-    capture.selected_content[1].extra_metadata = { generation_status: status, sender_name: "TestBot", provider: "llama.cpp", local_history: { generationInfo: { custom: "retained", stopped: true } } }
+    const capture = buildNativeServerCapture({
+      assistantExtra: {
+        generation_status: status,
+        sender_name: "TestBot",
+        provider: "llama.cpp",
+        local_history: { generationInfo: { custom: "retained", stopped: true } }
+      }
+    })
     const before = JSON.stringify(capture)
     const display = formatSelectedHistory(capture)
 
@@ -100,22 +117,28 @@ describe("B02 canonical partial reply display", () => {
   })
 
   it.each(["complete", "length", "unknown", undefined])("does not invent an interruption for native status %s", (status) => {
-    const capture = buildNativeServerCapture()
-    capture.selected_content[1].extra_metadata = status ? { generation_status: status } : null
+    const capture = buildNativeServerCapture({
+      assistantExtra: status ? { generation_status: status } : null
+    })
     expect(formatSelectedHistory(capture).messages[1].generationInfo).toBeUndefined()
   })
 
   it.each(["user", "system"])("does not interpret %s metadata as an assistant interruption", (role) => {
-    const capture = buildNativeServerCapture()
-    capture.rows[0].role = role
-    capture.selected_content[0].extra_metadata = { generation_status: "stopped" }
+    const capture = buildNativeServerCapture({
+      firstRole: role,
+      firstExtra: { generation_status: "stopped" }
+    })
     expect(formatSelectedHistory(capture).messages[0].generationInfo).toBeUndefined()
   })
 
   it("retains local generation info without treating server-shaped metadata as authority", () => {
-    const capture = buildNativeServerCapture()
-    capture.snapshot.owner_key = "local-history-v1:profile"
-    capture.selected_content[1].extra_metadata = { generation_status: "stopped", local_history: { generationInfo: { custom: "retained" } } }
+    const capture = buildNativeServerCapture({
+      ownerKey: "local-history-v1:profile",
+      assistantExtra: {
+        generation_status: "stopped",
+        local_history: { generationInfo: { custom: "retained" } }
+      }
+    })
     expect(formatSelectedHistory(capture).messages[1].generationInfo).toEqual({ custom: "retained" })
   })
 })
@@ -126,13 +149,12 @@ const namedSenderCapture = (
   alternatives: HistoryNodeV1[] = [],
   ownerKey = NATIVE_OWNER_KEY
 ): HistorySelectionCaptureV1 => {
-  const capture = buildNativeServerCapture()
+  const capture = buildNativeServerCapture({ ownerKey, assistantExtra: extra })
   const rows = capture.rows.map((row, index) => index === 1 ? { ...row, role } : row)
   return {
     ...capture,
     rows,
-    snapshot: { ...capture.snapshot, owner_key: ownerKey, nodes: [...rows, ...alternatives] },
-    selected_content: capture.selected_content.map((row, index) => index === 1 ? { ...row, extra_metadata: extra } : row)
+    snapshot: { ...capture.snapshot, nodes: [...rows, ...alternatives] }
   }
 }
 
@@ -217,9 +239,11 @@ describe("CM-04 recorded RAG sources after reload", () => {
       }
     ]
   }
-  const withSources = (value: unknown, row = 1) => {
-    const capture = buildNativeServerCapture()
-    capture.selected_content[row].extra_metadata = { workspace_rag_sources_v1: value }
+  const withSources = (value: unknown, role: "user" | "assistant" = "assistant") => {
+    const extra = { workspace_rag_sources_v1: value }
+    const capture = buildNativeServerCapture(
+      role === "user" ? { firstExtra: extra } : { assistantExtra: extra }
+    )
     return formatSelectedHistory(capture).messages
   }
 
@@ -241,7 +265,7 @@ describe("CM-04 recorded RAG sources after reload", () => {
   })
 
   it("does not show sources on a user message", () => {
-    const [question] = withSources(recordedSources, 0)
+    const [question] = withSources(recordedSources, "user")
     expect(question.sources).toEqual([])
   })
 })
