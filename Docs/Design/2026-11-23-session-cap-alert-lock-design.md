@@ -204,6 +204,18 @@ An independent reviewer checked the first draft against the code. What changed:
 - Second review round (2026-11-24): eviction is by least recent activity, not creation time; sign-ins without an install id form their own group; the eviction reason survives the row purge.
 - Background pause designed (PR 4), covering administrator deactivation as well.
 
+## Changes from the PR 2 plan (2026-11-25)
+
+- Proxy IP: the Next.js rewrite proxy cannot see the peer address and sets only `x-forwarded-host`, so it cannot forward the browser's IP. The alert shows the IP the server saw, subject to `AUTH_TRUST_X_FORWARDED_FOR` and `AUTH_TRUSTED_PROXY_IPS`.
+- Own-browser banner suppression uses the server-computed `same_install` flag (install id equality), not IP and device label: the label is client-chosen and a public IP is shared, so both can be matched by an attacker on the owner's network. The install id is never returned.
+- `GET /notifications` gains an optional `kind` filter, and `new_sign_in` gets a 30-day retention, so a flood of other notifications cannot bury the alert.
+- The "is lock available" flag is deferred to PR 3, which owns lock.
+- `logout` is guarded: `all_devices: true` and the no-`session_id` fallback need an interactive session, so an API key sent as a Bearer token cannot sign every session out.
+- The alert is also written when the capped insert evicted a session (the evicted owner must still see it), except when the same install signs in again.
+- `revoke_all_sessions_for_user` counts and updates live rows only, so "Signed out N other sessions" is accurate and `revoke_reason` of dead rows is kept.
+- The WebUI already toasts every stream notification (`NotificationToastBridge`); the toast is skipped for `new_sign_in` so the banner is the one surface.
+- Mark-read returns `refused_ids`; all-refused is 403 `new_sign_in_protected`.
+
 ## Left to the builder
 
 - Exact SQL, index choice for the live-session predicate, and migration numbering.
