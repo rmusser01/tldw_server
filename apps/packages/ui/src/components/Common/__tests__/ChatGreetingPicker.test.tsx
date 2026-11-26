@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { Character } from "@/types/character"
+import type { Character, CharacterApiResponse } from "@/types/character"
 import { ChatGreetingPicker } from "../ChatGreetingPicker"
 const state = vi.hoisted(() => ({ displayName: "Viewer", loading: false, unavailable: false, retry: vi.fn() }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string, values?: { name?: string }) => values?.name ? fallback.replace("{{name}}", values.name) : fallback }) }))
@@ -10,7 +10,7 @@ vi.mock("@/hooks/useCharacterGreeting", () => ({ useCharacterGreeting: (props: {
   fresh: props.playgroundReady && props.selectedCharacterMode === "tracked" && !!props.selectedCharacter?.id && !props.serverChatId && !props.historyId && props.messagesLength === 0
 }) }))
 vi.mock("antd", () => ({ Select: ({ value, onChange, options, disabled, ...props }: { value: string; onChange: (value: string) => void; options: { value: string; label: string; title?: string }[]; disabled: boolean; "aria-label"?: string }) => <select aria-label={props["aria-label"]} value={value} onChange={event => onChange(event.target.value)} disabled={disabled}>{options.map(option => <option key={option.value} value={option.value} title={option.title}>{option.label}</option>)}</select> }))
-const card = { id: "card-1", name: "Guide", first_message: "{{user}} meets {{char}}", alternate_greetings: ["Alternate greeting"] } as Character
+const card = { id: "card-1", name: "Guide", first_message: "{{user}} meets {{char}}", alternate_greetings: ["Alternate greeting"] } satisfies CharacterApiResponse
 const props = () => ({ selectedCharacter: card, selectedCharacterMode: "tracked" as const, messages: [], historyId: null, serverChatId: null, ready: true, viewKey: "fresh-1", onStartGreeting: vi.fn().mockResolvedValue(undefined), onStartWithMessage: vi.fn() })
 afterEach(cleanup)
 beforeEach(() => { state.displayName = "Viewer"; state.loading = false; state.unavailable = false; state.retry.mockClear() })
@@ -29,7 +29,8 @@ describe("explicit character opening", () => {
   })
   it.each(["", " \t "])("renders the default user name in previews and alternate labels/titles (%j)", displayName => {
     state.displayName = displayName
-    render(<ChatGreetingPicker {...props()} selectedCharacter={{ ...card, alternate_greetings: ["{{username}} greets {{character}}"] }} />)
+    const selectedCharacter = { ...card, alternate_greetings: ["{{username}} greets {{character}}"] } satisfies CharacterApiResponse
+    render(<ChatGreetingPicker {...props()} selectedCharacter={selectedCharacter} />)
     expect(screen.getByText("User meets Guide", { selector: "div" })).toBeInTheDocument()
     fireEvent.click(screen.getByText("Alternate greetings"))
     const alternate = screen.getByRole("option", { name: "User greets Guide" })
@@ -97,7 +98,8 @@ describe("explicit character opening", () => {
     expect(screen.getByRole("status")).toBeInTheDocument()
   })
   it("bounds long preview after the primary choices", () => {
-    render(<ChatGreetingPicker {...props()} selectedCharacter={{ ...card, first_message: "Long opening ".repeat(500) }} />)
+    const selectedCharacter = { ...card, first_message: "Long opening ".repeat(500) } satisfies CharacterApiResponse
+    render(<ChatGreetingPicker {...props()} selectedCharacter={selectedCharacter} />)
     const preview = screen.getByText(/^Long opening/, { selector: "div" })
     expect(preview.className).toContain("max-h-48")
     expect(screen.getByRole("button", { name: "Start with this greeting" }).compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { NotesGraphResponse } from "@/services/note-graph-suggestions"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import React from "react"
@@ -109,8 +110,9 @@ const graph = {
   active_note_count: 1,
   all_notes_note_cap: 20,
   all_notes_eligible: true,
-  suggestions_authorized: false
-}
+  suggestions_authorized: false,
+  manual_link_authorized: false
+} satisfies NotesGraphResponse
 
 const capability = {
   active_note_count: 12,

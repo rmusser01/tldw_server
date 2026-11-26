@@ -230,8 +230,8 @@ describe("useNotesExport paging (NL-02)", () => {
 
   it("stops a filtered export at the reported total", async () => {
     const matches = makeNotes(200);
-    const fetchFilteredNotesRaw = vi.fn(
-      async (_q: string, _toks: string[], page: number, pageSize: number) => ({
+    const fetchFilteredNotesRaw = vi.fn<UseNotesExportDeps["fetchFilteredNotesRaw"]>(
+      async (_q, _toks, page, pageSize) => ({
         items: matches.slice((page - 1) * pageSize, page * pageSize),
         total: matches.length,
       }),

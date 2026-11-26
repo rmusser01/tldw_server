@@ -30,7 +30,7 @@ const config = () => ({
     mocks.mode === "multi-user"
       ? `fixture.${btoa(JSON.stringify({ sub: mocks.principal }))}.signature`
       : undefined,
-  orgId: "org-test"
+  orgId: 42
 })
 vi.mock("@/utils/safe-storage", async (original) => ({
   ...(await original<typeof import("@/utils/safe-storage")>()),

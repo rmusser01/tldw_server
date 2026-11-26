@@ -587,7 +587,7 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         session_manager = await get_session_manager()
         if await session_manager.is_token_blacklisted(token, payload.get("jti")):
             logger.warning("Token has been revoked according to blacklist/session state")
-            raise credentials_exception
+            raise await session_manager.revoked_token_exception(token, credentials_exception)
     except HTTPException:
         raise
     except _USER_DB_NONCRITICAL_EXCEPTIONS as exc:

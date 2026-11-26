@@ -416,7 +416,7 @@ const modelSettingsFixture: import("@/store/model").ChatModelSettings = {
       extraHeaders: "",
       extraBody: "",
       llamaThinkingBudgetTokens: 0,
-      llamaGrammarMode: "off",
+      llamaGrammarMode: "none",
       llamaGrammarId: "",
       llamaGrammarInline: "",
       llamaGrammarOverride: "",

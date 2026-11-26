@@ -28,7 +28,7 @@ import * as historyRecoveryStorage from "@/db/dexie/history-selection"
 import { resolveHistorySelection } from "@/utils/history-selection"
 import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import { resetHistoryTurnRegistry } from "@/services/history-turn-keep"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { assert, beforeEach, describe, expect, it, vi } from "vitest"
 
 import LegacySidepanelChat from "../../../../../tldw-frontend/extension/routes/sidepanel-chat"
 import SidepanelChat from "../sidepanel-chat"
@@ -606,7 +606,7 @@ it("mounted shared Sidepanel keeps a stale completed Regenerate through the guar
   } as unknown as historyController.HistorySelectionController
   const selection = vi.spyOn(historyController, "useHistorySelection").mockReturnValue(controller)
   const load = vi.spyOn(historyRecoveryStorage, "loadHistoryTurnRecoveries").mockResolvedValue([entry])
-  const dismiss = vi.spyOn(historyRecoveryStorage, "dismissHistoryTurnRecovery").mockResolvedValue()
+  const dismiss = vi.spyOn(historyRecoveryStorage, "dismissHistoryTurnRecovery").mockResolvedValue(true)
   io.capture.mockReset().mockImplementation(async (_id, request) => ({
     status: "legacy_review_required", code: "legacy_review_required",
     acknowledged_capability: "tldw_history_existing_input_v1",
@@ -831,7 +831,7 @@ describe("current shared Clipper handoff consumer", () => {
     await waitFor(() => expect(io.submit).toHaveBeenCalledTimes(1))
     act(() => useStoreMessageOption.setState(state => ({ messages: [...state.messages, {
       id: "accepted-clip", isBot: false, name: "You", message: pending.message,
-      messageType: WEB_CLIPPER_ANALYZE_MESSAGE_TYPE
+      messageType: WEB_CLIPPER_ANALYZE_MESSAGE_TYPE, sources: []
     }] })))
     view.unmount()
     const replacement = { ...pending, ownerKey: ownerKey("bob"), message: "Bob capture" }
@@ -861,7 +861,7 @@ describe("current shared Clipper handoff consumer", () => {
     io.submit.mockImplementationOnce(async () => {
       useStoreMessageOption.setState(state => ({ messages: [...state.messages, {
         id: "accepted-clip", isBot: false, name: "You", message: pending.message,
-        messageType: WEB_CLIPPER_ANALYZE_MESSAGE_TYPE
+        messageType: WEB_CLIPPER_ANALYZE_MESSAGE_TYPE, sources: []
       }] }))
       await new Promise(resolve => setTimeout(resolve, 0))
     })
@@ -1155,7 +1155,7 @@ describe.each([
     fireEvent.click(find)
     const input = await screen.findByPlaceholderText("Search chats...")
     await waitFor(() => expect(input).toHaveFocus())
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Chats" })).getAllByRole("button", { name: "Close", exact: true })[0])
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Chats" })).getAllByRole("button", { name: "Close" })[0])
     const toggle = screen.getByRole("button", { name: "Toggle conversation sidebar" })
     toggle.focus()
     fireEvent.click(toggle)
@@ -1224,7 +1224,7 @@ describe.each([
       fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
       const dialog = await screen.findByRole("dialog", { name: "Chats" })
       expect(screen.getByRole("alert")).toHaveTextContent("Could not load chats")
-      fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }))
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }))
       expect(screen.queryByRole("dialog", { name: "Chats" })).not.toBeInTheDocument()
       expect(screen.getByText("alice first")).toBeVisible()
       expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
@@ -1245,7 +1245,7 @@ describe.each([
     find.focus()
     fireEvent.click(find)
     const dialog = await screen.findByRole("dialog", { name: "Chats" })
-    const close = within(dialog).getByRole("button", { name: "Close", exact: true })
+    const close = within(dialog).getByRole("button", { name: "Close" })
     close.focus()
     await act(async () => { io.sidebarHold = null; release(); await held })
     await screen.findByRole("textbox", { name: "Search chats" })
@@ -1263,8 +1263,8 @@ describe.each([
     await screen.findByText("alice first")
     fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
     const drawer = await screen.findByRole("dialog", { name: "Chats" })
-    const first = within(drawer).getAllByRole("button", { name: "Close", exact: true })[0]
-    const last = await within(drawer).findByRole("button", { name: "Pro", exact: true })
+    const first = within(drawer).getAllByRole("button", { name: "Close" })[0]
+    const last = await within(drawer).findByRole("button", { name: "Pro" })
     const outer = drawer.closest<HTMLElement>(".sidepanel-chat-overlay")!
     outer.focus()
     const initialBack = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true })
@@ -1317,7 +1317,7 @@ describe.each([
     fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }))
     const first = await screen.findByRole("dialog", { name: "Chats" })
     const old = io.drawerCallbacks.at(-1)!
-    fireEvent.click(within(first).getAllByRole("button", { name: "Close", exact: true })[0])
+    fireEvent.click(within(first).getAllByRole("button", { name: "Close" })[0])
     fireEvent.click(screen.getByRole("button", { name: "Palette find conversations" }))
     const search = await screen.findByRole("textbox", { name: "Search chats" })
     const current = io.drawerCallbacks.at(-1)!
@@ -1580,7 +1580,8 @@ describe.each([
           id: "new-user",
           isBot: false,
           name: "You",
-          message: "NEW COMPACT DRAFT"
+          message: "NEW COMPACT DRAFT",
+          sources: []
         }
       ]
       let replaced = false
@@ -2609,16 +2610,17 @@ describe.each([
     render(<Route />)
     await screen.findByRole("button", { name: "alice two" })
     await waitFor(() => expect(io.controller?.getCurrent().status).toBe("ready"))
-    const sourceOwner = io.controller!.getCurrent().owner!
-    expect(sourceOwner.validate_lease?.()).toBe(true)
+    const sourceOwner = io.controller!.getCurrent().owner
+    assert(sourceOwner?.kind === "native")
+    expect(sourceOwner.validate_lease()).toBe(true)
     fireEvent.click(screen.getByRole("button", { name: "alice two" }))
     await waitFor(() => expect(finish).toBeTypeOf("function"))
-    expect(sourceOwner.validate_lease?.()).toBe(true)
+    expect(sourceOwner.validate_lease()).toBe(true)
     fireEvent.click(screen.getByRole("button", { name: "alice one" }))
     await act(async () => { finish({ historyInfo: { id: "saved-B", local_owner_key: "local-profile" }, messages: [] }) })
     expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one")
     expect(io.controller!.getCurrent().owner).toBe(sourceOwner)
-    expect(sourceOwner.validate_lease?.()).toBe(true)
+    expect(sourceOwner.validate_lease()).toBe(true)
   })
 
   it.each([0, null])("does not carry another physical panel's RAM transcript into empty context %s", async physicalTabId => {

@@ -1246,7 +1246,7 @@ vi.mock("../ComposerToolbar", async importOriginal => {
     toolsButton?: React.ReactNode
     sendControl?: React.ReactNode
     contextItems?: { label?: React.ReactNode; value?: React.ReactNode }[]
-    rolePlayActions?: { onOpenRolePlaySetup: () => void }
+    rolePlayActions?: { onOpenRolePlaySetup?: () => void }
     setSelectedSystemPrompt?: (id: string | undefined) => void
   }) => (
     <div data-testid="composer-toolbar">
@@ -2103,7 +2103,6 @@ const prepareQualifiedSceneSource = (
     config: {
       serverUrl: "http://localhost:8000",
       authMode: "single-user",
-      apiKey: "original-selection-key",
       expectedSingleUserApiKeyScope: "original-selection-scope"
     },
     userId: null
@@ -2287,7 +2286,7 @@ const openActualSceneDrawer = async (
   await waitFor(() => expect(notes).toHaveValue(original.value.notes))
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "Apply", exact: true })
+      screen.getByRole("button", { name: "Apply" })
     ).toBeEnabled()
   )
   fireEvent.change(notes, { target: { value: "Staged connected Scene" } })
@@ -2333,7 +2332,7 @@ describe("PlaygroundForm role-play starter", () => {
     modelCatalogQueryOptions.loading = true
     const view = render(<PlaygroundForm droppedFiles={[]} />)
     try {
-    const sends = within(view.container).getAllByRole("button", { name: "Send message", exact: true })
+    const sends = within(view.container).getAllByRole("button", { name: "Send message" })
     for (const send of sends) {
       expect(send).toBeDisabled()
       expect(send).toHaveAttribute("title", "Loading models…")
@@ -2355,7 +2354,7 @@ describe("PlaygroundForm role-play starter", () => {
     modelCatalogQueryOptions.loading = true
     const view = render(<PlaygroundForm droppedFiles={[]} />)
     try {
-      for (const send of within(view.container).getAllByRole("button", { name: "Send message", exact: true })) expect(send).toBeEnabled()
+      for (const send of within(view.container).getAllByRole("button", { name: "Send message" })) expect(send).toBeEnabled()
     } finally { view.unmount() }
   })
 
@@ -2848,7 +2847,7 @@ describe("PlaygroundForm role-play starter", () => {
     const alias = mismatch === "unacknowledged" ? "raw-unacknowledged-13679" : await mirror.linkServerChatMirror({ chatId: mismatch === "CID" ? "other-native" : f.source.serverChatId!, title: "Foreign alias", ownerKey: mismatch === "owner" ? "other-owner" : mirror.serverChatMirrorOwnerKey({ requestScope: f.requestScope }), scope: mismatch === "scope" ? { type: "workspace", workspaceId: "7" } : { type: "global" } })
     try {
       act(() => { f.source.historyId = alias; f.view.rerender(<PlaygroundForm droppedFiles={[]} />) })
-      expect(screen.getByRole("button", { name: "Apply", exact: true })).toBeDisabled()
+      expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
       expect(sceneBucket.records.get(f.key)).toEqual(f.original)
       expect(saveActorSettingsMock).not.toHaveBeenCalled()
     } finally { f.view.unmount() }
@@ -2862,15 +2861,15 @@ describe("PlaygroundForm role-play starter", () => {
     const persist = sceneBucket.set.getMockImplementation()!
     if (phase === "held save") sceneBucket.set.mockImplementationOnce(async (...args) => { await held.promise; return persist(...args) })
     try {
-      if (phase === "held save") { await f.user.click(screen.getByRole("button", { name: "Apply", exact: true })); await waitFor(() => expect(sceneBucket.set).toHaveBeenCalledOnce()) }
+      if (phase === "held save") { await f.user.click(screen.getByRole("button", { name: "Apply" })); await waitFor(() => expect(sceneBucket.set).toHaveBeenCalledOnce()) }
       act(() => { f.source.historyId = alias; f.view.rerender(<PlaygroundForm droppedFiles={[]} />) })
       if (phase === "staged") {
         await waitFor(() => expect(screen.getByRole("textbox", { name: "Scene notes" })).toHaveValue("Staged connected Scene"))
-        await f.user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+        await f.user.click(screen.getByRole("button", { name: "Apply" }))
       }
       await act(async () => { held.resolve(); await held.promise })
-      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Role-play setup", exact: true })).not.toBeInTheDocument())
-      expect(sceneBucket.records.get(f.key)?.value.notes).toBe("Staged connected Scene")
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Role-play setup" })).not.toBeInTheDocument())
+      expect(sceneBucket.records.get(f.key)).toMatchObject({ value: { notes: "Staged connected Scene" } })
       expect(f.source.chatDraftAddress).toBe(f.address)
       expect(f.source.chatDraftRevision).toBe(f.revision)
     } finally { held.resolve(); await Promise.allSettled(nativeSetupFixture.drawerApplications); f.view.unmount() }
@@ -2881,7 +2880,7 @@ describe("PlaygroundForm role-play starter", () => {
     const f = await openActualSceneDrawer("native", { unavailableFreshModel: true })
     const initialScope = nativeSetupFixture.settings!.activeSettingsScope
     try {
-      await f.user.click(screen.getByRole("button", { name: "Apply", exact: true }))
+      await f.user.click(screen.getByRole("button", { name: "Apply" }))
       await act(async () => { await nativeSetupFixture.selectionApply })
       expect(saveActorSettingsMock).toHaveBeenCalledOnce()
       expect(sceneBucket.records.get(f.key)).toEqual(expect.objectContaining({
@@ -2908,7 +2907,7 @@ describe("PlaygroundForm role-play starter", () => {
       const f = await openActualSceneDrawer(kind)
       try {
         await f.user.click(
-          screen.getByRole("button", { name: "Apply", exact: true })
+          screen.getByRole("button", { name: "Apply" })
         )
         await act(async () => {
           await nativeSetupFixture.selectionApply
@@ -2973,7 +2972,7 @@ describe("PlaygroundForm role-play starter", () => {
         ).toBeEnabled()
         await f.user.click(screen.getByRole("button", { name: "Clear behavior" }))
         await f.user.click(
-          screen.getByRole("button", { name: "Apply", exact: true })
+          screen.getByRole("button", { name: "Apply" })
         )
         await waitFor(() => expect(casKey).toBe(f.key))
         expect(saveActorSettingsMock).toHaveBeenCalledOnce()
@@ -3071,7 +3070,7 @@ describe("PlaygroundForm role-play starter", () => {
     nativeSetupFixture.repeatActionStarted = true
     try {
       await f.user.click(
-        screen.getByRole("button", { name: "Apply", exact: true })
+        screen.getByRole("button", { name: "Apply" })
       )
       await act(async () => {
         await nativeSetupFixture.selectionApply
@@ -3114,7 +3113,7 @@ describe("PlaygroundForm role-play starter", () => {
       try {
         if (boundary === "during preparation") {
           await f.user.click(
-            screen.getByRole("button", { name: "Apply", exact: true })
+            screen.getByRole("button", { name: "Apply" })
           )
           await waitFor(() =>
             expect(nativeSetupFixture.snapshot).toHaveBeenCalledOnce()
@@ -3145,7 +3144,7 @@ describe("PlaygroundForm role-play starter", () => {
         expect(f.source.chatDraftRevision).toBe(f.revision)
         if (boundary === "before Apply") {
           await f.user.click(
-            screen.getByRole("button", { name: "Apply", exact: true })
+            screen.getByRole("button", { name: "Apply" })
           )
           expect(nativeSetupFixture.drawerApplications).toHaveLength(0)
         } else {
@@ -3178,7 +3177,7 @@ describe("PlaygroundForm role-play starter", () => {
     )
     try {
       await f.user.click(
-        screen.getByRole("button", { name: "Apply", exact: true })
+        screen.getByRole("button", { name: "Apply" })
       )
       await act(async () => {
         await expect(nativeSetupFixture.selectionApply).rejects.toThrow(
@@ -3191,7 +3190,7 @@ describe("PlaygroundForm role-play starter", () => {
         "Settings could not be applied"
       )
       await f.user.click(
-        screen.getByRole("button", { name: "Apply", exact: true })
+        screen.getByRole("button", { name: "Apply" })
       )
       await act(async () => {
         await nativeSetupFixture.selectionApply
@@ -3314,7 +3313,7 @@ describe("PlaygroundForm role-play starter", () => {
       })
       try {
         await f.user.click(
-          screen.getByRole("button", { name: "Apply", exact: true })
+          screen.getByRole("button", { name: "Apply" })
         )
         await waitFor(() => expect(saveActorSettingsMock).toHaveBeenCalledOnce())
         expect(receipt.events).toHaveLength(0)
@@ -3763,7 +3762,7 @@ describe("PlaygroundForm role-play starter", () => {
         )
         expect(f.original.value.isEnabled).toBe(false)
         await f.user.click(
-          screen.getByRole("button", { name: "Apply", exact: true })
+          screen.getByRole("button", { name: "Apply" })
         )
         if (nonempty) {
           await act(async () => {
@@ -7154,7 +7153,7 @@ describe("PlaygroundForm role-play starter", () => {
         }
       })
       const kind = path === "legacy character startup" ? "character" : null
-      const identity = kind ? { kind, id: "new-identity", name: "New identity" } : null
+      const identity = kind ? { kind: "character" as const, id: "new-identity", name: "New identity" } : null
       if (kind === null)
         prepareQualifiedSceneSource("native", "chat-original")
       else playgroundFormMessageOptionState.value.serverChatId = "chat-original"
@@ -7539,7 +7538,7 @@ describe("PlaygroundForm role-play starter", () => {
     rerender(form(null))
     expect(onSubmitMock).not.toHaveBeenCalled()
     expect(composer).toHaveValue("Keep this B02 question.")
-    const send = within(screen.getByTestId("composer-inline-send-control")).getByRole("button", { name: "Send message", exact: true }) as HTMLButtonElement
+    const send = within(screen.getByTestId("composer-inline-send-control")).getByRole("button", { name: "Send message" }) as HTMLButtonElement
     const recoveredForm = (screen.getByTestId("composer-textarea") as HTMLTextAreaElement).form!
     expect(send).toBeEnabled()
     expect(send.type).toBe("submit")

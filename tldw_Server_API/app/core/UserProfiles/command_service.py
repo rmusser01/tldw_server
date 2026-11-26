@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ import email_change as _email_change
 from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipAuthorizationError,
     MembershipPreflightChanged,
@@ -23,7 +24,36 @@ from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
 from tldw_Server_API.app.core.UserProfiles.update_service import (
     ProfileUpdateScope,
     UserProfileUpdateService,
+    _is_postgres_backend_for_pool,
 )
+
+
+async def _own_email_change_refusal(
+    command: ProfileUpdateCommand,
+    *,
+    db_conn: Any,
+    is_postgres: bool,
+) -> LegacyProfileCommandResult | None:
+    """A 403 result when a self-service email change lacks the current password, else None."""
+    new_emails = tuple(str(value) for key, value in command.updates if key == "identity.email")
+    if command.actor_user_id != command.target_user_id or not new_emails:
+        return None
+    try:
+        await _email_change.authorize_own_email_change(
+            db_conn=db_conn,
+            is_postgres=is_postgres,
+            user_id=command.target_user_id,
+            new_emails=new_emails,
+            current_password=command.current_password,
+        )
+    except _email_change.EmailChangeRefused as exc:
+        return LegacyProfileCommandResult(
+            status_code=403,
+            error_code=exc.code,
+            detail=exc.detail,
+            skipped=({"key": "identity.email", "message": exc.code},),
+        )
+    return None
 
 
 class ProfileCommandService:
@@ -122,6 +152,14 @@ class ProfileCommandService:
                         detail="profile_version_mismatch",
                         skipped=({"key": "profile_version", "message": "mismatch"},),
                     )
+
+        refusal = await _own_email_change_refusal(
+            command,
+            db_conn=db_conn,
+            is_postgres=_is_postgres_backend_for_pool(self._db_pool),
+        )
+        if refusal is not None:
+            return refusal
 
         executor_kwargs = {
             "user_id": command.target_user_id,

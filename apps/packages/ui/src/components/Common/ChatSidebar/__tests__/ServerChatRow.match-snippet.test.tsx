@@ -87,7 +87,7 @@ describe("ServerChatRow conversation actions", () => {
   it.each([false, true])("pins or unpins through the conversation menu (pinned=%s)", async (isPinned) => {
     renderRow(createChat(), { isPinned })
     fireEvent.click(screen.getByRole("button", { name: "More actions: Weekly sync" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: isPinned ? "Unpin" : "Pin", exact: true }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: isPinned ? "Unpin" : "Pin" }))
     expect(onTogglePinned).toHaveBeenCalledExactlyOnceWith("chat-1")
     expect(onSelectChat).not.toHaveBeenCalled()
     expect(screen.queryByRole("button", { name: /^(Unpin|Pin)$/ })).toBeNull()
@@ -103,7 +103,7 @@ describe("ServerChatRow conversation actions", () => {
   it("keeps trashed conversations free of pin actions", async () => {
     renderRow(createChat(), { isTrashView: true })
     fireEvent.click(screen.getByRole("button", { name: "More actions: Weekly sync" }))
-    expect(await screen.findByRole("menuitem", { name: "Restore", exact: true })).toBeInTheDocument()
+    expect(await screen.findByRole("menuitem", { name: "Restore" })).toBeInTheDocument()
     expect(screen.queryByRole("menuitem", { name: /^(Unpin|Pin)$/ })).toBeNull()
   })
 })

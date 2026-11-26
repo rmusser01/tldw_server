@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     SessionRevokedException,
 )
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
-from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
+from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager, request_device_id
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
 SESSION_DEVICE_ID = "single-user-cookie:v1"
@@ -40,6 +40,11 @@ class MintedSingleUserSession:
     cookie_token: str
 
 
+def is_single_user_cookie_device(value: object) -> bool:
+    """Return True for the single-user cookie tag, bare or carrying an install id."""
+    return value == SESSION_DEVICE_ID or str(value).startswith(SESSION_DEVICE_ID + ":")
+
+
 def _as_aware_datetime(value: datetime | str) -> datetime:
     """Normalize a session expiry to a timezone-aware datetime."""
     parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
@@ -56,13 +61,14 @@ async def mint_single_user_session(
     settings = get_settings()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.SINGLE_USER_SESSION_EXPIRE_DAYS)
     access_token = secrets.token_urlsafe(32)
+    install_id = request_device_id(request)
     result = await manager.create_session(
         user_id=int(settings.SINGLE_USER_FIXED_ID),
         access_token=access_token,
         refresh_token=secrets.token_urlsafe(32),
         ip_address=resolve_client_ip(request, settings),
         user_agent=request.headers.get("user-agent"),
-        device_id=SESSION_DEVICE_ID,
+        device_id=f"{SESSION_DEVICE_ID}:{install_id}" if install_id else SESSION_DEVICE_ID,
         expires_at_override=expires_at,
         refresh_expires_at_override=expires_at,
     )
@@ -93,7 +99,7 @@ async def validate_single_user_session(
             row = await session_manager.validate_session(token, raise_on_error=True)
         else:
             row = await session_manager.validate_session(token)
-        if not row or row.get("device_id") != SESSION_DEVICE_ID:
+        if not row or not is_single_user_cookie_device(row.get("device_id")):
             return None
         if int(row.get("user_id", 0)) != int(settings.SINGLE_USER_FIXED_ID):
             return None

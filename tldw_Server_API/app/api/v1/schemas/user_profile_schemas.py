@@ -4,7 +4,7 @@
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 
@@ -179,6 +179,10 @@ class UserProfileUpdateRequest(BaseModel):
         description="Optional optimistic lock token from the last profile read",
     )
     dry_run: bool = Field(False, description="Validate only, do not persist")
+    current_password: Optional[SecretStr] = Field(
+        None,
+        description="Your current password. Required when the request changes your own email address (multi-user mode).",
+    )
 
 
 class UserProfileUpdateError(BaseModel):

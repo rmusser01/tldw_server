@@ -115,7 +115,8 @@ const graph: NotesGraphResponse = {
   active_note_count: 8,
   all_notes_note_cap: 7,
   all_notes_eligible: false,
-  suggestions_authorized: true
+  suggestions_authorized: true,
+  manual_link_authorized: false
 }
 
 const baseWorkspaceState = () => ({

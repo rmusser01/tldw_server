@@ -3632,11 +3632,7 @@ class ChatbookService:
             profile = profile_payload.get("profile") or {}
             if not isinstance(profile, dict):
                 raise ValidationError("Account profile payload is invalid")
-            email = profile.get("identity.email")
-            destination_email = str(destination_user.get("email") or "").strip().casefold()
-            restored_email = str(email or "").strip().casefold()
-            if email is not None and restored_email != destination_email:
-                updates.append(("identity.email", email))
+            # The sign-in address is never restored from an archive; changing it needs the account password (TASK-15640).
         if settings_payload:
             overrides = settings_payload.get("overrides") or {}
             if not isinstance(overrides, dict):

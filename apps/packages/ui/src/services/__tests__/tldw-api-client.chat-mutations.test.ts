@@ -325,7 +325,7 @@ describe("qualified metadata reads for an unresolved proposal", () => {
 describe("saved Roleplay transport authority", () => {
   const digest = "sha256:" + "a".repeat(64)
   const fence = {
-    version: 1,
+    version: 1 as const,
     snapshot_digest: digest,
     settings_version: 3,
     history_version: 7,

@@ -189,7 +189,7 @@ it("keeps an active user edit mounted when the message view changes", async () =
   const props = {
     message: "Review this research plan.", isBot: false, name: "You",
     currentMessageIndex: 0, totalMessages: 1, onRegenerate: vi.fn(),
-    onEditFormSubmit: vi.fn(), isProcessing: false, messageId: "retained-edit"
+    onEditFormSubmit: vi.fn(), isProcessing: false, isStreaming: false, messageId: "retained-edit"
   }
   const { rerender } = render(<PlaygroundUserMessageBubble {...props} messageView="transcript" />)
   fireEvent.click(screen.getByRole("button", { name: "More actions" }))

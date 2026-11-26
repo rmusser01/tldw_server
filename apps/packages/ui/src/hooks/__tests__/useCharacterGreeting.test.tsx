@@ -1,12 +1,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import type { Character } from "@/types/character"
+import type { Character, CharacterApiResponse } from "@/types/character"
 import { useCharacterGreeting } from "../useCharacterGreeting"
 
 const mocks = vi.hoisted(() => ({ getCharacter: vi.fn(), snapshot: vi.fn(), authority: new AbortController(), release: vi.fn() }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { getCharacter: mocks.getCharacter } }))
 vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: mocks.snapshot }))
-const card = { id: "card-1", name: "Guide", first_message: "{{user}} meets {{char}}", alternate_greetings: ["Alternate"] } as Character
+const card = { id: "card-1", name: "Guide", first_message: "{{user}} meets {{char}}", alternate_greetings: ["Alternate"] } satisfies CharacterApiResponse
 const options = () => ({ playgroundReady: true, selectedCharacter: card, selectedCharacterMode: "tracked" as const, serverChatId: null, historyId: null, messagesLength: 0, viewKey: "fresh-1" })
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 beforeEach(() => {
@@ -34,7 +34,7 @@ describe("read-only character greeting preview", () => {
     const view = renderHook(() => useCharacterGreeting({ ...options(), scope }))
     await waitFor(() => expect(view.result.current.loading).toBe(false))
     expect(mocks.getCharacter).toHaveBeenCalledWith("card-1", expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) }))
-    expect(view.result.current.character?.first_message).toBe("{{user}} meets {{char}}")
+    expect(view.result.current.character).toMatchObject({ first_message: "{{user}} meets {{char}}" })
   })
   it.each([
     { selectedCharacterMode: "overlay" as const }, { serverChatId: "saved" },

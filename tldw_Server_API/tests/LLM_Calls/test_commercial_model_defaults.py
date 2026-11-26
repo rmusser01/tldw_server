@@ -355,3 +355,32 @@ def test_current_rates_cover_luna_long_cache_and_groq_output():
     assert long_flex["completion"] == 0.000375
     assert groq["completion"] == 0.0006
     assert groq["cache_read"] == 0.000075
+
+
+
+def test_moonshot_replay_disables_http_redirects(monkeypatch):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.LLM_Calls import chat_calls
+    from tldw_Server_API.app.core.LLM_Calls.providers.moonshot_adapter import MoonshotAdapter
+
+    fetch = Mock()
+    fetch.return_value.status_code = 200
+    fetch.return_value.json.return_value = {"choices": [{"message": {"content": "next answer"}}]}
+    monkeypatch.setattr(chat_calls, "fetch", fetch)
+    adapter = MoonshotAdapter()
+    monkeypatch.setattr(adapter, "_validate_model_inventory", lambda *_args: None)
+
+    adapter.chat({
+        "model": "kimi-k3.1-pro",
+        "api_key": "test-key",
+        "base_url": "https://api.moonshot.ai/v1",
+        "app_config": {"moonshot_api": {}},
+        "messages": [
+            {"role": "user", "content": "First question"},
+            {"role": "assistant", "content": "First answer", "reasoning_content": "Original reasoning"},
+            {"role": "user", "content": "Continue"},
+        ],
+    })
+
+    assert fetch.call_args.kwargs["allow_redirects"] is False
