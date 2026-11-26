@@ -21,13 +21,6 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     ChatProviderError,
 )
-from tldw_Server_API.app.core.Chat.response_processor import (
-    NonStreamChoice,
-    apply_redaction_to_content,
-    extract_text_from_content,
-    primary_choice,
-    set_choice_content,
-)
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 
@@ -532,3 +525,13 @@ def _emit_completion_metric(runtime: OutputModerationRuntime, outcome: str) -> N
         runtime.completion_metric_callback(outcome)
     except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Chat output safety completion metric failed: {}", exc)
+
+
+# late imports: moved code reads these at call time (TASK-13950.25 R5)
+from tldw_Server_API.app.core.Chat.response_processor import (
+    NonStreamChoice,
+    apply_redaction_to_content,
+    extract_text_from_content,
+    primary_choice,
+    set_choice_content,
+)
