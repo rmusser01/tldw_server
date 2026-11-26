@@ -39,14 +39,33 @@ Parametrised for other code (TASK-13950.25; each default is the RAG value, so th
 
 Chat part 2 (TASK-13950.25; each needs ``pkg: ""``: the destinations are existing siblings of the source file):
 
-    lift         {nested def: module}    a def directly in the function becomes ``<module>.<def>(cst, ...)``; its site becomes
+    lift         {nested def: module}    a def directly in the function (or, depth 2, in a def that is directly in it) becomes
+                                         ``<module>.<def>(cst, ...)``; its site becomes
                                          ``<def> = functools.partial(_<module>.<def>, cst)``, or goes (and every read of it is
-                                         rewritten to ``<ref>(cst, ...)``) when the code that held it is itself in that module
+                                         rewritten to ``<ref>(cst, ...)``) when the code that held it is itself in that module.
+                                         A depth-2 site sits in its parent: the lifted parent's body, or the function while the
+                                         parent is still nested (a later manifest lifts it). The partial is bound once, so an
+                                         attribute set on it (``_out_transform.flush = _flush``) is set on the object that is read.
     moves[].args [name]                  read-only locals of the function passed after the ctx (``except ... as e``)
     entry        {name, module, doc}     the body after the ``cst = <expr>`` prologue moves whole to ``<module>.<name>(cst)``
     drop         [{module, def|import|all|replace}]   delete a def, an import binding or ``__all__`` entries (``all_add`` adds),
                                          or replace a call-site expression; a dropped name must have no reference left (V15)
     late_imports [{module, lines}]       a top import of a destination moves into its late-import block
+    prune_dead_sites true                 a lifted name that no code in the function reads once the manifest is applied gets no
+                                         ``functools.partial`` at its def site (the def just goes). Off by default: PR E's committed
+                                         output keeps its dead partials, and verify must still accept it
+
+Chat part 3 (TASK-13950.25):
+
+    rewrite_in   {nested def: {name: expr}}   a rewrite, like ``rewrite``, of the names that are locals of that nested def (its own
+                                         scope, nested defs included), with their ``nonlocal`` entries deleted. The expressions
+                                         must be ``cst.x`` names or attribute chains, distinct from every other rewrite
+                                         expression (V16), and the names locals of the def: not parameters, not bound by
+                                         ``except as``, a walrus, an import, a def or ``global`` (V5). Works in either layout.
+    free_imports {name: import line}     (``pkg: ""``) a lifted body reads ``name`` from a function-local import of the function or
+                                         of its lifted parent. The line must be that import, alone (V16); it is added at the top
+                                         of each destination whose lifted def reads the name. A lifted parent's own copy of the
+                                         import goes when nothing in the parent still reads it (it would be unused, ruff F401).
 
 A destination that exists gets its new defs above a trailing *late-import block* (marker comment, then the ``_<module>`` aliases
 the new code calls, then ``from <pkg> import <source> as cs``), so no module reads ``cs`` or an alias at import time (R5).
@@ -99,8 +118,7 @@ from typing import Any, NamedTuple
 PIPELINE_FILE = "tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py"
 FUNC = "unified_rag_pipeline"
 DEFAULT_CTX = [["rcfg", "RagRunConfig"], ["state", "PipelineState"]]
-PART2_KEYS = {"rewrite_in", "free_imports", "relocate"}
-PART3_KEYS = {"rewrite_in", "free_imports", "relocate"}
+PART2_KEYS = {"relocate"}
 MOVE_KEYS = {"name", "module", "span", "doc", "noqa", "allow_locals", "args"}
 LATE_MARK = "# late imports: moved code reads these at call time (TASK-13950.25 R5)"
 DEFAULTS: dict[str, Any] = {
@@ -132,6 +150,9 @@ DEFAULTS: dict[str, Any] = {
     "entry": None,
     "drop": [],
     "late_imports": [],
+    "rewrite_in": {},
+    "free_imports": {},
+    "prune_dead_sites": False,
 }
 NEW = object()  # a node the tool created: it carries no scope annotation
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -438,6 +459,19 @@ def load_manifest(path: Path) -> dict[str, Any]:
                     raise SplitError(f"{path}: lift needs pkg '' (the destination modules are siblings of the source)")
                 if not isinstance(m["lift"], dict) or not all(isinstance(k, str) and isinstance(v, str) and v for k, v in m["lift"].items()):
                     raise SplitError(f"{path}: lift must map a def name to a module name")
+            ri = m["rewrite_in"]
+            if not (isinstance(ri, dict) and all(isinstance(k, str) and isinstance(v, dict) and v and all(isinstance(a, str) and a.isidentifier() and _is_target(e) for a, e in v.items()) for k, v in ri.items())):
+                raise SplitError(f"{path}: rewrite_in must map a def name to {{local name: 'cst.x' (a name or an attribute chain)}}")
+            if m["prune_dead_sites"] and (m["pkg"] != "" or not isinstance(m["prune_dead_sites"], bool)):
+                raise SplitError(f"{path}: prune_dead_sites is a bool and needs pkg ''")
+            fi = m["free_imports"]
+            if fi:
+                if m["pkg"] != "":
+                    raise SplitError(f"{path}: free_imports needs pkg ''")
+                if not m["lift"]:
+                    raise SplitError(f"{path}: free_imports needs a lift that reads the name")
+                if not (isinstance(fi, dict) and all(isinstance(k, str) and isinstance(v, str) and _is_import_of(v, k) for k, v in fi.items())):
+                    raise SplitError(f"{path}: free_imports must map a name to one import line that binds exactly that name")
             if m["publish"] and m["facade"] == "cs":
                 raise SplitError(f"{path}: publish is refused when facade is 'cs' (R6)")
             if not m["ctx"] or any(not (isinstance(c, list) and len(c) == 2 and all(isinstance(x, str) for x in c)) for c in m["ctx"]):
@@ -449,6 +483,21 @@ def load_manifest(path: Path) -> dict[str, Any]:
                     raise SplitError(f"{path}: {key} needs entry_split")
             return m
     raise SplitError(f"{path}: no MANIFEST literal")
+
+
+def _is_target(text: Any) -> bool:
+    try:
+        return isinstance(text, str) and isinstance(ast.parse(text, mode="eval").body, (ast.Name, ast.Attribute))
+    except SyntaxError:
+        return False
+
+
+def _is_import_of(line: str, name: str) -> bool:
+    try:
+        body = ast.parse(line).body
+    except SyntaxError:
+        return False
+    return len(body) == 1 and isinstance(body[0], (ast.Import, ast.ImportFrom)) and [_bound(a) for a in body[0].names] == [name]
 
 
 def is_sibling(m: dict) -> bool:
@@ -1022,6 +1071,52 @@ class Rewriter(ast.NodeTransformer):
         return node
 
 
+def plan_rewrite_in(m: dict, src: Src) -> tuple[list[tuple[Any, Any, dict]], list[str]]:
+    """``[(def, its scope, {name: expr})]`` for ``rewrite_in``, and the V5/V16 refusals.
+
+    The names are locals of a def nested in the function; the replacement expressions must differ from every other
+    replacement, or two variables would share one ``cst`` slot.
+    """
+    fn = src.fn
+    out: list[tuple[Any, Any, dict]] = []
+    errs: list[str] = []
+    seen = list(m["rewrite"].values())
+    for dname, rw in m["rewrite_in"].items():
+        hits = [n for n in ast.walk(fn) if isinstance(n, DEFS) and n is not fn and n.name == dname]
+        if len(hits) != 1:
+            errs.append(f"V16: rewrite_in: expected one def {dname} in {fn.name}, found {len(hits)}")
+            continue
+        d = hits[0]
+        key = src.scopes.tab_of[id(d)]
+        a = d.args
+        params = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x}
+        bound = f_bound(d, key)
+        for name, expr in rw.items():
+            if any(expr == o or expr.startswith(o + ".") or o.startswith(expr + ".") for o in seen):
+                errs.append(f"V16: rewrite_in {dname}.{name} -> {expr} collides with another rewritten name (the same slot or a prefix of it); two variables would share one slot")
+            seen.append(expr)
+            if name in params:
+                errs.append(f"V16: rewrite_in {dname}.{name} is a parameter of {dname}; its value never reaches {expr}")
+            elif name not in bound:
+                errs.append(f"V16: rewrite_in {dname}.{name} is not a local of {dname}")
+        for n in ast.walk(d):
+            bad = None
+            if isinstance(n, ast.ExceptHandler) and n.name in rw and is_f(n, key):
+                bad = "except ... as"
+            elif isinstance(n, ast.NamedExpr) and n.target.id in rw and is_f(n.target, key):
+                bad = "a walrus"
+            elif isinstance(n, (ast.Import, ast.ImportFrom)) and any(r is key and _bound(x) in rw for x, r in zip(n.names, n._rs)):  # type: ignore[attr-defined]
+                bad = "an import"
+            elif isinstance(n, ast.Global) and set(n.names) & set(rw):
+                bad = "a global statement"
+            elif isinstance(n, SCOPE_NODES) and n is not d and getattr(n, "name", None) in rw and is_f(n, key):
+                bad = "a def or class"
+            if bad:
+                errs.append(f"V5: line {n.lineno}: a name mapped by rewrite_in {dname} is bound by {bad}")
+        out.append((d, key, rw))
+    return out, errs
+
+
 class Methodize(ast.NodeTransformer):
     """state -> self, rcfg -> self.rcfg (V6)."""
 
@@ -1114,6 +1209,7 @@ class Built:
         self.src_mods: list[str] = []  # sibling mode: destination aliases the source still reads
         self.src_functools = False
         self.lifted: set[tuple[str, str]] = set()
+        self.free_imps: dict[str, set[str]] = {}  # module -> free_imports names its lifted defs read
 
 
 def spans_for_cells(m: dict, src: Src) -> list[tuple[str, list[ast.stmt]]]:
@@ -1130,13 +1226,19 @@ def spans_for_cells(m: dict, src: Src) -> list[tuple[str, list[ast.stmt]]]:
 
 
 class Lift:
-    """A def nested directly in the function, becoming ``<module>.<name>(cst, ...)``."""
+    """A def nested in the function (or in a def nested directly in it), becoming ``<module>.<name>(cst, ...)``."""
 
     def __init__(self, name: str, module: str) -> None:
         self.name, self.module = name, module
         self.node: Any = None
         self.block: list[ast.stmt] = []
-        self.defregion: Move | None = None  # the move whose span holds the def; None: the rest of the function
+        self.parent_node: Any = None  # depth 2: the def that holds this one; None at depth 1
+        self.key: Any = None  # the scope that binds the name: the function (depth 1) or the parent def (depth 2)
+        self.free: set[str] = set()  # free_imports names this body reads
+        self.needed = True  # False: nothing in the code that holds the def site reads the name once the manifest is applied, so no partial is bound
+        self.dead: list[ast.stmt] = []  # local imports in this body that its lifted children replaced and nothing reads any more
+        # where the def site is: the move whose span holds it, the lifted parent (depth 2), or None (the rest of the function)
+        self.defregion: Move | Lift | None = None
 
 
 class Regions:
@@ -1146,9 +1248,9 @@ class Regions:
         self.moves, self.lifts, self.rest_module = moves, lifts, rest_module
 
     def of(self, line: int) -> Any:
-        for lf in self.lifts:
-            if stmt_start(lf.node) <= line <= lf.node.end_lineno:
-                return lf
+        held = [lf for lf in self.lifts if stmt_start(lf.node) <= line <= lf.node.end_lineno]
+        if held:
+            return min(held, key=lambda lf: lf.node.end_lineno - stmt_start(lf.node))
         inner = [x for x in self.moves if x.a <= line <= x.b]
         return min(inner, key=lambda x: x.b - x.a) if inner else None
 
@@ -1163,9 +1265,41 @@ class Regions:
         """
         r = self.of(line)
         here = self.module(r)
-        if r is lf.defregion and not isinstance(r, Lift) and lf.module != self.module(lf.defregion):
+        if r is lf.defregion and lf.module != self.module(r):
             return None
         return lf.name if lf.module == here else f"_{lf.module}.{lf.name}"
+
+
+def lift_defs(fn: Any, name: str) -> list[tuple[list[ast.stmt], Any, Any]]:
+    """Every def called ``name`` directly in ``fn`` or directly in a def that is directly in ``fn``: ``(block, def, parent def)``."""
+    top = [(blk, s, None) for blk in own_blocks(fn) for s in blk if isinstance(s, DEFS) and s.name == name]
+    parents = [s for blk in own_blocks(fn) for s in blk if isinstance(s, DEFS)]
+    return top + [(blk, s, p) for p in parents for blk in own_blocks(p) for s in blk if isinstance(s, DEFS) and s.name == name]
+
+
+def local_import_bindings(root: Any, key: Any, name: str) -> tuple[list[Info], int]:
+    """How the scope ``key`` (the function ``root``) binds ``name``: by which imports, and by how many other bindings."""
+    infos: list[Info] = []
+    other = 0
+    a = root.args
+    other += sum(1 for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x and x.arg == name)
+    for n in ast.walk(root):
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            for al, r in zip(n.names, n._rs):  # type: ignore[attr-defined]
+                if r is key and _bound(al) == name:
+                    infos.append(Info("import", al.name, al.name, al.asname, 0) if isinstance(n, ast.Import) else Info("from", n.module or "", al.name, al.asname, n.level))
+        else:
+            stored = isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and n.id == name
+            named = isinstance(n, (ast.ExceptHandler, *SCOPE_NODES)) and n is not root and getattr(n, "name", None) == name
+            other += (stored or named) and is_f(n, key)
+    return infos, other
+
+
+def mark_needed(fn: Any, lifts: list[Lift], regions: Regions, prune: bool) -> None:
+    """Set ``needed``: some read of the name stays bare (the def site's partial serves it). Run before any read is rewritten."""
+    reads = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)]
+    for lf in lifts:
+        lf.needed = not prune or any(n.id == lf.name and is_f(n, lf.key) and regions.ref(lf, n.lineno) is None for n in reads)
 
 
 def plan_lifts(m: dict, src: Src, moves: list[Move]) -> tuple[list[Lift], list[str]]:
@@ -1174,41 +1308,74 @@ def plan_lifts(m: dict, src: Src, moves: list[Move]) -> tuple[list[Lift], list[s
     lifts: list[Lift] = []
     for name, module in m["lift"].items():
         lf = Lift(name, module)
-        hits = [(blk, s) for blk in own_blocks(fn) for s in blk if isinstance(s, DEFS) and s.name == name]
+        hits = lift_defs(fn, name)
         if len(hits) != 1:
-            errs.append(f"V11: expected one def {name} directly in {fn.name}, found {len(hits)}")
+            errs.append(f"V11: expected one def {name} directly in {fn.name} (or in a def directly in it), found {len(hits)}")
             continue
-        lf.block, lf.node = hits[0]
+        lf.block, lf.node, lf.parent_node = hits[0]
+        lf.key = key if lf.parent_node is None else src.scopes.tab_of[id(lf.parent_node)]
         if sum(1 for nm, _ in binding_nodes(fn) if nm == name) != 1:
             errs.append(f"V11: {name} has a second binding in {fn.name}; a lifted name must be bound by its def alone")
         if any(mv.name == name for mv in moves):
             errs.append(f"V10: {name} is both a lift and a move")
-        lf.defregion = next(iter(sorted((x for x in moves if x.a <= stmt_start(lf.node) and lf.node.end_lineno <= x.b), key=lambda x: x.b - x.a)), None)
         lifts.append(lf)
-    allowed = set(ctx_names(m)) | {lf.name for lf in lifts}
+    for lf in lifts:  # the def site's region: the lifted parent, else the smallest move that holds the def (or its parent)
+        host = next((x for x in lifts if lf.parent_node is not None and x.node is lf.parent_node), None)
+        site = lf.parent_node if lf.parent_node is not None else lf.node
+        lf.defregion = host or next(iter(sorted((x for x in moves if x.a <= stmt_start(site) and site.end_lineno <= x.b), key=lambda x: x.b - x.a)), None)
+    allowed = set(ctx_names(m))
+    fi = m["free_imports"]
     for lf in lifts:
+        outer = [key] + ([lf.key] if lf.parent_node is not None else [])
+        scope_node = {id(key): fn, id(lf.key): lf.parent_node or fn}
         for n in ast.walk(lf.node):
-            if isinstance(n, ast.Name) and is_f(n, key) and n.id not in allowed:
+            r = getattr(n, "_r", NEW)
+            if isinstance(n, ast.Name) and any(r is k for k in outer):
+                if (r is key and n.id in allowed) or any(o.name == n.id and o.key is r for o in lifts):
+                    continue
+                if n.id in fi and isinstance(n.ctx, ast.Load):
+                    infos, other = local_import_bindings(scope_node[id(r)], r, n.id)
+                    want = import_infos(ast.parse(fi[n.id])).get(n.id)
+                    if infos and not other and all(i == want for i in infos):
+                        lf.free.add(n.id)
+                        continue
+                    errs.append(f"V16: free_imports {n.id}: {scope_node[id(r)].name} binds it as {', '.join(i.line() for i in infos) or 'something else'}, not by `{fi[n.id]}` alone (line {n.lineno})")
+                    continue
                 errs.append(f"V11: lifted {lf.name} reads {n.id} (line {n.lineno}), which is neither {', '.join(ctx_names(m))} nor a lifted name")
-            elif isinstance(n, ast.Nonlocal) and any(r is key for r in n._rs):  # type: ignore[attr-defined]
+            elif isinstance(n, ast.Nonlocal) and any(rr is k for rr in n._rs for k in outer):  # type: ignore[attr-defined]
                 errs.append(f"V11: lifted {lf.name} declares nonlocal at line {n.lineno}")
             elif isinstance(n, ast.Name) and n.id in ("__name__", "__file__") and isinstance(n.ctx, ast.Load):
                 errs.append(f"V1: lifted {lf.name} reads {n.id} (line {n.lineno}); it reads a different module after the move")
             elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "globals" and getattr(n.func, "_r", NEW) is None:
                 errs.append(f"V1: lifted {lf.name} calls globals() (line {n.lineno}); it reads a different module after the move")
+    errs += [f"V16: free_imports {n} is read by no lifted def" for n in fi if lifts and not any(n in lf.free for lf in lifts)]
+    skip = {id(x.node) for x in lifts}
+    for par in lifts:  # a lifted parent's own `from x import Name` that only its lifted children read is replaced by the module-level import
+        kids = [c for c in lifts if c.parent_node is par.node]
+        for name in sorted({n for c in kids for n in c.free}):
+            stack, readers, stmts = [par.node], 0, []
+            while stack:
+                n = stack.pop()
+                if isinstance(n, (ast.Import, ast.ImportFrom)) and any(r is kids[0].key and _bound(a) == name for a, r in zip(n.names, n._rs)):  # type: ignore[attr-defined]
+                    stmts.append(n)
+                readers += isinstance(n, ast.Name) and n.id == name and is_f(n, kids[0].key) and isinstance(n.ctx, ast.Load)
+                stack.extend(c for c in ast.iter_child_nodes(n) if id(c) not in skip or c is par.node)
+            if not readers:
+                par.dead += [x for x in stmts if len(x.names) == 1]
     return lifts, errs
 
 
 class LiftRefs(ast.NodeTransformer):
     """Reads of a lifted name become ``ref(cst, ...)`` when called and ``functools.partial(ref, cst)`` otherwise."""
 
-    def __init__(self, m: dict, key: Any, lifts: list[Lift], regions: Regions) -> None:
+    def __init__(self, m: dict, lifts: list[Lift], regions: Regions) -> None:
         self.ctx = ctx_names(m)
-        self.key, self.by_name, self.regions = key, {lf.name: lf for lf in lifts}, regions
+        self.by_name, self.regions = {lf.name: lf for lf in lifts}, regions
         self.errors: list[str] = []
 
     def hit(self, n: ast.AST) -> Lift | None:
-        return self.by_name.get(n.id) if isinstance(n, ast.Name) and is_f(n, self.key) and isinstance(n.ctx, ast.Load) else None  # type: ignore[attr-defined]
+        lf = self.by_name.get(n.id) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) else None  # type: ignore[attr-defined]
+        return lf if lf is not None and is_f(n, lf.key) else None
 
     def visit_Call(self, node: ast.Call) -> ast.AST:
         lf = self.hit(node.func)
@@ -1248,13 +1415,13 @@ class LiftRefs(ast.NodeTransformer):
         return node
 
 
-def lift_edits(fn: Any, key: Any, lines: list[bytes], regions: Regions, lifts: list[Lift], ctx: str) -> list[Edit]:
+def lift_edits(fn: Any, lines: list[bytes], regions: Regions, lifts: list[Lift], ctx: str) -> list[Edit]:
     """The text counterpart of ``LiftRefs``."""
     by_name = {lf.name: lf for lf in lifts}
     calls = {id(c.func): c for c in ast.walk(fn) if isinstance(c, ast.Call)}
     out: list[Edit] = []
     for n in ast.walk(fn):
-        if not (isinstance(n, ast.Name) and is_f(n, key) and n.id in by_name and isinstance(n.ctx, ast.Load)):
+        if not (isinstance(n, ast.Name) and n.id in by_name and is_f(n, by_name[n.id].key) and isinstance(n.ctx, ast.Load)):
             continue
         ref = regions.ref(by_name[n.id], n.lineno)
         if ref is None:
@@ -1339,6 +1506,7 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # V8: a name the manifest introduces must not already be used in the function.
     used = fn_names(fn)
     intro = {t.split(".")[0] for t in rewrite.values()} | ({"rcfg"} if hidden else set()) | ({"state"} if publish else set())
+    intro |= {t.split(".")[0] for rw in m["rewrite_in"].values() for t in rw.values()}
     sm, sc = m["state_module"], m["state_class"]
     intro |= {ctx_names(m)[0]} if m["prologue"] else set()
     intro |= {"state", f"_{sm}"} if m["state_init"] else set()
@@ -1364,6 +1532,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     if is_sibling(m):
         # an alias an earlier manifest already imported into the source may be read again, never rebound
         reuse = {f"_{x}" for x in {y.module for y in moves} | {lf.module for lf in lifts} | ({entry["module"]} if entry else set()) if src.infos.get(f"_{x}") == Info("from", pkg_dotted(m), x, f"_{x}", 0)}
+        if lifts and src.infos.get("functools") == Info("import", "functools", "functools", None, 0):
+            reuse.add("functools")  # an earlier manifest's partials already import it
         intro -= reuse
         out.errors += [f"V8: line {getattr(x, 'lineno', '?')}: {nm} is bound inside {fn.name}" for nm, x in binding_nodes(fn) if nm in reuse]
     out.errors += [f"V8: {n} is already a name in {fn.name}" for n in sorted(intro & used)]
@@ -1386,6 +1556,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             bad = "a def or class" + (" (a published def must be the only binding of its name)" if isinstance(n, DEFS) and n.name in publish else "")
         if bad:
             out.errors.append(f"V5: line {n.lineno}: a mapped name is bound by {bad}")
+    ri_plan, ri_errs = plan_rewrite_in(m, src)
+    out.errors += ri_errs
     for n in publish:
         if not any(isinstance(s, DEFS) and s.name == n for b in own_blocks(fn) for s in b):
             out.errors.append(f"V5: publish: no closure {n} in {fn.name}")
@@ -1427,7 +1599,15 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             out.errors.append(f"V6: {name} has a nonlocal outside rewrite")
     if is_sibling(m):  # a loop could run a moved or lifted statement again after code that reads its result
         out.errors += [f"V1: {mv.name}: the span sits inside the loop at line {lp.lineno}; moves are refused in loops" for mv in moves if (lp := loop_above(fn, mv.members[0]))]
-        out.errors += [f"V1: lifted {lf.name} sits inside the loop at line {lp.lineno}; lifts are refused in loops" for lf in lifts if (lp := loop_above(fn, lf.node))]
+        out.errors += [f"V1: lifted {lf.name} sits inside the loop at line {lp.lineno}; lifts are refused in loops" for lf in lifts if (lp := loop_above(lf.parent_node or fn, lf.node))]
+    if m["prune_dead_sites"]:
+        first = fn.body[docstring_len(fn)] if len(fn.body) > docstring_len(fn) else None
+        inside = {id(x) for x in ast.walk(first)} if first is not None else set()
+        out.errors += [
+            f"V17: prune_dead_sites: {n.func.id}() at line {n.lineno} can read a def site by name; only the first statement after the docstring may call it"
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("locals", "vars", "globals", "eval", "exec") and getattr(n.func, "_r", NEW) is None and id(n) not in inside
+        ]
     for mv in moves:
         out.errors += check_span(mv, notes)
         out.errors += check_args(mv, fn, key, ctx_names(m), {lf.name for lf in lifts})
@@ -1437,6 +1617,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
 
     for s in fn.body:
         Rewriter(key, rewrite, hidden).visit(s)
+    for d, dkey, rw in ri_plan:
+        Rewriter(dkey, rw, {}).visit(d)
     names = src.names
     up = UpTransform(names, src.exempt, m["facade"], bump=not is_sibling(m))
     for old, (block, d) in class_defs.items():
@@ -1477,21 +1659,29 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
     # lifts: reads of lifted names first (in every body), then each def becomes a module function and its site a partial
     lifted_defs: dict[tuple[str, str], Any] = {}
     if lifts:
-        refs = LiftRefs(m, key, lifts, regions)
+        mark_needed(fn, lifts, regions, m["prune_dead_sites"])
+        refs = LiftRefs(m, lifts, regions)
         for st in fn.body:
             refs.visit(st)
         out.errors += refs.errors
-        blocks = list(own_blocks(fn))
+        blocks = list(own_blocks(fn)) + [b2 for p in {id(lf.parent_node): lf.parent_node for lf in lifts if lf.parent_node is not None}.values() for b2 in own_blocks(p)]
         bad = {m["facade"]} | {f"_{x}" for x in {y.module for y in moves} | {lf.module for lf in lifts}}
         for lf in lifts:
+            for st in lf.dead:
+                blk = next(b2 for b2 in own_blocks(lf.node) if any(x is st for x in b2))
+                if len(blk) == 1:
+                    out.errors.append(f"V11: removing the local import at line {st.lineno} would leave its block empty")
+                else:
+                    blk[:] = [x for x in blk if x is not st]
+        for lf in sorted(lifts, key=lambda x: x.parent_node is None):  # a def inside a lifted def goes first, so its parent carries the site
             d = up.visit(lf.node)
             a = d.args
             (a.posonlyargs if a.posonlyargs else a.args)[0:0] = copy.deepcopy(ctx_params(m))
             heads = d.decorator_list + a.defaults + [x for x in a.kw_defaults if x]
             if any(isinstance(x, ast.Name) and x.id in bad for r in heads for x in ast.walk(r)):
                 out.errors.append(f"V12: a decorator or default of lifted {lf.name} reads the facade or a module alias; it runs at import, before the late block")
-            site = [] if lf.module == regions.module(lf.defregion) else [ast.parse(f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {call_args(m)})").body[0]]
-            if not site and (len(lf.block) == 1 or (lf.defregion and len(lf.defregion.members) == 1 and lf.defregion.members[0] is lf.node)):
+            site = [] if lf.module == regions.module(lf.defregion) or not lf.needed else [ast.parse(f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {call_args(m)})").body[0]]
+            if not site and (len(lf.block) == 1 or (isinstance(lf.defregion, Move) and len(lf.defregion.members) == 1 and lf.defregion.members[0] is lf.node)):
                 out.errors.append(f"V11: lifting {lf.name} would leave its block or move empty")
             replace_stmt(lf.node, site, blocks, moves)
             lifted_defs[(lf.module, lf.name)] = d
@@ -1499,6 +1689,8 @@ def build(m: dict, src: Src, lines: list[str], notes: list[str] | None = None) -
             return out
         out.defs.update(lifted_defs)
         out.lifted = set(lifted_defs)
+        for lf in lifts:
+            out.free_imps.setdefault(lf.module, set()).update(lf.free)
 
     # moves, inside out
     for mv in sorted(moves, key=lambda x: x.b - x.a):
@@ -1921,15 +2113,18 @@ def row_end(lines: list[bytes], row: int) -> int:
 def gather(src: Src, m: dict, lines: list[bytes]) -> tuple[list[Edit], list[Cut]]:
     fn, key = src.fn, src.key
     rewrite, hidden, publish = m["rewrite"], m["hidden"], set(m["publish"])
+    scopes = [(key, rewrite)] + [(k, rw) for _, k, rw in plan_rewrite_in(m, src)[0]]  # rewrite_in: the nested def's own scope
+    gone = lambda x, r: any(r is k and x in rw for k, rw in scopes)  # noqa: E731
     edits: list[Edit] = []
     cuts: list[Cut] = []
     for n in ast.walk(fn):
-        if isinstance(n, ast.Name) and is_f(n, key) and n.id in rewrite:
-            edits.append(Edit(*pos(n), rewrite[n.id], True))
+        hit = next((rw[n.id] for k, rw in scopes if isinstance(n, ast.Name) and is_f(n, k) and n.id in rw), None)
+        if hit is not None:
+            edits.append(Edit(*pos(n), hit, True))
         elif isinstance(n, ast.Call) and (hit := hidden_match(n, key, hidden)):
             edits.append(Edit(*pos(n), f"rcfg.{hit[0]}.{hit[1]}", True))
-        elif isinstance(n, ast.Nonlocal) and any(r is key and x in rewrite for x, r in zip(n.names, n._rs)):  # type: ignore[attr-defined]
-            keep = [x for x, r in zip(n.names, n._rs) if not (r is key and x in rewrite)]  # type: ignore[attr-defined]
+        elif isinstance(n, ast.Nonlocal) and any(gone(x, r) for x, r in zip(n.names, n._rs)):  # type: ignore[attr-defined]
+            keep = [x for x, r in zip(n.names, n._rs) if not gone(x, r)]  # type: ignore[attr-defined]
             if keep:
                 edits.append(Edit(*pos(n), "nonlocal " + ", ".join(keep)))
             else:
@@ -2212,6 +2407,7 @@ class ModPlan:
         self.need_cs = False
         self.drops: list[dict] = []
         self.late_ranges: list[list[int]] = []  # rows of top imports that move into the late block
+        self.free: set[str] = set()  # free_imports names the appended defs read: module-level imports from the manifest's lines
 
 
 def split_late(text: str) -> tuple[ast.Module, list[ast.stmt], list[ast.stmt]]:
@@ -2355,6 +2551,13 @@ def make_plans(m: dict, src: Src, b: Built, text_of: Any) -> tuple[dict[str, Mod
             continue
         p.text = t
         dest_names(p, m, src, b.dests)
+        p.free = set(b.free_imps.get(mod, ()))
+        have = import_infos(ast.parse(t))
+        for n in sorted(p.free):
+            line = m["free_imports"][n]
+            p.std[n] = line
+            if n in have and have[n] != import_infos(ast.parse(line))[n]:
+                errs.append(f"V9: {mod}.py binds {n} as {have[n].line()}; free_imports wants `{line}`")
         if p.late_ranges:
             tree, top, _ = split_late(t)
             moved = [x for x in top if is_top_import(x) and [x.lineno, x.end_lineno] in p.late_ranges]
@@ -2430,6 +2633,8 @@ def sib_checks(m: dict, src: Src, plan: ModPlan, want_late: int, head_text: str)
         if n == "TYPE_CHECKING":
             continue
         want = src.infos.get(n) if n != "functools" else Info("import", "functools", "functools", None, 0)
+        if n in plan.free:
+            want = import_infos(ast.parse(m["free_imports"][n])).get(n)
         if psrc.infos.get(n) != want:
             got = psrc.infos.get(n)
             errs.append(f"V9: {label} binds {n} as {got.line() if got else 'nothing'}; {src_stem(m)} binds it as {want.line() if want else '?'}")
@@ -2498,19 +2703,21 @@ def apply_sibling(root: Path, m: dict) -> list[str]:
     lifts, _ = plan_lifts(m, fresh, moves) if m["lift"] else ([], [])
     entry = m["entry"]
     regions = Regions(moves, lifts, entry["module"] if entry else "")
-    edits += lift_edits(fn, fresh.key, lines, regions, lifts, ctx)
+    mark_needed(fn, lifts, regions, m["prune_dead_sites"])
+    edits += lift_edits(fn, lines, regions, lifts, ctx)
     lift_cuts: dict[str, Cut] = {}
     for lf in lifts:
         d = lf.node
-        keep = lf.module != regions.module(lf.defregion)
+        keep = lf.module != regions.module(lf.defregion) and lf.needed
         tail = d.end_lineno + (1 if not keep and d.end_lineno < len(rows_text) and not rows_text[d.end_lineno].strip() else 0)
         lift_cuts[lf.name] = Cut(stmt_start(d), tail, f"{lf.name} = functools.partial(_{lf.module}.{lf.name}, {ctx})" if keep else None, d.col_offset)
+    dead_cuts = [Cut(stmt_start(st), st.end_lineno + (1 if st.end_lineno < len(rows_text) and not rows_text[st.end_lineno].strip() else 0), None, st.col_offset) for lf in lifts for st in lf.dead]
     move_cuts: dict[str, Cut] = {}
     for mv in moves:
         recv = "" if (mv.parent.module if mv.parent else regions.rest_module) == mv.module else f"_{mv.module}."
         call = f"{'await ' if mv.is_async else ''}{recv}{mv.name}({', '.join([ctx, *mv.args])})"
         move_cuts[mv.name] = Cut(mv.a, mv.b, call, mv.members[0].col_offset)
-    cuts += list(lift_cuts.values()) + list(move_cuts.values())
+    cuts += list(lift_cuts.values()) + list(move_cuts.values()) + dead_cuts
     made: dict[tuple[str, str], str] = {}
     for lf in lifts:
         d = lf.node

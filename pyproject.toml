@@ -760,6 +760,7 @@ exclude = []
 "tldw_Server_API/app/api/v1/endpoints/*.py" = ["B008"]
 "tldw_Server_API/app/api/v1/schemas/rag_schemas_simple_compat.py" = ["F403", "F405"]
 "tldw_Server_API/app/core/Character_Chat/Character_Chat_Lib_facade.py" = ["F403", "F405"]
+"tldw_Server_API/app/core/Chat/chat_service.py" = ["F401"]  # the chat patch facade: moved code reads these imports as cs.<name> (TASK-13950.25 R4)
 "tldw_Server_API/app/api/v1/endpoints/audio/__init__.py" = ["F401", "BLE001"]
 # BLE001 grandfathered — explicit legacy file list generated on 2026-04-20.
 # New files remain subject to BLE001 because only current violators are listed here.
