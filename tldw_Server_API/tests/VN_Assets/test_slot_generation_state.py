@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksR
 from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+from tldw_Server_API.app.core.VN_Assets import prompts
 from tldw_Server_API.app.core.VN_Assets.concurrency import BackendGenerationLease
 from tldw_Server_API.app.core.VN_Assets.jobs import (
     create_generate_variant_job,
@@ -1998,6 +1999,8 @@ async def test_v1_outcome_follows_real_sdk_retry_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Real SDK disposition leaves retryable work active and final failures retryable by the user."""
+    # Use the offline estimator so recipe construction never downloads a tokenizer.
+    monkeypatch.setattr(prompts, "_get_prompt_token_encoder", lambda: None)
     pack = pack_with_slots
     slot_id = pack.slots[0].id
     jobs = v1_retry_jobs
