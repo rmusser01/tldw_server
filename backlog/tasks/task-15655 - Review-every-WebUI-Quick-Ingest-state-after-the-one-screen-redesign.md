@@ -30,6 +30,7 @@ Review all reachable WebUI Quick Ingest screens and conditional states on deskto
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review the branch shipped for PR 3631. Inventory conditional WebUI surfaces, inspect desktop and phone fixtures independently, and document ranked interaction changes with acceptance checks. ADR required: no. The proposed review uses the existing Quick Ingest session, job and navigation boundaries.
 Two independent assessments of PR #3631 plus paired desktop and phone interaction checks. The 14-row state inventory identifies browser and source coverage. Verified all five PDF pages, screenshot dimensions, pinned source links and local document links. Bandit found no Python code in the asset scope. No new application code. Live service and assistive-technology outcomes were outside this review.
+Published the review, illustrated proposal, and separate full-resolution desktop and phone evidence in https://github.com/rmusser01/tldw_server/pull/3633. The implementation and original screenshots are in https://github.com/rmusser01/tldw_server/pull/3631.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
