@@ -17,7 +17,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite._sessions_http_fixtures import (
     session_id_of,
 )
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.sign_in_alerts]
+pytestmark = pytest.mark.sign_in_alerts  # asyncio_mode=auto runs the async tests
 
 
 def item(client, tokens, notification_id: int) -> dict:
@@ -74,6 +74,7 @@ async def test_later_session_cannot_mark_read_or_snooze(two_user_client):
     assert item(client, A, nB)["read_at"] is None
     s = client.post(f"/api/v1/notifications/{nB}/snooze", json={"minutes": 30}, headers=bearer(C))
     assert s.status_code == 403 and s.json()["detail"]["code"] == "new_sign_in_protected"
+    assert item(client, A, nB)["dismissed_at"] is None   # snoozing dismisses on success, so a refusal must leave it
 
 
 async def test_api_key_cannot_silence_even_an_old_alert(two_user_client):
@@ -84,6 +85,15 @@ async def test_api_key_cannot_silence_even_an_old_alert(two_user_client):
     r = client.post(f"/api/v1/notifications/{nB}/dismiss", headers={"X-API-KEY": api_key_for(client, A)})
     assert r.status_code == 403 and r.json()["detail"]["code"] == "new_sign_in_protected"
     assert item(client, A, nB)["dismissed_at"] is None
+
+
+async def test_api_key_cannot_mark_a_protected_alert_read(two_user_client):
+    ctx = two_user_client
+    client = ctx.client
+    A, B, C, nB, nC = await _setup(ctx)
+    r = client.post("/api/v1/notifications/mark-read", json={"ids": [nB]}, headers={"X-API-KEY": api_key_for(client, A)})
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "new_sign_in_protected"
+    assert item(client, A, nB)["read_at"] is None
 
 
 async def test_after_24_hours_any_browser_session_may_dismiss(two_user_client):
@@ -147,21 +157,24 @@ def test_new_sign_in_alerts_expire_after_30_days():
 
 
 @pytest.mark.parametrize(
-    "created_at,caller,expected",
+    "created_at,caller,source,expected",
     [
-        ("garbage", 9, False),
-        ("", 9, False),
-        ("2026-11-23T00:00:00+00:00", 9, True),
-        ("2026-11-25T11:00:00+00:00", 9, False),
-        ("2026-11-25T11:00:00+00:00", 3, True),
-        ("2026-11-25T11:00:00+00:00", None, False),
+        ("garbage", 9, "7", False),
+        ("", 9, "7", False),
+        ("2026-11-23T00:00:00+00:00", 9, "7", True),
+        ("2026-11-25T11:00:00+00:00", 9, "7", False),
+        ("2026-11-25T11:00:00+00:00", 3, "7", True),
+        ("2026-11-25T11:00:00+00:00", None, "7", False),
+        ("2026-11-23T00:00:00+00:00", None, "7", False),  # no session: never, even after 24 hours
+        ("2026-11-25T11:00:00+00:00", 3, "not-a-number", False),
+        ("2026-11-25T11:00:00+00:00", 3, None, False),
     ],
 )
-def test_caller_may_silence_rule(created_at, caller, expected):
+def test_caller_may_silence_rule(created_at, caller, source, expected):
     now = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc)
     row = UserNotificationRow(
         id=1, user_id="1", kind="new_sign_in", title="t", message="m", severity="warning",
-        source_task_id=None, source_task_run_id=None, source_job_id="7", source_domain="auth_session",
+        source_task_id=None, source_task_run_id=None, source_job_id=source, source_domain="auth_session",
         source_job_type=None, link_type=None, link_id=None, link_url=None, dedupe_key=None,
         retention_until=None, archived_at=None, created_at=created_at, read_at=None, dismissed_at=None,
     )

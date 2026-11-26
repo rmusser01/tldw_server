@@ -109,6 +109,16 @@ async def test_revoke_all_counts_only_live_sessions_and_keeps_old_reasons(alice_
     assert await revoke_reason_of(dead) == "session_cap"
 
 
+async def test_keep_current_revoke_all_skips_dead_rows_and_keeps_old_reasons(alice_sessions):
+    ctx, A, B = alice_sessions.ctx, alice_sessions.A, alice_sessions.B
+    dead = await seed_session_revoked_with_reason(ctx.alice_id, "session_cap")
+    r = ctx.client.post("/api/v1/auth/sessions/revoke-all?keep_current=true", headers=bearer(A))
+    assert r.json()["details"]["sessions_revoked"] == 1          # B only: neither A nor the dead row
+    assert await revoke_reason_of(dead) == "session_cap"
+    assert ctx.client.get("/api/v1/auth/sessions", headers=bearer(A)).status_code == 200
+    assert ctx.client.get("/api/v1/auth/sessions", headers=bearer(B)).status_code == 401
+
+
 async def test_users_sessions_alias_reports_is_current(alice_sessions):
     client, A = alice_sessions.client, alice_sessions.A
     rows = client.get("/api/v1/users/sessions", headers=bearer(A)).json()

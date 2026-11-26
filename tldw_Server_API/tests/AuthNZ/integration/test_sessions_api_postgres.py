@@ -41,8 +41,10 @@ async def test_sessions_api_postgres(isolated_test_environment: tuple[TestClient
     c = _login(client, "pgalice", "dev-aaaaaaaa", CHROME_MAC)
     rows = {r["id"]: r for r in client.get("/api/v1/auth/sessions", headers=_bearer(a)).json()}
     assert len(rows) == 3
-    current = [i for i, r in rows.items() if r["is_current"]]
-    assert len(current) == 1
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+
+    a_id = int(get_jwt_service().decode_access_token(a["access_token"])["session_id"])
+    assert [i for i, r in rows.items() if r["is_current"]] == [a_id]
     assert sorted(r["same_install"] for r in rows.values()) == [False, True, True]
     assert sorted(r["device_label"] for r in rows.values()) == ["Chrome on macOS", "Chrome on macOS", "Safari on iOS"]
     assert "dev-aaaaaaaa" not in json.dumps(rows)

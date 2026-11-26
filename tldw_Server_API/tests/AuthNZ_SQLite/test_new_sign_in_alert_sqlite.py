@@ -72,11 +72,13 @@ async def test_alert_carries_no_credentials_or_install_id(two_user_client):
 async def test_alert_is_written_with_every_notification_preference_off(two_user_client):
     client, pw = two_user_client.client, two_user_client.password
     A = login(client, "alice", pw, device="dev-aaaaaaaa")
-    client.patch(
+    patched = client.patch(
         "/api/v1/notifications/preferences",
         json={"reminder_enabled": False, "job_completed_enabled": False, "job_failed_enabled": False},
         headers=bearer(A),
     )
+    assert patched.status_code == 200, patched.text
+    assert [patched.json()[k] for k in ("reminder_enabled", "job_completed_enabled", "job_failed_enabled")] == [False] * 3
     login(client, "alice", pw, device="dev-bbbbbbbb")
     assert len(await notifications(client, A)) == 1
 
@@ -139,8 +141,10 @@ async def test_alert_is_written_when_the_cap_evicted_the_only_other_session(two_
     client, pw = two_user_client.client, two_user_client.password
     monkeypatch.setenv("MAX_SESSIONS_PER_USER", "1")
     reset_settings()
-    login(client, "alice", pw, device="dev-aaaaaaaa")
+    A = login(client, "alice", pw, device="dev-aaaaaaaa")
     B = login(client, "alice", pw, device="dev-bbbbbbbb")  # evicts A (another install)
+    evicted = client.get("/api/v1/auth/sessions", headers=bearer(A))
+    assert evicted.status_code == 401 and evicted.json()["detail"]["code"] == "session_replaced"
     (n,) = await notifications(client, B)
     assert n["source_job_id"] == str(session_id_of(B))
 
@@ -149,8 +153,10 @@ async def test_evicting_the_same_install_writes_nothing(two_user_client, monkeyp
     client, pw = two_user_client.client, two_user_client.password
     monkeypatch.setenv("MAX_SESSIONS_PER_USER", "1")
     reset_settings()
-    login(client, "alice", pw, device="dev-aaaaaaaa")
+    A = login(client, "alice", pw, device="dev-aaaaaaaa")
     B = login(client, "alice", pw, device="dev-aaaaaaaa")  # evicts A, same install signing in again
+    evicted = client.get("/api/v1/auth/sessions", headers=bearer(A))
+    assert evicted.status_code == 401 and evicted.json()["detail"]["code"] == "session_replaced"
     assert await notifications(client, B) == []
 
 
