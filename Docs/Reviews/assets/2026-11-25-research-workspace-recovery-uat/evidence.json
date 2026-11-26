@@ -1,0 +1,270 @@
+{
+  "issue": 2608,
+  "backlog_task": "TASK-15658",
+  "date": "2026-11-25",
+  "status": "partial",
+  "dev_base": "1d8589b7c43e5dbb6fca3247e023f562129c70f3",
+  "tested_webui_commit": "0e207a9f210fc28d3364afd687a2b81c83f9be78",
+  "environment": {
+    "api": "Uvicorn FastAPI on loopback, dedicated single-user databases",
+    "webui": "Next.js 16.1.4 on loopback with an empty build directory",
+    "browser": "Playwright Chromium, desktop, 1440x900",
+    "fixtures": "Real owner-scoped media and Notes API records, portable workspace JSON imports, disposable IndexedDB chat rows for message deletion",
+    "model": "Recovery verification used saved transcripts and did not require model generation"
+  },
+  "observations": {
+    "import_and_reload": {
+      "workspaceId": "d80a9581-1827-4da0-9007-42993fe776f8",
+      "title": "UAT 2608 final (Imported)",
+      "messages": [
+        "UAT 2608 imported question stays visible after reload.",
+        "UAT 2608 imported reply remains attached to the workspace."
+      ],
+      "sources": [
+        {
+          "id": "uat-alpha",
+          "mediaId": 1
+        },
+        {
+          "id": "uat-beta",
+          "mediaId": 2
+        },
+        {
+          "id": "uat-survivor",
+          "mediaId": 3
+        }
+      ]
+    },
+    "batch_remove_and_undo": {
+      "before": {
+        "sources": [
+          {
+            "id": "uat-alpha",
+            "mediaId": 1
+          },
+          {
+            "id": "uat-beta",
+            "mediaId": 2
+          },
+          {
+            "id": "uat-survivor",
+            "mediaId": 3
+          }
+        ],
+        "direct": [
+          "uat-alpha"
+        ],
+        "folders": [
+          "uat-selected-folder"
+        ],
+        "memberships": [
+          {
+            "folderId": "uat-direct-folder",
+            "sourceId": "uat-alpha"
+          },
+          {
+            "folderId": "uat-selected-folder",
+            "sourceId": "uat-beta"
+          }
+        ]
+      },
+      "removed": {
+        "sources": [
+          {
+            "id": "uat-survivor",
+            "mediaId": 3
+          }
+        ],
+        "direct": [],
+        "folders": [
+          "uat-selected-folder"
+        ],
+        "memberships": []
+      },
+      "after": {
+        "sources": [
+          {
+            "id": "uat-alpha",
+            "mediaId": 1
+          },
+          {
+            "id": "uat-beta",
+            "mediaId": 2
+          },
+          {
+            "id": "uat-survivor",
+            "mediaId": 3
+          }
+        ],
+        "direct": [
+          "uat-alpha"
+        ],
+        "folders": [
+          "uat-selected-folder"
+        ],
+        "memberships": [
+          {
+            "folderId": "uat-direct-folder",
+            "sourceId": "uat-alpha"
+          },
+          {
+            "folderId": "uat-selected-folder",
+            "sourceId": "uat-beta"
+          }
+        ]
+      },
+      "liveMedia": [
+        {
+          "id": 1,
+          "status": 200
+        },
+        {
+          "id": 2,
+          "status": 200
+        },
+        {
+          "id": 3,
+          "status": 200
+        }
+      ]
+    },
+    "archive_restore_delete": {
+      "original": "d80a9581-1827-4da0-9007-42993fe776f8",
+      "copy": "ea140f67-cf62-4874-b465-930c3bf07de7",
+      "mediaStatus": [
+        200,
+        200,
+        200
+      ],
+      "archiveCancel": true,
+      "archiveUndo": true,
+      "explicitRestore": true,
+      "deleteCancelAndUndo": true
+    },
+    "artifact": "cancel preserved output; delete removed it; Undo restored it",
+    "chat_clear": "both messages removed and restored",
+    "quick_notes": "editor cleared, canonical Notes record stayed readable, and Undo restored it",
+    "single_source": {
+      "before": [
+        "uat-survivor"
+      ],
+      "afterRemoval": [],
+      "restored": [
+        "uat-survivor"
+      ],
+      "mediaStatus": 200
+    },
+    "move_transfer": {
+      "before": {
+        "destinationId": "fe549e05-5204-4916-aaba-51ed35beda21",
+        "origin": [
+          1,
+          2,
+          3
+        ],
+        "destination": [],
+        "selections": [
+          "uat-alpha"
+        ],
+        "folders": [
+          {
+            "folderId": "uat-direct-folder",
+            "sourceId": "uat-alpha"
+          },
+          {
+            "folderId": "uat-selected-folder",
+            "sourceId": "uat-beta"
+          }
+        ]
+      },
+      "moved": {
+        "destinationId": "fe549e05-5204-4916-aaba-51ed35beda21",
+        "origin": [
+          3
+        ],
+        "destination": [
+          1,
+          2
+        ],
+        "selections": [],
+        "folders": []
+      },
+      "restored": {
+        "destinationId": "fe549e05-5204-4916-aaba-51ed35beda21",
+        "origin": [
+          1,
+          2,
+          3
+        ],
+        "destination": [],
+        "selections": [
+          "uat-alpha"
+        ],
+        "folders": [
+          {
+            "folderId": "uat-direct-folder",
+            "sourceId": "uat-alpha"
+          },
+          {
+            "folderId": "uat-selected-folder",
+            "sourceId": "uat-beta"
+          }
+        ]
+      }
+    },
+    "domain_records": {
+      "media": [
+        {
+          "id": 1,
+          "http_status": 200,
+          "title_and_content_match": true
+        },
+        {
+          "id": 2,
+          "http_status": 200,
+          "title_and_content_match": true
+        },
+        {
+          "id": 3,
+          "http_status": 200,
+          "title_and_content_match": true
+        }
+      ],
+      "note": [
+        {
+          "id": "fa6189dd-cbb8-46c1-a715-30e3baebd4ec",
+          "http_status": 200,
+          "title_and_content_match": true
+        }
+      ]
+    },
+    "single_message_delete": {
+      "status": "product_failed",
+      "error": "history_selection_unavailable",
+      "visible_reply_retained": true,
+      "persisted_local_reply_retained": true,
+      "follow_up": "TASK-15658.3"
+    },
+    "imported_chat_settings": {
+      "status": "separate_follow_up",
+      "error": "missing_conversation",
+      "when": "bundle carried an exporter-local historyId with no matching IndexedDB record",
+      "transcript_retained": true,
+      "follow_up": "TASK-15658.2"
+    }
+  },
+  "checks": {
+    "focused_tests": 213,
+    "shared_ui_typecheck": "passed",
+    "scoped_eslint": "passed"
+  },
+  "screenshots": [
+    "imported-chat-recheck.png",
+    "batch-render-error.png",
+    "batch-remove.png",
+    "batch-undo.png",
+    "workspace-delete-undo.png",
+    "transfer-undo.png",
+    "message-delete-refused.png"
+  ]
+}
