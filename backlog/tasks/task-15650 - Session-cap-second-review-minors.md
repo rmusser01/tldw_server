@@ -29,20 +29,22 @@ Nine minor issues a second review found in the merged per-user session cap (#361
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-M1 to M9 implemented with tests; see the PR description. M8 changes wording only (cookie browsers sign in again on the next page load); bootstrap untouched.
+M1 to M9 implemented with tests. M8 changes wording only (cookie browsers sign in again on the next page load); bootstrap untouched. A review follow-up moved update_user_last_login inside the revoke guard (token-issuing helper and magic-link handler) and made logout clear the session-replaced notice after the remote call.
+Known limits, left on purpose: login's update_user_last_login is outside the revoke guard (its call is shared with the single-user branch). A cancelled request skips the placeholder revoke. In a same-install race the placeholder's revoke_reason changes from session_cap to sign_in_failed. The background-proxy.ts notice path has no negative test. The notice is written after the config-updated dispatch, so a login page that mounts first could miss it. auth-refresh-error.ts and background-proxy.ts import each other.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed the nine second-review minors on the per-user session cap. Cleanup (M1), the token-update guard and READ COMMITTED on PostgreSQL (M5, M9) are in sessions_repo and the session manager. A failed multi-user sign-in step now revokes the placeholder session (M4); a review follow-up moved update_user_last_login inside the revoke guard in the token-issuing helper and the magic-link handler. ADR-099 and the docs state the blacklist limit, the listing expires_at change and the cookie wording (M2, M3, M8). The web UI records the session-replaced notice only when invalidation applied, sanitizes refresh error details (M6, M7), and logout now clears the notice after the remote call. Bandit was not run.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

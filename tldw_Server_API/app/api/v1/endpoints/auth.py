@@ -446,7 +446,7 @@ async def _issue_multi_user_tokens(
             access_token=access_token,
             refresh_token=refresh_token,
         )
-    await _auth_service.update_user_last_login(db, user_id, datetime.utcnow())
+        await _auth_service.update_user_last_login(db, user_id, datetime.utcnow())
     await _safe_audit_log_login_event(
         user_id=user_id,
         username=username,
@@ -3219,8 +3219,7 @@ async def verify_magic_link(
             access_token=access_token,
             refresh_token=refresh_token,
         )
-
-    await _auth_service.update_user_last_login(db, int(user["id"]), datetime.utcnow())
+        await _auth_service.update_user_last_login(db, int(user["id"]), datetime.utcnow())
 
     return TokenResponse(
         access_token=access_token,

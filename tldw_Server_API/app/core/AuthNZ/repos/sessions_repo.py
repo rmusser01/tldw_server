@@ -896,7 +896,9 @@ class AuthnzSessionsRepo:
     async def cleanup_expired_sessions(self, *, session_cap_retention: timedelta) -> int:
         """
         Delete sessions past refresh expiry (plus 1 day), long-revoked sessions,
-        and cap-evicted sessions older than ``session_cap_retention``.
+        logged-out/revoked rows whose access token expired over a day ago
+        (``session_cap`` rows are excluded from that clause), and cap-evicted
+        sessions older than ``session_cap_retention``.
 
         Returns the number of deleted rows (best-effort).
         """

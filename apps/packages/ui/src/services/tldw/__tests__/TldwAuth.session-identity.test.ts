@@ -125,4 +125,17 @@ describe("TldwAuthService session identity", () => {
     )
     expect(hasSessionReplacedNotice()).toBe(false)
   })
+
+  it("clears a notice set while the remote logout was in flight", async () => {
+    const { hasSessionReplacedNotice } = await import(
+      "@/services/tldw/session-identity"
+    )
+    mocks.bgRequest.mockImplementation(async () => {
+      localStorage.setItem("tldw:session-replaced", "1")
+      throw { status: 401 }
+    })
+    const auth = await makeAuth()
+    await auth.logout()
+    expect(hasSessionReplacedNotice()).toBe(false)
+  })
 })
