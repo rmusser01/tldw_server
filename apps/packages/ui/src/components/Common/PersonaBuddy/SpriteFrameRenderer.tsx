@@ -102,7 +102,8 @@ const renderFrame = ({
   visualState,
   fallbackLabel,
   className,
-  fitSize
+  fitSize,
+  clipPathId
 }: {
   frame: PersonaVisualFrame
   asset: PersonaVisualAsset
@@ -111,6 +112,7 @@ const renderFrame = ({
   fallbackLabel: string
   className?: string
   fitSize?: number
+  clipPathId: string
 }) => {
   const sharedProps = {
     "data-testid": "persona-visual-frame",
@@ -130,8 +132,14 @@ const renderFrame = ({
           viewBox={`${region.x} ${region.y} ${region.width} ${region.height}`}
           preserveAspectRatio="xMidYMid meet"
         >
+          <defs>
+            <clipPath id={clipPathId}>
+              <rect x={region.x} y={region.y} width={region.width} height={region.height} />
+            </clipPath>
+          </defs>
           <image
             href={assetUrl}
+            clipPath={`url(#${clipPathId})`}
             width={asset.width ?? undefined}
             height={asset.height ?? undefined}
           />
@@ -216,6 +224,7 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
   onFailure,
   onComplete
 }) => {
+  const clipPathId = React.useId()
   const companionMode = requestedState !== undefined
   const visualState = requestedState ?? state ?? "idle"
   const resolved = React.useMemo(
@@ -393,7 +402,8 @@ export const SpriteFrameRenderer: React.FC<SpriteFrameRendererProps> = ({
     visualState,
     fallbackLabel,
     className,
-    fitSize
+    fitSize,
+    clipPathId
   })
 }
 
