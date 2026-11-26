@@ -33,7 +33,7 @@
 
 **Goal** Resolve the tabs prerequisite and make owned, nonempty linked conversations discoverable through a paginated Media route.
 
-- [x] Integrate [PR #3534](https://github.com/rmusser01/tldw_server/pull/3534) with Dev in an isolated branch. The actual merge with Dev `6d31f3d1a7` resolved the single Translate conflict in `76cc496428`. It retained both the provider lookup and the expected-account check. GitHub reports the PR mergeable with auto-merge enabled.
+- [x] Resolve the Translate conflict in `76cc496428`, preserving the provider lookup and expected-account check. The Dev merge queue landed [PR #3534](https://github.com/rmusser01/tldw_server/pull/3534) at `42e8a3fcf9` after all eight required checks passed.
 - [x] Verify the integrated baseline. The Translation and expected-actor suites passed 16 tests, and the Document Workspace chat and text selection suites passed 35 tests.
 
 **Files and interfaces**
@@ -96,7 +96,7 @@
 
 ## Stage 5 — Verify the release path
 
-**Status** Local qualification complete. Public Dev delivery is pending PR #3534.
+**Status** Local qualification complete. TASK-15586 is based on the merged Dev prerequisite.
 
 **Goal** Confirm the actual two-device path, including document mode, native retention, and account isolation.
 
@@ -104,4 +104,4 @@
 - [x] Run `TLDW_E2E_DOCUMENT_CHAT_SYNC=1 bun run e2e:pw e2e/workflows/tier-2-features/document-workspace-chat-sync.spec.ts --project=tier-2 --workers=1` from `apps/tldw-frontend` with `TLDW_E2E_SERVER_URL` set to that backend. All four passed without skips in the opt-in run. The regular tier-2 job uses single-user auth and does not create test accounts.
 - [x] Verify authorized reads and blocked writes with an active Sync v2 profile in the SQLite and PostgreSQL API suites. Verify that an older server continues to open browser histories using its existing persistence behavior.
 - [x] Generate the API types and fingerprint and run `make openapi-drift-check`. The final focused run passed 74 SQLite and PostgreSQL API and import tests and 451 frontend tests. WebUI type checking passed. Bandit reported zero findings on changed production lines.
-- [ ] Record the Public Dev PR checks after the prerequisite lands.
+- [ ] Verify the required checks on the TASK-15586 Dev PR.

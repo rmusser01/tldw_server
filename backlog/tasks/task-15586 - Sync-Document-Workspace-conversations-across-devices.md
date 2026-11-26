@@ -44,12 +44,13 @@ Local release qualification passed in Chromium against real PDF and EPUB documen
 Final focused verification passed 74 SQLite and PostgreSQL API and import tests, 451 frontend tests, WebUI type checking, and the OpenAPI drift check. The backend cases include active Sync v2 admission and create refusal alongside an authorized read. Bandit found zero issues on changed production lines. Public Dev PR #3534 is the queued prerequisite, and release CI and deployment are pending.
 The final opt-in Chromium run passed all four cases without skips. After a lost create response, it replayed the original ID, proved that a refused first question left no discoverable chat, then verified that retry saved the question and published exactly one tab.
 The [full shared UI typecheck](https://github.com/rmusser01/tldw_server/pull/3607) exposed two inherited Document Workspace message fixtures without source lists. Added empty lists to those fixtures. The shared UI typecheck and 436 focused shared UI tests passed on the preview built from current Dev and PR #3534.
+Dev merged [PR #3534](https://github.com/rmusser01/tldw_server/pull/3534) at 42e8a3fcf9 after all eight required checks passed. Rebased TASK-15586 onto that merge. All 492 focused shared UI tests and 74 SQLite and PostgreSQL tests passed on the new base. Shared UI and WebUI type checking and the OpenAPI drift check passed. Bandit reported no findings on changed production lines.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Document Workspace now discovers and continues native chats for the verified document and signed-in account. Existing browser histories can be saved individually and recover without creating duplicate server chats. Verified locally with real documents, both database backends, and an isolated multi-user browser run. Public Dev delivery is pending PR #3534.
+Document Workspace discovers and continues native chats for the verified document and signed-in account. Existing browser histories can be saved individually and recover without creating duplicate server chats. Local verification used real documents, both database backends, and an isolated multi-user browser run. The feature is based on the merged Dev prerequisite and awaits its own Dev PR checks.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
