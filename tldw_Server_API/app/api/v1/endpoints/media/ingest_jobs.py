@@ -8,9 +8,10 @@ import shutil
 import threading
 from collections.abc import AsyncIterator
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from cachetools import LRUCache
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
@@ -39,8 +40,9 @@ from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
-    TempDirManager,
+from tldw_Server_API.app.core.Ingestion_Media_Processing.staged_upload import (
+    cleanup_cancelled_upload,
+    upload_staging_directory,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
@@ -398,6 +400,7 @@ def _create_media_ingest_job(
     batch_id: str,
     request_id: str | None,
     trace_id: str | None,
+    job_uuid: UUID | None = None,
 ) -> dict[str, Any]:
     try:
         return jm.create_job(
@@ -412,6 +415,7 @@ def _create_media_ingest_job(
             idempotency_key=payload.get("idempotency_key"),
             request_id=request_id,
             trace_id=trace_id,
+            job_uuid=job_uuid,
         )
     except BadRequestError as exc:
         message = str(exc).strip() or "Invalid media ingest job request"
@@ -718,25 +722,23 @@ async def submit_media_ingest_jobs(
         for upload in files:
             temp_dir_path = None
             try:
-                with TempDirManager(prefix="media_ingest_job_", cleanup=False) as temp_dir:
-                    temp_dir_path = str(temp_dir)
-                    saved_files, file_errors = await _input_sourcing.save_uploaded_files(
-                        [upload],
-                        temp_dir=temp_dir,
-                        validator=file_validator_instance,
-                        expected_media_type_key=str(form_data.media_type),
-                    )
+                upload_uuid = uuid4()
+                temp_dir = upload_staging_directory(upload_uuid)
+                temp_dir.mkdir(mode=0o700)
+                temp_dir_path = str(temp_dir)
+                saved_files, file_errors = await _input_sourcing.save_uploaded_files(
+                    [upload],
+                    temp_dir=temp_dir,
+                    validator=file_validator_instance,
+                    expected_media_type_key=str(form_data.media_type),
+                )
                 if file_errors:
                     for err in file_errors:
                         msg = err.get("error") or "Failed to stage upload"
                         errors.append(msg)
-                    if temp_dir_path:
-                        _cleanup_dir(temp_dir_path)
                     continue
                 if not saved_files:
                     errors.append("Failed to stage upload")
-                    if temp_dir_path:
-                        _cleanup_dir(temp_dir_path)
                     continue
 
                 saved = saved_files[0]
@@ -763,7 +765,10 @@ async def submit_media_ingest_jobs(
                     batch_id=batch_id,
                     request_id=rid,
                     trace_id=tp or None,
+                    job_uuid=upload_uuid,
                 )
+                # Admission transfers the directory to Jobs, even if response construction fails.
+                temp_dir_path = None
                 row_id = row.get("id")
                 if row_id is None:
                     raise ValueError(f"Job creation returned no id: {row!r}")
@@ -781,6 +786,7 @@ async def submit_media_ingest_jobs(
             except Exception:
                 logger.warning("Failed to stage upload for ingest jobs")
                 errors.append("Upload staging failed")
+            finally:
                 if temp_dir_path:
                     _cleanup_dir(temp_dir_path)
 
@@ -1024,6 +1030,22 @@ async def stream_media_ingest_job_events(
     )
 
 
+def _cancel_ingest_job(jm: JobManager, job: dict[str, Any], reason: str | None) -> bool:
+    """Let the locked transition decide whether the API or a worker owns cleanup."""
+    payload = _normalize_payload(job.get("payload"))
+    return jm.cancel_job(
+        int(job["id"]), reason=reason, expected_uuid=job.get("uuid"),
+        expected_domain="media_ingest", expected_job_type=job.get("job_type"),
+        on_queued_cancel=partial(cleanup_cancelled_upload, job, payload),
+    )
+
+
+def _retry_unclaimed_upload_cleanup(job: dict[str, Any]) -> None:
+    """Recover an interrupted unlink after a durable, unclaimed cancellation."""
+    if job.get("status") == "cancelled" and job.get("acquired_at", True) is None and job.get("started_at", True) is None:
+        cleanup_cancelled_upload(job, _normalize_payload(job.get("payload")))
+
+
 @router.delete(
     "/ingest/jobs/{job_id}",
     response_model=CancelMediaIngestJobResponse,
@@ -1048,10 +1070,14 @@ async def cancel_media_ingest_job(
 
     status_val = str(job.get("status") or "").lower()
     if status_val in {"completed", "failed", "cancelled", "quarantined"}:
+        _retry_unclaimed_upload_cleanup(job)
         raise HTTPException(status_code=400, detail="Cannot cancel terminal job")
 
-    ok = jm.cancel_job(int(job_id), reason=reason)
+    ok = _cancel_ingest_job(jm, job, reason)
     if not ok:
+        refreshed = jm.get_job(int(job_id)) or {}
+        if refreshed.get("uuid") == job.get("uuid"):
+            _retry_unclaimed_upload_cleanup(refreshed)
         raise HTTPException(status_code=400, detail="Cancellation failed")
 
     return CancelMediaIngestJobResponse(
@@ -1109,15 +1135,17 @@ async def cancel_media_ingest_jobs_batch(
         job_id = int(raw_job_id)
         status_value = str(job.get("status") or "").lower()
         if status_value in _TERMINAL_MEDIA_INGEST_JOB_STATUSES:
+            _retry_unclaimed_upload_cleanup(job)
             already_terminal += 1
             continue
-        if jm.cancel_job(job_id, reason=reason):
+        if _cancel_ingest_job(jm, job, reason):
             cancelled += 1
             continue
 
         refreshed = jm.get_job(job_id) or {}
         refreshed_status = str(refreshed.get("status") or "").lower()
-        if refreshed_status in _TERMINAL_MEDIA_INGEST_JOB_STATUSES:
+        if refreshed.get("uuid") == job.get("uuid") and refreshed_status in _TERMINAL_MEDIA_INGEST_JOB_STATUSES:
+            _retry_unclaimed_upload_cleanup(refreshed)
             already_terminal += 1
         else:
             failed += 1

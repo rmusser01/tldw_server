@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
     process_batch_media,
     process_document_like_item,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.staged_upload import cleanup_cancelled_upload
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Usage.llm_call_context import (
@@ -580,6 +581,11 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
 
     db = None
     try:
+        # Publish prepare before checking for cancellation and before touching the staged input.
+        progress.percent = 5.0
+        progress.message = "prepare"
+        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
         if _should_cancel(jm, job_id):
             _mark_collection_item_status(
                 user_id=user_id,
@@ -613,10 +619,6 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
                         str(exc.detail), failure_code="media_ingest_daily_quota_exceeded",
                     ) from exc
                 raise
-
-        progress.percent = 5.0
-        progress.message = "prepare"
-        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
         db = _create_db(user_id)
         db_path = getattr(db, "db_path_str", None) or getattr(db, "db_path", None) or ""
@@ -819,8 +821,18 @@ async def run_media_ingest_jobs_worker(
     progress_state = _ProgressState()
 
     async def _cancel_check(job: dict[str, Any]) -> bool:
-        job_id = int(job.get("id"))
-        return _should_cancel(jm, job_id)
+        current = jm.get_job(int(job["id"])) or {}
+        if current.get("status") != "cancelled":
+            return False
+        # No attempt can consume this upload without publishing prepare, then
+        # observing a non-cancelled row. This also covers an expired original lease.
+        if (
+            job.get("uuid") == current.get("uuid")
+            and current.get("progress_percent", True) is None
+            and current.get("progress_message", True) is None
+        ):
+            cleanup_cancelled_upload(job, _normalize_payload(job.get("payload")))
+        return True
 
     async def _handler(job: dict[str, Any]) -> dict[str, Any]:
         return await _handle_job(job, jm, progress_state)
