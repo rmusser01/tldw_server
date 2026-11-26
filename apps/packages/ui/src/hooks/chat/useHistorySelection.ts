@@ -78,6 +78,12 @@ type HistoryLoadTarget = {
   onDeviceScope?: import("@/db/dexie/history-selection").OnDeviceHistoryScope
   qualifyCapture?: (capture: HistoryCaptureResultV1, owner: HistoryOwnerV1) => void
   resumeAfterBind?: () => Promise<boolean>
+  /**
+   * A new chat's first load from its first send (CM-14): the send renders its
+   * own question, so the empty capture is installed without onCapture and the
+   * load shows no loading panel.
+   */
+  quietLoad?: true
 }
 type PendingConfirmation = {
   scope: HistoryBookmarkScope
@@ -105,6 +111,8 @@ type SelectionState = {
     | "unsupported_history_capability"
   error: string | null
   pending: PendingConfirmation | null
+  /** Marks the loading state of a quiet load (HistoryLoadTarget.quietLoad). */
+  quietLoad?: true
 }
 const initialState = (): SelectionState => ({
   settingsQualified: false,
@@ -297,7 +305,8 @@ export function useHistorySelection(
       token: number,
       pending: PendingConfirmation | null = null,
       isCurrentLoad: () => boolean = () => true,
-      retainedView?: HistoryViewSelectionV1
+      retainedView?: HistoryViewSelectionV1,
+      quietLoad = false
     ) => {
       const current = () =>
         mounted.current &&
@@ -349,7 +358,8 @@ export function useHistorySelection(
           pending_confirmation_reference: pendingReference(pending)
         }))
       }
-      if (!retainedView && result.status === "captured") onCapture.current?.(result)
+      // A quiet load's turn renders its own display (CM-14).
+      if (!retainedView && !quietLoad && result.status === "captured") onCapture.current?.(result)
       return current()
     },
     [persist, publish]
@@ -362,7 +372,8 @@ export function useHistorySelection(
       onOpened?: (receipt: HistoryLoadReceipt) => void,
       isCurrentLoad: () => boolean = () => true,
       qualification?: { profileId: string | null; installLease: () => void },
-      qualifyCapture?: (capture: HistoryCaptureResultV1, owner: HistoryOwnerV1) => void
+      qualifyCapture?: (capture: HistoryCaptureResultV1, owner: HistoryOwnerV1) => void,
+      quietLoad = false
     ) => {
       let qualifiedProfile: string | undefined
       if (qualification) {
@@ -380,7 +391,7 @@ export function useHistorySelection(
         releaseOwnerLease.current?.()
         releaseOwnerLease.current = null
       }
-      publish({ ...initialState(), owner, status: "loading" })
+      publish({ ...initialState(), owner, status: "loading", ...(quietLoad ? { quietLoad: true as const } : {}) })
       try {
         // Unsupported temporary owners must not create even a profile/bookmark.
         if (owner.kind === "unavailable") throw new Error(owner.code)
@@ -540,7 +551,8 @@ export function useHistorySelection(
           isCurrentLoad,
           retainedStaleView && bookmark
             ? { ...view, owner_key: bookmark.view.owner_key }
-            : undefined
+            : undefined,
+          quietLoad
         )
         if (
           installed &&
@@ -555,6 +567,7 @@ export function useHistorySelection(
         if (operation.epoch !== epoch.current || !isCurrentLoad() || !ownerLeaseValid(owner)) return false
         publish({
           ...live.current,
+          quietLoad: undefined,
           status:
             errorCode(error) === "stale_bookmark"
               ? "stale_selection"
@@ -1076,7 +1089,7 @@ export function useHistorySelection(
           const opening = open(owner, reference, opened, isCurrent,
             target.onDeviceScope ? { profileId: target.onDeviceScope.profileId, installLease: () => {
               releaseOwnerLease.current?.(); releaseOwnerLease.current = null
-            } } : undefined, target.qualifyCapture)
+            } } : undefined, target.qualifyCapture, target.quietLoad === true)
           const result = await opening
           if (!result || captureEpoch !== epoch.current || live.current.owner !== owner || !isCurrent()) return false
           // Unsupported external assets are readable; resume the loader's metadata too.
@@ -1153,7 +1166,9 @@ export function useHistorySelection(
                 releaseOwnerLease.current = releaseCandidateLease
                 releaseCandidateLease = null
               }
-            } : undefined
+            } : undefined,
+            undefined,
+            target.quietLoad === true
           ))
         }
         const owner: HistoryOwnerV1 = {
@@ -1164,7 +1179,7 @@ export function useHistorySelection(
           validate_lease: () => valid && isCurrent()
         }
         capturedOwner = owner
-        const result = await open(owner, reference, opened, isCurrent, undefined, target.qualifyCapture)
+        const result = await open(owner, reference, opened, isCurrent, undefined, target.qualifyCapture, target.quietLoad === true)
         // Only an explicit action plus an authorized owner capture can bind an old mirror.
         if (
           target.bindUnbound &&

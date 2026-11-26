@@ -2642,6 +2642,173 @@ it.each(
   }
 )
 
+// CM-14 (#3101): a send that creates a server chat shows its question before
+// the create and the new chat's quiet first load. Any other first load replaces
+// the transcript, so those sends show the question only when the turn draws it.
+describe("early question (CM-14)", () => {
+  type Rows = import("@/store/option").Message[]
+  type SetRows = Parameters<typeof normalChatMode>[6]["setMessages"]
+  const firstSendParams = (
+    controller: HistorySelectionController,
+    setMessages: SetRows,
+    {
+      surface = "playground",
+      createServerChat = true,
+      serverChatId
+    }: { surface?: "playground" | "sidepanel"; createServerChat?: boolean; serverChatId?: string } = {}
+  ): Parameters<typeof normalChatMode>[6] => ({
+    selectedModel: "test",
+    selectedSystemPrompt: "",
+    useOCR: false,
+    currentChatModelSettings: {},
+    toolChoice: "none",
+    servicePromptSnapshot: snapshot(),
+    historyId: null,
+    serverChatId,
+    ...{ surface },
+    historySelection: { controller, originIsCurrent: controller.fence(), createServerChat },
+    setServerChatId: publishFixtureServerChatId,
+    setHistoryId: publishFixtureHistoryId,
+    setMessages,
+    setHistory: () => {},
+    setIsProcessing: () => {},
+    setStreaming: () => {},
+    setAbortController: () => {},
+    saveMessageOnSuccess,
+    saveMessageOnError
+  })
+  /** A setter that only records what each call would publish. */
+  const recordingSetter = () => {
+    let rows: Rows = []
+    const published: Rows[] = []
+    const setMessages: SetRows = (next) => {
+      rows = typeof next === "function" ? next(rows) : next
+      published.push(rows)
+    }
+    return { setMessages, published }
+  }
+  const startSend = (message: string, params: Parameters<typeof normalChatMode>[6]) => {
+    let attempt!: Promise<unknown>
+    act(() => {
+      attempt = normalChatMode(message, "", false, [], [], new AbortController().signal, params)
+    })
+    return attempt
+  }
+  afterEach(() => {
+    useStoreMessageOption.getState().setMessages([])
+  })
+
+  it.each(["playground", "sidepanel"] as const)(
+    "removes its question from the live transcript, past the retired view setter, when the new chat's first load fails (%s)",
+    async (surface) => {
+      vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+      vi.spyOn(tldwClient, "captureHistorySelection").mockRejectedValue(new Error("load failed"))
+      useStoreMessageOption.getState().setMessages([])
+      const hook = renderHook(() => useHistorySelection())
+      // Both surfaces guard a turn's view setters with the selection's origin
+      // fence, which the new chat's load breaks as soon as it starts.
+      const origin = hook.result.current.fence()
+      const params = firstSendParams(hook.result.current, (next) => {
+        if (origin()) useStoreMessageOption.getState().setMessages(next)
+      }, { surface })
+
+      const attempt = startSend("Load fails", params)
+      expect(useStoreMessageOption.getState().messages.map((row) => row.message)).toEqual(["Load fails"])
+      await act(async () => {
+        await attempt.catch(() => undefined)
+      })
+
+      expect(origin()).toBe(false)
+      expect(useStoreMessageOption.getState().messages).toEqual([])
+      hook.unmount()
+    }
+  )
+
+  it.each([
+    { path: "server create", createServerChat: true, quiet: true },
+    { path: "local create", createServerChat: false, quiet: false }
+  ])("after a $path, the first load is quiet and the question shows early only for a new server chat", async ({ createServerChat, quiet }) => {
+    vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+      async (_id, request) => emptyServerCapture(request)
+    )
+    const hook = renderHook(() => useHistorySelection())
+    const load = vi.spyOn(hook.result.current, "loadConversation")
+    const { setMessages, published } = recordingSetter()
+
+    const attempt = startSend("First question", firstSendParams(hook.result.current, setMessages, { createServerChat }))
+    expect(published.map((rows) => rows.map((row) => row.message))).toEqual(quiet ? [["First question"]] : [])
+    await act(async () => {
+      await attempt.catch(() => undefined)
+    })
+
+    expect(load).toHaveBeenCalled()
+    expect(load.mock.calls[0][0].quietLoad).toBe(quiet ? true : undefined)
+    hook.unmount()
+  })
+
+  // The early question and the turn's create are one decision. A tools change
+  // after the question is shown can't send it down the local-create path (whose
+  // non-quiet first load replaces the transcript): the dispatch fence refuses
+  // the turn first, and the question is withdrawn.
+  it("refuses a send whose tools change after its early question, without creating or loading a chat", async () => {
+    const create = vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+      async (_id, request) => emptyServerCapture(request)
+    )
+    const hook = renderHook(() => useHistorySelection())
+    const load = vi.spyOn(hook.result.current, "loadConversation")
+    const histories = storage.tables.chatHistories.rows.size
+    const setMessages: SetRows = (next) => {
+      useStoreMessageOption.getState().setMessages(next)
+      // A tool becomes available just after the question is shown.
+      useMcpToolsStore.setState({ healthState: "healthy", chatTools: buildChatToolFilterState({ tools: [{
+        name: "lookup", canExecute: true, inputSchema: { type: "object", properties: {} }
+      }] }).chatTools })
+    }
+    const tools = useMcpToolsStore.getState().chatTools
+    try {
+      const attempt = startSend("First question", { ...firstSendParams(hook.result.current, setMessages), toolChoice: "auto" })
+      expect(useStoreMessageOption.getState().messages.map((row) => row.message)).toEqual(["First question"])
+      let outcome: unknown
+      await act(async () => {
+        outcome = await attempt.catch((error) => error)
+      })
+
+      expect(outcome).toEqual(new Error("stale_selection"))
+      expect(create).not.toHaveBeenCalled()
+      expect(storage.tables.chatHistories.rows.size).toBe(histories)
+      expect(load).not.toHaveBeenCalled()
+      expect(useStoreMessageOption.getState().messages).toEqual([])
+    } finally {
+      useMcpToolsStore.setState({ chatTools: tools })
+      hook.unmount()
+    }
+  })
+
+  it("shows no early question when the turn first loads an existing chat", async () => {
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(
+      async (_id, request) => emptyServerCapture(request, "existing-server")
+    )
+    const hook = renderHook(() => useHistorySelection())
+    const load = vi.spyOn(hook.result.current, "loadConversation")
+    const { setMessages, published } = recordingSetter()
+
+    const attempt = startSend(
+      "Existing question",
+      firstSendParams(hook.result.current, setMessages, { createServerChat: false, serverChatId: "existing-server" })
+    )
+    expect(published).toEqual([])
+    await act(async () => {
+      await attempt.catch(() => undefined)
+    })
+
+    expect(load).toHaveBeenCalled()
+    expect(load.mock.calls[0][0].quietLoad).toBeUndefined()
+    hook.unmount()
+  })
+})
+
 describe("native latest intent and owned refusal", () => {
   it.each(
     ["playground", "sidepanel"].flatMap((surface) =>
@@ -6998,6 +7165,146 @@ it.each(["unsupported", "changed", "uncertain"])(
     }
   }
 )
+// D7 P5: on a server that settles turns, the edit goes out on /chat/completions,
+// and TldwChat wraps the server's 409 as the cause of "Stream completion failed".
+it("server-settled protected Edit keeps the edited text when the wrapped completion refuses the edit", async () => {
+  const graph = [
+    { id: "original-user", revision: "u1", parent_id: null, role: "user", settled: true, preview: "Original" },
+    { id: "original-answer", revision: "a1", parent_id: "original-user", role: "assistant", settled: true, preview: "Original answer" }
+  ]
+  vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
+    const view = { ...request.view, owner_key: "server-owner" }
+    const state = {
+      version: 1 as const,
+      owner_key: "server-owner",
+      conversation_id: newServerId,
+      nodes: graph,
+      fences: { conversation: "1", history: "1", settings: "1" },
+      source_digest: "source",
+      storage_context_digest: "storage",
+      interpretation_status: { kind: "parent_graph_v1" as const }
+    }
+    const { resolveHistorySelection } = await import("@/utils/history-selection")
+    const result = resolveHistorySelection(state, view, request.purpose, "")
+    if (result.status !== "ready") throw new Error(result.code)
+    return {
+      status: "captured",
+      view,
+      snapshot: state,
+      rows: result.rows,
+      purpose: request.purpose,
+      storage_context_digest: "storage",
+      ...(request.purpose === "send"
+        ? { native_completion_v1: { policy: "selected_history_v1", supported: true, storage_context_digest: "storage" } }
+        : {}),
+      selected_content: result.rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        message: graph.find((item) => item.id === row.id)!.preview,
+        images: []
+      }))
+    } as never
+  })
+  const append = vi.spyOn(tldwClient, "addChatMessage")
+  vi.mocked(tldwChat.streamMessage).mockImplementation(async function* (_messages, options) {
+    yield* []
+    options.onDispatch?.()
+    const selection = options.preparedRequest!.tldw_history_selection_v1!
+    throw new Error("Stream completion failed", {
+      cause: Object.assign(new Error("target changed"), {
+        status: 409,
+        details: {
+          detail: {
+            status: "stale_selection",
+            code: "history_edit_target_changed",
+            conversation_id: selection.conversation_id,
+            message_id: "original-user",
+            message_revision: "u1",
+            selection_digest: selection.selection_digest
+          }
+        }
+      })
+    })
+  })
+  const mounted = renderHook(() => useHistorySelection())
+  const native: NativeHistoryOwnerV1 = {
+    kind: "native",
+    conversation_id: newServerId,
+    request_scope: snapshot().requestScope,
+    validate_lease: () => true
+  }
+  await act(async () => {
+    expect(await mounted.result.current.open(native)).toBe(true)
+  })
+  const origin = mounted.result.current.getCurrent()
+  const source = mounted.result.current.fence()
+  const setMessages = vi.fn(),
+    setHistory = vi.fn()
+  const params: Parameters<typeof normalChatMode>[6] = {
+    selectedModel: "test",
+    selectedSystemPrompt: "",
+    useOCR: false,
+    currentChatModelSettings: {},
+    toolChoice: "none",
+    servicePromptSnapshot: snapshot(),
+    historyId: null,
+    serverChatId: newServerId,
+    historySelection: {
+      controller: mounted.result.current,
+      originIsCurrent: source,
+      editResend: {
+        owner_key: origin.view!.owner_key,
+        conversation_id: origin.view!.conversation_id,
+        message_id: "original-user",
+        message_revision: "u1",
+        isCurrent: () => true,
+        isOriginCurrent: source
+      }
+    },
+    setHistoryId: () => {},
+    setMessages,
+    setHistory,
+    setIsProcessing: vi.fn(),
+    setStreaming: vi.fn(),
+    setAbortController: vi.fn(),
+    saveMessageOnSuccess,
+    saveMessageOnError
+  }
+  try {
+    let error: unknown
+    await act(async () => {
+      error = await normalChatMode(
+        "  Edited\nExact proposal.  ",
+        "",
+        false,
+        [],
+        [],
+        new AbortController().signal,
+        params
+      ).catch((value) => value)
+    })
+    expect(error).toMatchObject({ status: "failed", errorMessage: "native_history_edit_target_changed" })
+    // The server was asked to settle the edit; the client appended nothing.
+    expect(append).not.toHaveBeenCalled()
+    expect(tldwChat.streamMessage).toHaveBeenCalledOnce()
+    expect(vi.mocked(tldwChat.streamMessage).mock.calls[0][1]?.preparedRequest).toMatchObject({
+      save_to_db: true,
+      tldw_history_branch: true,
+      tldw_history_edit_v1: { version: 1, message_id: "original-user", message_revision: "u1" }
+    })
+    const kept = await loadHistoryTurnRecoveries(origin.bookmarkScope!, origin.view!)
+    expect(kept[0]?.turn).toMatchObject({
+      state: "refused",
+      input_text: "  Edited\nExact proposal.  ",
+      result_text: ""
+    })
+    expect(setMessages).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(graph.map((row) => row.preview)).toEqual(["Original", "Original answer"])
+  } finally {
+    mounted.unmount()
+  }
+})
 it.each(["navigation", "selection"])("a no-output provider failure does not move a newer %s", async boundary => {
   const mounted = renderHook(() => useHistorySelection())
   vi.mocked(tldwChat.streamMessage).mockImplementationOnce(async function* () {

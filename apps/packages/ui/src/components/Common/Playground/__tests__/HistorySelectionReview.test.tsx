@@ -2,6 +2,7 @@ import React from "react"
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
+import { encodeChatErrorPayload } from "@/utils/chat-error-message"
 import { parseRoleplayResumeRecovery } from "@/services/tldw/roleplay-resume"
 const roleplayRetry = vi.hoisted(() => ({ send: vi.fn() }))
 const draftAuthority = vi.hoisted(() => ({ user: "alice" }))
@@ -723,8 +724,8 @@ describe("available history-path actions (TASK-13550)", () => {
     ).toBeNull()
   })
 
+  // A slow load still shows its panel, after a short delay (CM-14); see "loading panel" below.
   it.each([
-    { status: "loading", title: "Loading selected history" },
     { status: "stale_selection", title: "Conversation history changed" },
     {
       status: "unsupported_history_capability",
@@ -739,6 +740,64 @@ describe("available history-path actions (TASK-13550)", () => {
     } as unknown as HistorySelectionController
     render(<HistorySelectionReview selection={selection} />)
     expect(screen.getByText(title)).toBeInTheDocument()
+  })
+})
+
+// CM-14 (#3101): a fast load must not flash "Loading selected history", and a
+// new chat's first load (quiet) never shows it.
+describe("loading panel", () => {
+  const loading = (extra: Record<string, unknown> = {}) =>
+    ({
+      ...controller(),
+      status: "loading",
+      error: null,
+      capture: { snapshot: { nodes: [], source_digest: "empty" } },
+      ...extra
+    }) as unknown as HistorySelectionController
+  const panel = () => screen.queryByText("Loading selected history")
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("shows a load that is still running after 300 ms, and not before", () => {
+    render(<HistorySelectionReview selection={loading()} />)
+    expect(panel()).toBeNull()
+    act(() => { vi.advanceTimersByTime(299) })
+    expect(panel()).toBeNull()
+    act(() => { vi.advanceTimersByTime(1) })
+    expect(panel()).toBeInTheDocument()
+  })
+
+  it("never shows a quiet load", () => {
+    render(<HistorySelectionReview selection={loading({ quietLoad: true })} />)
+    act(() => { vi.advanceTimersByTime(1_000) })
+    expect(panel()).toBeNull()
+  })
+
+  it("starts the delay again for each load and cancels it when a load ends early", () => {
+    const view = render(<HistorySelectionReview selection={loading()} />)
+    act(() => { vi.advanceTimersByTime(200) })
+    view.rerender(<HistorySelectionReview selection={loading({ status: "ready" })} />)
+    act(() => { vi.advanceTimersByTime(200) })
+    expect(panel()).toBeNull()
+    view.rerender(<HistorySelectionReview selection={loading()} />)
+    act(() => { vi.advanceTimersByTime(299) })
+    expect(panel()).toBeNull()
+    act(() => { vi.advanceTimersByTime(1) })
+    expect(panel()).toBeInTheDocument()
+    view.rerender(<HistorySelectionReview selection={loading({ status: "ready" })} />)
+    expect(panel()).toBeNull()
+  })
+
+  it("leaves no timer behind when it unmounts during a load", () => {
+    const view = render(<HistorySelectionReview selection={loading()} />)
+    const before = vi.getTimerCount()
+    view.unmount()
+    expect(vi.getTimerCount()).toBeLessThan(before)
   })
 })
 
@@ -2195,24 +2254,181 @@ it("hides Connect for a retired native binding candidate", () => {
 })
 
 
-it.each([false, true])("B02 reviews a saved question before explicit retry (stale=%s)", async stale => {
-  let current = true
-  const review = {id: "saved-user", revision: "r1", text: "My unanswered question", model: "llamacpp:qwen", isCurrent: () => current}
-  const selected = {...controller(), status: "ready", owner: {kind: "native"}, settingsQualified: true,
-    capture: {status: "captured", rows: [{id: "saved-user", revision: "r1", role: "user"}], snapshot: {nodes: [{id: "saved-user", revision: "r1", role: "user"}]}},
+/** The open chat in the chat store, as the full page and side panel keep it. */
+const openSavedChat = (kind: "plain" | "character" | "persona") => {
+  const prior = useStoreMessageOption.getState()
+  act(() => useStoreMessageOption.setState({
+    serverChatId: "saved-chat",
+    serverChatAssistantKind: kind === "plain" ? null : kind,
+    serverChatCharacterId: kind === "character" ? "7" : null
+  }))
+  return () => act(() => useStoreMessageOption.setState({
+    serverChatId: prior.serverChatId,
+    serverChatAssistantKind: prior.serverChatAssistantKind,
+    serverChatCharacterId: prior.serverChatCharacterId
+  }))
+}
+
+/** A ready native view ending at the unanswered question "saved-user", after `earlier` rows. */
+const savedQuestionSelection = (native: Record<string, unknown> | null, earlier: Array<{ id: string; role: string; message: string }> = []) => {
+  const rows = [...earlier, { id: "saved-user", role: "user", message: "My unanswered question" }]
+  return {...controller(), status: "ready", owner: {kind: "native", conversation_id: "saved-chat"}, settingsQualified: true,
+    capture: {status: "captured", rows: rows.map(({id, role}) => ({id, revision: "r1", role})),
+      selected_content: rows.map(({id, message}) => ({id, revision: "r1", message, images: []})),
+      snapshot: {nodes: rows.map(({id, role}) => ({id, revision: "r1", role}))},
+      ...(native ? {native_completion_v1: {policy: "selected_history_v1", storage_context_digest: "s", ...native}} : {})},
     view: {cursor: {kind: "after_message", message_id: "saved-user"}}} as unknown as HistorySelectionController
-  const retry = vi.fn(async () => ({status: "submitted" as const}))
-  const getReview = vi.fn(async () => review)
-  render(<HistorySelectionReview selection={selected} getSavedQuestionReview={getReview} onRetrySavedQuestion={retry} />)
-  fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
-  expect(await screen.findByText("My unanswered question")).toBeVisible()
-  expect(screen.getByText("llamacpp:qwen")).toBeVisible()
-  expect(retry).not.toHaveBeenCalled()
-  current = !stale
-  fireEvent.click(screen.getByRole("button", {name: "Retry saved question"}))
-  if (stale) expect(await screen.findByRole("alert")).toHaveTextContent("Review the saved question again")
-  else { await vi.waitFor(() => expect(retry).toHaveBeenCalledWith(review)) }
-  expect(retry).toHaveBeenCalledTimes(stale ? 0 : 1)
+}
+
+it.each([false, true])("B02 reviews a saved question before explicit retry (stale=%s)", async stale => {
+  const close = openSavedChat("character")
+  try {
+    let current = true
+    const review = {id: "saved-user", revision: "r1", text: "My unanswered question", model: "llamacpp:qwen", isCurrent: () => current}
+    const retry = vi.fn(async () => ({status: "submitted" as const}))
+    const getReview = vi.fn(async () => review)
+    render(<HistorySelectionReview selection={savedQuestionSelection(null)} getSavedQuestionReview={getReview} onRetrySavedQuestion={retry} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    expect(await screen.findByText("My unanswered question")).toBeVisible()
+    expect(screen.getByText("llamacpp:qwen")).toBeVisible()
+    expect(retry).not.toHaveBeenCalled()
+    current = !stale
+    fireEvent.click(screen.getByRole("button", {name: "Retry saved question"}))
+    if (stale) expect(await screen.findByRole("alert")).toHaveTextContent("Review the saved question again")
+    else { await vi.waitFor(() => expect(retry).toHaveBeenCalledWith(review)) }
+    expect(retry).toHaveBeenCalledTimes(stale ? 0 : 1)
+  } finally { close() }
+})
+
+describe("plain-chat saved-question review (8B)", () => {
+  let close: () => void
+  beforeEach(() => { close = openSavedChat("plain") })
+  afterEach(() => close())
+  const selected = () => savedQuestionSelection({supported: true, existing_input_system_messages_supported: true})
+  const review = (overrides: Record<string, unknown>) => ({id: "saved-user", revision: "r1", text: "My unanswered question",
+    model: "llamacpp:qwen", isCurrent: () => true, instructionsSupported: true, ...overrides})
+  const offered = (selection: HistorySelectionController) => {
+    render(<HistorySelectionReview selection={selection} getSavedQuestionReview={vi.fn()} onRetrySavedQuestion={vi.fn()} />)
+    return screen.queryByRole("button", {name: "Review saved question"}) !== null
+  }
+
+  it("shows the System/Prompt instructions the Retry carries as a labelled list, not the character wording", async () => {
+    const retry = vi.fn(async () => ({status: "submitted" as const}))
+    const reviewed = review({instructions: ["Default instruction", "Answer like a pirate."]})
+    render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={async () => reviewed} onRetrySavedQuestion={retry} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    const group = await screen.findByRole("group", {name: "Saved question review"})
+    expect(within(group).getByText(/the System\/Prompt instructions shown below/)).toBeVisible()
+    expect(within(group).queryByText(/saved character context/)).toBeNull()
+    expect(within(group).getByRole("heading", {name: "Current System/Prompt instructions"})).toBeVisible()
+    const list = within(group).getByRole("list", {name: "Current System/Prompt instructions"})
+    expect(within(list).getAllByRole("listitem").map(item => item.textContent)).toEqual(["Default instruction", "Answer like a pirate."])
+    fireEvent.click(within(group).getByRole("button", {name: "Retry saved question"}))
+    await vi.waitFor(() => expect(retry).toHaveBeenCalledWith(reviewed))
+  })
+
+  it("says when no instruction is applied", async () => {
+    render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={async () => review({instructions: []})}
+      onRetrySavedQuestion={vi.fn(async () => ({status: "submitted" as const}))} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    expect(await screen.findByText("No System/Prompt instruction is currently applied.")).toBeVisible()
+    expect(screen.getByRole("button", {name: "Retry saved question"})).toBeEnabled()
+  })
+
+  it("refuses before sending when the server can't keep an active instruction, and says where the instructions live", async () => {
+    const retry = vi.fn()
+    render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={async () =>
+      review({instructions: ["Answer like a pirate."], instructionsSupported: false})} onRetrySavedQuestion={retry} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    const group = await screen.findByRole("group", {name: "Saved question review"})
+    const reason = within(group).getByText(/This server can't keep System\/Prompt instructions on a retry/)
+    expect(reason).toHaveTextContent("the default system prompt and output formatting guide in Settings")
+    // A standing reason, not an alert: the Retry error keeps the only alert.
+    expect(within(group).queryByRole("alert")).toBeNull()
+    const button = within(group).getByRole("button", {name: "Retry saved question"})
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute("aria-describedby", reason.id)
+    expect(within(group).getByText("My unanswered question")).toBeVisible()
+    expect(retry).not.toHaveBeenCalled()
+  })
+
+  it("tells the side panel to clear only the instructions it sends", async () => {
+    render(<HistorySelectionReview surface="sidepanel" selection={selected()} getSavedQuestionReview={async () =>
+      review({instructions: ["Answer like a pirate."], instructionsSupported: false})} onRetrySavedQuestion={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    const group = await screen.findByRole("group", {name: "Saved question review"})
+    const reason = within(group).getByText(/This server can't keep System\/Prompt instructions on a retry/)
+    expect(reason).toHaveTextContent("the default system prompt in Settings")
+    expect(reason).not.toHaveTextContent("output formatting guide")
+  })
+
+  it("keeps one alert when a refused review also reports an error", async () => {
+    const getReview = vi.fn()
+      .mockResolvedValueOnce(review({instructions: ["Answer like a pirate."], instructionsSupported: false}))
+      .mockRejectedValueOnce(new Error("retry_context_changed"))
+    render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={getReview} onRetrySavedQuestion={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    await screen.findByText(/This server can't keep System\/Prompt instructions on a retry/)
+    // Reviewing again fails; the refused review stays on screen beside the error.
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    await vi.waitFor(() => expect(getReview).toHaveBeenCalledTimes(2))
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("The System/Prompt instructions changed after your review")
+    expect(screen.getByText(/This server can't keep System\/Prompt instructions on a retry/)).toBeVisible()
+    expect(screen.getAllByRole("alert")).toHaveLength(1)
+  })
+
+  it.each([
+    ["retry_context_changed", "The System/Prompt instructions changed after your review"],
+    ["native_history_setting_unsupported:topK", "The topK setting can't be used when retrying a saved question"],
+    ["unsupported_history_action_context", "This saved question can't be retried with the chat's current setup"],
+    ["provider detail with dummy-private-marker", "Could not retry. Review the saved question again"]
+  ])("explains a refused Retry (%s) in plain words", async (code, copy) => {
+    render(<HistorySelectionReview selection={selected()} getSavedQuestionReview={async () => review({instructions: []})}
+      onRetrySavedQuestion={vi.fn(async () => ({status: "failed" as const, errorMessage: code}))} />)
+    fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+    fireEvent.click(await screen.findByRole("button", {name: "Retry saved question"}))
+    expect(await screen.findByRole("alert")).toHaveTextContent(copy)
+    expect(screen.queryByText(/dummy-private-marker/)).toBeNull()
+  })
+
+  it("is offered where the server settles the chat's turns", () => {
+    expect(offered(selected())).toBe(true)
+  })
+
+  it.each([
+    ["an older server or client-managed chat", null],
+    ["a Sync v2 owner", {supported: false}]
+  ])("is not offered for %s, which keeps the card's own Retry", (_label, native) => {
+    expect(offered(savedQuestionSelection(native))).toBe(false)
+  })
+
+  it.each([
+    ["a saved system row", [{id: "s0", role: "system", message: "Saved instruction"}]],
+    ["a saved error reply", [{id: "u0", role: "user", message: "Hi"},
+      {id: "a0", role: "assistant", message: encodeChatErrorPayload({summary: "Failed", hint: "Retry", detail: ""})}]]
+  ])("is not offered when the history has %s (it stays client-settled)", (_label, earlier) => {
+    expect(offered(savedQuestionSelection({supported: true}, earlier))).toBe(false)
+  })
+
+  it("is not offered in a persona chat", () => {
+    close()
+    close = openSavedChat("persona")
+    expect(offered(selected())).toBe(false)
+  })
+
+  it("points the uncertain server card to Review saved question when it is offered for that question", () => {
+    const selection = recoveryController("server", "accepted_unsent")
+    const question = {id: "accepted-input", revision: "r1", role: "user"}
+    Object.assign(selection, {owner: {kind: "native", conversation_id: "saved-chat"}, settingsQualified: true,
+      view: {...selection.recoveries[0].turn.origin_view, cursor: {kind: "after_message", message_id: "accepted-input"}},
+      capture: {status: "captured", rows: [question], selected_content: [{id: "accepted-input", revision: "r1", message: "q", images: []}],
+        snapshot: {nodes: [question]}, native_completion_v1: {policy: "selected_history_v1", supported: true, storage_context_digest: "s"}}})
+    render(<HistorySelectionReview selection={selection} getSavedQuestionReview={vi.fn()} onRetrySavedQuestion={vi.fn()} />)
+    fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
+    expect(screen.getByText(/To answer it, choose Review saved question/)).toBeVisible()
+    expect(screen.queryByText(/Reload this chat to check/)).toBeNull()
+  })
 })
 
 describe("legacy chats with alternative replies (CM-N2)", () => {

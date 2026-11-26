@@ -16,6 +16,7 @@ import {
 } from "@/hooks/chat/chat-action-utils";
 import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
+import { isPlainSavedQuestion } from "@/utils/saved-question-retry";
 import { useSidepanelReplyActions } from "./chat/sidepanel-reply-actions";
 import { continueChatMode } from "./chat-modes/continueChatMode";
 import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep";
@@ -3208,8 +3209,9 @@ export const useMessage = () => {
       scopeInvalidatedSignal: servicePromptSnapshot?.scopeInvalidatedSignal,
     };
 
+    const plainSavedQuestion = contextSendMode === "plain" && isPlainSavedQuestion(historyServerExistingInput); // 8B
     const nativeServerTurn = Boolean(historySelection) && resolvedChatMode === "normal" &&
-      (Boolean(historyRegenerate) || resolveUseMessageSendMode({ effectiveMode: effectiveAssistantState.mode,
+      (Boolean(historyRegenerate) || plainSavedQuestion || resolveUseMessageSendMode({ effectiveMode: effectiveAssistantState.mode,
         hasEffectiveAssistant: Boolean(effectiveSelectedAssistant), draftAssistantKind: selectedAssistant?.kind ?? null,
         draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant) }) === "tracked_character");
     if (nativeServerTurn) {
@@ -3271,7 +3273,7 @@ export const useMessage = () => {
         })()
       : {};
 
-      if (historyRegenerate) {
+      if (historyRegenerate || plainSavedQuestion) {
         try {
           await sendNativeHistoryCharacter({
             surface: "sidepanel", t, controller: selectedHistoryTurn!, originIsCurrent: historyOriginIsCurrent!,
@@ -3279,8 +3281,8 @@ export const useMessage = () => {
             sourceIsCurrent: commandSessionIsCurrent,
             signal, temporary: temporaryChat, historyId, serverChatId: serverChatIdOverride || serverChatId,
             model, currentModel: selectedModel, toolChoice: resolvedToolChoice, settings: currentChatModelSettings,
-            message, image, historyRegenerate, setServerChatId, setMessages,
-            unsupportedContext: Boolean(resolvedWebSearch || resolvedSelectedSystemPrompt || replyActive ||
+            message, image, historyRegenerate, existingInput: historyServerExistingInput, setServerChatId, setMessages,
+            unsupportedContext: Boolean(resolvedWebSearch || (!plainSavedQuestion && resolvedSelectedSystemPrompt) || replyActive ||
               conversationContextOverrides.historyForModel || conversationContextOverrides.messageForModel ||
               (effectiveAssistantState.mode === "overlay" && effectiveSelectedAssistant)),
             releaseActivity: () => {
@@ -3291,7 +3293,7 @@ export const useMessage = () => {
           });
           return chatSubmitSubmitted();
         } catch (error) {
-          if (historyRegenerate.isOriginCurrent()) notification.error({ message: t("error"),
+          if (historyRegenerate?.isOriginCurrent()) notification.error({ message: t("error"),
             description: nativeRegenerationFeedback(error, t, historyRegenerate.action === "continue" ? "continue" : "regenerate") });
           if (releaseNormalControllerIfOwned()) {
             setAbortController(null); setIsProcessing(false); setStreaming(false);
@@ -4137,8 +4139,8 @@ export const useMessage = () => {
     regenerateLastMessage, continueLastMessage,
     getRecoveryRetryContext,
     retryRecoveredHistoryTurn,
-    getSavedQuestionReview: serverChatCharacterId ? getSavedQuestionReview : undefined,
-    retrySavedQuestion: serverChatCharacterId ? retrySavedQuestion : undefined,
+    getSavedQuestionReview,
+    retrySavedQuestion,
     webSearch,
     setWebSearch,
     isSearchingInternet,

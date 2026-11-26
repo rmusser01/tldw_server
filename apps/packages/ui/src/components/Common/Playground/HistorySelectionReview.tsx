@@ -3,6 +3,7 @@ import { usePageAssist } from "@/context"
 import { useStoreMessageOption } from "@/store/option"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { focusComposer } from "@/hooks/useComposerFocus"
+import { useShowAfterDelay } from "@/hooks/useShowAfterDelay"
 import { classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { Button } from "@/components/Common/Button"
@@ -12,6 +13,13 @@ import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
 import { canRetryHistoryTurnRecovery, type HistoryRecoveryRetryContext } from "@/services/history-turn-retry"
+import {
+  INSTRUCTIONS_UNSUPPORTED,
+  plainSavedQuestionRefusalMessage,
+  savedQuestionChatKindOf,
+  savedQuestionReviewOffered,
+  type SavedQuestionSurface
+} from "@/utils/saved-question-retry"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import type { HistoryCursorV1 } from "@/types/history-selection"
 import {
@@ -65,6 +73,8 @@ const forkCopy = {
 /** A hidden list longer than this shows only its latest messages (CC-04). */
 const HIDDEN_PREVIEW_LIMIT = 4
 const HIDDEN_PREVIEW_SHOWN = 3
+/** A load shorter than this shows no loading panel (CM-14). */
+const LOADING_PANEL_DELAY_MS = 300
 
 export function HistorySelectionReview({
   selection,
@@ -75,9 +85,12 @@ export function HistorySelectionReview({
   onRetryRecovery,
   getSavedQuestionReview,
   onRetrySavedQuestion,
-  onSwitchModel = () => openModelSelector()
+  onSwitchModel = () => openModelSelector(),
+  surface = "playground"
 }: {
   selection: HistorySelectionController
+  /** The page showing the review; refusal copy names only the settings that page uses. */
+  surface?: SavedQuestionSurface
   /**
    * Open the model picker, offered when a send failed because of its model
    * (CC-02). Defaults to the shared model-selector event, which the full page
@@ -418,7 +431,24 @@ export function HistorySelectionReview({
   })
   const [savedQuestionReview, setSavedQuestionReview] = React.useState<import("@/services/history-turn-retry").SavedQuestionReview | null>(null)
   const [savedQuestionBusy, setSavedQuestionBusy] = React.useState(false)
-  const [savedQuestionError, setSavedQuestionError] = React.useState(false)
+  // Why the last saved-question review or Retry failed ("" when unknown), or null.
+  const [savedQuestionError, setSavedQuestionError] = React.useState<string | null>(null)
+  const savedQuestionIds = React.useId()
+  // The open chat's kind decides whether the server can answer its saved question (8B).
+  const savedQuestionKind = useStoreMessageOption((state) => selection.owner?.kind === "native"
+    ? savedQuestionChatKindOf(state, selection.owner.conversation_id) : null)
+  // Offered only where it can work: a character chat, or a plain chat whose turns the
+  // server settles (not Sync v2 or an older server) and whose history needs no client context.
+  const savedQuestionOffered = Boolean(getSavedQuestionReview && onRetrySavedQuestion) &&
+    selection.status === "ready" && selection.owner?.kind === "native" && Boolean(selection.settingsQualified) &&
+    selection.capture?.status === "captured" && selection.capture.rows.at(-1)?.role === "user" &&
+    savedQuestionReviewOffered(savedQuestionKind, selection.capture)
+  // An older server can't carry a plain Retry's instructions (decision 22): refuse before sending.
+  const savedQuestionInstructionsRefused =
+    Boolean(savedQuestionReview?.instructions?.length) && savedQuestionReview?.instructionsSupported !== true
+  const savedQuestionFailure = (code: string) =>
+    (savedQuestionKind === "plain" ? plainSavedQuestionRefusalMessage(code, t, surface) : null) ??
+    text("savedQuestionRefused", "Could not retry. Review the saved question again after checking the model, connection and conversation.")
   const [expanded, setExpanded] = React.useState(false)
   const [included, setIncluded] = React.useState<string[]>([])
   const [cursor, setCursor] = React.useState<HistoryCursorV1>({ kind: "empty" })
@@ -554,7 +584,7 @@ export function HistorySelectionReview({
   React.useEffect(() => {
     setRetryReview(null)
     setSavedQuestionReview(null)
-    setSavedQuestionError(false)
+    setSavedQuestionError(null)
     setFailedRetry(null)
     setRetryRefusal(null)
   }, [reviewOwner, selection.view?.view_session_id, selection.view?.selection_revision])
@@ -562,6 +592,11 @@ export function HistorySelectionReview({
     if (stale && expanded && !selection.freshnessConflict)
       errorRegion.current?.focus()
   }, [stale, expanded, selection.freshnessConflict])
+  // A new chat's first load is quiet; any other load shows only when slow (CM-14).
+  const showLoading = useShowAfterDelay(
+    selection.status === "loading" && !selection.quietLoad,
+    LOADING_PANEL_DELAY_MS
+  )
 
   const focusRow = (index: number) => {
     const node = nodes[Math.max(0, Math.min(index, nodes.length - 1))]
@@ -806,12 +841,19 @@ export function HistorySelectionReview({
               : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
           </p>
           <p>
-            {text(
-              entry.turn.persistence === 'server' ? 'nativeRecoveryMessage' : 'recoveryMessage',
-              entry.turn.persistence === 'server'
-                ? 'The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.'
-                : 'Your message is kept. Nothing is sent again unless you choose to retry.'
-            )}
+            {/* Its saved question is shown with "Review saved question" (8B): point there. */}
+            {entry.turn.persistence === "server" && savedQuestionOffered && selection.capture?.status === "captured" &&
+              selection.capture.rows.at(-1)?.id === (entry.turn.admission?.input_message_id ?? entry.turn.input_id)
+              ? text(
+                  "nativeSavedQuestionRecoveryMessage",
+                  "Your question is saved, and no reply is shown for it. To answer it, choose Review saved question; your question is not saved again. Any text that arrived is kept here. Nothing is sent again automatically."
+                )
+              : text(
+                  entry.turn.persistence === 'server' ? 'nativeRecoveryMessage' : 'recoveryMessage',
+                  entry.turn.persistence === 'server'
+                    ? 'The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.'
+                    : 'Your message is kept. Nothing is sent again unless you choose to retry.'
+                )}
           </p>
           {entry.turn.failure_action === "open-model-selector" && (
             <Button
@@ -998,34 +1040,45 @@ export function HistorySelectionReview({
           {savedSetup.provider && savedSetup.model ? ` · ${savedSetup.provider} / ${savedSetup.model}` : ""}.
           {" "}{text("savedRoleplaySetupHelp", "This conversation keeps its saved character and settings.")}</p>
       )}
-      {getSavedQuestionReview && onRetrySavedQuestion && selection.status === "ready" &&
-        selection.owner?.kind === "native" && selection.settingsQualified &&
-        selection.capture?.status === "captured" && selection.capture.rows.at(-1)?.role === "user" && (
+      {savedQuestionOffered && getSavedQuestionReview && onRetrySavedQuestion && (
         <div className="mb-3 rounded border p-3">
           <Button disabled={savedQuestionBusy} onClick={async () => {
             setSavedQuestionBusy(true)
-            setSavedQuestionError(false)
+            setSavedQuestionError(null)
             try { setSavedQuestionReview(await getSavedQuestionReview()) }
-            catch { setSavedQuestionError(true) }
+            catch (error) { setSavedQuestionError(error instanceof Error ? error.message : "") }
             finally { setSavedQuestionBusy(false) }
           }}>{text("reviewSavedQuestion", "Review saved question")}</Button>
           {savedQuestionReview && <div role="group" aria-label={text("savedQuestionReview", "Saved question review")}>
-            <p>{text("savedQuestionExplanation", "Answer this saved question using the selected model and saved character context. This does not send another copy of your question. Earlier uncertain attempts remain available for inspection.")}</p>
+            <p>{savedQuestionReview.instructions
+              ? text("savedQuestionPlainExplanation", "Answer this saved question using the selected model and the System/Prompt instructions shown below. This does not send another copy of your question. Earlier uncertain attempts remain available for inspection.")
+              : text("savedQuestionExplanation", "Answer this saved question using the selected model and saved character context. This does not send another copy of your question. Earlier uncertain attempts remain available for inspection.")}</p>
             <pre className="whitespace-pre-wrap break-words">{savedQuestionReview.text}</pre>
             <p>{savedQuestionReview.model}</p>
-            <Button disabled={savedQuestionBusy} onClick={async () => {
-              if (!savedQuestionReview.isCurrent()) { setSavedQuestionError(true); return }
+            {/* A plain chat's Retry carries its current instructions (decision 22). */}
+            {savedQuestionReview.instructions && <>
+              <h3 id={`${savedQuestionIds}-instructions`} className="text-sm font-medium">{text("retryCurrentPrompt", "Current System/Prompt instructions")}</h3>
+              {savedQuestionReview.instructions.length
+                ? <ul aria-labelledby={`${savedQuestionIds}-instructions`}>{savedQuestionReview.instructions.map((prompt, index) =>
+                    <li key={index}><pre className="whitespace-pre-wrap break-words">{prompt}</pre></li>)}</ul>
+                : <p>{text("retryNoPrompt", "No System/Prompt instruction is currently applied.")}</p>}
+            </>}
+            {/* A standing reason (it describes the disabled Retry), so the error below keeps the only alert. */}
+            {savedQuestionInstructionsRefused && <p id={`${savedQuestionIds}-refused`}>{savedQuestionFailure(INSTRUCTIONS_UNSUPPORTED)}</p>}
+            <Button disabled={savedQuestionBusy || savedQuestionInstructionsRefused}
+              aria-describedby={savedQuestionInstructionsRefused ? `${savedQuestionIds}-refused` : undefined} onClick={async () => {
+              if (!savedQuestionReview.isCurrent()) { setSavedQuestionError("history_selection_changed"); return }
               setSavedQuestionBusy(true)
-              setSavedQuestionError(false)
+              setSavedQuestionError(null)
               try {
                 const result = await onRetrySavedQuestion(savedQuestionReview)
-                if (result.status !== "submitted") setSavedQuestionError(true)
+                if (result.status !== "submitted") setSavedQuestionError(result.status === "failed" ? result.errorMessage : "")
                 else setSavedQuestionReview(null)
-              } catch { setSavedQuestionError(true) }
+              } catch (error) { setSavedQuestionError(error instanceof Error ? error.message : "") }
               finally { setSavedQuestionBusy(false) }
             }}>{text("retrySavedQuestion", "Retry saved question")}</Button>
           </div>}
-          {savedQuestionError && <p role="alert">{text("savedQuestionRefused", "Could not retry. Review the saved question again after checking the model, connection and conversation.")}</p>}
+          {savedQuestionError !== null && <p role="alert">{savedQuestionFailure(savedQuestionError)}</p>}
         </div>
       )}
       {selection.forkOperationsError && (
@@ -1089,7 +1142,7 @@ export function HistorySelectionReview({
       )}
       {openRecoveryError && <p role="alert">{openRecoveryError}</p>}
       {recoveryAction?.feedback && <p role={recoveryAction.failed ? "alert" : "status"}>{recoveryAction.feedback}</p>}
-      {selection.status === "loading" && (
+      {showLoading && (
         <StatePanel
           state="loading"
           title={text("loading", "Loading selected history")}

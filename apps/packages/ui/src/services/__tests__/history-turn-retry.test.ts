@@ -4,6 +4,7 @@ import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import { markHistoryTurnLive, resetHistoryTurnRegistry } from "@/services/history-turn-keep"
 import { loadHistoryRecoveryRetryContext, retryHistoryTurnRecovery, reviewServerSavedQuestion } from "../history-turn-retry"
 import { OUTPUT_FORMATTING_GUIDE_SYSTEM_PROMPT_SUFFIX } from "@/utils/output-formatting-guide"
+import { useStoreMessageOption } from "@/store/option"
 
 const boundary = vi.hoisted(() => ({ load: vi.fn(), capture: vi.fn(), prompt: vi.fn(), defaultPrompt: vi.fn() }))
 vi.mock("@/db/dexie/history-selection", async original => ({ ...await original<typeof import("@/db/dexie/history-selection")>(), loadHistoryTurnRecoveries: boundary.load }))
@@ -37,7 +38,11 @@ const fixture = () => {
   return { entry, current, capture, controller, review, submit, choose, invalidate: () => { epoch += 1 }, revoke: () => { valid = false } }
 }
 
-beforeEach(() => { vi.clearAllMocks(); resetHistoryTurnRegistry(); boundary.prompt.mockResolvedValue(null); boundary.defaultPrompt.mockResolvedValue(undefined) })
+beforeEach(() => {
+  vi.clearAllMocks(); resetHistoryTurnRegistry(); boundary.prompt.mockResolvedValue(null); boundary.defaultPrompt.mockResolvedValue(undefined)
+  // The fixture's saved chat is the open one, bound to a character unless a test says otherwise.
+  useStoreMessageOption.setState({ serverChatId: "saved-chat", serverChatAssistantKind: "character", serverChatCharacterId: "7" })
+})
 
 it("keeps local semantic revision validation without a native proof", async () => {
   const f = fixture()
@@ -183,4 +188,44 @@ it.each(["ready", "navigation", "account", "answered", "asset"])("B02 saved-ques
   expect(f.choose).not.toHaveBeenCalled()
   expect(f.submit).not.toHaveBeenCalled()
   expect(boundary.load).not.toHaveBeenCalled()
+})
+
+it.each([
+  { kind: "plain", state: { serverChatAssistantKind: null, serverChatCharacterId: null }, flag: true },
+  { kind: "plain on an older server", state: { serverChatAssistantKind: null, serverChatCharacterId: null }, flag: false },
+  { kind: "character", state: { serverChatAssistantKind: "character", serverChatCharacterId: "7" }, flag: true }
+] as const)("8B saved-question review records a $kind chat's instructions and server support", async ({ state, flag }) => {
+  const f = fixture()
+  useStoreMessageOption.setState(state)
+  Object.assign(f.capture, { native_completion_v1: { policy: "selected_history_v1", supported: true, storage_context_digest: "s",
+    ...(flag ? { existing_input_system_messages_supported: true } : {}) } })
+  const review = await reviewServerSavedQuestion(f.controller, f.review.context)
+  if (state.serverChatAssistantKind === null) expect(review.instructions).toEqual(["Answer like a pirate."])
+  else expect(review).not.toHaveProperty("instructions")
+  expect(review.instructionsSupported).toBe(flag)
+})
+
+it.each([
+  { label: "a persona chat", state: { serverChatAssistantKind: "persona" }, code: "native_history_persona_unsupported" },
+  { label: "another open chat", state: { serverChatId: "another-chat" }, code: "history_selection_changed" }
+] as const)("8B saved-question review refuses $label before any capture", async ({ state, code }) => {
+  const f = fixture()
+  useStoreMessageOption.setState(state)
+  await expect(reviewServerSavedQuestion(f.controller, f.review.context)).rejects.toThrow(code)
+  expect(boundary.capture).not.toHaveBeenCalled()
+})
+
+it.each([
+  { label: "a Sync v2 owner or older server", native: { supported: false }, systemRow: false },
+  { label: "history with a saved system row", native: { supported: true }, systemRow: true }
+])("8B plain saved-question review leaves $label to the client-managed Retry", async ({ native, systemRow }) => {
+  const f = fixture()
+  useStoreMessageOption.setState({ serverChatAssistantKind: null, serverChatCharacterId: null })
+  Object.assign(f.capture, { native_completion_v1: { policy: "selected_history_v1", storage_context_digest: "s", ...native } })
+  if (systemRow) {
+    f.capture.rows.unshift({ id: "saved-system", revision: "1", role: "system", parent_id: null, settled: true })
+    f.capture.selected_content.unshift({ id: "saved-system", revision: "1", message: "Saved instruction", images: [] })
+  }
+  await expect(reviewServerSavedQuestion(f.controller, f.review.context)).rejects.toThrow("native_history_existing_input_client_managed")
+  expect(boundary.capture).not.toHaveBeenCalled()
 })

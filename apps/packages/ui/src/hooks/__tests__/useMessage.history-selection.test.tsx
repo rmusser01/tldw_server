@@ -5856,6 +5856,77 @@ it.each(["character", "ordinary"])("B02 sidepanel saved-question dispatch is exp
   } else expect(h1.wire).not.toHaveBeenCalled()
 })
 
+it.each([
+  {mode: "reviewed instructions carried", native: {supported: true, existing_input_system_messages_supported: true}, via: "review", sent: [{role: "system", content: "system"}]},
+  {mode: "older server refuses at send", native: {supported: true}, via: "submit", sent: null},
+  {mode: "Sync v2 owner stays client-managed", native: {supported: false}, via: "submit", sent: null}
+])("8B sidepanel plain saved-question Retry: $mode", async ({native, via, sent}) => {
+  h1.native = false
+  mocks.storeState.serverChatCharacterId = null
+  mocks.storeState.serverChatAssistantKind = null
+  const current = h1.controller.getCurrent()
+  current.settingsQualified = true
+  current.view = {...current.view, cursor: {kind: "after_message", message_id: "u-old"}}
+  const fresh = (view: any) => {
+    const result = captureFor(view)
+    result.snapshot.nodes = result.snapshot.nodes.filter(row => row.id === "u-old")
+    result.rows = result.snapshot.nodes
+    result.selected_content = [{id: "u-old", revision: "r1", message: "old question", images: []}]
+    return result
+  }
+  current.capture = fresh(current.view)
+  h1.capture.mockImplementation(async (_id, request) => ({...fresh(request.view), acknowledged_capability: request.required_capability,
+    native_completion_v1: {policy: "selected_history_v1", storage_context_digest: "storage", ...native}}))
+  h1.wire.mockImplementation(async function* () {
+    yield {choices: [{delta: {content: "answer"}}]}
+    yield {tldw_message_id: "existing-answer", tldw_conversation_id: "tracked-chat-1"}
+  })
+  const {result} = renderHook(() => useMessage())
+  // A plain chat offers the saved-question review too, not only a character chat.
+  expect(result.current.getSavedQuestionReview).toEqual(expect.any(Function))
+  const review = {id: "u-old", revision: "r1", text: "old question", model: "qwen", isCurrent: () => true,
+    instructions: ["system"], instructionsSupported: true}
+  let outcome: unknown
+  await act(async () => {
+    outcome = via === "review"
+      ? await result.current.retrySavedQuestion!(review)
+      : await result.current.onSubmit({message: "old question", image: "", historyServerExistingInput: review} as any)
+  })
+  if (sent) {
+    expect(outcome).toEqual({status: "submitted"})
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.wire.mock.calls[0][0].messages).toEqual(sent)
+    expect(h1.wire.mock.calls[0][0].tldw_history_server_existing_input_v1.messages).toEqual([{id: "u-old", revision: "r1"}])
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({view_session_id: "origin"}), "existing-answer")
+  } else {
+    expect(outcome).toMatchObject({status: "failed"})
+    expect(h1.wire).not.toHaveBeenCalled()
+  }
+  expect(h1.append).not.toHaveBeenCalled()
+})
+
+it("8B sidepanel plain saved-question Retry refused by a model setting reports that setting", async () => {
+  const settings = (await import("@/store/model")).useStoreChatModelSettings.getState() as unknown as Record<string, unknown>
+  h1.native = false
+  mocks.storeState.serverChatCharacterId = null
+  mocks.storeState.serverChatAssistantKind = null
+  const current = h1.controller.getCurrent()
+  current.settingsQualified = true
+  current.view = {...current.view, cursor: {kind: "after_message", message_id: "u-old"}}
+  try {
+    settings.topK = 40
+    const {result} = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => { outcome = await result.current.onSubmit({message: "old question", image: "",
+      historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true, instructions: [], instructionsSupported: true}} as any) })
+    // The review shows this code as plain-chat copy (HistorySelectionReview).
+    expect(outcome).toMatchObject({status: "failed", errorMessage: "native_history_setting_unsupported:topK"})
+    expect(h1.wire).not.toHaveBeenCalled()
+  } finally {
+    delete settings.topK
+  }
+})
+
 it("binds Auto native character Sidepanel sends to the current exact catalog provider", async () => {
   const catalog = vi.spyOn(tldwModels, "getModels").mockResolvedValue([
     { id: "gemma3:1b", name: "gemma3:1b", provider: "ollama", type: "chat" }
@@ -5897,4 +5968,164 @@ it("binds Auto native character Sidepanel sends to the current exact catalog pro
     settings.apiProvider = previousProvider
     catalog.mockRestore()
   }
+})
+
+// D7 P5 (8A): the side panel's Edit and send in a plain server chat whose server
+// settles turns goes out on /chat/completions, like the full page.
+describe("side-panel Edit and send in a server-settled chat (D7 P5)", () => {
+  const editableChat = () => {
+    h1.native = false
+    mocks.storeState.serverChatCharacterId = null
+    mocks.storeState.serverChatAssistantKind = null
+    mocks.storeState.messages = [
+      { id: "u-old", name: "You", isBot: false, message: "old question", sources: [] },
+      { id: "a1", name: "Assistant", isBot: true, message: "same answer", sources: [] }
+    ]
+    h1.capture.mockImplementation(async (_id, request) => ({
+      ...captureFor(request.view),
+      native_completion_v1: { policy: "selected_history_v1", supported: true, storage_context_digest: "storage" }
+    }))
+    h1.controller.followResult.mockImplementation(
+      async (_origin: unknown, _id: unknown, current?: () => boolean) => current?.() !== false
+    )
+    return structuredClone(mocks.storeState.messages)
+  }
+  const editAndSend = async () => {
+    const hook = renderHook(() => useMessage())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await hook.result.current.editMessage(0, "Edited question", true, true, () => true)
+    })
+    return outcome
+  }
+
+  it("asks the server to save the edited question and its reply", async () => {
+    const original = editableChat()
+    h1.wire.mockImplementation(async function* (request, options) {
+      options?.onDispatch?.()
+      yield { tldw_history_admission_v1: nativeAdmission(request) }
+      yield { choices: [{ delta: { content: "Edited answer" } }] }
+      yield { tldw_message_id: "edited-answer", tldw_conversation_id: nativeChatId, tldw_user_message_id: "native-input" }
+    })
+
+    expect(await editAndSend()).toEqual({ status: "submitted" })
+    const options = mocks.pageAssistModel.mock.calls.at(-1)![0]
+    expect(options).toMatchObject({ saveToDb: true, conversationId: nativeChatId })
+    expect(options).not.toHaveProperty("clientManagedHistory")
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.wire.mock.calls[0][0]).toMatchObject({
+      save_to_db: true,
+      conversation_id: nativeChatId,
+      tldw_history_branch: true,
+      tldw_history_edit_v1: { version: 1, message_id: "u-old", message_revision: "r1" },
+      tldw_history_selection_v1: { cursor: { kind: "before_message", message_id: "u-old" }, messages: [] }
+    })
+    expect(h1.wire.mock.calls[0][0].messages.at(-1)).toEqual({ role: "user", content: "Edited question" })
+    // The client neither appends the edited question nor touches the mounted originals.
+    expect(h1.append).not.toHaveBeenCalled()
+    expect(mocks.storeState.messages).toEqual(original)
+    expect(h1.controller.followResult).toHaveBeenCalledWith(
+      expect.objectContaining({ view_session_id: "origin" }),
+      "edited-answer",
+      expect.any(Function)
+    )
+  })
+
+  it("reads the server's wrapped 409 edit refusal as refused and keeps the edited text", async () => {
+    const original = editableChat()
+    h1.wire.mockImplementation(async function* (request, options) {
+      yield* []
+      options?.onDispatch?.()
+      // TldwChat wraps this as the cause of "Stream completion failed".
+      throw Object.assign(new Error("HTTP 409"), {
+        status: 409,
+        details: { detail: {
+          status: "stale_selection",
+          code: "history_edit_target_changed",
+          conversation_id: nativeChatId,
+          message_id: "u-old",
+          message_revision: "r1",
+          selection_digest: request.tldw_history_selection_v1.selection_digest
+        } }
+      })
+    })
+
+    expect(await editAndSend()).toMatchObject({ status: "failed", errorMessage: "native_history_edit_target_changed" })
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.wire.mock.calls[0][0]).toMatchObject({ save_to_db: true, tldw_history_edit_v1: { message_id: "u-old" } })
+    expect(h1.append).not.toHaveBeenCalled()
+    expect(h1.recover).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ action: "edit_resend", input_text: "Edited question", result_text: "", state: "refused" })
+    )
+    expect(mocks.storeState.messages).toEqual(original)
+    expect(h1.controller.followResult).not.toHaveBeenCalled()
+  })
+})
+
+// CM-14 (8C) reaches the side panel: its first send in a new chat creates the
+// server chat, so the question shows on Enter and the new chat's first load
+// stays quiet. The side panel's onCapture replaces the transcript with the
+// capture, so a quiet load must not reach it.
+describe("side-panel first send in a new chat (CM-14)", () => {
+  it("shows the question at once and keeps the empty first load away from onCapture", async () => {
+    const { useConnectionStore } = await import("@/store/connection")
+    const { ConnectionPhase } = await import("@/types/connection")
+    const connection = useConnectionStore.getState().state
+    useConnectionStore.setState({ state: { ...connection, isConnected: true, phase: ConnectionPhase.CONNECTED, mode: "normal", offlineBypass: false } })
+    const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    actual.useStoreMessageOption.getState().startNewChatDraft(false)
+    actual.useStoreMessageOption.setState({ historyId: null, serverChatId: null })
+    bridgeDraftStore(actual.useStoreMessageOption)
+    const { useHistorySelection } = await import("@/hooks/chat/useHistorySelection")
+    // Like the side panel's controller: onCapture publishes each installed capture.
+    const onCapture = vi.fn()
+    const selection = renderHook(() => useHistorySelection({ onCapture }))
+    h1.controller = { ...selection.result.current, draftAccount: makeDraftAccount() }
+    h1.native = false
+    mocks.chatBaseState.historyId = null
+    mocks.storeState.serverChatId = null
+    mocks.storeState.messages = []
+    mocks.chatBaseState.history = []
+    h1.create.mockImplementation(createdNativeChat)
+    let releaseLoad!: () => void
+    const loadHeld = new Promise<void>((resolve) => { releaseLoad = resolve })
+    let loadArrived!: () => void
+    const arrived = new Promise<void>((resolve) => { loadArrived = resolve })
+    let firstCapture = true
+    h1.capture.mockImplementation(async (_id, request) => {
+      if (firstCapture) {
+        firstCapture = false
+        loadArrived()
+        await loadHeld
+      }
+      const result = captureFor({ ...request.view, owner_key: "native-key" })
+      return { ...result, rows: [], selected_content: [], snapshot: { ...result.snapshot, nodes: [] } }
+    })
+    const hook = renderHook(() => useMessage())
+    try {
+      let sent!: Promise<unknown>
+      act(() => { sent = hook.result.current.onSubmit({ message: "First side question", image: "" }) })
+      await act(async () => { await arrived })
+
+      // The new chat was created and its load is held: the question is already shown.
+      expect(h1.create).toHaveBeenCalledOnce()
+      const shown = mocks.setMessages.mock.calls.map(([next]) => typeof next === "function" ? next([]) : next)
+      expect(shown.at(-1)?.map((row: { message: string }) => row.message)).toEqual(["First side question"])
+      expect(h1.controller.getCurrent()).toMatchObject({ status: "loading", quietLoad: true })
+
+      releaseLoad()
+      await act(async () => { await sent })
+      // The empty first capture never reached onCapture (no overwrite of the question).
+      expect(onCapture.mock.calls.every(([capture]) => capture.rows.length > 0)).toBe(true)
+      const published = mocks.setMessages.mock.calls.map(([next]) => typeof next === "function" ? next(shown.at(-1)!) : next)
+      expect(published.every((rows) => rows.some((row: { message: string }) => row.message === "First side question"))).toBe(true)
+    } finally {
+      releaseLoad()
+      hook.unmount()
+      selection.unmount()
+      useConnectionStore.setState({ state: connection })
+    }
+  })
 })

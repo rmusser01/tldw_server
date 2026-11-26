@@ -439,7 +439,7 @@ Still open: a contract violation in one envelope raises out of `push` and fails 
 ## 6. Questions for the owner
 
 1. **§4.2 outbox.** Approve a small ChaChaNotes table and migration to make publication durable? It is the prerequisite for server-settled turns under Sync v2.
-2. **§4.1 timing.** P5 moves every chat to server-settled turns. Should P5 wait for §4.2 and §4.1, or should P5 keep the client-managed turn for Sync v2 owners until they land? The second needs a signal the client can read before it dispatches. The 409 on `/chat/completions` comes too late: the WebUI has already marked the turn as dispatched and would keep an "unknown outcome" record. The capture response is the natural place for that signal.
+2. **§4.1 timing.** P5 moves every chat to server-settled turns. Should P5 wait for §4.2 and §4.1, or should P5 keep the client-managed turn for Sync v2 owners until they land? The second needs a signal the client can read before it dispatches. The 409 on `/chat/completions` comes too late: the WebUI has already marked the turn as dispatched and would keep an "unknown outcome" record. The capture response is the natural place for that signal. Decided (2026-11-23, Wave 8 of #3101): P5 keeps the client-managed turn for Sync v2 owners until the outbox lands (#3182). The signal is `native_completion_v1.supported` on the capture.
 3. **§4.4.** Is it acceptable for the Sync materializer to mark a pushed message as graph data when it names its parent? Does the Chatbook client send `parent_message_id` on every message?
 4. **§5.1.** Decided: wait. The unversioned completion save is not refused now; it waits for the outbox (§4.2).
 5. **§5.3.** Decided: migrate. Shipped (§5.3).

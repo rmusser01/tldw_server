@@ -53,6 +53,7 @@ import {
   type ToolChoice
 } from "~/store/option"
 import {
+  generateID,
   getPromptById,
   saveHistory,
   formatSelectedHistory
@@ -806,6 +807,22 @@ export const captureNormalChatPreparation = (
   return { dispatchIsCurrent, draftIsCurrent, acceptDraftBind, sourceDraft }
 }
 
+/** A send from an empty view that addresses no chat creates its server chat first (D7 P4). */
+const createsServerChat = (
+  params: ChatModeParamsBase & HistoryChatModeParams,
+  current: { view: unknown }
+) => {
+  if (params.historyId || params.serverChatId || current.view || !params.historySelection?.createServerChat)
+    return false
+  const toolsState = useMcpToolsStore.getState()
+  return !resolveChatToolRequest({
+    tools: toolsState.chatTools ?? toolsState.tools,
+    toolChoice: params.toolChoice ?? useStoreMessageOption.getState().toolChoice,
+    mcpHealthState: toolsState.healthState,
+    hasMcp: toolsState.healthState !== "unavailable"
+  }).tools?.length
+}
+
 /** Establish one operation-lived adapter; display leases never authorize its later writes. */
 const captureNormalHistoryTurn = async (
   params: ChatModeParamsBase & HistoryChatModeParams,
@@ -818,7 +835,9 @@ const captureNormalHistoryTurn = async (
   acceptDraftBind: ReturnType<typeof captureChatDraftLoad> | null,
   sourceDraft: ChatDraftAddress | null,
   stopSignal: AbortSignal,
-  retainIdWatcher: (stop: () => void) => void
+  retainIdWatcher: (stop: () => void) => void,
+  /** The turn's one `createsServerChat` decision, taken before its early question. */
+  createServerChat: boolean
 ): Promise<HistorySendTurn> => {
   const { controller, originIsCurrent, temporary } = params.historySelection!
   const notifyServerMutation = () => {
@@ -859,15 +878,7 @@ const captureNormalHistoryTurn = async (
     let localId = params.historyId
     let serverId = params.serverChatId
     let createdNativeChat: Awaited<ReturnType<typeof tldwClient.createChat>> | undefined
-    const toolsState = useMcpToolsStore.getState()
-    const toolRequest = resolveChatToolRequest({
-      tools: toolsState.chatTools ?? toolsState.tools,
-      toolChoice: params.toolChoice ?? useStoreMessageOption.getState().toolChoice,
-      mcpHealthState: toolsState.healthState,
-      hasMcp: toolsState.healthState !== "unavailable"
-    })
-    if (!localId && !serverId && !current.view &&
-      params.historySelection!.createServerChat && !toolRequest.tools?.length) {
+    if (createServerChat) {
       if (!sourceDraft || sourceDraft.kind !== "fresh" || !params.surface)
         throw new Error("chat_creation_source_invalid")
       creationHandle = { address: sourceDraft, ownerHash: chatDraftOwnerKey(snapshot.requestScope) }
@@ -919,6 +930,10 @@ const captureNormalHistoryTurn = async (
     let loadPhase: "preparing" | "accepted" | "rejected" = "preparing"
     const target = {
       historyId: localId, serverChatId: serverId, scope,
+      // This send created a server chat, so its first load is empty: it stays
+      // quiet and leaves the question this turn renders alone (CM-14). A local
+      // create may follow an unsaved transcript, which its load must replace.
+      ...(creationHandle ? { quietLoad: true as const } : {}),
       // Accepted saved ownership is independent of the originating turn's Stop.
       isCurrent: () => acceptDraftBind?.isCurrent() !== false &&
         (loadPhase === "accepted" || (loadPhase === "preparing" && preparationIsCurrent()))
@@ -1464,11 +1479,15 @@ const captureNormalHistoryTurn = async (
             buildFriendlyErrorMessage(error, { modelLabel: turn.replyModel?.label })
           )
         : null
+      // A server-settled turn stopped before any text (whitespace counts as none, as in
+      // CM-02) keeps its uncertain record with no reply text (8B).
+      const stoppedServerTurn = turn.persistence === "server" && data.outcome === "stopped" && !data.content.trim()
+      const content = stoppedServerTurn ? "" : data.content
       await saveRecord(
         record(
           turn,
-          data.content,
-          data.content
+          content,
+          content
             ? "generated_unsaved"
             : turn.admission || turn.existingSelection
               ? "accepted_unsent"
@@ -1489,10 +1508,13 @@ const captureNormalHistoryTurn = async (
         )
       )
       // Keep the admitted question selected so a deliberate no-output retry can reuse it.
-      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection) {
-        const following = controller.followResult(view, turn.admission.input_message_id)
+      // The stopped server-settled turn's saved question is shown too, so it can be
+      // reviewed and retried (8B). Follow from the mounted view: an Edit's own view is a
+      // later revision that is never mounted.
+      if (turn.admission && !content && (!data.outcome || stoppedServerTurn) && !turn.existingSelection) {
+        const following = controller.followResult(originView, turn.admission.input_message_id)
         // A Stop ends at once; following the question may wait on a slow read (CM-02).
-        if (data.stoppedBeforeReply)
+        if (data.stoppedBeforeReply || stoppedServerTurn)
           void Promise.resolve(following).catch(() =>
             console.warn("Could not follow a question stopped before its reply.")
           )
@@ -1592,6 +1614,61 @@ const captureNormalHistoryTurn = async (
   return turn
 }
 
+const resolveTurnImage = (image: string) =>
+  image.length > 0
+    ? (image.startsWith("data:") ? createImageDataUrl(image) : null) ??
+      `data:image/jpeg;base64,${image.includes(",") ? image.split(",")[1] : image}`
+    : ""
+
+/**
+ * CM-14: an ordinary send shows its question on Enter, before its history turn
+ * awaits a chat create or load. The pipeline later rebuilds the list with the
+ * same id. Until it does, the row is this turn's to withdraw.
+ */
+const showQuestionEarly = <TParams extends ChatModeParamsBase & HistoryChatModeParams>(
+  mode: ChatModeDefinition<TParams>,
+  message: string,
+  image: string,
+  isRegenerate: boolean,
+  params: TParams,
+  createServerChat: boolean
+) => {
+  const selection = params.historySelection
+  if (!selection || isRegenerate || selection.regenerate || selection.editResend ||
+    selection.editAndSend || selection.retryAdmission || !message.trim() ||
+    mode.setupMessages || !mode.buildUserMessage)
+    return undefined
+  // Only a ready selection (no load) or a new server chat (a quiet load) keeps
+  // the transcript until the turn draws; any other first load replaces it, and
+  // the question would flicker.
+  const current = selection.controller.getCurrent()
+  if (current.owner ? current.status !== "ready" : current.status !== "idle" || !createServerChat)
+    return undefined
+  const question: Message = {
+    isBot: false,
+    role: "user",
+    name: "You",
+    message,
+    sources: [],
+    images: image ? [image] : [],
+    createdAt: Date.now(),
+    id: params.userMessageId ?? generateID()
+  }
+  params.setMessages(rows => rows.some(row => row.id === question.id) ? rows : [...rows, question])
+  return {
+    id: question.id!,
+    // The turn's view setters retire once the new chat's load starts, so this
+    // removes the row from the live transcript directly, and only this row (by
+    // identity): a row the pipeline drew under the same id is the pipeline's.
+    // The full page and the side panel both keep their rows in this store.
+    withdraw: () =>
+      useStoreMessageOption.setState(state =>
+        state.messages.includes(question)
+          ? { messages: state.messages.filter(row => row !== question) }
+          : state)
+  }
+}
+
 /** Reuse the accepted H1 bind and operation-lived settlement for each real mode. */
 export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase & HistoryChatModeParams>(
   mode: ChatModeDefinition<TParams>,
@@ -1607,12 +1684,14 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
     : signal
   let createdTurn: HistorySendTurn | undefined
   let stopWatchingPreparationIds: (() => void) | undefined
+  let earlyQuestion: ReturnType<typeof showQuestionEarly> | undefined
   const settlement = params.historySelection
     ? beginChatTurnSettlement(signal)
     : undefined
   try {
     if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted || executionSignal.aborted)
       return chatSubmitFailed("Request cancelled")
+    const resolvedImage = resolveTurnImage(image)
     if (params.historySelection) {
       if (isRegenerate && !params.historySelection.regenerate) throw new Error("unsupported_history_action")
       const originalOwner = params.historySelection.controller.getCurrent().owner
@@ -1621,6 +1700,11 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       if (params.uploadedFiles?.length && mode.id === "normal")
         throw new Error("unsupported_history_message_assets")
       if (!servicePromptSnapshot) throw new Error("history_scope_unavailable")
+      // Decide once: the early question and the turn's create must agree, even if
+      // the tools stores change in between (CM-14).
+      const createServerChat = createsServerChat(params, params.historySelection.controller.getCurrent())
+      earlyQuestion = showQuestionEarly(mode, message, resolvedImage, isRegenerate, params, createServerChat)
+      if (earlyQuestion) params = { ...params, userMessageId: earlyQuestion.id }
       const historyTurn = await captureNormalHistoryTurn(
         { ...params, historyPreparation: preparation },
         message,
@@ -1632,7 +1716,8 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
         preparation!.acceptDraftBind,
         preparation!.sourceDraft,
         signal,
-        stop => { stopWatchingPreparationIds = stop }
+        stop => { stopWatchingPreparationIds = stop },
+        createServerChat
       )
       createdTurn = historyTurn
       // Canonical roles/content come from the captured owner, not display normalization.
@@ -1702,11 +1787,6 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       }
       history = (regenerate ? selected.slice(0, -1) : selected) as ChatHistory
     }
-    const resolvedImage =
-      image.length > 0
-        ? (image.startsWith("data:") ? createImageDataUrl(image) : null) ??
-          `data:image/jpeg;base64,${image.includes(",") ? image.split(",")[1] : image}`
-        : ""
 
     const result = await runChatPipeline(
       mode,
@@ -1731,6 +1811,8 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
           : undefined
       }
     )
+    // A turn that ended before the pipeline drew its rows leaves no question behind.
+    if (result.status !== "submitted") earlyQuestion?.withdraw()
     const historyTurn = params.historyTurn
     if (result.status === "submitted" && historyTurn?.resultId) {
       const followed = await historyTurn.followResult(historyTurn.resultId)
@@ -1740,6 +1822,9 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       await historyTurn.keep?.()
     }
     return result
+  } catch (error) {
+    earlyQuestion?.withdraw()
+    throw error
   } finally {
     stopWatchingPreparationIds?.()
     createdTurn?.release?.()

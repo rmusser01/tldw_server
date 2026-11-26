@@ -14,6 +14,7 @@ import { chatSubmitFailed, type ChatSubmitResult } from "@/hooks/chat/chat-actio
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { createContinueSavedReply, savedReplyActionFeedback } from "@/hooks/chat/native-history-continue"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { submitSavedQuestionRetry } from "@/hooks/chat/saved-question-retry"
 import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import {
   loadHistoryRecoveryRetryContext,
@@ -70,12 +71,10 @@ export const useSidepanelReplyActions = ({
     const { reviewServerSavedQuestion } = await import("@/services/history-turn-retry")
     return reviewServerSavedQuestion(historySelection, await getRecoveryRetryContext())
   }
-  const retrySavedQuestion = async (review: SavedQuestionReview): Promise<ChatSubmitResult> => {
-    if (!review.isCurrent()) return chatSubmitFailed("history_selection_changed")
-    const submitted = (await onSubmit({ message: review.text, image: "", historyServerExistingInput: review })) as
-      ChatSubmitResult | undefined
-    return submitted ?? chatSubmitFailed("native_history_existing_input_not_submitted")
-  }
+  // A plain chat's review carries its instructions; they must still be the current ones (8B).
+  const retrySavedQuestion = (review: SavedQuestionReview): Promise<ChatSubmitResult> =>
+    submitSavedQuestionRetry(review, getRecoveryRetryContext, async (submission) =>
+      (await onSubmit(submission)) as ChatSubmitResult | undefined)
 
   const continueSavedReply = createContinueSavedReply({
     historySelection,

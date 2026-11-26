@@ -102,6 +102,16 @@ export type CompletionPlan = {
   finishReason?: string
 }
 
+/** A request the fake server holds until the test answers it (see `holdRequest`). */
+export type RequestHold = {
+  /** Settles when the held request reaches the server. */
+  arrived: Promise<void>
+  /** Let the held request through to its normal handler. */
+  release: () => void
+  /** Answer the held request with this error instead of handling it. */
+  fail: (status?: number, body?: unknown) => void
+}
+
 type Deferred = { promise: Promise<void>; resolve: () => void }
 export const deferred = (): Deferred => {
   let resolve!: () => void
@@ -211,6 +221,7 @@ const OPENAPI_SPEC = {
 export const createFakeTldwServer = ({
   catalog = DEFAULT_CATALOG,
   nativeCompletion = false,
+  existingInputInstructions = true,
   chatCommands = [],
   notes = []
 }: {
@@ -225,14 +236,29 @@ export const createFakeTldwServer = ({
   /**
    * Advertise `native_completion_v1` on send captures, like the real server
    * without Sync v2, so a saved chat's turns are settled by the server (D7).
+   * Such a server also answers a saved question through
+   * `tldw_history_server_existing_input_v1` (B02).
    */
   nativeCompletion?: boolean
+  /**
+   * With `nativeCompletion`, advertise that an existing-input Retry may carry
+   * system-only instructions (decision 22). False models an older server.
+   */
+  existingInputInstructions?: boolean
 } = {}) => {
   const requests: RecordedRequest[] = []
   const unhandled: RecordedRequest[] = []
   const chats = new Map<string, FakeChat>()
   const inputAdmissions = new Map<string, HistoryAdmissionV1>()
   const completionPlans: CompletionPlan[] = []
+  const holds: Array<{
+    method: string
+    path: string | RegExp
+    skip: number
+    arrived: Deferred
+    answered: Deferred
+    failure?: Response
+  }> = []
   let defaultReply = "Harness reply"
   let chatSequence = 0
   let messageSequence = 0
@@ -325,8 +351,11 @@ export const createFakeTldwServer = ({
         (operation === "completion" ? body!.save_to_db !== true || !Array.isArray(body!.messages) || body!.messages.at(-1)?.role !== "user" : body!.role !== "user"))
       throw new Error("invalid_history_edit")
     const target = chat?.messages.find(row => row.id === edit.message_id)
+    // Like HistoryEditTargetChangedError: every echo identifies the original request.
     if (!chat || target?.role !== "user" || String(target.version) !== edit.message_revision)
-      throw new Error("history_edit_target_changed")
+      throw Object.assign(new Error("history_edit_target_changed"), { details: {
+        conversation_id: chat?.id ?? String(body!.conversation_id ?? ""), message_id: edit.message_id,
+        message_revision: edit.message_revision, selection_digest: selection.selection_digest } })
     const captured = captureSelection(chat, { purpose: "send", view: selection })
     if (selection.owner_key !== captured.view.owner_key || selection.conversation_id !== chat.id ||
         captured.status !== "captured" ||
@@ -352,7 +381,41 @@ export const createFakeTldwServer = ({
     inputAdmissions.set(user.id, admission)
     return { chat: chat!, user, admission }
   }
-  const editRefusal = (error: unknown) => json({ detail: { code: error instanceof Error ? error.message : "invalid_history_edit" } }, 409)
+  // The server's 409 shape for a refused history admission: {status, code, ...details}.
+  const editRefusal = (error: unknown) => json({ detail: { status: "stale_selection",
+    code: error instanceof Error ? error.message : "invalid_history_edit",
+    ...(error as { details?: Record<string, unknown> } | null)?.details } }, 409)
+  /**
+   * Like `_require_history_tip`: a new input that must extend the latest message
+   * (`tldw_history_branch: false`) is refused when its selection's last message,
+   * or the root for an empty selection, already has a live child. Nothing is
+   * written and no provider work is consumed.
+   */
+  const branchTipRefusal = (body: JsonBody | undefined) => {
+    const selection = body?.tldw_history_selection_v1
+    const chat = body?.conversation_id ? chats.get(String(body.conversation_id)) : undefined
+    if (!chat || !selection || body!.tldw_history_branch !== false || body!.tldw_history_edit_v1 != null ||
+        body!.metadata?.tldw_regenerate_from_message_id !== undefined || body!.metadata?.tldw_continue_from_message_id !== undefined)
+      return null
+    const tip: string | null = selection.messages?.at(-1)?.id ?? null
+    const children = new Map<string | null, string[]>()
+    chat.messages.forEach((row, index) => {
+      const parent = parentIdOf(chat, row, index)
+      children.set(parent, [...(children.get(parent) ?? []), row.id])
+    })
+    const leaves = new Set<string>()
+    const pending = [...(children.get(tip) ?? [])]
+    while (pending.length) {
+      const id = pending.pop()!
+      const below = children.get(id)
+      if (below?.length) pending.push(...below)
+      else leaves.add(id)
+    }
+    if (!leaves.size) return null
+    return json({ detail: { status: "stale_selection", code: "history_branch_changed", conversation_id: chat.id,
+      parent_message_id: tip, leaf_ids: chat.messages.filter(row => leaves.has(row.id)).map(row => row.id),
+      history_version: chat.messages.length } }, 409)
+  }
 
   /**
    * `save_to_db: true` on /chat/completions persists the turn server side, into
@@ -372,7 +435,28 @@ export const createFakeTldwServer = ({
     const refusal = (reason: "request" | "question") => Object.assign(new Error(code), { reason })
     let prefix = ""
     let chat: FakeChat, user: FakeChatMessage, admission: HistoryAdmissionV1 | undefined
-    if (edited) {
+    const existingInput = body.tldw_history_server_existing_input_v1
+    if (existingInput !== undefined) {
+      // B02 + decision 22: answer the saved question without admitting it again.
+      // Only system instructions may come along; they are never saved.
+      const question = existing?.messages.find(row => row.id === existingInput?.messages?.at(-1)?.id)
+      const captured = existing && captureSelection(existing, { purpose: "send", view: existingInput })
+      const { tldw_history_server_existing_input_v1: _existing, ...context } = body
+      if (!nativeCompletion || !existing || selection !== undefined || body.stream !== true ||
+          !Array.isArray(body.messages) || body.messages.some((row: JsonBody) => row?.role !== "system") ||
+          (body.messages.length && !existingInputInstructions) ||
+          existingInput?.version !== 1 || existingInput.purpose !== "send" ||
+          existingInput.owner_key !== "harness-native-owner" || existingInput.conversation_id !== existing.id ||
+          existingInput.cursor?.kind !== "after_message" || existingInput.cursor.message_id !== question?.id ||
+          question?.role !== "user" || String(question.version) !== existingInput.messages.at(-1)?.revision ||
+          existing.messages.some(row => row.role === "assistant" && row.parent_message_id === question.id) ||
+          captured?.status !== "captured" ||
+          canonicalHistoryJson(existingInput.messages) !== canonicalHistoryJson(captured.rows.map(row => ({ id: row.id, revision: row.revision }))) ||
+          selectionDigest(existingInput) !== existingInput.selection_digest || historyDigest(context) !== existingInput.request_context_digest)
+        throw Object.assign(new Error("unsupported_history_existing_input"), { existingInput: true })
+      chat = existing
+      user = question
+    } else if (edited) {
       chat = edited.chat
       admission = edited.admission
       user = chat.messages.find(row => row.id === admission!.input_message_id)!
@@ -415,28 +499,38 @@ export const createFakeTldwServer = ({
         inputAdmissions.set(user.id, admission)
       }
     }
-    // Like the server, a reply cut off at the output limit is saved with that status.
-    const assistant = appendMessage(chat, { role: "assistant", content: prefix + reply, parent_message_id: user.id,
-      ...(finishReason === "length" ? { metadata_extra: { generation_status: "length", finish_reason: "length" } } : {}) })
-    return { conversationId: chat.id, assistantId: assistant.id, admission }
+    // Like the server, the reply is saved when the provider finishes (`settle`), so a
+    // Stop before any text leaves only the question. It records the requested model,
+    // and a reply cut off at the output limit is saved with that status.
+    const generation = { ...(typeof body.model === "string" ? { model_id: body.model } : {}),
+      ...(finishReason === "length" ? { generation_status: "length", finish_reason: "length" } : {}) }
+    let assistantId: string | undefined
+    const settle = () => assistantId ??= appendMessage(chat, { role: "assistant", content: prefix + reply,
+      parent_message_id: user.id, ...(Object.keys(generation).length ? { metadata_extra: generation } : {}) }).id
+    return { conversationId: chat.id, settle, admission }
   }
 
+  /**
+   * A row's parent as the capture reports it. A stored null parent is a root
+   * (e.g. a question reasked from the start); only rows that never recorded a
+   * parent read as linear.
+   */
+  const parentIdOf = (chat: FakeChat, message: FakeChatMessage, index: number) =>
+    message.parent_message_id !== undefined
+      ? message.parent_message_id
+      : index
+        ? chat.messages[index - 1].id
+        : null
+
   /** Emulates the native history-selection capture with the client's own resolver. */
-  const captureSelection = (chat: FakeChat, request: JsonBody, advertiseNativeCompletion = false) => {
+  const captureSelection = (chat: FakeChat, request: JsonBody, advertiseNativeCompletion = false, advertiseInstructions = false) => {
     const ownerKey = "harness-native-owner"
     const view = { ...request.view, owner_key: ownerKey }
     const nodes = chat.messages.map((message, index) => ({
       id: message.id,
       revision: String(message.version),
       role: message.role,
-      // A stored null parent is a root (e.g. a question reasked from the
-      // start); only rows that never recorded a parent read as linear.
-      parent_id:
-        message.parent_message_id !== undefined
-          ? message.parent_message_id
-          : index
-            ? chat.messages[index - 1].id
-            : null,
+      parent_id: parentIdOf(chat, message, index),
       settled: true,
       preview: message.content.slice(0, 120)
     }))
@@ -450,8 +544,9 @@ export const createFakeTldwServer = ({
       storage_context_digest: "storage",
       interpretation_status: { kind: "parent_graph_v1" as const }
     }
-    const acknowledgement = request.required_capability === "tldw_history_existing_input_v1"
-      ? { acknowledged_capability: "tldw_history_existing_input_v1" }
+    const acknowledgement = request.required_capability === "tldw_history_existing_input_v1" ||
+      (nativeCompletion && request.required_capability === "tldw_history_server_existing_input_v1")
+      ? { acknowledged_capability: request.required_capability }
       : {}
     const resolved = resolveHistorySelection(snapshot as never, view, request.purpose, "")
     if (resolved.status !== "ready") {
@@ -474,7 +569,8 @@ export const createFakeTldwServer = ({
       status: "captured",
       ...validatedAdmission,
       ...(advertiseNativeCompletion && request.purpose === "send"
-        ? { native_completion_v1: { policy: "selected_history_v1", supported: true, storage_context_digest: "storage" } }
+        ? { native_completion_v1: { policy: "selected_history_v1", supported: true, storage_context_digest: "storage",
+            ...(advertiseInstructions ? { existing_input_system_messages_supported: true } : {}) } }
         : {}),
       snapshot,
       view,
@@ -498,6 +594,8 @@ export const createFakeTldwServer = ({
     let edited: ReturnType<typeof admitEditedCompletion>
     try { edited = admitEditedCompletion(body, canonical, originalEditChat) }
     catch (error) { return editRefusal(error) }
+    const staleTip = branchTipRefusal(body)
+    if (staleTip) return staleTip
     const plan = completionPlans.shift() ?? {}
     if (plan.gate) await plan.gate
     if (plan.status && plan.status >= 400) {
@@ -509,6 +607,8 @@ export const createFakeTldwServer = ({
     try { persisted = persistCompletionTurn(body, reply, edited, canonical, plan.finishReason) }
     catch (error) {
       // Matches the server: a saved-reply refusal is an unsupported history capability.
+      if ((error as { existingInput?: boolean }).existingInput)
+        return json({ detail: { status: "stale_selection", code: (error as Error).message } }, 409)
       return edited ? editRefusal(error) : json({ detail: { status: "unsupported_history_capability",
         code: body?.metadata?.tldw_continue_from_message_id !== undefined
           ? "unsupported_history_continuation" : "unsupported_history_regeneration",
@@ -516,7 +616,7 @@ export const createFakeTldwServer = ({
     }
     if (!body?.stream) {
       return json({
-        ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.assistantId,
+        ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.settle(),
           ...(persisted.admission ? { tldw_history_admission_v1: persisted.admission } : {}) } : {}),
         id: "chatcmpl-harness",
         object: "chat.completion",
@@ -567,7 +667,7 @@ export const createFakeTldwServer = ({
               id: "chatcmpl-harness",
               object: "chat.completion.chunk",
               model,
-              ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.assistantId,
+              ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.settle(),
                 ...(persisted.admission ? { tldw_user_message_id: persisted.admission.input_message_id } : {}) } : {}),
               choices: [{ index: 0, delta: {}, finish_reason: plan.finishReason ?? "stop" }]
             })
@@ -587,6 +687,16 @@ export const createFakeTldwServer = ({
 
   const route = async (request: RecordedRequest, signal?: AbortSignal | null): Promise<Response> => {
     const { method, path, body } = request
+    const holdIndex = holds.findIndex(
+      (hold) => hold.method === method && (typeof hold.path === "string" ? hold.path === path : hold.path.test(path))
+    )
+    if (holdIndex >= 0 && holds[holdIndex].skip > 0) holds[holdIndex].skip -= 1
+    else if (holdIndex >= 0) {
+      const [hold] = holds.splice(holdIndex, 1)
+      hold.arrived.resolve()
+      await waitUnlessAborted(hold.answered.promise, signal)
+      if (hold.failure) return hold.failure
+    }
     if (OPTIONAL_UNSUPPORTED.has(path)) {
       return json({ detail: "Not supported by the harness server" }, 404)
     }
@@ -672,10 +782,13 @@ export const createFakeTldwServer = ({
     const capture = path.match(/^\/api\/v1\/chat\/conversations\/([^/]+)\/history\/selection$/)
     if (capture && method === "POST") {
       const chat = chats.get(decodeURIComponent(capture[1]))
-      if (body?.required_capability && body.required_capability !== "tldw_history_existing_input_v1")
+      // An older server, or one without server-settled turns, refuses B02's capability.
+      if (body?.required_capability && body.required_capability !== "tldw_history_existing_input_v1" &&
+          !(nativeCompletion && body.required_capability === "tldw_history_server_existing_input_v1"))
         return json({ detail: "Unsupported required capability" }, 422)
       return chat
-        ? json(captureSelection(chat, body ?? {}, nativeCompletion && request.query.include_native_completion === "true"))
+        ? json(captureSelection(chat, body ?? {}, nativeCompletion && request.query.include_native_completion === "true",
+          existingInputInstructions && request.query.include_existing_input_system_messages_support === "true"))
         : json({ detail: "Chat not found" }, 404)
     }
     if ((path === "/api/v1/chats/" || path === "/api/v1/chats") && method === "GET") {
@@ -831,6 +944,23 @@ export const createFakeTldwServer = ({
     /** Queue the behaviour of the next chat completion. */
     planCompletion: (plan: CompletionPlan) => {
       completionPlans.push(plan)
+    },
+    /**
+     * Hold the next request matching a method and a path (string or pattern),
+     * after letting `skip` matching requests through, until the test releases
+     * or fails it. The client can still abort the held request.
+     */
+    holdRequest: (method: string, path: string | RegExp, { skip = 0 }: { skip?: number } = {}): RequestHold => {
+      const hold: (typeof holds)[number] = { method, path, skip, arrived: deferred(), answered: deferred() }
+      holds.push(hold)
+      return {
+        arrived: hold.arrived.promise,
+        release: () => hold.answered.resolve(),
+        fail: (status = 500, failureBody: unknown = { detail: "Harness: held request failed" }) => {
+          hold.failure = json(failureBody, status)
+          hold.answered.resolve()
+        }
+      }
     },
     /** Seed a saved server conversation (user/assistant turns in order). */
     seedChat: (seed: { id: string; title: string; turns: Array<{ role: "user" | "assistant"; content: string }> }) => {

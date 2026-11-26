@@ -503,6 +503,22 @@ Each PR is independently shippable, starts with a red test, and names its review
 | P9 | **Frontend: status from durable state.** The status chip (N14) reads the server id, the last acknowledged write and (after P15) the outbox. #3147's store becomes a thin view of this, or is removed. | S | Stage 3 (N14, after D1) | **Retires in-memory save-status tracking** |
 | P10 | **Addresses.** `/chat/<id>` (WebUI), `#/chat/<id>` (extension), hand-off carrying the conversation id plus the draft (N6, XP-09). Same paths as G18/XP-05; this doc only requires that the id is the server id. | S–M | Stage 4 (G18) | XP-05, XP-09, N6 |
 
+**P5 after Wave 8 (2026-11-23, #3101).** The server settles ordinary sends, Regenerate, Continue, character sends, Edit and send (lane 8A), and Retry of a saved question that has no reply, in plain and character chats (lane 8B). A plain Retry carries the active System/Prompt instructions as system-only messages (decision 22, ADR-068). These turns stay settled by the client (decision 23):
+
+- Retry with `retryAdmission` (client-managed recovery): it follows its original turn.
+- An actor that rewrites history.
+- OCR: the model input differs from the saved input.
+- `messageForModel` (document snippets, context composition) and `historyForModel` (`clientManagedContext`).
+- Saved system or error rows in the selection.
+- Reasoning rows on servers without reasoning-history support.
+- Sync v2 owners, and servers without `native_completion_v1`.
+- Image questions on Retry: an existing input is text only.
+- Local and temporary chats: Dexie keeps their metadata.
+
+A reply the client settles loses its output-limit marker and model after a reload. This is accepted, because the client does not write generation metadata (§4.2(d)); it is revisited with #3182.
+
+Sync v2 Q2 (`2026-10-04-d7-sync-v2-native-history.md` §6) is answered: P5 does not wait for the outbox. Sync v2 owners keep client-managed turns until the outbox lands (#3182). The client reads `native_completion_v1.supported` on the capture before it dispatches.
+
 **Phase 2: server-run turns (S3-3, Stage 4 or later)**
 
 | # | PR | Size | Notes |

@@ -897,7 +897,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
     const nativeCompletion = Boolean(historyTurn?.owner.kind === "native" &&
       historyTurn.capture.status === "captured" && historyTurn.capture.native_completion_v1?.supported === true &&
-      !historyTurn.retryAdmission && !historyTurn.existingSelection && !historyTurn.historyEdit && promptData.nativeCurrentInput !== undefined && humanMessage && mode.id === "normal")
+      !historyTurn.retryAdmission && !historyTurn.existingSelection && promptData.nativeCurrentInput !== undefined && humanMessage && mode.id === "normal")
     if (nativeCompletion) historyTurn!.persistence = "server"
     modelClient = await pageAssistModel({
       model: rawSelectedModel,

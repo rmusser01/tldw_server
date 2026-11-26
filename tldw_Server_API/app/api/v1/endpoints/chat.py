@@ -1126,7 +1126,9 @@ async def _existing_input_validation_request(
         message = ChatCompletionUserMessageParam(role="user", content=text)
     except ValidationError as exc:
         raise HTTPException(413, detail="Saved question exceeds the supported message size.") from exc
-    return request_data.model_copy(deep=True, update={"messages": [message]})
+    # Current system-only instructions come first, then the saved question (ADR-068).
+    instructions = [instruction.model_copy(deep=True) for instruction in request_data.messages]
+    return request_data.model_copy(deep=True, update={"messages": [*instructions, message]})
 
 
 def _admitted_native_provider_error_response(
@@ -4621,7 +4623,7 @@ async def create_chat_completion(
                     mon = get_topic_monitoring_service()
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     mon = None
-                original_saved_content = (validation_request_data.messages[0].content
+                original_saved_content = (validation_request_data.messages[-1].content
                     if request_data.tldw_history_server_existing_input_v1 is not None else None)
                 await _chat_service.moderate_input_messages(
                     request_data=validation_request_data,
@@ -4639,9 +4641,11 @@ async def create_chat_completion(
                     chat_type=input_moderation_chat_type,
                 )
                 if request_data.tldw_history_server_existing_input_v1 is not None and (
-                    len(validation_request_data.messages) != 1
-                    or validation_request_data.messages[0].role != "user"
-                    or validation_request_data.messages[0].content != original_saved_content
+                    len(validation_request_data.messages) != len(request_data.messages) + 1
+                    or [(m.role, m.content) for m in validation_request_data.messages[:-1]]
+                    != [(m.role, m.content) for m in request_data.messages]
+                    or validation_request_data.messages[-1].role != "user"
+                    or validation_request_data.messages[-1].content != original_saved_content
                 ):
                     raise HTTPException(403, detail="The saved question cannot be replayed under the current input policy.")
             except MandatoryAuditWriteError as exc:
@@ -8595,6 +8599,10 @@ async def capture_conversation_history(
         "Omitted or false preserves the legacy response; completion admission rechecks ownership."
     )),
     include_reasoning_history_support: bool = Query(False),
+    include_existing_input_system_messages_support: bool = Query(False, description=(
+        "Opt in to native_completion_v1.existing_input_system_messages_supported: an existing-input completion "
+        "may carry system-only current messages. Omitted or false preserves the earlier response."
+    )),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ):
@@ -8649,6 +8657,8 @@ async def capture_conversation_history(
                     "supported": _active_message_sync_service(current_user, scope) is None,
                     "storage_context_digest": snap.storage_context_digest,
                     **({"reasoning_history_supported": True} if include_reasoning_history_support else {}),
+                    **({"existing_input_system_messages_supported": True}
+                       if include_existing_input_system_messages_support else {}),
                 }})
             proof = {}
             if body.accepted_input_admission is not None:

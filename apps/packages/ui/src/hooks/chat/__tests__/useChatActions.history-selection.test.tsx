@@ -7279,6 +7279,103 @@ it.each(["supported", "old-server", "stale-question", "answered", "stale-review"
 })
 
 
+/** A plain chat whose saved question "u-old" has no reply; captures advertise `native`. */
+const installPlainSavedQuestion = (native: Record<string, unknown> | null) => {
+  const current = h1.controller.getCurrent()
+  current.settingsQualified = true
+  current.view = {...current.view, cursor: {kind: "after_message", message_id: "u-old"}}
+  const captured = (view: any) => {
+    const result: any = captureFor(view)
+    result.snapshot.nodes = result.snapshot.nodes.filter((row: any) => row.id === "u-old")
+    result.rows = result.snapshot.nodes
+    result.selected_content = [{id: "u-old", revision: "r1", message: "saved question", images: []}]
+    return result
+  }
+  current.capture = captured(current.view)
+  h1.capture.mockImplementation(async (_id, request) => ({...captured(request.view), acknowledged_capability: request.required_capability,
+    ...(native ? {native_completion_v1: {policy: "selected_history_v1", storage_context_digest: "storage", ...native}} : {})}))
+  h1.wire.mockImplementation(async function* () {
+    yield {choices: [{delta: {content: "saved answer"}}]}
+    yield {tldw_message_id: "saved-result", tldw_conversation_id: nativeChatId}
+  })
+}
+
+it.each([
+  {mode: "instructions carried", native: {supported: true, existing_input_system_messages_supported: true}, instructions: ["system"], sent: [{role: "system", content: "system"}]},
+  {mode: "no instruction on an older server", native: {supported: true}, instructions: [], sent: []},
+  {mode: "instruction refused by an older server", native: {supported: true}, instructions: ["system"], sent: null},
+  {mode: "Sync v2 owner stays client-managed", native: {supported: false, existing_input_system_messages_supported: true}, instructions: [], sent: null},
+  {mode: "server without native completion", native: null, instructions: [], sent: null}
+])("8B plain saved-question Retry: $mode", async ({native, instructions, sent}) => {
+  const options = ordinaryOptions()
+  installPlainSavedQuestion(native)
+  const {result} = renderHook(() => useChatActions(options as any))
+  let outcome: unknown
+  await act(async () => { outcome = await result.current.onSubmit({message: "saved question", image: "",
+    historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true, instructions}} as any) })
+  if (sent) {
+    expect(outcome).toEqual({status: "submitted"})
+    expect(h1.wire).toHaveBeenCalledOnce()
+    const wire = h1.wire.mock.calls[0][0]
+    expect(wire.messages).toEqual(sent)
+    expect(wire.tldw_history_selection_v1).toBeUndefined()
+    expect(wire.tldw_history_server_existing_input_v1.messages).toEqual([{id: "u-old", revision: "r1"}])
+    expect(h1.capture.mock.calls[0][1].required_capability).toBe("tldw_history_server_existing_input_v1")
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({view_session_id: "origin"}), "saved-result")
+  } else {
+    expect(outcome).toMatchObject({status: "failed"})
+    expect(h1.wire).not.toHaveBeenCalled()
+  }
+  expect(normalChatModeMock).not.toHaveBeenCalled()
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+})
+
+it("8B plain saved-question Retry refused by a model setting explains it in plain-chat words", async () => {
+  installPlainSavedQuestion({supported: true, existing_input_system_messages_supported: true})
+  const options = ordinaryOptions()
+  options.currentChatModelSettings = {...options.currentChatModelSettings, topK: 40} as typeof options.currentChatModelSettings
+  const {result} = renderHook(() => useChatActions(options as any))
+  let outcome: unknown
+  await act(async () => { outcome = await result.current.onSubmit({message: "saved question", image: "",
+    historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true, instructions: []}} as any) })
+  expect(outcome).toMatchObject({status: "failed", errorMessage: "native_history_setting_unsupported:topK"})
+  expect(h1.wire).not.toHaveBeenCalled()
+  const description = String(options.notification.error.mock.calls.at(-1)?.[0]?.description)
+  expect(description).toContain("The topK setting can't be used when retrying a saved question")
+  expect(description).not.toMatch(/character/i)
+})
+
+it("8B plain saved-question Retry refuses a character review and a plain review in a character chat", async () => {
+  installPlainSavedQuestion({supported: true, existing_input_system_messages_supported: true})
+  const plain = renderHook(() => useChatActions(ordinaryOptions() as any))
+  await act(async () => { await plain.result.current.onSubmit({message: "saved question", image: "",
+    historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true}} as any) })
+  plain.unmount()
+  const character = renderHook(() => useChatActions(createHookOptions() as any))
+  await act(async () => { await character.result.current.onSubmit({message: "saved question", image: "",
+    historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true, instructions: []}} as any) })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+})
+
+it.each([
+  {label: "reviewed instructions still current", instructions: ["system"], submitted: true},
+  {label: "instructions changed after the review", instructions: ["Answer like a pirate."], submitted: false}
+])("8B retrySavedQuestion checks the reviewed instructions: $label", async ({instructions, submitted}) => {
+  installPlainSavedQuestion({supported: true, existing_input_system_messages_supported: true})
+  const {result} = renderHook(() => useChatActions(ordinaryOptions() as any))
+  let outcome: unknown
+  await act(async () => { outcome = await result.current.retrySavedQuestion({id: "u-old", revision: "r1", text: "saved question",
+    model: "deepseek-chat", isCurrent: () => true, instructions, instructionsSupported: true}) })
+  if (submitted) {
+    expect(outcome).toEqual({status: "submitted"})
+    expect(h1.wire.mock.calls[0][0].messages).toEqual([{role: "system", content: "system"}])
+  } else {
+    expect(outcome).toEqual({status: "failed", errorMessage: "retry_context_changed"})
+    expect(h1.wire).not.toHaveBeenCalled()
+  }
+})
+
 it("B02 saved-question completion refuses Compare before creating any fresh turn", async () => {
   const options = {...createHookOptions(), compareModeActive: true, compareSelectedModels: ["qwen", "deepseek-chat"], compareFeatureEnabled: true}
   const {result} = renderHook(() => useChatActions(options as any))

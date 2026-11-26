@@ -59,10 +59,13 @@ import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryCon
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import { isSavedReplyActionRefusal, rememberSavedReplyRefusal } from "./saved-reply-actions"
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
+import { existingInputCurrentMessages, PlainSavedQuestionRefusal, type SavedQuestionInstructions } from "@/utils/saved-question-retry"
+import { systemPromptFormatter } from "@/utils/system-message"
 
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
 
-export type NativeHistoryExistingInput = { id: string; revision: string; isCurrent: () => boolean }
+/** A reviewed saved question; a plain chat's review also carries its instructions (8B). */
+export type NativeHistoryExistingInput = SavedQuestionInstructions & { id: string; revision: string; isCurrent: () => boolean }
 
 export type NativeHistoryCharacterSendParams = {
   existingInput?: NativeHistoryExistingInput
@@ -152,7 +155,9 @@ export const sendNativeHistoryCharacter = async (
 ): Promise<{ content: string; matchesPreview: boolean } | void> => {
   const { controller, signal } = params
   const existing = params.existingInput
-  if (existing && (params.temporary || params.image || params.unsupportedContext || params.historyEditResend || params.historyRegenerate || params.greetingSeed || params.privateDraft || !existing.isCurrent() || params.settings.systemPrompt?.trim()))
+  // A plain Retry carries its reviewed instructions; a character Retry has none and no character is plain.
+  if (existing && (params.temporary || params.image || params.unsupportedContext || params.historyEditResend || params.historyRegenerate || params.greetingSeed || params.privateDraft || !existing.isCurrent() ||
+      (existing.instructions ? params.characterId != null : params.settings.systemPrompt?.trim())))
     throw new Error("native_history_existing_input_review_changed")
   if (existing && !params.serverChatId && !params.historyId) throw new Error("native_history_existing_input_owner_required")
   const editResend = params.historyEditResend
@@ -244,9 +249,12 @@ export const sendNativeHistoryCharacter = async (
   try {
     resolved = validateNativeCharacterConfiguration(configuration)
   } catch (error) {
-    if (!(error instanceof Error) || error.message !== "native_history_explicit_model_provider_required") throw error
+    // A plain Retry refused by these settings checks gets plain-chat copy, not character copy.
+    const refuse = (cause: unknown) => existing?.instructions && cause instanceof Error
+      ? new PlainSavedQuestionRefusal(cause.message, { cause }) : cause
+    if (!(error instanceof Error) || error.message !== "native_history_explicit_model_provider_required") throw refuse(error)
     const model = parseProviderQualifiedModelSelection(params.model).modelId.replace(/^tldw:/, "").trim()
-    if (!model || isAutoModelId(model)) throw error
+    if (!model || isAutoModelId(model)) throw refuse(error)
     const catalog = await tldwModels.getModels(true, { requireFresh: true })
     signal.throwIfAborted()
     if (!params.originIsCurrent() || !actorSceneSend.isCurrent() || !draftIsCurrent() ||
@@ -257,7 +265,7 @@ export const sendNativeHistoryCharacter = async (
       return binding.modelId === model ? binding.provider : undefined
     }))
     const provider = providers.size === 1 ? providers.values().next().value : undefined
-    if (!provider) throw error
+    if (!provider) throw refuse(error)
     resolved = validateNativeCharacterConfiguration({ ...configuration, settings: { ...capturedSettings, apiProvider: provider } })
   }
   const { model, provider, settings } = resolved
@@ -627,6 +635,13 @@ export const sendNativeHistoryCharacter = async (
           capture.snapshot.nodes.some(node => node.role === "assistant" && node.parent_id === existing.id))
         throw new Error("native_history_existing_input_changed")
     }
+    // The review compares and shows the instructions as written; like an ordinary
+    // send, they go out with their placeholders ({model}, {current_year}, ...) filled.
+    const existingInputMessages = existing
+      ? await Promise.all(existingInputCurrentMessages(capture, existing).map(async ({ role, content }) =>
+          ({ role, content: String((await systemPromptFormatter({ content })).content) })))
+      : []
+    if (!preparingIsCurrent()) throw new Error("stale_selection")
     const request = prepareChatCompletionRequest(
       [
         ...(settings.systemPrompt?.trim()
@@ -660,7 +675,7 @@ export const sendNativeHistoryCharacter = async (
         slashCommandInjectionMode: settings.slashCommandInjectionMode
       }
     )
-    if (existing) request.messages = []
+    if (existing) request.messages = existingInputMessages
     const prepared = prepareHistoryContext(request, preparingIsCurrent)
     const selection = finalizeHistorySelection(
       owner,

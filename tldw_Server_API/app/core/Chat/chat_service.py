@@ -3205,6 +3205,11 @@ async def build_context_and_messages(
                 question = (selected_unanswered_text_question(snap, content, selection)
                     if server_existing_input is not None else None)
                 context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+                if question is not None and (context[0] is not None or context[1] is not None) and any(
+                        message.role == "system" for message in request_data.messages):
+                    # Decision 22: only a plain chat's Retry carries current instructions;
+                    # a character answers under its frozen context.
+                    raise HistorySelectionError("unsupported_history_context_existing_input_instructions")
                 dictionary_plan = context[2].pop("history_dictionary_plan", None)
                 if dictionary_plan is not None:
                     from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
