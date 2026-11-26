@@ -132,6 +132,8 @@ def _container_inspect() -> dict:
 def test_rejected_inspection_never_starts_container(monkeypatch, tmp_path: Path, section, change) -> None:
     from Helper_Scripts.ci import outbound_isolation as isolation
 
+    report = tmp_path / "result.json"
+    report.write_text('{"status":"pass"}', encoding="utf-8")
     inspected = _container_inspect()
     inspected[section].update(change)
     calls = []
@@ -150,6 +152,7 @@ def test_rejected_inspection_never_starts_container(monkeypatch, tmp_path: Path,
         isolation.run_isolated(IMAGE_ID, ["-m", "example"], tmp_path, timeout=2)
 
     assert calls == ["create", "inspect", "rm"]
+    assert not report.exists()
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])

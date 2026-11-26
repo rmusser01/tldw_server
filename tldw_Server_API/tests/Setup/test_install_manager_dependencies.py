@@ -723,18 +723,18 @@ def test_installer_vcs_argv_matches_reviewed_source_when_enabled(monkeypatch, in
 def test_omnivoice_sidecar_argv_matches_reviewed_inventory(monkeypatch, tmp_path, installer_inventory):
     from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
 
-    checkout = tmp_path / "checkout"
+    checkout = tmp_path / "sources" / "checkout"
     interpreter = tmp_path / "venv/bin/python"
     commands = []
 
     def record(command, *, cwd=None):
         commands.append((command, cwd))
-        if command[:2] == ["/fixture/git", "clone"]:
-            checkout.mkdir()
 
     monkeypatch.setattr(installer, "_run_checked_command", record)
     monkeypatch.setattr(installer.shutil, "which", lambda name: "/fixture/git" if name == "git" else None)
     installer.clone_repository(installer.DEFAULT_REPO_URL, checkout)
+    assert checkout.parent.is_dir()
+    checkout.mkdir()  # Represents the checkout created by the mocked git command.
     installer.install_sidecar_runtime(interpreter_path=interpreter, repo_root=tmp_path, source_checkout=checkout)
 
     assets = installer_inventory.capabilities["setup.omnivoice"].assets
