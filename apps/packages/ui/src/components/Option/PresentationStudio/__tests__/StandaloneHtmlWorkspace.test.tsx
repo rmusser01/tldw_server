@@ -1382,17 +1382,25 @@ describe("StandaloneHtmlWorkspace", () => {
       .mockReturnValueOnce(new Promise((resolve) => { resolveFresh = resolve }))
 
     render(<StandaloneHtmlWorkspace presentationId="html-1" />)
-    const editor = await screen.findByLabelText("HTML source")
+    const editor = await waitFor(() => {
+      const sourceEditor = screen.getByLabelText("HTML source")
+      expect(sourceEditor).toHaveAttribute("data-workspace-monaco")
+      return sourceEditor
+    })
     fireEvent.change(editor, { target: { value: EDITED } })
     await waitFor(() => expect(screen.getByText("Not saved")).toBeVisible())
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(screen.getByTestId("standalone-html-save-status")).toHaveTextContent("Conflict"))
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite server with my draft" }))
+    const prepareOverwrite = screen.getByRole("button", { name: "Overwrite server with my draft" })
+    fireEvent.click(prepareOverwrite)
     await waitFor(() => expect(mocks.getPresentation).toHaveBeenCalledTimes(2))
     expect(screen.queryByRole("button", { name: "Confirm overwrite" })).not.toBeInTheDocument()
 
     fireEvent.change(editor, { target: { value: SECOND_EDIT } })
-    await waitFor(() => expect(editor).toHaveValue(SECOND_EDIT))
+    await waitFor(() => {
+      expect(editor).toHaveValue(SECOND_EDIT)
+      expect(prepareOverwrite).toBeEnabled()
+    })
     resolveFresh?.({ ...detail({ version: 8 }), etag: '"v8"' })
     fireEvent.click(await screen.findByRole("button", { name: "Confirm overwrite" }))
 
