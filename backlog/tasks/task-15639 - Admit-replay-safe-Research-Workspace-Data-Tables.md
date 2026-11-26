@@ -9,7 +9,7 @@ labels:
 dependencies:
 - TASK-15638
 references:
-- Docs/ADR/099-research-workspace-data-tables.md
+- Docs/ADR/101-research-workspace-data-tables.md
 - Docs/Design/research-workspace-data-tables.md
 ---
 
@@ -30,7 +30,7 @@ Let Studio use the exact supported Server processing route and recover its canon
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implements Docs/ADR/099-research-workspace-data-tables.md. The Workspace API qualifies the selected Server-managed provider and model, checks selected association and Media revisions, and admits one native table and job for each operation. Native publication and export remain in Data Tables. The focused Server suite passed 175 tests with PostgreSQL required. Ruff, Bandit and both OpenAPI drift gates passed. A localhost Chatbook test with a model adapter fixture recovered a dropped successful response, published all three output kinds and exported their native CSVs. Workspace generation is gated when usage quotas are enabled.
+Implements Docs/ADR/101-research-workspace-data-tables.md. The Workspace API qualifies the selected Server-managed provider and model, checks selected association and Media revisions, and admits one native table and job for each operation. Native publication and export remain in Data Tables. The focused Server suite passed 175 tests with PostgreSQL required. Ruff, Bandit and both OpenAPI drift gates passed. A localhost Chatbook test with a model adapter fixture recovered a dropped successful response, published all three output kinds and exported their native CSVs. Workspace generation is gated when usage quotas are enabled.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -42,7 +42,7 @@ Studio can recover an authenticated native Data Tables generation and its exact 
 ## Implementation Plan
 
 ADR required: yes
-ADR path: Docs/ADR/099-research-workspace-data-tables.md
+ADR path: Docs/ADR/101-research-workspace-data-tables.md
 Reason: The new Workspace admission and provider route are durable cross-owner contracts.
 
 Follow the implementation plan in Docs/Design/research-workspace-data-tables.md.

@@ -1,4 +1,4 @@
-# ADR-099 · Admit Research Workspace generation through native Data Tables
+# ADR-101 · Admit Research Workspace generation through native Data Tables
 
 **Status:** Proposed
 **Date:** 2026-11-24

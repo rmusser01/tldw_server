@@ -119,8 +119,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-095](095-coordinated-chroma-sdk-storage-lifetimes.md) | Proposed | Coordinate validation and complete canonical Chroma SDK lifetimes in shared storage sessions; fail closed on unsupported or incomplete existing storage. |
 | [ADR-096](096-tiered-development-and-release-ci.md) | Proposed | Run focused CI on dev PRs and require full same-commit qualification on main PRs and server publication. |
 | [ADR-097](097-research-workspace-study-publication.md) | Proposed | Commit native Research Study records and their replay receipts in one authenticated Workspace transaction. |
-| [ADR-099](099-research-workspace-data-tables.md) | Proposed | Bind a Workspace generation to one native Data Table and Jobs receipt, using the selected Server route. |
-| [ADR-102](102-research-workspace-run-origin.md) | Proposed | Bind a native Run to an authenticated Workspace launch and commit its first phase intent atomically. |
 
 
 
@@ -132,6 +130,8 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-098](098-advisory-ui-design-drift-reporting.md) | Proposed | Report UI token, color, radius, and layout drift across all four product UI roots without blocking builds or merges. |
 | [ADR-099](099-per-user-session-cap.md) | Accepted | Cap live sessions per user; evict the least recently active, same install first; never refuse sign-in. |
 | [ADR-100](100-document-workspace-chat-association.md) | Proposed | Store Document Workspace chat links with the owned native conversation and verify access through Media and Chat. |
+| [ADR-101](101-research-workspace-data-tables.md) | Proposed | Bind a Workspace generation to one native Data Table and Jobs receipt, using the selected Server route. |
+| [ADR-102](102-research-workspace-run-origin.md) | Proposed | Bind a native Run to an authenticated Workspace launch and commit its first phase intent atomically. |
 | [ADR-104](104-account-security-lock.md) | Accepted | Let a user lock their own account: all credentials refused (423) until an emailed link unlocks it; the previous address can take the account back for 7 days. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

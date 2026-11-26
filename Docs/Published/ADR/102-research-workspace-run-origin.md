@@ -1,4 +1,4 @@
-# ADR-100 · Retain the origin of a Workspace Research run
+# ADR-102 · Retain the origin of a Workspace Research run
 
 **Status:** Proposed
 **Date:** 2026-11-24

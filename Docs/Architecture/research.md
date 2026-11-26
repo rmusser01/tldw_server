@@ -37,7 +37,7 @@ receipt in the same ResearchSessionsDB transaction. The Jobs dispatch key
 survives a lost launch response. The native detail and bundle routes project
 the authenticated launch origin for the owner. Selecting the Report in
 Chatbook is a later action. See
-[ADR-100](../ADR/100-research-workspace-run-origin.md).
+[ADR-102](../ADR/102-research-workspace-run-origin.md).
 
 ## Discovery catalog
 

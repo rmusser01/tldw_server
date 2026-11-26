@@ -1,7 +1,7 @@
 # Research Workspace Data Tables
 
 - ADR required — yes
-- ADR path — [ADR-099](../ADR/099-research-workspace-data-tables.md)
+- ADR path — [ADR-101](../ADR/101-research-workspace-data-tables.md)
 - Reason — The public launch and replay contract spans Workspace, Media, and Jobs.
 
 The capability query at `GET /api/v1/workspaces/{workspace_id}/research-data-tables`
