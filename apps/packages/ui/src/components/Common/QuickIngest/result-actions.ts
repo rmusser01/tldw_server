@@ -72,7 +72,7 @@ export const canRetryWizardResult = (
   return (
     (item.status === "error" || item.outcome === "failed" || item.outcome === "submit_failed") &&
     item.outcome !== "cancelled" &&
-    classifyError(item.error, item.data).retryable &&
+    classifyError(item.error, item.data, item.httpStatus).retryable &&
     Boolean(
       queued?.validation.valid &&
       queued.conferenceOverride?.selected !== false &&

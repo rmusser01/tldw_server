@@ -250,6 +250,7 @@ const normalizeWizardResult = (
     type: String(item.type || "item"),
     data: item.data,
     error,
+    httpStatus: item.httpStatus,
     warning: derivedStatus === "ok"
       ? extractCompletedIngestJobWarning(item.data) || item.warning
       : undefined,

@@ -693,6 +693,20 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it.each(["link", "file"])("retains the original HTTP status and message for a rejected %s", async kind => {
+    const message = "The archive rejected this source."
+    const error = Object.assign(new Error(message), { status: 422 })
+    const file = kind === "file"
+    const request = file ? mocks.bgUpload : mocks.bgRequest
+    request.mockRejectedValueOnce(error)
+    const result = await submitQuickIngestBatch({
+      entries: file ? [] : [{ id: "source", url: "https://example.org/article", type: "html" }],
+      files: file ? [{ id: "source", directFile: new File(["notes"], "source.txt") }] : [],
+      storeRemote: false, processOnly: true,
+    })
+    expect(result.results).toMatchObject([{ id: "source", status: "error", error: message, httpStatus: 422 }])
+  })
+
   it.each([
     { storeRemote: true, ocr: true },
     { storeRemote: true, ocr: false },

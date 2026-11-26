@@ -81,7 +81,7 @@ describe("WizardResultsStep navigation buttons", () => {
     const retry = vi.fn()
     wizardHarness.results.push(
       { id: "failed", type: "web", url: "https://example.com", status: "error", error: "Timed out", outcome: "failed" },
-      { id: "skip", type: "pdf", status: "ok", outcome: "skipped", mediaId: 55 },
+      { id: "skip", type: "pdf", status: "ok", outcome: "skipped", mediaId: 55, message: "Already in library" },
       { id: "extract", type: "pdf", status: "ok", persisted: false },
     )
     wizardHarness.queueItems = [
@@ -91,7 +91,11 @@ describe("WizardResultsStep navigation buttons", () => {
     render(<WizardResultsStep oneScreen onClose={vi.fn()} onRetryItems={retry} />)
     expect(screen.getByRole("heading", { name: "1 saved to Media" })).toBeVisible()
     expect(screen.getByText("1 extracted · 1 failed · 2 skipped")).toBeVisible()
-    expect(screen.getByText("Duplicate · skipped")).toBeVisible()
+    const repeat = screen.getByText("Repeated in this import")
+    expect(repeat).toBeVisible()
+    expect(screen.getByText("Already in Media")).toBeVisible()
+    const failureRegion = screen.getByRole("region", { name: "Error items" })
+    expect(failureRegion.compareDocumentPosition(repeat) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Retry failed source" }))
     expect(retry).toHaveBeenCalledWith(["failed"], undefined)
   })
@@ -102,6 +106,17 @@ describe("WizardResultsStep navigation buttons", () => {
     render(<WizardResultsStep oneScreen onClose={vi.fn()} onReviewSavedItems={review} />)
     fireEvent.click(screen.getByRole("button", { name: "Review 2 saved sources" }))
     expect(review).toHaveBeenCalledWith([42, 8])
+  })
+
+  it("offers the source repair action for a structured HTTP rejection with arbitrary detail", () => {
+    const correct = vi.fn()
+    const url = "https://example.org/archive"
+    wizardHarness.results = [{ id: "rejected", type: "html", url, status: "error", error: "The archive rejected this link.", httpStatus: 422 }]
+    wizardHarness.queueItems = [{ id: "rejected", url, validation: { valid: true } }]
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onRetryItems={vi.fn()} onCorrectItems={correct} />)
+    expect(screen.queryByRole("button", { name: "Retry failed source" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Edit link" }))
+    expect(correct).toHaveBeenCalledWith(["rejected"], true)
   })
 
   it("reports each local write outcome and keeps the extraction available after a failed write", () => {

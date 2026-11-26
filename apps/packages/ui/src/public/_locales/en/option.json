@@ -7394,6 +7394,15 @@
   "quickIngest_web_resultExtracted": {
     "message": "{{count}} extracted"
   },
+  "quickIngest_web_resultRepeated": {
+    "message": "Repeated in this import"
+  },
+  "quickIngest_web_resultInMedia": {
+    "message": "Already in Media"
+  },
+  "quickIngest_web_skippedSources": {
+    "message": "Skipped sources ({{count}})"
+  },
   "quickIngest_web_resultFailed": {
     "message": "{{count}} failed"
   },

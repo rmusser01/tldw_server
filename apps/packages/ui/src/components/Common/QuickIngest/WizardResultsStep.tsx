@@ -139,6 +139,15 @@ function groupResultItems(results: WizardResultItem[]): ResultGroups {
 // Sub-components
 // ---------------------------------------------------------------------------
 
+function ResultSourceName({ label, url }: { label: string; url?: string }) {
+  return (
+    <>
+      <span className="qi-result-name block truncate" title={label}>{label}</span>
+      {url && url !== label && <span className="qi-result-name block truncate text-xs font-normal text-text-muted" title={url}>{url}</span>}
+    </>
+  )
+}
+
 type SuccessRowProps = {
   oneScreen?: boolean
   reviewFirst?: boolean
@@ -160,12 +169,12 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
     const handleChat = useCallback(() => onDiscussInChat?.(item), [item, onDiscussInChat])
 
     return (
-      <div className="flex items-center gap-2 rounded-md px-3 py-2 hover:bg-surface2 transition-colors">
+      <div className="qi-result-row flex items-center gap-2 rounded-md px-3 py-2 hover:bg-surface2 transition-colors">
         {item.warning
           ? <AlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-500" aria-hidden="true" />
           : <Check className="h-4 w-4 flex-shrink-0 text-green-500" aria-hidden="true" />}
         <div className="min-w-0 flex-1 text-sm text-text">
-          <div className="truncate" title={label}>{label}</div>
+          <ResultSourceName label={label} url={oneScreen ? item.url : undefined} />
           <p className="text-xs text-text-muted">{getSavedMediaIds([item]).length
             ? qi("wizard.results.savedState", "Saved")
             : reviewFirst && !item.omitDataOnReload ? qi("web.extractedForReview", "Extracted for review")
@@ -183,7 +192,7 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
             {duration}
           </span>
         )}
-        <div className="flex flex-shrink-0 items-center gap-1">
+        <div className="qi-result-actions flex flex-shrink-0 items-center gap-1">
           {extractedText && onViewText && (
             <button type="button" onClick={event => onViewText(item, event.currentTarget)}
               className="min-h-11 rounded px-2 text-sm font-medium text-primary hover:bg-primary/10"
@@ -223,6 +232,8 @@ SuccessRow.displayName = "SuccessRow"
 // ---------------------------------------------------------------------------
 
 type SkippedRowProps = {
+  oneScreen: boolean
+  libraryDuplicateMessage: string
   localDuplicateMessage: string
   item: WizardResultItem
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
@@ -231,27 +242,25 @@ type SkippedRowProps = {
 }
 
 const SkippedRow: React.FC<SkippedRowProps> = React.memo(
-  ({ item, qi, onOpenMedia, onDiscussInChat, localDuplicateMessage }) => {
+  ({ item, qi, onOpenMedia, onDiscussInChat, localDuplicateMessage, libraryDuplicateMessage, oneScreen }) => {
     const label = item.title || item.fileName || item.url || item.id
     const showOpenMedia = Boolean(onOpenMedia) && canOpenMedia(item)
     const skippedReason = resolveSkippedResultReason(item)
     const skippedMessage =
       skippedReason === "local-queue-duplicate"
         ? localDuplicateMessage
-        : skippedReason === "library-duplicate"
-          ? qi("wizard.results.skippedAlreadyInLibrary", LIBRARY_DUPLICATE_SKIP_MESSAGE)
+        : skippedReason === "library-duplicate" || (oneScreen && !item.message && getSavedMediaIds([item]).length > 0)
+          ? libraryDuplicateMessage
           : item.message || qi("wizard.results.skippedDefaultMessage", GENERIC_SKIPPED_MESSAGE)
 
     const handleOpen = useCallback(() => onOpenMedia?.(item), [item, onOpenMedia])
     const handleChat = useCallback(() => onDiscussInChat?.(item), [item, onDiscussInChat])
 
     return (
-      <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+      <div className="qi-result-row flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <span className="block truncate text-sm text-text" title={label}>
-            {label}
-          </span>
+          <div className="text-sm text-text"><ResultSourceName label={label} url={oneScreen ? item.url : undefined} /></div>
           <p className="mt-0.5 text-xs text-text-subtle">
             {skippedMessage}
           </p>
@@ -259,7 +268,7 @@ const SkippedRow: React.FC<SkippedRowProps> = React.memo(
             <p className="mt-0.5 whitespace-pre-line break-words text-xs text-text-subtle">{item.warning}</p>
           )}
         </div>
-        <div className="flex flex-shrink-0 items-center gap-1">
+        <div className="qi-result-actions flex flex-shrink-0 items-center gap-1">
           {showOpenMedia && (
             <button
               type="button"
@@ -319,7 +328,7 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
       !category.retryable && /\b(?:api_name|api_provider|analysis provider|transcription model)\b/i.test(item.error ?? "")
     )
     const failedSources = extractionFailureSources(item.data)
-    const rejectedSource = !settingsFailure && (category.classification === "validation" || (!category.retryable && failedSources.length > 0) || /\b(?:404|410|415|422)\b/.test(item.error ?? ""))
+    const rejectedSource = !settingsFailure && (category.classification === "validation" || (!category.retryable && failedSources.length > 0) || (item.httpStatus == null && /\b(?:404|410|415|422)\b/.test(item.error ?? "")))
     const repairLabel = oneScreen && source && (rejectedSource || missingFile)
       ? sourceRepairLabel(source, qi) : null
     const showFilePicker = missingFile && onReattach && (!oneScreen || ((category.retryable || settingsFailure) && source.fileOrigin !== "paste"))
@@ -335,9 +344,7 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
         <div className="flex items-start gap-2">
           <X className="mt-0.5 h-4 w-4 flex-shrink-0 text-danger" aria-hidden="true" />
           <div className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-text" title={label}>
-              {label}
-            </span>
+            <div className="text-sm font-medium text-text"><ResultSourceName label={label} url={oneScreen ? item.url || source?.url : undefined} /></div>
             {/* Plain-language explanation */}
             <p className="mt-1 text-xs text-text-subtle">
               {oneScreen && rejectedSource && source?.url && !failedSources.length
@@ -363,9 +370,9 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
         </div>
 
         {/* Classification badge + actions */}
-        <div className="mt-2 flex items-center justify-between">
+        <div className="qi-error-actions mt-2 flex items-center justify-between">
           <span
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${category.badgeColor}`}
+            className={`qi-result-badge inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${category.badgeColor}`}
           >
             <AlertTriangle className="h-3 w-3" aria-hidden="true" />
             {category.badgeLabel}
@@ -522,7 +529,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const errorCategories = useMemo(() => {
     const map = new Map<string, ErrorCategory>()
     for (const item of failures) {
-      const category = classifyError(item.error, item.data)
+      const category = classifyError(item.error, item.data, item.httpStatus)
       map.set(item.id, item.outcome === "cancelled" ? {
         ...category,
         retryable: false,
@@ -639,7 +646,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     <ErrorRow
       key={item.id} item={item} oneScreen={oneScreen}
       source={queueItems.find(source => source.id === item.id)}
-      category={errorCategories.get(item.id) ?? classifyError(item.error, item.data)}
+      category={errorCategories.get(item.id) ?? classifyError(item.error, item.data, item.httpStatus)}
       qi={qi}
       onRetry={getRetryHandlerForItem(item)}
       onCorrect={onCorrectItems ? repair => repair ? onCorrectItems([item.id], true) : onCorrectItems([item.id]) : undefined}
@@ -677,8 +684,11 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const skippedCount = skippedExisting.length + excludedItems.length
   const confirmedDrafts = reviewDrafts?.status === "saved" && reviewDrafts.count > 0 ? reviewDrafts : undefined
   const localDuplicateMessage = oneScreen
-    ? qi("source.duplicate", "Duplicate · skipped")
+    ? qi("web.resultRepeated", "Repeated in this import")
     : qi("wizard.results.skippedAlreadyQueued", LOCAL_QUEUE_DUPLICATE_SKIP_MESSAGE)
+  const libraryDuplicateMessage = oneScreen
+    ? qi("web.resultInMedia", "Already in Media")
+    : qi("wizard.results.skippedAlreadyInLibrary", LIBRARY_DUPLICATE_SKIP_MESSAGE)
   const reviewFirst = oneScreen && (Boolean(reviewDrafts) || state.presetConfig.reviewBeforeStorage)
   const draftHelp = reviewDrafts?.status === "failed"
     ? qi("web.draftWriteFailedHelp", "Retry to save drafts in this browser using the results of this import.")
@@ -824,11 +834,51 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     </ActionsPanel>
   )
 
+  const failureSections = (
+    <>
+      {/* Submission failures */}
+      {submitFailed.length > 0 && (
+        <section
+          aria-label={qi("wizard.results.submitFailedSection", "Not submitted items")}
+          className="mt-4"
+        >
+          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-danger">
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+            {qi("wizard.results.submitFailedHeading", "Not submitted ({{count}})", {
+              count: submitFailed.length,
+            })}
+          </h3>
+          <div className="space-y-2">
+            {submitFailed.map(renderErrorRow)}
+          </div>
+        </section>
+      )}
+
+      {/* Processing failures */}
+      {failedProcessing.length > 0 && (
+        <section
+          aria-label={qi("wizard.results.errorsSection", "Error items")}
+          className="mt-4"
+        >
+          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-danger">
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+            {qi("wizard.results.failedProcessingHeading", "Failed during processing ({{count}})", {
+              count: failedProcessing.length,
+            })}
+          </h3>
+          <div className="space-y-2">
+            {failedProcessing.map(renderErrorRow)}
+          </div>
+        </section>
+      )}
+    </>
+  )
+
   return (
     <>
     {viewedItem && <ExtractedTextViewer item={viewedItem}
       text={extractionTexts.get(viewedItem.id) ?? ""} qi={qi} onBack={() => setViewedItem(null)} />}
-    <div hidden={Boolean(viewedItem)} className={viewedItem ? "hidden" : "flex h-full min-h-0 flex-col"} data-testid="wizard-results-step">
+    <div hidden={Boolean(viewedItem)} className={viewedItem ? "hidden" : "qi-receipt flex h-full min-h-0 flex-col"} data-testid="wizard-results-step">
       {/* Scrollable content area */}
       <div className={oneScreen ? "qi-web-scroll min-h-0 flex-1 overflow-y-auto" : "min-h-0 flex-1 overflow-y-auto px-4 py-3"}>
         {oneScreen ? <div role="status" aria-atomic="true" className="mb-4">
@@ -866,21 +916,29 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
             <button type="button" className={secondaryStyle} onClick={interruption.onCheckMedia}>{qi("web.checkMedia", "Check Media")}</button>
           </div>
         </section>}
+        {oneScreen && failureSections}
         {excludedItems.length > 0 && <section aria-label={qi("wizard.results.excludedSection", "Excluded inputs")} className="mb-4 space-y-2">
-          {excludedItems.map(item => <div key={item.id} className="text-sm text-text">
-            <p className="break-words">{item.fileName || item.url || item.id}</p>
-            <p className="text-xs text-text-muted">{getQueueItemExclusionReason(item, queueItems) === "invalid"
-              ? item.validation.errors?.join("; ") || qi("wizard.results.invalidExcluded", "Invalid input. Correct it before processing.")
-              : getQueueItemExclusionReason(item, queueItems) === "unselected"
-                ? qi("wizard.results.unselectedExcluded", "Not selected for this run.")
-                : localDuplicateMessage}</p>
-            {oneScreen && onCorrectItems && !item.validation.valid && item.conferenceOverride?.selected !== false && (
-              <button type="button" onClick={() => onCorrectItems([item.id], true)}
-                className="rounded px-2 py-1 text-sm text-primary hover:bg-primary/10">
-                {sourceRepairLabel(item, qi)}
-              </button>
-            )}
-          </div>)}
+          {excludedItems.map(item => {
+            const reason = getQueueItemExclusionReason(item, queueItems)
+            const duplicateMessage = oneScreen && item.playlist?.duplicateStatus === "duplicate_existing"
+              ? libraryDuplicateMessage : localDuplicateMessage
+            return (
+              <div key={item.id} className="text-sm text-text">
+                <p className="[overflow-wrap:anywhere]">{item.fileName || item.url || item.id}</p>
+                <p className="text-xs text-text-muted">{reason === "invalid"
+                  ? item.validation.errors?.join("; ") || qi("wizard.results.invalidExcluded", "Invalid input. Correct it before processing.")
+                  : reason === "unselected"
+                    ? qi("wizard.results.unselectedExcluded", "Not selected for this run.")
+                    : duplicateMessage}</p>
+                {oneScreen && onCorrectItems && !item.validation.valid && item.conferenceOverride?.selected !== false && (
+                  <button type="button" onClick={() => onCorrectItems([item.id], true)}
+                    className="rounded px-2 py-1 text-sm text-primary hover:bg-primary/10">
+                    {sourceRepairLabel(item, qi)}
+                  </button>
+                )}
+              </div>
+            )
+          })}
         </section>}
         {/* Successes */}
         {successes.length > 0 && (
@@ -937,7 +995,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
           >
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-600">
               <AlertTriangle className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
-              {qi("wizard.results.skippedExistingHeading", "Skipped existing ({{count}})", {
+              {oneScreen ? qi("web.skippedSources", "Skipped sources ({{count}})", { count: skippedExisting.length }) : qi("wizard.results.skippedExistingHeading", "Skipped existing ({{count}})", {
                 count: skippedExisting.length,
               })}
             </h3>
@@ -945,6 +1003,8 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               {skippedExisting.map((item) => (
                 <SkippedRow
                   key={item.id}
+                  oneScreen={oneScreen}
+                  libraryDuplicateMessage={libraryDuplicateMessage}
                   localDuplicateMessage={localDuplicateMessage}
                   item={item}
                   qi={qi}
@@ -1004,41 +1064,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
           </div>
         )}
 
-        {/* Submission failures */}
-        {submitFailed.length > 0 && (
-          <section
-            aria-label={qi("wizard.results.submitFailedSection", "Not submitted items")}
-            className="mt-4"
-          >
-            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-danger">
-              <X className="h-3.5 w-3.5" aria-hidden="true" />
-              {qi("wizard.results.submitFailedHeading", "Not submitted ({{count}})", {
-                count: submitFailed.length,
-              })}
-            </h3>
-            <div className="space-y-2">
-              {submitFailed.map(renderErrorRow)}
-            </div>
-          </section>
-        )}
-
-        {/* Processing failures */}
-        {failedProcessing.length > 0 && (
-          <section
-            aria-label={qi("wizard.results.errorsSection", "Error items")}
-            className="mt-4"
-          >
-            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-danger">
-              <X className="h-3.5 w-3.5" aria-hidden="true" />
-              {qi("wizard.results.failedProcessingHeading", "Failed during processing ({{count}})", {
-                count: failedProcessing.length,
-              })}
-            </h3>
-            <div className="space-y-2">
-              {failedProcessing.map(renderErrorRow)}
-            </div>
-          </section>
-        )}
+        {!oneScreen && failureSections}
 
         {/* Cancelled */}
         {cancelled.length > 0 && (

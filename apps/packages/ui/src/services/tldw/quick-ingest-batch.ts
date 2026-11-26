@@ -1,5 +1,6 @@
 import { browser } from "wxt/browser";
 import type { BgUploadInit } from "@/services/background-proxy";
+import { readHttpStatus } from "@/services/notification-lifecycle";
 import { assertQuickIngestRequestCurrent, scopedQuickIngestRequest, scopedQuickIngestUpload, type QuickIngestRequestContext } from "./quick-ingest-request-scope";
 import {
   getProcessPathForType,
@@ -126,6 +127,7 @@ type QuickIngestBatchResult = {
   type: string;
   data?: unknown;
   error?: string;
+  httpStatus?: number;
   message?: string;
   persisted?: boolean;
   mediaId?: string | number | null;
@@ -944,6 +946,7 @@ const runDirectQuickIngestBatch = async (
           outcome,
           url,
           type: resolvedType,
+          httpStatus: readHttpStatus(error) ?? undefined,
           error:
             error instanceof Error
               ? error.message
@@ -1232,6 +1235,7 @@ const runDirectQuickIngestBatch = async (
           status: "error",
           fileName,
           type: "file",
+          httpStatus: readHttpStatus(error) ?? undefined,
           error: error instanceof Error ? error.message : String(error || "Upload failed"),
         });
       };

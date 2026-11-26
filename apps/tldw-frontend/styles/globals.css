@@ -58,6 +58,8 @@
 .qi-source-repair { grid-column: 3; }
 .qi-source-remove { grid-column: 4; grid-row: 1; }
 
+.qi-web-modal .qi-result-badge { font-size: 12px; }
+
 .qi-web-modal .qi-metadata-editor { container: qi-metadata / inline-size; }
 
 @container qi-metadata (max-width: 35rem) {
@@ -110,6 +112,17 @@
     border-radius: 0;
   }
 
+  .qi-web-modal .qi-receipt .qi-result-row {
+    display: grid;
+    grid-template-columns: 1rem minmax(0, 1fr) auto;
+    align-items: start;
+    row-gap: 0;
+  }
+  .qi-web-modal .qi-receipt .qi-result-name { white-space: normal; overflow-wrap: anywhere; }
+  .qi-web-modal .qi-receipt .qi-result-actions { grid-column: 2 / -1; flex-wrap: wrap; }
+  .qi-web-modal .qi-receipt .qi-error-actions { flex-wrap: wrap; gap: 4px 8px; }
+  .qi-web-modal .qi-receipt :is(button, summary, input[type="file"]) { min-height: 44px; min-width: 44px; }
+  .qi-web-modal .qi-receipt summary { align-content: center; }
   .qi-processing-prompt .ant-btn {
     width: 100%;
     min-height: 44px;
