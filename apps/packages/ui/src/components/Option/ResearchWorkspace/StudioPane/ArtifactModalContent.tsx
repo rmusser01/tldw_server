@@ -505,7 +505,7 @@ export const FlashcardArtifactEditor: React.FC<{
               messageApi.destroy(undoMessageKey)
             }}
           >
-            {t("common:undo", "Undo")}
+            {t("common:undo.action", "Undo")}
           </Button>
         )
       }
@@ -679,7 +679,7 @@ export const QuizArtifactEditor: React.FC<{
               messageApi.destroy(undoMessageKey)
             }}
           >
-            {t("common:undo", "Undo")}
+            {t("common:undo.action", "Undo")}
           </Button>
         )
       }

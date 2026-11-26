@@ -304,7 +304,7 @@ export const TransferSourcesModal: React.FC<TransferSourcesModalProps> = ({
               messageApi.destroy(undoMessageKey)
             }}
           >
-            {t("common:undo", "Undo")}
+            {t("common:undo.action", "Undo")}
           </Button>
         )
       }

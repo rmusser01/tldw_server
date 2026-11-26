@@ -2752,7 +2752,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             messageApi.destroy(undoMessageKey)
           }}
         >
-          {t("common:undo", "Undo")}
+          {t("common:undo.action", "Undo")}
         </Button>
       )
     }
