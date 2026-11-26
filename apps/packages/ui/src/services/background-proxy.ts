@@ -4,6 +4,7 @@ import { captureDocumentGetSignal } from "./document-get-scope"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
+import { sanitizeResponseData } from "./sanitize-response-data"
 import {
   isUnsafeMethod,
   parseRetryAfter,
@@ -208,63 +209,6 @@ const shouldRecordRequestError = (entry: {
   return true
 }
 
-const REDACTED_VALUE = "[REDACTED]"
-const SENSITIVE_KEY_FRAGMENTS = [
-  "stack",
-  "trace",
-  "sql",
-  "query",
-  "password",
-  "passwd",
-  "token",
-  "secret",
-  "path",
-  "headers",
-  "internalid",
-  "authorization",
-  "cookie",
-  "api_key",
-  "apikey",
-  "access_key",
-  "accesskey",
-  "private",
-  "credential",
-  "session",
-  "bearer"
-]
-
-const isSensitiveKey = (key: string): boolean => {
-  const normalized = key.toLowerCase().replace(/[\s-]/g, "_")
-  return SENSITIVE_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment))
-}
-
-// Redact known sensitive fields (stack/trace/sql/query/secret/headers/etc.) recursively.
-export const sanitizeResponseData = (
-  value: unknown,
-  seen: WeakSet<object> = new WeakSet(),
-  sanitizeErrorStrings = false
-): unknown => {
-  if (sanitizeErrorStrings && typeof value === "string") {
-    return sanitizeServerErrorMessage(value, "")
-  }
-  if (value == null || typeof value !== "object") return value
-  if (seen.has(value as object)) return REDACTED_VALUE
-  seen.add(value as object)
-
-  if (Array.isArray(value)) {
-    return value.map((entry) => sanitizeResponseData(entry, seen, sanitizeErrorStrings))
-  }
-
-  const result: Record<string, unknown> = {}
-  Object.entries(value as Record<string, unknown>).forEach(([key, entry]) => {
-    if (isSensitiveKey(key)) {
-      result[key] = REDACTED_VALUE
-      return
-    }
-    result[key] = sanitizeResponseData(entry, seen, sanitizeErrorStrings)
-  })
-  return result
-}
 
 type NoFallbackError = Error & {
   __tldwNoDirectFallback?: true
@@ -753,10 +697,11 @@ const refreshAuthDirect = async (
             return
           }
           assertCurrent()
-          if ((error as { status?: number } | null)?.status === 401) noteSessionReplaced(error)
-          if ((error as { status?: number } | null)?.status === 401 &&
-              !await invalidateRefreshSessionIfCurrent(storage, cfg, assertCurrent)) {
-            throw createServicePromptScopeChangedError()
+          if ((error as { status?: number } | null)?.status === 401) {
+            if (!await invalidateRefreshSessionIfCurrent(storage, cfg, assertCurrent)) {
+              throw createServicePromptScopeChangedError()
+            }
+            noteSessionReplaced(error)
           }
           throw error
         } finally {
@@ -2625,3 +2570,5 @@ export async function* bgStreamClient<
     yield chunk
   }
 }
+
+export { sanitizeResponseData }

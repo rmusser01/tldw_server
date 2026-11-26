@@ -89,6 +89,30 @@ async def test_live_predicate_and_cleanup_postgres(
     assert revoked in remaining
 
 
+@pytest.mark.asyncio
+async def test_cleanup_purges_logged_out_rows_a_day_after_access_expiry_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_session_cap_logout")
+    repo = AuthnzSessionsRepo(pool)
+    h, d = timedelta(hours=1), timedelta(days=1)
+    stale_logout = await _row(repo, uid, "slo", access_in=-2 * d, refresh_in=5 * d)
+    fresh_logout = await _row(repo, uid, "flo", access_in=h, refresh_in=5 * d)
+    stale_cap = await _row(repo, uid, "scap", access_in=-2 * d, refresh_in=5 * d)
+    await _revoke(pool, repo, stale_logout, "User logout")
+    await _revoke(pool, repo, fresh_logout, "User logout")
+    await _revoke(pool, repo, stale_cap, "session_cap", 30)
+    await repo.cleanup_expired_sessions(session_cap_retention=timedelta(hours=1))
+    rows = await pool.fetch("SELECT id FROM sessions WHERE user_id = $1", uid)
+    remaining = {int(r["id"]) for r in rows}
+    assert stale_logout not in remaining
+    assert fresh_logout in remaining
+    assert stale_cap in remaining
+
+
 # --- the per-user cap on session creation ------------------------------------
 
 
@@ -219,6 +243,63 @@ async def test_concurrent_creates_at_the_cap_never_exceed_it_postgres(
     results = await asyncio.gather(*[_capped(repo, uid, f"race{i}") for i in range(6)])
 
     assert len(results) == 6
+    assert len(await _live(repo, uid)) == 4
+
+
+@pytest.mark.asyncio
+async def test_token_update_is_refused_for_a_revoked_row_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_update")
+    repo = AuthnzSessionsRepo(pool)
+    sid = await _capped(repo, uid, "temp")
+    await _revoke(pool, repo, sid, "session_cap")
+    now = datetime.now(timezone.utc)
+    result = await repo.update_session_tokens_after_creation(
+        session_id=sid,
+        access_token_hash="h-real",
+        refresh_token_hash="r-real",
+        access_jti=None,
+        refresh_jti=None,
+        access_expires_at=now + timedelta(hours=1),
+        refresh_expires_at=now + timedelta(days=7),
+        encrypted_access_token="enc",
+        encrypted_refresh_token="enc",
+    )
+    assert result is None
+    assert await pool.fetchval("SELECT token_hash FROM sessions WHERE id = $1", sid) == "h-temp"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_creates_hold_the_cap_under_repeatable_read_default_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    import asyncio
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_rr")
+    repo = AuthnzSessionsRepo(pool)
+    # New connections default to REPEATABLE READ; the cap code must still pin READ COMMITTED.
+    # Reconnect with a REPEATABLE READ server default (asyncpg private attrs: the guarded
+    # wrapper rejects ALTER DATABASE, and this is the only seam that needs no pool change).
+    asyncpg_pool = pool.pool
+    kwargs = dict(asyncpg_pool._connect_kwargs)
+    kwargs["server_settings"] = {
+        **(kwargs.get("server_settings") or {}),
+        "default_transaction_isolation": "repeatable read",
+    }
+    asyncpg_pool.set_connect_args(*asyncpg_pool._connect_args, **kwargs)
+    await asyncpg_pool.expire_connections()
+    for i in range(4):
+        await _capped(repo, uid, f"seed{i}")
+
+    await asyncio.gather(*[_capped(repo, uid, f"race{i}") for i in range(6)])
+
     assert len(await _live(repo, uid)) == 4
 
 
