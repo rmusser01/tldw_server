@@ -2145,7 +2145,7 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
     )
 
     expect(source).toContain("const stabilizeInitialDesktopCapture = async (page) =>")
-    expect(source).toContain('getByTestId("chat-header-sidebar-toggle")')
+    expect(source).toContain('getByTestId("chat-toggle-shortcuts")')
     expect(source).toContain('waitFor({ state: "visible", timeout: 30_000 })')
     expect(source).toContain('window.scrollTo({ behavior: "instant", left: 0, top: 0 })')
     expect(source).toContain("document.fonts?.ready")
@@ -2249,7 +2249,8 @@ describe("shared-research-workspace-cdp-uat runner contract", () => {
 
     expect(source).toContain("const firstQuestion =")
     expect(source).toContain("const firstAnswer =")
-    expect(source).toContain('getByTestId("chat-header-sidebar-toggle")')
+    expect(source).toContain('memberPage.getByRole("button", {')
+    expect(source).toContain("name: /^(Expand|Collapse) sidebar$/u")
     expect(source).toContain('getAttribute("aria-label")')
     expect(source).toContain('sidebarLabel === "Expand sidebar"')
     expect(source).toContain("const recentConversations = memberPage.getByRole")
