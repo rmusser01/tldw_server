@@ -284,6 +284,7 @@ async def run_non_stream_tool_autoexec(cst: "NonStreamCall") -> None:
                                 content=cst.content_to_save,
                                 tool_calls=cst.tool_calls_to_save,
                                 function_call=cst.function_call_to_save,
+                                moonshot_reasoning=await _response_processor.approve_non_stream_moonshot_reasoning(cst),
                                 generation_metadata=cs._nonstream_generation_metadata(
                                     llm_response=cst.llm_response,
                                     choice=cst.first_choice,

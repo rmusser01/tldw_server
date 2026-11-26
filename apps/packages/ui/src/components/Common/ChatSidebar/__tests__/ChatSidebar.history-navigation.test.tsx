@@ -8,6 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18next from "i18next";
@@ -230,6 +231,38 @@ describe("history-first sidebar navigation", () => {
       expect(document.getElementById(String(controlled))).toBe(
         screen.getByTestId("chat-sidebar"),
       );
+    },
+  );
+
+  it.each([
+    [true, "Expand sidebar", "Collapse sidebar"],
+    [false, "Collapse sidebar", "Expand sidebar"],
+  ] as const)(
+    "keeps focus on the sidebar toggle when starting collapsed=%s",
+    async (initialCollapsed, before, after) => {
+      const user = userEvent.setup();
+      const Harness = () => {
+        const [collapsed, setCollapsed] = React.useState(initialCollapsed);
+        return (
+          <ChatSidebar
+            collapsed={collapsed}
+            onToggleCollapse={() => setCollapsed((value) => !value)}
+          />
+        );
+      };
+      render(
+        <I18nextProvider i18n={translations}>
+          <MemoryRouter initialEntries={["/chat"]}>
+            <Harness />
+          </MemoryRouter>
+        </I18nextProvider>,
+      );
+
+      const toggle = screen.getByRole("button", { name: before });
+      toggle.focus();
+      await user.keyboard("{Enter}");
+
+      expect(screen.getByRole("button", { name: after })).toHaveFocus();
     },
   );
 

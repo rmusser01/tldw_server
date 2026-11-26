@@ -252,29 +252,50 @@ def _refresh_primary_choice_state(cst: "NonStreamCall") -> None:
         cst.content_text_for_usage = cs._extract_text_from_content(cst.content_to_save)
 
 
-async def _apply_output_safety_to_current_choices(cst: "NonStreamCall") -> None:
+def _output_moderation_runtime(
+    cst: "NonStreamCall", *, require_policy_check: bool = False
+) -> cs.OutputModerationRuntime:
+    return cs.OutputModerationRuntime(
+        request=cst.request,
+        client_id=cst.client_id,
+        conversation_id=cst.final_conversation_id,
+        metrics=cst.metrics,
+        audit_service=cst.audit_service,
+        audit_context=cst.audit_context,
+        moderation_getter=cst.moderation_getter,
+        self_monitoring_service=cst.self_monitoring_service,
+        topic_monitoring_getter=cs.get_topic_monitoring_service,
+        review_item_callback=cs._capture_moderation_review_item_safely_async,
+        require_policy_check=require_policy_check,
+        completion_metric_callback=None if require_policy_check else (
+            lambda outcome: cs._emit_chat_run_first_completion_metric(
+                cst.metrics,
+                context=cst.run_first_metric_context,
+                outcome=outcome,
+            )
+        ),
+    )
 
+
+async def approve_non_stream_moonshot_reasoning(cst: "NonStreamCall") -> str | None:
+    """Approve exact reasoning from the current official Moonshot reply for history."""
+    if cst.first_choice is None or not cs.official_moonshot_chat_base_url(cst.selected_provider, cst.cleaned_args):
+        return None
+    reasoning = cs.bounded_moonshot_reasoning(cst.first_choice.message.get("reasoning_content"))
+    if reasoning is None:
+        return None
+    return await _moderation_pipeline.approve_saved_moonshot_reasoning(
+        reasoning,
+        _output_moderation_runtime(cst, require_policy_check=True),
+    )
+
+
+async def _apply_output_safety_to_current_choices(cst: "NonStreamCall") -> None:
     result = await cs.apply_output_safety_to_choices(
         choices=cst.processed_choices,
         fallback_content=cst.content_to_save,
         fallback_content_text=cst.content_text_for_usage,
-        runtime=cs.OutputModerationRuntime(
-            request=cst.request,
-            client_id=cst.client_id,
-            conversation_id=cst.final_conversation_id,
-            metrics=cst.metrics,
-            audit_service=cst.audit_service,
-            audit_context=cst.audit_context,
-            moderation_getter=cst.moderation_getter,
-            self_monitoring_service=cst.self_monitoring_service,
-            topic_monitoring_getter=cs.get_topic_monitoring_service,
-            review_item_callback=cs._capture_moderation_review_item_safely_async,
-            completion_metric_callback=lambda outcome: cs._emit_chat_run_first_completion_metric(
-                cst.metrics,
-                context=cst.run_first_metric_context,
-                outcome=outcome,
-            ),
-        ),
+        runtime=_output_moderation_runtime(cst),
     )
     cst.content_to_save = result.content_to_save
     cst.content_text_for_usage = result.content_text_for_usage
@@ -389,3 +410,4 @@ async def encode_non_stream_payload(cst: "NonStreamCall") -> None:
 # late imports: moved code reads these at call time (TASK-13950.25 R5)
 from tldw_Server_API.app.core.Chat import completion_pipeline as _completion_pipeline
 from tldw_Server_API.app.core.Chat import chat_service as cs
+from tldw_Server_API.app.core.Chat import moderation_pipeline as _moderation_pipeline
