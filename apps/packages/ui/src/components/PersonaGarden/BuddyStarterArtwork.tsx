@@ -27,6 +27,7 @@ const ArtworkImage = ({
   onError: () => void
 }) => {
   const { asset, frame } = artwork
+  const clipId = React.useId()
   const resolveUrl = usePersonaVisualAssetUrls({ [asset.id]: asset }, asset)
   const url = resolveUrl(asset)
   React.useEffect(() => {
@@ -53,8 +54,14 @@ const ArtworkImage = ({
       className="h-40 w-full"
       preserveAspectRatio="xMidYMid meet"
     >
+      <defs>
+        <clipPath id={clipId}>
+          <rect x={x} y={y} width={width} height={height} />
+        </clipPath>
+      </defs>
       <image
         href={url}
+        clipPath={`url(#${clipId})`}
         width={asset.width ?? undefined}
         height={asset.height ?? undefined}
         onLoad={onReady}

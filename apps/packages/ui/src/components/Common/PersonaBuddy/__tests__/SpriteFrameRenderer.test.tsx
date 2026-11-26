@@ -579,7 +579,7 @@ it("freezes frame playback in Static mode and resumes in Dynamic mode", () => {
     expect.stringContaining("idle-2.png")
   )
 })
-it("fits an atlas region without shrinking its crop coordinates", () => {
+it("clips the atlas to its selected region when fitting it into a card", () => {
   const manifest = baseManifest({
     animations: {
       idle: {
@@ -601,7 +601,16 @@ it("fits an atlas region without shrinking its crop coordinates", () => {
       fitSize={112}
     />
   )
-  expect(currentFrame()).toHaveAttribute("viewBox", "32 0 32 64")
-  expect(currentFrame()).toHaveAttribute("width", "112")
-  expect(currentFrame().querySelector("image")).toHaveAttribute("width", "64")
+  const frame = currentFrame()
+  const clip = frame.querySelector("clipPath")
+  const crop = clip?.querySelector("rect")
+  const artwork = frame.querySelector("image")
+  expect(frame).toHaveAttribute("viewBox", "32 0 32 64")
+  expect(frame).toHaveAttribute("width", "112")
+  expect(crop).toHaveAttribute("x", "32")
+  expect(crop).toHaveAttribute("y", "0")
+  expect(crop).toHaveAttribute("width", "32")
+  expect(crop).toHaveAttribute("height", "64")
+  expect(artwork).toHaveAttribute("width", "64")
+  expect(artwork).toHaveAttribute("clip-path", `url(#${clip?.id})`)
 })

@@ -16,6 +16,9 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Persona.visual_generation_recipes import (
+    build_persona_visual_recipe_generation_intent,
+)
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
     collect_visual_manifest_asset_ids,
 )
@@ -58,6 +61,14 @@ _BASIC_REACTION_STARTER_PACK_IDS = {
     "terminal-tile-basic",
 }
 _REQUIRED_BUDDY_STATES = {"idle", "listening", "thinking", "speaking", "error"}
+_NEW_STARTER_STATES = {
+    "study-desk-intermediate": set(),
+    "tool-helper-intermediate": {"tool.notes_search"},
+    "object-creature-intermediate": {"reaction.success"},
+    "lofi-study-intricate": {"tool.research"},
+    "action-guide-intricate": {"reaction.anticipation", "reaction.success"},
+    "elaborate-persona-intricate": {"mood.focused", "tool.media_import"},
+}
 _BASIC_PRODUCTION_GUIDANCE_EXPECTATIONS = {
     "search-lens-basic": {
         "identity": ("magnifying-glass", "teal-blue lens"),
@@ -192,7 +203,7 @@ def visual_storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     return root
 
 
-def test_starter_catalog_lists_bundled_packs_with_basic_tier_art_ready(
+def test_starter_catalog_lists_all_bundled_packs_as_art_ready(
     db_instance: CharactersRAGDB,
 ) -> None:
     service = PersonaVisualStarterCatalogService(db_instance)
@@ -208,14 +219,9 @@ def test_starter_catalog_lists_bundled_packs_with_basic_tier_art_ready(
     assert starter["asset_count"] >= 1
     assert starter["total_bytes"] > 0
     assert _REQUIRED_BUDDY_STATES.issubset(set(starter["states_offered"]))
-    basic_starters = [starter for starter in starters if starter["id"] in _BASIC_STARTER_PACK_IDS]
-    scaffold_starters = [starter for starter in starters if starter["production_status"] == "scaffold"]
-    assert {starter["production_status"] for starter in basic_starters} == {"art_ready"}
-    assert all("catalog:art-ready" in starter["tags"] for starter in basic_starters)
-    assert all("scaffold" not in starter["description"].lower() for starter in basic_starters)
-    assert {starter["production_status"] for starter in scaffold_starters} == {"scaffold"}
-    assert all("catalog:scaffold" in starter["tags"] for starter in scaffold_starters)
-    assert all("scaffold" in starter["description"].lower() for starter in scaffold_starters)
+    assert {starter["production_status"] for starter in starters} == {"art_ready"}
+    assert all("catalog:art-ready" in starter["tags"] for starter in starters)
+    assert all("scaffold" not in starter["description"].lower() for starter in starters)
     assert any("tier:intricate" in starter["tags"] for starter in starters)
     assert any("tool.notes_search" in starter["states_offered"] for starter in starters)
     assert {starter["complexity_tier"] for starter in starters} == {
@@ -273,14 +279,14 @@ def test_bundled_raster_starters_declare_explicit_resolvable_behavior() -> None:
         (
             "study-desk-intermediate",
             "intermediate",
-            "scaffold",
+            "art_ready",
             "static_talking_sheet",
             "required_state_loops",
         ),
         (
             "lofi-study-intricate",
             "intricate",
-            "scaffold",
+            "art_ready",
             "animation_atlas",
             "animation_atlas",
         ),
@@ -392,6 +398,18 @@ def test_default_starter_production_recipes_use_pipeline_taxonomy(
         assert animation_outputs <= BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
         assert animation_outputs <= expected_groups
         assert not (animation_outputs & BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS)
+
+
+def test_study_desk_recipe_accepts_custom_state_variants() -> None:
+    intent = build_persona_visual_recipe_generation_intent(
+        starter_pack_id="study-desk-intermediate",
+        recipe_output="custom_state_variants",
+        user_prompt="Draw a wave pose.",
+        request_id="study-desk-custom-variant",
+    )
+
+    assert intent is not None
+    assert intent.recipe_intent["recipe_output"] == "custom_state_variants"
 
 
 def test_list_starter_packs_rejects_static_source_animation_outputs(
@@ -617,7 +635,7 @@ def test_get_starter_pack_accepts_legacy_research_buddy_alias(
         ),
     ),
 )
-def test_multi_custom_state_scaffolds_use_distinct_variant_assets(
+def test_multi_custom_state_atlases_use_distinct_variant_regions(
     db_instance: CharactersRAGDB,
     starter_pack_id: str,
     custom_states: tuple[str, ...],
@@ -625,9 +643,82 @@ def test_multi_custom_state_scaffolds_use_distinct_variant_assets(
     service = PersonaVisualStarterCatalogService(db_instance)
 
     detail = service.get_starter_pack(starter_pack_id)
-    state_asset_ids = {_state_frame_asset_id(detail["manifest"], state) for state in custom_states}
+    manifest = detail["manifest"]
+    variants = [manifest["animations"][manifest["states"][state]["animation_id"]]["frames"] for state in custom_states]
+    assert {frame["region"]["y"] for frame in variants[0]}.isdisjoint(frame["region"]["y"] for frame in variants[1])
 
-    assert len(state_asset_ids) == len(custom_states)
+
+@pytest.mark.parametrize(("starter_id", "custom_states"), _NEW_STARTER_STATES.items())
+def test_authored_starter_loops_use_distinct_anchored_frames_and_activate(
+    db_instance: CharactersRAGDB, starter_id: str, custom_states: set[str]
+) -> None:
+    user_id = "art-reviewer"
+    persona_id = db_instance.create_persona_profile({"user_id": user_id, "name": "Artwork review"})
+    service = PersonaVisualStarterCatalogService(db_instance)
+    detail = service.get_starter_pack(starter_id)
+    manifest = detail["manifest"]
+    assert set(manifest["states"]) == _REQUIRED_BUDDY_STATES | custom_states
+    assert manifest["tldw/artwork"]["creator"] == "tldw-project"
+    assert manifest["tldw/artwork"]["license"] == detail["license_label"] == "AGPL-3.0-only"
+    assets = {}
+    for asset in detail["assets"]:
+        data, mime_type = service.get_starter_asset_content(starter_id, asset["asset_key"])
+        assert mime_type == "image/png"
+        with Image.open(BytesIO(data)) as image:
+            assert image.mode == "RGBA"
+            assets[asset["asset_key"]] = image.copy()
+
+    seen = set()
+    foot_edges = []
+    for state in manifest["states"].values():
+        loop = manifest["animations"][state["animation_id"]]
+        assert len(loop["frames"]) >= 2
+        cells = set()
+        for frame in loop["frames"]:
+            cell = assets[frame["asset_id"]]
+            if detail["complexity_tier"] == "intricate":
+                region = frame["region"]
+                x, y = region["x"], region["y"]
+                right, bottom = x + region["width"], y + region["height"]
+                assert 0 <= x < right <= cell.width
+                assert 0 <= y < bottom <= cell.height
+                cell = cell.crop((x, y, right, bottom))
+            assert cell.size == (128, 128)
+            alpha = cell.getchannel("A")
+            assert alpha.getextrema() == (0, 255)
+            threshold = alpha.point(lambda value: 255 if value >= 128 else 0)
+            opaque_bounds = threshold.getbbox()
+            assert opaque_bounds is not None
+            assert opaque_bounds[3] == 118
+            feet = threshold.crop((0, 108, 128, 118)).getbbox()
+            assert feet is not None
+            foot_edges.append((feet[0], feet[2]))
+            assert frame["duration_ms"] > 0
+            cells.add(cell.tobytes())
+        assert len(cells) == len(loop["frames"])
+        assert cells.isdisjoint(seen)
+        seen.update(cells)
+
+    left_edges, right_edges = zip(*foot_edges, strict=True)
+    assert max(left_edges) - min(left_edges) <= 2
+    assert max(right_edges) - min(right_edges) <= 2
+
+    copied = service.copy_starter_pack_to_persona(starter_pack_id=starter_id, persona_id=persona_id, user_id=user_id)
+    assert copied["status"] == "draft"
+    assert copied["active_at"] is None
+    visual_service = PersonaVisualService(db_instance)
+    review = visual_service.review_pack(
+        pack_id=copied["id"], user_id=user_id, reviewer_user_id=user_id, expected_version=copied["version"]
+    )
+    active = visual_service.activate_pack(
+        pack_id=copied["id"],
+        persona_id=persona_id,
+        user_id=user_id,
+        expected_version=copied["version"],
+        reviewed_fingerprint=review["fingerprint"],
+    )
+    assert active["status"] == "active"
+    assert set(active["manifest"]["states"]) == set(manifest["states"])
 
 
 def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
@@ -712,7 +803,7 @@ def test_copy_starter_pack_to_persona_creates_inactive_user_owned_draft(
 
 
 @pytest.mark.parametrize("starter_pack_id", DEFAULT_PERSONA_VISUAL_STARTER_PACK_IDS)
-def test_copy_every_default_scaffold_creates_inactive_user_owned_draft(
+def test_copy_every_bundled_starter_creates_inactive_user_owned_draft(
     db_instance: CharactersRAGDB,
     starter_pack_id: str,
 ) -> None:
@@ -748,6 +839,10 @@ def test_copy_every_default_scaffold_creates_inactive_user_owned_draft(
     frame_asset_ids = _manifest_frame_asset_ids(copied["manifest"])
     assert frame_asset_ids == referenced_asset_ids
     assert not (fixture_asset_keys & frame_asset_ids)
+    review = PersonaVisualService(db_instance).review_pack(
+        pack_id=copied["id"], user_id=user_id, reviewer_user_id=user_id, expected_version=copied["version"]
+    )
+    assert review["fingerprint"]
 
 
 def test_copy_legacy_research_buddy_alias_creates_default_draft(

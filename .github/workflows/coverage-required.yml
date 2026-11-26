@@ -133,7 +133,9 @@ jobs:
           needs.await_license.outputs.license_passed != 'true'
         )
       )
-    timeout-minutes: 30
+    # Setup and both suites share this budget. On #3605, the global floor passed
+    # twice before the 30-minute limit cancelled AuthNZ at 98% and 94%.
+    timeout-minutes: 40
     steps:
       - name: Require the license audit to have passed
         if: >-
