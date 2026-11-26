@@ -4,7 +4,7 @@
 **Date:** 2026-11-24
 **Backfilled from:** not backfilled
 **Decision owner:** Project maintainer and design review
-**Related task:** TASK-15646
+**Related task:** TASK-15670
 **Related spec/plan:** `Docs/Design/2026-11-24-outbound-destination-inventory-design.md`
 
 ## Decision

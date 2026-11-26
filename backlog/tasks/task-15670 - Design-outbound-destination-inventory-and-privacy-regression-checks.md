@@ -1,5 +1,5 @@
 ---
-id: TASK-15646
+id: TASK-15670
 title: Design outbound destination inventory and privacy regression checks
 status: Done
 labels:
@@ -35,6 +35,7 @@ Written-spec review findings addressed at the requester’s direction. Increment
 Verification for the revision: reviewed all five changes against the spec and ADR, checked Markdown links and placeholders, and passed Backlog canonical-format and Git whitespace checks. No runtime code changed.
 Requester approved the revised written spec on 2026-11-24 and requested the Increment 1 implementation plan. No runtime implementation was included in the design task.
 Renumbered during the PR #3612 CI follow-up because dev already uses the original ID.
+Renumbered after the backend change detector found that dev assigned the previous ID to the desktop chat sidebar task.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

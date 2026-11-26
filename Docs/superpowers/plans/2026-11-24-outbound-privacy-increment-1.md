@@ -10,7 +10,7 @@
 
 **Spec:** [Outbound destination inventory and privacy regression checks](../../Design/2026-11-24-outbound-destination-inventory-design.md), Increment 1.
 
-**Backlog:** TASK-15647, dependent on TASK-15646. The earlier stage commits predate the renumbering.
+**Backlog:** TASK-15647, dependent on TASK-15670. The earlier stage commits predate the renumbering.
 
 **ADR check:** Required. [Proposed ADR-097](../../ADR/097-reviewed-outbound-destinations-and-privacy-modes.md) covers the reviewed inventory and required checks. [ADR-026](../../ADR/026-security-outbound-egress-and-ssrf-policy.md) governs existing URL safety. Fit the gate into the existing license-admitted contexts and preserve compatibility with the CI tiers in [proposed ADR-096](../../ADR/096-tiered-development-and-release-ci.md).
 

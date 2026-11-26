@@ -7,7 +7,7 @@ labels:
 - privacy
 - ci
 dependencies:
-- TASK-15646
+- TASK-15670
 references:
 - Docs/Design/2026-11-24-outbound-destination-inventory-design.md
 - Docs/superpowers/plans/2026-11-24-outbound-privacy-increment-1.md
@@ -54,6 +54,7 @@ PR #3612 follow-up authorized to address the two test-quality observations. Keep
 The full test-quality enforcement command reproduced the two GitHub findings before edits. Rejected container inspection now checks that a prior report was removed while preserving Docker call order. The OmniVoice test now checks real preparation of a missing checkout parent while preserving all reviewed Git and pip arguments. Both independent assertions caught their deliberate local failures. All 58 affected pytest cases passed. Test-quality enforcement passed over 5,543 files with both new offenses gone. Bandit found no new issues, Ruff had the same two existing findings, and whitespace checks passed. GitHub required verification is pending.
 PR #3612 backend-gate follow-up authorized. Reproduced the 20 non-UTC order cases and both provider catalog ratchets before edits. Restore the non-UTC guard immediately after change detection, extract the existing catalog endpoint policy evaluation, and patch DNS resolution at its defining module. ADR required: no. These fixes preserve the existing guard semantics and ADR-026 and ADR-097 boundaries.
 Backend gate verification: all 317 workflow contracts and 63 provider-readiness tests passed. The full CI contracts and code ratchets step passed with 1,719 cases and two skips in its first command, then 198 passing WebSocket auth cases. The catalog listing is 652 lines and both provider ceilings are unchanged. All 496 backend unit smoke cases passed. Startup liveness passed in a loopback-only sandbox, OpenAPI fingerprint and path checks matched, and test-quality enforcement passed over 5,543 files. Actionlint, whitespace checks, and Bandit and Ruff baseline comparisons passed. Hosted exact-head verification is pending.
+GitHub change detection on 334c35806d stopped before backend tests because dev reused the design task ID. The design task now uses TASK-15670, and its dependency and documentation references follow it.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
