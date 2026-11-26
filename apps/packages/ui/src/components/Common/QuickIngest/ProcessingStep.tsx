@@ -46,6 +46,9 @@ const TERMINAL_STATUSES = new Set<ItemProgressStatus>([
   "cancelled",
 ])
 
+const isActiveStatus = (status: ItemProgressStatus) =>
+  status !== "unknown" && status !== "queued" && !TERMINAL_STATUSES.has(status)
+
 type FailedProcessingItem = {
   id: string
   label: string
@@ -83,23 +86,19 @@ const formatEstimated = (seconds: number): string => {
 // ---------------------------------------------------------------------------
 
 type ItemRowProps = {
+  oneScreen?: boolean
   item: WizardQueueItem
   progress: ItemProgress
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
   onCancel?: (id: string) => Promise<boolean>
 }
 
-const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
+const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel, oneScreen }) => {
   const [cancelState, setCancelState] = useState<"idle" | "pending" | "failed">("idle")
   const IconComponent = TYPE_ICON_MAP[item.detectedType] || File
-  const displayName = item.fileName || item.url || item.id
+  const displayName = (oneScreen && (item.conferenceOverride?.title || item.playlist?.sourceTitle)) || item.fileName || item.url || item.id
   const isTerminal = TERMINAL_STATUSES.has(progress.status)
-  const isActive =
-    progress.status !== "unknown" &&
-    progress.status !== "queued" &&
-    progress.status !== "complete" &&
-    progress.status !== "failed" &&
-    progress.status !== "cancelled"
+  const isActive = isActiveStatus(progress.status)
 
   const statusLabel = useMemo(() => {
     switch (progress.status) {
@@ -164,7 +163,7 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         {/* Name + status line */}
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium text-text" title={displayName}>
+          <span className={`${oneScreen ? "min-w-0 break-words [overflow-wrap:anywhere]" : "truncate"} text-sm font-medium text-text`} title={displayName}>
             {displayName}
           </span>
           <div className="flex items-center gap-2 text-xs">
@@ -194,7 +193,7 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
           </div>
         </div>
 
-        {!isTerminal && progress.currentStage && (
+        {!isTerminal && progress.currentStage && (!oneScreen || progress.currentStage.trim().toLowerCase() !== statusLabel.toLowerCase()) && (
           <p className="break-words text-xs text-text-muted" aria-live="polite">
             {progress.currentStage}
           </p>
@@ -300,7 +299,8 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
     if (!tracking) return null
 
     const plannedCount = tracking.plannedItemIds?.length ?? 0
-    const jobCount = tracking.jobIds?.length ?? 0
+    const jobIds = tracking.jobIds ?? []
+    const jobCount = jobIds.length
     const batchCount = tracking.batchIds?.length ?? (tracking.batchId ? 1 : 0)
     const hasAnyTracking =
       Boolean(tracking.collectionId) ||
@@ -337,7 +337,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
     }
     if (jobCount > 0) {
       details.push(
-        jobCount === 1
+        oneScreen ? qi("web.trackedJobs", "Job IDs: {{ids}}", { ids: jobIds.join(", ") }) : jobCount === 1
           ? qi("processing.tracking.jobOne", "1 job")
           : qi("processing.tracking.jobMany", "{{count}} jobs", {
               count: jobCount,
@@ -354,7 +354,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
     }
 
     return { modeLabel, details }
-  }, [qi, tracking])
+  }, [oneScreen, qi, tracking])
 
   const failedItems = useMemo<FailedProcessingItem[]>(() => {
     return processingState.perItemProgress
@@ -404,6 +404,9 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
   const totalCount = processingState.perItemProgress.length
   const finishedPercent =
     totalCount > 0 ? Math.round((finishedCount / totalCount) * 100) : 0
+  const progressRows = useMemo(() => oneScreen
+    ? [...processingState.perItemProgress].sort((a, b) => Number(isActiveStatus(b.status)) - Number(isActiveStatus(a.status)))
+    : processingState.perItemProgress, [oneScreen, processingState.perItemProgress])
 
   const handleCancelAll = useCallback(() => {
     if (onCancelAll) {
@@ -477,11 +480,37 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
     }
   }, [failedItems, qi])
 
+  const TrackingPanel = oneScreen ? "details" : "div"
+  const trackingPanel = trackingSummary && (
+    <TrackingPanel className="rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text-muted"
+      data-testid="quick-ingest-run-tracking" role={oneScreen ? undefined : "status"}>
+      {oneScreen && <summary className="min-h-11 cursor-pointer content-center rounded text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus">{qi("processing.trackingDetails", "Tracking details")}</summary>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-text">{trackingSummary.modeLabel}</span>
+        {trackingSummary.details.map(detail => <span key={detail} className="break-words rounded border border-border bg-surface px-2 py-0.5">{detail}</span>)}
+      </div>
+    </TrackingPanel>
+  )
+
   return (
     <>
     <div className={oneScreen ? "qi-web-scroll flex flex-col gap-4" : "flex flex-col gap-4 p-4"}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      {oneScreen ? <header>
+        <h2 className="text-xl font-semibold text-text" aria-live="polite">
+          {totalCount ? qi("processing.sourcesFinished", "{{done}} of {{total}} finished", { done: finishedCount, total: totalCount })
+            : qi("processing.waitingForStatus", "Waiting for source status")}
+        </h2>
+        <p className="mt-1 flex flex-wrap gap-x-3 text-sm text-text-muted">
+          {counts.processing > 0 && <span>{qi("processing.activeCount", "{{count}} active", { count: counts.processing })}</span>}
+          {counts.queued > 0 && <span>{qi("processing.queuedCount", "{{count}} queued", { count: counts.queued })}</span>}
+          {counts.failed > 0 && <span>{qi("web.resultFailed", "{{count}} failed", { count: counts.failed })}</span>}
+          {counts.cancelled > 0 && <span>{qi("web.resultCancelled", "{{count}} cancelled", { count: counts.cancelled })}</span>}
+          {counts.unknown > 0 && <span>{qi("widget.unknownCount", "{{count}} awaiting status", { count: counts.unknown })}</span>}
+          <span className="tabular-nums">{qi("processing.elapsed", "Elapsed")}: {formatTime(processingState.elapsed)}</span>
+          {processingState.estimatedRemaining > 0 && <span>{qi("processing.estRemaining", "Est. remaining")}: ~{formatTime(processingState.estimatedRemaining)}</span>}
+        </p>
+      </header> : <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-text">
           {qi("processing.title", "Processing")}
         </h3>
@@ -494,7 +523,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
             })}
           </span>
         )}
-      </div>
+      </div>}
 
       {/* Confirmed finished-item count */}
       <div
@@ -518,28 +547,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
       </div>
 
       {/* Durable run tracking */}
-      {trackingSummary && (
-        <div
-          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text-muted"
-          data-testid="quick-ingest-run-tracking"
-          role="status"
-          aria-live="polite"
-        >
-          <span className="font-medium text-text">{trackingSummary.modeLabel}</span>
-          {trackingSummary.details.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              {trackingSummary.details.map((detail) => (
-                <span
-                  key={detail}
-                  className="rounded border border-border bg-surface px-2 py-0.5"
-                >
-                  {detail}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {!oneScreen && trackingPanel}
 
       {processingState.bulkStop === "requested" && (
         <p role="status" className="text-sm text-text">
@@ -558,7 +566,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
       )}
 
       {/* Descriptive processing banner */}
-      {processingState.status === "running" && counts.processing > 0 && (
+      {!oneScreen && processingState.status === "running" && counts.processing > 0 && (
         <div
           className="flex items-start gap-2.5 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5"
           role="status"
@@ -608,13 +616,14 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
 
       {/* Item list */}
       <div className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto" role="list">
-        {processingState.perItemProgress.map((progress) => {
+        {progressRows.map((progress) => {
           const queueItem = queueItemMap.get(progress.id)
           if (!queueItem) return null
 
           return (
             <div key={progress.id} role="listitem">
               <ItemRow
+                oneScreen={oneScreen}
                 item={queueItem}
                 progress={progress}
                 qi={qi}
@@ -626,7 +635,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
       </div>
 
       {/* Summary bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-surface2 px-3 py-2 text-xs text-text-muted">
+      {oneScreen ? trackingPanel : <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-surface2 px-3 py-2 text-xs text-text-muted">
         <div className="flex flex-wrap items-center gap-3">
           <span>
             {qi("processing.completed", "Completed")}: {counts.completed}
@@ -668,7 +677,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = fals
             </>
           )}
         </div>
-      </div>
+      </div>}
 
       {failedItems.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-danger/20 bg-danger/5 px-3 py-2 text-xs">

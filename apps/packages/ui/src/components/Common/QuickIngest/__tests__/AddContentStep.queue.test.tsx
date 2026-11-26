@@ -21,9 +21,10 @@ vi.mock("react-i18next", async () => {
   return { useTranslation: () => ({ t: i18n.t }) };
 });
 vi.mock("@/hooks/useServerCapabilities", () => ({
-  useServerCapabilities: () => ({ capabilities: {} }),
+  useServerCapabilities: () => ({ capabilities: { hasMediaPlaylistPreflight: true } }),
 }));
-vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {} }));
+const { preflightPlaylist } = vi.hoisted(() => ({ preflightPlaylist: vi.fn() }));
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { preflightPlaylist } }));
 
 function QueueProbe() {
   const { state, skipToProcessing } = useIngestWizard();
@@ -67,6 +68,57 @@ const mountOneScreen = (processingItems?: WizardQueueItem[]) => render(
 );
 
 describe("one-screen source queue", () => {
+  it.each([true, false])("adds companion links once alongside the preview, selected=%s", async (selected) => {
+    const playlist = "https://www.youtube.com/playlist?list=PLone";
+    const secondPlaylist = "https://www.youtube.com/playlist?list=PLtwo";
+    const talk = "https://www.youtube.com/watch?v=talk";
+    const link = "https://example.org/notes";
+    preflightPlaylist.mockResolvedValue({
+      playlistTitle: "Test playlist", itemCount: 1, duplicateCount: 0,
+      items: [{ ordinal: 1, sourceUrl: talk, title: "Talk", selected: true, duplicateStatus: "new" }],
+    });
+    mountOneScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Links" }));
+    const input = screen.getByRole("textbox", { name: "URL input area" });
+    fireEvent.change(input, { target: { value: [link, playlist, secondPlaylist].join("\n") } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const checkbox = await screen.findByRole("checkbox", { name: "Select Talk" });
+    if (!selected) fireEvent.click(checkbox);
+    expect(screen.queryByRole("button", { name: "Add URLs to queue" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: selected ? "Add 1 selected and 1 other link" : "Add 1 other link" }));
+    expect(JSON.parse(screen.getByTestId("urls").textContent!)).toEqual(selected ? [link, talk] : [link]);
+    expect(input).toHaveValue(secondPlaylist);
+    expect(screen.getByRole("button", { name: "Preview" })).toBeVisible();
+  });
+
+  it("describes each duplicate policy and counts only selected playlist rows", async () => {
+    preflightPlaylist.mockResolvedValue({
+      playlistTitle: "Test playlist", itemCount: 1, duplicateCount: 1,
+      items: [{ ordinal: 1, sourceUrl: "https://www.youtube.com/watch?v=existing",
+        title: "Existing talk", selected: false, duplicateStatus: "duplicate_existing" }],
+    });
+    mountOneScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Links" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "URL input area" }), { target: { value: "https://www.youtube.com/playlist?list=PLexisting" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByText("1 duplicate")).toBeVisible();
+    expect(screen.getByText("1 item")).toBeVisible();
+    expect(screen.getByText("Already in Media")).toBeVisible();
+    expect(screen.getByText(/Duplicates are left out/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add 0 selected" })).toBeDisabled();
+    for (const [choice, outcome] of [
+      ["Overwrite", /replace matching Media/],
+      ["Update metadata only", /update collection metadata/],
+      ["Include existing", /include existing items in the collection/i],
+    ] as const) {
+      fireEvent.click(screen.getByRole("radio", { name: choice }));
+      expect(screen.getByText(outcome)).toBeVisible();
+      expect(screen.getByRole("button", { name: "Add 1 selected" })).toBeEnabled();
+    }
+    fireEvent.click(screen.getByRole("radio", { name: "Skip duplicates" }));
+    expect(screen.getByRole("button", { name: "Add 0 selected" })).toBeDisabled();
+  });
+
   it("undoes Clear all in the original order and keeps sources added since clearing", () => {
     mountOneScreen();
     fireEvent.click(screen.getByRole("button", { name: "Links" }));

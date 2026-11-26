@@ -46,7 +46,7 @@ for (const [device, width, height] of [['desktop', 1280, 800], ['mobile', 390, 8
     await links.fill('https://www.youtube.com/playlist?list=PLfieldnotes');
     await dialog.getByRole('button', { name: 'Preview', exact: true }).click();
     await dialog.getByRole('radio', { name: 'Overwrite', exact: true }).check();
-    await dialog.getByRole('button', { name: 'Add 2', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Add 2 selected', exact: true }).click();
     await useQuickPreset(dialog);
     await dialog.getByRole('button', { name: 'Hide settings', exact: true }).click();
     await links.fill('https://example.org/interview-index');

@@ -7568,6 +7568,51 @@
   "quickIngest_widget_unknownCount": {
     "message": "{{count}} awaiting status"
   },
+  "quickIngest_playlistPreview_items": {
+    "message": "{count, plural, one {# item} other {# items}}"
+  },
+  "quickIngest_playlistPreview_add": {
+    "message": "Add {{count}} selected"
+  },
+  "quickIngest_playlistPreview_addWithLinks": {
+    "message": "Add {selected} selected and {count, plural, one {# other link} other {# other links}}"
+  },
+  "quickIngest_playlistPreview_addLinks": {
+    "message": "Add {count, plural, one {# other link} other {# other links}}"
+  },
+  "quickIngest_playlistPreview_skipHelp": {
+    "message": "Duplicates are left out of the import."
+  },
+  "quickIngest_playlistPreview_overwriteHelp": {
+    "message": "Selected duplicates can replace matching Media when saved."
+  },
+  "quickIngest_playlistPreview_metadataHelp": {
+    "message": "Selected duplicates update collection metadata where supported."
+  },
+  "quickIngest_playlistPreview_includeHelp": {
+    "message": "Include existing items in the collection without processing them again."
+  },
+  "quickIngest_playlistPreview_inMedia": {
+    "message": "Already in Media"
+  },
+  "quickIngest_playlistPreview_repeated": {
+    "message": "Repeated in playlist"
+  },
+  "quickIngest_processing_sourcesFinished": {
+    "message": "{{done}} of {{total}} finished"
+  },
+  "quickIngest_processing_waitingForStatus": {
+    "message": "Waiting for source status"
+  },
+  "quickIngest_processing_activeCount": {
+    "message": "{{count}} active"
+  },
+  "quickIngest_processing_queuedCount": {
+    "message": "{{count}} queued"
+  },
+  "quickIngest_processing_trackingDetails": {
+    "message": "Tracking details"
+  },
   "quickIngest_processing_stopRequested": {
     "message": "Stop requested. Waiting for the server to confirm each outcome."
   },

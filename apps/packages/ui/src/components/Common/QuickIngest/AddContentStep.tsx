@@ -40,6 +40,7 @@ import {
   getEligibleQueueItems,
   getQueueItemExclusionReason,
   isValidQueueUrl,
+  parseQueueUrls,
   restoreQueueFile,
   validateQueueItem
 } from "./queue-items"
@@ -293,18 +294,16 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     setPastedTextInput("")
   }, [pastedTextInput, queueItems, clearedItems, setQueueItems])
 
-  const playlistCandidateUrls = useMemo(
-    () =>
-      urlInput
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .filter(detectPlaylistPreflightCandidate),
-    [urlInput]
-  )
+  const pastedUrls = useMemo(() => oneScreen
+    ? parseQueueUrls(urlInput)
+    : urlInput.split("\n").map(url => url.trim()).filter(Boolean), [oneScreen, urlInput])
+  const playlistCandidateUrls = pastedUrls.filter(detectPlaylistPreflightCandidate)
   const primaryPlaylistCandidateUrl = playlistCandidateUrls[0] || ""
   const shouldOfferPlaylistPreflight =
     Boolean(capabilities?.hasMediaPlaylistPreflight) && Boolean(primaryPlaylistCandidateUrl)
+  const currentPreview = playlistPreflightUrl === primaryPlaylistCandidateUrl ? playlistPreflight : null
+  const webPlaylistPreview = oneScreen && shouldOfferPlaylistPreflight && Boolean(currentPreview)
+  const otherLinks = webPlaylistPreview ? pastedUrls.filter(url => !detectPlaylistPreflightCandidate(url)) : []
 
   const handlePreviewPlaylist = useCallback(async () => {
     if (!primaryPlaylistCandidateUrl) return
@@ -359,7 +358,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     void handlePreviewPlaylist()
   }, [handlePreviewPlaylist, primaryPlaylistCandidateUrl, shouldOfferPlaylistPreflight])
 
-  const handleAddPreflightItems = useCallback(() => {
+  const handleAddPreflightItems = () => {
     if (!playlistPreflight) return
     const newItems: WizardQueueItem[] = []
     const selectedItems = playlistPreflight.items.filter(
@@ -392,9 +391,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       item.validation = validateQueueItem(item)
       newItems.push(item)
     }
+    if (webPlaylistPreview) {
+      // Expand this playlist in place; leave other playlists available to preview.
+      const precedingLinks = pastedUrls.indexOf(playlistPreflightUrl)
+      newItems.unshift(...createUrlQueueItems(otherLinks.slice(0, precedingLinks).join("\n")))
+      newItems.push(...createUrlQueueItems(otherLinks.slice(precedingLinks).join("\n")))
+    }
     if (newItems.length === 0) return
     setQueueItems([...queueItems, ...newItems])
-    setConferenceBatchMetadata({
+    if (selectedItems.length) setConferenceBatchMetadata({
       collectionName:
         conferenceBatchMetadata?.collectionName ||
         playlistPreflight.playlistTitle ||
@@ -406,26 +411,13 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       sourcePlaylistUrl:
         conferenceBatchMetadata?.sourcePlaylistUrl || playlistPreflightUrl,
     })
-    setUrlInput((current) =>
-      current
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line && line !== playlistPreflightUrl)
-        .join("\n")
-    )
+    const remainingUrls = webPlaylistPreview ? playlistCandidateUrls : pastedUrls
+    setUrlInput(remainingUrls.filter(url => url !== playlistPreflightUrl).join("\n"))
     setPlaylistPreflight(null)
     setPlaylistPreflightUrl("")
     setDuplicatePolicy("skip")
     setPlaylistPreflightError(null)
-  }, [
-    conferenceBatchMetadata,
-    duplicatePolicy,
-    playlistPreflight,
-    playlistPreflightUrl,
-    queueItems,
-    setConferenceBatchMetadata,
-    setQueueItems,
-  ])
+  }
 
   const handlePreflightItemSelectionChange = useCallback(
     (ordinal: number, selected: boolean) => {
@@ -691,7 +683,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
               aria-label={qi("urlsInputAria", "URL input area")}
               className="flex-1"
             />
-            <Button
+            {!webPlaylistPreview && <Button
               type={oneScreen ? "default" : "primary"}
               onClick={handleAddUrls}
               disabled={!urlInput.trim()}
@@ -700,7 +692,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             >
               <Plus className="mr-1 h-4 w-4" />
               {oneScreen ? qi("source.addLinks", "Add links") : qi("addUrls", "Add")}
-            </Button>
+            </Button>}
           </div>
         </div>}
 
@@ -709,11 +701,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             candidateUrl={primaryPlaylistCandidateUrl}
             loading={playlistPreflightLoading}
             error={playlistPreflightError}
-            result={
-              playlistPreflightUrl === primaryPlaylistCandidateUrl
-                ? playlistPreflight
-                : null
-            }
+            result={currentPreview}
+            webPreview={oneScreen ? { otherLinks: otherLinks.length, qi } : undefined}
             onPreview={handlePreviewPlaylist}
             onAddItems={handleAddPreflightItems}
             onItemSelectionChange={handlePreflightItemSelectionChange}

@@ -1480,7 +1480,24 @@
       "activeWithFailures": "{{active}} active · {{failed}} failed",
       "unknownCount": "{{count}} awaiting status"
     },
+    "playlistPreview": {
+      "items": "{count, plural, one {# item} other {# items}}",
+      "add": "Add {{count}} selected",
+      "addWithLinks": "Add {selected} selected and {count, plural, one {# other link} other {# other links}}",
+      "addLinks": "Add {count, plural, one {# other link} other {# other links}}",
+      "skipHelp": "Duplicates are left out of the import.",
+      "overwriteHelp": "Selected duplicates can replace matching Media when saved.",
+      "metadataHelp": "Selected duplicates update collection metadata where supported.",
+      "includeHelp": "Include existing items in the collection without processing them again.",
+      "inMedia": "Already in Media",
+      "repeated": "Repeated in playlist"
+    },
     "processing": {
+      "sourcesFinished": "{{done}} of {{total}} finished",
+      "waitingForStatus": "Waiting for source status",
+      "activeCount": "{{count}} active",
+      "queuedCount": "{{count}} queued",
+      "trackingDetails": "Tracking details",
       "stopRequested": "Stop requested. Waiting for the server to confirm each outcome.",
       "stopUnconfirmed": "Could not confirm the stop for all sources. You can try again while Quick Ingest checks their status.",
       "status": {

@@ -1186,6 +1186,37 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(screen.getByRole("progressbar", { name: "Finished items" })).toHaveAttribute("aria-valuenow", "0")
   })
 
+  it("leads WebUI progress with confirmed counts and the active source, with tracking on demand", async () => {
+    useQuickIngestSessionStore.getState().createDraftSession({
+      lifecycle: "processing", tracking: { mode: "webui-direct", jobIds: [77, 78], startedAt: 1 },
+    })
+    render(<IngestWizardProvider initialState={{
+      currentStep: 4, queueItems: ["done", "current", "later"].map(id => ({
+        id, fileName: id + ".txt", detectedType: "document", icon: "File", fileSize: 4, validation: { valid: true },
+      })),
+      processingState: { status: "running", elapsed: 360, estimatedRemaining: 0, bulkStop: "unconfirmed",
+        perItemProgress: [
+          { id: "done", status: "complete", currentStage: "Complete", progressPercent: 100, estimatedRemaining: 0 },
+          { id: "current", status: "processing", currentStage: "Extracting words", progressPercent: 40, estimatedRemaining: 0 },
+          { id: "later", status: "queued", currentStage: "Queued", progressPercent: 0, estimatedRemaining: 0 },
+        ] },
+    }}><ProcessingStep oneScreen jobStatusUnavailable /></IngestWizardProvider>)
+    expect(screen.getByRole("heading", { name: "1 of 3 finished" })).toBeVisible()
+    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("current.txt")
+    expect(screen.getAllByText("Extracting words")).toHaveLength(1)
+    expect(screen.getAllByText("Queued", { exact: true })).toHaveLength(1)
+    expect(screen.getAllByText(/Elapsed: 6:00/)).toHaveLength(1)
+    expect(screen.queryByText("Waiting for server results")).toBeNull()
+    expect(screen.getByText(/still waiting for server results/i)).toBeVisible()
+    expect(screen.getByText(/server job status is unavailable/i)).toBeVisible()
+    expect(screen.getByText(/could not confirm the stop/i)).toBeVisible()
+    const disclosure = screen.getByText("Tracking details")
+    expect(disclosure.tagName).toBe("SUMMARY")
+    expect(screen.getByText("Job IDs: 77, 78")).not.toBeVisible()
+    fireEvent.click(disclosure)
+    expect(screen.getByText("Job IDs: 77, 78")).toBeVisible()
+  })
+
   it("Step 2 -> Step 3 — clicking Next advances to review summary", async () => {
     const user = userEvent.setup()
     render(<WizardTestHarness onClose={onClose} />)
