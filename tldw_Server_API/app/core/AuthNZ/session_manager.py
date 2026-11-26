@@ -63,7 +63,10 @@ from tldw_Server_API.app.core.AuthNZ.repos.token_blacklist_repo import AuthnzTok
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
-from tldw_Server_API.app.core.AuthNZ.sign_in_alert import SIGN_IN_ALERT_NONCRITICAL_EXCEPTIONS, schedule_new_sign_in_alert
+from tldw_Server_API.app.core.AuthNZ.sign_in_alert import (
+    SIGN_IN_ALERT_NONCRITICAL_EXCEPTIONS,
+    schedule_new_sign_in_alert,
+)
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
