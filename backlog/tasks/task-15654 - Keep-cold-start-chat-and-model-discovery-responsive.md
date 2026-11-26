@@ -8,6 +8,7 @@ labels:
 - api
 references:
 - https://github.com/rmusser01/tldw_server/issues/3135
+- https://github.com/rmusser01/tldw_server/pull/3632
 - Docs/ADR/069-frontend-api-contract-package.md
 - Docs/ADR/025-llm-provider-adapter-routing-and-overrides.md
 ---
