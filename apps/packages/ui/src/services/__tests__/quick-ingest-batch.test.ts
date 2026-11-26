@@ -227,7 +227,7 @@ describe("submitQuickIngestBatch", () => {
 
     expect(mocks.bgUpload.mock.calls[0][0].abortSignal.aborted).toBe(true)
     expect(owner.signal.aborted).toBe(false)
-    expect(await run).toEqual({ ok: true, results: [] })
+    expect(await run).toMatchObject({ ok: true, interruptedItemIds: ["first"], results: [expect.objectContaining({ id: "next", outcome: "cancelled", error: "Stopped before submission." })] })
     expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
     expect(mocks.bgRequest).not.toHaveBeenCalled()
   })
@@ -1286,15 +1286,17 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
-  it("releases a slow accepted-job monitor when cancelling the direct session", async () => {
+  it.each([true, false])("keeps monitoring after a bulk stop acknowledgement (success=%s) until the job confirms its outcome", async (success) => {
     vi.useFakeTimers()
     const owner = new AbortController()
     try {
       const startedAt = Date.now()
       const sessionId = "qi-direct-long-cancel"
       mocks.bgUpload.mockResolvedValue({ batch_id: "long-cancel", jobs: [{ id: 70 }] })
+      let finished = false
       mocks.bgRequest.mockImplementation(({ method }) => {
-        if (method === "POST") return { ok: true, data: { success: true } }
+        if (method === "POST") return { ok: true, data: { success, failed: success ? 0 : 1 } }
+        if (finished) return { ok: true, data: { status: "completed", result: { media_id: 70 } } }
         vi.setSystemTime(startedAt + 6 * 60_000)
         return { ok: true, data: { status: "queued" } }
       })
@@ -1311,12 +1313,12 @@ describe("submitQuickIngestBatch", () => {
       await vi.advanceTimersByTimeAsync(0)
       expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
 
-      await cancelQuickIngestSession({ sessionId, signal: owner.signal })
+      expect(await cancelQuickIngestSession({ sessionId, signal: owner.signal })).toEqual({ ok: success })
       await vi.advanceTimersByTimeAsync(0)
-      expect(owner.signal.aborted).toBe(false)
-      expect(settled).toHaveBeenCalledWith(expect.objectContaining({
-        results: [expect.objectContaining({ id: "pdf", outcome: "cancelled" })],
-      }))
+      expect(settled).not.toHaveBeenCalled()
+      finished = true
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect((await run).results).toEqual([expect.objectContaining({ id: "pdf", status: "ok", mediaId: 70 })])
     } finally {
       owner.abort()
       vi.useRealTimers()
@@ -1334,7 +1336,7 @@ describe("submitQuickIngestBatch", () => {
       if (path.includes("/api/v1/media/ingest/jobs/cancel?batch_id=batch-stop-1")) {
         return { ok: true, data: { success: true } }
       }
-      return { ok: false, error: "unexpected path" }
+      return { ok: true, data: { status: "cancelled" } }
     })
 
     const runPromise = submitQuickIngestBatch({
@@ -1371,7 +1373,7 @@ describe("submitQuickIngestBatch", () => {
     expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
       path: "/api/v1/media/ingest/jobs/cancel?batch_id=batch-stop-1&reason=user_cancelled",
     }))
-    expect(runResult.results?.map((item) => item.id)).not.toContain("entry-stop-2")
+    expect(runResult.results).toContainEqual(expect.objectContaining({ id: "entry-stop-2", outcome: "cancelled", error: "Stopped before submission." }))
   })
 
   it("uses extension message transport when extension runtime is available", async () => {
@@ -1498,7 +1500,9 @@ describe("submitQuickIngestBatch", () => {
         overwrite_existing: false
       },
       advancedValues: {
-        custom_headers: '{"x-test":"1"}'
+        custom_headers: '{"x-test":"1"}',
+        mode: "persist",
+        include_extracted_content: false,
       }
     })
 
@@ -1507,6 +1511,8 @@ describe("submitQuickIngestBatch", () => {
         path: "/api/v1/media/process-web-scraping",
         method: "POST",
         body: expect.objectContaining({
+          mode: "ephemeral",
+          include_extracted_content: true,
           url_input: "https://example.com/page",
           scrape_method: "Individual URLs"
         })
@@ -2523,8 +2529,83 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it("marks preplanned collection rows stopped before submission while an in-flight request completes", async () => {
+    const sessionId = "qi-direct-planned-stop"
+    const entries = ["first", "next"].map(id => ({ id, url: `https://example.com/${id}.pdf`, type: "pdf" as const }))
+    let itemId = 10
+    let accept!: (data: unknown) => void
+    mocks.bgUpload.mockImplementationOnce(() => new Promise(resolve => { accept = resolve }))
+    mocks.bgRequest.mockImplementation(({ path, method, body }) => {
+      if (path === "/api/v1/media/collections") return { id: 7, name: "Talks", kind: "conference", items: [] }
+      if (path === "/api/v1/media/collections/7/items") return {
+        ...body, id: ++itemId, collection_id: 7, status: "planned", idempotency_key: `planned-${itemId}`,
+      }
+      if (method === "PATCH") return body
+      return method === "POST" ? { ok: true, data: { success: false } }
+        : { ok: true, data: { status: "completed", result: { media_id: 51 } } }
+    })
+    const run = submitQuickIngestBatch({ entries, files: [], storeRemote: true, processOnly: false,
+      conferenceBatchMetadata: { collectionName: "Talks", sharedTags: [] }, __quickIngestSessionId: sessionId })
+    await vi.waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(1))
+    await cancelQuickIngestSession({ sessionId })
+    accept({ batch_id: "planned-batch", jobs: [{ id: 51 }] })
+    expect((await run).results).toMatchObject([
+      { id: "first", status: "ok", mediaId: 51 },
+      { id: "next", outcome: "cancelled", collectionItemId: 12, idempotencyKey: "planned-12" },
+    ])
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/media/collections/7/items/12", method: "PATCH",
+      body: expect.objectContaining({ status: "cancelled", error_summary: "Stopped before submission." }),
+    }))
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not submit a fallback when an in-flight URL job submission rejects after stopping", async () => {
+    let rejectUpload!: (error: Error) => void
+    mocks.bgUpload.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectUpload = reject }))
+    mocks.bgUpload.mockResolvedValue({ results: [{ status: "Success", media_id: 999 }] })
+    const sessionId = "qi-direct-stop-fallback"
+    const run = submitQuickIngestBatch({
+      entries: [{ id: "late", url: "https://example.com/book.pdf", type: "pdf" }],
+      files: [], storeRemote: true, processOnly: false, __quickIngestSessionId: sessionId,
+    })
+    await vi.waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(1))
+    await cancelQuickIngestSession({ sessionId })
+    rejectUpload(Object.assign(new Error("Concurrent job limit reached"), { status: 429 }))
+    expect((await run).results).toMatchObject([{ id: "late", outcome: "submit_failed" }])
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+  })
+
+  it("publishes a late URL job id before its stop response and retains the eventual completion", async () => {
+    let acceptUpload!: (data: unknown) => void
+    mocks.bgUpload.mockImplementation(() => new Promise(resolve => { acceptUpload = resolve }))
+    let rejectStop!: (response: unknown) => void
+    const onTrackingMetadata = vi.fn()
+    mocks.bgRequest.mockImplementation(({ method }) => method === "POST"
+      ? new Promise(resolve => { rejectStop = resolve })
+      : { ok: true, data: { status: "completed", result: { media_id: 61 } } })
+    const sessionId = "qi-direct-late-ack"
+    const run = submitQuickIngestBatch({
+      entries: [{ id: "late", url: "https://example.com/book.pdf", type: "pdf" }],
+      files: [], onTrackingMetadata, storeRemote: true, processOnly: false, __quickIngestSessionId: sessionId,
+    })
+    await vi.waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(1))
+    await cancelQuickIngestSession({ sessionId })
+    acceptUpload({ batch_id: "late-ack", jobs: [{ id: 61 }] })
+    await vi.waitFor(() => expect(onTrackingMetadata).toHaveBeenCalledWith(expect.objectContaining({ jobIds: [61] })))
+    rejectStop({ ok: false, status: 503 })
+    expect((await run).results).toMatchObject([{ id: "late", status: "ok", mediaId: 61 }])
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ method: "POST", path: expect.stringContaining("batch_id=late-ack") }))
+  })
+
+  it.each([{ ok: false, status: 503 }, { ok: true, data: { success: false, failed: 1 } }, { ok: true }])("reports rejected, partial or malformed cancellation responses", async (response) => {
+    mocks.bgRequest.mockResolvedValue(response)
+    await expect(cancelQuickIngestSession({ sessionId: "qi-direct-restore", batchIds: ["batch-a"] })).resolves.toEqual({ ok: false })
+  })
+
   it("cancels direct sessions without routing through background session runtime", async () => {
     mocks.runtimeId = "ext-1"
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { success: true } })
 
     const response = await cancelQuickIngestSession({
       sessionId: "qi-direct-active",
@@ -2580,6 +2661,7 @@ describe("submitQuickIngestBatch", () => {
   })
 
   it("cancels persisted direct batches after refresh using tracking metadata", async () => {
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { success: true } })
     const response = await cancelQuickIngestSession({
       sessionId: "qi-direct-restored",
       reason: "user_cancelled",

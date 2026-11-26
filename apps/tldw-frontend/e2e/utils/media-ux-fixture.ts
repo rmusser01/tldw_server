@@ -52,11 +52,13 @@ export async function installBrowserFixture(
   options: {
     empty?: boolean;
     count?: number;
+    webUrl?: string;
     processingPolls?: number;
     ingestFailure?: boolean;
     errorList?: boolean;
   } = {}
 ) {
+  const webUrl = options.webUrl ?? FRONTEND_URL;
   const state = {
     items: options.empty ? [] : createMediaItems(options.count ?? 40),
     processingPolls: options.processingPolls ?? 1,
@@ -72,13 +74,13 @@ export async function installBrowserFixture(
   await seedAuth(page, {
     serverUrl: DUMMY_API_URL,
     apiKey: 'ux-review-fixture-key',
-    webUrl: FRONTEND_URL,
+    webUrl,
     allowOffline: false,
   });
   await page.route('**/*', async (route: any) => {
     const req = route.request();
     const url = new URL(req.url());
-    if (url.origin === FRONTEND_URL && url.pathname === '/api/_tldw-webui/runtime-config') {
+    if (url.origin === webUrl && url.pathname === '/api/_tldw-webui/runtime-config') {
       return route.fulfill({
         json: {
           runtimeAuth: { available: false },
@@ -88,7 +90,7 @@ export async function installBrowserFixture(
     }
     if (url.origin !== DUMMY_API_URL) {
       if (
-        url.origin === FRONTEND_URL ||
+        url.origin === webUrl ||
         url.hostname === 'localhost' ||
         url.hostname === '127.0.0.1' ||
         url.protocol === 'data:' ||
@@ -191,7 +193,7 @@ export async function installBrowserFixture(
         setup_completed: true,
         remote_setup_enabled: false,
         connection: {
-          frontend_origin: FRONTEND_URL,
+          frontend_origin: webUrl,
           api_origin: DUMMY_API_URL,
           browser_access: 'local',
         },
@@ -286,6 +288,17 @@ export async function installBrowserFixture(
       state.attempts.set(source, attempts);
       if (state.ingestFailure || (source.includes('fail-once') && attempts === 1)) {
         return fulfill({ detail: 'Network error: simulated source temporarily unavailable' }, 503);
+      }
+      if (body?.mode === 'ephemeral') {
+        const article = {
+          url: source, title: 'Field notes from the river survey',
+          content: 'Three teams returned to the river in September. Each team repeated the measurements from the spring survey.\n\nThe north bank had changed most. A new gravel bar redirected the current toward the sampling station.\n\nAt the next visit, record the water level before moving the station.',
+        };
+        return fulfill({
+          status: 'ephemeral-ok', ephemeral_id: 'test-extraction', total_articles: 1,
+          preview: { first_article: article.title, articles: 1 },
+          ...(body.include_extracted_content ? { articles: [article] } : {}),
+        });
       }
       const id = ++state.nextMedia;
       const item = { ...createMediaItems(1)[0], id, title: `Imported source ${id}`, url: source };

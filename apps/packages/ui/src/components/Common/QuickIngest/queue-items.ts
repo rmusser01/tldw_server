@@ -100,6 +100,29 @@ export const createUrlQueueItems = (input: string): WizardQueueItem[] =>
     return item
   })
 
+// Older sessions do not distinguish a generated filename from a real upload of that name.
+// Offer both recovery methods for those stubs until the user identifies the source.
+export const canPasteQueueItem = (item: WizardQueueItem): boolean =>
+  item.fileOrigin === "paste" ||
+  (!item.fileOrigin && !item.file && /^pasted-text(?:-\d+)?\.txt$/.test(item.fileName || ""))
+
+export function restoreQueueFile(
+  item: WizardQueueItem,
+  file: File,
+  origin: "paste" | "upload",
+  mismatchMessage: string,
+  detected?: Pick<WizardQueueItem, "detectedType" | "icon">,
+): WizardQueueItem {
+  if (origin === "upload" && !item.file && (file.name !== item.fileName || file.size !== item.fileSize)) {
+    return { ...item, validation: { valid: false, errors: [mismatchMessage] } }
+  }
+  const updated = {
+    ...item, ...detected, file, fileName: file.name, fileSize: file.size, mimeType: file.type,
+    fileOrigin: origin,
+  }
+  return { ...updated, validation: validateQueueItem(updated) }
+}
+
 export type QueueExclusionReason = "invalid" | "unselected" | "duplicate"
 export const getQueueItemExclusionReason = (
   item: WizardQueueItem,

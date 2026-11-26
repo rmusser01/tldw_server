@@ -492,6 +492,9 @@ class WebScrapingRequest(BaseModel):
     temperature: float = 0.7
     custom_cookies: Optional[list[dict[str, Any]]] = None
     mode: str = "persist"  # or "ephemeral"
+    include_extracted_content: bool = Field(
+        False, description="Include article titles, URLs and text in an ephemeral response."
+    )
     user_agent: Optional[str] = None
     custom_headers: Optional[dict[str, str]] = None
     crawl_strategy: Optional[str] = None

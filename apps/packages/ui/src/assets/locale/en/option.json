@@ -1023,7 +1023,35 @@
       "ingestMore": "Add more sources",
       "searchReadiness": "Availability in Knowledge search depends on source readiness.",
       "resultsTitle": "Import results",
-      "resultActions": "Result actions"
+      "resultActions": "Result actions",
+      "extractionUnavailable": "Extracted text is unavailable in this receipt.",
+      "emptyExtraction": "No readable text was returned for this source.",
+      "viewTextFor": "View text for {{name}}",
+      "viewText": "View text",
+      "viewExtractedText": "View extracted text",
+      "statusUnavailable": "Status unavailable",
+      "unconfirmedHelp": "The server could not confirm the outcome. Check before importing these sources again.",
+      "trackedJobs": "Job IDs: {{ids}}",
+      "checkStatus": "Check status",
+      "checkMedia": "Check Media",
+      "stopTitle": "Stop the remaining import?",
+      "leaveTitle": "Leave this import?",
+      "oneActive": "1 source is still active.",
+      "sourcesActive": "{{count}} sources are still active.",
+      "waitingForStatus": "Waiting for the latest source status.",
+      "stopHelp": "Saved items stay in Media. Quick Ingest will check which jobs stopped.",
+      "leaveHelp": "You can keep working here while your import continues in the background.",
+      "keepImporting": "Keep importing",
+      "stayHere": "Stay here",
+      "stopRemaining": "Stop remaining sources",
+      "continueBackground": "Continue in background",
+      "extractedText": "Extracted text",
+      "textCopied": "Text copied.",
+      "textCopyFailed": "Select the text and copy it manually.",
+      "backToResults": "Back to results",
+      "copyText": "Copy text",
+      "repairSourceHint": "Repair a queued source to continue.",
+      "lastReported": "Last reported: {{stage}}"
     },
     "source": {
       "title": "Add sources",
@@ -1053,7 +1081,14 @@
       "correctLink": "Correct link",
       "linkHelp": "Enter a full link starting with http:// or https://.",
       "apply": "Apply link",
-      "cancelEdit": "Cancel edit"
+      "cancelEdit": "Cancel edit",
+      "pasteAgain": "Paste again",
+      "chooseFileFor": "Choose file for {{name}}",
+      "applyText": "Apply text",
+      "chooseFile": "Choose file",
+      "rejectedLink": "The server could not process this link. Check the address and try again.",
+      "editSettingsFor": "Edit settings for {{name}}",
+      "editSettings": "Edit settings"
     },
     "oneScreen": {
       "skipAnalysis": "Skip analysis for this import",
@@ -1403,7 +1438,18 @@
       }
     },
     "review.replacementAllowed": "Replacement allowed: matching saved sources may be replaced. Affected saved items have not been confirmed.",
-    "review.replacementDisabled": "Replacement disabled: existing saved sources are preserved."
+    "review.replacementDisabled": "Replacement disabled: existing saved sources are preserved.",
+    "widget": {
+      "activeWithFailures": "{{active}} active · {{failed}} failed",
+      "unknownCount": "{{count}} awaiting status"
+    },
+    "processing": {
+      "stopRequested": "Stop requested. Waiting for the server to confirm each outcome.",
+      "stopUnconfirmed": "Could not confirm the stop for all sources. You can try again while Quick Ingest checks their status.",
+      "status": {
+        "unknown": "Status unavailable"
+      }
+    }
   },
   "libraryView": "Library View",
   "notes": "Notes",

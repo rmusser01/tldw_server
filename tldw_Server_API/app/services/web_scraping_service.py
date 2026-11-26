@@ -128,6 +128,7 @@ async def process_web_scraping_task(
     auto_chunking_goal: str = "balanced",
     auto_chunking_use_llm: bool = False,
     summary_prompt_overrides: Mapping[str, str] | None = None,
+    include_extracted_content: bool = False,
 ) -> dict[str, Any]:
     """
     Enhanced web scraping with production features:
@@ -219,6 +220,7 @@ async def process_web_scraping_task(
         custom_cookies=custom_cookies,
         mode=mode,
         priority=priority,
+        include_extracted_content=include_extracted_content,
         user_id=user_id,
         user_agent=user_agent,
         custom_headers=custom_headers,

@@ -24,6 +24,9 @@ import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
 import { resolvePerformChunking } from "@/services/tldw/ingest-defaults"
+import { extractProcessingItems, isProcessingItem, resolveContent } from "../QuickIngest/processing-results"
+import type { ProcessingItem, ProcessingResultPayload } from "../QuickIngest/processing-results"
+export type { ProcessingItem, ProcessingResultPayload } from "../QuickIngest/processing-results"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { detectSections } from "@/utils/content-review"
 import {
@@ -35,45 +38,6 @@ import { getFileInstanceId, snapshotTypeDefaults, buildQueuedFileStub } from './
 // ---------------------------------------------------------------------------
 // Processing / result types (mirrored from QuickIngestModal)
 // ---------------------------------------------------------------------------
-
-export type ProcessingItem = {
-  id?: string | number
-  media_id?: string | number
-  pk?: string | number
-  uuid?: string | number
-  media?: ProcessingItem
-  status?: string
-  url?: string
-  input_ref?: string
-  media_type?: string
-  content?: string | Array<string | number>
-  text?: string
-  transcript?: string
-  transcription?: string
-  summary?: string
-  analysis_content?: string | null
-  analysis?: string | null
-  analysis_status?: string
-  analysis_error?: string
-  warnings?: string[]
-  prompt?: string
-  custom_prompt?: string
-  title?: string
-  metadata?: Record<string, any>
-  keywords?: string[] | string
-  segments?: Record<string, any>[]
-}
-
-export type ProcessingResultPayload =
-  | ProcessingItem[]
-  | ProcessingItem
-  | {
-      results?: ProcessingItem[]
-      articles?: ProcessingItem[]
-      result?: ProcessingItem | ProcessingItem[]
-    }
-  | null
-  | undefined
 
 export type ResultItem = {
   id: string
@@ -178,20 +142,6 @@ const normalizeKeywords = (value: ProcessingItem['keywords']): string[] => {
   return []
 }
 
-const resolveContent = (item: ProcessingItem): string => {
-  if (Array.isArray(item?.content)) {
-    return item.content
-      .filter((v: unknown) => typeof v === "string" || typeof v === "number")
-      .map((v: string | number) => String(v))
-      .join("\n")
-  }
-  const candidates = [item?.content, item?.text, item?.transcript, item?.transcription, item?.summary, item?.analysis_content]
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) return candidate
-  }
-  return ""
-}
-
 const resolveTitle = (item: ProcessingItem, fallback: string): string => {
   const title = item?.title || item?.metadata?.title || item?.input_ref || fallback
   return String(title || "").trim() || fallback
@@ -215,42 +165,6 @@ const inferContentFormat = (content: string): "plain" | "markdown" => {
   if (/```/.test(text)) return "markdown"
   if (/(^|\n)\s*[-*]\s+\S/.test(text)) return "markdown"
   return "plain"
-}
-
-const isResultsWrapper = (value: unknown): value is { results: ProcessingItem[] } => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false
-  return Array.isArray((value as { results?: unknown }).results)
-}
-
-const isArticlesWrapper = (value: unknown): value is { articles: ProcessingItem[] } => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false
-  return Array.isArray((value as { articles?: unknown }).articles)
-}
-
-const isResultWrapper = (value: unknown): value is { result: ProcessingItem | ProcessingItem[] } => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false
-  const result = (value as { result?: unknown }).result
-  return Array.isArray(result) || (typeof result === "object" && result !== null)
-}
-
-const isProcessingItem = (value: unknown): value is ProcessingItem => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false
-  if (isResultsWrapper(value) || isArticlesWrapper(value) || isResultWrapper(value)) return false
-  return (
-    "id" in value || "media_id" in value || "pk" in value || "uuid" in value ||
-    "content" in value || "text" in value || "transcript" in value ||
-    "analysis" in value || "analysis_content" in value
-  )
-}
-
-const extractProcessingItems = (data: ProcessingResultPayload): ProcessingItem[] => {
-  if (!data) return []
-  if (Array.isArray(data)) return data
-  if (isResultsWrapper(data)) return data.results
-  if (isArticlesWrapper(data)) return data.articles
-  if (isResultWrapper(data)) return Array.isArray(data.result) ? data.result : [data.result]
-  if (isProcessingItem(data)) return [data]
-  return []
 }
 
 const getProcessingStatusLabels = (data: ProcessingResultPayload): string[] =>

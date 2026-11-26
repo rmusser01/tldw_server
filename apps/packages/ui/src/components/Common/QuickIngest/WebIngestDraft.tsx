@@ -94,7 +94,9 @@ export function WebIngestDraft({
           {t("chooseProvider", "Choose analysis provider")}
         </Button>
       ) : <span className="min-w-0 text-sm text-text-muted">
-        {count === 0 ? t("addSourceHint", "Add a source to continue.")
+        {count === 0 && queueItems.some(item => !item.validation.valid)
+          ? t("repairSourceHint", "Repair a queued source to continue.")
+          : count === 0 ? t("addSourceHint", "Add a source to continue.")
           : queueItems.length > count ? t("readyOnly", "Only ready sources will run.")
             : presetConfig.reviewBeforeStorage ? t("reviewHint", "Review before saving to Media.") : null}
       </span>}

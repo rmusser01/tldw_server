@@ -7447,5 +7447,125 @@
   },
   "quickIngest_oneScreen_preset": {
     "message": "Processing preset"
+  },
+  "quickIngest_source_pasteAgain": {
+    "message": "Paste again"
+  },
+  "quickIngest_source_chooseFileFor": {
+    "message": "Choose file for {{name}}"
+  },
+  "quickIngest_source_applyText": {
+    "message": "Apply text"
+  },
+  "quickIngest_widget_activeWithFailures": {
+    "message": "{{active}} active · {{failed}} failed"
+  },
+  "quickIngest_widget_unknownCount": {
+    "message": "{{count}} awaiting status"
+  },
+  "quickIngest_processing_stopRequested": {
+    "message": "Stop requested. Waiting for the server to confirm each outcome."
+  },
+  "quickIngest_processing_stopUnconfirmed": {
+    "message": "Could not confirm the stop for all sources. You can try again while Quick Ingest checks their status."
+  },
+  "quickIngest_processing_status_unknown": {
+    "message": "Status unavailable"
+  },
+  "quickIngest_web_extractionUnavailable": {
+    "message": "Extracted text is unavailable in this receipt."
+  },
+  "quickIngest_web_emptyExtraction": {
+    "message": "No readable text was returned for this source."
+  },
+  "quickIngest_web_viewTextFor": {
+    "message": "View text for {{name}}"
+  },
+  "quickIngest_web_viewText": {
+    "message": "View text"
+  },
+  "quickIngest_source_chooseFile": {
+    "message": "Choose file"
+  },
+  "quickIngest_source_rejectedLink": {
+    "message": "The server could not process this link. Check the address and try again."
+  },
+  "quickIngest_source_editSettingsFor": {
+    "message": "Edit settings for {{name}}"
+  },
+  "quickIngest_source_editSettings": {
+    "message": "Edit settings"
+  },
+  "quickIngest_web_viewExtractedText": {
+    "message": "View extracted text"
+  },
+  "quickIngest_web_statusUnavailable": {
+    "message": "Status unavailable"
+  },
+  "quickIngest_web_unconfirmedHelp": {
+    "message": "The server could not confirm the outcome. Check before importing these sources again."
+  },
+  "quickIngest_web_trackedJobs": {
+    "message": "Job IDs: {{ids}}"
+  },
+  "quickIngest_web_checkStatus": {
+    "message": "Check status"
+  },
+  "quickIngest_web_checkMedia": {
+    "message": "Check Media"
+  },
+  "quickIngest_web_stopTitle": {
+    "message": "Stop the remaining import?"
+  },
+  "quickIngest_web_leaveTitle": {
+    "message": "Leave this import?"
+  },
+  "quickIngest_web_oneActive": {
+    "message": "1 source is still active."
+  },
+  "quickIngest_web_sourcesActive": {
+    "message": "{{count}} sources are still active."
+  },
+  "quickIngest_web_waitingForStatus": {
+    "message": "Waiting for the latest source status."
+  },
+  "quickIngest_web_stopHelp": {
+    "message": "Saved items stay in Media. Quick Ingest will check which jobs stopped."
+  },
+  "quickIngest_web_leaveHelp": {
+    "message": "You can keep working here while your import continues in the background."
+  },
+  "quickIngest_web_keepImporting": {
+    "message": "Keep importing"
+  },
+  "quickIngest_web_stayHere": {
+    "message": "Stay here"
+  },
+  "quickIngest_web_stopRemaining": {
+    "message": "Stop remaining sources"
+  },
+  "quickIngest_web_continueBackground": {
+    "message": "Continue in background"
+  },
+  "quickIngest_web_extractedText": {
+    "message": "Extracted text"
+  },
+  "quickIngest_web_textCopied": {
+    "message": "Text copied."
+  },
+  "quickIngest_web_textCopyFailed": {
+    "message": "Select the text and copy it manually."
+  },
+  "quickIngest_web_backToResults": {
+    "message": "Back to results"
+  },
+  "quickIngest_web_copyText": {
+    "message": "Copy text"
+  },
+  "quickIngest_web_repairSourceHint": {
+    "message": "Repair a queued source to continue."
+  },
+  "quickIngest_web_lastReported": {
+    "message": "Last reported: {{stage}}"
   }
 }

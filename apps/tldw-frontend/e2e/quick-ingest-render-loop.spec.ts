@@ -31,9 +31,7 @@ async function openQuickIngest(page: Page): Promise<Locator> {
   })
   await seedAuth(page)
   await page.goto("/media", { waitUntil: "domcontentloaded" })
-  const trigger = page.getByRole("button", { name: /^(open )?quick ingest$/i })
-    .or(page.getByTestId("first-ingest-tutorial").getByRole("button", { name: /^ingest$/i }))
-    .first()
+  const trigger = page.getByRole("button", { name: "Add media", exact: true })
   await trigger.click({ timeout: 60_000 })
   const dialog = page.getByRole("dialog", { name: /quick ingest/i })
   await expect(dialog).toBeVisible()
@@ -102,7 +100,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await expect(provider).toHaveAttribute("aria-describedby", /quick-ingest-analysis-provider-warning/)
     await dialog.getByRole("button", { name: "Choose analysis provider", exact: true }).click()
     await expect(provider).toBeFocused()
-    await expect(provider).toBeInViewport({ ratio: 1 })
+    // Ant Design clips its internal input to the painted combobox border.
+    await expect(dialog.locator(".ant-select").filter({ has: page.getByRole("combobox", { name: "Analysis provider" }) })).toBeInViewport({ ratio: 1 })
 
     const skip = dialog.getByRole("button", { name: "Skip analysis for this import" })
     await skip.scrollIntoViewIfNeeded()
