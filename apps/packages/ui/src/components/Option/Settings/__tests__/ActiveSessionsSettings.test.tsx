@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { Modal } from "antd"
 import { createInstance } from "i18next"
 import { I18nextProvider } from "react-i18next"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -128,6 +129,7 @@ describe("ActiveSessionsSettings", () => {
 
   it("confirming calls revokeOtherAuthSessions, reloads and announces the result", async () => {
     const user = userEvent.setup()
+    const confirm = vi.spyOn(Modal, "confirm")
     await renderPage()
     await screen.findByText("Safari on iOS")
     await user.click(screen.getByRole("button", { name: "Sign out all other sessions" }))
@@ -137,6 +139,12 @@ describe("ActiveSessionsSettings", () => {
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("Signed out 1 other session.")
     )
+    // jsdom never finishes antd's close animation, so afterClose is invoked by hand: this pins
+    // that the heading takes focus only once the modal has closed (after its focus restore).
+    const heading = screen.getByRole("heading", { level: 1, name: "Active sessions" })
+    expect(heading).not.toHaveFocus()
+    confirm.mock.calls[0][0].afterClose?.()
+    expect(heading).toHaveFocus()
   })
 
   it("Sign out all other sessions is disabled when only this device is listed", async () => {
@@ -154,6 +162,16 @@ describe("ActiveSessionsSettings", () => {
     expect(screen.getByText(/This connection uses an API key\. Sign in with the browser to sign sessions out\./)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /^Sign out Safari on iOS/ })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Sign out all other sessions" })).toBeDisabled()
+  })
+
+  it("a failed reload after a successful sign-out shows the load error and no remaining-count claim", async () => {
+    const user = userEvent.setup()
+    await renderPage()
+    await screen.findByText("Safari on iOS")
+    list.mockRejectedValue(new Error("down"))
+    await user.click(screen.getByRole("button", { name: /^Sign out Safari on iOS/ }))
+    expect(await screen.findByText("Could not load your sessions")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent(/^Signed out Safari on iOS\.$/)
   })
 
   it("shows the browser-sign-in warning when the server answers interactive_session_required", async () => {

@@ -32,6 +32,9 @@ export const ActiveSessionsSettings = () => {
   const [status, setStatus] = useState("")
   const [busy, setBusy] = useState(false)
   const headingRef = useRef<HTMLHeadingElement>(null)
+  // Modal.confirm restores focus to its (now disabled) trigger as it closes, so the bulk
+  // action moves focus to the heading in afterClose, not in onOk.
+  const focusAfterModalRef = useRef(false)
 
   /** Returns the fresh list (null on failure). */
   const load = useCallback(async (): Promise<AuthSession[] | null> => {
@@ -59,14 +62,19 @@ export const ActiveSessionsSettings = () => {
     })
 
   /** Runs a revoke, reloads, announces the result and moves focus to the heading. */
-  const act = async (revoke: () => Promise<string>, withRemaining: boolean) => {
+  const act = async (
+    revoke: () => Promise<string>,
+    withRemaining: boolean,
+    modal = false
+  ) => {
     setBusy(true)
     setActionError(null)
     try {
       const done = await revoke()
       const rows = await load()
-      setStatus(withRemaining ? `${done} ${remaining(rows)}` : done)
-      headingRef.current?.focus()
+      setStatus(withRemaining && rows ? `${done} ${remaining(rows)}` : done)
+      if (modal) focusAfterModalRef.current = true
+      else headingRef.current?.focus()
     } catch (error) {
       setActionError(isInteractiveRequiredError(error) ? "interactive" : "generic")
     } finally {
@@ -93,6 +101,11 @@ export const ActiveSessionsSettings = () => {
       }),
       okText: t("settings:activeSessions.confirmOk", "Sign out other sessions"),
       cancelText: t("common:cancel", "Cancel"),
+      afterClose: () => {
+        if (!focusAfterModalRef.current) return
+        focusAfterModalRef.current = false
+        headingRef.current?.focus()
+      },
       onOk: () =>
         act(async () => {
           const { sessions_revoked } = await revokeOtherAuthSessions()
@@ -101,7 +114,7 @@ export const ActiveSessionsSettings = () => {
             defaultValue:
               "{count, plural, one {Signed out # other session.} other {Signed out # other sessions.}}"
           })
-        }, false)
+        }, false, true)
     })
 
   const columns = [
@@ -158,7 +171,7 @@ export const ActiveSessionsSettings = () => {
   ]
 
   let body: React.ReactNode
-  if (loadFailed && sessions === null) {
+  if (loadFailed) {
     body = (
       <Alert
         variant="error"
