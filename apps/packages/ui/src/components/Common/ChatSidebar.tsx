@@ -96,6 +96,20 @@ export function ChatSidebar({
     key: readOwner.ownerKey!, requestScope: readOwner.requestScope!, isCurrent: readOwner.isCurrent
   } : undefined, [ownerReady, readOwner.ownerKey, readOwner.requestScope, readOwner.isCurrent])
 
+  const collapseToggle = React.useRef<HTMLButtonElement | null>(null)
+  const restoreToggleFocus = React.useRef(false)
+  const setCollapseToggle = React.useCallback((button: HTMLButtonElement | null) => {
+    // The rail and panel render different buttons for the same control.
+    if (button === null) {
+      restoreToggleFocus.current = collapseToggle.current !== null &&
+        document.activeElement === collapseToggle.current
+    } else if (restoreToggleFocus.current) {
+      restoreToggleFocus.current = false
+      if (document.activeElement === document.body) button.focus()
+    }
+    collapseToggle.current = button
+  }, [])
+
   const searchInput = React.useRef<InputRef>(null)
   const focusSearchOnOpen = React.useRef<{
     location: typeof location
@@ -371,6 +385,7 @@ export function ChatSidebar({
             aria-label={t("common:chatSidebar.expand", "Expand sidebar")}
             aria-expanded={false}
             aria-controls={sidebarId}
+            ref={setCollapseToggle}
             data-testid="chat-sidebar-toggle"
             onClick={onToggleCollapse}
             className={cn(
@@ -531,6 +546,7 @@ export function ChatSidebar({
               aria-label={t("common:chatSidebar.collapse", "Collapse sidebar")}
               aria-expanded={true}
               aria-controls={sidebarId}
+              ref={setCollapseToggle}
               data-testid="chat-sidebar-toggle"
               onClick={onToggleCollapse}
               className={cn(
