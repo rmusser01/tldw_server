@@ -166,6 +166,7 @@ export interface NotesEditorPaneProps {
   editorKeywords: string[]
   keywordOptions: string[]
   saveIndicator: SaveIndicatorState
+  saveOwnerReady: boolean
   /** The one save-problem surface: conflict, error, retrying or a newer server copy. */
   saveIssue: NotesSaveIssue | null
   /** Version, last save and server for the status pill's tooltip. */
@@ -384,6 +385,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   editorKeywords,
   keywordOptions,
   saveIndicator,
+  saveOwnerReady,
   saveIssue,
   saveStatusDetail,
   selectedLastSavedAt,
@@ -719,6 +721,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           !saving &&
           (title.trim().length > 0 || content.trim().length > 0)
         }
+        saveOwnerReady={saveOwnerReady}
         canGenerateFlashcards={!editorDisabled && content.trim().length > 0}
         canOpenNotesStudio={!editorDisabled && selectedId != null && content.trim().length > 0}
         canExport={Boolean(title || content)}

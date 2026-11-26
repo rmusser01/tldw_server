@@ -1357,6 +1357,7 @@
     "exportJsonSuccess": "Exported {{count}} notes as JSON ({{size}})",
     "toolbarExportMdTooltip": "Export note as Markdown (.md)",
     "toolbarSaveTooltip": "Save note",
+    "toolbarSaveOwnerUnavailable": "Notes needs a verified account to save",
     "toolbarCopyTooltip": "Copy note content",
     "toolbarDeleteTooltip": "Delete note",
     "toolbarSave": "Save",

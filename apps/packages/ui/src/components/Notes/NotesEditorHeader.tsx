@@ -35,6 +35,7 @@ interface NotesEditorHeaderProps {
   editorMode: 'edit' | 'split' | 'preview'
   hasContent: boolean
   canSave: boolean
+  saveOwnerReady?: boolean
   canGenerateFlashcards: boolean
   canCreateStudyPack?: boolean
   canOpenNotesStudio?: boolean
@@ -78,7 +79,8 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   openingLinkedChat,
   editorMode,
   hasContent,
-  canSave,
+  canSave: canSaveDraft,
+  saveOwnerReady = true,
   canGenerateFlashcards,
   canCreateStudyPack = false,
   canOpenNotesStudio = false,
@@ -110,6 +112,14 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   studioBadgeLabel = null,
 }) => {
   const { t } = useTranslation(['option', 'common'])
+  const canSave = canSaveDraft && saveOwnerReady
+  const saveDisabledTooltip = saveOwnerReady
+    ? t('option:notesSearch.toolbarSaveDisabledTooltip', {
+        defaultValue: 'Add a title or content to save'
+      })
+    : t('option:notesSearch.toolbarSaveOwnerUnavailable', {
+        defaultValue: 'Notes needs a verified account to save'
+      })
   const { token } = theme.useToken()
   const isMobileViewport = useMobile()
   const toolbarButtonSize: 'small' | 'large' = isMobileViewport ? 'large' : 'small'
@@ -502,9 +512,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         <Tooltip
           title={
             !canSave
-              ? t('option:notesSearch.toolbarSaveDisabledTooltip', {
-                  defaultValue: 'Add a title or content to save'
-                })
+              ? saveDisabledTooltip
               : t('option:notesSearch.toolbarSaveTooltip', {
                   defaultValue: 'Save note (auto-saves after 5 seconds)'
                 })
@@ -531,9 +539,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
           <Tooltip
             title={
               !canSave
-                ? t('option:notesSearch.toolbarSaveDisabledTooltip', {
-                    defaultValue: 'Add a title or content to save'
-                  })
+                ? saveDisabledTooltip
                 : t('option:notesSearch.toolbarSaveAndNewTooltip', {
                     defaultValue: 'Save and start another note'
                   })

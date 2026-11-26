@@ -230,6 +230,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setKeywordSuggestionSelection,
     editorDisabled,
   } = deps
+  const saveOwnerReady = Boolean(authorityScope && connectionConfig)
   const syncSavedNoteToList = useNotesListSaveRefresh(deps.queryClient, refetch)
   const callerCapabilities = useCallerCapabilities()
   const callerCapabilitiesRef = React.useRef(callerCapabilities)
@@ -2758,12 +2759,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (!hasModifier || lowered !== 's' || event.altKey || event.shiftKey) return
       if (!isEditorSaveShortcutContext(event.target)) return
       event.preventDefault()
-      if (editorDisabled) return
+      if (editorDisabled || !saveOwnerReady) return
       void saveNote()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [editorDisabled, saveNote])
+  }, [editorDisabled, saveNote, saveOwnerReady])
 
   // Autosave: debounce (with a max wait) while dirty, back off after transient
   // failures, and never run during a conflict, a fatal error or while the
@@ -2771,7 +2772,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const offlineSyncStateForEditor = currentOfflineDraft?.syncState
   React.useEffect(() => {
     clearAutosaveTimeout()
-    if (editorDisabled || saving) return
+    if (editorDisabled || !saveOwnerReady || saving) return
     if (!content.trim() && !title.trim()) return
     const delay = nextAutosaveDelayMs(saveState, {
       now: Date.now(),
@@ -2785,7 +2786,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       void saveNoteRef.current?.({ showSuccessMessage: false, trigger: 'auto' })
     }, delay)
     return clearAutosaveTimeout
-  }, [clearAutosaveTimeout, content, editorDisabled, isDirty, offlineSyncStateForEditor, saveState, saving, title])
+  }, [clearAutosaveTimeout, content, editorDisabled, isDirty, offlineSyncStateForEditor, saveOwnerReady, saveState, saving, title])
 
   // A newer server version while local edits are pending is a conflict now,
   // not a modal at the next autosave (NS-N2, NS-03).
@@ -3343,6 +3344,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     saving,
     saveIndicator, setSaveIndicator,
     saveStatus: saveState.status,
+    saveOwnerReady,
     saveIssue,
     saveStatusDetail,
     leaveGuard,

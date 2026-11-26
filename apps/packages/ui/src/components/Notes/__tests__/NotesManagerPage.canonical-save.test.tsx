@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 import { applyRefreshRotation } from "@/services/tldw/single-user-credential"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import type { UserInfo } from "@/services/tldw/TldwAuth"
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom"
 import OptionNotes from "@/routes/option-notes"
 import { getFlashcardSourceMeta } from "@/components/Flashcards/utils/source-reference"
@@ -34,6 +35,7 @@ const {
   canonicalBoundary: {
     storage: {} as Record<string, unknown>,
     getConfig: vi.fn(),
+    getCurrentUser: vi.fn<() => Promise<UserInfo>>(),
     userId: 7
   }
 }))
@@ -157,12 +159,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
   ]
 }))
 vi.mock("@/services/tldw/TldwAuth", () => ({
-  tldwAuth: {
-    getCurrentUser: vi.fn(async () => ({
-      id: canonicalBoundary.userId,
-      is_active: true
-    }))
-  }
+  tldwAuth: { getCurrentUser: canonicalBoundary.getCurrentUser }
 }))
 
 const renderPage = () => {
@@ -343,6 +340,9 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     // NS-01); start every test without the previous test's drafts.
     localStorage.clear()
     canonicalBoundary.userId = 7
+    canonicalBoundary.getCurrentUser.mockReset().mockImplementation(async () => ({
+      id: canonicalBoundary.userId, username: "notes-user", is_active: true
+    }))
     canonicalBoundary.storage = {
       serverUrl: "https://notes.test",
       authMode: "multi-user",
@@ -356,6 +356,35 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
     seedBaseNotesMock()
+  })
+
+  it("enables Save for a new draft after its owner is verified", async () => {
+    const principal = deferred<UserInfo>()
+    canonicalBoundary.getCurrentUser.mockReturnValue(principal.promise)
+    renderPage()
+    await waitFor(() => expect(canonicalBoundary.getCurrentUser).toHaveBeenCalled())
+    await act(async () => { fireEvent.click(screen.getByTestId("notes-new-note-button")) })
+    const title = screen.getByPlaceholderText("Title")
+    const content = screen.getByRole("textbox", { name: "Note content" })
+    fireEvent.change(title, { target: { value: "Study draft" } })
+    fireEvent.change(content, { target: { value: "Notes typed while the account loads." } })
+
+    const save = screen.getByTestId("notes-save-button")
+    expect(save).toBeDisabled()
+    expect(screen.getByTestId("notes-save-and-new-button")).toBeDisabled()
+    await act(async () => { fireEvent.keyDown(content, { key: "s", ctrlKey: true }) })
+    expect(createCalls()).toHaveLength(0)
+    expect(mockMessageError).not.toHaveBeenCalled()
+
+    await act(async () => principal.resolve({ id: 7, username: "notes-user", is_active: true }))
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    await waitFor(() => {
+      expect(createCalls()).toEqual([[expect.objectContaining({
+        body: expect.objectContaining({ title: "Study draft", content: "Notes typed while the account loads." }),
+        headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "7" })
+      })]])
+    })
   })
 
   it("opens an owned saved Flashcard Note source through the actual route even outside the list page", async () => {
