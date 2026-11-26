@@ -62,8 +62,29 @@ const PUBLIC_PROVIDER_ERROR_MESSAGES = {
   provider_unavailable: 'The selected provider is currently unavailable.',
 } as const;
 
+const PUBLIC_AUTH_REFUSAL_MESSAGES = {
+  new_sign_in_protected:
+    'A new sign-in alert can only be dismissed from a browser that was signed in before it, or after 24 hours.',
+  interactive_session_required:
+    'This action needs a browser sign-in. API keys, virtual keys and service tokens cannot end sessions.',
+} as const;
+
 type PublicProviderErrorCode = keyof typeof PUBLIC_PROVIDER_ERROR_MESSAGES;
-type PublicErrorCode = PublicProviderErrorCode | VNGenerationRejectionCode;
+type PublicAuthRefusalCode = keyof typeof PUBLIC_AUTH_REFUSAL_MESSAGES;
+type PublicErrorCode =
+  | PublicProviderErrorCode
+  | PublicAuthRefusalCode
+  | VNGenerationRejectionCode;
+
+function asPublicAuthRefusalCode(value: unknown): PublicAuthRefusalCode | undefined {
+  if (
+    typeof value === 'string' &&
+    Object.prototype.hasOwnProperty.call(PUBLIC_AUTH_REFUSAL_MESSAGES, value)
+  ) {
+    return value as PublicAuthRefusalCode;
+  }
+  return undefined;
+}
 
 function asPublicProviderErrorCode(value: unknown): PublicProviderErrorCode | undefined {
   if (
@@ -87,6 +108,9 @@ function normalizeApiErrorBody(errorBody: ApiErrorResponse, statusCode: number, 
         errorCode,
       };
     }
+    const refusal = statusCode === 403
+      ? asPublicAuthRefusalCode(errorBody.detail.code) : undefined;
+    if (refusal) return { detail: PUBLIC_AUTH_REFUSAL_MESSAGES[refusal], errorCode: refusal };
     const rejection = statusCode === 409 && vnGenerationRequest
       ? asVNGenerationRejectionCode(errorBody.detail.code) : undefined;
     if (rejection) return { detail: VN_GENERATION_REJECTION_MESSAGES[rejection], errorCode: rejection };
