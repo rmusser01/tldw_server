@@ -298,10 +298,13 @@ describe("NewSignInBanner", () => {
       return vi.fn()
     })
     refuse()
-    let seen: any = null
     const Probe = () => {
-      seen = useOptionalNotificationLifecycle()
-      return null
+      const lifecycleState = useOptionalNotificationLifecycle()
+      return (
+        <span data-testid="lifecycle-probe">
+          {`${lifecycleState?.state}|${String(lifecycleState?.mutationError ?? null)}`}
+        </span>
+      )
     }
     render(
       <NotificationLifecycleProvider scopeKey="notifications:server-a:user-a">
@@ -312,8 +315,7 @@ describe("NewSignInBanner", () => {
     await flush()
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }))
     await screen.findByText(/can be dismissed from a browser/)
-    expect(seen.state).toBe("active")
-    expect(seen.mutationError).toBeNull()
+    expect(screen.getByTestId("lifecycle-probe").textContent).toBe("active|null")
     expect(screen.getByRole("alert")).toBeInTheDocument()
   })
 
