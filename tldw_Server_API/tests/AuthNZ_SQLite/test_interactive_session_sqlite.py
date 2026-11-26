@@ -86,6 +86,20 @@ async def test_token_without_a_session_claim_is_not_interactive(two_user_client)
     assert await resolve_current_session_id(_request(_access(bare)), principal, manager) is None
 
 
+async def test_virtual_key_token_is_not_interactive(two_user_client):
+    """A virtual key (even with allowed_paths covering the sessions routes) carries no session claim."""
+    ctx = two_user_client
+    manager = await get_session_manager()
+    tokens = login(ctx.client, "alice", ctx.password)
+    minted = ctx.client.post(
+        "/api/v1/auth/virtual-key",
+        json={"scope": "workflows", "ttl_minutes": 5, "allowed_paths": ["/api/v1/auth/sessions*"]},
+        headers=bearer(tokens),
+    ).json()["token"]
+    principal = AuthPrincipal(kind="user", user_id=ctx.alice_id, token_type="access")
+    assert await resolve_current_session_id(_request(_access(minted)), principal, manager) is None
+
+
 async def test_refreshed_token_is_still_interactive(two_user_client):
     ctx = two_user_client
     manager = await get_session_manager()

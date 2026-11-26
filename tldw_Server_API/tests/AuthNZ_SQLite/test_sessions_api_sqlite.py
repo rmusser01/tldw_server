@@ -70,9 +70,11 @@ async def test_api_key_cannot_end_sessions(alice_sessions, prefix):
     assert len(client.get("/api/v1/auth/sessions", headers=bearer(A)).json()) == 2   # nothing was revoked
 
 
-async def test_scoped_virtual_key_cannot_end_sessions(alice_sessions):
+@pytest.mark.parametrize("extra", [{}, {"allowed_paths": ["/api/v1/auth/sessions*"], "allowed_methods": ["DELETE"]}])
+async def test_scoped_virtual_key_is_stopped_by_scope_enforcement_before_it_can_end_sessions(alice_sessions, extra):
+    """The sessions routes declare no scope enforcement, so any scoped token is refused before the interactive guard."""
     client, A, B = alice_sessions.client, alice_sessions.A, alice_sessions.B
-    minted = client.post("/api/v1/auth/virtual-key", json={"scope": "workflows", "ttl_minutes": 5}, headers=bearer(A)).json()["token"]
+    minted = client.post("/api/v1/auth/virtual-key", json={"scope": "workflows", "ttl_minutes": 5, **extra}, headers=bearer(A)).json()["token"]
     r = client.delete(f"/api/v1/auth/sessions/{session_id_of(B)}", headers={"Authorization": f"Bearer {minted}"})
     assert r.status_code == 403 and "Scoped token" in r.json()["detail"]
     assert {x["id"] for x in client.get("/api/v1/auth/sessions", headers=bearer(B)).json()} >= {session_id_of(A), session_id_of(B)}   # B survived
