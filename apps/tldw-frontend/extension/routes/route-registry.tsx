@@ -30,6 +30,7 @@ import {
   Table2,
   Library,
   ListTodo,
+  MonitorSmartphone,
   PenLine,
   ShieldCheck,
   SquareTerminal,
@@ -113,6 +114,10 @@ const OptionTldwSettings = createSettingsRoute(
 const OptionProviderKeysSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/ProviderKeysSettings"),
   "ProviderKeysSettings"
+)
+const OptionActiveSessionsSettings = createSettingsRoute(
+  () => import("~/components/Option/Settings/ActiveSessionsSettings"),
+  "ActiveSessionsSettings"
 )
 const OptionMedia = lazy(() => import("./option-media"))
 const OptionMediaCollection = lazy(() => import("./option-media-collection"))
@@ -267,6 +272,17 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       labelToken: "settings:providerKeys.navTitle",
       icon: ServerIcon,
       order: 1.5
+    }
+  },
+  {
+    kind: "options",
+    path: "/settings/sessions",
+    element: <OptionActiveSessionsSettings />,
+    nav: {
+      group: "server",
+      labelToken: "settings:activeSessions.navTitle",
+      icon: MonitorSmartphone,
+      order: 1.6
     }
   },
   {
