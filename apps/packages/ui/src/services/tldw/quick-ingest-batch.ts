@@ -122,6 +122,7 @@ type QuickIngestBatchResult = {
   id: string;
   status: "ok" | "error";
   outcome?: "skipped" | "submit_failed" | "failed" | "cancelled";
+  cancellationConfirmed?: boolean;
   url?: string;
   fileName?: string;
   type: string;
@@ -1096,6 +1097,7 @@ const runDirectQuickIngestBatch = async (
                   id: entry.id,
                   status: "error",
                   outcome: "cancelled",
+                  cancellationConfirmed: true,
                   url,
                   type: resolvedType,
                   error: pollResult.error,
@@ -1293,6 +1295,7 @@ const runDirectQuickIngestBatch = async (
                   id,
                   status: "error",
                   outcome: "cancelled",
+                  cancellationConfirmed: true,
                   fileName,
                   type: mediaType,
                   error: pollResult.error,

@@ -69,7 +69,7 @@ import {
   type PresetMap,
 } from "./QuickIngest/presets"
 import { getEligibleQueueItems, restoreQueueFile } from "./QuickIngest/queue-items"
-import { canRetryWizardResult, getSavedMediaIds } from "./QuickIngest/result-actions"
+import { canRetryWizardResult, canStartNewAttempt, getSavedMediaIds } from "./QuickIngest/result-actions"
 import type {
   CommonOptions,
   ConferenceBatchMetadata,
@@ -239,6 +239,7 @@ const normalizeWizardResult = (
   return {
     id,
     status: derivedStatus,
+    cancellationConfirmed: item.cancellationConfirmed === true,
     outcome:
       isDuplicate
         ? "skipped"
@@ -293,6 +294,7 @@ const preserveConfirmedCancellation = (
       ...result,
       status: "error",
       outcome: "cancelled",
+      cancellationConfirmed: true,
       error: "Cancelled by user.",
       mediaId: null,
       persisted: false,
@@ -803,6 +805,7 @@ const buildResultsFromReattachedJobs = (
     return {
       id: item?.id || `reattached-${job.jobId}`,
       status: resultStatus,
+      cancellationConfirmed: jobStatus === "cancelled",
       outcome: isDuplicate
         ? ("skipped" as const)
         : resultStatus === "ok"
@@ -1991,6 +1994,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     setQueueItems(queueItems.map(item => item.id === id ? restoreQueueFile(item, file, "upload", mismatch) : item))
   }, [operation, qi, queueItems, setQueueItems])
 
+  const handleStartNewAttempt = useCallback((id: string) => {
+    if (!operation.isCurrent() || !isOnlineForIngest || isCheckingConnection) return
+    const item = resultsRef.current.find(result => result.id === id)
+    if (item && canStartNewAttempt(item, queueItems, session.tracking?.durableMode === "durable_collection")) {
+      beginRetry([id])
+    }
+  }, [beginRetry, isCheckingConnection, isOnlineForIngest, operation, queueItems, session.tracking?.durableMode])
+
   const handleCorrectItems = useCallback((ids: string[], repairSource = false) => {
     if (!operation.isCurrent()) return
     if (repairSource) {
@@ -2292,6 +2303,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             onOpenWorkspace={handleOpenWorkspace}
             onOpenCollection={handleOpenCollection}
             onRetryItems={handleRetryItems}
+            onStartNewAttempt={oneScreen && !interruption && isOnlineForIngest && !isCheckingConnection ? handleStartNewAttempt : undefined}
             onCorrectItems={handleCorrectItems}
             onReattach={handleReattach}
             onReviewSavedItems={handleReviewSavedItems}
@@ -2323,6 +2335,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     handleOpenMedia,
     handleOpenCollection,
     handleRetryItems,
+    handleStartNewAttempt,
     handleCorrectItems,
     handleReattach,
     handleReviewSavedItems,

@@ -5,6 +5,7 @@ import { getQuickIngestAnalysisProviderWarning } from "@/services/tldw/quick-ing
 import { AddContentStep } from "./AddContentStep"
 import { WizardConfigureStep } from "./WizardConfigureStep"
 import { useIngestWizard } from "./IngestWizardContext"
+import { getQueueItemExclusionReason } from "./queue-items"
 import type { WizardQueueItem } from "./types"
 
 type WebIngestDraftProps = {
@@ -39,6 +40,21 @@ export function WebIngestDraft({
   }, [showReview])
   const settingsId = useId()
   const count = processingItems.length
+  let emptyQueueHint
+  if (count === 0) {
+    const repairIds = state.processingState.correctionItemIds
+    const remaining = queueItems.filter(item =>
+      (!repairIds || repairIds.includes(item.id)) &&
+      !state.results.some(result => result.id === item.id && result.status === "ok")
+    )
+    const canInclude = remaining.some(item => {
+      const reason = getQueueItemExclusionReason(item, queueItems)
+      return reason === "unselected" || reason === "duplicate"
+    })
+    emptyQueueHint = canInclude ? t("includeSourceHint", "Include a source to continue.")
+      : remaining.length ? t("repairSourceHint", "Repair a queued source to continue.")
+      : t("addSourceHint", "Add a source to continue.")
+  }
   const providerMissing = Boolean(getQuickIngestAnalysisProviderWarning(presetConfig))
   const connectionBlocked = !isOnlineForIngest || isCheckingConnection
   const disabled = count === 0 || providerMissing || connectionBlocked
@@ -150,9 +166,7 @@ export function WebIngestDraft({
     </> : null}
     <div hidden={showReview} className={showReview ? undefined : "qi-web-footer qi-draft-footer"} role="group" aria-label={actionLabel}>
       {(!showReview && remedies) || <span className="min-w-0 text-sm text-text-muted">
-        {count === 0 && queueItems.some(item => !item.validation.valid)
-          ? t("repairSourceHint", "Repair a queued source to continue.")
-          : count === 0 ? t("addSourceHint", "Add a source to continue.")
+        {count === 0 ? emptyQueueHint
           : queueItems.length > count ? t("readyOnly", "Only ready sources will run.")
             : presetConfig.reviewBeforeStorage ? t("reviewHint", "Review before saving to Media.") : null}
       </span>}

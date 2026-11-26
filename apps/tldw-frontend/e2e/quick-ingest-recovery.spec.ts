@@ -317,6 +317,10 @@ for (const width of [320, 390, 1280]) {
     if (phone) await secondToggle.click();
     await second.getByRole('checkbox').uncheck();
     await expect(batch.getByText('1 selected')).toBeVisible();
+    await first.getByRole('checkbox').uncheck();
+    await expect(dialog.getByText('Include a source to continue.', { exact: true })).toBeVisible();
+    await first.getByRole('checkbox').check();
+    await expect(dialog.getByText('Include a source to continue.', { exact: true })).toHaveCount(0);
     const title = first.getByLabel('Title override for item 1');
     const speaker = first.getByLabel('Speaker for item 1');
     const track = first.getByLabel('Track for item 1');

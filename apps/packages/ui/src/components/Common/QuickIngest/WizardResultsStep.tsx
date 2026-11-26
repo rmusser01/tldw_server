@@ -31,6 +31,7 @@ import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   canOpenMedia,
   canRetryWizardResult,
+  canStartNewAttempt,
   getSavedMediaIds,
   GENERIC_SKIPPED_MESSAGE,
   LIBRARY_DUPLICATE_SKIP_MESSAGE,
@@ -58,6 +59,7 @@ type WizardResultsStepProps = {
   }
   onClose: () => void
   onIngestMore?: () => void
+  onStartNewAttempt?: (id: string) => void
   onRetryItems?: (
     itemIds: string[],
     retryItems?: ConferenceRetryRequestItem[]
@@ -305,6 +307,7 @@ type ErrorRowProps = {
   category: ErrorCategory
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
   onRetry?: (item: WizardResultItem) => void
+  onStartNewAttempt?: (id: string) => void
   onRemove?: (id: string) => void
   onCorrect?: (repairSource?: boolean) => void
   onReattach?: (file: File) => void
@@ -321,7 +324,7 @@ function sourceRepairLabel(source: WizardQueueItem, qi: ErrorRowProps["qi"]): st
 }
 
 const ErrorRow: React.FC<ErrorRowProps> = React.memo(
-  ({ item, category, qi, onRetry, onRemove, onCorrect, onReattach, source, oneScreen }) => {
+  ({ item, category, qi, onRetry, onStartNewAttempt, onRemove, onCorrect, onReattach, source, oneScreen }) => {
     const label = item.title || item.fileName || item.url || item.id
     const missingFile = source && !source.url && !source.file
     const settingsFailure = (
@@ -349,7 +352,9 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
             <p className="mt-1 text-xs text-text-subtle">
               {oneScreen && rejectedSource && source?.url && !failedSources.length
                 ? qi("source.rejectedLink", "The server could not process this link. Check the address and try again.")
-                : <>{category.userMessage} {category.suggestion}</>}
+                : <>{category.userMessage} {onStartNewAttempt
+                  ? qi("web.onlyRestartSource", "Only this source will run again.")
+                  : category.suggestion}</>}
             </p>
             {item.error && (
               <details className="mt-1 text-xs text-text-subtle">
@@ -395,6 +400,13 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
               aria-label={oneScreen ? qi("source.editSettingsFor", "Edit settings for {{name}}", { name: label }) : qi("wizard.results.correctItem", "Correct settings for {{name}}", { name: label })}>
               {oneScreen ? qi("source.editSettings", "Edit settings") : qi("wizard.results.correct", "Correct settings")}
             </button>}
+            {onStartNewAttempt && (
+              <button type="button" onClick={() => onStartNewAttempt(item.id)}
+                className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
+                aria-label={qi("web.startAttemptFor", "Start a new attempt for {{name}}", { name: label })}>
+                {qi("web.startAttempt", "Start a new attempt")}
+              </button>
+            )}
             {category.retryable && onRetry && (
               <button
                 type="button"
@@ -436,6 +448,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   onClose,
   onIngestMore,
   onRetryItems,
+  onStartNewAttempt,
   onOpenMedia,
   onDiscussInChat,
   onSearchKnowledge,
@@ -649,6 +662,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
       category={errorCategories.get(item.id) ?? classifyError(item.error, item.data, item.httpStatus)}
       qi={qi}
       onRetry={getRetryHandlerForItem(item)}
+      onStartNewAttempt={oneScreen && canStartNewAttempt(item, queueItems, hasDurableCollection) ? onStartNewAttempt : undefined}
       onCorrect={onCorrectItems ? repair => repair ? onCorrectItems([item.id], true) : onCorrectItems([item.id]) : undefined}
       onReattach={onReattach ? file => onReattach(item.id, file) : undefined}
     />

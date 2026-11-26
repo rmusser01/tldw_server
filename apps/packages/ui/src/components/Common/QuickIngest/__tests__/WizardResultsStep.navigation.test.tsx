@@ -66,6 +66,25 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
 import { WizardResultsStep } from "../WizardResultsStep"
 
 describe("WizardResultsStep navigation buttons", () => {
+  it("offers a new attempt only for its confirmed cancelled source, separately from failed-source retries", () => {
+    const start = vi.fn()
+    const retry = vi.fn()
+    wizardHarness.results = [
+      { id: "confirmed", type: "pdf", status: "error", outcome: "cancelled", cancellationConfirmed: true },
+      { id: "unconfirmed", type: "pdf", status: "error", outcome: "cancelled" },
+      { id: "failed", type: "pdf", status: "error", outcome: "failed", error: "Network error" },
+    ]
+    wizardHarness.queueItems = wizardHarness.results.map(({ id }) => ({
+      id, url: `https://example.org/${id}.pdf`, validation: { valid: true },
+    }))
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onStartNewAttempt={start} onRetryItems={retry} />)
+    const cancelled = within(screen.getByRole("region", { name: "Cancelled items" }))
+    fireEvent.click(cancelled.getByRole("button", { name: /Start a new attempt/ }))
+    expect(start).toHaveBeenCalledWith("confirmed")
+    fireEvent.click(screen.getByRole("button", { name: "Retry failed source" }))
+    expect(retry).toHaveBeenCalledWith(["failed"], undefined)
+  })
+
   it("opens the one newly saved source from the WebUI footer and keeps secondary actions collapsed", () => {
     const openMedia = vi.fn()
     render(<WizardResultsStep oneScreen onClose={vi.fn()} onOpenMedia={openMedia} onSearchKnowledge={vi.fn()} />)

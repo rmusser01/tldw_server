@@ -7352,6 +7352,9 @@
   "quickIngest_web_addSourceHint": {
     "message": "Add a source to continue."
   },
+  "quickIngest_web_includeSourceHint": {
+    "message": "Include a source to continue."
+  },
   "quickIngest_web_readyOnly": {
     "message": "Only ready sources will run."
   },
@@ -7417,6 +7420,15 @@
   },
   "quickIngest_web_retrySources": {
     "message": "Retry {{count}} failed sources"
+  },
+  "quickIngest_web_startAttempt": {
+    "message": "Start a new attempt"
+  },
+  "quickIngest_web_startAttemptFor": {
+    "message": "Start a new attempt for {{name}}"
+  },
+  "quickIngest_web_onlyRestartSource": {
+    "message": "Only this source will run again."
   },
   "quickIngest_web_openDrafts": {
     "message": "Open drafts"

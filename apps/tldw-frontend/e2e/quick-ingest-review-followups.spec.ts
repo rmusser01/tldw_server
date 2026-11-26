@@ -101,6 +101,35 @@ for (const [device, width, height] of [
 
     if (device === 'narrow') return;
 
+    test('starts a new attempt for just the server-cancelled source', async ({ page }, info) => {
+      const fixture = await installBrowserFixture(page, { webUrl, processingPolls: 100 });
+      const stopped = 'https://example.org/estuary/cancelled.pdf';
+      const completed = 'https://example.org/estuary/saved.pdf';
+      const dialog = await openIngest(page);
+      await fillLinks(dialog, [completed, stopped]);
+      await dialog.getByRole('button', { name: /add urls/i }).click();
+      await quickPreset(dialog);
+      await dialog.getByRole('button', { name: 'Save 2 sources', exact: true }).click();
+      await expect.poll(() => fixture.jobs.size).toBe(2);
+      for (const job of fixture.jobs.values()) {
+        if (job.source === stopped) job.status = 'cancelled';
+        else job.polls = 0;
+      }
+      const next = dialog.getByRole('region', { name: 'Cancelled items' })
+        .getByRole('button', { name: 'Start a new attempt for ' + stopped, exact: true });
+      await expect(next).toBeVisible({ timeout: 30_000 });
+      await expect(dialog.getByText('Only this source will run again.', { exact: false })).toBeVisible();
+      await next.scrollIntoViewIfNeeded();
+      await screenshot(page, info, 'cancelled-source-' + device);
+      fixture.processingPolls = 0;
+      await next.focus();
+      await next.press('Enter');
+      await expect(dialog.getByRole('heading', { name: '2 saved to Media' })).toBeVisible({ timeout: 30_000 });
+      expect(fixture.attempts.get(completed)).toBe(1);
+      expect(fixture.attempts.get(stopped)).toBe(2);
+      expect(fixture.jobs.size).toBe(3);
+    });
+
     test('progress leads with the completed count and active file and discloses job tracking', async ({ page }, info) => {
       const fixture = await installBrowserFixture(page, { webUrl, count: 2, processingPolls: 100 });
       const fileName = 'North bank field notes.txt';

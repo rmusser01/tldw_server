@@ -21,6 +21,8 @@ export type ResultItem = {
   id: string
   status: "ok" | "error"
   outcome?: ResultOutcome
+  /** The server reported a terminal cancellation for this source. */
+  cancellationConfirmed?: boolean
   url?: string
   fileName?: string
   type: string

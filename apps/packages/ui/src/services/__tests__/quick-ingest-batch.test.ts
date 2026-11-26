@@ -1388,6 +1388,7 @@ describe("submitQuickIngestBatch", () => {
       path: "/api/v1/media/ingest/jobs/cancel?batch_id=batch-stop-1&reason=user_cancelled",
     }))
     expect(runResult.results).toContainEqual(expect.objectContaining({ id: "entry-stop-2", outcome: "cancelled", error: "Stopped before submission." }))
+    expect(runResult.results?.filter(item => item.cancellationConfirmed).map(item => item.id)).toEqual(["entry-stop-1"])
   })
 
   it("uses extension message transport when extension runtime is available", async () => {
