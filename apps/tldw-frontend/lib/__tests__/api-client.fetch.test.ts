@@ -389,6 +389,40 @@ describe("fetch-backed WebUI api client", () => {
     )
   })
 
+  it.each([
+    ["new_sign_in_protected", "A new sign-in alert can only be dismissed from a browser that was signed in before it, or after 24 hours."],
+    ["interactive_session_required", "This action needs a browser sign-in. API keys, virtual keys and service tokens cannot end sessions."]
+  ])("passes the %s refusal through with fixed text", async (code, text) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      jsonResponse({ detail: { code, message: "raw server text" } }, { status: 403, statusText: "Forbidden" })
+    ))
+    const { apiClient } = await loadApiModule()
+    await expect(apiClient.post("/notifications/1/dismiss")).rejects.toMatchObject({
+      name: "ApiError", status: 403, errorCode: code, detail: text, message: text
+    })
+    expect(JSON.stringify(storedRequestHistory()[0])).not.toContain("raw server text")
+  })
+
+  it("keeps the refusal allowlist closed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      jsonResponse({ detail: { code: "something_else", message: "m" } }, { status: 403, statusText: "Forbidden" })
+    ))
+    const { apiClient } = await loadApiModule()
+    const err = await apiClient.post("/notifications/1/dismiss").catch((e) => e)
+    expect(err).toMatchObject({ status: 403, message: "Forbidden" })
+    expect(err.errorCode).toBeUndefined()
+  })
+
+  it("does not expose a refusal code on a 500", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      jsonResponse({ detail: { code: "new_sign_in_protected", message: "m" } }, { status: 500, statusText: "Server Error" })
+    ))
+    const { apiClient } = await loadApiModule()
+    const err = await apiClient.post("/notifications/1/dismiss").catch((e) => e)
+    expect(err.status).toBe(500)
+    expect(err.errorCode).toBeUndefined()
+  })
+
   it("does not expose unknown nested error objects", async () => {
     const secret = "upstream-secret-provider-body"
     const fetchMock = vi.fn().mockResolvedValue(

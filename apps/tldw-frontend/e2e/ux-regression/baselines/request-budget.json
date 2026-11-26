@@ -6,10 +6,10 @@
       "page": "notes",
       "kind": "total",
       "key": "api-requests",
-      "count": 19,
+      "count": 20,
       "reviewIds": ["XP-16"],
       "issue": 3121,
-      "note": "21 on 2026-10-22 after XP-16 stopped the 5 s buddy polling (it backs off after the mount read); 19 on 2026-11-12 after W4 TASK-13524's auth-snapshot + notification poll gating (CI run 43081892449, ratchet-directed)."
+      "note": "21 on 2026-10-22 after XP-16 stopped the 5 s buddy polling (it backs off after the mount read); 19 on 2026-11-12 after W4 TASK-13524's auth-snapshot + notification poll gating (CI run 43081892449, ratchet-directed); 20 on 2026-11-25: the new sign-in banner reads GET /notifications?kind=new_sign_in once per page load, kept separate from the inbox read so other notifications cannot bury the alert (#3635, CI run 45755309665)."
     },
     {
       "page": "notes",
@@ -51,11 +51,11 @@
       "page": "chat",
       "kind": "total",
       "key": "api-requests",
-      "count": 20,
+      "count": 21,
       "tolerance": 1,
       "reviewIds": ["XP-16"],
       "issue": 3121,
-      "note": "22 on 2026-10-22 after XP-16 stopped the buddy polling and FirstRunGate stopped re-reading profiles on /chat; 20 on 2026-11-12 after W4 TASK-13524's model-catalog staleTime/gcTime caching (CI run 43132582711, ratchet-directed)."
+      "note": "22 on 2026-10-22 after XP-16 stopped the buddy polling and FirstRunGate stopped re-reading profiles on /chat; 20 on 2026-11-12 after W4 TASK-13524's model-catalog staleTime/gcTime caching (CI run 43132582711, ratchet-directed); 21 on 2026-11-25 for the new sign-in banner's one GET /notifications?kind=new_sign_in per page load (#3635)."
     },
     {
       "page": "chat",

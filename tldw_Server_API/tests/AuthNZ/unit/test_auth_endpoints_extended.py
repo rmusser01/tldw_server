@@ -10,6 +10,7 @@ from fastapi import HTTPException, Response
 from pydantic import ValidationError
 from starlette.requests import Request
 
+from tldw_Server_API.app.core.AuthNZ.interactive_session import InteractiveSession
 from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
     build_login_client_lockout_key,
     validate_login_client_lockout_key,
@@ -1636,6 +1637,30 @@ async def test_logout_accepts_lowercase_bearer(monkeypatch):
     assert captured["revoked"] is True
 
 
+def _interactive_logout_args(session_id: int = 5, user_id: int = 12):
+    """A browser-session principal plus a request whose bearer carries a ``session_id`` claim."""
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    token = get_jwt_service().create_access_token(
+        user_id, "alice", "user", additional_claims={"session_id": session_id}
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/logout",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+            "client": ("203.0.113.5", 1234),
+            "scheme": "http",
+            "query_string": b"",
+            "server": ("testserver", 80),
+        }
+    )
+    principal = AuthPrincipal(kind="user", user_id=user_id, token_type="access")
+    return request, principal
+
+
 @pytest.mark.asyncio
 async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
     reset_settings()
@@ -1645,6 +1670,9 @@ async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
     captured = {"calls": 0, "user_id": None, "reason": None}
 
     class _StubSessionManager:
+        async def get_user_sessions(self, user_id, strict=False):
+            return [{"id": 5}]
+
         async def revoke_all_user_sessions(
             self,
             *,
@@ -1666,22 +1694,12 @@ async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
 
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", lambda: _BlacklistShouldNotBeCalled())
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/logout",
-        "headers": [(b"authorization", b"Bearer unused-for-all-devices")],
-        "client": ("203.0.113.5", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
+    request, principal = _interactive_logout_args()
 
     result = await auth.logout(
         data=auth.LogoutRequest(all_devices=True),
         request=request,
-        current_user=SimpleNamespace(id=12),
+        current_user=principal,
         session_manager=_StubSessionManager(),
         jwt_service=object(),
     )
@@ -1753,6 +1771,9 @@ async def test_logout_all_devices_ignores_blacklist_factory_failure(monkeypatch)
     import tldw_Server_API.app.api.v1.endpoints.auth as auth
 
     class _StubSessionManager:
+        async def get_user_sessions(self, user_id, strict=False):
+            return [{"id": 5}]
+
         async def revoke_all_user_sessions(
             self,
             *,
@@ -1767,22 +1788,12 @@ async def test_logout_all_devices_ignores_blacklist_factory_failure(monkeypatch)
 
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", _failing_blacklist_factory)
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/logout",
-        "headers": [],
-        "client": ("203.0.113.5", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
+    request, principal = _interactive_logout_args()
 
     result = await auth.logout(
         data=auth.LogoutRequest(all_devices=True),
         request=request,
-        current_user=SimpleNamespace(id=12),
+        current_user=principal,
         session_manager=_StubSessionManager(),
         jwt_service=object(),
     )
@@ -1797,6 +1808,9 @@ async def test_logout_all_devices_raises_when_session_revoke_fails(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.auth as auth
 
     class _FailingSessionManager:
+        async def get_user_sessions(self, user_id, strict=False):
+            return [{"id": 5}]
+
         async def revoke_all_user_sessions(
             self,
             *,
@@ -1806,23 +1820,13 @@ async def test_logout_all_devices_raises_when_session_revoke_fails(monkeypatch):
         ) -> int:
             raise RuntimeError("session revoke failed")
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/logout",
-        "headers": [],
-        "client": ("203.0.113.5", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
+    request, principal = _interactive_logout_args()
 
     with pytest.raises(auth.HTTPException) as exc:
         await auth.logout(
             data=auth.LogoutRequest(all_devices=True),
             request=request,
-            current_user=SimpleNamespace(id=12),
+            current_user=principal,
             session_manager=_FailingSessionManager(),
             jwt_service=object(),
         )
@@ -1855,6 +1859,8 @@ async def test_revoke_all_sessions_returns_revoked_count():
     result = await auth.revoke_all_sessions(
         current_user={"id": 77, "username": "carol"},
         session_manager=_StubSessionManager(),
+        keep_current=False,
+        interactive=InteractiveSession(user_id=77, session_id=5),
     )
 
     assert result.message == "Successfully revoked 3 sessions"
@@ -1879,6 +1885,7 @@ async def test_list_user_sessions_sanitizes_backend_error_in_test_mode(monkeypat
         await auth.list_user_sessions(
             current_user=SimpleNamespace(id=77),
             session_manager=_FailingSessionManager(),
+            current_session_id=None,
         )
 
     assert exc.value.status_code == 500

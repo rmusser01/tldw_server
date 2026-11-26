@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import ast
 import gc
+import subprocess  # nosec B404 # Test-only fixed local Python lifetime probe.
+import sys
 import weakref
 from pathlib import Path
 
@@ -64,9 +66,8 @@ def test_reset_all_clears_several_drained_apps_at_once() -> None:
     assert not any(is_lifecycle_draining(app) for app in apps)
 
 
-@pytest.mark.unit
-def test_registry_does_not_keep_apps_alive() -> None:
-    """Tracking apps must not turn every test app into a permanent leak."""
+def _assert_registry_releases_app() -> None:
+    """Check the real registry and FastAPI cycles without ambient collectors."""
     app = FastAPI()
     mark_lifecycle_shutdown(app)
     # Reaching it here proves it is tracked, so the collection check below is
@@ -82,6 +83,26 @@ def test_registry_does_not_keep_apps_alive() -> None:
 
 
 @pytest.mark.unit
+def test_registry_does_not_keep_apps_alive() -> None:
+    """Tracking apps must not turn every test app into a permanent leak."""
+    # Concurrent gc.collect() returns without collecting FastAPI's cycles.
+    # One fresh interpreter isolates this registry contract from ambient GC.
+    result = subprocess.run(  # nosec B603 # Fixed local Python probe, no shell or untrusted command.
+        [
+            sys.executable,
+            "-c",
+            "import runpy, sys; runpy.run_path(sys.argv[1])['_assert_registry_releases_app']()",
+            str(Path(__file__).resolve()),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr  # nosec B101 # Propagate the child lifetime assertions to pytest.
+
+
+@pytest.mark.unit
 def test_root_fixture_resets_every_app_not_just_the_current_one() -> None:
     """Guard the wiring: the semantics above only help if the fixture calls them.
 
@@ -92,23 +113,15 @@ def test_root_fixture_resets_every_app_not_just_the_current_one() -> None:
     tree = ast.parse(ROOT_CONFTEST.read_text(encoding="utf-8"))
 
     fixture = next(
-        (
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name == FIXTURE_NAME
-        ),
+        (node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == FIXTURE_NAME),
         None,
     )
     assert fixture is not None, (
-        f"{ROOT_CONFTEST.name} no longer defines {FIXTURE_NAME}(), so nothing "
-        "clears drain state between tests."
+        f"{ROOT_CONFTEST.name} no longer defines {FIXTURE_NAME}(), so nothing clears drain state between tests."
     )
 
     called = {
-        node.func.id
-        for node in ast.walk(fixture)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        node.func.id for node in ast.walk(fixture) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "reset_all_lifecycle_states" in called, (
         f"{FIXTURE_NAME}() no longer calls reset_all_lifecycle_states(). "
