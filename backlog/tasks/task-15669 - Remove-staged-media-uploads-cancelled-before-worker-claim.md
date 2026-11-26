@@ -5,6 +5,8 @@ status: Done
 labels:
 - media-ingest
 - jobs
+references:
+- https://github.com/rmusser01/tldw_server/pull/3645
 ---
 
 ## Description
@@ -28,6 +30,7 @@ Plan: reproduce using real multipart + Jobs SQLite, implement safe cleanup at th
 Local live-tier Uvicorn + SQLite and separate real ingest worker: two trials per route in the final run. Single cancel acknowledgements took 12.8 and 20.9 ms, batch took 29.4 and 36.1 ms. All four individual sources and their empty directories were gone by acknowledgement. A fifth independent upload remained intact, processed successfully and was then cleaned by the worker. Repeated batch cancellations counted the rows already terminal.
 155 focused media/SQLite Jobs tests and 3 PostgreSQL integration cases passed. Initial queued single, queued batch, pre-handler, admission rejection and concurrent interrupted-cleanup tests all reproduced on pre-fix code. Safety coverage includes an active successor attempt, expired unclaimed prepare, foreign or copied payloads, replaced directory links, surviving siblings and recovery on repeat cancel. Ruff and Bandit match the dev baseline (Bandit excludes pytest assertion B101 in test files only). No public API schema, migrations or new configuration. Authenticated participants use their configured shared OS temporary directory.
 Upgrading: a queued upload created by an older server can still be processed by a worker as before. Its legacy random directory has no authoritative binding to the Jobs UUID. Automatic cancellation cleanup deliberately leaves legacy files in place. For a historical cancellation an operator can reconcile the exact job and source with trusted admission evidence, confirm that no live jobs/workers share the path and remove that individual file and empty directory. There is no historical directory sweep.
+Review follow-up verified the previously expired SDK handoff, concurrent interrupted-cancellation recovery and admission-rejection cleanup cases. The standalone implementation is in PR #3645.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
