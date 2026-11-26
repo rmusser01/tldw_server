@@ -408,6 +408,13 @@ class TestAuthEndpointsIntegration:
         app.dependency_overrides[get_auth_principal] = mock_get_auth_principal
         app.dependency_overrides[get_session_manager_dep] = lambda: session_manager
         app.dependency_overrides[get_jwt_service_dep] = lambda: jwt_service
+        # Logout ends the session the token names; a token without one is refused.
+        session_access_token = jwt_service.create_access_token(
+            user_id=test_user["id"],
+            username=test_user["username"],
+            role=test_user["role"],
+            additional_claims={"session_id": 1},
+        )
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -415,7 +422,7 @@ class TestAuthEndpointsIntegration:
         ) as client:
             response = await client.post(
                 "/api/v1/auth/logout",
-                headers={"Authorization": f"Bearer {valid_access_token}"}
+                headers={"Authorization": f"Bearer {session_access_token}"}
             )
 
         assert response.status_code == 200

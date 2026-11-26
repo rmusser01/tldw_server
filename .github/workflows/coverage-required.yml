@@ -133,7 +133,7 @@ jobs:
           needs.await_license.outputs.license_passed != 'true'
         )
       )
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Require the license audit to have passed
         if: >-

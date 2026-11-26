@@ -32,6 +32,7 @@ DEFAULT_RETENTION_DAYS: dict[str, int] = {
     "reminder_failed": 90,
     "job_completed": 30,
     "job_failed": 60,
+    "new_sign_in": 30,
 }
 DEFAULT_READ_DISMISSED_DAYS = 30
 DEFAULT_ARCHIVE_GRACE_DAYS = 7

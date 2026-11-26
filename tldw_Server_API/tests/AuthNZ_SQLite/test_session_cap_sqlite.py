@@ -477,6 +477,28 @@ async def test_same_device_id_replaces_only_its_own_row(authnz_sqlite):
     assert {a, b, c} <= await live_ids(pool, uid)
 
 
+async def test_evicted_rows_returned_by_the_repo_carry_their_device_id(authnz_sqlite):
+    from datetime import datetime, timedelta, timezone
+
+    from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
+
+    pool, uid, _ = authnz_sqlite
+    repo = AuthnzSessionsRepo(pool)
+    now = datetime.now(timezone.utc)
+
+    async def capped(tag, device):
+        return await repo.create_session_record_with_cap(
+            user_id=uid, token_hash=f"h-{tag}", refresh_token_hash=f"r-{tag}", encrypted_token="enc",
+            encrypted_refresh="enc", expires_at=now + timedelta(hours=1), refresh_expires_at=now + timedelta(days=7),
+            ip_address="127.0.0.1", user_agent="pytest", device_id=device, access_jti=f"aj-{tag}",
+            refresh_jti=f"rj-{tag}", max_live_sessions=1,
+        )
+
+    await capped("one", "dev-aaaaaaaa")
+    _new_id, evicted = await capped("two", "dev-bbbbbbbb")
+    assert [e["device_id"] for e in evicted] == ["dev-aaaaaaaa"]
+
+
 async def test_expired_refresh_rows_do_not_count_toward_the_cap(authnz_sqlite):
     pool, uid, _ = authnz_sqlite
     h, d = timedelta(hours=1), timedelta(days=1)

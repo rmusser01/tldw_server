@@ -344,6 +344,9 @@ class SessionResponse(BaseModel):
     created_at: datetime = Field(..., description="Session creation time")
     last_activity: datetime = Field(..., description="Last activity time")
     expires_at: datetime = Field(..., description="Session expiration time")
+    is_current: bool = Field(False, description="True only for the session making this request, derived from the verified credential.")
+    device_label: str = Field("Unknown browser", description="Browser and OS family from the user agent.")
+    same_install: bool = Field(False, description="True when this session was signed in from the same browser install as the session making this request. The install id itself is never returned.")
 
     model_config = {
         "from_attributes": True,

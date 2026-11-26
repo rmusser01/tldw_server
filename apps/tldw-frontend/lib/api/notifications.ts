@@ -124,6 +124,7 @@ export async function listNotifications(params?: {
   offset?: number
   include_archived?: boolean
   only_snoozed?: boolean
+  kind?: string
   signal?: AbortSignal
 }): Promise<NotificationsListResponse> {
   assertNotificationTarget()
@@ -132,7 +133,8 @@ export async function listNotifications(params?: {
       limit: params?.limit ?? 100,
       offset: params?.offset ?? 0,
       include_archived: params?.include_archived ?? false,
-      only_snoozed: params?.only_snoozed
+      only_snoozed: params?.only_snoozed,
+      kind: params?.kind
     })}`,
     { signal: params?.signal, withCredentials: !hasExplicitAuthHeaders() }
   )
@@ -148,9 +150,11 @@ export async function getUnreadCount(options?: {
   })
 }
 
-export async function markNotificationsRead(ids: number[]): Promise<{ updated: number }> {
+export async function markNotificationsRead(
+  ids: number[]
+): Promise<{ updated: number; refused_ids?: number[] }> {
   assertNotificationTarget()
-  return apiClient.post<{ updated: number }>("/notifications/mark-read", { ids }, {
+  return apiClient.post<{ updated: number; refused_ids?: number[] }>("/notifications/mark-read", { ids }, {
     withCredentials: !hasExplicitAuthHeaders()
   })
 }

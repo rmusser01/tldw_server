@@ -740,4 +740,79 @@ describe('NotificationsPage', () => {
       expect(jobCompletedToggle).not.toBeChecked();
     });
   });
+
+  describe('new sign-in alerts', () => {
+    const signIn = {
+      id: 201,
+      kind: 'new_sign_in',
+      title: 'New sign-in to your account',
+      message: 'Chrome on macOS signed in.',
+      severity: 'warning',
+      created_at: '2026-11-25T14:00:00+00:00',
+      read_at: null,
+      dismissed_at: null,
+      link_url: '/settings/sessions',
+    };
+    const protectedError = { status: 403, errorCode: 'new_sign_in_protected', message: 'protected' };
+    const useSignIn = () =>
+      mocks.listNotifications.mockImplementation(({ only_snoozed }: { only_snoozed?: boolean } = {}) =>
+        Promise.resolve({ items: only_snoozed ? [] : [signIn], total: 1 })
+      );
+
+    it('a refused_ids response leaves the alert unread and the unread count unchanged', async () => {
+      const user = userEvent.setup();
+      useSignIn();
+      mocks.markNotificationsRead.mockResolvedValue({ updated: 0, refused_ids: [201] });
+      render(<NotificationsPage />);
+      await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+      await waitFor(() => expect(mocks.markNotificationsRead).toHaveBeenCalledWith([201]));
+      expect(screen.getByText('Unread: 2')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Mark read' })).toBeInTheDocument();
+    });
+
+    it('a 403 new_sign_in_protected shows the explanation toast, leaves the item unread, does not call reportMutationError, and View still navigates', async () => {
+      const user = userEvent.setup();
+      useSignIn();
+      mocks.markNotificationsRead.mockRejectedValue(protectedError);
+      render(<NotificationsPage />);
+      await user.click(await screen.findByRole('button', { name: 'View' }));
+      await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/settings/sessions'));
+      expect(mocks.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({ variant: 'warning', description: expect.stringContaining('24 hours') })
+      );
+      expect(mocks.reportMutationError).not.toHaveBeenCalled();
+      expect(screen.getByText('Unread: 2')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Mark read' })).toBeInTheDocument();
+      expect(screen.queryByText(/Failed to mark/)).toBeNull();
+    });
+
+    it('Dismiss answered 403 new_sign_in_protected does not call reportMutationError', async () => {
+      const user = userEvent.setup();
+      useSignIn();
+      mocks.dismissNotification.mockRejectedValue(protectedError);
+      render(<NotificationsPage />);
+      await user.click(await screen.findByRole('button', { name: 'Dismiss' }));
+      await waitFor(() => expect(mocks.showToast).toHaveBeenCalledWith(expect.objectContaining({ variant: 'warning' })));
+      expect(mocks.reportMutationError).not.toHaveBeenCalled();
+      expect(screen.getByText('New sign-in to your account')).toBeInTheDocument();
+      expect(screen.queryByText(/Failed to dismiss/)).toBeNull();
+    });
+
+    it('an ordinary mark-read failure still calls reportMutationError', async () => {
+      const user = userEvent.setup();
+      useSignIn();
+      const failure = Object.assign(new Error('offline'), { status: 503 });
+      mocks.markNotificationsRead.mockRejectedValue(failure);
+      render(<NotificationsPage />);
+      await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+      await waitFor(() => expect(mocks.reportMutationError).toHaveBeenCalledWith(failure));
+    });
+
+    it('no Snooze button on a new_sign_in item', async () => {
+      useSignIn();
+      render(<NotificationsPage />);
+      await screen.findByText('New sign-in to your account');
+      expect(screen.queryByRole('button', { name: /Snooze/ })).toBeNull();
+    });
+  });
 });
