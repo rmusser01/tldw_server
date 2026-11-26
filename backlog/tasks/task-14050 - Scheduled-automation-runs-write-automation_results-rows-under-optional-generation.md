@@ -12,6 +12,7 @@ labels:
 dependencies: []
 references:
 - https://github.com/rmusser01/tldw_server/issues/2864
+- https://github.com/rmusser01/tldw_server/pull/3637
 - Docs/superpowers/specs/2026-06-09-scheduled-tasks-phase4b-backend-api-foundation-design.md
 - Docs/superpowers/specs/2026-06-30-scheduled-tasks-phase4c-recurring-question-execution-design.md
 - Docs/User_Guides/WebUI/Automation_Admin_Operations.md
@@ -67,6 +68,7 @@ ADR required: no. The Phase 4B visibility policy and scheduled-job compatibility
 The dev baseline reproduced the exact report. A manual optional run emitted run_succeeded and the Results endpoint returned zero rows. The new regression runs preview, create, the compatibility Run Now route, the real consumer, and the Results API. It verifies the full answer, matching IDs, bounded summary, unread state, and one result across review and redelivery. A forced result-write interruption rolls back completion and lets the same job retry. The consumer tests cover empty and failed answers, approval, and visibility exclusions.
 
 Verification against origin/dev 1d8589b7c4 included 234 scheduled-task tests, followed by 40 consumer and Run Now tests on the final visibility policy. Local FastAPI and the Jobs worker used a deterministic model response. Playwright saw the generated result under Unreviewed, opened the answer, and confirmed Mark reviewed persisted read state through the API. Bandit and Ruff reported no new findings.
+PR #3637 opened against dev after all 235 affected scheduled-task tests passed on a560526fe7.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
