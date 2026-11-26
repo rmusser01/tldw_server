@@ -92,7 +92,7 @@
   .qi-web-scroll { padding: 8px 16px; }
   .qi-web-footer { padding: 10px 16px max(10px, env(safe-area-inset-bottom)); }
   .qi-web-footer button { min-height: 44px; }
-  .qi-draft-footer { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .qi-draft-footer, .qi-replacement-footer { display: grid; grid-template-columns: minmax(0, 1fr); }
   .qi-draft-footer > :empty { display: none; }
   .qi-link-entry { flex-direction: column; }
   .qi-link-entry textarea { flex: auto; font-size: 16px; }

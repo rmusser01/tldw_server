@@ -67,6 +67,25 @@ const mountOneScreen = (processingItems?: WizardQueueItem[]) => render(
 );
 
 describe("one-screen source queue", () => {
+  it("undoes Clear all in the original order and keeps sources added since clearing", () => {
+    mountOneScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Links" }));
+    add("https://example.com/a\nhttps://example.com/b");
+    const originalIds = JSON.parse(screen.getByTestId("ids").textContent!);
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo).toHaveFocus();
+    expect(screen.getByTestId("ids")).toHaveTextContent("[]");
+    add("https://example.com/c");
+    fireEvent.click(undo);
+    expect(JSON.parse(screen.getByTestId("ids").textContent!).slice(0, 2)).toEqual(originalIds);
+    expect(JSON.parse(screen.getByTestId("urls").textContent!)).toEqual([
+      "https://example.com/a", "https://example.com/b", "https://example.com/c",
+    ]);
+    expect(screen.getByRole("button", { name: "Clear all" })).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
   it("keeps different pasted texts of the same size eligible", () => {
     mountOneScreen();
     fireEvent.click(screen.getByRole("button", { name: "Text", exact: true }));
@@ -75,6 +94,21 @@ describe("one-screen source queue", () => {
       fireEvent.click(screen.getByRole("button", { name: /add pasted text/i }));
     }
     expect(screen.getByRole("status", { name: "Source counts" })).toHaveTextContent(/^2 ready$/);
+  });
+
+  it("keeps a new equal-length paste eligible when Undo restores earlier pasted sources", () => {
+    mountOneScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+    const paste = (value: string) => {
+      fireEvent.change(screen.getByRole("textbox", { name: "Pasted text input" }), { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: /add pasted text/i }));
+    };
+    paste("one");
+    paste("two");
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    paste("new");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByRole("status", { name: "Source counts" })).toHaveTextContent(/^3 ready$/);
   });
 
   it("offers one keyboard control for choosing files", () => {

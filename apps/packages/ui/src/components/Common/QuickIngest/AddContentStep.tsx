@@ -188,6 +188,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     firstSourceAddMode,
   } = state
 
+  const [clearedItems, setClearedItems] = useState<WizardQueueItem[]>([])
+  const clearButton = React.useRef<React.ComponentRef<typeof Button>>(null)
+  const undoButton = React.useRef<React.ComponentRef<typeof Button>>(null)
+  const focusAfterClear = React.useRef<"undo" | "clear" | null>(null)
+  React.useEffect(() => {
+    if (focusAfterClear.current === "undo") undoButton.current?.focus()
+    if (focusAfterClear.current === "clear") clearButton.current?.focus()
+    focusAfterClear.current = null
+  }, [clearedItems])
   const [fileRejections, setFileRejections] = useState<string[]>([])
   const [urlInput, setUrlInput] = useState("")
   const [pastedTextInput, setPastedTextInput] = useState("")
@@ -260,7 +269,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   const handleAddPastedText = useCallback(() => {
     if (!pastedTextInput.trim()) return
 
-    const names = new Set(queueItems.map(item => item.fileName))
+    const names = new Set([...queueItems, ...clearedItems].map(item => item.fileName))
     let name = "pasted-text.txt"
     for (let index = 2; names.has(name); index++) name = `pasted-text-${index}.txt`
     const file = new File([pastedTextInput], name, {
@@ -282,7 +291,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     item.validation = validateQueueItem(item)
     setQueueItems([...queueItems, item])
     setPastedTextInput("")
-  }, [pastedTextInput, queueItems, setQueueItems])
+  }, [pastedTextInput, queueItems, clearedItems, setQueueItems])
 
   const playlistCandidateUrls = useMemo(
     () =>
@@ -368,6 +377,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         playlist: {
           playlistId: playlistPreflight.playlistId,
           playlistTitle: playlistPreflight.playlistTitle,
+          sourceTitle: preflightItem.title,
           ordinal: preflightItem.ordinal,
           normalizedSourceId: preflightItem.normalizedSourceId,
           duplicateStatus: preflightItem.duplicateStatus
@@ -475,8 +485,12 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
 
   // Clear all items
   const handleClearAll = useCallback(() => {
+    if (oneScreen) {
+      focusAfterClear.current = "undo"
+      setClearedItems(queueItems)
+    }
     setQueueItems([])
-  }, [setQueueItems])
+  }, [oneScreen, queueItems, setQueueItems])
 
   const captureMounted = React.useRef(true)
   const queueRef = React.useRef(queueItems)
@@ -751,7 +765,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       )}
 
       {/* Queued items list */}
-      {oneScreen && hasItems && (
+      {clearedItems.length > 0 && <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-border bg-surface2 px-3">
+        <p role="status" className="text-sm text-text">{qi("source.cleared", "{count, plural, one {# source cleared.} other {# sources cleared.}}", { count: clearedItems.length })}</p>
+        <Button ref={undoButton} type="link" className="min-h-11" onClick={() => {
+          focusAfterClear.current = "clear"
+          setQueueItems([...clearedItems, ...queueItems])
+          setClearedItems([])
+        }}>{qi("source.undo", "Undo")}</Button>
+      </div>}
+      {oneScreen && (hasItems || clearedItems.length > 0) && (
         <SourceQueue
           items={queueItems}
           repairId={repairId}
@@ -759,6 +781,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           setItems={setQueueItems}
           remove={handleRemoveItem}
           clear={handleClearAll}
+          clearButton={clearButton}
           qi={qi}
         />
       )}
@@ -960,10 +983,11 @@ type SourceQueueProps = {
   setItems: (items: WizardQueueItem[]) => void
   remove: (id: string) => void
   clear: () => void
+  clearButton: React.Ref<React.ComponentRef<typeof Button>>
   qi: (key: string, fallback: string, values?: Record<string, unknown>) => string
 }
 
-function SourceQueue({ items, repairId, processingItems, setItems, remove, clear, qi }: SourceQueueProps) {
+function SourceQueue({ items, repairId, processingItems, setItems, remove, clear, clearButton, qi }: SourceQueueProps) {
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(() => {
     const source = items.find(item => item.id === repairId && !item.validation.valid)
     return source && (source.url || canPasteQueueItem(source)) ? { id: source.id, value: source.url ?? "" } : null
@@ -1013,7 +1037,7 @@ function SourceQueue({ items, repairId, processingItems, setItems, remove, clear
     setEditing(null)
   }
   return (
-    <section aria-label={qi("source.queue", "Queued sources")}>
+    <section hidden={!items.length} aria-label={qi("source.queue", "Queued sources")}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
         <h3 className="text-base font-semibold text-text">
           {qi("source.count", "{count, plural, one {# source} other {# sources}}", { count: items.length })}
@@ -1104,7 +1128,7 @@ function SourceQueue({ items, repairId, processingItems, setItems, remove, clear
           )
         })}
       </ul>
-      {items.length > 1 && <Button size="small" type="text" onClick={clear} className="mt-1">
+      {items.length > 1 && <Button ref={clearButton} size="small" type="text" onClick={clear} className="mt-1">
         {qi("clearAll", "Clear all")}
       </Button>}
     </section>
