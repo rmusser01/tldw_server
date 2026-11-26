@@ -1153,6 +1153,8 @@ Notes
 
 ## Architecture Diagram
 
+Start with the [C4 architecture reference](Docs/Architecture/c4.md) for system, container and component views of the server, WebUI and Admin Panel. The [subsystem index](Docs/Architecture/README.md) links to detailed module guides.
+
 Two views are provided: a **high-level overview** of how clients, the FastAPI app, the core
 module layers, and external providers fit together; and a detailed **module → database map** that
 shows every backend datastore as its own node (no single icon stands in for multiple databases).

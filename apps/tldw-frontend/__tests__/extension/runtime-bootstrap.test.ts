@@ -517,6 +517,27 @@ describe("runtime-bootstrap chrome shim", () => {
     }
   )
 
+  it("sends the per-install id on the cookie mint", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const fetchMock = stubCookieRuntimeFetch()
+    await importAndAwaitBootstrap()
+    const [, init] = fetchMock.mock.calls.find(([url]) => String(url) === "/api/_tldw-webui/session")!
+    const id = localStorage.getItem("tldw:install-id")
+    expect(id).toBeTruthy()
+    expect((init as RequestInit).headers).toEqual({ "X-TLDW-Device-Id": id })
+  })
+
+  it("publishes the cookie-session config when randomUUID is missing", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    vi.stubGlobal("crypto", { getRandomValues: (a: Uint8Array) => a.fill(171) })
+    stubCookieRuntimeFetch()
+    await importAndAwaitBootstrap()
+    expect(
+      (readStoredValue("tldwCookieSessionConfig") as { verificationRevision: string })
+        .verificationRevision
+    ).toBe("ab".repeat(16))
+  })
+
   it("preserves manual config and legacy slots when session bootstrap fails", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     const existing = {

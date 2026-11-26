@@ -6,6 +6,10 @@ import { useRouter } from "next/router"
 
 import { RouteRedirect } from "@web/components/navigation/RouteRedirect"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import {
+  hasSessionReplacedNotice,
+  SESSION_REPLACED_MESSAGE
+} from "@/services/tldw/session-identity"
 
 const TldwSettings = dynamic(
   () => import("@/components/Option/Settings/tldw").then((m) => m.TldwSettings),
@@ -33,6 +37,9 @@ const SelfHostLogin: React.FC<{ serverUrl: string }> = ({ serverUrl }) => {
   const [password, setPassword] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
+  // A read, not a consume: StrictMode double-invokes initializers. The next
+  // successful login clears it.
+  const [replaced] = React.useState(hasSessionReplacedNotice)
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -74,6 +81,11 @@ const SelfHostLogin: React.FC<{ serverUrl: string }> = ({ serverUrl }) => {
             Change server
           </Link>
         </p>
+        {replaced ? (
+          <p role="status" className="mt-4 text-sm text-text">
+            {SESSION_REPLACED_MESSAGE}
+          </p>
+        ) : null}
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
           <label className="block">
             <span className="text-sm font-medium text-text">Username</span>
