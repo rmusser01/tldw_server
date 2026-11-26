@@ -29,7 +29,7 @@ const referenceBase64 = (bytes: Uint8Array): string => {
   return globalThis.btoa(binary)
 }
 
-const randomBytes = (size: number, seed: number): Uint8Array => {
+const randomBytes = (size: number, seed: number): Uint8Array<ArrayBuffer> => {
   const rand = mulberry32(seed)
   const bytes = new Uint8Array(size)
   for (let i = 0; i < size; i++) {

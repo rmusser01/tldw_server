@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequireRole,
@@ -60,6 +60,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     StorageError,
     WeakPasswordError,
 )
+from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, fetch_password_hash
 from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_READ, SYSTEM_LOGS, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -81,6 +82,7 @@ from tldw_Server_API.app.core.UserProfiles.response_mappers import (
     LegacyProfileCommandResult,
 )
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
+from tldw_Server_API.app.core.UserProfiles.update_service import normalize_profile_email
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user_profile_catalog
 from tldw_Server_API.app.services.storage_quota_service import (
     StorageQuotaService,
@@ -90,6 +92,7 @@ from tldw_Server_API.app.services.storage_quota_service import (
 import tldw_Server_API.app.api.v1.API_Deps.auth_deps as _auth_deps
 import tldw_Server_API.app.core.AuthNZ.api_key_manager as _api_key_manager
 import tldw_Server_API.app.core.AuthNZ.database as _database
+import tldw_Server_API.app.core.AuthNZ.email_change as _email_change
 import tldw_Server_API.app.core.AuthNZ.principal_model as _principal_model
 import tldw_Server_API.app.core.AuthNZ.repos.users_repo as _users_repo
 import tldw_Server_API.app.core.UserProfiles.command_service as _command_service
@@ -299,6 +302,38 @@ async def _require_principal_active_verified(
     user_context = await _resolve_user_context(principal, allow_missing=allow_missing)
     _require_active_verified_user(user_context)
     return user_context
+
+
+def _requested_email(payload: UserProfileUpdateRequest) -> str | None:
+    """Return the address the last ``identity.email`` value in a profile update stores, or None if invalid."""
+    values = [entry.value for entry in payload.updates if entry.key == "identity.email"]
+    if not values or values[-1] is None:
+        return None
+    try:
+        return normalize_profile_email(values[-1])
+    except ValidationError:
+        return None
+
+
+async def _notify_email_change(
+    http_request: Request | None,
+    user_context: dict[str, Any],
+    new_email: str | None,
+) -> None:
+    """Notify the previous address when ``new_email`` differs from ``user_context["email"]``.
+
+    Call before ``user_context["email"]`` is overwritten; the notice goes out after commit.
+    """
+    old_email = str(user_context.get("email") or "").strip()
+    if not old_email or not new_email or new_email.strip().lower() == old_email.lower():
+        return
+    await _email_change.notify_previous_address(
+        user_id=int(user_context["id"]),
+        old_email=old_email,
+        new_email=new_email.strip().lower(),
+        username=str(user_context["username"]),
+        ip_address=resolve_client_ip(http_request) or "unknown",
+    )
 
 
 async def _emit_user_profile_audit_event(
@@ -512,6 +547,7 @@ async def update_current_user_profile(
         dry_run=payload.dry_run,
         expected_profile_version=payload.profile_version,
         contract_mode=ProfileContractMode.LEGACY_V1,
+        current_password=payload.current_password.get_secret_value() if payload.current_password else None,
     )
     result = await _command_service.ProfileCommandService(db_pool=db_pool).apply(
         command,
@@ -521,6 +557,8 @@ async def update_current_user_profile(
     response = _legacy_profile_command_response(result)
     if isinstance(response, JSONResponse):
         return response
+    if not payload.dry_run and "identity.email" in response.applied:
+        await _notify_email_change(http_request, user_context, _requested_email(payload))
     with contextlib.suppress(_USERS_AUDIT_EXCEPTIONS):
         if not payload.dry_run:
             await _emit_user_profile_audit_event(
@@ -587,6 +625,7 @@ async def update_user_profile(
     principal: AuthPrincipal = Depends(get_auth_principal),
     db=Depends(get_db_transaction),
     response: Response = None,
+    http_request: Request = None,
 ) -> DeprecatedUserResponse:
     """
     Deprecated: use /api/v1/users/me/profile.
@@ -616,11 +655,28 @@ async def update_user_profile(
         _require_active_verified_user(user_context)
         user_id = int(user_context["id"])
         updates_made = False
+        is_pg = await _database.is_postgres_backend()
 
-        if request.email and request.email != user_context.get("email"):
-            is_pg = await _database.is_postgres_backend()
+        if request.email and request.email.lower() != str(user_context.get("email") or "").lower():
             try:
-                await update_user_email(
+                await _email_change.authorize_own_email_change(
+                    db_conn=db,
+                    is_postgres=is_pg,
+                    user_id=user_id,
+                    new_emails=(request.email,),
+                    current_password=(
+                        request.current_password.get_secret_value() if request.current_password else None
+                    ),
+                )
+            except _email_change.EmailChangeRefused as exc:
+                return _profile_error_response(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    error_code=exc.code,
+                    detail=exc.detail,
+                    errors=[UserProfileErrorDetail(key="email", message=exc.code)],
+                )
+            try:
+                write = await update_user_email(
                     db,
                     backend="postgres" if is_pg else "sqlite",
                     user_id=user_id,
@@ -632,6 +688,8 @@ async def update_user_profile(
                     detail="User not found",
                 ) from None
 
+            if write.affected_user_ids:
+                await _notify_email_change(http_request, user_context, request.email)
             updates_made = True
             user_context["email"] = request.email.lower()
             logger.info(f"Updated email for user {user_context['username']} (ID: {user_id})")

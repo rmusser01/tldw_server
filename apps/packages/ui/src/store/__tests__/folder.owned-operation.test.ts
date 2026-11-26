@@ -20,7 +20,14 @@ import { useFolderStore } from "../folder"
 const ok = <T,>(data: T) => ({ ok: true, status: 200, data })
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 const folder = { id: 1, name: "Adventure", parent_id: null, deleted: false }
-const keyword = { id: 9, keyword: "Adventure", deleted: false }
+const keyword = {
+  id: 9,
+  keyword: "Adventure",
+  created_at: "2026-01-01T00:00:00Z",
+  last_modified: "2026-01-01T00:00:00Z",
+  version: 1,
+  deleted: false
+}
 const operation = (user = 7) => ({ requestScope: { config: { serverUrl: "https://folders.test", authMode: "multi-user" as const }, userId: user }, isCurrent: vi.fn(() => true) })
 const seedReads = () => {
   vi.mocked(api.fetchFolders).mockResolvedValue(ok([folder]) as never)

@@ -2,6 +2,7 @@ import "./native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import React from "react"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { useStoreChatModelSettings } from "@/store/model"
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -188,13 +189,17 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+type HookOptions = Parameters<typeof useOriginalSdkSceneFixture>[0]
+
 const createHookOptions = () => ({
-  t: (_key: string, fallback?: string) => fallback || _key,
+  t: ((_key: string, fallback?: string) => fallback || _key) as HookOptions["t"],
   notification: {
     error: vi.fn(),
     warning: vi.fn(),
     info: vi.fn(),
-    success: vi.fn()
+    success: vi.fn(),
+    open: vi.fn(),
+    destroy: vi.fn()
   },
   abortController: null,
   setAbortController: vi.fn(),
@@ -212,6 +217,7 @@ const createHookOptions = () => ({
   toolChoice: "auto" as const,
   webSearch: false,
   currentChatModelSettings: {
+    ...useStoreChatModelSettings.getInitialState(),
     apiProvider: "openai",
     setSystemPrompt: vi.fn()
   },
@@ -252,7 +258,7 @@ const createHookOptions = () => ({
   setServerChatClusterId: vi.fn(),
   setServerChatSource: vi.fn(),
   setServerChatExternalRef: vi.fn(),
-  ensureServerChatHistoryId: vi.fn(async (_id, _title, _signal, _snapshot, scene) => {
+  ensureServerChatHistoryId: vi.fn<HookOptions["ensureServerChatHistoryId"]>(async (_id, _title, _signal, _snapshot, scene) => {
     if (scene) {
       if (!scene.acceptHistoryMirror?.("history-persona")) throw new Error("Original mirror source changed")
       useStoreMessageOption.getState().setHistoryId("history-persona", { preserveServerChatId: true })
@@ -287,7 +293,7 @@ const createHookOptions = () => ({
   messageSteeringMode: "none" as const,
   messageSteeringForceNarrate: false,
   clearMessageSteering: vi.fn()
-})
+} satisfies HookOptions)
 
 const servicePromptSnapshot = {
   scopeKey: "scope:captured-user",
@@ -334,7 +340,7 @@ const deferred = <T,>() => {
 }
 
 let entrySnapshot = servicePromptSnapshot
-const useChatActions = (options: Parameters<typeof useOriginalSdkSceneFixture>[0]) =>
+const useChatActions = (options: HookOptions) =>
   useOriginalSdkSceneFixture(options, () => entrySnapshot)
 
 describe("useChatActions persona integration", () => {
@@ -371,7 +377,7 @@ describe("useChatActions persona integration", () => {
 
   it.each([false, true])("creates a persona-backed chat with assistant_kind=persona (temporary=%s)", async temporaryChat => {
     const options = { ...createHookOptions(), temporaryChat }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -472,7 +478,7 @@ describe("useChatActions persona integration", () => {
         serverChatId: null
       }
       const hook = renderHook(() =>
-        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+        useChatActions(options)
       )
       const controller = new AbortController()
       let pending!: Promise<unknown>
@@ -612,7 +618,7 @@ describe("useChatActions persona integration", () => {
         serverChatId: null
       }
       const hook = renderHook(() =>
-        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+        useChatActions(options)
       )
       let pending!: Promise<unknown>
       act(() => {
@@ -661,7 +667,7 @@ describe("useChatActions persona integration", () => {
         serverChatAssistantKind: "persona",
         serverChatAssistantId: "garden-helper",
         compareFeatureEnabled: true
-      }
+      } satisfies HookOptions
       if (operation === "reply") {
         // This declares only a private Scene locator, not H1 send/admission authority.
         const account = {
@@ -699,13 +705,7 @@ describe("useChatActions persona integration", () => {
         } as unknown as import("../useHistorySelection").HistorySelectionController
       }
       const hook = renderHook(() =>
-        operation === "turn"
-          ? useChatActions(
-              options as unknown as Parameters<typeof useChatActions>[0]
-            )
-          : useRawChatActions(
-              options as unknown as Parameters<typeof useRawChatActions>[0]
-            )
+        operation === "turn" ? useChatActions(options) : useRawChatActions(options)
       )
       let request!: Promise<unknown>
       act(() => {
@@ -753,7 +753,7 @@ describe("useChatActions persona integration", () => {
       ...createHookOptions(),
       webSearch: true
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -775,7 +775,7 @@ describe("useChatActions persona integration", () => {
       ...createHookOptions(),
       scope
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -835,7 +835,7 @@ describe("useChatActions persona integration", () => {
       assistant_id: "workspace-helper",
       persona_memory_mode: "read_write"
     })
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -897,6 +897,7 @@ describe("useChatActions persona integration", () => {
         historyId: string | null
         saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
         serverChatId?: string | null
+        servicePromptSnapshot?: ServicePromptSnapshot
       }
       expect(params.historyId).toBe("history-persona")
       expect(params.serverChatId).toBe("workspace-plain-chat")
@@ -920,7 +921,7 @@ describe("useChatActions persona integration", () => {
       serverChatTitle: null,
       selectedAssistant: null
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -978,7 +979,10 @@ describe("useChatActions persona integration", () => {
   it("adopts the first persisted plain chat so server message actions become available", async () => {
     createChatMock.mockResolvedValueOnce({ id: "first-saved-chat", title: "Hello" })
     normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
-      const params = args[6] as { saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null> }
+      const params = args[6] as {
+        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
+        servicePromptSnapshot?: ServicePromptSnapshot
+      }
       await params.saveMessageOnSuccess({
         requestScope: params.servicePromptSnapshot?.requestScope,
         scopeSignal: params.servicePromptSnapshot?.scopeSignal,
@@ -992,7 +996,7 @@ describe("useChatActions persona integration", () => {
       serverChatAssistantKind: null, serverChatAssistantId: null,
       serverChatCharacterId: null, selectedAssistant: null, historyId: null
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
     await act(async () => { await result.current.onSubmit({ message: "Hello", image: "" }) })
     expect(options.setServerChatId).toHaveBeenCalledWith("first-saved-chat")
   })
@@ -1025,7 +1029,7 @@ describe("useChatActions persona integration", () => {
       serverChatMetaLoaded: true,
       selectedAssistant: null
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -1060,6 +1064,7 @@ describe("useChatActions persona integration", () => {
         historyId: string | null
         saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
         serverChatId?: string | null
+        servicePromptSnapshot?: ServicePromptSnapshot
       }
       expect(params.historyId).toBe("history-persona")
       expect(params.serverChatId).toBe("workspace-rag-chat")
@@ -1084,7 +1089,7 @@ describe("useChatActions persona integration", () => {
       serverChatTitle: null,
       selectedAssistant: null
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -1157,7 +1162,7 @@ describe("useChatActions persona integration", () => {
       selectedAssistant: null,
       ensureServerChatHistoryId: vi.fn(() => historyLink.promise)
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     let submission!: ReturnType<typeof result.current.onSubmit>
     act(() => {
@@ -1210,7 +1215,7 @@ describe("useChatActions persona integration", () => {
       serverChatAssistantKind: "persona" as const, serverChatAssistantId: "garden-helper",
       serverChatMetaLoaded: false
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
     await act(async () => {
       expect(await result.current.onSubmit({ message: "Keep this draft", image: "" })).toMatchObject({
         status: "failed", restoreDraft: true
@@ -1237,6 +1242,7 @@ describe("useChatActions persona integration", () => {
           payload: Record<string, unknown>
         ) => Promise<string | null>
         serverChatId?: string | null
+        servicePromptSnapshot?: ServicePromptSnapshot
       }
       capturedParams = params
       await params.saveMessageOnSuccess({
@@ -1259,7 +1265,7 @@ describe("useChatActions persona integration", () => {
       serverChatMetaLoaded: true,
       serverChatTitle: "Existing global chat"
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -1294,7 +1300,7 @@ describe("useChatActions persona integration", () => {
       serverChatSource: "old-source",
       serverChatExternalRef: "old-ref"
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       expect(await result.current.onSubmit({ message: "Hello persona", image: "" })).toMatchObject({
@@ -1331,7 +1337,7 @@ describe("useChatActions persona integration", () => {
         system_prompt: "Stale prompt"
       }
     }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -1399,7 +1405,7 @@ describe("useChatActions persona integration", () => {
       })
     })
 
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
       await result.current.onSubmit({

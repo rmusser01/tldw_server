@@ -401,7 +401,7 @@ CALLER_CASES = (
         ),
     ),
     CallerCase(
-        name="chatbooks_restore_preserves_adapter_update_order",
+        name="chatbooks_restore_never_sends_identity_email",
         caller="chatbooks",
         dry_run=False,
         updates=(
@@ -410,19 +410,19 @@ CALLER_CASES = (
         ),
         status_code=200,
         body={"account_profile": 1, "account_settings": 1},
-        applied_keys=("identity.email", "preferences.ui.theme"),
+        applied_keys=("preferences.ui.theme",),
         headers={},
         audit_count=0,
         command_result=LegacyProfileCommandResult(
             profile_version=PROFILE_VERSION,
-            applied=("identity.email", "preferences.ui.theme"),
+            applied=("preferences.ui.theme",),
         ),
     ),
     CallerCase(
         name="chatbooks_restore_rejection_is_generic",
         caller="chatbooks",
         dry_run=False,
-        updates=(("identity.email", "not-an-email"),),
+        updates=(("preferences.ui.theme", 7),),
         status_code=422,
         body={"detail": "Destination rejected one or more account profile/settings values"},
         applied_keys=(),
@@ -430,7 +430,7 @@ CALLER_CASES = (
         audit_count=0,
         command_result=LegacyProfileCommandResult(
             status_code=422,
-            skipped=({"key": "identity.email", "message": "invalid_email"},),
+            skipped=({"key": "preferences.ui.theme", "message": "type_mismatch"},),
             error_code="profile_update_invalid",
             detail="One or more updates failed validation",
         ),

@@ -308,3 +308,40 @@ def test_packaged_postgres_candidate_hierarchy_is_public_qualified() -> None:
     assert schema.count(
         "updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"
     ) >= 5
+
+
+_ADD_PREVIOUS = "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS previous_email VARCHAR(255)"
+_ADD_CHANGED_AT = "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email_changed_at TIMESTAMPTZ"
+
+
+class _ColumnProbeConnection:
+    def __init__(self, existing: set[str]) -> None:
+        self.existing = existing
+        self.executed: list[str] = []
+        self.probes: list[str] = []
+
+    async def fetchval(self, query: str, column: str) -> bool:
+        self.probes.append(query)
+        return column in self.existing
+
+    async def execute(self, query: str) -> None:
+        self.executed.append(query)
+
+
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        (set(), [_ADD_PREVIOUS, _ADD_CHANGED_AT]),
+        ({"previous_email"}, [_ADD_CHANGED_AT]),
+        ({"previous_email", "email_changed_at"}, []),
+    ],
+    ids=["fresh", "half-migrated", "migrated"],
+)
+def test_users_email_change_columns_are_altered_only_when_missing(existing, expected) -> None:
+    from tldw_Server_API.app.core.AuthNZ import pg_migrations_extra
+
+    conn = _ColumnProbeConnection(existing)
+    asyncio.run(pg_migrations_extra._ensure_users_email_change_columns(conn))
+    assert conn.executed == expected
+    assert len(conn.probes) == 2
+    assert all("information_schema.columns" in query for query in conn.probes)

@@ -1536,8 +1536,7 @@ describe("RolePlaySetupDrawer", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Close drawer" }))
     const discard = await screen.findByRole("button", {
-      name: "Discard",
-      exact: true
+      name: "Discard"
     })
     act(() => selectDeclaredChat("history-2", "server-2"))
     view.rerender(
@@ -1583,7 +1582,7 @@ describe("RolePlaySetupDrawer", () => {
         target: { value: "Keep this source's staged scene" }
       })
       fireEvent.click(screen.getByRole("button", { name: "Close drawer" }))
-      await screen.findByRole("button", { name: "Discard", exact: true })
+      await screen.findByRole("button", { name: "Discard" })
       const discard = actorSettingsMocks.discards.at(-1)!
       act(() => {
         if (change === "new draft")

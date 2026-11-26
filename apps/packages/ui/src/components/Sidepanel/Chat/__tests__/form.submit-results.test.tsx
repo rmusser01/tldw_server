@@ -225,7 +225,7 @@ it("does not publish queued compact settings after the model setter synchronousl
   const setQueue = (value: QueuedRequest[] | ((previous: QueuedRequest[]) => QueuedRequest[])) => { queue.current = typeof value === "function" ? value(queue.current) : value; };
   const view = renderHook(() => useCompactQueue({ queue: queue.current, setQueue, sendMessage, stopListening, setters: {
     setSelectedModel: core.setSelectedModel, setChatMode: core.setChatMode, setWebSearch: core.setWebSearch, setSelectedSystemPrompt: core.setSelectedSystemPrompt, setToolChoice: core.setToolChoice, setUseOCR: core.setUseOCR } }));
-  const replacement = { historyId: "replacement-compact-queue", serverChatId: null, selectedModel: "replacement-model", chatMode: "rag", webSearch: true, selectedSystemPrompt: "REPLACEMENT SYSTEM PROMPT", toolChoice: "none" as const, useOCR: true };
+  const replacement = { historyId: "replacement-compact-queue", serverChatId: null, selectedModel: "replacement-model", chatMode: "rag", webSearch: true, selectedSystemPrompt: "REPLACEMENT SYSTEM PROMPT", toolChoice: "none", useOCR: true } satisfies Partial<ReturnType<typeof useStoreMessageOption.getState>>;
   const unsubscribe = useStoreMessageOption.subscribe(state => {
     if (state.selectedModel !== "original-queued-model") return;
     unsubscribe(); state.startNewChatDraft(); useStoreMessageOption.setState(replacement);

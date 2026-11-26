@@ -84,6 +84,7 @@ class _SessionShim:
             )
             return self._delegate_session.post(url, headers=headers, json=json, stream=True, timeout=timeout)
         # Non-streaming via centralized http client (egress/pinning)
+        redirect_options = {"allow_redirects": False} if kwargs.get("allow_redirects") is False else {}
         resp = fetch(
             method="POST",
             url=url,
@@ -91,6 +92,7 @@ class _SessionShim:
             json=json,
             timeout=timeout,
             retry=self._retry,
+            **redirect_options,
         )
         return resp
 

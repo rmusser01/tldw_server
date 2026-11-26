@@ -91,6 +91,7 @@ def test_admin_profile_update_delegates_to_command_service(monkeypatch) -> None:
             UserProfileUpdateEntry(key="preferences.ui.theme", value="paper"),
             UserProfileUpdateEntry(key="preferences.ui.theme", value="midnight"),
         ],
+        current_password="admin-own-pass",
     )
 
     response, audit_info = _run_async(
@@ -115,6 +116,7 @@ def test_admin_profile_update_delegates_to_command_service(monkeypatch) -> None:
     assert command.active_org_id == 11
     assert command.active_team_id == 22
     assert command.contract_mode == ProfileContractMode.LEGACY_V1
+    assert command.current_password == "admin-own-pass"
     assert captured["db_conn"] is write_conn
 
     scope = captured["scope"]

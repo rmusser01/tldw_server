@@ -199,7 +199,7 @@ it("explicit capture references coexist with original references using strict v1
     type: "website" as const,
     sourceType: "web"
   }
-  const head = {
+  const head: Parameters<typeof appendCapturedNoteProvenance>[0] = {
     knowledge_provenance_state: "active",
     knowledge_provenance_version: 2,
     knowledge_provenance: { origin: "knowledge_qa", sources: [originalSource] }

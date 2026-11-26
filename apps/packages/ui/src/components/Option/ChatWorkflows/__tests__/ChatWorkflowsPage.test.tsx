@@ -131,10 +131,9 @@ vi.mock("react-router-dom", async () => {
 
 import { ChatWorkflowsPage } from "../ChatWorkflowsPage"
 
-const render: typeof renderUI = (ui, options) =>
+const render = (ui: Parameters<typeof renderUI>[0]) =>
   renderUI(ui, {
-    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
-    ...options
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>
   })
 
 describe("ChatWorkflowsPage", () => {

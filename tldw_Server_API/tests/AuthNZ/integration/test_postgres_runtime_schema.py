@@ -499,6 +499,19 @@ async def test_nonowner_startup_refuses_required_drift_without_repair(migrated_s
 
 
 @pytest.mark.asyncio
+async def test_nonowner_serving_refuses_missing_users_previous_email(migrated_startup):
+    """The non-owner pool refuses to initialize without users.previous_email; the owner is never asked to repair it."""
+    owner, runtime_dir, env, _ids = migrated_startup
+    async with unmanaged_authnz_pg_connection(owner.config.pg_database) as conn:
+        await conn.execute("ALTER TABLE public.users DROP COLUMN previous_email")
+    before = _startup_snapshot(owner)
+    result = _run_runtime(runtime_dir, env, _STARTUP_SCRIPT)
+    # Pool initialization validates the users columns before startup's own readiness step runs.
+    assert result == {"complete": False, "unexpected_error": "DatabaseError"}  # nosec B101 -- real fail-closed refusal.
+    assert _startup_snapshot(owner) == before  # nosec B101 -- schema remains untouched.
+
+
+@pytest.mark.asyncio
 async def test_nonowner_startup_keeps_optional_migrations_optional(migrated_startup):
     """The serving admission must not promote optional owner extras into fatal requirements."""
     owner, runtime_dir, env, _ids = migrated_startup

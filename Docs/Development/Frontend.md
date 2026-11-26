@@ -4,6 +4,22 @@ This page covers local WebUI development workflows that need more detail than th
 repo README. Keep feature-specific runbooks here when they affect repeatable
 frontend testing.
 
+## Shared UI typecheck
+
+After installing dependencies from `apps/`, run this from the repository root.
+
+```bash
+cd apps/packages/ui
+bun run typecheck
+```
+
+The check covers the full shared UI TypeScript project, including its tests.
+It uses the same 8 GiB Node heap allowance as the WebUI typecheck.
+
+If the compiler reports incompatible PostCSS versions after a lockfile update,
+run `bun install --frozen-lockfile --force` from `apps/` and rerun the check.
+Bun 1.3.2 can retain the previous Tailwind PostCSS link in an existing install.
+
 ## Research Workspace UAT Harness
 
 Use this profile when validating `/research-workspace` against a running local

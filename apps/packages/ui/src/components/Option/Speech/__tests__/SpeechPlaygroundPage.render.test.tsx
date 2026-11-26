@@ -621,7 +621,7 @@ describe("SpeechPlaygroundPage", () => {
       : []
     render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
 
-    const stop = screen.getByRole("button", { name: "Stop", exact: true })
+    const stop = screen.getByRole("button", { name: "Stop" })
     expect(stop).toBeEnabled()
     fireEvent.click(stop)
     expect(clearSegmentsMock).toHaveBeenCalledOnce()
@@ -640,7 +640,7 @@ describe("SpeechPlaygroundPage", () => {
     ttsGeneratingRef.current = true
     clearSegmentsMock.mockClear()
     view.rerender(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
-    const stop = screen.getByRole("button", { name: "Stop", exact: true })
+    const stop = screen.getByRole("button", { name: "Stop" })
     expect(stop).toBeEnabled()
     fireEvent.click(stop)
     expect(clearSegmentsMock).toHaveBeenCalledOnce()
@@ -663,7 +663,7 @@ describe("SpeechPlaygroundPage", () => {
     ttsSegmentsRef.current = [{ id: "completed", index: 0, text: "Completed", source: "generated" }]
     render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }))
     expect(clearSegmentsMock).not.toHaveBeenCalled()
   })
 

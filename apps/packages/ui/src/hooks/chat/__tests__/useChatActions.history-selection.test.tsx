@@ -10,7 +10,7 @@ import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fi
 import { roleplayDetail, roleplayAppend, roleplayCompletion, captureRoleplayFixtureRows } from "./roleplay-resume-fixture"
 import { captureChatDraftSource, chatDraftAddressForReceipt } from "../chat-draft-transition"
 import type { HistoryLoadReceipt } from "../useHistorySelection"
-import type { HistoryViewSelectionV1 } from "@/types/history-selection"
+import type { ForkRequestV1, HistoryViewSelectionV1 } from "@/types/history-selection"
 import { captureActorSceneSend, captureActorSceneSendForTarget } from "../actor-scene-source"
 import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import { PageAssistProvider } from "@/components/Common/PageAssistProvider"
@@ -21,6 +21,8 @@ import { tldwModels, type ModelInfo } from "@/services/tldw/TldwModels"
 import type { HistorySelectedContentV1 } from "@/types/history-selection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
 import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
+import type { TFunction } from "i18next"
+import type { Message } from "@/store/option"
 import { OUTPUT_FORMATTING_GUIDE_SYSTEM_PROMPT_SUFFIX } from "@/utils/output-formatting-guide"
 
 const {
@@ -62,7 +64,7 @@ const {
 
 const messageStoreState = vi.hoisted(() => ({
   draftFields: null as (() => Record<string, unknown>) | null,
-  editRows: null as (() => unknown[]) | null,
+  editRows: null as (() => Message[]) | null,
   value: {
     selectedModel: "deepseek-chat" as string | null,
     toolChoice: "auto" as "auto" | "none" | "required",
@@ -223,10 +225,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     persistCharacterCompletion: persistCharacterCompletionMock,
     addChatMessage: addChatMessageMock,
-    getChat: vi.fn(async (id: string, options?: { requireRoleplayResume?: boolean }) => options?.requireRoleplayResume ? { ...roleplayDetail(id, h1.roleplayState.get(id)!.tail), history_version: h1.roleplayState.get(id)!.historyVersion } : { id, title: "Actual owned chat", character_id: "12" }),
+    getChat: vi.fn(async (id: string, options?: { requireRoleplayResume?: boolean }) => options?.requireRoleplayResume ? { ...roleplayDetail(String(id), h1.roleplayState.get(String(id))!.tail), history_version: h1.roleplayState.get(String(id))!.historyVersion } : { id: String(id), title: "Actual owned chat", character_id: "12", created_at: "2026-10-07T00:00:00Z" }),
     appendRoleplayResumeInput: (...args: unknown[]) => h1.roleplayAppend(...args),
     completeCharacterChatTurn: (...args: unknown[]) => h1.roleplayComplete(...args),
-    getChatSettings: vi.fn(async (id: string) => ({ conversation_id: id, settings: {} })),
+    getChatSettings: vi.fn(async (id: string) => ({ conversation_id: String(id), settings: {}, last_modified: "2026-10-07T00:00:00Z" })),
     initialize: vi.fn(async () => null),
     getOpenAPISpec: (...args: unknown[]) => h1.spec(...args),
     getCharacter: h1.live,
@@ -268,12 +270,14 @@ const creationReviewIdentity = async (
 }
 
 const createHookOptions = () => ({
-  t: (_key: string, fallback?: string) => fallback || _key,
+  t: ((_key: string, fallback?: string) => fallback || _key) as TFunction,
   notification: {
     error: vi.fn(),
     warning: vi.fn(),
     info: vi.fn(),
-    success: vi.fn()
+    success: vi.fn(),
+    open: vi.fn(),
+    destroy: vi.fn()
   },
   abortController: null,
   setAbortController: vi.fn(),
@@ -696,8 +700,8 @@ beforeEach(async () => {
   h1.lookupAdmission.mockReset()
   vi.clearAllMocks()
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
-  vi.mocked(api.getChat).mockReset().mockImplementation(async (id, options) => options?.requireRoleplayResume ? { ...roleplayDetail(id, h1.roleplayState.get(id)!.tail), history_version: h1.roleplayState.get(id)!.historyVersion } : { id, title: "Actual owned chat", character_id: "12" })
-  vi.mocked(api.getChatSettings).mockReset().mockImplementation(async id => ({ conversation_id: id, settings: {} }))
+  vi.mocked(api.getChat).mockReset().mockImplementation(async (id, options) => options?.requireRoleplayResume ? { ...roleplayDetail(String(id), h1.roleplayState.get(String(id))!.tail), history_version: h1.roleplayState.get(String(id))!.historyVersion } : { id: String(id), title: "Actual owned chat", character_id: "12", created_at: "2026-10-07T00:00:00Z" })
+  vi.mocked(api.getChatSettings).mockReset().mockImplementation(async id => ({ conversation_id: String(id), settings: {}, last_modified: "2026-10-07T00:00:00Z" }))
   localStorage.clear()
   sessionStorage.clear()
   const lockTails = new Map<string, Promise<unknown>>()
@@ -762,8 +766,8 @@ const ordinaryOptions = () => ({
   serverChatCharacterId: null,
   serverChatAssistantKind: null,
   messages: [
-    { id: "u-old", isBot: false, message: "old question", sources: [] },
-    { id: "a2", isBot: true, message: "wrong latest", sources: [] }
+    { id: "u-old", isBot: false, name: "You", message: "old question", sources: [] },
+    { id: "a2", isBot: true, name: "Assistant", message: "wrong latest", sources: [] }
   ],
   history: [
     { role: "user", content: "old question" },
@@ -818,7 +822,7 @@ it.each(["unchanged", "Prompt edit", "Formatting guide", "Prompt whitespace", "g
   } } as HistoryTurnRecoveryEntry
   h1.lookupRecoveries.mockResolvedValue([entry])
   messageStoreState.value.selectedModel = "qwen"
-  const options = { ...ordinaryOptions(), selectedModel: "qwen", selectedSystemPrompt: "pirate", messages: [{ id: "u-old", isBot: false, message: "old question", sources: [] }], history: [{ role: "user", content: "old question" }] }
+  const options = { ...ordinaryOptions(), selectedModel: "qwen", selectedSystemPrompt: "pirate", messages: [{ id: "u-old", isBot: false, name: "You", message: "old question", sources: [] }], history: [{ role: "user", content: "old question" }] }
   const { result, rerender } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
   render(<HistorySelectionReview selection={{ ...h1.controller, ...current, recoveries: [entry] }} getRetryContext={result.current.getRecoveryRetryContext} onRetryRecovery={result.current.retryRecoveredHistoryTurn} />)
   fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
@@ -861,7 +865,7 @@ it("edits an ordinary local message while the mounted history controller is idle
     ...ordinaryOptions(),
     serverChatId: null,
     messages: [
-      { id: "plain-message", isBot: false, message: "old", sources: [] }
+      { id: "plain-message", isBot: false, name: "You", message: "old", sources: [] }
     ]
   }
   messageStoreState.editRows = () => options.messages
@@ -896,7 +900,7 @@ it("deletes an ordinary local message while the mounted history controller is id
   const options = {
     ...ordinaryOptions(),
     serverChatId: null,
-    messages: [{ id: "plain-message", isBot: false, message: "old", sources: [] }]
+    messages: [{ id: "plain-message", isBot: false, name: "You", message: "old", sources: [] }]
   }
   messageStoreState.editRows = () => options.messages
   const { result } = renderHook(() => useChatActions(options as any))
@@ -1054,7 +1058,7 @@ it.each([
   { label: "no override", saved: {}, omitTemperature: false, omitTopP: false }
 ])("native sampler uses the saved chat independently of model defaults: $label", async ({ saved, omitTemperature, omitTopP }) => {
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
-  vi.mocked(api.getChatSettings).mockResolvedValueOnce({ conversation_id: nativeChatId, settings: saved })
+  vi.mocked(api.getChatSettings).mockResolvedValueOnce({ conversation_id: nativeChatId, settings: saved, last_modified: "2026-10-07T00:00:00Z" })
   const options = { ...createHookOptions(), currentChatModelSettings: { apiProvider: "openai", temperature: 0.23, topP: 0.9 } }
   h1.controller.getCurrent().owner.scope = { type: "workspace", workspaceId: "workspace-a" }
   installAcceptedSource(h1.controller.getCurrent())
@@ -1101,7 +1105,7 @@ it.each(["view", "account", "owner lease"])("native sampler does not continue a 
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
   let release!: () => void
   vi.mocked(api.getChatSettings).mockImplementationOnce(() => new Promise(resolve => {
-    release = () => resolve({ conversation_id: nativeChatId, settings: { chatGenerationOverride: { temperature: 0 } } })
+    release = () => resolve({ conversation_id: nativeChatId, settings: { chatGenerationOverride: { temperature: 0 } }, last_modified: "2026-10-07T00:00:00Z" })
   }))
   const options = createHookOptions()
   let ownerLive = true
@@ -2935,8 +2939,8 @@ it("deleting the selected local leaf follows only its captured parent", async ()
   localMutationController()
   const helpers = await import("@/db/dexie/helpers")
   const visible = [
-    { id: "u-old", isBot: false, message: "question", sources: [] },
-    { id: "a1", isBot: true, message: "same", sources: [] }
+    { id: "u-old", isBot: false, name: "You", message: "question", sources: [] },
+    { id: "a1", isBot: true, name: "Assistant", message: "same", sources: [] }
   ]
   const choose = vi.fn(async () => true)
   h1.controller.choose = choose
@@ -2964,7 +2968,7 @@ it("deleting the selected local leaf follows only its captured parent", async ()
 it("late leaf deletion retains its storage result without moving a new view", async () => {
   localMutationController()
   const helpers = await import("@/db/dexie/helpers")
-  const visible = [{ id: "a1", isBot: true, message: "same", sources: [] }]
+  const visible = [{ id: "a1", isBot: true, name: "Assistant", message: "same", sources: [] }]
   const choose = vi.fn(async () => true)
   h1.controller.choose = choose
   let current = true
@@ -3001,6 +3005,7 @@ it("unqualified native edits and unsupported deletes cannot mutate or change the
       id: "a1",
       serverMessageId: "a1",
       isBot: true,
+      name: "Assistant",
       message: "same",
       sources: []
     }
@@ -3028,13 +3033,13 @@ const localForks = vi.hoisted(() => ({
   capture: vi.fn(),
   prepare: vi.fn(),
   commit: vi.fn(),
-  digest: (_request: any) => "fork-digest"
+  digest: (_request: ForkRequestV1): string => "fork-digest"
 }))
 vi.mock("@/db/dexie/branch", () => ({
   captureLocalForkSelection: localForks.capture,
   prepareLocalFork: localForks.prepare,
   commitLocalFork: localForks.commit,
-  forkRequestDigest: (request: any) => localForks.digest(request)
+  forkRequestDigest: (request: ForkRequestV1) => localForks.digest(request)
 }))
 it("mounted branch action captures a stable boundary and returns the committed owner result", async () => {
   const {historyDigest} = await vi.importActual<any>("@/db/dexie/history-selection")
@@ -3516,7 +3521,7 @@ it("native sampler retires an actual same-ID H1 read without recapture or dispat
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
   let release!: () => void
   vi.mocked(api.getChatSettings).mockImplementationOnce(() => new Promise(resolve => {
-    release = () => resolve({ conversation_id: nativeChatId, settings: { chatGenerationOverride: { temperature: 0 } } })
+    release = () => resolve({ conversation_id: nativeChatId, settings: { chatGenerationOverride: { temperature: 0 } }, last_modified: "2026-10-07T00:00:00Z" })
   }))
   h1.capture.mockClear(); h1.wire.mockClear(); h1.recover.mockClear()
   let sending!: Promise<unknown>
@@ -3759,7 +3764,7 @@ it("native first-create does not adopt a newer cancelled load epoch during bound
   })
   await act(async () => { release(); await pending })
   expect(h1.wire).not.toHaveBeenCalled()
-  expect(mounted.selection.result.current.getCurrent().owner?.conversation_id).toBe(nativeChatId)
+  expect(mounted.selection.result.current.getCurrent().owner).toMatchObject({ conversation_id: nativeChatId })
   write.mockRestore(); mounted.hook.unmount(); mounted.selection.unmount()
 })
 
@@ -4061,7 +4066,7 @@ it.each(["owned", "outside"])("assistant-only bind respects %s keyboard focus", 
   document.body.append(button, textarea, other); button.focus()
   const focusComposer = vi.fn(() => textarea.focus())
   const starter = renderHook(() => {
-    const form = useSimpleForm({ initialValues: { message: "UNSENT", image: "" } })
+    const form = useSimpleForm({ initialValues: { message: "UNSENT", image: "", imageFilename: "" } })
     return useCharacterGreetingStart({ form, retainCurrentDraft: async () => true,
       submit: async input => {
         if (focus === "outside") other.focus()
@@ -4350,10 +4355,11 @@ const mountInterruptedRetry = async (local = false, invalidCompare = false) => {
       : {}),
     ...(local ? { serverChatId: null, historyId: 'history-1' } : {}),
     messages: [
-      { id: 'u-old', isBot: false, message: 'old question', sources: [] },
+      { id: 'u-old', isBot: false, name: 'You', message: 'old question', sources: [] },
       {
         id: 'interrupted-device-reply',
         isBot: true,
+        name: 'Assistant',
         message: 'partial',
         generationInfo: { interrupted: true },
         sources: [],
@@ -4727,14 +4733,19 @@ const mountClientUUIDRecovery = async (workspace = false) => {
   const { usePlaygroundSessionStore: sessions } =
     await import("@/store/playground-session")
   sessions.setState({ serverChatSelectionIntent: null })
-  if (workspace)
+  if (workspace) {
+    const address = mounted.sourceDraft
+    if (address?.kind !== "fresh") throw new Error("Missing fresh draft for workspace fixture")
     mounted.draftStore.getState().setChatDraftAddress({
-      ...mounted.sourceDraft!,
+      ...address,
       scope: { type: "workspace", workspaceId: "owned-workspace" }
     })
+  }
   const snapshot = await loadServicePromptSnapshot([])
+  const address = mounted.draftStore.getState().chatDraftAddress
+  if (address?.kind !== "fresh") throw new Error("Missing original fresh draft")
   const handle = {
-    address: mounted.draftStore.getState().chatDraftAddress!,
+    address,
     ownerHash: chatDraftOwnerKey(snapshot.requestScope)
   }
   const operationId = "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a14"
@@ -4938,9 +4949,7 @@ it.each([
   if (["copy", "copy-failed"].includes(boundary))
     expect(copyInput).toHaveBeenCalledOnce()
   if (boundary === "newer-H1")
-    expect(
-      mounted.selection.result.current.getCurrent().owner?.conversation_id
-    ).toBe("newer-chat")
+    expect(mounted.selection.result.current.getCurrent().owner).toMatchObject({ conversation_id: "newer-chat" })
   mounted.snapshot.release()
   mounted.hook.unmount()
   mounted.selection.unmount()
@@ -5232,7 +5241,7 @@ it.each(["current", "newer edit", "Cancel", "interrupted"])(
         sources: [],
         metadataExtra: { sender_role: "user" }
       },
-      { id: "a1", isBot: true, message: "same answer", sources: [] }
+      { id: "a1", isBot: true, name: "Assistant", message: "same answer", sources: [] }
     ] as any
     messageStoreState.editRows = () => options.messages
     const original = structuredClone(options.messages)
@@ -5384,8 +5393,8 @@ it.each([false, true])(
     const store = (await import("@/store/option")).useStoreMessageOption
     const options = createHookOptions()
     options.messages = [
-      { id: "u-old", isBot: false, message: "old question", sources: [] },
-      { id: "a1", isBot: true, message: "same answer", sources: [] }
+      { id: "u-old", isBot: false, name: "You", message: "old question", sources: [] },
+      { id: "a1", isBot: true, name: "Assistant", message: "same answer", sources: [] }
     ] as any
     messageStoreState.editRows = () => options.messages
     let release!: () => void
@@ -5525,7 +5534,9 @@ const mountNativePlainSave = async (
       })
     ).toBe(true)
   })
-  const origin = selection.result.current.getCurrent().capture!
+  const { owner, capture: origin } = selection.result.current.getCurrent()
+  if (owner?.kind !== "native" || origin?.status !== "captured")
+    throw new Error("Missing native Save fixture capture")
   installAcceptedSource(selection.result.current.getCurrent() as HistoryLoadReceipt)
   const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
   const read = vi.mocked(api.getMessage),
@@ -5566,7 +5577,7 @@ const mountNativePlainSave = async (
     selection,
     publish,
     origin,
-    owner: selection.result.current.getCurrent().owner!,
+    owner,
     server,
     read,
     write,
@@ -6361,6 +6372,7 @@ it("a late acknowledged Delete preserves a newer draft and publishes no old capt
           id: "newer",
           message: "Keep my newer draft",
           isBot: false,
+          name: "You",
           sources: []
         }
       ]
@@ -6548,6 +6560,7 @@ describe("rendered Delete ownership", () => {
         {
           id: "local-leaf",
           isBot: true,
+          name: "Assistant",
           message: "saved answer",
           sources: [],
           serverMessageId: undefined as string | undefined
@@ -6754,6 +6767,7 @@ describe("rendered Delete ownership", () => {
       const rows = [
         {
           id: "question-1",
+          name: "You",
           isBot: false,
           message: "First question",
           sources: [],
@@ -6761,6 +6775,7 @@ describe("rendered Delete ownership", () => {
         },
         {
           id: "answer-1",
+          name: "Assistant",
           isBot: true,
           message: "Sure.",
           sources: [],
@@ -6768,6 +6783,7 @@ describe("rendered Delete ownership", () => {
         },
         {
           id: "question-2",
+          name: "You",
           isBot: false,
           message: "Second question",
           sources: [],
@@ -6775,6 +6791,7 @@ describe("rendered Delete ownership", () => {
         },
         {
           id: "answer-2",
+          name: "Assistant",
           isBot: true,
           message: "Sure.",
           sources: [],
@@ -6848,6 +6865,7 @@ describe("rendered Delete ownership", () => {
         },
         {
           id: "other-leaf",
+          name: "Assistant",
           isBot: true,
           message: "original sibling",
           sources: [],
@@ -7113,7 +7131,8 @@ it("an acknowledged workspace character creation keeps its existing native path"
     type: "workspace" as const,
     workspaceId: "owned-workspace"
   }
-  const address = mounted.draftStore.getState().chatDraftAddress!
+  const address = mounted.draftStore.getState().chatDraftAddress
+  if (address?.kind !== "fresh") throw new Error("Missing fresh draft for workspace fixture")
   expect(
     mounted.draftStore
       .getState()
@@ -7148,9 +7167,9 @@ it("an acknowledged workspace character creation keeps its existing native path"
       })
     })
     expect(createChatMock).toHaveBeenCalledOnce()
-    expect(mounted.selection.result.current.getCurrent().owner?.scope).toEqual(
-      workspace
-    )
+    const owner = mounted.selection.result.current.getCurrent().owner
+    if (owner?.kind !== "native") throw new Error("Missing accepted native owner")
+    expect(owner.scope).toEqual(workspace)
     expect(send).not.toHaveBeenCalled()
   } finally {
     mounted.hook.unmount()

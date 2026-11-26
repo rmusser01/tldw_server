@@ -105,6 +105,40 @@ describe("ChatTldw stream metadata handoff", () => {
 
 
 describe("selected history provider fidelity", () => {
+  it("round-trips approved Moonshot reasoning through the app API for eligible history", async () => {
+    const model = new ChatTldw({ model: "kimi-k2.6", apiProvider: "moonshot", clientManagedHistory: true })
+    const user = new HumanMessage("Question")
+    const preparedRequest = model.prepareClientManagedRequest([user], "local")
+    expect(preparedRequest.metadata).toMatchObject({ tldw_moonshot_reasoning_history_v1: true })
+    mocks.streamMessage.mockImplementationOnce(async function* (_messages, _options, onChunk) {
+      onChunk({ choices: [{ delta: { reasoning_content: "unapproved" } }] })
+      yield "Answer"
+      onChunk({ event: "moonshot_history_reasoning", data: { reasoning_content: "  exact </think> bytes\n" } })
+    })
+    const handleLLMEnd = vi.fn()
+    for await (const _ of await model.stream([user], { preparedRequest, callbacks: [{ handleLLMEnd }] })) {
+      // Drain the stream so the reasoning event reaches the completion callback.
+    }
+    const { moonshotReasoning } = handleLLMEnd.mock.lastCall![0].generations[0][0].generationInfo
+    expect(moonshotReasoning).toBe("  exact </think> bytes\n")
+    const history = [new AIMessage({ content: "Answer", additional_kwargs: { moonshotReasoning } }), user]
+    expect(model.prepareClientManagedRequest(history, "local").messages[0]).toMatchObject({
+      moonshot_reasoning_content: moonshotReasoning
+    })
+    expect(model.prepareClientManagedRequest(history).messages[0]).not.toHaveProperty("moonshot_reasoning_content")
+    const auto = new ChatTldw({ model: "auto", clientManagedHistory: true })
+    expect(auto.prepareClientManagedRequest(history, "local").messages[0])
+      .toHaveProperty("moonshot_reasoning_content", moonshotReasoning)
+    const native = model.prepareClientManagedRequest(history, "native")
+    expect(native.messages[0]).toHaveProperty("moonshot_reasoning_content", moonshotReasoning)
+    expect(native.metadata?.tldw_moonshot_reasoning_history_v1).toBeUndefined()
+
+    const openai = new ChatTldw({ model: "test", apiProvider: "openai", clientManagedHistory: true })
+    const openaiRequest = openai.prepareClientManagedRequest(history, "local")
+    expect(openaiRequest.metadata?.tldw_moonshot_reasoning_history_v1).toBe(true)
+    expect(openaiRequest.messages[0]).not.toHaveProperty("moonshot_reasoning_content")
+  })
+
   it("replays the Gemini signature captured from a streamed function call", async () => {
     const extraContent = { google: { thought_signature: "c2lnbmF0dXJl" } }
     mocks.streamMessage.mockImplementationOnce(async function* (_messages, _options, onChunk) {

@@ -71,14 +71,14 @@ describe("cockpit mobile panels in short viewports", () => {
         screen.getByTestId("playground-cockpit-mobile-rails")
       ).toHaveAttribute("data-mobile-panel", "none")
       expect(
-        screen.getByRole("button", { name: "Context", exact: true })
+        screen.getByRole("button", { name: "Context" })
       ).toHaveAttribute("aria-expanded", "false")
       expect(onMobilePanelChange).not.toHaveBeenCalled()
     })
 
     it("opens a panel the user asks for as an overlay over the chat", () => {
       renderShell()
-      fireEvent.click(screen.getByRole("button", { name: "Context", exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: "Context" }))
 
       const panel = screen.getByRole("region", { name: "Context" })
       expect(panel).toBeVisible()

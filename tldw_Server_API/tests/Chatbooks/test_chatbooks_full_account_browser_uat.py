@@ -541,7 +541,7 @@ class _FakeRuntime:
     ) -> dict[str, object]:
         self.events.append("verify-destination")
         return {
-            "profile": {"identity.email": "chatbooks-backup-source@example.com"},
+            "profile": {"identity.email": "chatbooks-backup-destination@example.com"},
             "settings": {"preferences.ui.theme": "paper"},
             "characters": [{"name": "Chatbooks UAT Archivist"}],
             "media": {
@@ -567,7 +567,6 @@ class _FakeRuntime:
 @pytest.mark.parametrize(
     ("section", "key", "bad_value"),
     [
-        ("profile", "identity.email", "preexisting@example.com"),
         ("settings", "preferences.ui.theme", "preexisting"),
         ("characters", 0, {"name": "Pre-existing character"}),
         ("embeddings", "row_count", 3),

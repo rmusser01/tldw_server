@@ -87,10 +87,11 @@ function useWebUiComposer(textareaRef: React.RefObject<HTMLTextAreaElement>) {
   });
 }
 
-type Composer = ReturnType<typeof useComposerText> & {
+type DraftOwnerVerification = {
   draftOwnerVerificationState?: "pending" | "ready" | "error";
   retryDraftOwnerVerification?: () => void;
 };
+type Composer = ReturnType<typeof useComposerText> & DraftOwnerVerification;
 type Surface = "WebUI" | "Sidepanel";
 function extractSurface(relative: string, surface: Surface) {
   const source = readFileSync(path.resolve(__dirname, relative), "utf8");
@@ -266,7 +267,7 @@ describe("actual composer owner verification adapters and deployed recovery boun
       useWebUiComposer(React.useRef<HTMLTextAreaElement>(null)),
     );
     await settle();
-    expect((result.current as Composer).draftOwnerVerificationState).toBe(
+    expect((result.current as DraftOwnerVerification).draftOwnerVerificationState).toBe(
       "pending",
     );
     expect(result.current.draftReady).toBe(false);
@@ -282,17 +283,17 @@ describe("actual composer owner verification adapters and deployed recovery boun
     );
     await settle();
     act(() => result.current.setMessageValue("UNSAVED\n private text  "));
-    expect((result.current as Composer).draftOwnerVerificationState).toBe(
+    expect((result.current as DraftOwnerVerification).draftOwnerVerificationState).toBe(
       "error",
     );
-    expect((result.current as Composer).retryDraftOwnerVerification).toEqual(
+    expect((result.current as DraftOwnerVerification).retryDraftOwnerVerification).toEqual(
       expect.any(Function),
     );
     expect(result.current.draftReady).toBe(false);
     expect(ownerRecords()).toEqual([]);
-    act(() => (result.current as Composer).retryDraftOwnerVerification!());
+    act(() => (result.current as DraftOwnerVerification).retryDraftOwnerVerification!());
     await settle();
-    expect((result.current as Composer).draftOwnerVerificationState).toBe(
+    expect((result.current as DraftOwnerVerification).draftOwnerVerificationState).toBe(
       "ready",
     );
     expect(result.current.draftReady).toBe(true);

@@ -1,4 +1,5 @@
 import type { ChatScope } from '@/types/chat-scope';
+import type { HistoryAdmissionV1 } from "@/types/history-selection";
 import {
   tldwClient,
   ChatMessage,
@@ -391,6 +392,12 @@ export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
 
 export interface ChatStreamChunk {
+  tldw_history_admission_v1?: HistoryAdmissionV1
+  tldw_conversation_id?: string
+  tldw_user_message_id?: string
+  tldw_message_id?: string
+  success?: boolean
+  error?: unknown
   additional_kwargs?: { reasoning_content?: string }
   id?: string
   object?: string
