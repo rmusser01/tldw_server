@@ -19,6 +19,7 @@ references:
 - Docs/ADR/008-workspace-split-key-persistence-and-indexeddb-offload.md
 - Docs/Reviews/RESEARCH_WORKSPACE_LIVE_UAT_MATRIX_2026_05_25.md
 - Docs/Reviews/assets/2026-11-25-research-workspace-recovery-uat/evidence.json
+- https://github.com/rmusser01/tldw_server/pull/3642
 ---
 
 ## Description
@@ -46,6 +47,7 @@ RW-UAT-030 stays Partial. Attempting single-message Delete with valid persisted 
 
 The focused suite passed 213 tests. Shared UI typecheck, scoped ESLint, pre-commit for the label fix, and evidence link and manifest validation passed. The tracked changes have no Python source for Bandit.
 Renumbered from TASK-15658 because open PRs already held that ID. The requester waived the remaining check as a prerequisite for PR submission. RW-UAT-030 retains its measured Partial status and both follow-up tasks.
+Opened PR #3642 against dev after the fresh 213-test focused run. The PR records the remaining check and both follow-ups.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -56,10 +58,10 @@ Completed the live recovery recheck and corrected the Undo-label crash. Publishe
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
