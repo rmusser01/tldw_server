@@ -121,6 +121,13 @@ export interface VNAssetGenerationPreflight {
   worker_health: 'unknown';
   local_workers_enabled: boolean;
   warnings: string[];
+  storage?: {
+    registered_bytes: number | null;
+    approved_bytes: number | null;
+    estimated_output_bytes: number | null;
+    unknown_output_count: number;
+    estimate_fits_quota: boolean | null;
+  };
   slots: Array<{
     slot_id: number;
     backend: string | null;

@@ -92,7 +92,11 @@ export default function VNAssetsWorkbench() {
   const [slots, setSlots] = useState<VNAssetSlot[]>([]);
   const [items, setItems] = useState<VNAssetItem[]>([]);
   const [generation, setGeneration] = useState<VNAssetGenerationStatus | null>(null);
-  const [preflight, setPreflight] = useState<VNAssetGenerationPreflight | null>(null);
+  const [preflight, setPreflight] = useState<{
+    packId: number;
+    scope: VNCommandScope;
+    result: VNAssetGenerationPreflight;
+  } | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [preflightRevision, setPreflightRevision] = useState(0);
   const [loadedPackId, setLoadedPackId] = useState<number | null>(null);
@@ -119,6 +123,8 @@ export default function VNAssetsWorkbench() {
   const [discardConfirmed, setDiscardConfirmed] = useState(false);
   const [accountRevision, setAccountRevision] = useState(0);
   const recovery = useVNGenerationRecovery(useCallback((resetAccount: boolean) => {
+    setPreflight(null);
+    setPreflightError(null);
     if (resetAccount) {
       generationCommandPending.current.clear();
       setPendingCommands({});
@@ -134,8 +140,13 @@ export default function VNAssetsWorkbench() {
       setAccountRevision((value) => value + 1);
     }
   }, []));
-  const { authority, captureCurrent, isAuthority } = recovery;
+  const { authority, captureCurrent, isAuthority, isCurrent, ready, verifiedRevision } = recovery;
   const savedCommand = recovery.commands.find((command) => command.packId === selectedPack?.id);
+  const currentPreflight = ready && preflight && preflight.packId === selectedPack?.id && isAuthority(preflight.scope)
+    ? preflight.result
+    : null;
+  const generationActive = ['queued', 'enqueued', 'processing'].includes(generation?.status ?? '');
+  const activeGenerationPack = useRef<number | null>(null);
 
   const starterMatrix = starterMatrices[0] ?? null;
 
@@ -368,17 +379,32 @@ export default function VNAssetsWorkbench() {
     let cancelled = false;
     setPreflight(null);
     setPreflightError(null);
-    if (!selectedPack) return;
-    getVNAssetGenerationPreflight(selectedPack.id).then((result) => {
-      if (!cancelled) setPreflight(result);
+    if (!selectedPack || !ready) return;
+    const capture = captureCurrent();
+    if (!capture) return;
+    const packId = selectedPack.id;
+    const canAdopt = () => !cancelled && selectedPackIdRef.current === packId && isCurrent(capture);
+    getVNAssetGenerationPreflight(packId).then((result) => {
+      if (canAdopt()) setPreflight({ packId, scope: capture.scope, result });
     }).catch(() => {
-      if (!cancelled) setPreflightError('Generation configuration could not be checked. Refresh to try again.');
+      if (canAdopt()) setPreflightError('Generation configuration could not be checked. Refresh to try again.');
     });
     return () => { cancelled = true; };
-  }, [selectedPack, preflightRevision]);
+  }, [selectedPack, captureCurrent, isCurrent, ready, verifiedRevision, preflightRevision]);
 
   useEffect(() => {
-    if (!selectedPack || loadedPackId !== selectedPack.id || !['queued', 'enqueued', 'processing'].includes(generation?.status ?? '')) return;
+    if (!selectedPack || loadedPackId !== selectedPack.id) {
+      activeGenerationPack.current = null;
+    } else if (generationActive) {
+      activeGenerationPack.current = selectedPack.id;
+    } else if (activeGenerationPack.current === selectedPack.id) {
+      activeGenerationPack.current = null;
+      setPreflightRevision((revision) => revision + 1);
+    }
+  }, [selectedPack, loadedPackId, generationActive]);
+
+  useEffect(() => {
+    if (!selectedPack || loadedPackId !== selectedPack.id || !generationActive) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -392,7 +418,7 @@ export default function VNAssetsWorkbench() {
     };
     timer = setTimeout(poll, 3000);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [selectedPack, loadedPackId, generation?.status, refreshPackDetails]);
+  }, [selectedPack, loadedPackId, generationActive, refreshPackDetails]);
 
   const handleRefreshGeneration = useCallback(async () => {
     if (!selectedPack || generationCommandPending.current.has(selectedPack.id)) return;
@@ -591,6 +617,7 @@ export default function VNAssetsWorkbench() {
         const reviewedById = new Map(reviewedItems.map((item) => [item.id, item]));
         return previous.map((item) => reviewedById.get(item.id) ?? item);
       });
+      setPreflightRevision((revision) => revision + 1);
       await refreshPackDetails(selectedPack, true);
     } catch (reviewError) {
       setError(reviewError instanceof Error ? reviewError.message : 'Failed to update review status');
@@ -752,7 +779,7 @@ export default function VNAssetsWorkbench() {
                   retryingSlotId={retryingSlotId}
                   disabled={loadedPackId !== selectedPack?.id || !recovery.ready || !!savedCommand}
                   onRefresh={selectedPack ? handleRefreshGeneration : undefined}
-                  preflight={preflight}
+                  preflight={currentPreflight}
                   preflightError={preflightError}
                 />
               </div>
