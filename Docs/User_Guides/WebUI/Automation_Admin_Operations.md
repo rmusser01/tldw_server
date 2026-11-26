@@ -16,6 +16,24 @@ Use these pages when you want recurring work, integrations, server operations, t
 | `/skills` | Advanced self-hosted | Inspect or manage skill-facing surfaces. | Skill discovery, capability review. |
 | `/notifications` | WebUI | View notification inbox and alert state. | Background job notices, task alerts. |
 
+### Recurring Question results
+
+For RAG-backed runs started with `POST /api/v1/scheduled-tasks/definitions/{id}/runs`,
+the default `findings_only` policy surfaces matching evidence as an unread
+finding in Results. In optional generation mode, the finding contains the
+generated answer when one is available, or the matching evidence on its own.
+Attention-worthy failures can appear as separate failure entries.
+
+The compatibility endpoint `POST /api/v1/scheduled-tasks/definitions/{id}/run`
+uses the generation-only executor. With `findings_only` or `every_run`
+visibility, a successful optional-mode run publishes its answer as an unread
+finding in `GET /api/v1/scheduled-tasks/results`.
+
+When retrieval finds no matching evidence, the run completes with outcome
+`no_match`. Find that outcome in the definition's run history or at
+`GET /api/v1/scheduled-tasks/runs/{run_id}`. For that run,
+`GET /api/v1/scheduled-tasks/results?run_id={run_id}` returns an empty list.
+
 ## Safety And Review Pages
 
 | Page or feature | Surface/status | What it lets you do | Common uses |

@@ -552,6 +552,7 @@ async def handle_agent_task_job(
             status=status,
             error=finish_error,
             summary=finish_summary,
+            result_text=result_text,
             jobs_job_id=jobs_job_id,
             execution_timeout_seconds=execution_timeout_seconds,
             execution_claim_id=claim_id,
@@ -586,17 +587,23 @@ def _finish(
     status: str,
     error: str | None,
     summary: str | None,
+    result_text: str | None = None,
     jobs_job_id: str | None = None,
     execution_timeout_seconds: float = RUN_EXECUTION_TIMEOUT_SECONDS,
     execution_claim_id: str | None = None,
 ) -> None:
     """Record the terminal run state, deliver the notification, update health.
 
-    Notification and audit failures never mask the run outcome: the run
-    row is written first, and downstream failures log and continue.
+    The run and any finding commit before the completion notification and audit.
+    Downstream failures log and continue.
     """
     completed_at = datetime.now(timezone.utc).isoformat()
     try:
+        finding = None
+        if definition is not None and status == "succeeded" and summary and result_text:
+            finding = _optional_recurring_question_finding(
+                sdb, definition, run_id=run_id, answer=result_text, summary=summary
+            )
         sdb.update_scheduled_task_run_status(
             run_id=run_id,
             status=status,
@@ -604,6 +611,7 @@ def _finish(
             result_summary=summary,
             completed_at=completed_at,
             execution_claim_id=execution_claim_id,
+            finding=finding,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
@@ -694,3 +702,35 @@ def _finish(
             run_id=run_id,
             status=status,
         )
+
+
+def _optional_recurring_question_finding(
+    sdb: ScheduledTasksDatabase,
+    definition: DefinitionRow,
+    *,
+    run_id: int | str,
+    answer: str,
+    summary: str,
+) -> dict[str, Any] | None:
+    """Build the Results entry for an eligible generation-only answer."""
+    if (
+        definition.family != "recurring_question"
+        or definition.visibility_policy not in {"findings_only", "every_run", "owner"}
+    ):
+        return None
+
+    preview = sdb.get_preview(owner_id=definition.owner_id, preview_id=definition.preview_id)
+    config = preview.normalized_config.get("config", {}) if preview is not None else {}
+    if isinstance(config, dict) and config.get("generation_mode", "optional") != "optional":
+        return None
+
+    return {
+        "title": definition.name,
+        "summary": summary,
+        "answer": answer,
+        "answer_mode": "synthesized",
+        "confidence": {"label": "none"},
+        "source_refs": [],
+        "dedupe_key": f"automation_run:{definition.id}:{run_id}:finding",
+        "visibility_destination": {"home": True, "results": True},
+    }

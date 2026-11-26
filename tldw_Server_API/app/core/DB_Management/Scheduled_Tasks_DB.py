@@ -2580,8 +2580,9 @@ class ScheduledTasksDatabase:
         result_summary: str | None = None,
         completed_at: str | None = None,
         execution_claim_id: str | None = None,
+        finding: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Update an agent-task run row through the normalized run table."""
+        """Update a legacy run and its optional finding in one transaction."""
         with self._connect() as conn:
             begin_immediate_if_needed(conn)
             row = conn.execute(
@@ -2599,7 +2600,8 @@ class ScheduledTasksDatabase:
             run_summary["legacy_status"] = status
             if result_summary is not None:
                 run_summary["result_summary"] = result_summary
-            updated = ScheduledTasksTransaction(conn).update_run(
+            tx = ScheduledTasksTransaction(conn)
+            updated = tx.update_run(
                 owner_id=current.owner_id,
                 run_id=current.id,
                 patch={
@@ -2610,6 +2612,14 @@ class ScheduledTasksDatabase:
                     "ended_at": completed_at,
                 },
             )
+            if finding is not None:
+                tx.create_result(
+                    owner_id=current.owner_id,
+                    definition_id=current.definition_id,
+                    run_id=current.id,
+                    kind="finding",
+                    **finding,
+                )
         return _legacy_scheduled_task_run_from_run(updated)
 
     def get_scheduled_task_run_by_slot(
