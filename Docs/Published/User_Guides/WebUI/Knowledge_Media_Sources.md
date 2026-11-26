@@ -41,6 +41,8 @@ When creating review drafts, wait for the receipt to confirm how many were saved
 
 Use **Edit link**, **Choose file**, or **Paste again** beside a source that needs repair. Quick Ingest retries the corrected source and keeps the other results. After a refresh, select the original file with the same name and size or paste the text again.
 
+For a playlist, preview it, select the entries and check how duplicates will be handled before adding them. During an import, **Tracking details** shows the server job information. On the results screen, sources that need repair or retry appear before skipped sources. **Repeated in this import** identifies a source already in the queue. **Already in Media** identifies a library match.
+
 Minimize an active import to keep working. The background indicator shows work still in progress alongside failures. If you stop an import, Quick Ingest waits for the server to confirm the outcome. When a job’s status is unavailable, use **Check status** or **Check Media** before trying again.
 
 On the receipt, choose **Open in Media** for a saved source or **Open drafts** for a review batch. Further actions are under **More actions**.
