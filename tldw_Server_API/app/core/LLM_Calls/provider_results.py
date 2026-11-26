@@ -28,6 +28,17 @@ _PROVIDER_RESULT_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 
+# Server-owned continuation text, separate from the public generation metadata allow-list.
+MOONSHOT_REASONING_KEY = "moonshot_reasoning_content"
+MAX_MOONSHOT_REASONING_LENGTH = 100_000
+
+
+def bounded_moonshot_reasoning(value: Any) -> str | None:
+    if isinstance(value, str) and 0 < len(value) <= MAX_MOONSHOT_REASONING_LENGTH:
+        return value
+    return None
+
+
 # Comments and event: lines are always SSE control. id:/retry: are control only
 # inside SSE-framed chunks; an unframed provider chunk starting with them is
 # assistant text. sse.normalize_provider_line only ever sees framed lines, so it

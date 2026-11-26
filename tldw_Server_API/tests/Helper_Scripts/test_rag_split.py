@@ -1992,6 +1992,7 @@ def set_tree(tmp: Path, tail: str) -> Tree:
         "    try:\n        done = False\n    finally:\n        audit(done)\n",
         "    audit(done)\n    done = False\n",
         "    done = bool(done)\n",
+        "    done = False\n    audit(done)\n",
     ],
 )
 def test_strict_crossing_treats_anything_but_a_plain_rebind_as_crossing(tmp_path: Path, capsys: pytest.CaptureFixture, tail: str) -> None:
@@ -1999,10 +2000,118 @@ def test_strict_crossing_treats_anything_but_a_plain_rebind_as_crossing(tmp_path
     assert t.run("apply") == 1 and "V4: crossing local done: bound in step, read after it in <rest>" in capsys.readouterr().out
 
 
-def test_strict_crossing_exempts_a_plain_rebind_in_the_spans_block(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-    t = set_tree(tmp_path, "    done = False\n    audit(done)\n")
+# --- V18 (handler spans that await) and the crossing toy of the final review ---
+
+HANDLER_BASE = textwrap.dedent(
+    '''\
+    import os
+
+
+    def audit(*args):
+        return args
+
+
+    async def call(a):
+        """Doc."""
+        cst = make(a)
+        try:
+            audit(a)
+        FAIL_KEY:
+            audit(1)
+    SPAN
+        return cst
+    '''
+)
+SPAN_AWAIT = "        os.getenv('A')\n        await audit(2)\n        audit(3)\n"
+NODE_ID = "tests/test_throw.py::test_throw_resumed"
+
+
+def handler_tree(tmp: Path, span: str, fail: str = "except ValueError", **mv_extra: object) -> Tree:
+    src = HANDLER_BASE.replace("FAIL_KEY", fail).replace("SPAN\n", span)
+    first = row(src, span.strip().split("\n")[0].strip())
+    mv = {"name": "step", "module": "stage_a", "span": [first, first + span.count("\n") - 1], **mv_extra}
+    t = sib_tree(tmp, src, moves=[mv])
+    for d in (t.base, t.head):
+        (d / "tests").mkdir()
+        (d / "tests" / "test_throw.py").write_text("")
+    return t
+
+
+@pytest.mark.parametrize("fail", ["except ValueError", "finally"])
+def test_v18_refuses_an_awaiting_span_in_a_handler_or_finally_body(tmp_path: Path, capsys: pytest.CaptureFixture, fail: str) -> None:
+    t = handler_tree(tmp_path, SPAN_AWAIT, fail if fail == "finally" else "except ValueError")
+    assert t.run("apply") == 1 and "V18: step: the span awaits inside" in capsys.readouterr().out
+    assert t.run("verify") == 1 and "V18: step: the span awaits inside" in capsys.readouterr().out
+
+
+def test_v18_accepts_a_span_in_a_handler_without_an_await(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = handler_tree(tmp_path, "        os.getenv('A')\n        audit(3)\n")
     assert t.run("apply") == 0, capsys.readouterr().out
     assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_v18_accepts_the_declared_opt_out(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = handler_tree(tmp_path, SPAN_AWAIT, handler_await=NODE_ID)
+    assert t.run("apply") == 0, capsys.readouterr().out
+    assert t.run("verify") == 0, capsys.readouterr().out
+
+
+def test_v18_opt_out_on_a_span_that_does_not_need_it_is_stray(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = handler_tree(tmp_path, "        os.getenv('A')\n        audit(3)\n", handler_await=NODE_ID)
+    assert t.run("apply") == 1 and "handler_await is stray" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "tail, what",
+    [
+        ("        raise\n", "bare raise"),
+        ("        raise_detached_error(None)\n", "raise_detached_error"),
+        ("        try:\n            audit(4)\n        except OSError:\n            raise RuntimeError('x')\n", "raise inside an inner except"),
+        ("        logger.exception('x')\n", "ambient-exception read exception()"),
+        ("        sys.exc_info()\n", "ambient-exception read exc_info()"),
+        ("        traceback.format_exc()\n", "ambient-exception read format_exc()"),
+        ("        logger.opt(exception=True).error('x')\n", "ambient-exception read opt(exception=...)"),
+    ],
+)
+def test_v18_opt_out_is_refused_when_a_raise_follows_the_await(tmp_path: Path, capsys: pytest.CaptureFixture, tail: str, what: str) -> None:
+    t = handler_tree(tmp_path, SPAN_AWAIT + tail, handler_await=NODE_ID)
+    assert t.run("apply") == 1 and what in capsys.readouterr().out
+
+
+def test_v18_opt_out_names_an_existing_test_file(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = handler_tree(tmp_path, SPAN_AWAIT, handler_await="tests/missing.py::test_x")
+    assert t.run("apply") == 1 and "does not exist" in capsys.readouterr().out
+
+
+def test_v18_opt_out_must_look_like_a_node_id(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    t = handler_tree(tmp_path, SPAN_AWAIT, handler_await="test_throw")
+    assert t.run("apply") == 1 and "pytest node id" in capsys.readouterr().err
+
+
+def test_strict_crossing_refuses_a_handler_read_on_the_exception_edge(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    src = textwrap.dedent(
+        '''\
+        def audit(*args):
+            return args
+
+
+        async def call(a):
+            """Doc."""
+            cst = make(a)
+            x = 0
+            try:
+                x = compute()
+                await audit(1)
+                x = 2
+                audit(x)
+            except ValueError:
+                audit(x)
+            return cst
+        '''
+    )
+    mv = {"name": "step", "module": "stage_a", "span": [row(src, "x = compute()"), row(src, "x = compute()")]}
+    t = sib_tree(tmp_path, src, moves=[mv])
+    assert t.run("apply") == 1 and "V4: crossing local x: bound in step" in capsys.readouterr().out
 
 
 def test_entry_refuses_a_generator_body(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:

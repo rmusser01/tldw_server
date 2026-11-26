@@ -2230,6 +2230,16 @@ class TestSSENormalization:
         assert [message["choices"][0]["delta"]["content"] for message in content_messages] == [raw_text]
         assert handler.full_response == [raw_text]
 
+    async def test_malformed_sse_payload_is_wrapped_as_content(self):
+        handler = StreamingResponseHandler("conv_raw_sse_text", "gpt-4")
+
+        async def provider_stream():
+            yield "data: plain text instead of JSON\n\n"
+            yield "data: [DONE]\n\n"
+
+        messages = [message async for message in handler.safe_stream_generator(provider_stream())]
+        assert any('"delta": {"content": "plain text instead of JSON"}' in message for message in messages)
+
     @pytest.mark.parametrize("control_line", ["id: stream-7", "retry: 1500"])
     async def test_sse_control_only_line_is_not_assistant_content(self, control_line):
         handler = StreamingResponseHandler("conv_sse_control", "gpt-4")
@@ -2418,3 +2428,30 @@ async def test_native_cancelled_stream_never_fabricates_saved_identity(monkeypat
     wire = "".join([frame async for frame in handler.safe_stream_generator(provider(), save)])
     save.assert_not_awaited()
     assert "tldw_message_id" not in wire
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture", [True, False])
+async def test_stream_passes_exact_reasoning_to_completed_save_only(capture):
+    async def provider():
+        for delta in ({"reasoning_content": "  Plan <tool>"},
+                      {"reasoning_content": " & preserve\n"}, {"content": "Answer"}):
+            yield f"data: {json.dumps({'choices': [{'index': 0, 'delta': delta}]})}\n\n"
+        yield 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+        yield "data: [DONE]\n\n"
+
+    saved = []
+
+    async def save(content, _tools=None, _function=None, *, provider_reasoning=None):
+        saved.append((content, provider_reasoning))
+
+    frames = [
+        frame
+        async for frame in create_streaming_response_with_timeout(
+            provider(), "conv", "kimi-k3.1-pro", save_callback=save, capture_provider_reasoning=capture
+        )
+    ]
+
+    assert any('"delta": {"content": "Answer"}' in frame for frame in frames)
+    assert saved == [("Answer", "  Plan <tool> & preserve\n" if capture else None)]
