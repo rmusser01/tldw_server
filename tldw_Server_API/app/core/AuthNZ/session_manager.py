@@ -11,7 +11,7 @@ import os
 import re
 import stat
 import threading
-from contextlib import contextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -1435,6 +1435,27 @@ class SessionManager:
                 )
             return session_details is not None
 
+    @asynccontextmanager
+    async def revoke_on_failure(self, session_id: int, user_id: int):
+        """
+        Guard the steps after ``create_session`` commits a placeholder row.
+
+        If the body raises, best-effort revoke that row (so it does not stay live
+        holding temporary tokens until refresh expiry), then re-raise the original error.
+        """
+        try:
+            yield
+        except Exception:
+            try:
+                await self.revoke_session(
+                    session_id, reason="sign_in_failed", expected_user_id=int(user_id)
+                )
+            except Exception as revoke_exc:  # noqa: BLE001 - best-effort; must not mask the original error
+                logger.bind(exception_type=type(revoke_exc).__name__).warning(
+                    "Could not revoke the placeholder session after a failed sign-in"
+                )
+            raise
+
     async def revoke_all_user_sessions(
         self,
         user_id: int,
@@ -1647,6 +1668,9 @@ class SessionManager:
                 encrypted_access_token=encrypted_access_token,
                 encrypted_refresh_token=encrypted_refresh_token,
             )
+            if user_id is None:
+                # No live row to update: the session was revoked (e.g. cap-evicted) meanwhile.
+                raise SessionError("Session is no longer active")
 
             expires_at_dt = access_exp
             if isinstance(expires_at_dt, str):

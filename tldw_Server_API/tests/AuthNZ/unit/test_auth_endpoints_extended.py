@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -1041,6 +1042,7 @@ class _MFALoginSessionManager:
         self.updated = {}
         self.consumed = []
         self.created_calls = []
+        self.revoked = []
         self.redis_client = object()
 
     @property
@@ -1057,6 +1059,14 @@ class _MFALoginSessionManager:
     async def create_session(self, **kwargs):
         self.created_calls.append(kwargs)
         return {"session_id": 56}
+
+    @asynccontextmanager
+    async def revoke_on_failure(self, session_id, user_id):
+        try:
+            yield
+        except Exception:
+            self.revoked.append((session_id, user_id))
+            raise
 
     async def update_session_tokens(self, **kwargs):
         self.updated.update(kwargs)
@@ -1192,6 +1202,24 @@ async def test_mfa_login_completes_tokens(monkeypatch, legacy_payload):
         ]
     )
     assert all(identifier != "198.51.100.44" for identifier, _ in limiter.reset_calls)
+
+
+@pytest.mark.asyncio
+async def test_mfa_login_guards_the_placeholder_session_against_a_failed_token_update(monkeypatch):
+    auth = _patch_mfa_login(monkeypatch)
+    session_manager = _MFALoginSessionManager()
+    token = "mfa-session-token"
+    session_manager.ephemeral[auth._mfa_login_cache_key(token)] = json.dumps({"user_id": 5})
+
+    async def _fail(**kwargs):
+        raise RuntimeError("token update failed")
+
+    session_manager.update_session_tokens = _fail
+
+    with pytest.raises(auth.HTTPException) as exc:
+        await _submit_mfa_login(auth, session_manager, _MFALoginLimiter(), token)
+    assert exc.value.status_code == 500
+    assert session_manager.revoked == [(56, 5)]
 
 
 @pytest.mark.asyncio

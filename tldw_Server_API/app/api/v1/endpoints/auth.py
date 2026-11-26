@@ -435,29 +435,30 @@ async def _issue_multi_user_tokens(
     )
     session_id = int(temp_session_info["session_id"])
 
-    if settings.AUTH_MODE == "multi_user":
-        await _ensure_user_org_membership(user_id, user.get("username"))
+    async with session_manager.revoke_on_failure(session_id, user_id):
+        if settings.AUTH_MODE == "multi_user":
+            await _ensure_user_org_membership(user_id, user.get("username"))
 
-    scope_claims = await _build_scope_claims(user_id)
-    add_claims = dict(scope_claims)
-    add_claims["session_id"] = session_id
-    access_token = jwt_service.create_access_token(
-        user_id=user_id,
-        username=username,
-        role=str(user.get("role") or settings.DEFAULT_USER_ROLE),
-        additional_claims=add_claims,
-    )
-    refresh_token = jwt_service.create_refresh_token(
-        user_id=user_id,
-        username=username,
-        additional_claims=add_claims,
-    )
-    await session_manager.update_session_tokens(
-        session_id=session_id,
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
-    await _auth_service.update_user_last_login(db, user_id, datetime.utcnow())
+        scope_claims = await _build_scope_claims(user_id)
+        add_claims = dict(scope_claims)
+        add_claims["session_id"] = session_id
+        access_token = jwt_service.create_access_token(
+            user_id=user_id,
+            username=username,
+            role=str(user.get("role") or settings.DEFAULT_USER_ROLE),
+            additional_claims=add_claims,
+        )
+        refresh_token = jwt_service.create_refresh_token(
+            user_id=user_id,
+            username=username,
+            additional_claims=add_claims,
+        )
+        await session_manager.update_session_tokens(
+            session_id=session_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+        await _auth_service.update_user_last_login(db, user_id, datetime.utcnow())
     await _safe_audit_log_login_event(
         user_id=user_id,
         username=username,
@@ -1919,32 +1920,33 @@ async def login(
             session_id = temp_session_info['session_id']
 
             # Ensure org membership before issuing tokens (so claims include org_id)
-            if settings.AUTH_MODE == "multi_user":
-                await _ensure_user_org_membership(int(user["id"]), user.get("username"))
+            async with session_manager.revoke_on_failure(session_id, int(user["id"])):
+                if settings.AUTH_MODE == "multi_user":
+                    await _ensure_user_org_membership(int(user["id"]), user.get("username"))
 
-            # Create JWT tokens with session_id
-            scope_claims = await _build_scope_claims(int(user["id"]))
-            add_claims = dict(scope_claims)
-            add_claims["session_id"] = session_id
-            access_token = jwt_service.create_access_token(
-                user_id=user['id'],
-                username=user['username'],
-                role=user['role'],
-                additional_claims=add_claims
-            )
+                # Create JWT tokens with session_id
+                scope_claims = await _build_scope_claims(int(user["id"]))
+                add_claims = dict(scope_claims)
+                add_claims["session_id"] = session_id
+                access_token = jwt_service.create_access_token(
+                    user_id=user['id'],
+                    username=user['username'],
+                    role=user['role'],
+                    additional_claims=add_claims
+                )
 
-            refresh_token = jwt_service.create_refresh_token(
-                user_id=user['id'],
-                username=user['username'],
-                additional_claims=add_claims
-            )
+                refresh_token = jwt_service.create_refresh_token(
+                    user_id=user['id'],
+                    username=user['username'],
+                    additional_claims=add_claims
+                )
 
-            # Update session with actual tokens
-            await session_manager.update_session_tokens(
-                session_id=session_id,
-                access_token=access_token,
-                refresh_token=refresh_token
-            )
+                # Update session with actual tokens
+                await session_manager.update_session_tokens(
+                    session_id=session_id,
+                    access_token=access_token,
+                    refresh_token=refresh_token
+                )
 
 
         # Update last login time
@@ -3220,27 +3222,27 @@ async def verify_magic_link(
     )
     session_id = temp_session_info["session_id"]
 
-    scope_claims = await _build_scope_claims(int(user["id"]))
-    add_claims = dict(scope_claims)
-    add_claims["session_id"] = session_id
-    access_token = jwt_service.create_access_token(
-        user_id=user["id"],
-        username=user["username"],
-        role=user["role"],
-        additional_claims=add_claims,
-    )
-    refresh_token = jwt_service.create_refresh_token(
-        user_id=user["id"],
-        username=user["username"],
-        additional_claims=add_claims,
-    )
-    await session_manager.update_session_tokens(
-        session_id=session_id,
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
-
-    await _auth_service.update_user_last_login(db, int(user["id"]), datetime.utcnow())
+    async with session_manager.revoke_on_failure(session_id, int(user["id"])):
+        scope_claims = await _build_scope_claims(int(user["id"]))
+        add_claims = dict(scope_claims)
+        add_claims["session_id"] = session_id
+        access_token = jwt_service.create_access_token(
+            user_id=user["id"],
+            username=user["username"],
+            role=user["role"],
+            additional_claims=add_claims,
+        )
+        refresh_token = jwt_service.create_refresh_token(
+            user_id=user["id"],
+            username=user["username"],
+            additional_claims=add_claims,
+        )
+        await session_manager.update_session_tokens(
+            session_id=session_id,
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+        await _auth_service.update_user_last_login(db, int(user["id"]), datetime.utcnow())
 
     return TokenResponse(
         access_token=access_token,
