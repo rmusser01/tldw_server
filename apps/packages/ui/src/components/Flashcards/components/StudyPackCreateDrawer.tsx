@@ -184,16 +184,25 @@ const StudyPackMediaSections = ({
               </Text>
             )
           ) : (
-            <Checkbox.Group<number>
-              aria-label={reviewLabel}
-              className="mt-1 flex-col"
-              options={result.sections.map(({ index, title }) => ({ label: title, value: index }))}
-              value={storedSelection ?? []}
-              onChange={(indices) => onChange(rowId, {
-                section_revision: result.revision,
-                section_indices: indices
-              })}
-            />
+            <div role="group" aria-label={reviewLabel} className="mt-1 inline-flex flex-col">
+              {result.sections.map(({ index, title }) => (
+                <Checkbox
+                  key={index}
+                  value={index}
+                  checked={storedSelection?.includes(index) ?? false}
+                  onChange={({ target: { checked } }) => {
+                    const indices = result.sections
+                      .filter(({ index: sectionIndex }) =>
+                        sectionIndex === index ? checked : storedSelection?.includes(sectionIndex)
+                      )
+                      .map((section) => section.index)
+                    onChange(rowId, { section_revision: result.revision, section_indices: indices })
+                  }}
+                >
+                  {title}
+                </Checkbox>
+              ))}
+            </div>
           )
         )}
       </div>

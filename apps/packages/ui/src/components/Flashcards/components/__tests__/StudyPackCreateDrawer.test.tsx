@@ -266,15 +266,26 @@ describe("StudyPackCreateDrawer", () => {
       })
     createStudyPackJobMock.mockResolvedValue({ job: { id: 91 } })
     const user = userEvent.setup()
+    let firstRevisedChecked: boolean | undefined
     renderDrawer(
-      <StudyPackCreateDrawer
-        open
-        onClose={vi.fn()}
-        initialIntent={{
-          title: "Networks",
-          sourceItems: [{ sourceType: "media", sourceId: "42" }]
+      <React.Profiler
+        id="study-pack-revision"
+        onRender={() => {
+          // Capture the first committed checkbox state before passive effects can change it.
+          firstRevisedChecked ??= screen.queryByRole<HTMLInputElement>("checkbox", {
+            name: "Revised chapter"
+          })?.checked
         }}
-      />
+      >
+        <StudyPackCreateDrawer
+          open
+          onClose={vi.fn()}
+          initialIntent={{
+            title: "Networks",
+            sourceItems: [{ sourceType: "media", sourceId: "42" }]
+          }}
+        />
+      </React.Profiler>
     )
 
     const review = screen.getByRole("button", { name: "Review sections" })
@@ -284,6 +295,7 @@ describe("StudyPackCreateDrawer", () => {
     await user.click(review)
 
     const revised = await screen.findByRole("checkbox", { name: "Revised chapter" })
+    expect(firstRevisedChecked).toBe(false)
     expect(revised).not.toBeChecked()
     expect(screen.getByRole("checkbox", { name: "Chapter one" })).not.toBeChecked()
     expect(screen.getByText("This media changed. Choose its sections again.")).toBeVisible()
