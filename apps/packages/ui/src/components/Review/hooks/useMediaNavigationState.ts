@@ -80,7 +80,7 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     promise: Promise<any>
   } | null>(null)
   const restoredInitialSettingRef = useRef(false)
-  const hydratedPermalinkRef = useRef<string | null>(null)
+  const [hydratedPermalinkId, setHydratedPermalinkId] = useState<string | null>(null)
 
   const permalinkMediaId = useMemo(
     () => getMediaPermalinkIdFromSearch(location.search),
@@ -113,9 +113,9 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     publishSelected(next)
   }, [lifetime, publishSelected])
 
-  // Effects below schedule hydration; do not clear its URL in that same render.
+  // Read hydration and pending selection from the same render, including during layout updates.
   const permalinkNeedsHydration =
-    permalinkMediaId != null && hydratedPermalinkRef.current !== permalinkMediaId
+    permalinkMediaId != null && hydratedPermalinkId !== permalinkMediaId
 
   const selectedIndex = displayResults.findIndex((r) => r.id === selected?.id)
   const hasPrevious = selectedIndex > 0
@@ -229,11 +229,11 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
   // Hydrate pending initial media from URL
   useEffect(() => {
     if (!permalinkMediaId) {
-      hydratedPermalinkRef.current = null
+      setHydratedPermalinkId(null)
       return
     }
-    if (hydratedPermalinkRef.current === permalinkMediaId) return
-    hydratedPermalinkRef.current = permalinkMediaId
+    if (hydratedPermalinkId === permalinkMediaId) return
+    setHydratedPermalinkId(permalinkMediaId)
     if (selected?.kind === 'media' && String(selected.id) === permalinkMediaId) return
     detailGeneration.current += 1
     pendingDetailRequestRef.current = null
@@ -242,7 +242,7 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     setPendingInitialMediaIdSource('url')
     // Hydrate navigation changes once; clearing a deleted selection must not
     // reselect the same cached URL before permalink synchronization runs.
-  }, [permalinkMediaId, selected?.id, selected?.kind])
+  }, [hydratedPermalinkId, permalinkMediaId, selected?.id, selected?.kind])
 
   // Hydrate pending initial media from settings
   useEffect(() => {
