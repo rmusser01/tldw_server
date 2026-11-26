@@ -16,6 +16,9 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Persona.visual_generation_recipes import (
+    build_persona_visual_recipe_generation_intent,
+)
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import (
     collect_visual_manifest_asset_ids,
 )
@@ -395,6 +398,18 @@ def test_default_starter_production_recipes_use_pipeline_taxonomy(
         assert animation_outputs <= BUDDY_VISUAL_ANIMATION_OUTPUT_IDS
         assert animation_outputs <= expected_groups
         assert not (animation_outputs & BUDDY_VISUAL_STATIC_SOURCE_ASSET_GROUP_IDS)
+
+
+def test_study_desk_recipe_accepts_custom_state_variants() -> None:
+    intent = build_persona_visual_recipe_generation_intent(
+        starter_pack_id="study-desk-intermediate",
+        recipe_output="custom_state_variants",
+        user_prompt="Draw a wave pose.",
+        request_id="study-desk-custom-variant",
+    )
+
+    assert intent is not None
+    assert intent.recipe_intent["recipe_output"] == "custom_state_variants"
 
 
 def test_list_starter_packs_rejects_static_source_animation_outputs(

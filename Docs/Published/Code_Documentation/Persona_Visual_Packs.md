@@ -424,9 +424,7 @@ recovery flows. They are not global Persona Visual pack rows or shared library
 entries. Listing the catalog returns safe fixture metadata only, and copying a
 starter always creates a normal user-owned draft pack before activation.
 
-The bundled catalog exposes thirteen art-ready starters in stable order.
-Six basic Buddy defaults and Pixel-Migu ship alongside three intermediate and
-three intricate defaults. Additional Buddy packs are optional downloads:
+The catalog ships thirteen art-ready starters in this order.
 
 1. `search-lens-basic`
 2. `index-card-basic`
@@ -442,15 +440,14 @@ three intricate defaults. Additional Buddy packs are optional downloads:
 12. `action-guide-intricate`
 13. `elaborate-persona-intricate`
 
-The bundled basic tier is Search Lens, Index Card, Archive Cube, Paperclip,
-Terminal Tile, and Migu. Earlier tracker text that described only three basic
-defaults is stale; this six-pack is the current basic tier. The existing
-package-backed 96x96 frame packets are accepted art-ready Persona Visual
-runtime assets for those six defaults, with neutral/preview assets and required
-state coverage. They are not the final interchange ceiling. When a default pack
-needs cross-app portability or Codex Buddy parity, the production target is the
-Codex/Petdex-compatible path: `pet.json` plus a 1536x1872, 8x9
-`spritesheet.webp`/PNG atlas imported through the Codex pet adapter.
+Additional Buddy packs are available as optional downloads.
+
+The Basic tier includes `pixel-migu` alongside the six original defaults.
+Search Lens, Index Card, Archive Cube, Paperclip, Terminal Tile, and Migu Marker
+use packaged 96x96 frames with neutral and preview assets and the required
+runtime state coverage. When a default pack needs cross-app portability or Codex
+Buddy parity, the Codex pet adapter imports a `pet.json` and a 1536x1872, 8x9
+`spritesheet.webp` or PNG atlas.
 
 The approved 3x4 basic sheets and processed 96x96 frame packets remain review
 evidence and current bundled runtime assets. They should be treated as source

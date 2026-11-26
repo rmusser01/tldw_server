@@ -1325,8 +1325,8 @@ def _authored_sprite_pack(
     outputs = ["required_state_loops"]
     if uses_atlas:
         outputs.extend(("animation_strips", "animation_atlas"))
-    if custom_states:
-        outputs.append("custom_state_variants")
+    # Recipes can generate custom states even when the starter ships without any.
+    outputs.append("custom_state_variants")
     return PersonaVisualStarterPack(
         id=starter_id,
         title=title,
