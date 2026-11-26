@@ -551,7 +551,7 @@ Task 3's pattern, applied to `execute_streaming_call`:
 
 ### Task 8: Streaming callbacks (PR H; R10, R13, AC1)
 
-**Lifts:** Appendix B's S10-S14 rows (manifest `c25h_stream_callbacks.py`), callee-first, depth 2 included.
+**Lifts:** Appendix B's S10-S14 rows (manifest `c25h_stream_callbacks.py`), callee-first, depth 2 included. After #3538 (R14) the lift shipped as `c25h1_stream_moonshot_state.py` (rewrite-only) + `c25h2_stream_callbacks.py`.
 - To `moderation_pipeline`: `_apply_stream_output_policies` and `_out_transform`.
 - To `streaming_pipeline`: everything else.
 - `_finalize_stream` stays nested in `tracked_streaming_generator`.
