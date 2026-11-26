@@ -1,5 +1,5 @@
 ---
-id: TASK-15658
+id: TASK-15666
 title: 'Certify Research Workspace recovery on current dev for GitHub #2608'
 status: Done
 labels:
@@ -12,9 +12,9 @@ references:
 - TASK-12020.27
 - TASK-12020.32
 - TASK-12020.33
-- TASK-15658.1
-- TASK-15658.2
-- TASK-15658.3
+- TASK-15666.1
+- TASK-15666.2
+- TASK-15666.3
 - Docs/ADR/007-research-workspace-canonical-first-slice-shell.md
 - Docs/ADR/008-workspace-split-key-persistence-and-indexeddb-offload.md
 - Docs/Reviews/RESEARCH_WORKSPACE_LIVE_UAT_MATRIX_2026_05_25.md
@@ -40,11 +40,12 @@ Close the remaining RW-UAT-030 evidence gap left by TASK-12020.27 and TASK-12020
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: no. This recheck and label correction use the existing Research Workspace route, persistence and recovery contracts from ADR-007 and ADR-008.
 
-Started from freshly fetched dev 1d8589b7c4. Live Chromium tested the current FastAPI and WebUI on isolated disposable data. The original batch removal hit the workspace render boundary after producing a translation object as the Undo label. TASK-15658.1 fixed that and reproduced the browser failure in a real-catalog unit test. The clean rebuilt WebUI passed imported chat reload, selected batch Remove and Undo, archive/cancel/restore and deletion of a typed disposable copy, artifact recovery, clear chat, Quick Notes, single-source recovery, and source-transfer Undo. All three media records and the canonical note were still readable with their original titles and content.
+Started from freshly fetched dev 1d8589b7c4. Live Chromium tested the current FastAPI and WebUI on isolated disposable data. The original batch removal hit the workspace render boundary after producing a translation object as the Undo label. TASK-15666.1 fixed that and reproduced the browser failure in a real-catalog unit test. The clean rebuilt WebUI passed imported chat reload, selected batch Remove and Undo, archive/cancel/restore and deletion of a typed disposable copy, artifact recovery, clear chat, Quick Notes, single-source recovery, and source-transfer Undo. All three media records and the canonical note were still readable with their original titles and content.
 
-RW-UAT-030 stays Partial. Attempting single-message Delete with valid persisted local chat/message IDs leaves the reply and IndexedDB row intact and reports history_selection_unavailable. TASK-15658.3 records the exact reproduction. TASK-15658.2 records exporter-local chat settings identity warnings while the imported chat remains visible.
+RW-UAT-030 stays Partial. Attempting single-message Delete with valid persisted local chat/message IDs leaves the reply and IndexedDB row intact and reports history_selection_unavailable. TASK-15666.3 records the exact reproduction. TASK-15666.2 records exporter-local chat settings identity warnings while the imported chat remains visible.
 
 The focused suite passed 213 tests. Shared UI typecheck, scoped ESLint, pre-commit for the label fix, and evidence link and manifest validation passed. The tracked changes have no Python source for Bandit.
+Renumbered from TASK-15658 because open PRs already held that ID. The requester waived the remaining check as a prerequisite for PR submission. RW-UAT-030 retains its measured Partial status and both follow-up tasks.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

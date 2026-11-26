@@ -1,6 +1,6 @@
 {
   "issue": 2608,
-  "backlog_task": "TASK-15658",
+  "backlog_task": "TASK-15666",
   "date": "2026-11-25",
   "status": "partial",
   "dev_base": "1d8589b7c43e5dbb6fca3247e023f562129c70f3",
@@ -243,14 +243,14 @@
       "error": "history_selection_unavailable",
       "visible_reply_retained": true,
       "persisted_local_reply_retained": true,
-      "follow_up": "TASK-15658.3"
+      "follow_up": "TASK-15666.3"
     },
     "imported_chat_settings": {
       "status": "separate_follow_up",
       "error": "missing_conversation",
       "when": "bundle carried an exporter-local historyId with no matching IndexedDB record",
       "transcript_retained": true,
-      "follow_up": "TASK-15658.2"
+      "follow_up": "TASK-15666.2"
     }
   },
   "checks": {
