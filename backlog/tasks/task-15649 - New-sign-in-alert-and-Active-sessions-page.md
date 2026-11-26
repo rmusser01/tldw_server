@@ -27,6 +27,7 @@ PR 2 of the session cap, alert and lock design (Docs/Design/2026-11-23-session-c
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR assessment: no ADR in this PR; the rules are recorded in AuthNZ-API-Guide.md and restated by the lock ADR in PR 3. No schema change, so no migration.
+Task 10 verification (2026-11-25), left In Progress: backend targeted 551+510+624 passed (12 skipped, all sandbox host-gated, 0 Postgres skips) and AuthNZ_SQLite+Notifications 996 passed; tests/lint 414 passed (test_runtime_package_discovery ignored, setuptools missing); tests/CI 6 failed = the known local-only six, 1277 passed. Frontend: ui suite 3 failed (2 Layout.shell-overrides Joyride tests pass alone = load flake; chat-document-processing fails on dev too), tldw-frontend 42 failed in 19 files identical on origin/dev, extension 1 passed. Open: ruff I001 on tldw_Server_API/app/core/AuthNZ/session_manager.py:65 (unsorted sign_in_alert import, dev clean) needs a fix; Bandit not run. Known limits: see plan.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -38,7 +39,7 @@ ADR assessment: no ADR in this PR; the rules are recorded in AuthNZ-API-Guide.md
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
 - [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
