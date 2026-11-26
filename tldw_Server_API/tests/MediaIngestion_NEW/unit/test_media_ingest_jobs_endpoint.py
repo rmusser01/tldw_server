@@ -927,6 +927,7 @@ async def test_cancel_after_claim_before_handler_releases_upload(staging_client,
                     enforce=True,
                 )
                 successor = acquire(**{**kwargs, "worker_id": "successor"})
+                assert successor is not None
                 assert successor["lease_id"] != claimed["lease_id"]
                 assert manager.update_job_progress(job["id"], progress_percent=5, progress_message="prepare")
             cancelled = staging_client.delete(f"{_INGEST}/{job['id']}")
@@ -951,16 +952,19 @@ def test_cancel_takes_cleanup_ownership_from_locked_job_state(staging_client, mo
     job, batch = _submit_staged_upload(staging_client)
     source = Path(job["source"])
     manager = JobManager()
-    claim_args = {"domain": "media_ingest", "queue": "default", "worker_id": "racing", "lease_seconds": 120}
-    if release_to_queue:
-        lease = manager.acquire_next_job(**claim_args)
+    def claim(jm: JobManager):
+        row = jm.acquire_next_job(domain="media_ingest", queue="default", worker_id="racing", lease_seconds=120)
+        assert row is not None
+        return row
+
+    lease = claim(manager) if release_to_queue else None
     cancel = JobManager.cancel_job
 
     def change_claim_before_cancel(jm, job_id, **kwargs):
-        if release_to_queue:
+        if lease is not None:
             assert jm.release_job(job_id, worker_id=lease["worker_id"], lease_id=lease["lease_id"], enforce=True)
         else:
-            assert jm.acquire_next_job(**claim_args)["uuid"] == job["uuid"]
+            assert claim(jm)["uuid"] == job["uuid"]
         return cancel(jm, job_id, **kwargs)
 
     monkeypatch.setattr(JobManager, "cancel_job", change_claim_before_cancel)
@@ -981,11 +985,13 @@ def test_queued_cancel_preserves_unrelated_staging_entries(staging_client):
     other = source.parent / "unrelated.txt"
     other.write_text("other", encoding="utf-8")
     jm = JobManager()
+    original = jm.get_job(job["id"])
+    assert original is not None
     copied = jm.create_job(
         domain="media_ingest",
         queue="default",
         job_type="media_ingest_item",
-        payload=jm.get_job(job["id"])["payload"],
+        payload=original["payload"],
         owner_user_id="1",
     )
     assert staging_client.delete(f"{_INGEST}/{copied['id']}").status_code == 200
