@@ -8,6 +8,7 @@ import json
 import os
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ import aiofiles
 import aiofiles.os
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -63,6 +65,10 @@ from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
 from tldw_Server_API.app.core.VN_Assets.constants import DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
 from tldw_Server_API.app.core.VN_Assets.jobs import (
+    VN_ASSETS_DOMAIN,
+    VN_PACK_EXPORT_JOB_TYPE,
+    VN_PACK_IMPORT_COMMIT_JOB_TYPE,
+    VN_PACK_IMPORT_PREVIEW_JOB_TYPE,
     create_pack_export_job,
     create_pack_import_commit_job,
     create_pack_import_preview_job,
@@ -70,6 +76,7 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.portability.archive import DEFAULT_MAX_ARCHIVE_SIZE_BYTES
 from tldw_Server_API.app.core.VN_Assets.portability.constants import VNPACK_EXTENSION
+from tldw_Server_API.app.core.VN_Assets.portability.recovery import ImportCleanupConflict, discard_import_checkpoint
 from tldw_Server_API.app.core.VN_Assets.preflight import generation_preflight
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Assets.storage import (
@@ -372,11 +379,44 @@ def _json_field(row: dict[str, Any], key: str, default: Any) -> Any:
         return default
 
 
-def _job_for_portability(jobs_manager: JobManager, job_id: str) -> dict[str, Any] | None:
+_PORTABILITY_JOB_REFERENCE_FIELDS = {
+    VN_PACK_EXPORT_JOB_TYPE: "pack_id",
+    VN_PACK_IMPORT_COMMIT_JOB_TYPE: "import_id",
+    VN_PACK_IMPORT_PREVIEW_JOB_TYPE: "preview_id",
+}
+
+
+def _job_for_portability(
+    jobs_manager: JobManager,
+    job_id: str,
+    job_type: str,
+    reference_id: int,
+    *,
+    owner_user_id: int,
+) -> dict[str, Any] | None:
     try:
-        return jobs_manager.get_job(int(job_id))
+        numeric_id = int(job_id)
     except (TypeError, ValueError):
         return None
+    job = jobs_manager.get_job(numeric_id, owner_user_id=str(owner_user_id))
+    if job is None or job.get("domain") != VN_ASSETS_DOMAIN or job.get("job_type") != job_type:
+        return None
+    payload = job.get("payload")
+    if not isinstance(payload, dict) or payload.get(_PORTABILITY_JOB_REFERENCE_FIELDS[job_type]) != reference_id:
+        return None
+    return job
+
+
+def _cancel_portability_job(jobs_manager: JobManager, job: dict[str, Any] | None, *, reason: str) -> bool:
+    if not job or not job.get("uuid"):
+        return False
+    return jobs_manager.cancel_job(
+        int(job["id"]),
+        reason=reason,
+        expected_uuid=str(job["uuid"]),
+        expected_domain=VN_ASSETS_DOMAIN,
+        expected_job_type=str(job["job_type"]),
+    )
 
 
 def _portability_export_or_404(
@@ -487,7 +527,7 @@ def _compose_import_preview_response(
             )
             if updated_job is not None:
                 portability_job = updated_job
-        if preview_status not in TERMINAL_JOB_STATUSES | {"deleting", "deleted", "expired"}:
+        if preview_status not in TERMINAL_JOB_STATUSES | {"expired", "deleting", "deleted"}:
             updated_preview = service.repo.update_import_preview(
                 int(preview["id"]),
                 {"status": job_status},
@@ -533,7 +573,8 @@ def _compose_import_commit_response(
 ) -> VNPackImportJobResponse:
     job_status = str((job or {}).get("status") or portability_job["status"])
     journal_status = str(journal["status"])
-    if job_status in TERMINAL_JOB_STATUSES:
+    # A Jobs status alone cannot publish the owner database's import receipt.
+    if job_status in TERMINAL_JOB_STATUSES and (job_status != "completed" or journal_status == "completed"):
         if str(portability_job["status"]) not in TERMINAL_JOB_STATUSES:
             updated_job = service.repo.update_portability_job(
                 str(portability_job["job_id"]),
@@ -552,6 +593,14 @@ def _compose_import_commit_response(
                 journal = updated_journal
                 journal_status = str(journal["status"])
 
+    records = _json_field(journal, "created_records_json", {})
+    cleanup = _json_field(journal, "cleanup_status_json", {})
+    interrupted = (
+        job_status in {"failed", "cancelled", "quarantined"}
+        and not journal.get("completed_at")
+        and records.get("checkpoint_version") == 1
+        and cleanup.get("status") not in {"completed", "discarded"}
+    )
     return VNPackImportJobResponse(
         job_id=str(portability_job["job_id"]),
         portability_job_id=int(portability_job["id"]),
@@ -563,16 +612,19 @@ def _compose_import_commit_response(
         stage=str(journal.get("stage") or portability_job["stage"]),
         pack_id=journal.get("target_pack_id") or portability_job.get("pack_id"),
         id_maps=_json_field(journal, "id_maps_json", {}),
-        created_records=_json_field(journal, "created_records_json", {}),
-        cleanup_status=_json_field(journal, "cleanup_status_json", {}),
+        created_records=records,
+        cleanup_status=cleanup,
         warnings=_json_field(journal, "warnings_json", _json_field(portability_job, "warnings_json", [])),
         archive_sha256=journal.get("archive_sha256") or portability_job.get("archive_sha256"),
         canonical_payload_fingerprint=(
             journal.get("canonical_payload_fingerprint")
             or portability_job.get("canonical_payload_fingerprint")
         ),
-        error_code=journal.get("error_code") or portability_job.get("error_code"),
-        error_message=journal.get("error_message") or portability_job.get("error_message"),
+        error_code="import_interrupted" if interrupted else journal.get("error_code") or portability_job.get("error_code"),
+        error_message=(
+            "The restore stopped with staged assets. Job redelivery can resume the restore, or you can discard its staged assets."
+            if interrupted else journal.get("error_message") or portability_job.get("error_message")
+        ),
         completed_at=journal.get("completed_at"),
     )
 
@@ -693,6 +745,73 @@ async def _remove_file_if_exists(path: Path) -> None:
         await aiofiles.os.remove(path)
     except FileNotFoundError:
         return
+
+
+def _import_preview_expired(preview: dict[str, Any]) -> bool:
+    expires_at = preview.get("expires_at")
+    value = expires_at or preview.get("created_at")
+    if not value:
+        return False
+    try:
+        expiration = datetime.fromisoformat(str(value))
+    except ValueError:
+        return False
+    if expiration.tzinfo is None:
+        expiration = expiration.replace(tzinfo=timezone.utc)
+    if expires_at is None:
+        expiration += timedelta(days=7)
+    return expiration <= datetime.now(timezone.utc)
+
+
+def _import_preview_has_active_commit(
+    service: VNAssetPackService, jobs_manager: JobManager, *, preview_id: int, owner_user_id: int,
+) -> bool:
+    for entry in service.repo.list_import_jobs_for_preview(preview_id, owner_user_id=owner_user_id):
+        job_id = str(entry["job_id"])
+        job = _job_for_portability(
+            jobs_manager, job_id, VN_PACK_IMPORT_COMMIT_JOB_TYPE, int(entry["id"]), owner_user_id=owner_user_id,
+        )
+        if job and job["status"] not in TERMINAL_JOB_STATUSES:
+            return True
+        if job is None and not job_id.isdecimal() and entry["status"] not in TERMINAL_JOB_STATUSES:
+            return True
+    return False
+
+
+def _owned_import_archive_path(archive_path: str, *, owner_user_id: int) -> Path:
+    root = _vn_pack_import_preview_staging_root(owner_user_id).resolve()
+    # lgtm[py/path-injection] The stored path must still resolve under the owner's staging root.
+    path = Path(archive_path).resolve()
+    if path == root or not path.is_relative_to(root):
+        raise ValueError("import_preview_archive_outside_user_root")
+    return path
+
+
+async def _expire_import_preview(
+    service: VNAssetPackService, jobs_manager: JobManager, *, preview_id: int, owner_user_id: int,
+) -> None:
+    """Claim an idle expired preview before removing its owner-local staging file."""
+    with service.repo.db.transaction():
+        preview = service.repo.get_import_preview(preview_id, owner_user_id=owner_user_id)
+        if not preview or preview["status"] in {"deleted", "deleting"} or not _import_preview_expired(preview):
+            return
+        if not preview["archive_path"]:
+            return
+        preview_job = _job_for_portability(
+            jobs_manager, str(preview["job_id"]), VN_PACK_IMPORT_PREVIEW_JOB_TYPE, preview_id,
+            owner_user_id=owner_user_id,
+        )
+        if preview_job and preview_job.get("status") not in TERMINAL_JOB_STATUSES:
+            return
+        if _import_preview_has_active_commit(service, jobs_manager, preview_id=preview_id, owner_user_id=owner_user_id):
+            return
+        try:
+            path = _owned_import_archive_path(preview["archive_path"], owner_user_id=owner_user_id)
+        except ValueError:
+            return
+        service.repo.update_import_preview(preview_id, {"status": "expired"}, owner_user_id=owner_user_id)
+    await _remove_file_if_exists(path)
+    service.repo.update_import_preview(preview_id, {"status": "expired", "archive_path": ""}, owner_user_id=owner_user_id)
 
 
 def _content_not_found() -> HTTPException:
@@ -1033,7 +1152,9 @@ async def get_pack_export_status(
         job_id=job_id,
         owner_user_id=owner_user_id,
     )
-    job = _job_for_portability(jobs_manager, job_id)
+    job = _job_for_portability(
+        jobs_manager, job_id, VN_PACK_EXPORT_JOB_TYPE, int(portability_job["pack_id"]), owner_user_id=owner_user_id,
+    )
     return _compose_portability_response(
         service,
         portability_job=portability_job,
@@ -1058,7 +1179,9 @@ async def download_pack_export(
     response = _compose_portability_response(
         service,
         portability_job=portability_job,
-        job=_job_for_portability(jobs_manager, job_id),
+        job=_job_for_portability(
+            jobs_manager, job_id, VN_PACK_EXPORT_JOB_TYPE, int(portability_job["pack_id"]), owner_user_id=owner_user_id,
+        ),
         owner_user_id=owner_user_id,
     )
     if response.status != "completed":
@@ -1089,11 +1212,11 @@ async def cancel_pack_export(
         job_id=job_id,
         owner_user_id=owner_user_id,
     )
-    try:
-        cancelled = jobs_manager.cancel_job(int(job_id), reason="vn_pack_export_cancel_requested")
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_job_not_found") from exc
-    if not cancelled:
+    reference_id = int(portability_job["pack_id"])
+    job = _job_for_portability(
+        jobs_manager, job_id, VN_PACK_EXPORT_JOB_TYPE, reference_id, owner_user_id=owner_user_id,
+    )
+    if not _cancel_portability_job(jobs_manager, job, reason="vn_pack_export_cancel_requested"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_job_not_found")
 
     updated = service.repo.update_portability_job(
@@ -1104,7 +1227,9 @@ async def cancel_pack_export(
     return _compose_portability_response(
         service,
         portability_job=updated or portability_job,
-        job=_job_for_portability(jobs_manager, job_id),
+        job=_job_for_portability(
+            jobs_manager, job_id, VN_PACK_EXPORT_JOB_TYPE, reference_id, owner_user_id=owner_user_id,
+        ),
         owner_user_id=owner_user_id,
     )
 
@@ -1126,6 +1251,11 @@ async def start_pack_import_preview(
     owner_user_id = _current_user_id(current_user)
     operation_idempotency_key = _operation_idempotency_key(idempotency_key, request_id)
     operation_request_id = request_id or operation_idempotency_key
+    for expired in service.repo.list_expired_import_previews(owner_user_id=owner_user_id):
+        try:
+            await _expire_import_preview(service, jobs_manager, preview_id=int(expired["id"]), owner_user_id=owner_user_id)
+        except OSError as exc:
+            logger.warning("Expired VN preview {} could not be removed ({})", expired["id"], type(exc).__name__)
     archive_token = uuid.uuid4().hex
     archive_root = _vn_pack_import_preview_staging_root(owner_user_id)
     archive_path_str = safe_join(
@@ -1169,6 +1299,7 @@ async def start_pack_import_preview(
             job_id=f"pending:{operation_request_id}",
             status="queued",
             archive_path=str(archive_path),
+            expires_at=(datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
         )
         job = create_pack_import_preview_job(
             jobs_manager,
@@ -1244,7 +1375,10 @@ async def get_pack_import_preview(
         service,
         preview=preview,
         portability_job=portability_job,
-        job=_job_for_portability(jobs_manager, str(preview["job_id"])),
+        job=_job_for_portability(
+            jobs_manager, str(preview["job_id"]), VN_PACK_IMPORT_PREVIEW_JOB_TYPE, preview_id,
+            owner_user_id=owner_user_id,
+        ),
         owner_user_id=owner_user_id,
     )
 
@@ -1266,14 +1400,10 @@ async def cancel_pack_import_preview(
         owner_user_id=owner_user_id,
     )
     job_id = str(preview["job_id"])
-    try:
-        cancelled = jobs_manager.cancel_job(
-            int(job_id),
-            reason="vn_pack_import_preview_cancel_requested",
-        )
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_preview_job_not_found") from exc
-    if not cancelled:
+    job = _job_for_portability(
+        jobs_manager, job_id, VN_PACK_IMPORT_PREVIEW_JOB_TYPE, preview_id, owner_user_id=owner_user_id,
+    )
+    if not _cancel_portability_job(jobs_manager, job, reason="vn_pack_import_preview_cancel_requested"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_preview_job_not_found")
 
     updated_preview = service.repo.update_import_preview(
@@ -1290,7 +1420,9 @@ async def cancel_pack_import_preview(
         service,
         preview=updated_preview or preview,
         portability_job=updated_job or portability_job,
-        job=_job_for_portability(jobs_manager, job_id),
+        job=_job_for_portability(
+            jobs_manager, job_id, VN_PACK_IMPORT_PREVIEW_JOB_TYPE, preview_id, owner_user_id=owner_user_id,
+        ),
         owner_user_id=owner_user_id,
     )
 
@@ -1307,35 +1439,24 @@ async def delete_pack_import_preview(
         preview, portability_job = _portability_import_preview_or_404(
             service, preview_id=preview_id, owner_user_id=owner_user_id,
         )
-        if preview["status"] == "deleted":
+        if preview["status"] == "deleted" or (preview["status"] == "expired" and not preview["archive_path"]):
             return Response(status_code=status.HTTP_204_NO_CONTENT)
-        if preview["status"] == "processing":
+        job_id = str(preview["job_id"])
+        validation_job = _job_for_portability(
+            jobs_manager, job_id, VN_PACK_IMPORT_PREVIEW_JOB_TYPE, preview_id, owner_user_id=owner_user_id,
+        )
+        if preview["status"] == "processing" or (validation_job or {}).get("status") == "processing":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_processing")
-        for entry in service.repo.list_import_jobs_for_preview(preview_id, owner_user_id=owner_user_id):
-            job = _job_for_portability(jobs_manager, str(entry["job_id"])) or {}
-            if entry["status"] not in TERMINAL_JOB_STATUSES or (
-                job and job.get("status") not in TERMINAL_JOB_STATUSES
-            ):
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_has_active_import")
-
-        # lgtm[py/path-injection] The stored path must stay inside the owner's staging root.
-        archive_path = Path(str(preview.get("archive_path") or ""))
-        preview_root = _vn_pack_import_preview_staging_root(owner_user_id).resolve()
+        if _import_preview_has_active_commit(service, jobs_manager, preview_id=preview_id, owner_user_id=owner_user_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_has_active_import")
         try:
-            resolved_archive_path = archive_path.resolve()
-            if resolved_archive_path == preview_root:
-                raise ValueError("preview_archive_is_staging_root")
-            resolved_archive_path.relative_to(preview_root)
+            path = _owned_import_archive_path(str(preview["archive_path"]), owner_user_id=owner_user_id)
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="import_preview_archive_outside_user_root") from exc
         # Fence new restore admission before unlinking. A failed unlink can be retried.
         service.repo.update_import_preview(preview_id, {"status": "deleting"}, owner_user_id=owner_user_id)
-
-    try:
-        jobs_manager.cancel_job(int(preview["job_id"]), reason="vn_pack_import_preview_delete_requested")
-    except (TypeError, ValueError):
-        pass
-    await _remove_file_if_exists(resolved_archive_path)
+    _cancel_portability_job(jobs_manager, validation_job, reason="vn_pack_import_preview_delete_requested")
+    await _remove_file_if_exists(path)
     service.repo.update_import_preview(
         preview_id,
         {"status": "deleted"},
@@ -1407,6 +1528,10 @@ async def start_pack_import_commit(
             preview = service.repo.get_import_preview(request.preview_id, owner_user_id=owner_user_id)
             if preview is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_preview_not_found")
+            if preview["status"] == "expired" or (
+                preview["status"] == "completed" and _import_preview_expired(preview)
+            ):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_expired")
             if preview["status"] != "completed":
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_not_completed")
             idempotency_key = _require_idempotency_key(idempotency_key)
@@ -1495,6 +1620,8 @@ async def start_pack_import_commit(
             resource_id=resource_id,
             idempotency_key=idempotency_key,
         )
+        if isinstance(exc, ValueError) and str(exc) == "import_preview_unavailable":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_not_completed") from exc
         raise
     return queued_response
 
@@ -1515,11 +1642,17 @@ async def get_pack_import_commit_status(
         job_id=job_id,
         owner_user_id=owner_user_id,
     )
+    job = _job_for_portability(
+        jobs_manager, job_id, VN_PACK_IMPORT_COMMIT_JOB_TYPE, int(journal["id"]), owner_user_id=owner_user_id,
+    )
+    if job is None and job_id.isdecimal() and not journal.get("completed_at"):
+        if _json_field(journal, "created_records_json", {}).get("checkpoint_version") == 1:
+            job = {"status": "failed"}
     return _compose_import_commit_response(
         service,
         journal=journal,
         portability_job=portability_job,
-        job=_job_for_portability(jobs_manager, job_id),
+        job=job,
         owner_user_id=owner_user_id,
     )
 
@@ -1540,18 +1673,15 @@ async def cancel_pack_import_commit(
         job_id=job_id,
         owner_user_id=owner_user_id,
     )
-    try:
-        cancelled = jobs_manager.cancel_job(
-            int(job_id),
-            reason="vn_pack_import_commit_cancel_requested",
-        )
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_commit_job_not_found") from exc
-    if not cancelled:
+    import_id = int(journal["id"])
+    job = _job_for_portability(
+        jobs_manager, job_id, VN_PACK_IMPORT_COMMIT_JOB_TYPE, import_id, owner_user_id=owner_user_id,
+    )
+    if not _cancel_portability_job(jobs_manager, job, reason="vn_pack_import_commit_cancel_requested"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_commit_job_not_found")
 
     updated_journal = service.repo.update_import_journal(
-        int(journal["id"]),
+        import_id,
         {"status": "cancelled", "stage": "cancelled"},
         owner_user_id=owner_user_id,
     )
@@ -1564,7 +1694,9 @@ async def cancel_pack_import_commit(
         service,
         journal=updated_journal or journal,
         portability_job=updated_job or portability_job,
-        job=_job_for_portability(jobs_manager, job_id),
+        job=_job_for_portability(
+            jobs_manager, job_id, VN_PACK_IMPORT_COMMIT_JOB_TYPE, import_id, owner_user_id=owner_user_id,
+        ),
         owner_user_id=owner_user_id,
     )
 
@@ -1583,25 +1715,38 @@ async def cleanup_pack_import_commit(
     journal = service.repo.get_import_journal(import_id, owner_user_id=owner_user_id)
     if journal is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_journal_not_found")
-    if str(journal["status"]) != "failed":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_cleanup_requires_failed_import")
     portability_job = service.repo.get_portability_job_by_job_id(
         str(journal["job_id"]),
         owner_user_id=owner_user_id,
     )
-    if portability_job is None or portability_job.get("operation") != "import_commit":
+    if portability_job is None or portability_job.get("operation") != "import_commit" or portability_job["import_id"] != import_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_commit_job_not_found")
-    if not _json_field(journal, "cleanup_status_json", {}):
-        journal = service.repo.update_import_journal(
-            import_id,
-            {"cleanup_status": {"status": "nothing_to_clean"}},
-            owner_user_id=owner_user_id,
-        ) or journal
+    job = _job_for_portability(
+        jobs_manager, str(journal["job_id"]), VN_PACK_IMPORT_COMMIT_JOB_TYPE, import_id,
+        owner_user_id=owner_user_id,
+    )
+    if job is not None and job.get("status") not in {"failed", "cancelled", "quarantined"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_cleanup_requires_terminal_failure")
+    # A bound numeric job that is absent from the owner's active Jobs table cannot hold a live lease.
+    if job is None and not str(journal["job_id"]).isdecimal():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_cleanup_requires_terminal_failure")
+    records = _json_field(journal, "created_records_json", {})
+    try:
+        await discard_import_checkpoint(
+            service.repo, import_id=import_id, owner_user_id=owner_user_id, abandoned=True,
+            storage=await get_storage_service() if records.get("checkpoint_version") == 1 else None,
+        )
+    except ImportCleanupConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    journal = service.repo.get_import_journal(import_id, owner_user_id=owner_user_id) or journal
+    await _expire_import_preview(
+        service, jobs_manager, preview_id=int(journal["preview_id"]), owner_user_id=owner_user_id,
+    )
     return _compose_import_commit_response(
         service,
         journal=journal,
         portability_job=portability_job,
-        job=_job_for_portability(jobs_manager, str(journal["job_id"])),
+        job=job or {"status": "failed"},
         owner_user_id=owner_user_id,
     )
 

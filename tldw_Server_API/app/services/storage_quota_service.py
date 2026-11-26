@@ -5,7 +5,7 @@
 import asyncio
 import contextlib
 import copy
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -1037,32 +1037,71 @@ class StorageQuotaService:
             raise StorageError(f"Registered VN file {record['id']} has missing or invalid bytes")
         return record
 
-    async def _register_vn_generated_file(
-        self, file_values: dict[str, Any], *, check_quota: bool,
-    ) -> dict[str, Any]:
-        """Commit a VN file and all applicable usage deltas together."""
+    @contextlib.asynccontextmanager
+    async def _vn_item_storage_transaction(
+        self, *, user_id: int, source_ref: str,
+    ) -> AsyncIterator[tuple["StorageQuotaService", AuthnzGeneratedFilesRepo]]:
+        """Serialize publication and cleanup of one owner's VN item files."""
         repo = await self.get_generated_files_repo()
-        user_id = file_values["user_id"]
         try:
-            async with repo.vn_item_transaction(user_id=user_id, source_ref=file_values["source_ref"]) as bound_repo:
-                # A separate service view keeps concurrent requests on this instance
-                # from sharing the transaction connection or uncommitted quota cache.
+            async with repo.vn_item_transaction(user_id=user_id, source_ref=source_ref) as bound_repo:
+                # Keep this transaction's quota and connection state isolated.
                 bound_service = copy.copy(self)
                 bound_service.db_pool = bound_repo.db_pool
                 bound_service._quota_db_pool = bound_repo.db_pool
                 bound_service.quota_cache = TTLCache(maxsize=1000, ttl=300)
                 bound_service.storage_cache = TTLCache(maxsize=1000, ttl=600)
-                existing = await bound_service.get_vn_generated_file(
-                    user_id=user_id, source_ref=file_values["source_ref"],
-                )
-                if existing is not None:
-                    return existing
-                await bound_repo.lock_quota_scopes(
-                    user_id=user_id, org_id=file_values["org_id"], team_id=file_values["team_id"],
-                )
-                return await bound_service._register_and_account_generated_file(file_values, check_quota=check_quota)
+                yield bound_service, bound_repo
         finally:
             self.invalidate_user_cache(user_id)
+
+    async def _register_vn_generated_file(
+        self, file_values: dict[str, Any], *, check_quota: bool,
+        publication_guard: Callable[[], object] | None = None,
+        prepare_vn_import_bytes: Callable[[], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
+        """Commit a VN file and all applicable usage deltas together."""
+        user_id, source_ref = file_values["user_id"], file_values["source_ref"]
+        async with self._vn_item_storage_transaction(user_id=user_id, source_ref=source_ref) as (bound, repo):
+            existing = await bound.get_vn_generated_file(user_id=user_id, source_ref=source_ref)
+            if existing is not None:
+                return existing
+            await repo.lock_quota_scopes(user_id=user_id, org_id=file_values["org_id"], team_id=file_values["team_id"])
+            if publication_guard is not None:
+                publication_guard()
+            if prepare_vn_import_bytes is not None:
+                await prepare_vn_import_bytes()
+                if publication_guard is not None:
+                    publication_guard()
+            return await bound._register_and_account_generated_file(file_values, check_quota=check_quota)
+
+    async def discard_vn_import_file(
+        self, *, user_id: int, source_ref: str, storage_path: str,
+        require_owned_file: Callable[[dict[str, Any]], None],
+        remove_bytes: Callable[[], None],
+        require_delivery: Callable[[], None] | None = None,
+    ) -> int | None:
+        """Resolve and remove an interrupted registration under its publication lock."""
+        if not is_vn_item_source_ref(SOURCE_FEATURE_VN_ASSETS, source_ref):
+            raise StorageError("Invalid VN import file source")
+        async with self._vn_item_storage_transaction(user_id=user_id, source_ref=source_ref) as (bound, repo):
+            record = await repo.get_file_by_source_ref(
+                user_id=user_id, source_feature=SOURCE_FEATURE_VN_ASSETS, source_ref=source_ref,
+            )
+            if require_delivery is not None:
+                require_delivery()
+            if record is not None:
+                if record["storage_path"] != storage_path:
+                    raise StorageError("VN import file registration changed")
+                require_owned_file(record)
+                if not await bound._unregister_generated_file_record(repo, record, hard_delete=True):
+                    raise StorageError("VN import file registration could not be removed")
+            if await repo.get_live_file_by_storage_path(user_id=user_id, storage_path=storage_path) is not None:
+                raise StorageError("VN import file storage is still referenced")
+            if require_delivery is not None:
+                require_delivery()
+            remove_bytes()
+            return int(record["id"]) if record else None
 
     async def register_generated_file(
         self,
@@ -1085,6 +1124,8 @@ class StorageQuotaService:
         expires_at: Optional[datetime] = None,
         retention_policy: str = "user_default",
         check_quota: bool = True,
+        publication_guard: Callable[[], object] | None = None,
+        prepare_vn_import_bytes: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """
         Register a generated file and update storage usage.
@@ -1147,7 +1188,10 @@ class StorageQuotaService:
         }
 
         if is_vn_item_source_ref(source_feature, source_ref):
-            return await self._register_vn_generated_file(file_values, check_quota=check_quota)
+            return await self._register_vn_generated_file(
+                file_values, check_quota=check_quota, publication_guard=publication_guard,
+                prepare_vn_import_bytes=prepare_vn_import_bytes,
+            )
         async with self._accounting_transaction() as bound:
             repo = await bound.get_generated_files_repo()
             await repo.lock_quota_scopes(user_id=user_id, org_id=org_id, team_id=team_id)

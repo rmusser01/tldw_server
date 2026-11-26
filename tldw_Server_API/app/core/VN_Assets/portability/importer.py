@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import contextlib
 import json
 import zipfile
 from collections.abc import Awaitable, Callable, Mapping
@@ -11,6 +10,8 @@ from datetime import datetime, timezone
 from inspect import isawaitable
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.VN_Assets.portability.constants import (
@@ -31,7 +32,11 @@ from tldw_Server_API.app.core.VN_Assets.portability.preview import (
     _section_list,
     _section_record,
 )
-from tldw_Server_API.app.core.VN_Assets.storage import image_format_from_mime_type
+from tldw_Server_API.app.core.VN_Assets.portability.recovery import (
+    discard_import_checkpoint,
+    legacy_import_may_have_written,
+)
+from tldw_Server_API.app.core.VN_Assets.storage import generated_file_matches_vn_asset, image_format_from_mime_type
 
 QuotaPreflight = Callable[..., tuple[bool, dict[str, Any]] | Awaitable[tuple[bool, dict[str, Any]]]]
 
@@ -47,12 +52,16 @@ class VNPackImporter:
         save_vn_asset_image: Callable[..., dict[str, Any] | Awaitable[dict[str, Any]]],
         unregister_generated_file: Callable[..., bool | Awaitable[bool]] | None = None,
         preflight_storage_quota: QuotaPreflight | None = None,
+        import_storage: Any = None,
+        require_delivery: Callable[[], None] | None = None,
     ) -> None:
         self.repo = repo
         self.owner_user_id = int(owner_user_id)
         self.save_vn_asset_image = save_vn_asset_image
         self.unregister_generated_file = unregister_generated_file
         self.preflight_storage_quota = preflight_storage_quota
+        self.import_storage = import_storage
+        self.require_delivery = require_delivery
 
     async def import_pack(
         self,
@@ -72,12 +81,54 @@ class VNPackImporter:
             raise ValueError("unsupported_import_target_mode")
         if trust_mode not in {TRUST_MODE_TRUSTED_RESTORE, TRUST_MODE_UNTRUSTED_IMPORT}:
             raise ValueError("unsupported_import_trust_mode")
+        if self.require_delivery is not None:
+            self.require_delivery()
+
+        admitted_at = None
+        if journal_id is not None:
+            current = self.repo.get_import_journal(journal_id, owner_user_id=self.owner_user_id)
+            if (
+                current is None or int(current["preview_id"]) != preview_id or current["job_id"] != job_id
+                or current["target_mode"] != target_mode or current["trust_mode"] != trust_mode
+            ):
+                raise ValueError("import_journal_not_found")
+            cleanup = json.loads(current["cleanup_status_json"])
+            legacy_completion = (
+                current["status"] == "failed"
+                and target_mode == "create_new"
+                and current["completed_at"] is not None
+                and cleanup.get("status") == "not_required"
+            )
+            if current["status"] == "completed" or legacy_completion:
+                pack_id = int(current["target_pack_id"] or 0)
+                if pack_id <= 0:
+                    raise ValueError("vn_pack_import_completed_result_missing")
+                if legacy_completion:
+                    self.repo.update_import_journal(
+                        journal_id,
+                        {"status": "completed", "stage": "completed", "error_code": None, "error_message": None},
+                        owner_user_id=self.owner_user_id,
+                    )
+                return {
+                    "status": "imported", "import_id": journal_id, "preview_id": preview_id,
+                    "pack_id": pack_id, "id_maps": json.loads(current["id_maps_json"]),
+                    "created_records": json.loads(current["created_records_json"]),
+                }
+            if cleanup.get("status") == "discarding" and not cleanup.get("abandoned"):
+                await discard_import_checkpoint(
+                    self.repo, import_id=journal_id, owner_user_id=self.owner_user_id, abandoned=False,
+                    storage=self.import_storage, unregister=self.unregister_generated_file,
+                    require_delivery=self.require_delivery,
+                )
+            elif cleanup.get("status") in {"discarding", "discarded"}:
+                raise ValueError("import_cleanup_required")
+            admitted_at = _parse_datetime(current["created_at"])
 
         preview = self._load_preview(preview_id)
         archive_path = Path(str(preview["archive_path"]))
         archive_sha256 = str(preview.get("archive_sha256") or "")
         canonical_payload_fingerprint = str(preview.get("canonical_payload_fingerprint") or "")
-        self._validate_preview_ready(preview=preview, archive_path=archive_path)
+        self._validate_preview_ready(preview=preview, archive_path=archive_path, admitted_at=admitted_at)
         self._progress(progress, "revalidating_preview", {"preview_id": int(preview_id)})
         await self._revalidate_archive(
             archive_path=archive_path,
@@ -95,120 +146,57 @@ class VNPackImporter:
             archive_sha256=archive_sha256,
             canonical_payload_fingerprint=canonical_payload_fingerprint,
         )
-        created_generated_file_ids: list[int] = []
-        created_pack_id: int | None = None
-        imported_pack_id: int | None = None
-        id_maps: dict[str, Any] = {"packs": {}, "slots": {}, "items": {}, "characters": {}}
-        created_records: dict[str, Any] = {
-            "pack_id": None,
-            "slot_ids": [],
-            "item_ids": [],
-            "generated_file_ids": [],
-        }
-        if json.loads(journal["created_records_json"]).get("writes_started") is False:
-            created_records["writes_started"] = False
-
+        import_id = int(journal["id"])
         try:
             archive_data = _load_archive_payloads(archive_path)
-            if target_mode == "create_new":
-                await self._preflight_quota(archive_data["items"])
-            created_records["writes_started"] = True
-            self.repo.update_import_journal(
-                int(journal["id"]), {"created_records": created_records}, owner_user_id=self.owner_user_id
-            )
-            if target_mode == "update_existing":
-                self._progress(progress, "updating_pack", {"target_pack_id": target_pack_id})
-                update_result = await self._update_existing_pack(
-                    archive_path=archive_path,
-                    archive_data=archive_data,
-                    accepted_plan=_preview_update_existing_plan(preview),
-                    target_pack_id=target_pack_id,
-                    target_character_id=target_character_id,
-                    conflict_decisions=conflict_decisions or {},
-                    trust_mode=trust_mode,
-                    id_maps=id_maps,
-                    created_records=created_records,
-                    created_generated_file_ids=created_generated_file_ids,
-                    progress=progress,
-                )
-                imported_pack_id = int(update_result["pack_id"])
-                return await self._complete_import(
-                    journal=journal,
-                    preview_id=preview_id,
-                    pack_id=imported_pack_id,
-                    id_maps=id_maps,
-                    created_records=created_records,
-                    created_generated_file_ids=created_generated_file_ids,
-                    progress=progress,
-                )
-
-            character_id = self._resolve_character(
-                action=character_action,
+            pack_id, id_maps, created_records = await self._prepare_import(
+                journal=journal,
+                preview=preview,
+                archive_data=archive_data,
+                character_action=character_action,
                 target_character_id=target_character_id,
-                pack=archive_data["pack"],
-                character=archive_data.get("character"),
-                id_maps=id_maps,
+                target_pack_id=target_pack_id,
+                conflict_decisions=conflict_decisions or {},
             )
-            self._progress(progress, "creating_pack", {})
-            pack = self._create_pack(archive_data["pack"], primary_character_id=character_id)
-            created_pack_id = int(pack["id"])
-            imported_pack_id = created_pack_id
-            created_records["pack_id"] = created_pack_id
-            if archive_data["pack"].get("source_pack_id") not in (None, ""):
-                id_maps["packs"][str(archive_data["pack"]["source_pack_id"])] = created_pack_id
-
-            self.repo.update_import_journal(
-                int(journal["id"]),
-                {
-                    "status": "processing",
-                    "stage": "creating_slots",
-                    "id_maps": id_maps,
-                    "created_records": created_records,
-                },
-                owner_user_id=self.owner_user_id,
-            )
-            slot_by_source_id = self._create_slots(
-                pack_id=created_pack_id,
-                slots=archive_data["slots"],
-                id_maps=id_maps,
-                created_records=created_records,
-            )
-            self._progress(progress, "creating_items", {"slot_count": len(slot_by_source_id)})
-            self.repo.update_import_journal(
-                int(journal["id"]),
-                {
-                    "status": "processing",
-                    "stage": "creating_items",
-                    "id_maps": id_maps,
-                    "created_records": created_records,
-                },
-                owner_user_id=self.owner_user_id,
-            )
-            await self._create_items(
+            await self._store_prepared_assets(
+                import_id=import_id,
                 archive_path=archive_path,
-                pack_id=created_pack_id,
-                slots=archive_data["slots"],
+                pack_id=pack_id,
                 items=archive_data["items"],
-                slot_by_source_id=slot_by_source_id,
-                trust_mode=trust_mode,
                 id_maps=id_maps,
                 created_records=created_records,
-                created_generated_file_ids=created_generated_file_ids,
+                progress=progress,
+            )
+            return self._complete_import(
+                journal=journal,
+                preview_id=preview_id,
+                pack_id=pack_id,
+                items=archive_data["items"],
+                id_maps=id_maps,
+                trust_mode=trust_mode,
                 progress=progress,
             )
         except Exception as exc:
-            cleanup_status = await self._cleanup_after_failure(
-                created_generated_file_ids=created_generated_file_ids,
-                created_pack_id=created_pack_id,
-            )
+            if self.require_delivery is not None:
+                self.require_delivery()
+            current = self.repo.get_import_journal(import_id, owner_user_id=self.owner_user_id) or journal
+            if current["status"] == "completed":
+                raise
+            try:
+                await discard_import_checkpoint(
+                    self.repo, import_id=import_id, owner_user_id=self.owner_user_id, abandoned=False,
+                    storage=self.import_storage, unregister=self.unregister_generated_file,
+                    require_delivery=self.require_delivery,
+                )
+            except Exception as cleanup_error:
+                logger.warning("VN import {} cleanup requires attention ({})", import_id, type(cleanup_error).__name__)
+            if self.require_delivery is not None:
+                self.require_delivery()
             self.repo.update_import_journal(
-                int(journal["id"]),
+                import_id,
                 {
                     "status": "failed",
                     "stage": "failed",
-                    "id_maps": id_maps,
-                    "created_records": created_records,
-                    "cleanup_status": cleanup_status,
                     "error_code": "import_failed",
                     "error_message": str(exc),
                 },
@@ -216,33 +204,138 @@ class VNPackImporter:
             )
             raise
 
-        completed_at = datetime.now(timezone.utc).isoformat()
-        self.repo.update_import_journal(
-            int(journal["id"]),
-            {
-                "status": "completed",
-                "stage": "completed",
-                "target_pack_id": imported_pack_id,
-                "id_maps": id_maps,
-                "created_records": created_records,
-                "cleanup_status": {"status": "not_required"},
-                "completed_at": completed_at,
-            },
-            owner_user_id=self.owner_user_id,
-        )
-        self._progress(
-            progress,
-            "completed",
-            {"pack_id": imported_pack_id, "generated_file_count": len(created_generated_file_ids)},
-        )
-        return {
-            "status": "imported",
-            "import_id": int(journal["id"]),
-            "preview_id": int(preview_id),
-            "pack_id": int(imported_pack_id or 0),
-            "id_maps": id_maps,
-            "created_records": created_records,
+    async def _prepare_import(
+        self,
+        *,
+        journal: dict[str, Any],
+        preview: dict[str, Any],
+        archive_data: dict[str, Any],
+        character_action: str,
+        target_character_id: int | None,
+        target_pack_id: int | None,
+        conflict_decisions: Mapping[str, Any],
+    ) -> tuple[int, dict[str, Any], dict[str, Any]]:
+        """Commit the journal and hidden local rows before writing asset files."""
+        checkpoint = self._resume_checkpoint(journal)
+        plan_args = {
+            "archive_data": archive_data,
+            "accepted_plan": _preview_update_existing_plan(preview),
+            "target_pack_id": target_pack_id,
+            "target_character_id": target_character_id,
+            "conflict_decisions": conflict_decisions,
         }
+        updating = journal["target_mode"] == "update_existing"
+        items = archive_data["items"]
+        if checkpoint is None:
+            if updating:
+                candidate = self._validated_update_candidate(**plan_args)
+                added = {int(entry["source_item_id"]) for entry in candidate["added_items"]}
+                await self._preflight_quota([item for item in items if int(item["source_item_id"]) in added])
+            else:
+                await self._preflight_quota(items)
+
+        import_id = int(journal["id"])
+        with self.repo.db.transaction():
+            current = self._require_processing_import(import_id)
+            checkpoint = self._resume_checkpoint(current)
+            if checkpoint is not None:
+                pack_id = int(checkpoint["pack_id"])
+                self._require_owned_pack(pack_id)
+                if updating:
+                    if pack_id != target_pack_id:
+                        raise ValueError("import_target_changed")
+                    self._validated_update_candidate(**plan_args)
+                return pack_id, json.loads(current["id_maps_json"]), checkpoint
+
+            id_maps: dict[str, Any] = {"packs": {}, "slots": {}, "items": {}, "characters": {}}
+            created_records: dict[str, Any] = {
+                "checkpoint_version": 1,
+                "writes_started": True,
+                "slot_ids": [],
+                "item_ids": [],
+                "generated_file_ids": [],
+                "asset_formats": {},
+            }
+            if updating:
+                candidate = self._validated_update_candidate(**plan_args)
+                pack_id = int(candidate["target_pack_id"])
+                if pack_id in self.repo.import_staging_ids(pack_id=pack_id)["targets"]:
+                    raise ValueError("import_target_busy")
+                slot_by_source_id = self._map_existing_slots(candidate=candidate, id_maps=id_maps)
+                self._create_update_slots(
+                    pack_id=pack_id,
+                    slots=archive_data["slots"],
+                    candidate=candidate,
+                    slot_by_source_id=slot_by_source_id,
+                    id_maps=id_maps,
+                    created_records=created_records,
+                )
+                for matched in candidate["matched_items"]:
+                    id_maps["items"][str(matched["source_item_id"])] = int(matched["local_item_id"])
+                added = {int(entry["source_item_id"]) for entry in candidate["added_items"]}
+                items = [item for item in items if int(item["source_item_id"]) in added]
+            else:
+                previous_character = json.loads(current["created_records_json"]).get("new_character_id")
+                character_id = self._resolve_character(
+                    action="link_existing_character" if previous_character else character_action,
+                    target_character_id=previous_character or target_character_id,
+                    pack=archive_data["pack"], character=archive_data.get("character"), id_maps=id_maps,
+                )
+                if character_action != "link_existing_character":
+                    created_records["new_character_id"] = character_id
+                pack_id = int(self._create_pack(archive_data["pack"], primary_character_id=character_id)["id"])
+                slot_by_source_id = self._create_slots(
+                    pack_id=pack_id,
+                    slots=archive_data["slots"],
+                    id_maps=id_maps,
+                    created_records=created_records,
+                )
+            created_records["pack_id"] = pack_id
+            source_pack_id = archive_data["pack"].get("source_pack_id")
+            if source_pack_id not in (None, ""):
+                id_maps["packs"][str(source_pack_id)] = pack_id
+            self._prepare_items(
+                import_id=import_id,
+                pack_id=pack_id,
+                slots=archive_data["slots"],
+                items=items,
+                slot_by_source_id=slot_by_source_id,
+                id_maps=id_maps,
+                created_records=created_records,
+            )
+            self.repo.update_import_journal(
+                import_id,
+                {"stage": "creating_items", "id_maps": id_maps, "created_records": created_records, "cleanup_status": {}},
+                owner_user_id=self.owner_user_id,
+            )
+        return pack_id, id_maps, created_records
+
+    def _resume_checkpoint(self, journal: Mapping[str, Any]) -> dict[str, Any] | None:
+        cleanup = json.loads(journal["cleanup_status_json"]).get("status")
+        if cleanup in {"partial", "discarding", "discarded"}:
+            raise ValueError("import_cleanup_required")
+        records = json.loads(journal["created_records_json"])
+        if records.get("checkpoint_version") == 1:
+            return None if cleanup == "completed" else records
+        if legacy_import_may_have_written(records):
+            raise ValueError("import_legacy_checkpoint_incomplete")
+        return None
+
+    def _require_owned_pack(self, pack_id: int) -> dict[str, Any]:
+        pack = self.repo.get_pack(pack_id)
+        if pack is None or bool(pack["deleted"]) or int(pack["owner_user_id"]) != self.owner_user_id:
+            raise ValueError("target_pack_not_found")
+        return pack
+
+    def _require_processing_import(self, import_id: int) -> dict[str, Any]:
+        if self.require_delivery is not None:
+            self.require_delivery()
+        current = self.repo.get_import_journal(import_id, owner_user_id=self.owner_user_id)
+        if current is None or current["status"] != "processing":
+            raise ValueError("import_journal_not_processing")
+        if json.loads(current["cleanup_status_json"]).get("status") in {"discarding", "discarded"}:
+            raise ValueError("import_cleanup_required")
+        return current
 
     def _load_preview(self, preview_id: int) -> dict[str, Any]:
         preview = self.repo.get_import_preview(preview_id, owner_user_id=self.owner_user_id)
@@ -250,13 +343,18 @@ class VNPackImporter:
             raise ValueError("import_preview_not_found")
         return preview
 
-    def _validate_preview_ready(self, *, preview: Mapping[str, Any], archive_path: Path) -> None:
+    def _validate_preview_ready(
+        self, *, preview: Mapping[str, Any], archive_path: Path, admitted_at: datetime | None,
+    ) -> None:
         if str(preview.get("status") or "") != "completed":
             raise ValueError("import_preview_not_completed")
         if not archive_path.is_file():
             raise ValueError("import_archive_not_found")
         expires_at = _parse_datetime(preview.get("expires_at"))
-        if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+        if (
+            expires_at is not None and expires_at <= datetime.now(timezone.utc)
+            and (admitted_at is None or admitted_at >= expires_at)
+        ):
             raise ValueError("import_preview_expired")
         if sha256_file(archive_path) != str(preview.get("archive_sha256") or ""):
             raise ValueError("import_archive_checksum_changed")
@@ -447,89 +545,118 @@ class VNPackImporter:
             last_error=slot.get("last_error"),
         )
 
-    async def _create_items(
+    def _prepare_items(
         self,
         *,
-        archive_path: Path,
+        import_id: int,
         pack_id: int,
         slots: list[dict[str, Any]],
         items: list[dict[str, Any]],
         slot_by_source_id: dict[int, dict[str, Any]],
-        trust_mode: str,
         id_maps: dict[str, Any],
         created_records: dict[str, Any],
-        created_generated_file_ids: list[int],
-        progress: Callable[[str, dict[str, Any]], None] | None,
-        only_source_item_ids: set[int] | None = None,
     ) -> None:
         slot_by_identity = {
             (str(slot["asset_type"]), str(slot["slot_key"])): slot_by_source_id[int(slot["source_slot_id"])]
             for slot in slots
             if slot.get("source_slot_id") not in (None, "")
         }
+        for item in sorted(items, key=lambda row: int(row.get("variant_index") or 0)):
+            source_item_id = int(item["source_item_id"])
+            slot = _resolve_item_slot(item=item, slot_by_source_id=slot_by_source_id, slot_by_identity=slot_by_identity)
+            created_item = self.repo.create_item(
+                pack_id=pack_id,
+                slot_id=int(slot["id"]),
+                variant_index=int(item.get("variant_index") or 0),
+                file_artifact_id=item.get("file_artifact_id"),
+                generated_file_id=None,
+                storage_ref=None,
+                mime_type=item.get("mime_type"),
+                width=_int_or_none(item.get("width")),
+                height=_int_or_none(item.get("height")),
+                bytes=_int_or_none(item.get("bytes")),
+                review_status="hidden",
+                preferred=False,
+                source="imported",
+                generation_job_id=item.get("generation_job_id"),
+                source_context_snapshot={
+                    "vnpack_import": {
+                        "import_id": import_id,
+                        "source_item_id": source_item_id,
+                        "source_review_status": item.get("review_status"),
+                        "asset_bytes_status": item.get("asset_bytes_status"),
+                    }
+                },
+                backend_metadata=_mapping_or_none(item.get("backend_metadata")),
+                depth_kind=item.get("depth_kind"),
+                has_alpha=None if item.get("has_alpha") is None else bool(item.get("has_alpha")),
+                crop_box=_mapping_or_none(item.get("crop_box")),
+                anchor=_mapping_or_none(item.get("anchor")),
+                scale_hint=item.get("scale_hint"),
+                trim_status=str(item.get("trim_status") or "unknown"),
+                quality_flags=_list_or_none(item.get("quality_flags")) or [],
+            )
+            created_records["item_ids"].append(int(created_item["id"]))
+            id_maps["items"][str(source_item_id)] = int(created_item["id"])
+            if item.get("asset_bytes_status") == ASSET_BYTES_STATUS_PRESENT:
+                item_id = int(created_item["id"])
+                created_records["asset_formats"][str(item_id)] = _image_format(item)
+
+
+    async def _store_prepared_assets(
+        self,
+        *,
+        import_id: int,
+        archive_path: Path,
+        pack_id: int,
+        items: list[dict[str, Any]],
+        id_maps: dict[str, Any],
+        created_records: dict[str, Any],
+        progress: Callable[[str, dict[str, Any]], None] | None,
+    ) -> None:
+        owned_item_ids = set(created_records["item_ids"])
+        saved_assets = 0
         with zipfile.ZipFile(archive_path, "r") as archive:
             members = _archive_members_by_normalized_name(archive)
             for item in sorted(items, key=lambda row: int(row.get("variant_index") or 0)):
                 source_item_id = int(item["source_item_id"])
-                if only_source_item_ids is not None and source_item_id not in only_source_item_ids:
+                item_id = id_maps["items"].get(str(source_item_id))
+                if item_id not in owned_item_ids or item.get("asset_bytes_status") != ASSET_BYTES_STATUS_PRESENT:
                     continue
-                slot = _resolve_item_slot(item=item, slot_by_source_id=slot_by_source_id, slot_by_identity=slot_by_identity)
-                created_item = self.repo.create_item(
-                    pack_id=pack_id,
-                    slot_id=int(slot["id"]),
-                    variant_index=int(item.get("variant_index") or 0),
-                    file_artifact_id=item.get("file_artifact_id"),
-                    generated_file_id=None,
-                    storage_ref=None,
-                    mime_type=item.get("mime_type"),
-                    width=_int_or_none(item.get("width")),
-                    height=_int_or_none(item.get("height")),
-                    bytes=_int_or_none(item.get("bytes")),
-                    review_status="hidden",
-                    preferred=False,
-                    source="imported",
-                    generation_job_id=item.get("generation_job_id"),
-                    source_context_snapshot={
-                        "vnpack_import": {
-                            "source_item_id": source_item_id,
-                            "source_review_status": item.get("review_status"),
-                            "asset_bytes_status": item.get("asset_bytes_status"),
-                        }
-                    },
-                    backend_metadata=_mapping_or_none(item.get("backend_metadata")),
-                    depth_kind=item.get("depth_kind"),
-                    has_alpha=None if item.get("has_alpha") is None else bool(item.get("has_alpha")),
-                    crop_box=_mapping_or_none(item.get("crop_box")),
-                    anchor=_mapping_or_none(item.get("anchor")),
-                    scale_hint=item.get("scale_hint"),
-                    trim_status=str(item.get("trim_status") or "unknown"),
-                    quality_flags=_list_or_none(item.get("quality_flags")) or [],
-                )
-                created_records["item_ids"].append(int(created_item["id"]))
-                id_maps["items"][str(source_item_id)] = int(created_item["id"])
-
-                if item.get("asset_bytes_status") == ASSET_BYTES_STATUS_PRESENT and item.get("asset_path"):
-                    asset_path = str(item["asset_path"])
-                    asset_bytes = archive.read(members[asset_path])
-                    file_record = await _maybe_await(
-                        self.save_vn_asset_image(
-                            user_id=self.owner_user_id,
-                            image_bytes=asset_bytes,
-                            image_format=_image_format(item),
-                            pack_id=pack_id,
-                            item_id=int(created_item["id"]),
-                            asset_type=str(item["asset_type"]),
-                            labels=_json_mapping_or_none(slot.get("labels_json"))
-                            or _mapping_or_none(item.get("labels"))
-                            or {},
-                            check_quota=True,
-                        )
+                self._require_processing_import(import_id)
+                prepared = self._require_prepared_item(import_id, pack_id, item_id, source_item_id)
+                asset_bytes = archive.read(members[str(item["asset_path"])])
+                slot = self.repo.get_slot(int(prepared["slot_id"]))
+                if slot is None or int(slot["pack_id"]) != pack_id:
+                    raise ValueError("import_checkpoint_slot_missing")
+                file_record = await _maybe_await(
+                    self.save_vn_asset_image(
+                        user_id=self.owner_user_id,
+                        image_bytes=asset_bytes,
+                        image_format=_image_format(item),
+                        pack_id=pack_id,
+                        item_id=item_id,
+                        import_id=import_id,
+                        publication_guard=lambda: self._require_processing_import(import_id),
+                        asset_type=str(item["asset_type"]),
+                        labels=_json_mapping_or_none(slot.get("labels_json"))
+                        or _mapping_or_none(item.get("labels"))
+                        or {},
+                        check_quota=True,
                     )
-                    file_id = int(file_record["id"])
-                    created_generated_file_ids.append(file_id)
-                    created_records["generated_file_ids"].append(file_id)
+                )
+                if (
+                    not generated_file_matches_vn_asset(file_record, user_id=self.owner_user_id, item_id=item_id)
+                    or int(file_record["file_size_bytes"]) != len(asset_bytes)
+                    or file_record.get("checksum") not in {None, item.get("asset_sha256")}
+                ):
+                    raise ValueError("import_storage_binding_mismatch")
+                file_id = int(file_record["id"])
+                with self.repo.db.transaction():
+                    current = self._require_processing_import(import_id)
+                    attached = self._require_prepared_item(import_id, pack_id, item_id, source_item_id)
                     self.repo.update_item_storage(
-                        int(created_item["id"]),
+                        item_id,
                         generated_file_id=file_id,
                         storage_ref=str(file_record.get("storage_path") or ""),
                         mime_type=str(file_record.get("mime_type") or item.get("mime_type") or "image/png"),
@@ -543,43 +670,44 @@ class VNPackImporter:
                             }
                         },
                     )
+                    records = json.loads(current["created_records_json"])
+                    old_file_id = attached["generated_file_id"]
+                    if old_file_id is not None and old_file_id != file_id:
+                        records["generated_file_ids"] = [
+                            identifier for identifier in records["generated_file_ids"] if identifier != old_file_id
+                        ]
+                    if file_id not in records["generated_file_ids"]:
+                        records["generated_file_ids"].append(file_id)
+                    self.repo.update_import_journal(
+                        import_id, {"created_records": records}, owner_user_id=self.owner_user_id,
+                    )
+                    created_records["generated_file_ids"] = records["generated_file_ids"]
+                saved_assets += 1
+                self._progress(progress, "creating_items", {"created_items": saved_assets})
 
-                review_status, preferred = _final_review_state(item, trust_mode=trust_mode)
-                self.repo.update_item_review(
-                    int(created_item["id"]),
-                    review_status=review_status,
-                    preferred=preferred,
-                )
-                self._progress(
-                    progress,
-                    "creating_items",
-                    {"created_items": len(created_records["item_ids"])},
-                )
+    def _require_prepared_item(
+        self, import_id: int, pack_id: int, item_id: int, source_item_id: int
+    ) -> dict[str, Any]:
+        item = self.repo.get_item(item_id)
+        if item is not None and int(item["pack_id"]) == pack_id:
+            context = _json_mapping_or_none(item.get("source_context_snapshot_json")) or {}
+            binding = context.get("vnpack_import") or {}
+            if binding.get("import_id") == import_id and binding.get("source_item_id") == source_item_id:
+                return item
+        raise ValueError("import_checkpoint_item_missing")
 
-    async def _update_existing_pack(
+    def _validated_update_candidate(
         self,
         *,
-        archive_path: Path,
         archive_data: Mapping[str, Any],
         accepted_plan: Mapping[str, Any],
         target_pack_id: int | None,
         target_character_id: int | None,
         conflict_decisions: Mapping[str, Any],
-        trust_mode: str,
-        id_maps: dict[str, Any],
-        created_records: dict[str, Any],
-        created_generated_file_ids: list[int],
-        progress: Callable[[str, dict[str, Any]], None] | None,
     ) -> dict[str, Any]:
         if target_pack_id is None:
             raise ValueError("target_pack_required")
-        target_pack = self.repo.get_pack(int(target_pack_id))
-        if (
-            target_pack is None
-            or bool(target_pack["deleted"])
-            or int(target_pack["owner_user_id"]) != self.owner_user_id
-        ):
-            raise ValueError("target_pack_not_found")
+        target_pack = self._require_owned_pack(int(target_pack_id))
         if target_character_id is not None and int(target_pack["primary_character_id"]) != int(target_character_id):
             raise ValueError("update_character_relink_not_supported")
 
@@ -621,50 +749,7 @@ class VNPackImporter:
         if unconfirmed:
             raise ValueError("update_confirmation_required")
 
-        created_records["pack_id"] = int(target_pack_id)
-        if archive_data["pack"].get("source_pack_id") not in (None, ""):
-            id_maps["packs"][str(archive_data["pack"]["source_pack_id"])] = int(target_pack_id)
-        slot_by_source_id = self._map_existing_slots(candidate=candidate, id_maps=id_maps)
-        slot_by_source_id.update(
-            self._create_update_slots(
-                pack_id=int(target_pack_id),
-                slots=archive_data["slots"],
-                candidate=candidate,
-                slot_by_source_id=slot_by_source_id,
-                id_maps=id_maps,
-                created_records=created_records,
-            )
-        )
-        for matched_item in candidate["matched_items"]:
-            id_maps["items"][str(matched_item["source_item_id"])] = int(matched_item["local_item_id"])
-
-        added_source_item_ids = {int(item["source_item_id"]) for item in candidate["added_items"]}
-        await self._preflight_quota(
-            [
-                item
-                for item in archive_data["items"]
-                if int(item["source_item_id"]) in added_source_item_ids
-            ]
-        )
-        self._progress(
-            progress,
-            "creating_items",
-            {"target_pack_id": int(target_pack_id), "added_item_count": len(added_source_item_ids)},
-        )
-        await self._create_items(
-            archive_path=archive_path,
-            pack_id=int(target_pack_id),
-            slots=archive_data["slots"],
-            items=archive_data["items"],
-            slot_by_source_id=slot_by_source_id,
-            trust_mode=trust_mode,
-            id_maps=id_maps,
-            created_records=created_records,
-            created_generated_file_ids=created_generated_file_ids,
-            progress=progress,
-            only_source_item_ids=added_source_item_ids,
-        )
-        return {"pack_id": int(target_pack_id)}
+        return candidate
 
     def _map_existing_slots(
         self,
@@ -727,69 +812,65 @@ class VNPackImporter:
             remaining = next_remaining
         return created
 
-    async def _complete_import(
+    def _complete_import(
         self,
         *,
         journal: Mapping[str, Any],
         preview_id: int,
         pack_id: int,
+        items: list[dict[str, Any]],
         id_maps: dict[str, Any],
-        created_records: dict[str, Any],
-        created_generated_file_ids: list[int],
+        trust_mode: str,
         progress: Callable[[str, dict[str, Any]], None] | None,
     ) -> dict[str, Any]:
-        completed_at = datetime.now(timezone.utc).isoformat()
-        self.repo.update_import_journal(
-            int(journal["id"]),
-            {
-                "status": "completed",
-                "stage": "completed",
-                "target_pack_id": int(pack_id),
-                "id_maps": id_maps,
-                "created_records": created_records,
-                "cleanup_status": {"status": "not_required"},
-                "completed_at": completed_at,
-            },
-            owner_user_id=self.owner_user_id,
-        )
+        import_id = int(journal["id"])
+        with self.repo.db.transaction():
+            current = self._require_processing_import(import_id)
+            created_records = json.loads(current["created_records_json"])
+            owned_item_ids = set(created_records["item_ids"])
+            protected_preferences = {
+                int(item["slot_id"]) for item in self.repo.list_items(pack_id, include_import_staging=True)
+                if item["preferred"] and int(item["id"]) not in owned_item_ids
+            }
+            for item in sorted(items, key=lambda row: int(row.get("variant_index") or 0)):
+                source_item_id = int(item["source_item_id"])
+                item_id = id_maps["items"].get(str(source_item_id))
+                if item_id not in owned_item_ids:
+                    continue
+                prepared = self._require_prepared_item(import_id, pack_id, item_id, source_item_id)
+                if item.get("asset_bytes_status") == ASSET_BYTES_STATUS_PRESENT and not prepared["generated_file_id"]:
+                    raise ValueError("import_checkpoint_file_missing")
+                review_status, preferred = _final_review_state(item, trust_mode=trust_mode)
+                self.repo.update_item_review(
+                    item_id,
+                    review_status=review_status,
+                    preferred=preferred and int(prepared["slot_id"]) not in protected_preferences,
+                )
+            self.repo.update_import_journal(
+                import_id,
+                {
+                    "status": "completed",
+                    "stage": "completed",
+                    "target_pack_id": pack_id,
+                    "id_maps": id_maps,
+                    "created_records": created_records,
+                    "cleanup_status": {"status": "not_required"},
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                },
+                owner_user_id=self.owner_user_id,
+            )
         self._progress(
             progress,
             "completed",
-            {"pack_id": int(pack_id), "generated_file_count": len(created_generated_file_ids)},
+            {"pack_id": pack_id, "generated_file_count": len(created_records["generated_file_ids"])},
         )
         return {
             "status": "imported",
-            "import_id": int(journal["id"]),
+            "import_id": import_id,
             "preview_id": int(preview_id),
-            "pack_id": int(pack_id),
+            "pack_id": pack_id,
             "id_maps": id_maps,
             "created_records": created_records,
-        }
-
-    async def _cleanup_after_failure(
-        self,
-        *,
-        created_generated_file_ids: list[int],
-        created_pack_id: int | None,
-    ) -> dict[str, Any]:
-        unregistered: list[int] = []
-        errors: list[str] = []
-        if self.unregister_generated_file is not None:
-            for file_id in created_generated_file_ids:
-                try:
-                    await _maybe_await(self.unregister_generated_file(file_id, hard_delete=True))
-                    unregistered.append(file_id)
-                except Exception as exc:  # pragma: no cover - defensive cleanup path
-                    errors.append(f"{file_id}:{exc}")
-        if created_pack_id is not None:
-            with contextlib.suppress(Exception):
-                self.repo.soft_delete_pack(created_pack_id)
-        return {
-            "status": "completed" if not errors else "partial",
-            "generated_file_ids": list(created_generated_file_ids),
-            "unregistered_generated_file_ids": unregistered,
-            "errors": errors,
-            "soft_deleted_pack_id": created_pack_id,
         }
 
     def _progress(

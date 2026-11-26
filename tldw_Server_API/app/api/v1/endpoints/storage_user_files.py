@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_api_key_scope
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.storage_helpers import _normalize_folder_tag, _to_generated_file
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
@@ -20,6 +21,8 @@ from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     SourceFeature,
     StorageDeleteResponse,
 )
+from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import SOURCE_FEATURE_VN_ASSETS
+from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 router = APIRouter()
@@ -57,6 +60,24 @@ async def _load_owned_file_records(
         if file_record.get("user_id") != user_id:
             raise HTTPException(status_code=403, detail=f"Access denied for file {file_record.get('id')}")
     return file_records
+
+
+async def _require_import_files_published(file_records: list[dict[str, Any]], user_id: int) -> None:
+    import_ids = set()
+    for record in file_records:
+        if record.get("source_feature") != SOURCE_FEATURE_VN_ASSETS:
+            continue
+        parts = str(record.get("storage_path") or "").split("/")
+        if len(parts) == 4 and parts[:2] == ["vn_assets", "imports"] and parts[2].isdecimal():
+            import_ids.add(int(parts[2]))
+    if not import_ids:
+        return
+    db = await get_chacha_db_for_user_id(user_id)
+    repo = VNAssetPacksRepository.initialized(db)
+    for import_id in import_ids:
+        journal = repo.get_import_journal(import_id, owner_user_id=user_id)
+        if journal is None or not journal["completed_at"]:
+            raise HTTPException(status_code=409, detail="vn_import_file_still_staged")
 
 
 @router.get(
@@ -157,6 +178,7 @@ async def bulk_delete_files(
     """Bulk delete multiple files."""
     files_repo = await service.get_generated_files_repo()
     file_records = await _load_owned_file_records(files_repo, request.file_ids, user.id)
+    await _require_import_files_published(file_records, user.id)
 
     deleted_count = await service.unregister_generated_files(
         file_records,
@@ -251,6 +273,7 @@ async def delete_file(
     if file_record.get("user_id") != user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
+    await _require_import_files_published([file_record], user.id)
     success = await service.unregister_generated_file(file_id, hard_delete=hard_delete)
 
     if not success:
@@ -281,6 +304,7 @@ async def update_file(
     if file_record.get("user_id") != user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
+    await _require_import_files_published([file_record], user.id)
     updated = await files_repo.update_file(
         file_id,
         folder_tag=update.folder_tag,

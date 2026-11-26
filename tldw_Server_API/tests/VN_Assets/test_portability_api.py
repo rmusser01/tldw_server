@@ -8,18 +8,19 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints import vn_assets
+from tldw_Server_API.app.api.v1.endpoints import storage_user_files, vn_assets
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import (
     _job_manager,
     router as vn_assets_router,
 )
+from tldw_Server_API.app.api.v1.schemas.storage_schemas import BulkDeleteRequest
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetPackCreate,
     VNPackExportRequest,
@@ -66,12 +67,29 @@ class FakeJobManager:
         self.created.append(job)
         return job
 
-    def get_job(self, job_id: int) -> dict[str, Any] | None:
-        return self.jobs.get(int(job_id))
+    def get_job(self, job_id: int, *, owner_user_id: str | None = None) -> dict[str, Any] | None:
+        job = self.jobs.get(int(job_id))
+        if job and (owner_user_id is None or job.get("owner_user_id") == owner_user_id):
+            return job
+        return None
 
-    def cancel_job(self, job_id: int, *, reason: str | None = None) -> bool:
+    def cancel_job(
+        self,
+        job_id: int,
+        *,
+        reason: str | None = None,
+        expected_uuid: str | None = None,
+        expected_domain: str | None = None,
+        expected_job_type: str | None = None,
+    ) -> bool:
         job = self.jobs.get(int(job_id))
         if job is None or job["status"] in {"completed", "failed", "cancelled", "quarantined"}:
+            return False
+        if (
+            (expected_uuid is not None and job["uuid"] != expected_uuid)
+            or (expected_domain is not None and job["domain"] != expected_domain)
+            or (expected_job_type is not None and job["job_type"] != expected_job_type)
+        ):
             return False
         self.cancelled.append((int(job_id), reason))
         job["status"] = "cancelled"
@@ -534,13 +552,17 @@ def test_import_preview_cancel_routes_through_jobs_manager(
     assert preview["status"] == "cancelled"
 
 
-@pytest.mark.parametrize("preview_status", ["queued", "completed"])
+@pytest.mark.parametrize(
+    ("preview_status", "replacement_owner"),
+    [("queued", None), ("completed", None), ("queued", "42"), ("queued", "43")],
+)
 def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
     client: TestClient,
     fake_jobs: FakeJobManager,
     repo: VNAssetPacksRepository,
     tmp_path: Path,
     preview_status: str,
+    replacement_owner: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     archive_path = _write_preview_archive(tmp_path / "preview.tldw-vnpack")
@@ -552,7 +574,14 @@ def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
         )
     preview_id = started.json()["preview_id"]
     job_id = started.json()["job_id"]
-    fake_jobs.jobs[int(job_id)]["status"] = preview_status
+    jobs_row = fake_jobs.jobs[int(job_id)]
+    jobs_row["status"] = preview_status
+    if replacement_owner is not None:
+        jobs_row.update(
+            owner_user_id=replacement_owner,
+            uuid="replacement",
+            payload={**jobs_row["payload"], "preview_id": preview_id + 1},
+        )
     repo.update_import_preview(preview_id, {"status": preview_status}, owner_user_id=42)
     preview = repo.get_import_preview(preview_id, owner_user_id=42)
     assert preview is not None
@@ -581,7 +610,9 @@ def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
     assert client.delete(endpoint).status_code == 204
     response = client.get(endpoint)
     assert response.json()["vn_status"] == "deleted"
-    if preview_status == "queued":
+    if replacement_owner is not None:
+        assert jobs_row["status"] == "queued"
+    elif preview_status == "queued":
         assert fake_jobs.cancelled == [(int(job_id), "vn_pack_import_preview_delete_requested")]
 
 
@@ -675,12 +706,21 @@ def test_start_import_commit_creates_jobs_backed_journal_row(
     assert fake_jobs.created[0]["payload"]["import_id"] == body["import_id"]
 
 
+@pytest.mark.parametrize(
+    ("preview_mutation", "fresh_error"),
+    [
+        ({"status": "deleted"}, "import_preview_not_completed"),
+        ({"expires_at": "2020-01-01T00:00:00+00:00"}, "import_preview_expired"),
+    ],
+)
 def test_start_import_commit_replays_same_idempotency_key_and_conflicts_on_different_payload(
     client: TestClient,
     fake_jobs: FakeJobManager,
     repo: VNAssetPacksRepository,
     character_id: int,
     tmp_path: Path,
+    preview_mutation: dict[str, str],
+    fresh_error: str,
 ) -> None:
     archive_path = _write_preview_archive(tmp_path / "commit-idempotent.tldw-vnpack")
     preview = repo.create_import_preview(
@@ -703,7 +743,7 @@ def test_start_import_commit_replays_same_idempotency_key_and_conflicts_on_diffe
 
     first = client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
     assert first.status_code == 202
-    repo.update_import_preview(preview["id"], {"status": "deleted"}, owner_user_id=42)
+    repo.update_import_preview(preview["id"], preview_mutation, owner_user_id=42)
     replay = client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
     conflict = client.post(
         "/api/v1/vn/vn-assets/import/commit",
@@ -717,7 +757,7 @@ def test_start_import_commit_replays_same_idempotency_key_and_conflicts_on_diffe
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
     different_start = client.post("/api/v1/vn/vn-assets/import/commit", json={**payload, "idempotency_key": "new"})
     assert different_start.status_code == 409
-    assert different_start.json()["detail"] == "import_preview_not_completed"
+    assert different_start.json()["detail"] == fresh_error
 
 
 def test_start_import_commit_releases_idempotency_claim_on_enqueue_failure(
@@ -829,12 +869,23 @@ def test_start_import_commit_requires_idempotency_key(
     assert fake_jobs.created == []
 
 
+@pytest.mark.parametrize(
+    ("jobs_status", "replacement", "response_status"),
+    [
+        ("processing", False, "processing"),
+        ("completed", False, "completed"),
+        ("completed", True, "queued"),
+    ],
+)
 def test_import_commit_status_composes_jobs_lifecycle_with_journal(
     client: TestClient,
     fake_jobs: FakeJobManager,
     repo: VNAssetPacksRepository,
     character_id: int,
     tmp_path: Path,
+    jobs_status: str,
+    replacement: bool,
+    response_status: str,
 ) -> None:
     archive_path = _write_preview_archive(tmp_path / "commit-status.tldw-vnpack")
     preview = repo.create_import_preview(
@@ -859,7 +910,10 @@ def test_import_commit_status_composes_jobs_lifecycle_with_journal(
     )
     job_id = started.json()["job_id"]
     import_id = started.json()["import_id"]
-    fake_jobs.jobs[int(job_id)]["status"] = "processing"
+    jobs_row = fake_jobs.jobs[int(job_id)]
+    jobs_row["status"] = jobs_status
+    if replacement:
+        jobs_row["payload"] = {**jobs_row["payload"], "import_id": import_id + 1}
     repo.update_import_journal(
         import_id,
         {"status": "processing", "stage": "creating_items", "id_maps": {"packs": {"100": 200}}},
@@ -875,7 +929,7 @@ def test_import_commit_status_composes_jobs_lifecycle_with_journal(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "processing"
+    assert body["status"] == response_status
     assert body["vn_status"] == "processing"
     assert body["stage"] == "creating_items"
     assert body["id_maps"] == {"packs": {"100": 200}}
@@ -916,6 +970,189 @@ def test_import_commit_cancel_routes_through_jobs_manager(
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
     assert fake_jobs.cancelled == [(int(job_id), "vn_pack_import_commit_cancel_requested")]
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_cleanup_interrupted_import_preserves_original_pack_and_removes_expired_preview(
+    client: TestClient, fake_jobs: FakeJobManager, repo: VNAssetPacksRepository,
+    pack: SimpleNamespace, current_user_id: dict[str, int], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    registered: bool,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "interrupted.tldw-vnpack")
+    monkeypatch.setenv("VN_PACK_IMPORT_PREVIEW_STAGING_ROOT", str(tmp_path / "previews"))
+    with archive_path.open("rb") as archive:
+        started = client.post(
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "interrupted-preview"},
+            files={"archive": (archive_path.name, archive, "application/zip")},
+        ).json()
+    preview_id = started["preview_id"]
+    repo.update_import_preview(preview_id, {"status": "completed"}, owner_user_id=42)
+    fake_jobs.jobs[int(started["job_id"])]["status"] = "completed"
+    admitted = client.post(
+        "/api/v1/vn/vn-assets/import/commit",
+        json={
+            "preview_id": preview_id, "idempotency_key": "interrupted-commit",
+            "trust_mode": "trusted_restore", "character_action": "import_included_character",
+            "target_pack_id": pack.id, "target_mode": "update_existing",
+        },
+    )
+    assert admitted.status_code == 202
+    import_id = admitted.json()["import_id"]
+    job_id = admitted.json()["job_id"]
+    repo.update_import_preview(preview_id, {"expires_at": "2020-01-01T00:00:00+00:00"}, owner_user_id=42)
+    staged = Path(repo.get_import_preview(preview_id, owner_user_id=42)["archive_path"])
+    original_slot = repo.create_slot(pack_id=pack.id, asset_type="sprite", slot_key="original")
+    original_item = repo.create_item(pack_id=pack.id, slot_id=original_slot["id"], generated_file_id=15)
+    extra_slot = repo.create_slot(pack_id=pack.id, asset_type="sprite", slot_key="expanded")
+    extra_item = repo.create_item(
+        pack_id=pack.id, slot_id=extra_slot["id"], source="imported", review_status="hidden",
+        source_context_snapshot={"vnpack_import": {"import_id": import_id, "source_item_id": 40}},
+    )
+    outputs = tmp_path / "outputs"
+    relative_path = f"vn_assets/imports/{import_id}/vn_asset_{extra_item['id']}.png"
+    saved = outputs / relative_path
+    saved.parent.mkdir(parents=True)
+    saved.write_bytes(PNG_BYTES)
+    records = {
+        "checkpoint_version": 1, "pack_id": pack.id, "slot_ids": [extra_slot["id"]],
+        "item_ids": [extra_item["id"]], "generated_file_ids": [], "asset_formats": {str(extra_item["id"]): "png"},
+    }
+    repo.update_import_journal(import_id, {"status": "processing", "created_records": records}, owner_user_id=42)
+    repo.update_item_storage(
+        extra_item["id"], generated_file_id=51, storage_ref=relative_path, mime_type="image/png",
+        width=1, height=1, bytes=len(PNG_BYTES),
+    )
+    pack_url = f"/api/v1/vn/vn-assets/packs/{pack.id}"
+    assert [item["id"] for item in client.get(pack_url + "/items").json()] == [original_item["id"]]
+    assert [slot["id"] for slot in client.get(pack_url + "/slots").json()] == [original_slot["id"]]
+    staged_review = client.patch(pack_url + f"/items/{extra_item['id']}/review", json={"review_status": "approved"})
+    assert staged_review.status_code == 404
+
+    class Storage:
+        record = {
+            "id": 51, "user_id": 42, "source_feature": "vn_assets", "source_ref": f"vn_asset_item:{extra_item['id']}",
+            "storage_path": relative_path,
+        } if registered else None
+
+        async def discard_vn_import_file(self, **kwargs: Any) -> int | None:
+            assert kwargs["user_id"] == 42
+            assert kwargs["source_ref"] == f"vn_asset_item:{extra_item['id']}"
+            assert kwargs["storage_path"] == relative_path
+            record = self.record
+            if record is None:
+                kwargs["remove_bytes"]()
+                return None
+            kwargs["require_owned_file"](record)
+            self.record = None
+            raise OSError("cleanup stopped after unregistering")
+
+    storage = Storage()
+
+    async def get_storage() -> Storage:
+        return storage
+
+    monkeypatch.setattr(vn_assets, "get_storage_service", get_storage)
+    monkeypatch.setattr(vn_assets.DatabasePaths, "get_user_outputs_dir", staticmethod(lambda _: outputs))
+    endpoint = f"/api/v1/vn/vn-assets/portability/imports/{import_id}/cleanup"
+    current_user_id["value"] = 43
+    assert client.post(endpoint).status_code == 404
+    current_user_id["value"] = 42
+    assert client.post(endpoint).status_code == 409
+    assert client.delete(f"/api/v1/vn/vn-assets/import/previews/{preview_id}").status_code == 409
+    assert staged.is_file() and saved.is_file()
+
+    fake_jobs.jobs[int(job_id)]["status"] = "failed"
+    if registered:
+        fake_jobs.jobs.pop(int(job_id))
+    job_status = client.get(f"/api/v1/vn/vn-assets/portability/imports/{job_id}").json()
+    assert job_status["error_code"] == "import_interrupted"
+    if registered:
+        with pytest.raises(OSError, match="cleanup stopped"):
+            client.post(endpoint)
+        assert json.loads(repo.get_import_journal(import_id, owner_user_id=42)["cleanup_status_json"])["status"] == "discarding"
+        assert saved.is_file()
+    assert client.post(endpoint).json()["cleanup_status"]["status"] == "discarded"
+    assert client.post(endpoint).status_code == 200
+    assert storage.record is None
+    assert not saved.exists() and not staged.exists()
+    assert repo.get_item(original_item["id"])["generated_file_id"] == 15
+    assert repo.get_item(extra_item["id"]) is None and repo.get_slot(extra_slot["id"]) is None
+
+
+def test_preview_upload_reaps_expired_archives_only_for_current_owner(
+    client: TestClient, repo: VNAssetPacksRepository, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    staging = tmp_path / "previews"
+    monkeypatch.setenv("VN_PACK_IMPORT_PREVIEW_STAGING_ROOT", str(staging))
+    owned_archive = staging / "42" / "expired.tldw-vnpack"
+    other_archive = staging / "43" / "expired.tldw-vnpack"
+    for owner_id, archive in ((42, owned_archive), (43, other_archive)):
+        archive.parent.mkdir(parents=True)
+        archive.write_bytes(b"staged backup")
+        repo.create_import_preview(
+            owner_user_id=owner_id, job_id=f"job-{owner_id}", status="completed", archive_path=str(archive),
+            expires_at="2020-01-01T00:00:00+00:00",
+        )
+
+    upload = _write_preview_archive(tmp_path / "new.tldw-vnpack")
+    with upload.open("rb") as archive:
+        response = client.post(
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "new-upload"},
+            files={"archive": (upload.name, archive, "application/zip")},
+        )
+
+    assert response.status_code == 202
+    assert not owned_archive.exists()
+    assert other_archive.is_file()
+    expired_preview = repo.get_import_preview(1, owner_user_id=42)
+    assert expired_preview["status"] == "expired" and expired_preview["archive_path"] == ""
+
+
+@pytest.mark.asyncio
+async def test_generic_storage_delete_waits_for_import_publication(
+    repo: VNAssetPacksRepository, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = repo.create_import_preview(owner_user_id=42, job_id="preview", status="completed", archive_path="backup")
+    journal = repo.create_import_journal(
+        owner_user_id=42, preview_id=preview["id"], job_id="restore", status="processing", stage="creating_items",
+        trust_mode="trusted_restore", target_mode="create_new",
+    )
+    record = {"id": 51, "user_id": 42, "source_feature": "vn_assets", "storage_path": f"vn_assets/imports/{journal['id']}/vn_asset_12.png"}
+    deleted: list[int] = []
+
+    class Storage:
+        async def get_generated_files_repo(self) -> "Storage":
+            return self
+
+        async def get_file_by_id(self, _file_id: int) -> dict[str, Any]:
+            return record
+
+        async def unregister_generated_file(self, file_id: int, *, hard_delete: bool) -> bool:
+            deleted.append(file_id)
+            return True
+
+    async def get_db(user_id: int) -> CharactersRAGDB:
+        assert user_id == 42
+        return repo.db
+
+    monkeypatch.setattr(storage_user_files, "get_chacha_db_for_user_id", get_db)
+    user = User(id=42, username="owner")
+    storage = Storage()
+    with pytest.raises(HTTPException, match="vn_import_file_still_staged") as single:
+        await storage_user_files.delete_file(51, user=user, hard_delete=True, service=storage)
+    assert single.value.status_code == 409
+    with pytest.raises(HTTPException, match="vn_import_file_still_staged") as bulk:
+        await storage_user_files.bulk_delete_files(BulkDeleteRequest(file_ids=[51]), user=user, service=storage)
+    assert bulk.value.status_code == 409
+    assert not deleted
+
+    repo.update_import_journal(
+        journal["id"], {"status": "completed", "completed_at": "2026-11-26T10:00:00+00:00"}, owner_user_id=42,
+    )
+    assert (await storage_user_files.delete_file(51, user=user, hard_delete=True, service=storage)).success
+    assert deleted == [51]
 
 
 def _write_preview_archive(archive_path: Path) -> Path:

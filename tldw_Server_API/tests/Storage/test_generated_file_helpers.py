@@ -8,6 +8,48 @@ from tldw_Server_API.app.core.Storage import generated_file_helpers
 
 
 @pytest.mark.asyncio
+async def test_vn_import_reuses_path_after_bytes_are_written_before_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker restart can find bytes written before the AuthNZ commit."""
+    paths: list[str] = []
+
+    class InterruptedStorageService:
+        async def get_vn_generated_file(self, **_kwargs: Any) -> None:
+            return None
+
+        async def register_generated_file(self, **kwargs: Any) -> dict[str, Any]:
+            await kwargs["prepare_vn_import_bytes"]()
+            paths.append(kwargs["storage_path"])
+            if len(paths) == 1:
+                raise RuntimeError("worker stopped after writing bytes")
+            return {"id": 17, "storage_path": paths[-1]}
+
+    async def get_service() -> InterruptedStorageService:
+        return InterruptedStorageService()
+
+    async def no_process_cleanup(*_args: Any, **_kwargs: Any) -> None:
+        pass
+
+    monkeypatch.setattr(generated_file_helpers, "get_storage_service", get_service)
+    monkeypatch.setattr(generated_file_helpers, "_cleanup_unregistered_vn_file", no_process_cleanup)
+    monkeypatch.setattr(generated_file_helpers.DatabasePaths, "get_user_outputs_dir", staticmethod(lambda _: tmp_path))
+    request = {
+        "user_id": 5, "pack_id": 1, "item_id": 4, "asset_type": "sprite", "image_bytes": b"backup", "import_id": 23,
+    }
+    with pytest.raises(RuntimeError, match="stopped after writing bytes"):
+        await generated_file_helpers.save_and_register_vn_asset_image(**request)
+    (tmp_path / paths[0]).with_name(".vn_asset_4.png.abandoned.part").write_bytes(b"part")
+
+    result = await generated_file_helpers.save_and_register_vn_asset_image(**request)
+
+    assert paths == ["vn_assets/imports/23/vn_asset_4.png"] * 2
+    assert [path for path in tmp_path.rglob("*") if path.is_file()] == [tmp_path / paths[0]]
+    assert (tmp_path / paths[0]).read_bytes() == b"backup"
+    assert result["id"] == 17
+
+
+@pytest.mark.asyncio
 @pytest.mark.unit
 async def test_vn_helper_resolves_replay_before_quota_preflight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

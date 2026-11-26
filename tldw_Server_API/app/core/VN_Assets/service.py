@@ -1100,13 +1100,14 @@ class VNAssetPackService:
             pack is None
             or bool(pack["deleted"])
             or int(pack["owner_user_id"]) != self.owner_user_id
+            or pack_id in self.repo.import_staging_ids(pack_id=pack_id)["packs"]
         ):
             raise ValueError("pack_not_found")
         return pack
 
     def _require_owned_slot(self, slot_id: int) -> dict[str, Any]:
         slot = self.repo.get_slot(slot_id)
-        if slot is None:
+        if slot is None or slot_id in self.repo.import_staging_ids(pack_id=int(slot["pack_id"]))["slots"]:
             raise ValueError("slot_not_found")
         try:
             self._require_pack(int(slot["pack_id"]))
