@@ -2,7 +2,7 @@ import React from "react"
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // ---------------------------------------------------------------------------
@@ -1722,6 +1722,29 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(screen.getByText("Strange Loop")).toBeTruthy()
     expect(screen.getAllByText("2012").length).toBeGreaterThan(0)
     expect(screen.getByText(/conference, clojure/i)).toBeTruthy()
+  })
+
+  it("keeps all four metadata fields and inclusion with their source", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+    fireEvent.change(screen.getByPlaceholderText(/https:\/\/example\.com/i), {
+      target: { value: "https://youtu.be/talk-1\nhttps://youtu.be/talk-2" },
+    })
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    const second = within(screen.getByRole("group", { name: "Source 2" }))
+    await user.click(second.getByRole("button"))
+    await user.type(second.getByLabelText("Title override for item 2"), "Tidal archives")
+    await user.type(second.getByLabelText("Speaker for item 2"), "Maya Chen")
+    await user.type(second.getByLabelText("Track for item 2"), "Field methods")
+    await user.type(second.getByLabelText("Tags for item 2"), "coast, archive{Enter}")
+    await user.click(second.getByRole("button"))
+    await user.click(second.getByRole("checkbox"))
+    expect(ctxRef!.state.queueItems[1].conferenceOverride).toEqual({
+      title: "Tidal archives", speaker: "Maya Chen", track: "Field methods",
+      tags: ["coast", "archive"], selected: false,
+    })
+    expect(ctxRef!.state.queueItems[0].conferenceOverride?.title).toBeUndefined()
   })
 
   it("allows overriding one talk title and speaker inside a conference batch", async () => {

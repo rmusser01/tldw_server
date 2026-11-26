@@ -29,6 +29,8 @@ Use these pages when you want to add material, organize it, ask cited questions,
 
 Open **Quick Ingest** in Media. Choose **Files**, **Links**, or **Text**. You can switch between them to build one batch. The source list shows what is ready and why an item will be skipped. Use **Edit link** to repair an invalid URL.
 
+For a batch of video links, enter a **Collection name** under **Conference batch** to save per-source metadata with the collection. You can edit each source’s title, speaker, track, and comma-separated tags. On a phone, tap a source to expand its fields. Clear **Include** to skip that source and keep its edits.
+
 Check the destination above the main button. **Change settings** lets you save to Media, create drafts to review in this browser, or extract content without saving. If your preset uses AI analysis, choose a provider or select **Skip analysis for this import**. When an import can replace existing Media, **Review replacements** shows how many sources will run and which ones may replace an item. **Back to sources** returns to your selected input with any unqueued links or text still there.
 
 If you use **Clear all** by mistake, choose **Undo** in the same draft to restore the sources in their original order. Sources added after clearing stay in the queue.
