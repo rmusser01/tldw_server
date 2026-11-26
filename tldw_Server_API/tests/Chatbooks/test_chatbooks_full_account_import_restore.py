@@ -649,7 +649,7 @@ async def test_finalize_account_restore_removes_private_payload_before_return(tm
 
 
 @pytest.mark.asyncio
-async def test_account_restore_delegates_ordered_profile_updates_to_command_service(
+async def test_account_restore_delegates_settings_and_never_restores_the_email(
     monkeypatch,
 ):
     from tldw_Server_API.app.core.AuthNZ import database as database_module
@@ -687,7 +687,6 @@ async def test_account_restore_delegates_ordered_profile_updates_to_command_serv
             captured["scope"] = scope
             return LegacyProfileCommandResult(
                 applied=(
-                    "identity.email",
                     "preferences.audio.voice",
                     "preferences.ui.theme",
                 )
@@ -715,7 +714,6 @@ async def test_account_restore_delegates_ordered_profile_updates_to_command_serv
 
     command = captured["command"]
     assert command.updates == (
-        ("identity.email", "restored@example.com"),
         ("preferences.audio.voice", "alloy"),
         ("preferences.ui.theme", "paper"),
     )

@@ -57,6 +57,7 @@ class ProfileUpdateCommand:
     active_org_id: int | None = None
     active_team_id: int | None = None
     contract_mode: ProfileContractMode = ProfileContractMode.LEGACY_V1
+    current_password: str | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)

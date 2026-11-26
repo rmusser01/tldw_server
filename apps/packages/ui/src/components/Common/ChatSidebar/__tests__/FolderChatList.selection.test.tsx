@@ -28,7 +28,14 @@ import { useStoreMessageOption } from "@/store/option"
 import { FolderChatList } from "../FolderChatList"
 
 const chat = { id: "folder-chat", title: "Folder chat" }
-const owner = { key: "verified-folder-owner", requestScope: { config: { serverUrl: "https://server.example", apiKey: "synthetic-key" }, expectedUserId: "7" }, isCurrent: () => true }
+const owner = {
+  key: "verified-folder-owner",
+  requestScope: {
+    config: { serverUrl: "https://server.example", authMode: "multi-user", expectedUserId: "7" },
+    userId: "7"
+  },
+  isCurrent: () => true
+} satisfies NonNullable<React.ComponentProps<typeof FolderChatList>["owner"]>
 
 beforeEach(() => {
   vi.clearAllMocks()

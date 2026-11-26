@@ -43,6 +43,8 @@ _USERS_COLUMNS = {
     "backup_codes",
     "created_by",
     "password_changed_at",
+    "previous_email",
+    "email_changed_at",
 }
 _AUDIO_COLUMNS = {
     "id",
@@ -605,6 +607,7 @@ def _column_type_allowed(column: str, data_type: str) -> bool:
         "locked_until",
         "email_verified_at",
         "password_changed_at",
+        "email_changed_at",
         "expires_at",
         "consumed_at",
         "revoked_at",

@@ -225,7 +225,7 @@ const chatSettingsState = vi.hoisted(() => ({
   )
 }))
 
-const loadLocalConversationMock = vi.hoisted(() => vi.fn(async () => {}))
+const loadLocalConversationMock = vi.hoisted(() => vi.fn<() => Promise<boolean | void>>(async () => {}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -1224,7 +1224,7 @@ describe("Playground H1 URL initialization with the mounted session/controller",
     page.unmount()
     page = render(<Playground />)
     await waitFor(() => expect(screen.getByTestId("playground-chat")).toHaveAttribute("data-selected-history", "chat-one answer A"))
-    expect(h1.controller?.getCurrent().owner?.conversation_id).toBe("chat-one")
+    expect(h1.controller?.getCurrent().owner).toMatchObject({ conversation_id: "chat-one" })
     expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe("local")
     page.unmount()
   })

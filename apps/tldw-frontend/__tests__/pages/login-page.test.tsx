@@ -35,6 +35,7 @@ import LoginPage from "../../pages/login"
 describe("LoginPage (#2919)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     deploymentMock.hosted = false
     clientMock.getFirstRunMetadata.mockReset().mockRejectedValue(new Error("Discovery unavailable"))
     clientMock.getConfig.mockResolvedValue({
@@ -118,5 +119,21 @@ describe("LoginPage (#2919)", () => {
     render(<LoginPage />)
     expect(await screen.findByRole("heading", { name: "Sign in to tldw" })).toBeInTheDocument()
     expect(clientMock.updateConfig).toHaveBeenCalledWith({ authMode: "multi-user" })
+  })
+
+  it("explains a sign-out caused by a newer sign-in", async () => {
+    localStorage.setItem("tldw:session-replaced", "1")
+    render(<LoginPage />)
+    expect(
+      await screen.findByText(
+        "You were signed out because your account was signed in on another device."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("shows no sign-out notice by default", async () => {
+    render(<LoginPage />)
+    await screen.findByRole("heading", { name: "Sign in to tldw" })
+    expect(screen.queryByText(/signed in on another device/)).toBeNull()
   })
 })

@@ -131,6 +131,18 @@ describe('WebUI runtime session bootstrap API', () => {
     });
   });
 
+  it('forwards a well-formed install id to the backend', async () => {
+    await callRoute({ headers: { 'x-tldw-device-id': 'install-12345678' } });
+    expect(mockFetch.mock.calls[0][1]?.headers).toMatchObject({
+      'X-TLDW-Device-Id': 'install-12345678',
+    });
+  });
+
+  it('drops a malformed install id', async () => {
+    await callRoute({ headers: { 'x-tldw-device-id': 'bad id!' } });
+    expect(mockFetch.mock.calls[0][1]?.headers).not.toHaveProperty('X-TLDW-Device-Id');
+  });
+
   it('forwards only the configured session cookie and csrf cookie inbound', async () => {
     process.env.SINGLE_USER_SESSION_COOKIE_NAME = 'custom_session';
 

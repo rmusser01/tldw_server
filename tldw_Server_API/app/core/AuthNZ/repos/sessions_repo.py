@@ -1,13 +1,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+from tldw_Server_API.app.core.DB_Management.backends.postgresql_locks import acquire_schema_lock
+
+# ``sessions.revoke_reason`` written when the per-user session cap evicts a session.
+SESSION_CAP_REVOKE_REASON = "session_cap"
+# Namespace of the per-user PostgreSQL advisory lock that serializes the session cap.
+SESSION_CAP_LOCK_NAMESPACE = "authnz_sessions_cap"
+
+# A session is live until its refresh token expires (``COALESCE`` covers rows
+# without a refresh expiry). Listing, the cap and cleanup all share this predicate.
+LIVE_SESSION_PREDICATE_PG = (
+    "is_active = TRUE AND COALESCE(is_revoked, FALSE) = FALSE "
+    "AND COALESCE(refresh_expires_at, expires_at) > CURRENT_TIMESTAMP"
+)
+LIVE_SESSION_PREDICATE_SQLITE = (
+    "is_active = 1 AND COALESCE(is_revoked, 0) = 0 "
+    "AND datetime(COALESCE(refresh_expires_at, expires_at)) > datetime('now')"
+)
 
 
 @dataclass
@@ -73,77 +90,212 @@ class AuthnzSessionsRepo:
         refresh_jti: str | None,
     ) -> int:
         """
-        Insert a new session row and return its ``id``.
+        Insert a new session row without enforcing the per-user cap; return its ``id``.
+
+        ``SessionManager`` creates sessions through ``create_session_record_with_cap``.
         """
         try:
             async with self.db_pool.transaction() as conn:
-                if self._is_postgres_backend():
-                    exp = expires_at.replace(tzinfo=None) if getattr(expires_at, "tzinfo", None) else expires_at
-                    ref = (
-                        refresh_expires_at.replace(tzinfo=None)
-                        if refresh_expires_at is not None and getattr(refresh_expires_at, "tzinfo", None)
-                        else refresh_expires_at
-                    )
-                    session_id = await conn.fetchval(
-                        """
-                        INSERT INTO sessions (
-                            user_id, token_hash, refresh_token_hash,
-                            encrypted_token, encrypted_refresh,
-                            expires_at, refresh_expires_at,
-                            ip_address, user_agent, device_id,
-                            access_jti, refresh_jti
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                        RETURNING id
-                        """,
-                        user_id,
-                        token_hash,
-                        refresh_token_hash,
-                        encrypted_token,
-                        encrypted_refresh,
-                        exp,
-                        ref,
-                        ip_address,
-                        user_agent,
-                        device_id,
-                        access_jti,
-                        refresh_jti,
-                    )
-                    return int(session_id)
-
-                cursor = await conn.execute(
-                    """
-                    INSERT INTO sessions (
-                        user_id, token_hash, refresh_token_hash,
-                        encrypted_token, encrypted_refresh,
-                        expires_at, refresh_expires_at,
-                        ip_address, user_agent, device_id,
-                        access_jti, refresh_jti, last_activity
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                    """,
-                    (
-                        user_id,
-                        token_hash,
-                        refresh_token_hash,
-                        encrypted_token,
-                        encrypted_refresh,
-                        expires_at.isoformat(),
-                        refresh_expires_at.isoformat() if refresh_expires_at else None,
-                        ip_address,
-                        user_agent,
-                        device_id,
-                        access_jti,
-                        refresh_jti,
-                    ),
+                return await self._insert_session_row(
+                    conn,
+                    user_id=user_id,
+                    token_hash=token_hash,
+                    refresh_token_hash=refresh_token_hash,
+                    encrypted_token=encrypted_token,
+                    encrypted_refresh=encrypted_refresh,
+                    expires_at=expires_at,
+                    refresh_expires_at=refresh_expires_at,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    device_id=device_id,
+                    access_jti=access_jti,
+                    refresh_jti=refresh_jti,
                 )
-                session_id = getattr(cursor, "lastrowid", None)
-                if session_id is None:
-                    raise RuntimeError("Failed to obtain session id for new session row")
-                return int(session_id)
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzSessionsRepo.create_session_record failed: {exc}")
             raise
+
+    async def create_session_record_with_cap(
+        self,
+        *,
+        user_id: int,
+        token_hash: str,
+        refresh_token_hash: str,
+        encrypted_token: str,
+        encrypted_refresh: str,
+        expires_at: datetime,
+        refresh_expires_at: datetime | None,
+        ip_address: str | None,
+        user_agent: str | None,
+        device_id: str | None,
+        access_jti: str | None,
+        refresh_jti: str | None,
+        max_live_sessions: int,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """
+        Insert a session, first revoking live sessions so at most ``max_live_sessions`` remain.
+
+        Count, eviction and insert share one transaction, serialized per user:
+        PostgreSQL takes a per-user advisory lock first (READ COMMITTED, so every
+        later statement sees the previous holder's commit); SQLite's transaction
+        is ``BEGIN IMMEDIATE``, so the write lock is held before the count.
+        Eviction is one statement: same ``device_id`` first (a missing id is its
+        own group), then least recently active, then ``created_at``, then ``id``.
+
+        The outer UPDATE repeats the live predicate so a row revoked by a concurrent
+        logout between the subquery and the update keeps its own reason.
+
+        A caller must not already hold the ``SESSION_CAP_LOCK_NAMESPACE`` advisory
+        lock for ``user_id`` on another connection: this call would wait on itself.
+
+        Returns the new id and the evicted rows (``id, user_id, access_jti,
+        refresh_jti, expires_at, refresh_expires_at, last_activity, created_at``)
+        for blacklisting after commit.
+        """
+        is_postgres = self._is_postgres_backend()
+        try:
+            async with self.db_pool.transaction() as conn:
+                if is_postgres:
+                    await acquire_schema_lock(conn.execute, SESSION_CAP_LOCK_NAMESPACE, str(user_id))
+                    live = await conn.fetchval(
+                        f"SELECT COUNT(*) FROM sessions WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}",
+                        user_id,
+                    )
+                else:
+                    cursor = await conn.execute(
+                        f"SELECT COUNT(*) FROM sessions WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}",
+                        (user_id,),
+                    )
+                    live = (await cursor.fetchone())[0]
+
+                evicted: list[dict[str, Any]] = []
+                excess = int(live) - (max_live_sessions - 1)
+                if excess > 0:
+                    if is_postgres:
+                        rows = await conn.fetch(
+                            f"""
+                            UPDATE sessions
+                               SET is_active = FALSE, is_revoked = TRUE, revoked_at = CURRENT_TIMESTAMP,
+                                   revoked_by = NULL, revoke_reason = $4
+                             WHERE id IN (SELECT id FROM sessions
+                                           WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}
+                                           ORDER BY CASE WHEN device_id IS NOT DISTINCT FROM $2 THEN 0 ELSE 1 END,
+                                                    COALESCE(last_activity, created_at), created_at, id
+                                           LIMIT $3)
+                               AND {LIVE_SESSION_PREDICATE_PG}
+                            RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at,
+                                      last_activity, created_at
+                            """,
+                            user_id,
+                            device_id,
+                            excess,
+                            SESSION_CAP_REVOKE_REASON,
+                        )
+                    else:
+                        cursor = await conn.execute(
+                            f"""
+                            UPDATE sessions
+                               SET is_active = 0, is_revoked = 1, revoked_at = datetime('now'),
+                                   revoked_by = NULL, revoke_reason = ?
+                             WHERE id IN (SELECT id FROM sessions
+                                           WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}
+                                           ORDER BY CASE WHEN device_id IS ? THEN 0 ELSE 1 END,
+                                                    COALESCE(last_activity, created_at), created_at, id
+                                           LIMIT ?)
+                               AND {LIVE_SESSION_PREDICATE_SQLITE}
+                            RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at,
+                                      last_activity, created_at
+                            """,
+                            (SESSION_CAP_REVOKE_REASON, user_id, device_id, excess),
+                        )
+                        rows = await cursor.fetchall()
+                    evicted = [self._normalize_session_details(dict(row)) for row in rows]
+
+                new_id = await self._insert_session_row(
+                    conn,
+                    user_id=user_id,
+                    token_hash=token_hash,
+                    refresh_token_hash=refresh_token_hash,
+                    encrypted_token=encrypted_token,
+                    encrypted_refresh=encrypted_refresh,
+                    expires_at=expires_at,
+                    refresh_expires_at=refresh_expires_at,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    device_id=device_id,
+                    access_jti=access_jti,
+                    refresh_jti=refresh_jti,
+                )
+                return new_id, evicted
+        except Exception as exc:  # pragma: no cover - surfaced via callers
+            logger.bind(
+                operation="create_session_record_with_cap",
+                exception_type=type(exc).__name__,
+            ).error("AuthNZ session persistence failed")
+            raise
+
+    async def _insert_session_row(self, conn: Any, **fields: Any) -> int:
+        """Insert one session row on the caller's transaction ``conn`` and return its ``id``."""
+        expires_at = fields["expires_at"]
+        refresh_expires_at = fields["refresh_expires_at"]
+        if self._is_postgres_backend():
+            session_id = await conn.fetchval(
+                """
+                INSERT INTO sessions (
+                    user_id, token_hash, refresh_token_hash,
+                    encrypted_token, encrypted_refresh,
+                    expires_at, refresh_expires_at,
+                    ip_address, user_agent, device_id,
+                    access_jti, refresh_jti
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                RETURNING id
+                """,
+                fields["user_id"],
+                fields["token_hash"],
+                fields["refresh_token_hash"],
+                fields["encrypted_token"],
+                fields["encrypted_refresh"],
+                self._normalize_datetime_for_postgres(expires_at),
+                self._normalize_datetime_for_postgres(refresh_expires_at),
+                fields["ip_address"],
+                fields["user_agent"],
+                fields["device_id"],
+                fields["access_jti"],
+                fields["refresh_jti"],
+            )
+            return int(session_id)
+
+        cursor = await conn.execute(
+            """
+            INSERT INTO sessions (
+                user_id, token_hash, refresh_token_hash,
+                encrypted_token, encrypted_refresh,
+                expires_at, refresh_expires_at,
+                ip_address, user_agent, device_id,
+                access_jti, refresh_jti, last_activity
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """,
+            (
+                fields["user_id"],
+                fields["token_hash"],
+                fields["refresh_token_hash"],
+                fields["encrypted_token"],
+                fields["encrypted_refresh"],
+                expires_at.isoformat(),
+                refresh_expires_at.isoformat() if refresh_expires_at else None,
+                fields["ip_address"],
+                fields["user_agent"],
+                fields["device_id"],
+                fields["access_jti"],
+                fields["refresh_jti"],
+            ),
+        )
+        session_id = getattr(cursor, "lastrowid", None)
+        if session_id is None:
+            raise RuntimeError("Failed to obtain session id for new session row")
+        return int(session_id)
 
     async def revoke_session_record(
         self,
@@ -536,6 +688,43 @@ class AuthnzSessionsRepo:
             )
             raise
 
+    async def fetch_revoke_reason_for_token_hash_candidates(
+        self,
+        token_hash_candidates: list[str],
+    ) -> str | None:
+        """
+        Return the ``revoke_reason`` of a revoked session whose access or
+        refresh token hash matches one of the candidates, or None.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                for candidate in token_hash_candidates:
+                    if self._is_postgres_backend():
+                        row = await conn.fetchrow(
+                            "SELECT revoke_reason FROM sessions WHERE is_revoked = TRUE "
+                            "AND (token_hash = $1 OR refresh_token_hash = $1) "
+                            "ORDER BY id DESC LIMIT 1",
+                            candidate,
+                        )
+                        reason = row["revoke_reason"] if row else None
+                    else:
+                        cursor = await conn.execute(
+                            "SELECT revoke_reason FROM sessions WHERE is_revoked = 1 "
+                            "AND (token_hash = ? OR refresh_token_hash = ?) "
+                            "ORDER BY id DESC LIMIT 1",
+                            (candidate, candidate),
+                        )
+                        found = await cursor.fetchone()
+                        reason = found[0] if found else None
+                    if reason:
+                        return reason
+                return None
+        except Exception as exc:  # pragma: no cover - surfaced via callers
+            logger.error(
+                f"AuthnzSessionsRepo.fetch_revoke_reason_for_token_hash_candidates failed: {exc}"
+            )
+            raise
+
     async def mark_sessions_revoked_for_user_with_audit(
         self,
         *,
@@ -633,11 +822,12 @@ class AuthnzSessionsRepo:
         try:
             if getattr(self.db_pool, "pool", None) is not None:
                 rows = await self.db_pool.fetch(
-                    """
+                    f"""
                     SELECT id, ip_address, user_agent, device_id,
-                           created_at, last_activity, expires_at
+                           created_at, last_activity,
+                           COALESCE(refresh_expires_at, expires_at) AS expires_at
                     FROM sessions
-                    WHERE user_id = $1 AND is_active = TRUE
+                    WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}
                     ORDER BY last_activity DESC
                     """,
                     user_id,
@@ -649,11 +839,12 @@ class AuthnzSessionsRepo:
             async with self.db_pool.acquire() as conn:
                 try:
                     cursor = await conn.execute(
-                        """
+                        f"""
                         SELECT id, ip_address, user_agent, device_id,
-                               created_at, last_activity, expires_at
+                               created_at, last_activity,
+                               COALESCE(refresh_expires_at, expires_at) AS expires_at
                         FROM sessions
-                        WHERE user_id = ? AND is_active = 1
+                        WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                         ORDER BY last_activity DESC
                         """,
                         (user_id,),
@@ -662,11 +853,12 @@ class AuthnzSessionsRepo:
                     msg = str(exc).lower()
                     if "no such column" in msg and "last_activity" in msg:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             SELECT id, ip_address, user_agent, device_id,
-                                   created_at, created_at AS last_activity, expires_at
+                                   created_at, created_at AS last_activity,
+                                   COALESCE(refresh_expires_at, expires_at) AS expires_at
                             FROM sessions
-                            WHERE user_id = ? AND is_active = 1
+                            WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             ORDER BY created_at DESC
                             """,
                             (user_id,),
@@ -698,9 +890,10 @@ class AuthnzSessionsRepo:
             ).error("AuthNZ session read failed")
             raise DatabaseError("Session read operation failed") from None
 
-    async def cleanup_expired_sessions(self) -> int:
+    async def cleanup_expired_sessions(self, *, session_cap_retention: timedelta) -> int:
         """
-        Delete expired or long-revoked sessions.
+        Delete sessions past refresh expiry (plus 1 day), long-revoked sessions,
+        and cap-evicted sessions older than ``session_cap_retention``.
 
         Returns the number of deleted rows (best-effort).
         """
@@ -735,19 +928,27 @@ class AuthnzSessionsRepo:
                     rows = await conn.fetch(
                         """
                         DELETE FROM sessions
-                        WHERE expires_at < CURRENT_TIMESTAMP - INTERVAL '1 day'
+                        WHERE COALESCE(refresh_expires_at, expires_at) < CURRENT_TIMESTAMP - INTERVAL '1 day'
                         OR (is_active = FALSE AND revoked_at < CURRENT_TIMESTAMP - INTERVAL '7 days')
+                        OR (revoke_reason = $1 AND revoked_at < CURRENT_TIMESTAMP - $2::interval)
                         RETURNING id
-                        """
+                        """,
+                        SESSION_CAP_REVOKE_REASON,
+                        session_cap_retention,
                     )
                     deleted = len(rows or [])
                 else:
                     cursor = await conn.execute(
                         """
                         DELETE FROM sessions
-                        WHERE datetime(expires_at) < datetime('now', '-1 day')
+                        WHERE datetime(COALESCE(refresh_expires_at, expires_at)) < datetime('now', '-1 day')
                         OR (is_active = 0 AND datetime(revoked_at) < datetime('now', '-7 days'))
-                        """
+                        OR (revoke_reason = ? AND datetime(revoked_at) < datetime('now', ?))
+                        """,
+                        (
+                            SESSION_CAP_REVOKE_REASON,
+                            f"-{int(session_cap_retention.total_seconds())} seconds",
+                        ),
                     )
                     deleted = getattr(cursor, "rowcount", 0) or 0
 

@@ -658,7 +658,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     renderPage()
     fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
     act(() => useStoreMessageOption.setState({ temporaryChat: true, serverChatId: null, historyId: "temp",
-      messages: kind === "greeting" ? [{ id: "greeting", role: "assistant", isBot: true, name: "Guide", message: "Keep this opening", messageType: "character:greeting" }] : [],
+      messages: kind === "greeting" ? [{ id: "greeting", role: "assistant", isBot: true, name: "Guide", message: "Keep this opening", messageType: "character:greeting", sources: [] }] : [],
       history: [{ role: "assistant", content: "Keep this opening" }] }))
     const source = useStoreMessageOption.getState()
     const session = usePlaygroundSessionStore.getState()

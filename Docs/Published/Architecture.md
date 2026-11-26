@@ -2,7 +2,7 @@
 
 This document gives new contributors a fast, opinionated tour of how tldw_server is structured and how the main pieces fit together at runtime. It complements the top-level `README.md` (high-level overview) and `Docs/Code_Documentation/Code_Map.md` (detailed code map).
 
-If you read **this file**, then **Code_Map.md**, and skim the module-specific developer guides, you will have a solid mental model of the system.
+Start with the [C4 architecture reference](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/c4.md) to see the system boundaries and follow a request into FastAPI, the end-user WebUI or the standalone Admin Panel. Use the [subsystem index](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/README.md) to find the module guide and source entry points for a change.
 
 - High-level intro and mental model
 - Repository and directory layout
@@ -22,7 +22,7 @@ At a high level, tldw_server is:
 - A set of **core domain modules** under `tldw_Server_API/app/core/` (AuthNZ, Media Ingestion, Chunking, Embeddings, RAG, Chat, Evaluations, MCP, etc.).
 - A **storage layer** using SQLite by default (PostgreSQL supported) plus ChromaDB for vectors, with per-user content and metadata.
 - A **provider layer** for commercial/local LLMs, STT/TTS backends, OCR, and connectors.
-- Optional **Next.js WebUI** at `apps/tldw-frontend/` and external clients (CLI tools, MCP-aware IDE integrations).
+- Optional **Next.js WebUI** at `apps/tldw-frontend/`, a separate **Admin Panel** at `admin-ui/`, and external clients such as CLI tools and MCP-aware IDE integrations.
 
 Think of the architecture as:
 
@@ -217,15 +217,10 @@ This section highlights common flows a new contributor will likely touch.
 
 ### 5.2 Chat with Retrieval
 
-1. Client calls `POST /api/v1/chat/completions` with messages and optional retrieval settings.
-2. Endpoint in `app/api/v1/endpoints/chat.py`:
-   - Resolves provider/model (from config, aliases, or request).
-   - Optionally calls `core/RAG/` to fetch context for retrieval-augmented replies.
-3. `core/Chat/` orchestrates:
-   - System/instruction messages.
-   - Context windows and truncation/compaction.
-   - Conversation persistence.
-4. `core/LLM_Calls/` sends the final request to the chosen provider and streams the response back to the client.
+1. In the WebUI's RAG mode, the [client](https://github.com/rmusser01/tldw_server/blob/dev/apps/packages/ui/src/hooks/chat-modes/ragMode.ts) calls `POST /api/v1/rag/search`. The [retrieval pipeline](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/rag.md) resolves and ranks sources.
+2. The client builds a grounded prompt from the returned sources and calls `POST /api/v1/chat/completions`.
+3. The [chat pipeline](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/chat-character.md) assembles the completion request and calls the configured provider through the [LLM gateway](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Architecture/llm-providers.md). Chat can stream the response back to the client.
+
 
 ### 5.3 Audio STT/TTS and Streaming
 

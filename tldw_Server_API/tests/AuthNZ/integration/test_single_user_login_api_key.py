@@ -80,6 +80,12 @@ def test_single_user_login_returns_api_key_and_authenticates(single_user_client)
     assert sessions_resp.status_code == 200
 
 
+def test_single_user_login_inserts_no_session_row(single_user_client):
+    client, password, api_key = single_user_client
+    assert client.post("/api/v1/auth/login", data={"username": "single_user", "password": password}).status_code == 200
+    assert client.get("/api/v1/auth/sessions", headers={"Authorization": f"Bearer {api_key}"}).json() == []
+
+
 def test_single_user_refresh_requires_api_key(single_user_client):
     client, password, api_key = single_user_client
 

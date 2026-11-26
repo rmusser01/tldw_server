@@ -1,3 +1,4 @@
+import type { NotesGraphResponse } from "@/services/note-graph-suggestions"
 import {
   act,
   fireEvent,
@@ -233,8 +234,9 @@ const graph = {
   radius_cap_applied: false,
   active_note_count: 2,
   all_notes_note_cap: 100,
-  all_notes_eligible: true
-}
+  all_notes_eligible: true,
+  manual_link_authorized: false
+} satisfies NotesGraphResponse
 
 const overlays = [
   {

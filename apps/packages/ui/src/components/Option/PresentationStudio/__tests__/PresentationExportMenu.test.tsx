@@ -41,7 +41,7 @@ beforeEach(() => {
     etag: 'W/"v3"',
     slides: savedSlides,
     isDirty: false,
-    autosaveState: "saved"
+    autosaveState: "idle"
   })
   mocks.exportPresentation.mockReset()
   mocks.exportPresentation.mockResolvedValue(new Blob(["export"]))

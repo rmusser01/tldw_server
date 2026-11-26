@@ -652,3 +652,44 @@ async def test_command_service_successful_write_returns_executor_result_and_vers
             "scope": scope,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_own_email_change_refusal_stops_before_the_executor(monkeypatch) -> None:
+    from tldw_Server_API.app.core.AuthNZ import email_change
+
+    async def _refuse(**_kwargs):
+        raise email_change.EmailChangeRefused("current_password_invalid", "Current password is incorrect. ...")
+
+    monkeypatch.setattr(email_change, "authorize_own_email_change", _refuse)
+    executor = _Executor()
+    command = ProfileUpdateCommand(
+        actor_user_id=7, target_user_id=7, updates=(("identity.email", "new@example.com"),),
+        roles=frozenset({"user"}), dry_run=False, current_password="wrong",
+    )
+    result = await ProfileCommandService(
+        db_pool=object(), profile_service=_ProfileService(), planner=_Planner(), executor=executor
+    ).apply(command, db_conn=object(), scope=None)
+    assert (result.status_code, result.error_code) == (403, "current_password_invalid")
+    assert result.skipped == ({"key": "identity.email", "message": "current_password_invalid"},)
+    assert executor.called is False
+
+
+@pytest.mark.asyncio
+async def test_email_change_for_another_user_skips_the_password_gate(monkeypatch) -> None:
+    from tldw_Server_API.app.core.AuthNZ import email_change
+
+    async def _must_not_run(**_kwargs):
+        raise AssertionError("an admin edit of another user needs no password")
+
+    monkeypatch.setattr(email_change, "authorize_own_email_change", _must_not_run)
+    executor = _Executor()
+    command = ProfileUpdateCommand(
+        actor_user_id=99, target_user_id=7, updates=(("identity.email", "new@example.com"),),
+        roles=frozenset({"platform_admin", "user"}), dry_run=False,
+    )
+    result = await ProfileCommandService(
+        db_pool=object(), profile_service=_ProfileService(), planner=_Planner(), executor=executor
+    ).apply(command, db_conn=object(), scope=None)
+    assert result.status_code == 200
+    assert executor.called is True

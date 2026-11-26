@@ -182,7 +182,7 @@ describe("ACPPermissionModal", () => {
         stopOperation={stopOperation}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Stop", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }))
     expect(stopOperation).toHaveBeenCalledTimes(1)
     expect(approvePermission).not.toHaveBeenCalled()
     expect(denyPermission).not.toHaveBeenCalled()

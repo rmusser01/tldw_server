@@ -249,6 +249,31 @@ class AuthnzTokenBlacklistRepo:
             )
             raise
 
+    async def get_reason_for_jti(self, jti: str) -> str | None:
+        """
+        Return the ``reason`` stored for a blacklisted JTI, or None.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                if self._is_postgres_backend():
+                    row = await conn.fetchrow(
+                        "SELECT reason FROM token_blacklist WHERE jti = $1 "
+                        "ORDER BY expires_at DESC LIMIT 1",
+                        jti,
+                    )
+                    return row["reason"] if row else None
+
+                cursor = await conn.execute(
+                    "SELECT reason FROM token_blacklist WHERE jti = ? "
+                    "ORDER BY expires_at DESC LIMIT 1",
+                    (jti,),
+                )
+                result = await cursor.fetchone()
+                return result[0] if result else None
+        except Exception as exc:  # pragma: no cover - surfaced via callers
+            logger.error(f"AuthnzTokenBlacklistRepo.get_reason_for_jti failed: {exc}")
+            raise
+
     async def cleanup_expired(self, now: datetime) -> int:
         """
         Delete expired blacklist rows and return the approximate count.
