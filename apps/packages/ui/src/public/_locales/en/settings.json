@@ -3431,6 +3431,93 @@
   "quickIngestSettings_presetHint": {
     "message": "Changes apply the next time you open Quick Ingest."
   },
+  "quickIngestSettings_presetChoice": {
+    "message": "Preset to edit"
+  },
+  "quickIngestSettings_defaultsHint": {
+    "message": "Edits are saved for future ingests that use this preset."
+  },
+  "quickIngestSettings_editorTitle": {
+    "message": "{{preset}} preset"
+  },
+  "quickIngestSettings_destination": {
+    "message": "Destination"
+  },
+  "quickIngestSettings_saveToMedia": {
+    "message": "Save to Media"
+  },
+  "quickIngestSettings_createDrafts": {
+    "message": "Create review drafts"
+  },
+  "quickIngestSettings_extractOnly": {
+    "message": "Extract without saving"
+  },
+  "quickIngestSettings_draftHelp": {
+    "message": "Review extracted content in this browser before saving it to Media."
+  },
+  "quickIngestSettings_extractHelp": {
+    "message": "Read the extracted content in the result without creating a Media record."
+  },
+  "quickIngestSettings_mediaHelp": {
+    "message": "Completed sources are saved directly to Media."
+  },
+  "quickIngestSettings_providerNeeded": {
+    "message": "Choose an analysis provider or turn off Analysis before using this preset."
+  },
+  "quickIngestSettings_providerHelp": {
+    "message": "Choose a configured provider or enter its name."
+  },
+  "quickIngestSettings_sourceFormats": {
+    "message": "Source formats"
+  },
+  "quickIngestSettings_speakers": {
+    "message": "Identify speakers in audio"
+  },
+  "quickIngestSettings_scans": {
+    "message": "Read text from scanned documents"
+  },
+  "quickIngestSettings_captions": {
+    "message": "Use video captions"
+  },
+  "quickIngestSettings_saveFailed": {
+    "message": "Could not save the preset change. Try again."
+  },
+  "quickIngestSettings_resetFailed": {
+    "message": "Could not reset the presets. Try again."
+  },
+  "quickIngestSettings_undoFailed": {
+    "message": "Could not restore the presets. Try Undo again."
+  },
+  "quickIngestSettings_resetOne": {
+    "message": "Reset {{preset}} preset"
+  },
+  "quickIngestSettings_resetOneNotice": {
+    "message": "{{preset}} reset to defaults."
+  },
+  "quickIngestSettings_resetManyNotice": {
+    "message": "{{presets}} reset to defaults."
+  },
+  "quickIngestSettings_undo": {
+    "message": "Undo"
+  },
+  "quickIngestSettings_restored": {
+    "message": "Previous preset settings restored."
+  },
+  "quickIngestSettings_sharedOcr": {
+    "message": "These text recognition settings apply across presets."
+  },
+  "quickIngestSettings_advancedSearch": {
+    "message": "Search advanced fields"
+  },
+  "quickIngestSettings_advancedNoMatches": {
+    "message": "No matching advanced fields."
+  },
+  "quickIngestSettings_unset": {
+    "message": "Unset"
+  },
+  "quickIngestSettings_unsetField": {
+    "message": "Unset {{field}}"
+  },
   "quickIngestSettings_resetAll": {
     "message": "Reset all presets"
   },
