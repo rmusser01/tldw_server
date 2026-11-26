@@ -9,6 +9,7 @@ site is checked with a plain task cancel and with an anyio scope.
 from __future__ import annotations
 
 import asyncio
+import gc
 import platform
 import sys
 import threading
@@ -26,6 +27,50 @@ from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStat
 pytestmark = pytest.mark.unit
 
 CANCEL_MODES = pytest.mark.parametrize("via_anyio_scope", [False, True], ids=["task-cancel", "anyio-scope"])
+
+
+@pytest.mark.asyncio
+async def test_engine_failure_completed_before_cancel_unwinds_is_retrieved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed call can finish after cancellation but before the holder's finally block."""
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled: list[dict] = []
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    failed_call = loop.create_future()
+    pending_calls = [failed_call]
+    monkeypatch.setattr(tts_utils, "run_tts_blocking_call", lambda *_args: pending_calls.pop())
+    lock = asyncio.Lock()
+
+    async def request() -> None:
+        """Hold the engine lock while the controlled call is pending."""
+        async with tts_utils.hold_tts_engine(lock) as run:
+            await run(lambda: None)
+
+    caller = asyncio.create_task(request())
+    try:
+        await asyncio.sleep(0)
+        assert lock.locked()
+        caller.cancel()
+        failed_call.set_exception(RuntimeError("raw-engine-race-secret"))
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        assert not lock.locked()
+        caller = None
+        failed_call = None
+        await asyncio.sleep(0)
+        gc.collect()
+        await asyncio.sleep(0)
+    finally:
+        if caller is not None:
+            caller.cancel()
+            await asyncio.gather(caller, return_exceptions=True)
+        if failed_call is not None:
+            failed_call.cancel()
+            if not failed_call.cancelled():
+                failed_call.exception()
+        loop.set_exception_handler(previous_handler)
+
+    assert unhandled == []
 
 
 class _Gate:
