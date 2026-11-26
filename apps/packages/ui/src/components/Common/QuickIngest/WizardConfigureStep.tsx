@@ -83,6 +83,8 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
   const { t } = useTranslation(["option"])
   const { state, setPreset, setCustomOptions, goNext, goBack } = useIngestWizard()
   const { queueItems, selectedPreset, presetConfig } = state
+  const destination = presetConfig.reviewBeforeStorage ? "draft" : presetConfig.storeRemote ? "media" : "extract"
+  const [destinationBeforePreset, setDestinationBeforePreset] = React.useState<string | null>(null)
   const eligibleItems = React.useMemo(() => processingItems ?? getEligibleQueueItems(queueItems), [processingItems, queueItems])
 
   const qi = React.useCallback(
@@ -648,7 +650,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
       <AutoComplete
         ref={analysisProviderRef}
         id="quick-ingest-analysis-provider"
-        className="w-full"
+        className={inline ? "qi-analysis-provider w-full" : "w-full"}
         aria-label={qi("analysisProvider.label", "Analysis provider")}
         aria-describedby={`quick-ingest-analysis-provider-help${visibleAnalysisProviderWarning ? " quick-ingest-analysis-provider-warning" : ""}`}
         aria-invalid={visibleAnalysisProviderWarning ? true : undefined}
@@ -695,11 +697,6 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
           {visibleAnalysisProviderWarning}
         </p>
       ) : null}
-      {inline && requiredAnalysisProviderWarning && (
-        <Button type="link" className="!h-auto !px-0 !py-1" onClick={() => handleAnalysisToggle(false)}>
-          {qi("oneScreen.skipAnalysis", "Skip analysis for this import")}
-        </Button>
-      )}
     </div>
   ) : null
 
@@ -707,6 +704,11 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
     return requiredAnalysisProviderWarning || editingProvider ? providerField : null
   }
 
+  const destinationLabels = {
+    media: qi("oneScreen.saveToMedia", "Save to Media"),
+    draft: qi("oneScreen.createDrafts", "Create review drafts"),
+    extract: qi("oneScreen.extractOnly", "Extract without saving"),
+  }
   const advancedToggle = (
     <button
       type="button"
@@ -730,7 +732,10 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
       <PresetSelector
         qi={qi}
         value={selectedPreset}
-        onChange={setPreset}
+        onChange={preset => {
+          if (inline) setDestinationBeforePreset(destination)
+          setPreset(preset)
+        }}
         queueItems={eligibleItems}
         compact={inline}
       />
@@ -742,16 +747,25 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
             id="quick-ingest-destination"
             aria-describedby={presetConfig.reviewBeforeStorage ? "quick-ingest-draft-help" : undefined}
             className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
-            value={presetConfig.reviewBeforeStorage ? "draft" : presetConfig.storeRemote ? "media" : "extract"}
-            onChange={event => setCustomOptions({
-              storeRemote: event.target.value !== "extract",
-              reviewBeforeStorage: event.target.value === "draft",
-            })}
+            value={destination}
+            onChange={event => {
+              setDestinationBeforePreset(null)
+              setCustomOptions({
+                storeRemote: event.target.value !== "extract",
+                reviewBeforeStorage: event.target.value === "draft",
+              })
+            }}
           >
-            <option value="media">{qi("oneScreen.saveToMedia", "Save to Media")}</option>
-            <option value="draft">{qi("oneScreen.createDrafts", "Create review drafts")}</option>
-            <option value="extract">{qi("oneScreen.extractOnly", "Extract without saving")}</option>
+            <option value="media">{destinationLabels.media}</option>
+            <option value="draft">{destinationLabels.draft}</option>
+            <option value="extract">{destinationLabels.extract}</option>
           </select>
+          <p role="status" className="text-xs font-normal text-text">
+            {destinationBeforePreset && destinationBeforePreset !== destination && qi(
+              "oneScreen.presetChangedDestination", "This preset changed the destination to {{destination}}.",
+              { destination: destinationLabels[destination] }
+            )}
+          </p>
           {presetConfig.reviewBeforeStorage && (
             <p id="quick-ingest-draft-help" className="text-xs font-normal text-text-muted">
               {qi("oneScreen.reviewDraftHelp", "Review extracted content in this browser before saving it to Media.")}
@@ -817,7 +831,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
               </div>
             </Tooltip>
 
-            <Tooltip
+            {(!inline || destination === "media") && <Tooltip
               title={qi(
                 "overwriteTooltip",
                 "Replace existing content if URL was previously ingested"
@@ -836,7 +850,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
                   {qi("configure.overwriteHint", "Replace content if previously ingested")}
                 </p>
               </div>
-            </Tooltip>
+            </Tooltip>}
           </div>
 
           {providerField}

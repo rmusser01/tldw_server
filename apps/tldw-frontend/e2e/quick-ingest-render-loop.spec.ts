@@ -1,5 +1,6 @@
 import type { Locator, Page, TestInfo } from "@playwright/test"
 import { test, expect, seedAuth } from "./smoke/smoke.setup"
+import { installBrowserFixture } from "./utils/media-ux-fixture"
 
 test.describe.configure({ timeout: 120_000 })
 
@@ -98,16 +99,28 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await expect(save).toBeInViewport({ ratio: 1 })
     const provider = dialog.getByRole("combobox", { name: "Analysis provider" })
     await expect(provider).toHaveAttribute("aria-describedby", /quick-ingest-analysis-provider-warning/)
-    await dialog.getByRole("button", { name: "Choose analysis provider", exact: true }).click()
+    const actions = dialog.getByRole("group", { name: "Import actions" })
+    await expect(dialog.getByText("AI analysis needs a provider", { exact: true })).toHaveCount(1)
+    const choose = actions.getByRole("button", { name: "Choose provider", exact: true })
+    const skip = actions.getByRole("button", { name: "Skip analysis for this import" })
+    await expect(choose).toBeInViewport({ ratio: 1 })
+    await expect(skip).toBeInViewport({ ratio: 1 })
+    await capture(page, testInfo, "provider-required")
+    const placeholder = dialog.getByText("Choose or enter a provider", { exact: true })
+    const mutedColor = await dialog.locator("label[for='quick-ingest-analysis-provider']").evaluate(label => {
+      const muted = getComputedStyle(label).getPropertyValue("--color-text-muted").trim()
+      return "rgb(" + muted.split(/\s+/).join(", ") + ")"
+    })
+    await expect(placeholder).toHaveCSS("color", mutedColor)
+    await expect(placeholder).toHaveCSS("opacity", "1")
+    await choose.click()
     await expect(provider).toBeFocused()
     // Ant Design clips its internal input to the painted combobox border.
     await expect(dialog.locator(".ant-select").filter({ has: page.getByRole("combobox", { name: "Analysis provider" }) })).toBeInViewport({ ratio: 1 })
 
-    const skip = dialog.getByRole("button", { name: "Skip analysis for this import" })
-    await skip.scrollIntoViewIfNeeded()
-    await capture(page, testInfo, "provider-required")
     await skip.click()
     await expect(save).toBeEnabled()
+    await expect(save).toBeFocused()
     await counts.scrollIntoViewIfNeeded()
     if (viewport.width === 390) await expectPhoneLayout(dialog, save, viewport)
     await capture(page, testInfo, "mixed-queue")
@@ -119,6 +132,20 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await expect(dialog.locator(".qi-web-footer")).toBeInViewport({ ratio: 1 })
     await expect(save).toBeInViewport({ ratio: 1 })
     await capture(page, testInfo, "expanded-settings")
+
+    const preset = dialog.getByRole("combobox", { name: "Processing preset" })
+    const destination = dialog.getByRole("combobox", { name: "Destination" })
+    const overwrite = dialog.getByRole("switch", { name: /overwrite existing/i })
+    await expect(overwrite).toBeVisible()
+    await preset.selectOption("deep")
+    await expect(destination).toHaveValue("draft")
+    await expect(dialog.getByText("This preset changed the destination to Create review drafts.")).toBeVisible()
+    await expect(overwrite).toHaveCount(0)
+    await destination.selectOption("extract")
+    await expect(overwrite).toHaveCount(0)
+    await preset.selectOption("quick")
+    await expect(destination).toHaveValue("media")
+    await expect(overwrite).toBeVisible()
 
     await dialog.getByRole("button", { name: "Hide settings" }).click()
     await dialog.getByRole("button", { name: "Edit link" }).click()
@@ -132,6 +159,46 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     expect(renderLoopErrors).toEqual([])
   })
 }
+
+test("Retry connection keeps an offline queue and its unsubmitted link", async ({ page }, testInfo) => {
+  const webUrl = new URL(process.env.TLDW_WEB_URL || "http://localhost:8080").origin
+  const fixture = await installBrowserFixture(page, { webUrl })
+  let online = false
+  await page.route("**/api/v1/health/live", route => {
+    if (online || route.request().method() !== "GET") return route.fallback()
+    return route.fulfill({
+      status: 503, headers: { "access-control-allow-origin": "*" },
+      json: { detail: "Server temporarily unavailable" },
+    })
+  })
+  await page.goto(webUrl + "/media", { waitUntil: "domcontentloaded" })
+  await expect(page.getByRole("button", { name: "Retry connection", exact: true }).first()).toBeVisible()
+  await page.getByRole("button", { name: "Quick Ingest", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Quick Ingest", exact: true })
+  await addLinks(dialog, ["https://example.org/offline-notes"])
+  const input = dialog.getByRole("textbox", { name: /URLs input/i })
+  const unsent = "https://example.org/next-survey"
+  await input.fill(unsent)
+
+  const actions = dialog.getByRole("group", { name: "Import actions" })
+  const save = actions.getByRole("button", { name: "Save 1 source" })
+  const retry = actions.getByRole("button", { name: "Retry connection" })
+  await expect(save).toBeDisabled()
+  await expect(save).toHaveAccessibleDescription("Server offline")
+  await expect(retry).toBeInViewport({ ratio: 1 })
+  await expect(actions.getByRole("button", { name: "Choose provider" })).toHaveCount(0)
+  await capture(page, testInfo, "offline-retry")
+  const recovered = page.waitForResponse(response => response.url().endsWith("/api/v1/health/live") && response.ok())
+  online = true
+  await retry.click()
+  await recovered
+  await actions.getByRole("button", { name: "Skip analysis for this import" }).click()
+  await expect(save).toBeEnabled()
+  await expect(save).toBeFocused()
+  await expect(input).toHaveValue(unsent)
+  await expect(dialog.getByRole("status", { name: "Source counts" })).toHaveText("1 ready")
+  expect(fixture.jobs.size).toBe(0)
+})
 
 test("Quick Ingest hydrates the saved Standard analysis provider from WebUI storage", async ({ page }) => {
   await page.addInitScript(() => {

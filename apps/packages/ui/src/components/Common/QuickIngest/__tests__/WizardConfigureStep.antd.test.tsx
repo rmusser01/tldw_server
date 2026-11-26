@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -10,6 +10,8 @@ import {
 } from "@/components/Common/QuickIngest/IngestWizardContext"
 import { resolvePresetMap } from "@/components/Common/QuickIngest/presets"
 import { WizardConfigureStep } from "@/components/Common/QuickIngest/WizardConfigureStep"
+import { WebIngestDraft } from "../WebIngestDraft"
+import type { WizardQueueItem } from "../types"
 
 const mocks = vi.hoisted(() => ({
   getProvidersStatus: vi.fn(),
@@ -19,11 +21,11 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
       key: string,
-      defaultValueOrOptions?: string | { defaultValue?: string }
+      defaultValueOrOptions?: string | { defaultValue?: string; destination?: string }
     ) =>
       typeof defaultValueOrOptions === "string"
         ? defaultValueOrOptions
-        : defaultValueOrOptions?.defaultValue ?? key,
+        : (defaultValueOrOptions?.defaultValue ?? key).replace("{{destination}}", defaultValueOrOptions?.destination ?? ""),
   }),
 }))
 
@@ -35,8 +37,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   },
 }))
 
-vi.mock("@/components/Common/QuickIngest/PresetSelector", () => ({
-  PresetSelector: () => null,
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => ({ capabilities: {} }),
 }))
 
 const ProviderValue = () => {
@@ -53,6 +55,27 @@ const RunOptions = () => {
   return <output data-testid="run-analysis">{state.presetConfig.common.perform_analysis ? "on" : "off"}</output>
 }
 
+const sources: WizardQueueItem[] = [{
+  id: "notes", kind: "url", url: "https://example.org/notes", detectedType: "web",
+  icon: "Globe", fileSize: 0, validation: { valid: true },
+}]
+
+function renderWebDraft(isOnlineForIngest: boolean, onRetryConnection = vi.fn()) {
+  const savedStandard = resolvePresetMap().standard
+  render(
+    <IngestWizardProvider initialState={{ presetConfig: savedStandard, queueItems: sources }}>
+      <div role="dialog">
+        <WebIngestDraft processingItems={sources} replacementItems={[]} visible
+          isOnlineForIngest={isOnlineForIngest} isCheckingConnection={false}
+          onRetryConnection={onRetryConnection} connectionRecoveryMessage="Cannot reach the server."
+          onProcess={vi.fn()} />
+      </div>
+      <RunOptions />
+    </IngestWizardProvider>
+  )
+  return savedStandard
+}
+
 describe("WizardConfigureStep Ant Design provider selection", () => {
   beforeEach(() => {
     mocks.getProvidersStatus.mockReset()
@@ -65,23 +88,40 @@ describe("WizardConfigureStep Ant Design provider selection", () => {
     })
   })
 
-  it("offers a run-only skip for the missing provider before commit", async () => {
+  it("puts both provider remedies beside submission and focuses the enabled action after a run-only skip", async () => {
     const user = userEvent.setup()
-    const savedStandard = resolvePresetMap().standard
-    render(
-      <IngestWizardProvider initialState={{ presetConfig: savedStandard }}>
-        <WizardConfigureStep inline />
-        <RunOptions />
-      </IngestWizardProvider>
-    )
+    const savedStandard = renderWebDraft(true)
 
+    const actions = within(screen.getByRole("group", { name: "Import actions" }))
+    const submit = actions.getByRole("button", { name: "Save 1 source" })
+    expect(submit).toBeDisabled()
+    expect(screen.getAllByText("AI analysis needs a provider")).toEqual([actions.getByText("AI analysis needs a provider")])
     const provider = screen.getByRole("combobox", { name: "Analysis provider" })
     expect(provider).toHaveAttribute("aria-invalid", "true")
-    expect(screen.queryByRole("button", { name: "Next" })).toBeNull()
-    await user.click(screen.getByRole("button", { name: "Skip analysis for this import" }))
+    await user.click(actions.getByRole("button", { name: "Choose provider" }))
+    expect(provider).toHaveFocus()
+    await user.click(actions.getByRole("button", { name: "Skip analysis for this import" }))
+    expect(submit).toBeEnabled()
+    expect(submit).toHaveFocus()
     expect(screen.queryByRole("combobox", { name: "Analysis provider" })).toBeNull()
     expect(screen.getByTestId("run-analysis")).toHaveTextContent("off")
     expect(savedStandard.common.perform_analysis).toBe(true)
+  })
+
+  it("prioritizes connection recovery in the footer and keeps the source editor available", async () => {
+    const user = userEvent.setup()
+    const retry = vi.fn()
+    renderWebDraft(false, retry)
+    const actions = within(screen.getByRole("group", { name: "Import actions" }))
+    const submit = actions.getByRole("button", { name: "Save 1 source" })
+    expect(submit).toBeDisabled()
+    expect(submit).toHaveAccessibleDescription(/server offline/i)
+    expect(actions.queryByRole("button", { name: "Choose provider" })).toBeNull()
+    const linkInput = screen.getByRole("textbox", { name: "URL input area" })
+    await user.type(linkInput, "https://example.org/next")
+    expect(linkInput).toHaveValue("https://example.org/next")
+    await user.click(actions.getByRole("button", { name: "Retry connection" }))
+    expect(retry).toHaveBeenCalledTimes(1)
   })
 
   it("keeps the compact provider editor focused until a custom name is complete", async () => {
@@ -128,10 +168,18 @@ describe("WizardConfigureStep Ant Design provider selection", () => {
       </IngestWizardProvider>
     )
     const destination = screen.getByRole("combobox", { name: "Destination" })
+    const overwrite = () => screen.queryByRole("switch", { name: /overwrite existing/i })
+    expect(overwrite()).toBeVisible()
     await user.selectOptions(destination, screen.getByRole("option", { name: "Create review drafts" }))
     expect(screen.getByTestId("destination")).toHaveTextContent("[true,true]")
+    expect(overwrite()).toBeNull()
     await user.selectOptions(destination, screen.getByRole("option", { name: "Extract without saving" }))
     expect(screen.getByTestId("destination")).toHaveTextContent("[false,false]")
+    expect(overwrite()).toBeNull()
+    await user.selectOptions(screen.getByRole("combobox", { name: "Processing preset" }), "quick")
+    expect(destination).toHaveValue("media")
+    expect(screen.getByText("This preset changed the destination to Save to Media.")).toHaveAttribute("role", "status")
+    expect(overwrite()).toBeVisible()
   })
 
   it("selects a configured provider from the real AutoComplete with the keyboard", async () => {

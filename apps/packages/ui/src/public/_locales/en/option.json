@@ -7296,7 +7296,13 @@
     "message": "AI analysis needs a provider"
   },
   "quickIngest_web_chooseProvider": {
-    "message": "Choose analysis provider"
+    "message": "Choose provider"
+  },
+  "quickIngest_web_importActions": {
+    "message": "Import actions"
+  },
+  "quickIngest_web_checkingServer": {
+    "message": "Checking server connection…"
   },
   "quickIngest_web_replaceTitle": {
     "message": "Review replacements"
@@ -7534,6 +7540,9 @@
   },
   "quickIngest_oneScreen_preset": {
     "message": "Processing preset"
+  },
+  "quickIngest_oneScreen_presetChangedDestination": {
+    "message": "This preset changed the destination to {{destination}}."
   },
   "quickIngest_source_pasteAgain": {
     "message": "Paste again"

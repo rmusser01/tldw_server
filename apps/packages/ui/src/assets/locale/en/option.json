@@ -1010,7 +1010,9 @@
       "analysisOff": "AI analysis off",
       "analysisWithProvider": "AI analysis with {{provider}}",
       "providerNeeded": "AI analysis needs a provider",
-      "chooseProvider": "Choose analysis provider",
+      "chooseProvider": "Choose provider",
+      "importActions": "Import actions",
+      "checkingServer": "Checking server connection…",
       "replaceTitle": "Review replacements",
       "replaceHelp": "Existing Media items that match these sources may be replaced.",
       "editSources": "Back to sources",
@@ -1128,7 +1130,8 @@
       "createDrafts": "Create review drafts",
       "extractOnly": "Extract without saving",
       "reviewDraftHelp": "Review extracted content in this browser before saving it to Media.",
-      "preset": "Processing preset"
+      "preset": "Processing preset",
+      "presetChangedDestination": "This preset changed the destination to {{destination}}."
     },
     "invalidUrl": "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space.",
     "configureEligibleCount": "{count, plural, one {# eligible item} other {# eligible items}} in this run",

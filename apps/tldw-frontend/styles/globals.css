@@ -44,7 +44,8 @@
   border-top: 1px solid rgb(var(--color-border));
 }
 
-.qi-web-modal .ant-input::placeholder {
+.qi-web-modal .ant-input::placeholder,
+.qi-web-modal .qi-analysis-provider .ant-select-placeholder {
   color: rgb(var(--color-text-muted)) !important;
   opacity: 1;
 }
