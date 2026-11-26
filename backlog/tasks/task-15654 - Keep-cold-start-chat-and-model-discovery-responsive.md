@@ -1,5 +1,5 @@
 ---
-id: TASK-15652
+id: TASK-15654
 title: Keep cold-start chat and model discovery responsive
 status: In Progress
 labels:
