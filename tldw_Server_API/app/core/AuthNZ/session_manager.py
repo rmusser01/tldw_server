@@ -11,7 +11,7 @@ import os
 import re
 import stat
 import threading
-from contextlib import contextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -63,6 +63,10 @@ from tldw_Server_API.app.core.AuthNZ.repos.token_blacklist_repo import AuthnzTok
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.AuthNZ.sign_in_alert import (
+    SIGN_IN_ALERT_NONCRITICAL_EXCEPTIONS,
+    schedule_new_sign_in_alert,
+)
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
@@ -1090,6 +1094,7 @@ class SessionManager:
         device_id: Optional[str] = None,
         expires_at_override: Optional[datetime] = None,
         refresh_expires_at_override: Optional[datetime] = None,
+        alert_new_sign_in: bool = False,
     ) -> dict[str, Any]:
         """
         Create a new session for a user
@@ -1103,6 +1108,7 @@ class SessionManager:
             device_id: Optional device identifier
             expires_at_override: Optional override for access token expiry
             refresh_expires_at_override: Optional override for refresh token expiry
+            alert_new_sign_in: Write a new-sign-in inbox alert (best-effort, off the request path)
 
         Returns:
             Session information dictionary
@@ -1182,6 +1188,22 @@ class SessionManager:
                     logger.info(f"Session cap evicted {len(evicted)} session(s) [redacted]")
                 else:
                     logger.info(f"Session cap evicted {len(evicted)} session(s) for user {user_id}")
+
+            if alert_new_sign_in:
+                # Own try: the outer except would turn an error here into SessionError after the row exists.
+                try:
+                    schedule_new_sign_in_alert(
+                        user_id=user_id,
+                        session_id=session_id,
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                        device_id=device_id,
+                        db_pool=db_pool,
+                        evicted_device_ids=tuple(e.get("device_id") for e in evicted),
+                    )
+                except SIGN_IN_ALERT_NONCRITICAL_EXCEPTIONS as exc:
+                    log_counter("auth_sign_in_alert_failed")
+                    logger.bind(error_type=type(exc).__name__).warning("New sign-in alert not scheduled")
 
             # Cache in Redis if available
             if self.redis_client:
@@ -1413,6 +1435,27 @@ class SessionManager:
                 )
             return session_details is not None
 
+    @asynccontextmanager
+    async def revoke_on_failure(self, session_id: int, user_id: int):
+        """
+        Guard the steps after ``create_session`` commits a placeholder row.
+
+        If the body raises, best-effort revoke that row (so it does not stay live
+        holding temporary tokens until refresh expiry), then re-raise the original error.
+        """
+        try:
+            yield
+        except Exception:
+            try:
+                await self.revoke_session(
+                    session_id, reason="sign_in_failed", expected_user_id=int(user_id)
+                )
+            except Exception as revoke_exc:  # noqa: BLE001 - best-effort; must not mask the original error
+                logger.bind(exception_type=type(revoke_exc).__name__).warning(
+                    "Could not revoke the placeholder session after a failed sign-in"
+                )
+            raise
+
     async def revoke_all_user_sessions(
         self,
         user_id: int,
@@ -1625,6 +1668,9 @@ class SessionManager:
                 encrypted_access_token=encrypted_access_token,
                 encrypted_refresh_token=encrypted_refresh_token,
             )
+            if user_id is None:
+                # No live row to update: the session was revoked (e.g. cap-evicted) meanwhile.
+                raise SessionError("Session is no longer active")
 
             expires_at_dt = access_exp
             if isinstance(expires_at_dt, str):

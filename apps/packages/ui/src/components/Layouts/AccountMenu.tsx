@@ -1,7 +1,14 @@
 import React from "react"
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { Bell, ChevronRight, LogOut, Settings, UserRound } from "lucide-react"
+import {
+  Bell,
+  ChevronRight,
+  LogOut,
+  MonitorSmartphone,
+  Settings,
+  UserRound
+} from "lucide-react"
 import { tldwAuth, type UserInfo } from "@/services/tldw/TldwAuth"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
@@ -122,6 +129,14 @@ export function AccountMenu({
         <Link to="/settings/tldw" onClick={onClose} className={rowClass}>
           <UserRound className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{t("header.accountSettings", "Account settings")}</span>
+          <ChevronRight
+            className="ml-auto h-4 w-4 shrink-0"
+            aria-hidden="true"
+          />
+        </Link>
+        <Link to="/settings/sessions" onClick={onClose} className={rowClass}>
+          <MonitorSmartphone className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{t("header.activeSessions", "Active sessions")}</span>
           <ChevronRight
             className="ml-auto h-4 w-4 shrink-0"
             aria-hidden="true"

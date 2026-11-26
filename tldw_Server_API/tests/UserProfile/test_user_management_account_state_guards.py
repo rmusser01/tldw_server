@@ -5,6 +5,8 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.API_Deps.interactive_session_deps import require_interactive_session
+from tldw_Server_API.app.core.AuthNZ.interactive_session import InteractiveSession
 from tldw_Server_API.app.main import app
 
 
@@ -59,6 +61,11 @@ def test_user_management_endpoints_reject_inactive_or_unverified_users(
         }
 
     monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
+    # Ending sessions needs a browser session (API keys get 403 first); this test is about the
+    # account-state guard, so present one.
+    monkeypatch.setitem(
+        app.dependency_overrides, require_interactive_session, lambda: InteractiveSession(user_id=1, session_id=1)
+    )
 
     with TestClient(app) as client:
         request_kwargs: dict[str, object] = {"headers": auth_headers}

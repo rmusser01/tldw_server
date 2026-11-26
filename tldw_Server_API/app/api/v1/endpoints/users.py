@@ -15,6 +15,11 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps.interactive_session_deps import (
+    get_current_session_id,
+    require_interactive_session,
+)
+from tldw_Server_API.app.core.AuthNZ.interactive_session import InteractiveSession
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequireRole,
     get_auth_principal,
@@ -987,6 +992,7 @@ async def revoke_api_key(
 async def list_user_sessions(
     principal: AuthPrincipal = Depends(get_auth_principal),
     session_manager: SessionManager = Depends(get_session_manager_dep),
+    current_session_id: Optional[int] = Depends(get_current_session_id),
 ) -> list[SessionResponse]:
     """
     List all active sessions for the current user.
@@ -1005,6 +1011,7 @@ async def list_user_sessions(
     return await _auth_list_sessions(
         current_user=current_user,
         session_manager=session_manager,
+        current_session_id=current_session_id,
     )
 
 
@@ -1013,6 +1020,7 @@ async def revoke_session(
     session_id: int,
     principal: AuthPrincipal = Depends(get_auth_principal),
     session_manager: SessionManager = Depends(get_session_manager_dep),
+    interactive: InteractiveSession = Depends(require_interactive_session),
 ) -> MessageResponse:
     """
     Revoke a specific session.
@@ -1040,6 +1048,7 @@ async def revoke_session(
         session_id=session_id,
         current_user=current_user,
         session_manager=session_manager,
+        interactive=interactive,
     )
 
 
@@ -1047,6 +1056,8 @@ async def revoke_session(
 async def revoke_all_sessions(
     principal: AuthPrincipal = Depends(get_auth_principal),
     session_manager: SessionManager = Depends(get_session_manager_dep),
+    keep_current: bool = Query(False, description="Keep the caller's own session."),
+    interactive: InteractiveSession = Depends(require_interactive_session),
 ) -> MessageResponse:
     """
     Revoke all sessions for the current user.
@@ -1067,6 +1078,8 @@ async def revoke_all_sessions(
     return await _auth_revoke_all_sessions(
         current_user=current_user,
         session_manager=session_manager,
+        keep_current=keep_current,
+        interactive=interactive,
     )
 
 

@@ -141,15 +141,21 @@ async def hold_tts_engine(lock: asyncio.Lock) -> AsyncIterator[Callable[..., Awa
     last_call: asyncio.Future | None = None
 
     async def run(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        """Wait for a thread call without cancelling the engine's owned work."""
         nonlocal last_call
         last_call = asyncio.ensure_future(run_tts_blocking_call(func, *args, **kwargs))
-        return await asyncio.shield(last_call)
+        if not last_call.done():
+            # The lock owner handles late failures; shield would also log them raw.
+            await asyncio.wait({last_call})
+        return last_call.result()
 
     try:
         yield run
     finally:
-        if last_call is None or last_call.done():
+        if last_call is None:
             lock.release()
+        elif last_call.done():
+            _release_engine_lock(lock, last_call)
         else:
             # ponytail: a cancelled model load's result is discarded, so the next holder loads again
             # (after it, not alongside it); store the model from the thread if that cost matters.

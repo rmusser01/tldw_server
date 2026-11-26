@@ -7645,21 +7645,28 @@ class CollectionsDatabase:
         include_archived: bool = False,
         limit: int = 100,
         offset: int = 0,
+        kind: str | None = None,
     ) -> list[UserNotificationRow]:
         params: list[Any] = [self.user_id]
         where = "user_id = ?"
         if not include_archived:
             where += " AND archived_at IS NULL AND dismissed_at IS NULL"
+        if kind is not None:
+            where += " AND kind = ?"
+            params.append(kind)
         q = f"SELECT * FROM user_notifications WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?"  # nosec B608
         params.extend([limit, offset])
         rows = self.backend.execute(q, tuple(params)).rows
         return [self._notification_row_from_db(row) for row in rows]
 
-    def count_user_notifications(self, *, include_archived: bool = False) -> int:
+    def count_user_notifications(self, *, include_archived: bool = False, kind: str | None = None) -> int:
         params: list[Any] = [self.user_id]
         where = "user_id = ?"
         if not include_archived:
             where += " AND archived_at IS NULL AND dismissed_at IS NULL"
+        if kind is not None:
+            where += " AND kind = ?"
+            params.append(kind)
         row = self.backend.execute(
             f"SELECT COUNT(*) AS total FROM user_notifications WHERE {where}",  # nosec B608
             tuple(params),
@@ -7818,6 +7825,17 @@ class CollectionsDatabase:
         if not row:
             raise KeyError("user_notification_not_found")
         return self._notification_row_from_db(row)
+
+    def list_user_notifications_of_kind(self, kind: str, ids: list[int]) -> list[UserNotificationRow]:
+        """The caller's notifications of ``kind`` among ``ids`` (one query, any list size)."""
+        if not ids:
+            return []
+        placeholders = ",".join(["?"] * len(ids))
+        rows = self.backend.execute(
+            f"SELECT * FROM user_notifications WHERE user_id = ? AND kind = ? AND id IN ({placeholders})",  # nosec B608
+            (self.user_id, kind, *ids),
+        ).rows
+        return [self._notification_row_from_db(row) for row in rows]
 
     def mark_user_notifications_read(self, ids: list[int]) -> int:
         if not ids:

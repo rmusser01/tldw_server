@@ -143,6 +143,7 @@ vi.mock("@web/components/notifications/NotificationLifecycleProvider", () => ({
   useNotificationLifecycle: () => ({ state: "idle", unreadCount: 0, tryAgain: vi.fn() })
 }))
 vi.mock("@web/components/notifications/NotificationToastBridge", () => ({ NotificationToastBridge: () => null }))
+vi.mock("@web/components/notifications/NewSignInBanner", () => ({ NewSignInBanner: () => null }))
 vi.mock("@/components/Timeline", () => ({ TimelineModal: () => null }))
 vi.mock("@/components/Common/TutorialRunner", () => ({ TutorialRunner: () => null }))
 vi.mock("@/components/Common/TutorialPrompt", () => ({ TutorialPrompt: () => null }))

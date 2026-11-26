@@ -149,13 +149,16 @@ class AuthnzSessionsRepo:
         lock for ``user_id`` on another connection: this call would wait on itself.
 
         Returns the new id and the evicted rows (``id, user_id, access_jti,
-        refresh_jti, expires_at, refresh_expires_at, last_activity, created_at``)
+        refresh_jti, expires_at, refresh_expires_at, last_activity, created_at, device_id``)
         for blacklisting after commit.
         """
         is_postgres = self._is_postgres_backend()
         try:
             async with self.db_pool.transaction() as conn:
                 if is_postgres:
+                    # Must be the first statement: the count below has to see the previous
+                    # lock holder's commit, which REPEATABLE READ / SERIALIZABLE would hide.
+                    await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                     await acquire_schema_lock(conn.execute, SESSION_CAP_LOCK_NAMESPACE, str(user_id))
                     live = await conn.fetchval(
                         f"SELECT COUNT(*) FROM sessions WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}",
@@ -184,7 +187,7 @@ class AuthnzSessionsRepo:
                                            LIMIT $3)
                                AND {LIVE_SESSION_PREDICATE_PG}
                             RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at,
-                                      last_activity, created_at
+                                      last_activity, created_at, device_id
                             """,
                             user_id,
                             device_id,
@@ -204,7 +207,7 @@ class AuthnzSessionsRepo:
                                            LIMIT ?)
                                AND {LIVE_SESSION_PREDICATE_SQLITE}
                             RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at,
-                                      last_activity, created_at
+                                      last_activity, created_at, device_id
                             """,
                             (SESSION_CAP_REVOKE_REASON, user_id, device_id, excess),
                         )
@@ -453,14 +456,14 @@ class AuthnzSessionsRepo:
                 if self._is_postgres_backend():
                     if except_session_id:
                         result = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_active = FALSE,
                                 is_revoked = TRUE,
                                 revoked_at = CURRENT_TIMESTAMP,
                                 revoked_by = $3,
                                 revoke_reason = $4
-                            WHERE user_id = $1 AND id != $2
+                            WHERE user_id = $1 AND id != $2 AND {LIVE_SESSION_PREDICATE_PG}
                             """,
                             user_id,
                             except_session_id,
@@ -469,14 +472,14 @@ class AuthnzSessionsRepo:
                         )
                     else:
                         result = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_active = FALSE,
                                 is_revoked = TRUE,
                                 revoked_at = CURRENT_TIMESTAMP,
                                 revoked_by = $2,
                                 revoke_reason = $3
-                            WHERE user_id = $1
+                            WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}
                             """,
                             user_id,
                             revoked_by,
@@ -489,27 +492,27 @@ class AuthnzSessionsRepo:
                 else:
                     if except_session_id:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_active = 0,
                                 is_revoked = 1,
                                 revoked_at = datetime('now'),
                                 revoked_by = ?,
                                 revoke_reason = ?
-                            WHERE user_id = ? AND id != ?
+                            WHERE user_id = ? AND id != ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             """,
                             (revoked_by, reason, user_id, except_session_id),
                         )
                     else:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_active = 0,
                                 is_revoked = 1,
                                 revoked_at = datetime('now'),
                                 revoked_by = ?,
                                 revoke_reason = ?
-                            WHERE user_id = ?
+                            WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             """,
                             (revoked_by, reason, user_id),
                         )
@@ -746,14 +749,14 @@ class AuthnzSessionsRepo:
                 if self._is_postgres_backend():
                     if except_session_id is None:
                         result = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_revoked = TRUE,
                                 is_active = FALSE,
                                 revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
                                 revoked_by = COALESCE($2, revoked_by),
                                 revoke_reason = COALESCE($3, revoke_reason)
-                            WHERE user_id = $1
+                            WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}
                             """,
                             user_id,
                             revoked_by,
@@ -761,14 +764,14 @@ class AuthnzSessionsRepo:
                         )
                     else:
                         result = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_revoked = TRUE,
                                 is_active = FALSE,
                                 revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
                                 revoked_by = COALESCE($3, revoked_by),
                                 revoke_reason = COALESCE($4, revoke_reason)
-                            WHERE user_id = $1 AND id != $2
+                            WHERE user_id = $1 AND id != $2 AND {LIVE_SESSION_PREDICATE_PG}
                             """,
                             user_id,
                             except_session_id,
@@ -782,27 +785,27 @@ class AuthnzSessionsRepo:
                 else:
                     if except_session_id is None:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_revoked = 1,
                                 is_active = 0,
                                 revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
                                 revoked_by = COALESCE(?, revoked_by),
                                 revoke_reason = COALESCE(?, revoke_reason)
-                            WHERE user_id = ?
+                            WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             """,
                             (revoked_by, reason, user_id),
                         )
                     else:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_revoked = 1,
                                 is_active = 0,
                                 revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
                                 revoked_by = COALESCE(?, revoked_by),
                                 revoke_reason = COALESCE(?, revoke_reason)
-                            WHERE user_id = ? AND id != ?
+                            WHERE user_id = ? AND id != ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             """,
                             (revoked_by, reason, user_id, except_session_id),
                         )
@@ -893,7 +896,9 @@ class AuthnzSessionsRepo:
     async def cleanup_expired_sessions(self, *, session_cap_retention: timedelta) -> int:
         """
         Delete sessions past refresh expiry (plus 1 day), long-revoked sessions,
-        and cap-evicted sessions older than ``session_cap_retention``.
+        logged-out/revoked rows whose access token expired over a day ago
+        (``session_cap`` rows are excluded from that clause), and cap-evicted
+        sessions older than ``session_cap_retention``.
 
         Returns the number of deleted rows (best-effort).
         """
@@ -929,6 +934,9 @@ class AuthnzSessionsRepo:
                         """
                         DELETE FROM sessions
                         WHERE COALESCE(refresh_expires_at, expires_at) < CURRENT_TIMESTAMP - INTERVAL '1 day'
+                        OR ((is_active = FALSE OR COALESCE(is_revoked, FALSE))
+                            AND expires_at < CURRENT_TIMESTAMP - INTERVAL '1 day'
+                            AND revoke_reason IS DISTINCT FROM $1)
                         OR (is_active = FALSE AND revoked_at < CURRENT_TIMESTAMP - INTERVAL '7 days')
                         OR (revoke_reason = $1 AND revoked_at < CURRENT_TIMESTAMP - $2::interval)
                         RETURNING id
@@ -942,10 +950,14 @@ class AuthnzSessionsRepo:
                         """
                         DELETE FROM sessions
                         WHERE datetime(COALESCE(refresh_expires_at, expires_at)) < datetime('now', '-1 day')
+                        OR ((is_active = 0 OR COALESCE(is_revoked, 0) = 1)
+                            AND datetime(expires_at) < datetime('now', '-1 day')
+                            AND revoke_reason IS NOT ?)
                         OR (is_active = 0 AND datetime(revoked_at) < datetime('now', '-7 days'))
                         OR (revoke_reason = ? AND datetime(revoked_at) < datetime('now', ?))
                         """,
                         (
+                            SESSION_CAP_REVOKE_REASON,
                             SESSION_CAP_REVOKE_REASON,
                             f"-{int(session_cap_retention.total_seconds())} seconds",
                         ),
@@ -1180,7 +1192,8 @@ class AuthnzSessionsRepo:
 
         This mirrors the behavior previously embedded in
         ``SessionManager.update_session_tokens`` and returns the associated user_id
-        when available.
+        when available, or ``None`` when the session is no longer active (the
+        update is then a no-op, so a cap-evicted row is never given real tokens).
         """
         try:
             async with self.db_pool.transaction() as conn:
@@ -1201,7 +1214,7 @@ class AuthnzSessionsRepo:
                             refresh_expires_at = COALESCE($7, refresh_expires_at),
                             encrypted_token = $8,
                             encrypted_refresh = $9
-                        WHERE id = $1
+                        WHERE id = $1 AND is_active = TRUE
                         """,
                         session_id,
                         access_token_hash,
@@ -1214,7 +1227,7 @@ class AuthnzSessionsRepo:
                         encrypted_refresh_token,
                     )
                     session_row = await conn.fetchrow(
-                        "SELECT user_id FROM sessions WHERE id = $1",
+                        "SELECT user_id FROM sessions WHERE id = $1 AND is_active = TRUE",
                         session_id,
                     )
                 else:
@@ -1229,7 +1242,7 @@ class AuthnzSessionsRepo:
                             refresh_expires_at = COALESCE(?, refresh_expires_at),
                             encrypted_token = ?,
                             encrypted_refresh = ?
-                        WHERE id = ?
+                        WHERE id = ? AND is_active = 1
                         """,
                         (
                             access_token_hash,
@@ -1248,7 +1261,7 @@ class AuthnzSessionsRepo:
                         ),
                     )
                     cursor = await conn.execute(
-                        "SELECT user_id FROM sessions WHERE id = ?",
+                        "SELECT user_id FROM sessions WHERE id = ? AND is_active = 1",
                         (session_id,),
                     )
                     session_row = await cursor.fetchone()

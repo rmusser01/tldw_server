@@ -11,6 +11,7 @@ import type { CommandItem } from "@/components/Common/CommandPalette"
 import { useTutorialStore } from "@/store/tutorials"
 import WebLayout from "../../../components/layout/WebLayout"
 
+const sidebarState = vi.hoisted(() => ({ persistent: false, mobile: false }))
 const promptState = vi.hoisted(() => ({ commands: [] as CommandItem[] }))
 const messageState = vi.hoisted(() => ({
   clearChat: vi.fn(), useOCR: false, chatMode: "normal", setChatMode: vi.fn(),
@@ -65,9 +66,9 @@ vi.mock("@/hooks/useFeatureFlags", async (importOriginal) => ({
   // other flags (for example COMPARE_MODE) keep working; every flag reads off.
   ...(await importOriginal<typeof import("@/hooks/useFeatureFlags")>()),
   useFeatureFlag: () => [false, () => undefined, true],
-  useChatSidebar: () => [false]
+  useChatSidebar: () => [sidebarState.persistent]
 }))
-vi.mock("@/hooks/useMediaQuery", () => ({ useMobile: () => false }))
+vi.mock("@/hooks/useMediaQuery", () => ({ useMobile: () => sidebarState.mobile }))
 vi.mock("@/hooks/useSetting", () => ({ useSetting: () => [""] }))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: () => undefined }))
 vi.mock("@/hooks/useConnectionState", () => ({
@@ -76,10 +77,23 @@ vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionUxState: () => ({ isChecking: false })
 }))
 vi.mock("@/components/Layouts/Header", () => ({
-  Header: () => <header data-testid="shell-header">Shell</header>
+  Header: ({ onToggleSidebar }: { onToggleSidebar?: () => void }) => (
+    <header data-testid="shell-header">
+      {onToggleSidebar && <button onClick={onToggleSidebar}>Open sidebar from header</button>}
+    </header>
+  )
 }))
 vi.mock("@/components/Option/Sidebar", () => ({ Sidebar: () => null }))
-vi.mock("@/components/Common/ChatSidebar", () => ({ ChatSidebar: () => null }))
+vi.mock("@/components/Common/ChatSidebar", () => ({
+  ChatSidebar: ({ collapsed, onToggleCollapse }: {
+    collapsed: boolean
+    onToggleCollapse: () => void
+  }) => (
+    <button onClick={onToggleCollapse}>
+      {collapsed ? "Expand sidebar rail" : "Collapse sidebar rail"}
+    </button>
+  )
+}))
 vi.mock("@/components/Layouts/QuickIngestButton", () => ({ QuickIngestModalHost: () => null }))
 vi.mock("@/components/Common/QuickChatHelper", () => ({ QuickChatHelperButton: () => null }))
 vi.mock("@/components/Common/NotesDock", () => ({ NotesDockHost: () => null }))
@@ -102,6 +116,7 @@ vi.mock("@web/components/notifications/NotificationLifecycleProvider", () => ({
   useNotificationLifecycle: () => ({ state: "idle", unreadCount: 0, tryAgain: vi.fn() })
 }))
 vi.mock("@web/components/notifications/NotificationToastBridge", () => ({ NotificationToastBridge: () => null }))
+vi.mock("@web/components/notifications/NewSignInBanner", () => ({ NewSignInBanner: () => null }))
 vi.mock("@/components/Timeline", () => ({ TimelineModal: () => null }))
 vi.mock("@/components/Common/TutorialRunner", () => ({ TutorialRunner: () => null }))
 vi.mock("@/components/Common/TutorialPrompt", () => ({ TutorialPrompt: () => null }))
@@ -117,6 +132,8 @@ const layouts = [
 beforeEach(() => {
   delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell
   promptState.commands = []
+  sidebarState.persistent = false
+  sidebarState.mobile = false
   useTutorialStore.getState().resetProgress()
   HTMLElement.prototype.scrollIntoView = vi.fn()
 })
@@ -127,6 +144,31 @@ afterEach(() => {
 })
 
 for (const { name, Layout } of layouts) {
+  describe(`${name} sidebar controls`, () => {
+    it("keeps only the rail toggle when the persistent sidebar is on screen", () => {
+      sidebarState.persistent = true
+      render(<MemoryRouter initialEntries={["/chat"]}><Layout>Chat</Layout></MemoryRouter>)
+
+      const toggleName = /^(Expand|Collapse) sidebar rail$/
+      const initialLabel = screen.getByRole("button", { name: toggleName }).textContent
+      expect(screen.queryByRole("button", { name: "Open sidebar from header" })).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: toggleName }))
+      expect(screen.getByRole("button", { name: toggleName }).textContent).not.toBe(initialLabel)
+      expect(screen.queryByRole("button", { name: "Open sidebar from header" })).toBeNull()
+    })
+
+    it.each([
+      { persistent: true, mobile: true },
+      { persistent: false, mobile: false }
+    ])("keeps the header opener for a drawer (%j)", ({ persistent, mobile }) => {
+      sidebarState.persistent = persistent
+      sidebarState.mobile = mobile
+      render(<MemoryRouter initialEntries={["/chat"]}><Layout>Chat</Layout></MemoryRouter>)
+
+      expect(screen.getByRole("button", { name: "Open sidebar from header" })).toBeVisible()
+    })
+  })
+
   describe(`${name} command palette lifetime`, () => {
     const tree = (hideHeader: boolean, nestedRoute = true) => (
       <MemoryRouter initialEntries={["/"]}>

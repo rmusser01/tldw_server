@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { useOptionalNotificationLifecycle } from '@web/components/notifications/NotificationLifecycleProvider';
 import { useToast } from '@web/components/ui/ToastProvider';
+import { NEW_SIGN_IN_KIND } from '@/services/sign-in-alert';
 import type { NotificationItem } from '@web/lib/api/notifications';
 
 const TOAST_COALESCE_MS = 800;
@@ -95,7 +96,8 @@ export function NotificationToastBridge() {
       handledEventSequenceRef.current = sequence;
       if (event.event === 'notification') {
         const nextItem = toNotificationFromStream(event.payload);
-        if (nextItem) queueToast(nextItem, 1);
+        // The new-sign-in alert has its own banner; a toast would be a second, weaker one.
+        if (nextItem && nextItem.kind !== NEW_SIGN_IN_KIND) queueToast(nextItem, 1);
         continue;
       }
       if (event.event === 'notifications_coalesced') {

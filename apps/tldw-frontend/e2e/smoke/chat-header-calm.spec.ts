@@ -105,7 +105,12 @@ for (const viewport of [
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
       });
-      expect((await header.boundingBox())!.height).toBeLessThanOrEqual(80);
+      const home = header.getByRole('button', { name: 'Companion Home', exact: true });
+      const pages = header.getByTestId('chat-toggle-shortcuts');
+      await expect(home).toBeInViewport({ ratio: 1 });
+      await expect(pages).toBeInViewport({ ratio: 1 });
+      const headerHeight = viewport.name === 'mobile' ? 112 : 80;
+      expect((await header.boundingBox())!.height).toBeLessThanOrEqual(headerHeight);
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(
         false
       );
@@ -151,13 +156,13 @@ for (const viewport of [
       await expect(menu).toBeHidden();
       await expect(more).toBeFocused();
       await expect(input).toHaveValue('Keep this draft while I use the header.');
-      await more.click();
-      await page.getByRole('menuitem', { name: 'Browse pages', exact: true }).click();
+      await expect(pages).toHaveAccessibleName('Show pages');
+      await pages.click();
       const launcher = page.getByRole('dialog').last();
       await expect(launcher).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(launcher).toBeHidden();
-      await expect(more).toBeFocused();
+      await expect(pages).toBeFocused();
       await more.click();
       await page.getByRole('menuitem', { name: 'Show keyboard shortcuts', exact: true }).click();
       const shortcuts = page.getByRole('dialog').last();
@@ -214,6 +219,8 @@ for (const viewport of [
         ).toHaveAttribute('aria-disabled', 'true');
         await page.keyboard.press('Escape');
       }
+      await home.click();
+      await expect(page).toHaveURL(/\/$/);
       expect(errors).toEqual([]);
     });
 

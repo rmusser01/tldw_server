@@ -61,6 +61,7 @@ import {
   NotificationLifecycleProvider,
   useNotificationLifecycle,
 } from '@web/components/notifications/NotificationLifecycleProvider';
+import { NewSignInBanner } from '@web/components/notifications/NewSignInBanner';
 import { NotificationToastBridge } from '@web/components/notifications/NotificationToastBridge';
 import { CommandPaletteHost } from '@/components/Common/CommandPaletteHost';
 import { useCommandPaletteContentProviders } from '@/components/Common/command-palette-content-providers';
@@ -560,7 +561,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 )}
               >
                 <Header
-                  onToggleSidebar={shellSidebarEnabled ? toggleSidebar : undefined}
+                  onToggleSidebar={shellSidebarEnabled && !shouldRenderChatSidebar ? toggleSidebar : undefined}
                   sidebarCollapsed={headerSidebarCollapsed}
                   notificationCount={notificationCount}
                   notificationState={notificationState}
@@ -920,6 +921,7 @@ function NotificationRuntimeOwner({
   return (
     <NotificationLifecycleProvider enabled={enabled && !demoEnabled}>
       <NotificationToastBridge />
+      <NewSignInBanner />
       {children}
     </NotificationLifecycleProvider>
   );
