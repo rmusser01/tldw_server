@@ -151,7 +151,7 @@ export const ActiveSessionsSettings = () => {
       render: (iso: string) => <span title={iso}>{formatTime(iso)}</span>
     },
     {
-      title: "",
+      title: <span className="sr-only">{t("settings:activeSessions.colActions", "Actions")}</span>,
       key: "actions",
       render: (_: unknown, s: AuthSession) =>
         s.is_current ? null : (

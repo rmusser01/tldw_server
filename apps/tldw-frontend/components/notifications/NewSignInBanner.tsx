@@ -54,12 +54,14 @@ export function NewSignInBanner() {
   const load = useCallback(async () => {
     const token = ++loadRef.current;
     try {
-      const [list, sessions] = await Promise.all([
-        listNotifications({ kind: NEW_SIGN_IN_KIND, limit: 100, offset: 0, include_archived: false }),
-        // A failed session lookup must never hide a security alert.
-        listAuthSessions().catch((): AuthSession[] => []),
-      ]);
-      if (token === loadRef.current) setItems(visibleSignInAlerts(list.items ?? [], sessions));
+      const list = await listNotifications({ kind: NEW_SIGN_IN_KIND, limit: 100, offset: 0, include_archived: false });
+      const rows = list.items ?? [];
+      // No unread alert: skip the session lookup (it only decides whether an alert is our own).
+      // A failed lookup must never hide a security alert.
+      const sessions = rows.some((i) => !i.read_at && !i.dismissed_at)
+        ? await listAuthSessions().catch((): AuthSession[] => [])
+        : [];
+      if (token === loadRef.current) setItems(visibleSignInAlerts(rows, sessions));
     } catch {
       // Keep what is shown; the next trigger retries.
     }

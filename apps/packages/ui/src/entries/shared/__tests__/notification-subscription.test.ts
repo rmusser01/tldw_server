@@ -633,6 +633,13 @@ describe("notification subscription", () => {
       expect(notifyMock).not.toHaveBeenCalled()
     })
 
+    it("survives a throwing OS notification (no unhandled rejection)", async () => {
+      listAuthSessionsMock.mockResolvedValue([sessionRow(5, { is_current: true }), sessionRow(10)])
+      notifyMock.mockImplementation(() => { throw new Error("blocked") })
+      await emit(alertPayload)
+      expect(notifyMock).toHaveBeenCalledWith("New sign-in", "m")
+    })
+
     it("does not look up sessions for other kinds", async () => {
       await emit({ kind: "job_failed", title: "Job failed", message: "m" })
       expect(listAuthSessionsMock).not.toHaveBeenCalled()

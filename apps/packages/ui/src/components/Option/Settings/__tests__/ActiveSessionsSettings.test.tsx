@@ -92,6 +92,12 @@ describe("ActiveSessionsSettings", () => {
     expect(within(row).getByText("This device")).toBeInTheDocument()
   })
 
+  it("the actions column has an accessible header name", async () => {
+    await renderPage()
+    await screen.findByText("Safari on iOS")
+    expect(screen.getByRole("columnheader", { name: "Actions" })).toBeInTheDocument()
+  })
+
   it("the current row has no Sign out button; other rows have one labelled with device and time", async () => {
     await renderPage()
     await screen.findByText("Safari on iOS")

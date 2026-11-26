@@ -166,7 +166,17 @@ describe("NewSignInBanner", () => {
       alertItem(2, { dismissed_at: "2026-11-25T15:00:00Z" }),
       alertItem(3, { kind: "job_failed" })
     )
-    await renderSettled()
+    await renderBanner()
+    await flush()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it("does not look up sessions when there is no unread alert", async () => {
+    setItems(alertItem(1, { dismissed_at: "2026-11-25T15:00:00Z" }))
+    await renderBanner()
+    await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalled())
+    await flush()
+    expect(mocks.listAuthSessions).not.toHaveBeenCalled()
     expect(screen.queryByRole("alert")).toBeNull()
   })
 

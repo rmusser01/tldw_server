@@ -232,9 +232,11 @@ const transitionToConfig = async (
       if (payload?.title) {
         const { title, message } = payload
         // Off to the side: the lookup must not delay the unread write or outlive its scope.
-        void isOwnBrowserSignIn(payload).then((own) => {
-          if (!own && isCurrent() && !terminal) notify(title, message || "")
-        })
+        void isOwnBrowserSignIn(payload)
+          .then((own) => {
+            if (!own && isCurrent() && !terminal) notify(title, message || "")
+          })
+          .catch(() => undefined)
       }
 
       unreadCountWrite = unreadCountWrite

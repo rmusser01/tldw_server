@@ -459,6 +459,7 @@
     "colIp": "IP address",
     "colSignedIn": "Signed in",
     "colLastActive": "Last active",
+    "colActions": "Actions",
     "thisDevice": "This device",
     "signOut": "Sign out",
     "signOutAria": "Sign out {device}, signed in {time}",
