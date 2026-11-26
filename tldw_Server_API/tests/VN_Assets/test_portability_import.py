@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import zipfile
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,6 @@ from tldw_Server_API.app.core.VN_Assets.portability.fingerprints import (
     canonical_json_bytes,
     canonical_payload_fingerprint,
     sha256_bytes,
-    sha256_file,
 )
 from tldw_Server_API.app.core.VN_Assets.portability.importer import VNPackImporter
 from tldw_Server_API.app.core.VN_Assets.portability.preview import VNPackImportPreviewer
@@ -504,6 +503,156 @@ async def test_import_failure_unregisters_created_generated_files(
     assert cleanup_status["unregistered_generated_file_ids"] == [saver.records[0]["id"]]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_point",
+    ["delivery", "archive-deleted", "completion-progress", "legacy-progress"],
+)
+async def test_worker_recovers_completed_import_after_interrupted_delivery(
+    repo: VNAssetPacksRepository,
+    target_character_id: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    archive = _write_import_archive(tmp_path / "interrupted.tldw-vnpack")
+    preview_id = int((await _create_completed_preview(repo, archive))["id"])
+    job_id = "123"
+    journal = repo.create_import_journal(
+        owner_user_id=USER_ID,
+        preview_id=preview_id,
+        job_id=job_id,
+        status="queued",
+        stage="queued",
+        trust_mode=TRUST_MODE_TRUSTED_RESTORE,
+        target_mode="create_new",
+    )
+    import_id = int(journal["id"])
+    repo.create_portability_job(
+        owner_user_id=USER_ID,
+        job_id=job_id,
+        operation="import_commit",
+        status="queued",
+        stage="queued",
+        preview_id=preview_id,
+        import_id=import_id,
+    )
+    job = {
+        "id": int(job_id),
+        "job_type": VN_PACK_IMPORT_COMMIT_JOB_TYPE,
+        "owner_user_id": str(USER_ID),
+        "payload": build_pack_import_commit_payload(
+            import_id=import_id,
+            preview_id=preview_id,
+            request_id="interrupted",
+            user_id=USER_ID,
+            trust_mode=TRUST_MODE_TRUSTED_RESTORE,
+            target_mode="create_new",
+            character_action="link_existing_character",
+            target_character_id=target_character_id,
+        ),
+    }
+    saver = FakeGeneratedFileSaver()
+    worker = VNAssetGenerationWorker(repo=repo, jobs_manager=FakeJobs(), save_vn_asset_image=saver)
+    update_portability_job = repo.update_portability_job
+
+    def stop_before_delivery(
+        row_job_id: str,
+        fields: Mapping[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        if fields.get("status") == "completed" or (
+            failure_point == "completion-progress" and fields.get("stage") == "completed"
+        ):
+            raise RuntimeError("worker stopped before publishing Jobs result")
+        return update_portability_job(row_job_id, fields, owner_user_id=owner_user_id)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(repo, "update_portability_job", stop_before_delivery)
+        with pytest.raises(RuntimeError, match="worker stopped before publishing Jobs result"):
+            await worker.handle_job_async(job)
+
+    completed = repo.get_import_journal(import_id, owner_user_id=USER_ID)
+    assert completed is not None
+    assert completed["status"] == "completed"
+    pack_id = completed["target_pack_id"]
+    if failure_point == "archive-deleted":
+        archive.unlink()
+        repo.update_import_preview(preview_id, {"status": "deleted"}, owner_user_id=USER_ID)
+
+    if failure_point == "legacy-progress":
+        # Older workers could overwrite status after the create-new journal committed.
+        failed_status = {
+            "status": "failed",
+            "stage": "failed",
+            "error_code": "import_failed",
+            "error_message": "temporary progress write failure",
+        }
+        job_id = "124"
+        legacy = repo.create_import_journal(
+            **failed_status,
+            owner_user_id=USER_ID,
+            preview_id=preview_id,
+            job_id=job_id,
+            trust_mode=TRUST_MODE_TRUSTED_RESTORE,
+            target_mode="create_new",
+            target_pack_id=pack_id,
+            completed_at=completed["completed_at"],
+            id_maps=json.loads(completed["id_maps_json"]),
+            created_records=json.loads(completed["created_records_json"]),
+            cleanup_status={"status": "not_required"},
+        )
+        import_id = int(legacy["id"])
+        repo.create_portability_job(
+            **failed_status,
+            owner_user_id=USER_ID,
+            job_id=job_id,
+            operation="import_commit",
+            preview_id=preview_id,
+            import_id=import_id,
+        )
+        job["id"] = int(job_id)
+        job["payload"]["import_id"] = import_id
+
+    result = await worker.handle_job_async(job)
+
+    assert result == {
+        "status": "imported",
+        "import_id": import_id,
+        "preview_id": preview_id,
+        "pack_id": pack_id,
+        "id_maps": json.loads(completed["id_maps_json"]),
+        "created_records": json.loads(completed["created_records_json"]),
+    }
+    assert [pack["id"] for pack in repo.list_packs(owner_user_id=USER_ID)] == [pack_id]
+    assert len(saver.calls) == 1
+    replayed = repo.get_import_journal(import_id, owner_user_id=USER_ID)
+    assert replayed is not None
+    for field in (
+        "status",
+        "stage",
+        "target_pack_id",
+        "completed_at",
+        "id_maps_json",
+        "created_records_json",
+        "cleanup_status_json",
+        "error_code",
+        "error_message",
+    ):
+        assert replayed[field] == completed[field]
+    portability = repo.get_portability_job_by_job_id(job_id, owner_user_id=USER_ID)
+    assert portability is not None
+    assert portability["error_code"] is None and portability["error_message"] is None
+    assert (portability["status"], portability["stage"], portability["pack_id"]) == (
+        "completed",
+        "completed",
+        pack_id,
+    )
+
+
 def test_pack_import_commit_job_helpers_use_import_group() -> None:
     jobs = FakeJobs()
 
@@ -685,6 +834,46 @@ async def test_update_existing_non_destructive(
     assert id_maps["items"]["401"] == added_item["id"]
     assert created_records["slot_ids"] == [next(slot["id"] for slot in all_slots if slot["slot_key"].endswith("smile"))]
     assert created_records["item_ids"] == [added_item["id"]]
+
+
+    # Simulate redelivery before the worker publishes the durable update result.
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    job_id = journal["job_id"]
+    preview_id = int(preview["id"])
+    import_id = int(result["import_id"])
+    job = {
+        "id": job_id,
+        "job_type": VN_PACK_IMPORT_COMMIT_JOB_TYPE,
+        "owner_user_id": str(USER_ID),
+        "payload": build_pack_import_commit_payload(
+            import_id=import_id,
+            preview_id=preview_id,
+            request_id="update-existing",
+            user_id=USER_ID,
+            trust_mode=TRUST_MODE_TRUSTED_RESTORE,
+            target_mode="update_existing",
+            character_action="link_existing_character",
+            target_character_id=target_character_id,
+            target_pack_id=int(existing_pack["id"]),
+        ),
+    }
+    for bound_job_id in (job_id, "other-job"):
+        repo.create_portability_job(
+            owner_user_id=USER_ID,
+            job_id=bound_job_id,
+            operation="import_commit",
+            status="processing",
+            stage="creating_items",
+            preview_id=preview_id,
+            import_id=import_id,
+        )
+    worker = VNAssetGenerationWorker(repo=repo, jobs_manager=FakeJobs(), save_vn_asset_image=saver)
+    with pytest.raises(ValueError, match="vn_pack_import_commit_job_not_found"):
+        await worker.handle_job_async({**job, "id": "other-job"})
+    assert await worker.handle_job_async(job) == result
+    assert len(saver.calls) == 1
+    assert repo.get_import_journal(import_id, owner_user_id=USER_ID) == journal
 
 
 @pytest.mark.asyncio

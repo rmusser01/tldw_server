@@ -853,13 +853,49 @@ class VNAssetGenerationWorker:
         journal = self.repo.get_import_journal(import_id, owner_user_id=user_id)
         if journal is None or int(journal["preview_id"]) != preview_id:
             raise ValueError("vn_pack_import_journal_not_found")
-        preview = self.repo.get_import_preview(preview_id, owner_user_id=user_id)
-        if preview is None:
-            raise ValueError("vn_pack_import_preview_not_found")
         job_id = str((job or {}).get("id") or journal["job_id"])
         portability_job = self.repo.get_portability_job_by_job_id(job_id, owner_user_id=user_id)
-        if portability_job is None or portability_job.get("operation") != "import_commit":
+        if (
+            portability_job is None
+            or portability_job["operation"] != "import_commit"
+            or portability_job["import_id"] != import_id
+            or portability_job["preview_id"] != preview_id
+            or str(journal["job_id"]) != job_id
+        ):
             raise ValueError("vn_pack_import_commit_job_not_found")
+
+        # Older workers could report a progress error after committing the import.
+        legacy_completion = (
+            journal["status"] == "failed"
+            and journal["target_mode"] == "create_new"
+            and journal["completed_at"] is not None
+            and _loads_json(journal["cleanup_status_json"], {}).get("status") == "not_required"
+        )
+        if journal["status"] == "completed" or legacy_completion:
+            pack_id = int(journal["target_pack_id"] or 0)
+            if pack_id <= 0:
+                raise ValueError("vn_pack_import_completed_result_missing")
+            if legacy_completion:
+                self.repo.update_import_journal(
+                    import_id,
+                    {"status": "completed", "stage": "completed", "error_code": None, "error_message": None},
+                    owner_user_id=user_id,
+                )
+            return self._publish_import_commit_result(
+                job_id,
+                user_id,
+                {
+                    "status": "imported",
+                    "import_id": import_id,
+                    "preview_id": preview_id,
+                    "pack_id": pack_id,
+                    "id_maps": _loads_json(journal["id_maps_json"], {}),
+                    "created_records": _loads_json(journal["created_records_json"], {}),
+                },
+            )
+
+        if self.repo.get_import_preview(preview_id, owner_user_id=user_id) is None:
+            raise ValueError("vn_pack_import_preview_not_found")
 
         self.repo.update_import_journal(
             import_id,
@@ -877,6 +913,9 @@ class VNAssetGenerationWorker:
         )
 
         def _progress(stage: str, progress: dict[str, Any]) -> None:
+            # Publish completion after the importer has returned its durable result.
+            if stage == "completed":
+                return
             self.repo.update_portability_job(
                 job_id,
                 {"status": "processing", "stage": stage, "progress": progress},
@@ -926,16 +965,22 @@ class VNAssetGenerationWorker:
             )
             raise
 
-        self.repo.update_import_journal(
-            import_id,
-            {"target_pack_id": int(result["pack_id"])},
-            owner_user_id=user_id,
-        )
+        return self._publish_import_commit_result(job_id, user_id, result)
+
+    def _publish_import_commit_result(
+        self,
+        job_id: str,
+        user_id: int,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Publish a completed import using the same result on initial delivery and retry."""
         self.repo.update_portability_job(
             job_id,
             {
                 "status": "completed",
                 "stage": "completed",
+                "error_code": None,
+                "error_message": None,
                 "pack_id": int(result["pack_id"]),
                 "progress": {
                     "pack_id": int(result["pack_id"]),

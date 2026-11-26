@@ -765,7 +765,7 @@ export default function VNAssetsWorkbench() {
               onSetPreferred={handleSetPreferred}
             />
 
-            <PortabilityPanel selectedPack={selectedPack} />
+            <PortabilityPanel key={accountRevision} selectedPack={selectedPack} />
           </div>
         </section>
       </div>

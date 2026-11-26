@@ -978,8 +978,8 @@ class VNAssetPacksRepository:
     ) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
         current = self.get_import_journal(import_id, owner_user_id=owner_user_id)
-        if current is None:
-            return None
+        if current is None or current["status"] == "completed":
+            return current
 
         update_values = _portability_update_values(
             fields,
@@ -990,7 +990,8 @@ class VNAssetPacksRepository:
             return current
 
         with self.db.transaction() as conn:
-            where_clause = "id = ?"
+            # A concurrent completion must survive stale status and cancel writes.
+            where_clause = "id = ? AND status <> 'completed'"
             where_params: list[Any] = [import_id]
             if owner_user_id is not None:
                 where_clause += " AND owner_user_id = ?"
@@ -1002,7 +1003,8 @@ class VNAssetPacksRepository:
                 where_clause=where_clause,
                 where_params=where_params,
             )
-        return self.get_import_journal(import_id, owner_user_id=owner_user_id)
+            # A failed readback must roll back the same update.
+            return self.get_import_journal(import_id, owner_user_id=owner_user_id)
 
     def create_pack(
         self,

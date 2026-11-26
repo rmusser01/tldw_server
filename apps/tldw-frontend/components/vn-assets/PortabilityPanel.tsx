@@ -118,6 +118,13 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
   );
   const riskyUpdateDiffs = useMemo(() => riskyDiffs(updateCandidate), [updateCandidate]);
   const requiredChoices = useMemo(() => asArray(importPreview?.required_choices), [importPreview]);
+  const hasCharacterNameConflict = asArray(importPreview?.conflicts).some(
+    (conflict) => asRecord(conflict).kind === 'character_candidate'
+  );
+  const canImportIncludedCharacter = !hasCharacterNameConflict && requiredChoices.some((choice) =>
+    asArray(asRecord(choice).allowed_actions).includes('import_included_character')
+  );
+  const canCommit = importPreview?.status === 'completed' && (!!selectedPack || canImportIncludedCharacter);
   const targetMode = updateCandidate && !updateCandidate.blocked ? 'update_existing' : 'create_new';
 
   const handleExport = async () => {
@@ -164,7 +171,7 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
   };
 
   const handleCommitImport = async () => {
-    if (!selectedPack || !importPreview) return;
+    if (!importPreview || !canCommit) return;
     if (riskyUpdateDiffs.length > 0 && !confirmRiskyDiffs) {
       setError('Confirm risky update diffs before committing this update.');
       return;
@@ -176,9 +183,9 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
         preview_id: importPreview.preview_id,
         trust_mode: trustMode,
         target_mode: targetMode,
-        character_action: 'link_existing_character',
-        target_character_id: selectedPack.primary_character_id,
-        target_pack_id: targetMode === 'update_existing' ? selectedPack.id : null,
+        character_action: selectedPack ? 'link_existing_character' : 'import_included_character',
+        target_character_id: selectedPack?.primary_character_id ?? null,
+        target_pack_id: targetMode === 'update_existing' ? selectedPack?.id : null,
         conflict_decisions: {
           confirm_all_risky_diffs: riskyUpdateDiffs.length > 0 && confirmRiskyDiffs,
         },
@@ -292,6 +299,26 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
                 <Badge variant={statusVariant(importPreview.status)}>{importPreview.stage}</Badge>
               </div>
               <p className="font-medium">{previewTitle(importPreview)}</p>
+              {(importPreview.status === 'failed' || importPreview.status === 'quarantined') && importPreview.error_message && (
+                <p className="text-danger" role="alert">
+                  {importPreview.error_message.startsWith('invalid_archive:')
+                    ? 'The archive could not be read. Download it again or choose another VN pack backup.'
+                    : 'Archive validation failed. Check the backup and try again.'}
+                </p>
+              )}
+              {asArray(importPreview.validation_warnings).some((warning) =>
+                typeof warning === 'string' && warning.startsWith('missing_asset_bytes:')
+              ) && (
+                <p className="text-warn">Assets with missing image files will import as hidden items.</p>
+              )}
+              {importPreview.status === 'completed' && !selectedPack && (
+                <p className="text-text-muted">
+                  {hasCharacterNameConflict && 'A character with this name already exists. '}
+                  {canImportIncludedCharacter
+                    ? 'Import creates a pack with the included character.'
+                    : 'Select a pack to link its primary character before importing.'}
+                </p>
+              )}
               {requiredChoices.length > 0 && (
                 <div className="rounded-md border border-border bg-surface p-3">
                   <h4 className="font-medium">Character resolution</h4>
@@ -336,7 +363,7 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
                 </select>
               </label>
               <Button
-                disabled={importPreview.status !== 'completed' || !selectedPack}
+                disabled={!canCommit}
                 loading={isCommitting}
                 onClick={handleCommitImport}
                 size="sm"

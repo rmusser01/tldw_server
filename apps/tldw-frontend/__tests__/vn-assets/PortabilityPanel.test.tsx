@@ -175,6 +175,94 @@ describe('PortabilityPanel', () => {
     });
   });
 
+  it('restores the included character and pack on an empty installation', async () => {
+    const user = userEvent.setup();
+    mocks.getVNPackImportPreview.mockResolvedValueOnce({
+      preview_id: 33,
+      status: 'completed',
+      stage: 'completed',
+      required_choices: [{ allowed_actions: ['import_included_character', 'link_existing_character'] }],
+    });
+    render(<PortabilityPanel />);
+
+    await user.upload(
+      screen.getByLabelText('Import VN pack archive'),
+      new File(['backup'], 'orbital.tldw-vnpack', { type: 'application/zip' })
+    );
+
+    const commit = await screen.findByRole('button', { name: 'Commit import' });
+    expect(commit).toBeEnabled();
+    await user.click(commit);
+    expect(mocks.commitVNPackImport).toHaveBeenCalledWith(expect.objectContaining({
+      preview_id: 33,
+      target_mode: 'create_new',
+      character_action: 'import_included_character',
+      target_character_id: null,
+      target_pack_id: null,
+    }));
+  });
+
+  it('guides the user to link a local character with the same name', async () => {
+    const user = userEvent.setup();
+    mocks.getVNPackImportPreview.mockResolvedValueOnce({
+      preview_id: 33,
+      status: 'completed',
+      stage: 'completed',
+      required_choices: [{ allowed_actions: ['import_included_character', 'link_existing_character'] }],
+      conflicts: [{ kind: 'character_candidate', signals: ['normalized_name'], local_character_id: 42 }],
+    });
+    render(<PortabilityPanel />);
+
+    await user.upload(
+      screen.getByLabelText('Import VN pack archive'),
+      new File(['backup'], 'orbital.tldw-vnpack', { type: 'application/zip' })
+    );
+
+    expect(await screen.findByRole('button', { name: 'Commit import' })).toBeDisabled();
+    expect(screen.getByText(/a character with this name already exists/i)).toBeInTheDocument();
+  });
+
+  it('explains why the archive was quarantined and prevents commit', async () => {
+    const user = userEvent.setup();
+    mocks.getVNPackImportPreview.mockResolvedValueOnce({
+      preview_id: 33,
+      status: 'quarantined',
+      stage: 'failed',
+      error_message: 'invalid_archive: bad_zip_file',
+    });
+    render(<PortabilityPanel selectedPack={pack} />);
+
+    await user.upload(
+      screen.getByLabelText('Import VN pack archive'),
+      new File(['incomplete'], 'orbital.tldw-vnpack', { type: 'application/zip' })
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The archive could not be read. Download it again or choose another VN pack backup.'
+    );
+    expect(screen.getByRole('button', { name: 'Commit import' })).toBeDisabled();
+  });
+
+  it('ignores a previous validation error after preview succeeds on retry', async () => {
+    const user = userEvent.setup();
+    mocks.getVNPackImportPreview.mockResolvedValueOnce({
+      preview_id: 33,
+      status: 'completed',
+      stage: 'completed',
+      error_message: 'temporary preview failure',
+    });
+    render(<PortabilityPanel selectedPack={pack} />);
+
+    await user.upload(
+      screen.getByLabelText('Import VN pack archive'),
+      new File(['backup'], 'orbital.tldw-vnpack', { type: 'application/zip' })
+    );
+
+    await screen.findByText('Preview status: completed');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Commit import' })).toBeEnabled();
+  });
+
   it('polls an import preview until it reaches a terminal status', async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((handler, _timeout, ...args) => {
       if (typeof handler === 'function') {
