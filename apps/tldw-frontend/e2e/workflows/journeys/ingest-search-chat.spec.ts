@@ -96,6 +96,8 @@ test.describe('Ingest -> Search -> Chat journey', () => {
           );
           const record = await apiGet(`/api/v1/media/${id}`);
           const savedSource = readMediaRecord(record, id, text, runId);
+          await expect(page.getByRole('region', { name: 'Media content', exact: true }))
+            .toContainText(text.trim());
           owned.push(savedSource);
           evidence[fixture] = {
             id,
