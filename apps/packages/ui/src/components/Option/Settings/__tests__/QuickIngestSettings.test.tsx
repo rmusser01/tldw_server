@@ -110,10 +110,11 @@ describe("QuickIngestSettings", () => {
   it("persists both edits when the first preset storage write is delayed", async () => {
     const user = userEvent.setup()
     await act(async () => { renderSettings() })
-    const pending = Promise.withResolvers<void>()
+    let releaseFirstWrite!: () => void
+    const firstWrite = new Promise<void>((resolve) => { releaseFirstWrite = resolve })
     const persist = Storage.prototype.set
     const write = vi.spyOn(Storage.prototype, "set").mockImplementationOnce(async function (key, value) {
-      await pending.promise
+      await firstWrite
       await persist.call(this, key, value)
     })
 
@@ -122,7 +123,7 @@ describe("QuickIngestSettings", () => {
       await waitFor(() => expect(write).toHaveBeenCalledWith(presetsKey, expect.anything()))
       await user.click(screen.getByRole("switch", { name: "Analysis" }))
     } finally {
-      await act(async () => { pending.resolve() })
+      await act(async () => { releaseFirstWrite() })
     }
 
     await waitFor(() => expect(storedPresets().standard).toMatchObject({
