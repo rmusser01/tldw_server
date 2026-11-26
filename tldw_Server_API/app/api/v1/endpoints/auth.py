@@ -31,7 +31,12 @@ from tldw_Server_API.app.api.v1.API_Deps.interactive_session_deps import (
     require_interactive_session,
 )
 from tldw_Server_API.app.core.AuthNZ.device_label import device_label
-from tldw_Server_API.app.core.AuthNZ.interactive_session import InteractiveSession, install_id_or_none
+from tldw_Server_API.app.core.AuthNZ.interactive_session import (
+    InteractiveSession,
+    install_id_or_none,
+    interactive_required_http_exception,
+    resolve_current_session_id,
+)
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RateLimiter,
     _authnz_busy_http_exception,
@@ -2037,6 +2042,8 @@ async def logout(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user context")
 
         if all_devices:
+            if await resolve_current_session_id(request, current_user, session_manager) is None:
+                raise interactive_required_http_exception()
             try:
                 count = int(
                     await session_manager.revoke_all_user_sessions(
@@ -2059,7 +2066,6 @@ async def logout(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Current-session logout requires a bearer token. Use all_devices=true to revoke all sessions.",
                 )
-            blacklist = _token_blacklist.get_token_blacklist()
             payload = {}
             try:
                 # NOTE: Using sync verify_token() here is acceptable - we're extracting
@@ -2068,6 +2074,12 @@ async def logout(
                 payload = jwt_service.verify_token(token)
             except _AUTH_NONCRITICAL_EXCEPTIONS:
                 payload = {}
+
+            session_id = payload.get("session_id")
+            if session_id is None:
+                # An API key or service token carries no session; it must not end any.
+                raise interactive_required_http_exception()
+            blacklist = _token_blacklist.get_token_blacklist()
 
             try:
                 jti = jwt_service.extract_jti(token)
@@ -2090,30 +2102,18 @@ async def logout(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail="Failed to revoke access token during logout",
                     ) from revoke_exc
-            session_id = payload.get("session_id")
-            if session_id is not None:
-                try:
-                    await session_manager.revoke_session(
-                        session_id=session_id,
-                        revoked_by=user_id,
-                        reason="User logout",
-                    )
-                except _AUTH_NONCRITICAL_EXCEPTIONS as cleanup_exc:
-                    logger.error(f"Failed to revoke session {session_id} during logout: {cleanup_exc}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to revoke session during logout",
-                    ) from cleanup_exc
-            else:
-                # Fallback to full session revoke if the token lacks a session id.
-                try:
-                    await session_manager.revoke_all_user_sessions(user_id=user_id)
-                except _AUTH_NONCRITICAL_EXCEPTIONS as cleanup_exc:
-                    logger.error(f"Failed to revoke user sessions during logout: {cleanup_exc}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to revoke sessions during logout",
-                    ) from cleanup_exc
+            try:
+                await session_manager.revoke_session(
+                    session_id=session_id,
+                    revoked_by=user_id,
+                    reason="User logout",
+                )
+            except _AUTH_NONCRITICAL_EXCEPTIONS as cleanup_exc:
+                logger.error(f"Failed to revoke session {session_id} during logout: {cleanup_exc}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to revoke session during logout",
+                ) from cleanup_exc
 
             message = "Successfully logged out"
 

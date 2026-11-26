@@ -1609,6 +1609,30 @@ async def test_logout_accepts_lowercase_bearer(monkeypatch):
     assert captured["revoked"] is True
 
 
+def _interactive_logout_args(session_id: int = 5, user_id: int = 12):
+    """A browser-session principal plus a request whose bearer carries a ``session_id`` claim."""
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    token = get_jwt_service().create_access_token(
+        user_id, "alice", "user", additional_claims={"session_id": session_id}
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/logout",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+            "client": ("203.0.113.5", 1234),
+            "scheme": "http",
+            "query_string": b"",
+            "server": ("testserver", 80),
+        }
+    )
+    principal = AuthPrincipal(kind="user", user_id=user_id, token_type="access")
+    return request, principal
+
+
 @pytest.mark.asyncio
 async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
     reset_settings()
@@ -1618,6 +1642,9 @@ async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
     captured = {"calls": 0, "user_id": None, "reason": None}
 
     class _StubSessionManager:
+        async def get_user_sessions(self, user_id, strict=False):
+            return [{"id": 5}]
+
         async def revoke_all_user_sessions(
             self,
             *,
@@ -1639,22 +1666,12 @@ async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
 
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", lambda: _BlacklistShouldNotBeCalled())
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/logout",
-        "headers": [(b"authorization", b"Bearer unused-for-all-devices")],
-        "client": ("203.0.113.5", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
+    request, principal = _interactive_logout_args()
 
     result = await auth.logout(
         data=auth.LogoutRequest(all_devices=True),
         request=request,
-        current_user=SimpleNamespace(id=12),
+        current_user=principal,
         session_manager=_StubSessionManager(),
         jwt_service=object(),
     )
@@ -1720,12 +1737,80 @@ async def test_logout_rejects_api_key_authenticated_current_session_logout(monke
 
 
 @pytest.mark.asyncio
+async def test_logout_all_devices_refuses_a_caller_without_a_browser_session():
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    class _Manager:
+        def __init__(self):
+            self.revoked = []
+
+        async def revoke_all_user_sessions(self, **kwargs):
+            self.revoked.append(kwargs)
+            return 3
+
+    request = Request({"type": "http", "method": "POST", "path": "/api/v1/auth/logout", "headers": [
+        (b"x-api-key", b"k")], "client": ("203.0.113.5", 1234), "scheme": "http", "query_string": b"", "server": ("testserver", 80)})
+    manager = _Manager()
+    with pytest.raises(auth.HTTPException) as exc:
+        await auth.logout(
+            data=auth.LogoutRequest(all_devices=True),
+            request=request,
+            current_user=auth.AuthPrincipal(kind="api_key", user_id=12),
+            session_manager=manager,
+            jwt_service=object(),
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "interactive_session_required"
+    assert manager.revoked == []
+
+
+@pytest.mark.asyncio
+async def test_logout_token_without_session_id_revokes_nothing():
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    class _JWT:
+        def verify_token(self, token):
+            return {"exp": 1_700_000_000}
+
+        def extract_jti(self, token):
+            return "jti-x"
+
+    class _Manager:
+        def __init__(self):
+            self.calls = []
+
+        async def revoke_all_user_sessions(self, **kwargs):
+            self.calls.append(("all", kwargs))
+
+        async def revoke_session(self, **kwargs):
+            self.calls.append(("single", kwargs))
+
+    request = Request({"type": "http", "method": "POST", "path": "/api/v1/auth/logout", "headers": [
+        (b"authorization", b"Bearer an-api-key")], "client": ("203.0.113.5", 1234), "scheme": "http", "query_string": b"", "server": ("testserver", 80)})
+    manager = _Manager()
+    with pytest.raises(auth.HTTPException) as exc:
+        await auth.logout(
+            data=auth.LogoutRequest(all_devices=False),
+            request=request,
+            current_user=SimpleNamespace(id=12),
+            session_manager=manager,
+            jwt_service=_JWT(),
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "interactive_session_required"
+    assert manager.calls == []
+
+
+@pytest.mark.asyncio
 async def test_logout_all_devices_ignores_blacklist_factory_failure(monkeypatch):
     reset_settings()
 
     import tldw_Server_API.app.api.v1.endpoints.auth as auth
 
     class _StubSessionManager:
+        async def get_user_sessions(self, user_id, strict=False):
+            return [{"id": 5}]
+
         async def revoke_all_user_sessions(
             self,
             *,
@@ -1740,22 +1825,12 @@ async def test_logout_all_devices_ignores_blacklist_factory_failure(monkeypatch)
 
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist", _failing_blacklist_factory)
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/logout",
-        "headers": [],
-        "client": ("203.0.113.5", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
+    request, principal = _interactive_logout_args()
 
     result = await auth.logout(
         data=auth.LogoutRequest(all_devices=True),
         request=request,
-        current_user=SimpleNamespace(id=12),
+        current_user=principal,
         session_manager=_StubSessionManager(),
         jwt_service=object(),
     )
@@ -1770,6 +1845,9 @@ async def test_logout_all_devices_raises_when_session_revoke_fails(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.auth as auth
 
     class _FailingSessionManager:
+        async def get_user_sessions(self, user_id, strict=False):
+            return [{"id": 5}]
+
         async def revoke_all_user_sessions(
             self,
             *,
@@ -1779,23 +1857,13 @@ async def test_logout_all_devices_raises_when_session_revoke_fails(monkeypatch):
         ) -> int:
             raise RuntimeError("session revoke failed")
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/api/v1/auth/logout",
-        "headers": [],
-        "client": ("203.0.113.5", 1234),
-        "scheme": "http",
-        "query_string": b"",
-        "server": ("testserver", 80),
-    }
-    request = Request(scope)
+    request, principal = _interactive_logout_args()
 
     with pytest.raises(auth.HTTPException) as exc:
         await auth.logout(
             data=auth.LogoutRequest(all_devices=True),
             request=request,
-            current_user=SimpleNamespace(id=12),
+            current_user=principal,
             session_manager=_FailingSessionManager(),
             jwt_service=object(),
         )
