@@ -4,12 +4,15 @@ import { useOptionalNotificationLifecycle } from '@web/components/notifications/
 import { dismissNotification, listNotifications, type NotificationItem } from '@web/lib/api/notifications';
 import { Alert } from '@/components/ui/primitives/Alert';
 import { listAuthSessions, type AuthSession } from '@/services/auth-sessions';
-import { isProtectedAlertError, NEW_SIGN_IN_KIND, visibleSignInAlerts } from '@/services/sign-in-alert';
+import {
+  isProtectedAlertError,
+  NEW_SIGN_IN_KIND,
+  NEW_SIGN_IN_PROTECTED_MESSAGE,
+  visibleSignInAlerts,
+} from '@/services/sign-in-alert';
 
 const SESSIONS_PATH = '/settings/sessions';
 const HIDDEN_KEY_PREFIX = 'tldw:new-sign-in-hidden:';
-const PROTECTED_TEXT =
-  'This alert can be dismissed from a browser that was signed in before it, or after 24 hours.';
 const RETRY_TEXT = 'Could not dismiss the alert. Try again.';
 
 const isHiddenHere = (id: number): boolean => {
@@ -44,6 +47,7 @@ export function NewSignInBanner() {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<number>>(new Set());
   const [notice, setNotice] = useState<{ id: number; text: string; refused: boolean } | null>(null);
+  const pathname = router.pathname;
   const loadRef = useRef(0);
   const handledSequenceRef = useRef(0);
 
@@ -63,13 +67,17 @@ export function NewSignInBanner() {
 
   useEffect(() => {
     handledSequenceRef.current = 0;
+  }, [epoch]);
+
+  useEffect(() => {
     if (!active) {
       loadRef.current += 1;
       setItems([]);
       return;
     }
     void load();
-  }, [active, epoch, load]);
+    // pathname: the same alert may have been handled in the inbox since the last load.
+  }, [active, epoch, load, pathname]);
 
   useEffect(() => {
     if (!active) return;
@@ -96,7 +104,7 @@ export function NewSignInBanner() {
       // Deliberately not reported to the lifecycle: a refusal would stop the runtime and hide this alert.
       setNotice(
         isProtectedAlertError(error)
-          ? { id: newest.id, text: PROTECTED_TEXT, refused: true }
+          ? { id: newest.id, text: NEW_SIGN_IN_PROTECTED_MESSAGE, refused: true }
           : { id: newest.id, text: RETRY_TEXT, refused: false }
       );
     }
@@ -110,9 +118,10 @@ export function NewSignInBanner() {
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-50 mx-auto max-w-3xl px-4 pt-2">
+      {/* cn() does not merge Tailwind classes, so the opaque surface lives on a wrapper under the tinted Alert. */}
+      <div className="pointer-events-auto rounded-lg bg-surface shadow-lg" data-testid="new-sign-in-banner-surface">
       <Alert
         variant="warning"
-        className="pointer-events-auto bg-surface shadow-lg"
         title={newest.title}
         action={{ label: 'Review sessions', onClick: () => void router.push(SESSIONS_PATH) }}
         secondaryAction={
@@ -124,6 +133,7 @@ export function NewSignInBanner() {
         <p>{notice?.id === newest.id ? notice.text : newest.message}</p>
         {more > 0 && <p className="mt-1">{more === 1 ? '1 more new sign-in.' : `${more} more new sign-ins.`}</p>}
       </Alert>
+      </div>
     </div>
   );
 }

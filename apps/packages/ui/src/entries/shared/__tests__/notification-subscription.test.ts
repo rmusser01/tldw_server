@@ -623,6 +623,16 @@ describe("notification subscription", () => {
       expect(notifyMock).toHaveBeenCalledWith("New sign-in", "m")
     })
 
+    it("raises no OS notification when the scope changes while the session lookup is pending", async () => {
+      let release: (rows: unknown[]) => void = () => undefined
+      listAuthSessionsMock.mockReturnValue(new Promise((resolve) => { release = resolve }))
+      await emit(alertPayload)
+      await notificationSubscription.startNotificationSubscription(multiUserConfig("user-b"))
+      release([sessionRow(5, { is_current: true }), sessionRow(10)])
+      await flushAsync()
+      expect(notifyMock).not.toHaveBeenCalled()
+    })
+
     it("does not look up sessions for other kinds", async () => {
       await emit({ kind: "job_failed", title: "Job failed", message: "m" })
       expect(listAuthSessionsMock).not.toHaveBeenCalled()

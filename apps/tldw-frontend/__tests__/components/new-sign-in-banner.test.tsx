@@ -99,6 +99,13 @@ const setItems = (...items: any[]) =>
 
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve() })
 
+const renderSettled = async () => {
+  const utils = await renderBanner()
+  await waitFor(() => expect(mocks.listAuthSessions).toHaveBeenCalled())
+  await flush()
+  return utils
+}
+
 const renderBanner = async () => {
   const utils = render(<NewSignInBanner />)
   await flush()
@@ -137,13 +144,13 @@ describe("NewSignInBanner", () => {
 
   it("does not show it when the source session is the current session", async () => {
     mocks.listAuthSessions.mockResolvedValue([session(10, { is_current: true })])
-    await renderBanner()
+    await renderSettled()
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
   it("does not show it when the source session has same_install true", async () => {
     mocks.listAuthSessions.mockResolvedValue([session(5, { is_current: true }), session(10, { same_install: true })])
-    await renderBanner()
+    await renderSettled()
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
@@ -159,7 +166,7 @@ describe("NewSignInBanner", () => {
       alertItem(2, { dismissed_at: "2026-11-25T15:00:00Z" }),
       alertItem(3, { kind: "job_failed" })
     )
-    await renderBanner()
+    await renderSettled()
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
@@ -303,6 +310,8 @@ describe("NewSignInBanner", () => {
   it("is not rendered on /settings/sessions", async () => {
     mocks.pathname = "/settings/sessions"
     await renderBanner()
+    await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalled())
+    await flush()
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
@@ -323,6 +332,22 @@ describe("NewSignInBanner", () => {
     await renderBanner()
     expect(screen.queryByRole("alert")).toBeNull()
     expect(mocks.listNotifications).not.toHaveBeenCalled()
+  })
+
+  it("puts the opaque surface on the element wrapping the alert (class only; pixels are not checked)", async () => {
+    await renderBanner()
+    const banner = await screen.findByRole("alert")
+    expect(banner.parentElement).toHaveClass("bg-surface")
+    expect(banner).not.toHaveClass("bg-surface")
+  })
+
+  it("reloads when the route changes, so an alert handled in the inbox disappears", async () => {
+    const { rerender } = await renderBanner()
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    setItems(alertItem(1, { read_at: "2026-11-25T15:00:00Z" }))
+    mocks.pathname = "/notifications"
+    rerender(<NewSignInBanner />)
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
   })
 
   it("two unread alerts show the newest and \"1 more new sign-in.\"", async () => {

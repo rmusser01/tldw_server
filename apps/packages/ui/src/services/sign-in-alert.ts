@@ -3,6 +3,8 @@ import type { NotificationItem } from "@/services/notifications"
 
 export const NEW_SIGN_IN_KIND = "new_sign_in"
 export const NEW_SIGN_IN_PROTECTED_CODE = "new_sign_in_protected"
+export const NEW_SIGN_IN_PROTECTED_MESSAGE =
+  "This alert can be dismissed from a browser that was signed in before it, or after 24 hours."
 
 export const isProtectedAlertError = (error: unknown): boolean =>
   errorCode(error) === NEW_SIGN_IN_PROTECTED_CODE

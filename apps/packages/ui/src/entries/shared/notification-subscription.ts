@@ -229,8 +229,12 @@ const transitionToConfig = async (
         kind?: string
         source_job_id?: string | number | null
       } | null
-      if (payload?.title && !(await isOwnBrowserSignIn(payload))) {
-        notify(payload.title, payload.message || "")
+      if (payload?.title) {
+        const { title, message } = payload
+        // Off to the side: the lookup must not delay the unread write or outlive its scope.
+        void isOwnBrowserSignIn(payload).then((own) => {
+          if (!own && isCurrent() && !terminal) notify(title, message || "")
+        })
       }
 
       unreadCountWrite = unreadCountWrite

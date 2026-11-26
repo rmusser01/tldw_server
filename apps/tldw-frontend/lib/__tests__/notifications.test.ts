@@ -104,6 +104,15 @@ describe("web notifications adapter", () => {
     })
   })
 
+  it("puts kind in the list request URL", async () => {
+    await listNotifications({ kind: "new_sign_in", limit: 100, offset: 0 })
+
+    expect(mocks.apiGet).toHaveBeenCalledWith(
+      expect.stringContaining("kind=new_sign_in"),
+      expect.anything()
+    )
+  })
+
   it("uses the web apiClient transport for inbox CRUD", async () => {
     await listNotifications({ limit: 20, offset: 0 })
     await listNotifications({ limit: 25, offset: 5, include_archived: true, only_snoozed: true })

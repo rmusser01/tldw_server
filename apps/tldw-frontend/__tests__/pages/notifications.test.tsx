@@ -795,6 +795,7 @@ describe('NotificationsPage', () => {
       await waitFor(() => expect(mocks.showToast).toHaveBeenCalledWith(expect.objectContaining({ variant: 'warning' })));
       expect(mocks.reportMutationError).not.toHaveBeenCalled();
       expect(screen.getByText('New sign-in to your account')).toBeInTheDocument();
+      expect(screen.queryByText(/Failed to dismiss/)).toBeNull();
     });
 
     it('an ordinary mark-read failure still calls reportMutationError', async () => {
