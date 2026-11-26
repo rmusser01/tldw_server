@@ -9,6 +9,7 @@ from fastapi import HTTPException, Response
 from pydantic import ValidationError
 from starlette.requests import Request
 
+from tldw_Server_API.app.core.AuthNZ.interactive_session import InteractiveSession
 from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
     build_login_client_lockout_key,
     validate_login_client_lockout_key,
@@ -1827,6 +1828,8 @@ async def test_revoke_all_sessions_returns_revoked_count():
     result = await auth.revoke_all_sessions(
         current_user={"id": 77, "username": "carol"},
         session_manager=_StubSessionManager(),
+        keep_current=False,
+        interactive=InteractiveSession(user_id=77, session_id=5),
     )
 
     assert result.message == "Successfully revoked 3 sessions"
@@ -1851,6 +1854,7 @@ async def test_list_user_sessions_sanitizes_backend_error_in_test_mode(monkeypat
         await auth.list_user_sessions(
             current_user=SimpleNamespace(id=77),
             session_manager=_FailingSessionManager(),
+            current_session_id=None,
         )
 
     assert exc.value.status_code == 500

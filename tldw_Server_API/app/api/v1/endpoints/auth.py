@@ -26,6 +26,12 @@ from pydantic import BaseModel, EmailStr, Field
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id,
 )
+from tldw_Server_API.app.api.v1.API_Deps.interactive_session_deps import (
+    get_current_session_id,
+    require_interactive_session,
+)
+from tldw_Server_API.app.core.AuthNZ.device_label import device_label
+from tldw_Server_API.app.core.AuthNZ.interactive_session import InteractiveSession, install_id_or_none
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RateLimiter,
     _authnz_busy_http_exception,
@@ -2146,7 +2152,8 @@ async def logout(
 @router.get("/sessions", response_model=list[SessionResponse])
 async def list_user_sessions(
     current_user: AuthPrincipal = Depends(get_auth_principal),
-    session_manager: SessionManager = Depends(get_session_manager_dep)
+    session_manager: SessionManager = Depends(get_session_manager_dep),
+    current_session_id: Optional[int] = Depends(get_current_session_id),
 ) -> list[SessionResponse]:
     """
     List all active sessions for the current user.
@@ -2159,6 +2166,10 @@ async def list_user_sessions(
                 detail="Invalid credentials",
             )
         sessions = await session_manager.get_user_sessions(user_id)
+        current_install = next(
+            (install_id_or_none(s.get('device_id')) for s in sessions if s['id'] == current_session_id),
+            None,
+        )
 
         return [
             SessionResponse(
@@ -2167,7 +2178,11 @@ async def list_user_sessions(
                 user_agent=session.get('user_agent'),
                 created_at=session['created_at'],
                 last_activity=session['last_activity'],
-                expires_at=session['expires_at']
+                expires_at=session['expires_at'],
+                is_current=session['id'] == current_session_id,
+                device_label=device_label(session.get('user_agent')),
+                same_install=current_install is not None
+                and install_id_or_none(session.get('device_id')) == current_install,
             )
             for session in sessions
         ]
@@ -2184,7 +2199,8 @@ async def list_user_sessions(
 async def revoke_session(
     session_id: int,
     current_user: AuthPrincipal = Depends(get_auth_principal),
-    session_manager: SessionManager = Depends(get_session_manager_dep)
+    session_manager: SessionManager = Depends(get_session_manager_dep),
+    interactive: InteractiveSession = Depends(require_interactive_session),
 ) -> MessageResponse:
     """
     Revoke a specific session for the current user.
@@ -2216,7 +2232,8 @@ async def revoke_session(
         await session_manager.revoke_session(
             session_id,
             revoked_by=user_id,
-            reason="User requested revocation"
+            reason="User requested revocation",
+            expected_user_id=user_id,
         )
 
         logger.info(f"User {username} revoked session {session_id}")
@@ -2245,7 +2262,9 @@ async def revoke_session(
 @router.post("/sessions/revoke-all", response_model=MessageResponse)
 async def revoke_all_sessions(
     current_user: AuthPrincipal = Depends(get_auth_principal),
-    session_manager: SessionManager = Depends(get_session_manager_dep)
+    session_manager: SessionManager = Depends(get_session_manager_dep),
+    keep_current: bool = Query(False, description="Keep the caller's own session."),
+    interactive: InteractiveSession = Depends(require_interactive_session),
 ) -> MessageResponse:
     """
     Revoke all sessions for the current user.
@@ -2261,7 +2280,8 @@ async def revoke_all_sessions(
 
         count = await session_manager.revoke_all_user_sessions(
             user_id=user_id,
-            reason="User requested logout from all devices"
+            reason="User requested logout from all devices",
+            except_session_id=interactive.session_id if keep_current else None,
         )
         revoked_count = int(count)
 

@@ -453,14 +453,14 @@ class AuthnzSessionsRepo:
                 if self._is_postgres_backend():
                     if except_session_id:
                         result = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_active = FALSE,
                                 is_revoked = TRUE,
                                 revoked_at = CURRENT_TIMESTAMP,
                                 revoked_by = $3,
                                 revoke_reason = $4
-                            WHERE user_id = $1 AND id != $2
+                            WHERE user_id = $1 AND id != $2 AND {LIVE_SESSION_PREDICATE_PG}
                             """,
                             user_id,
                             except_session_id,
@@ -469,14 +469,14 @@ class AuthnzSessionsRepo:
                         )
                     else:
                         result = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_active = FALSE,
                                 is_revoked = TRUE,
                                 revoked_at = CURRENT_TIMESTAMP,
                                 revoked_by = $2,
                                 revoke_reason = $3
-                            WHERE user_id = $1
+                            WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}
                             """,
                             user_id,
                             revoked_by,
@@ -489,27 +489,27 @@ class AuthnzSessionsRepo:
                 else:
                     if except_session_id:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_active = 0,
                                 is_revoked = 1,
                                 revoked_at = datetime('now'),
                                 revoked_by = ?,
                                 revoke_reason = ?
-                            WHERE user_id = ? AND id != ?
+                            WHERE user_id = ? AND id != ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             """,
                             (revoked_by, reason, user_id, except_session_id),
                         )
                     else:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_active = 0,
                                 is_revoked = 1,
                                 revoked_at = datetime('now'),
                                 revoked_by = ?,
                                 revoke_reason = ?
-                            WHERE user_id = ?
+                            WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             """,
                             (revoked_by, reason, user_id),
                         )
@@ -746,14 +746,14 @@ class AuthnzSessionsRepo:
                 if self._is_postgres_backend():
                     if except_session_id is None:
                         result = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_revoked = TRUE,
                                 is_active = FALSE,
                                 revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
                                 revoked_by = COALESCE($2, revoked_by),
                                 revoke_reason = COALESCE($3, revoke_reason)
-                            WHERE user_id = $1
+                            WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}
                             """,
                             user_id,
                             revoked_by,
@@ -761,14 +761,14 @@ class AuthnzSessionsRepo:
                         )
                     else:
                         result = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_revoked = TRUE,
                                 is_active = FALSE,
                                 revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
                                 revoked_by = COALESCE($3, revoked_by),
                                 revoke_reason = COALESCE($4, revoke_reason)
-                            WHERE user_id = $1 AND id != $2
+                            WHERE user_id = $1 AND id != $2 AND {LIVE_SESSION_PREDICATE_PG}
                             """,
                             user_id,
                             except_session_id,
@@ -782,27 +782,27 @@ class AuthnzSessionsRepo:
                 else:
                     if except_session_id is None:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_revoked = 1,
                                 is_active = 0,
                                 revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
                                 revoked_by = COALESCE(?, revoked_by),
                                 revoke_reason = COALESCE(?, revoke_reason)
-                            WHERE user_id = ?
+                            WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             """,
                             (revoked_by, reason, user_id),
                         )
                     else:
                         cursor = await conn.execute(
-                            """
+                            f"""
                             UPDATE sessions
                             SET is_revoked = 1,
                                 is_active = 0,
                                 revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP),
                                 revoked_by = COALESCE(?, revoked_by),
                                 revoke_reason = COALESCE(?, revoke_reason)
-                            WHERE user_id = ? AND id != ?
+                            WHERE user_id = ? AND id != ? AND {LIVE_SESSION_PREDICATE_SQLITE}
                             """,
                             (revoked_by, reason, user_id, except_session_id),
                         )
