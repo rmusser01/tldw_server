@@ -3214,6 +3214,7 @@ async def test_execute_non_stream_saturation_fails_closed_before_dispatch(
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(chat_service, "log_llm_usage", AsyncMock(return_value=None))
 
     def blocked_call() -> dict[str, object]:
         entered.set()
