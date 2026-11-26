@@ -1,5 +1,109 @@
 @import "../../packages/ui/src/assets/tailwind.css";
 
+.qi-web-wrap .qi-web-modal {
+  padding-bottom: 0;
+}
+
+.qi-web-wrap .qi-web-modal .ant-modal-container.qi-web-surface {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.qi-web-wrap .qi-web-modal .ant-modal-header.qi-web-header {
+  flex: none;
+  margin: 0;
+  padding: 18px 56px 18px 24px;
+  border-bottom: 1px solid rgb(var(--color-border));
+}
+
+.qi-web-modal .qi-web-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.qi-web-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 24px;
+}
+
+.qi-web-footer {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 12px 24px;
+  border-top: 1px solid rgb(var(--color-border));
+}
+
+.qi-web-modal .ant-input::placeholder {
+  color: rgb(var(--color-text-muted)) !important;
+  opacity: 1;
+}
+
+.qi-web-modal .ant-btn-link:not(:disabled) {
+  color: rgb(var(--color-primary-text)) !important;
+}
+
+.qi-source-row { grid-template-columns: 1rem minmax(0, 1fr) auto auto; }
+.qi-source-repair { grid-column: 3; }
+.qi-source-remove { grid-column: 4; grid-row: 1; }
+
+@media (max-width: 640px) {
+  .qi-web-wrap.ant-modal-wrap {
+    top: var(--qi-visible-top, 0);
+    bottom: auto;
+    height: var(--qi-visible-height, 100dvh);
+    overflow: hidden;
+  }
+
+  .ant-modal-root .qi-web-wrap.ant-modal-wrap.ant-modal-centered::before {
+    display: none;
+    content: none;
+  }
+  .qi-web-wrap.ant-modal-wrap .qi-web-modal.ant-modal {
+    display: block;
+    top: 0;
+    width: 100% !important;
+    max-width: 100%;
+    margin: 0;
+  }
+
+  .qi-web-wrap .qi-web-modal .ant-modal-container.qi-web-surface {
+    height: var(--qi-visible-height, 100dvh);
+    max-height: none;
+    border-radius: 0;
+  }
+
+  .qi-web-modal .qi-web-body { flex: 1; }
+  .qi-web-wrap .qi-web-modal .ant-modal-header.qi-web-header { padding-left: 16px; }
+  .qi-web-scroll { padding: 8px 16px; }
+  .qi-web-footer { padding: 10px 16px max(10px, env(safe-area-inset-bottom)); }
+  .qi-web-footer button { min-height: 44px; }
+  .qi-draft-footer { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .qi-draft-footer > :empty { display: none; }
+  .qi-link-entry { flex-direction: column; }
+  .qi-link-entry textarea { flex: auto; font-size: 16px; }
+  .qi-web-modal .qi-link-entry button { min-height: 44px; }
+  .qi-source-row { grid-template-columns: 1rem minmax(0, 1fr) auto; }
+  .qi-web-modal .qi-source-repair {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: start;
+    min-height: 44px;
+    padding-inline: 0;
+  }
+  .qi-source-remove { grid-column: 3; }
+}
+
 .server-readiness-degraded-shell {
   display: flex;
   flex-direction: column;
