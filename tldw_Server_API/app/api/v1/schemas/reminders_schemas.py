@@ -113,6 +113,8 @@ NotificationKind = Literal[
     "automation_run_timed_out",
     "automation_run_skipped",
     "automation_run_approval_required",
+    # New-sign-in alert (TASK-15649), written by core/AuthNZ/sign_in_alert.py.
+    "new_sign_in",
 ]
 
 

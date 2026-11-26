@@ -149,7 +149,7 @@ class AuthnzSessionsRepo:
         lock for ``user_id`` on another connection: this call would wait on itself.
 
         Returns the new id and the evicted rows (``id, user_id, access_jti,
-        refresh_jti, expires_at, refresh_expires_at, last_activity, created_at``)
+        refresh_jti, expires_at, refresh_expires_at, last_activity, created_at, device_id``)
         for blacklisting after commit.
         """
         is_postgres = self._is_postgres_backend()
@@ -184,7 +184,7 @@ class AuthnzSessionsRepo:
                                            LIMIT $3)
                                AND {LIVE_SESSION_PREDICATE_PG}
                             RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at,
-                                      last_activity, created_at
+                                      last_activity, created_at, device_id
                             """,
                             user_id,
                             device_id,
@@ -204,7 +204,7 @@ class AuthnzSessionsRepo:
                                            LIMIT ?)
                                AND {LIVE_SESSION_PREDICATE_SQLITE}
                             RETURNING id, user_id, access_jti, refresh_jti, expires_at, refresh_expires_at,
-                                      last_activity, created_at
+                                      last_activity, created_at, device_id
                             """,
                             (SESSION_CAP_REVOKE_REASON, user_id, device_id, excess),
                         )

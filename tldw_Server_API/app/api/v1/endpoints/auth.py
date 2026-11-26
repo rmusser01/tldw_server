@@ -431,6 +431,7 @@ async def _issue_multi_user_tokens(
         ip_address=client_ip,
         user_agent=user_agent,
         device_id=request_device_id(request),
+        alert_new_sign_in=True,
     )
     session_id = int(temp_session_info["session_id"])
 
@@ -1912,6 +1913,7 @@ async def login(
                 ip_address=client_ip,
                 user_agent=user_agent,
                 device_id=request_device_id(request),
+                alert_new_sign_in=True,
             )
 
             session_id = temp_session_info['session_id']
@@ -3214,6 +3216,7 @@ async def verify_magic_link(
         ip_address=_auth_request_client_ip(request),
         user_agent=user_agent,
         device_id=request_device_id(request),
+        alert_new_sign_in=True,
     )
     session_id = temp_session_info["session_id"]
 

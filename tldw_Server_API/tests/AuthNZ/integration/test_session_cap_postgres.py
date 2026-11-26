@@ -159,6 +159,26 @@ async def test_same_device_id_replaces_only_its_own_row_postgres(
 
 
 @pytest.mark.asyncio
+async def test_evicted_rows_returned_by_the_repo_carry_their_device_id_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+
+    pool = await get_db_pool()
+    uid = await _create_user(pool, "pg_cap_evicted_device")
+    repo = AuthnzSessionsRepo(pool)
+    ids = [await _capped(repo, uid, f"s{i}", device_id=f"dev-{i}aaaaaaa") for i in range(4)]
+    now = datetime.now(timezone.utc)
+    _new_id, evicted = await repo.create_session_record_with_cap(
+        user_id=uid, token_hash="h-new", refresh_token_hash="r-new", encrypted_token="enc",
+        encrypted_refresh="enc", expires_at=now + timedelta(hours=1), refresh_expires_at=now + timedelta(days=7),
+        ip_address="127.0.0.1", user_agent="pytest-pg", device_id="dev-newaaaaa", access_jti="aj-new",
+        refresh_jti="rj-new", max_live_sessions=4,
+    )
+    assert [(e["id"], e["device_id"]) for e in evicted] == [(ids[0], "dev-0aaaaaaa")]
+
+
+@pytest.mark.asyncio
 async def test_cap_evicts_the_least_recently_active_session_postgres(
     isolated_test_environment: tuple[TestClient, str],
 ) -> None:

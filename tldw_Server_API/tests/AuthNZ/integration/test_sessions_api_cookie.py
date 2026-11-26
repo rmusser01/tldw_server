@@ -104,3 +104,42 @@ def test_cookie_sessions_without_an_install_header_are_never_same_install(single
     rows = client.get(LIST).json()
     assert sum(r["is_current"] for r in rows) == 1
     assert sorted(r["same_install"] for r in rows) == [False, False, True, True]
+
+
+def _single_user_alerts(user_id: int) -> list:
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+
+    with CollectionsDatabase.for_user(user_id=user_id) as db:
+        rows = db.list_user_notifications()
+    return [r for r in rows if r.kind == "new_sign_in"]
+
+
+@pytest.mark.sign_in_alerts
+async def test_single_user_cookie_mint_alerts_the_other_install(single_user_cookie_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.AuthNZ.sign_in_alert import drain_pending_alerts
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    client, api_key = single_user_cookie_client
+    uid = int(get_settings().SINGLE_USER_FIXED_ID)
+    _mint_cookie(client, api_key, "dev-cookie-0001")
+    await drain_pending_alerts()
+    assert _single_user_alerts(uid) == []
+    _mint_cookie(client, api_key, "dev-cookie-0002")
+    await drain_pending_alerts()
+    (alert,) = _single_user_alerts(uid)
+    assert alert.severity == "warning" and alert.link_url == "/settings/sessions"
+
+
+@pytest.mark.sign_in_alerts
+async def test_cookie_mints_without_an_install_header_still_alert(single_user_cookie_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.AuthNZ.sign_in_alert import drain_pending_alerts
+
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    client, api_key = single_user_cookie_client
+    uid = int(get_settings().SINGLE_USER_FIXED_ID)
+    _mint_cookie(client, api_key)
+    _mint_cookie(client, api_key)
+    await drain_pending_alerts()
+    assert len(_single_user_alerts(uid)) == 1
