@@ -286,6 +286,7 @@ const throwIfServicePromptScopeInvalidated = (
 }
 
 type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
+  historyServerChatId?: string
   setHistoryId?: (id: string, options?: { preserveServerChatId?: boolean }) => void
   conversationId?: string | number | null
   message_source?: "copilot" | "web-ui" | "server" | "branch"
@@ -437,6 +438,8 @@ const characterIdsMatch = (
 }
 
 type UseChatActionsOptions = {
+  historyDocumentId?: string
+  onDocumentHistorySaved?: (historyId: string) => Promise<void>
   capturePrivateScene?: (commandIsCurrent: () => boolean) => ReturnType<typeof captureActorSceneSend>
   t: TFunction
   notification: NotificationInstance
@@ -622,7 +625,9 @@ export const useChatActions = ({
   clearMessageSteering,
   visualIdentityManualExpressionOverride,
   setVisualIdentityManualExpressionOverride,
-  capturePrivateScene
+  capturePrivateScene,
+  historyDocumentId,
+  onDocumentHistorySaved
 }: UseChatActionsOptions) => {
   const historySelection = useHistorySelectionContext()
   const captureSceneForCommand = (isCurrent: () => boolean) => historySelection
@@ -887,7 +892,7 @@ export const useChatActions = ({
       options?: { preserveServerChatId?: boolean }
     ) => void
   )
-  const saveMessageOnError = createSaveMessageOnError(
+  const baseSaveMessageOnError = createSaveMessageOnError(
     temporaryChat,
     history,
     setHistory,
@@ -896,6 +901,12 @@ export const useChatActions = ({
       options?: { preserveServerChatId?: boolean }
     ) => void
   )
+
+  const saveMessageOnError: typeof baseSaveMessageOnError = async (data) => {
+    const key = await baseSaveMessageOnError(historyDocumentId ? { ...data, historyDocumentId } : data)
+    if (key && onDocumentHistorySaved) await onDocumentHistorySaved(key)
+    return key
+  }
 
   const resolveImageEventSyncModeForPayload = React.useCallback(
     (payload?: SaveMessagePayload): ImageGenerationEventSyncMode => {
@@ -962,6 +973,7 @@ export const useChatActions = ({
     let payloadForLocalPersistence = payload
       ? {
           ...payload,
+          ...(historyDocumentId ? { historyDocumentId } : {}),
           setHistoryId: (
             ...args: Parameters<NonNullable<SaveMessagePayload["setHistoryId"]>>
           ) => {
@@ -987,6 +999,7 @@ export const useChatActions = ({
         }
       const key = await baseSaveMessageOnSuccess(payloadForLocalPersistence)
       throwIfScopeChanged()
+      if (key && onDocumentHistorySaved) await onDocumentHistorySaved(key)
       if (!payload?.historyId && key && sourceIsCurrent()) {
         markCompareHistoryCreated(key)
       }
@@ -1966,7 +1979,9 @@ export const useChatActions = ({
     serverChatIdOverride,
     historyIdOverride,
     servicePromptSnapshot,
-    onResponseDispatch
+    onResponseDispatch,
+    documentViewIsCurrent,
+    view = { setMessages, setHistory, setIsProcessing, setStreaming, setHistoryId }
   }: {
     message: string
     image: string
@@ -1981,12 +1996,16 @@ export const useChatActions = ({
     historyIdOverride?: string | null
     servicePromptSnapshot?: ServicePromptSnapshot
     onResponseDispatch?: () => void
+    documentViewIsCurrent?: () => boolean
+    view?: Pick<Awaited<ReturnType<typeof buildChatModeParams>>,
+      "setMessages" | "setHistory" | "setIsProcessing" | "setStreaming" | "setHistoryId">
     messageSteering: {
       continueAsUser: boolean
       impersonateUser: boolean
       forceNarrate: boolean
     }
   }): Promise<ChatSubmitResult> => {
+    const { setMessages, setHistory, setIsProcessing, setStreaming, setHistoryId } = view
     const executionSignal = servicePromptSnapshot?.scopeSignal ?? signal
     const requestOptions = {
       ...(scope ? { scope } : {}),
@@ -1996,6 +2015,7 @@ export const useChatActions = ({
     const throwIfTurnCancelled = () => {
       throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
       executionSignal.throwIfAborted()
+      if (documentViewIsCurrent?.() === false) throw createServicePromptScopeChangedError()
     }
     // Capture the current turn's supported controls before asynchronous work.
     const { numPredict, temperature, topP, repeatPenalty } = currentChatModelSettings
@@ -2993,12 +3013,13 @@ export const useChatActions = ({
         assistantServerMessageId: persistedAssistantServerMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
         conversationId: activeChatId,
+        ...(historyDocumentId && activeChatId ? { historyServerChatId: activeChatId } : {}),
         saveToDb: true,
         serverMessagesAlreadyPersisted: assistantPersistedToServer,
         scopeSignal: servicePromptSnapshot?.scopeSignal,
         scopeInvalidatedSignal: servicePromptSnapshot?.scopeInvalidatedSignal,
         requestScope: servicePromptSnapshot?.requestScope
-      })
+      }, documentViewIsCurrent)
       throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
 
       setIsProcessing(false)
@@ -3211,6 +3232,9 @@ export const useChatActions = ({
       const errorSave = await saveMessageOnError({
         e,
         conversationId: activeChatId,
+        ...(historyDocumentId && activeChatId ? { historyServerChatId: activeChatId } : {}),
+        setHistory,
+        setHistoryId,
         botMessage: assistantContent,
         history: historyBase,
         historyId: historyIdOverride ?? historyId,
@@ -4268,7 +4292,8 @@ export const useChatActions = ({
           ...chatModeParamsWithRegen,
           ...alternateHistoryParams,
           actorSceneSend: workspaceServerChat.sceneSend,
-          servicePromptSnapshot: turnServicePromptSnapshot
+          servicePromptSnapshot: turnServicePromptSnapshot,
+          ...(historyDocumentId && !chatModeParams.serverChatId ? { saveToDb: false } : {})
         }
         const scopedRagModeParams = workspaceServerChat.chatId
           ? {
@@ -4532,7 +4557,12 @@ export const useChatActions = ({
               messageSteering: messageSteeringForTurn,
               serverChatIdOverride,
               servicePromptSnapshot: turnServicePromptSnapshot,
-              onResponseDispatch: markSteeringApplied
+              onResponseDispatch: markSteeringApplied,
+              ...(historyDocumentId ? {
+                view: servicePromptChatModeParams,
+                documentViewIsCurrent: () => commandSessionIsCurrent() &&
+                  actorSceneSend.scene.target.account?.isCurrent() === true
+              } : {})
             })
             return toChatSubmitResult(characterResult)
           }

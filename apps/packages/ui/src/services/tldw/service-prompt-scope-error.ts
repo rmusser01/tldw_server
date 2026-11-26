@@ -113,7 +113,7 @@ export const isServicePromptRequestPath = (
   )) return true
   if (requestMethod === "POST" && [
     "/api/v1/research-workspace/artifacts/generate", "/api/v1/quizzes/generate",
-    "/api/v1/slides/generate/from-media", "/api/v1/audio/speech",
+    "/api/v1/slides/generate/from-media", "/api/v1/audio/speech", "/api/v1/translate",
   ].includes(pathname)) return true
   if (/^\/api\/v1\/workspaces\/[^/]+\/outputs$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/workspaces\/[^/]+\/outputs\/[A-Za-z0-9_-]+$/.test(pathname)) return requestMethod === "GET"

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   acknowledgeUser: vi.fn(async () => undefined),
+  getHistory: vi.fn(),
+  updateHistory: vi.fn(),
   events: [] as string[],
   settle: vi.fn<(...args: any[]) => Promise<any>>(async () => ({
     id: "assistant-1"
@@ -52,6 +54,10 @@ const mocks = vi.hoisted(() => ({
   })
 }))
 
+vi.mock("@/db/dexie/schema", () => ({
+  db: { chatHistories: { get: mocks.getHistory, update: mocks.updateHistory } }
+}))
+
 vi.mock("@/db/dexie/helpers", () => ({
   acknowledgeSavedUserMessage: mocks.acknowledgeUser,
   addFileToSession: mocks.addFileToSession,
@@ -84,6 +90,7 @@ vi.mock("@/services/chat-history-selection", () => ({
 }))
 
 import { saveMessageOnSuccess, saveMessageOnError } from "../index"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 
 const requestScope = Object.freeze({
   config: Object.freeze({
@@ -127,6 +134,45 @@ describe("saveMessageOnSuccess request scope", () => {
       })
     }
     expect(mocks.saveHistory).toHaveBeenCalledWith("Generated title", false, "web-ui", undefined, undefined, requestScope)
+  })
+
+  it("indexes a completed first document turn under its document and verified account", async () => {
+    await saveMessageOnSuccess(payload({
+      historyId: null, historyDocumentId: "document:81", requestScope
+    }))
+    expect(mocks.saveHistory).toHaveBeenCalledWith(
+      "Generated title", false, "web-ui", "document:81", undefined, requestScope
+    )
+  })
+
+  it("indexes the first interrupted answer under the verified document", async () => {
+    await saveMessageOnError({
+      e: new Error("Provider interrupted"), history: [], setHistory: vi.fn(),
+      historyId: null, setHistoryId: vi.fn(), image: "", userMessage: "question",
+      botMessage: "partial reply", selectedModel: "model-1", isRegenerating: false,
+      historyDocumentId: "document:81", requestScope
+    })
+    expect(mocks.saveHistory).toHaveBeenCalledWith(
+      "Generated title", false, "web-ui", "document:81", undefined, requestScope
+    )
+  })
+
+  it("indexes an existing owned document mirror without creating a second history", async () => {
+    mocks.getHistory.mockResolvedValueOnce({ server_scope_key: serverChatMirrorOwnerKey({ requestScope }) })
+    await saveMessageOnSuccess(payload({ historyDocumentId: "document:81", requestScope }))
+    expect(mocks.updateHistory).toHaveBeenCalledWith("history-1", { doc_id: "document:81" })
+    expect(mocks.saveHistory).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { server_scope_key: "different-account" },
+    { server_scope_key: serverChatMirrorOwnerKey({ requestScope }), doc_id: "document:82" }
+  ])("does not associate another account or document's history", async row => {
+    mocks.getHistory.mockResolvedValueOnce(row)
+    await expect(saveMessageOnSuccess(payload({ historyDocumentId: "document:81", requestScope })))
+      .rejects.toMatchObject({ status: 412 })
+    expect(mocks.updateHistory).not.toHaveBeenCalled()
+    expect(mocks.saveMessage).not.toHaveBeenCalled()
   })
 
   it("resolves owned assistant media after the user write and immediately before insertion", async () => {

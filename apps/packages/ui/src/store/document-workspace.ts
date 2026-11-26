@@ -70,6 +70,7 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
     rightPanelCollapsed: false,
     activeSidebarTab: "toc",
     activeRightTab: "chat",
+    pendingSelectionPrompt: null,
     currentPage: 1,
     totalPages: 0,
     zoomLevel: DEFAULT_ZOOM_LEVEL,
@@ -296,6 +297,13 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
 
     setActiveRightTab: (tab: RightPanelTab) => {
       set({ activeRightTab: tab })
+    },
+    queueSelectionPrompt: (documentId, workspaceAuthority, prompt) => {
+      const state = get()
+      if (!workspaceAuthority || state.workspaceAuthority !== workspaceAuthority ||
+          state.activeDocumentId !== documentId) return false
+      set({ activeRightTab: "chat", pendingSelectionPrompt: { documentId, prompt } })
+      return true
     },
 
     // Viewer
@@ -537,6 +545,7 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
         rightPanelCollapsed: false,
         activeSidebarTab: "toc",
         activeRightTab: "chat",
+        pendingSelectionPrompt: null,
         currentPage: 1,
         totalPages: 0,
         zoomLevel: DEFAULT_ZOOM_LEVEL,
