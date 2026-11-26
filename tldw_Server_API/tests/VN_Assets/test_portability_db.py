@@ -181,6 +181,36 @@ def test_import_journal_round_trips(chacha_db: CharactersRAGDB) -> None:
     assert stale_write == updated
 
 
+def test_deleted_preview_rejects_stale_status_update(chacha_db: CharactersRAGDB) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    preview = repo.create_import_preview(owner_user_id=7, job_id="preview", status="completed", archive_path="preview.tldw-vnpack")
+    repo.update_import_preview(preview["id"], {"status": "deleted"}, owner_user_id=7)
+
+    updated = repo.update_import_preview(preview["id"], {"status": "completed"}, owner_user_id=7)
+
+    assert updated["status"] == "deleted"
+
+
+def test_import_journal_keeps_evidence_of_earlier_writes(chacha_db: CharactersRAGDB) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    preview = repo.create_import_preview(owner_user_id=7, job_id="preview", status="completed", archive_path="preview.tldw-vnpack")
+    journal = repo.create_import_journal(
+        owner_user_id=7,
+        preview_id=preview["id"],
+        job_id="import",
+        status="processing",
+        stage="creating_pack",
+        trust_mode="trusted_restore",
+        target_mode="create_new",
+        created_records={"writes_started": True},
+    )
+
+    updated = repo.update_import_journal(
+        journal["id"], {"status": "failed", "created_records": {"writes_started": False}}, owner_user_id=7
+    )
+
+    assert json.loads(updated["created_records_json"])["writes_started"] is True
+
 
 def test_import_journal_completion_rolls_back_if_readback_fails(
     chacha_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch

@@ -18,7 +18,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    rbac_rate_limit,
+    require_expected_user_if_present,
+)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetBulkReviewRequest,
@@ -84,7 +89,9 @@ from tldw_Server_API.app.core.VN_Platform.idempotency import (
 )
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
-router = APIRouter(prefix="/vn-assets", tags=["vn-assets"])
+router = APIRouter(
+    prefix="/vn-assets", tags=["vn-assets"], dependencies=[Depends(require_expected_user_if_present)]
+)
 CONFLICT_ERROR_CODES = {
     "slot_already_exists",
     "slot_has_dependents",
@@ -480,7 +487,7 @@ def _compose_import_preview_response(
             )
             if updated_job is not None:
                 portability_job = updated_job
-        if preview_status not in TERMINAL_JOB_STATUSES:
+        if preview_status not in TERMINAL_JOB_STATUSES | {"deleting", "deleted", "expired"}:
             updated_preview = service.repo.update_import_preview(
                 int(preview["id"]),
                 {"status": job_status},
@@ -930,32 +937,30 @@ async def start_pack_export(
     current_user: User = Depends(get_request_user),
     jobs_manager: JobManager = Depends(_job_manager),
 ) -> VNPackExportResponse:
-    try:
-        service.get_pack(pack_id)
-    except ValueError as exc:
-        raise _handle_value_error(exc) from exc
-
     owner_user_id = _current_user_id(current_user)
     export_request = request or VNPackExportRequest()
-    idempotency_key = _operation_idempotency_key(
-        export_request.idempotency_key,
-        export_request.request_id,
-    )
-    request_id = export_request.request_id or idempotency_key
+    idempotency_key = export_request.idempotency_key or export_request.request_id
     options = export_request.model_dump(exclude={"idempotency_key", "request_id"})
     payload_hash = canonical_payload_hash({"pack_id": pack_id, "options": options})
-    replay = _claim_or_replay_idempotency(
-        service,
-        owner_user_id=owner_user_id,
-        scope="vn_asset_export",
-        resource_id=f"pack:{pack_id}",
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
-        response_model=VNPackExportResponse,
-    )
-    if replay is not None:
-        return replay
+    if idempotency_key:
+        replay = _claim_or_replay_idempotency(
+            service,
+            owner_user_id=owner_user_id,
+            scope="vn_asset_export",
+            resource_id=f"pack:{pack_id}",
+            idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
+            response_model=VNPackExportResponse,
+        )
+        if replay is not None:
+            return replay
     try:
+        try:
+            service.get_pack(pack_id)
+        except ValueError as exc:
+            raise _handle_value_error(exc) from exc
+        idempotency_key = _require_idempotency_key(idempotency_key)
+        request_id = export_request.request_id or idempotency_key
         job = create_pack_export_job(
             jobs_manager,
             pack_id=pack_id,
@@ -1298,28 +1303,39 @@ async def delete_pack_import_preview(
     jobs_manager: JobManager = Depends(_job_manager),
 ) -> Response:
     owner_user_id = _current_user_id(current_user)
-    preview, portability_job = _portability_import_preview_or_404(
-        service,
-        preview_id=preview_id,
-        owner_user_id=owner_user_id,
-    )
-    if str(preview["status"]) == "processing":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_processing")
-    job_id = str(preview["job_id"])
+    with service.repo.db.transaction():
+        preview, portability_job = _portability_import_preview_or_404(
+            service, preview_id=preview_id, owner_user_id=owner_user_id,
+        )
+        if preview["status"] == "deleted":
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        if preview["status"] == "processing":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_processing")
+        for entry in service.repo.list_import_jobs_for_preview(preview_id, owner_user_id=owner_user_id):
+            job = _job_for_portability(jobs_manager, str(entry["job_id"])) or {}
+            if entry["status"] not in TERMINAL_JOB_STATUSES or (
+                job and job.get("status") not in TERMINAL_JOB_STATUSES
+            ):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_has_active_import")
+
+        # lgtm[py/path-injection] The stored path must stay inside the owner's staging root.
+        archive_path = Path(str(preview.get("archive_path") or ""))
+        preview_root = _vn_pack_import_preview_staging_root(owner_user_id).resolve()
+        try:
+            resolved_archive_path = archive_path.resolve()
+            if resolved_archive_path == preview_root:
+                raise ValueError("preview_archive_is_staging_root")
+            resolved_archive_path.relative_to(preview_root)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="import_preview_archive_outside_user_root") from exc
+        # Fence new restore admission before unlinking. A failed unlink can be retried.
+        service.repo.update_import_preview(preview_id, {"status": "deleting"}, owner_user_id=owner_user_id)
+
     try:
-        jobs_manager.cancel_job(int(job_id), reason="vn_pack_import_preview_delete_requested")
+        jobs_manager.cancel_job(int(preview["job_id"]), reason="vn_pack_import_preview_delete_requested")
     except (TypeError, ValueError):
         pass
-    # lgtm[py/path-injection] persisted archive_path is accepted only after import-preview root containment checks.
-    archive_path = Path(str(preview.get("archive_path") or ""))
-    preview_root = _vn_pack_import_preview_staging_root(owner_user_id).resolve()
-    try:
-        resolved_archive_path = archive_path.resolve()
-        resolved_archive_path.relative_to(preview_root)
-    except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="import_preview_archive_outside_user_root") from exc
-    if resolved_archive_path.is_file():
-        await _remove_file_if_exists(resolved_archive_path)
+    await _remove_file_if_exists(resolved_archive_path)
     service.repo.update_import_preview(
         preview_id,
         {"status": "deleted"},
@@ -1346,29 +1362,8 @@ async def start_pack_import_commit(
     jobs_manager: JobManager = Depends(_job_manager),
 ) -> VNPackImportCommitStartResponse:
     owner_user_id = _current_user_id(current_user)
-    if request.target_mode == "update_existing":
-        if request.target_pack_id is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_pack_required")
-        try:
-            service.get_pack(int(request.target_pack_id))
-        except ValueError as exc:
-            raise _handle_value_error(exc) from exc
-    if request.character_action == "fail_import":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="primary_character_unresolved")
-    if request.character_action == "link_existing_character":
-        if request.target_character_id is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_character_required")
-        if service.repo.get_character(int(request.target_character_id)) is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="target_character_not_found")
-
-    preview = service.repo.get_import_preview(request.preview_id, owner_user_id=owner_user_id)
-    if preview is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_preview_not_found")
-    if str(preview["status"]) != "completed":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_not_completed")
-
-    idempotency_key = _operation_idempotency_key(request.idempotency_key, request.request_id)
-    request_id = request.request_id or idempotency_key
+    resource_id = f"preview:{request.preview_id}"
+    idempotency_key = request.idempotency_key or request.request_id
     payload_hash = canonical_payload_hash(
         {
             "preview_id": request.preview_id,
@@ -1378,34 +1373,61 @@ async def start_pack_import_commit(
             ),
         }
     )
-    replay = _claim_or_replay_idempotency(
-        service,
-        owner_user_id=owner_user_id,
-        scope="vn_asset_import_commit",
-        resource_id=f"preview:{request.preview_id}",
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
-        response_model=VNPackImportCommitStartResponse,
-    )
-    if replay is not None:
-        return replay
-    try:
-        journal = service.repo.create_import_journal(
+    if idempotency_key:
+        replay = _claim_or_replay_idempotency(
+            service,
             owner_user_id=owner_user_id,
-            preview_id=int(preview["id"]),
-            job_id=f"pending:{request_id}",
-            status="queued",
-            stage="queued",
-            trust_mode=request.trust_mode,
-            target_mode=request.target_mode,
-            archive_path=preview.get("archive_path"),
-            archive_sha256=preview.get("archive_sha256"),
-            canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
+            scope="vn_asset_import_commit",
+            resource_id=resource_id,
+            idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
+            response_model=VNPackImportCommitStartResponse,
         )
+        if replay is not None:
+            return replay
+    journal = None
+    try:
+        if request.target_mode == "update_existing":
+            if request.target_pack_id is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_pack_required")
+            try:
+                service.get_pack(int(request.target_pack_id))
+            except ValueError as exc:
+                raise _handle_value_error(exc) from exc
+        if request.character_action == "fail_import":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="primary_character_unresolved")
+        if request.character_action == "link_existing_character":
+            if request.target_character_id is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_character_required")
+            if service.repo.get_character(int(request.target_character_id)) is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="target_character_not_found")
+
+        # Staged archive deletion and new restore admission serialize on this database.
+        with service.repo.db.transaction():
+            preview = service.repo.get_import_preview(request.preview_id, owner_user_id=owner_user_id)
+            if preview is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_preview_not_found")
+            if preview["status"] != "completed":
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_not_completed")
+            idempotency_key = _require_idempotency_key(idempotency_key)
+            request_id = request.request_id or idempotency_key
+            journal = service.repo.create_import_journal(
+                owner_user_id=owner_user_id,
+                preview_id=request.preview_id,
+                job_id=f"pending:{request_id}",
+                status="queued",
+                stage="queued",
+                trust_mode=request.trust_mode,
+                target_mode=request.target_mode,
+                archive_path=preview.get("archive_path"),
+                archive_sha256=preview.get("archive_sha256"),
+                canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
+                created_records={"writes_started": False},
+            )
         job = create_pack_import_commit_job(
             jobs_manager,
             import_id=int(journal["id"]),
-            preview_id=int(preview["id"]),
+            preview_id=request.preview_id,
             request_id=request_id,
             user_id=owner_user_id,
             trust_mode=request.trust_mode,
@@ -1416,36 +1438,46 @@ async def start_pack_import_commit(
             conflict_decisions=request.conflict_decisions,
         )
         job_id = str(job["id"])
-        journal = service.repo.update_import_journal(
-            int(journal["id"]),
-            {"job_id": job_id, "status": str(job.get("status") or "queued")},
-            owner_user_id=owner_user_id,
-        ) or journal
-        portability_job = service.repo.create_portability_job(
-            owner_user_id=owner_user_id,
-            job_id=job_id,
-            operation="import_commit",
-            status=str(job.get("status") or "queued"),
-            stage="queued",
-            preview_id=int(preview["id"]),
-            import_id=int(journal["id"]),
-            archive_path=preview.get("archive_path"),
-            archive_sha256=preview.get("archive_sha256"),
-            canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
-            progress={"request_id": request_id},
-        )
-
-        queued_response = VNPackImportCommitStartResponse(
-            job_id=job_id,
-            portability_job_id=int(portability_job["id"]),
-            operation=str(portability_job["operation"]),
-            preview_id=int(preview["id"]),
-            import_id=int(journal["id"]),
-            status=str(job.get("status") or portability_job["status"]),
-            stage=str(portability_job["stage"]),
-        )
+        # A runnable binding and its replay receipt commit together in the owner database.
+        with service.repo.db.transaction():
+            service.repo.update_import_journal(
+                int(journal["id"]),
+                {"job_id": job_id, "status": str(job.get("status") or "queued")},
+                owner_user_id=owner_user_id,
+            )
+            portability_job = service.repo.create_portability_job(
+                owner_user_id=owner_user_id,
+                job_id=job_id,
+                operation="import_commit",
+                status=str(job.get("status") or "queued"),
+                stage="queued",
+                preview_id=request.preview_id,
+                import_id=int(journal["id"]),
+                archive_path=preview.get("archive_path"),
+                archive_sha256=preview.get("archive_sha256"),
+                canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
+                progress={"request_id": request_id},
+            )
+            queued_response = VNPackImportCommitStartResponse(
+                job_id=job_id,
+                portability_job_id=int(portability_job["id"]),
+                operation=str(portability_job["operation"]),
+                preview_id=request.preview_id,
+                import_id=int(journal["id"]),
+                status=str(job.get("status") or portability_job["status"]),
+                stage=str(portability_job["stage"]),
+            )
+            _record_idempotency_response(
+                service,
+                owner_user_id=owner_user_id,
+                scope="vn_asset_import_commit",
+                resource_id=resource_id,
+                idempotency_key=idempotency_key,
+                payload_hash=payload_hash,
+                response=queued_response,
+            )
     except Exception as exc:
-        if "journal" in locals():
+        if journal is not None:
             service.repo.update_import_journal(
                 int(journal["id"]),
                 {
@@ -1460,19 +1492,10 @@ async def start_pack_import_commit(
             service,
             owner_user_id=owner_user_id,
             scope="vn_asset_import_commit",
-            resource_id=f"preview:{request.preview_id}",
+            resource_id=resource_id,
             idempotency_key=idempotency_key,
         )
         raise
-    _record_idempotency_response(
-        service,
-        owner_user_id=owner_user_id,
-        scope="vn_asset_import_commit",
-        resource_id=f"preview:{request.preview_id}",
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
-        response=queued_response,
-    )
     return queued_response
 
 
