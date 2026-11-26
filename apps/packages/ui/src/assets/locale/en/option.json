@@ -129,6 +129,7 @@
   },
   "buttonRetry": "Retry connection",
   "header": {
+    "activeSessions": "Active sessions",
     "backToHome": "Back to home",
     "notifications": "Notifications",
     "notificationsActiveName": "Notifications, {count} unread",

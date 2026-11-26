@@ -1,5 +1,6 @@
 /** Background notification subscription for the browser extension. */
 
+import { listAuthSessions } from "@/services/auth-sessions"
 import { notify } from "@/services/background-helpers"
 import {
   classifyNotificationError,
@@ -12,6 +13,7 @@ import {
   parseNotificationRuntimeConfig,
   type NotificationRuntimeConfig
 } from "@/services/notification-runtime-scope"
+import { isOwnSignIn, NEW_SIGN_IN_KIND } from "@/services/sign-in-alert"
 import { getUnreadCount, subscribeNotificationsStream } from "@/services/notifications"
 import type { NotificationStreamEvent } from "@/services/notifications"
 import { createSafeStorage } from "@/utils/safe-storage"
@@ -224,8 +226,18 @@ const transitionToConfig = async (
       const payload = event.payload as {
         title?: string
         message?: string
+        kind?: string
+        source_job_id?: string | number | null
       } | null
-      if (payload?.title) notify(payload.title, payload.message || "")
+      if (payload?.title) {
+        const { title, message } = payload
+        // Off to the side: the lookup must not delay the unread write or outlive its scope.
+        void isOwnBrowserSignIn(payload)
+          .then((own) => {
+            if (!own && isCurrent() && !terminal) notify(title, message || "")
+          })
+          .catch(() => undefined)
+      }
 
       unreadCountWrite = unreadCountWrite
         .catch(() => undefined)
@@ -273,6 +285,19 @@ const transitionToConfig = async (
     unsubscribe = stop
   } catch (error) {
     await handleTerminalError(error)
+  }
+}
+
+/** A sign-in from this browser needs no OS notification; a failed lookup never suppresses one. */
+const isOwnBrowserSignIn = async (payload: {
+  kind?: string
+  source_job_id?: string | number | null
+}): Promise<boolean> => {
+  if (payload.kind !== NEW_SIGN_IN_KIND) return false
+  try {
+    return isOwnSignIn(payload.source_job_id, await listAuthSessions())
+  } catch {
+    return false
   }
 }
 

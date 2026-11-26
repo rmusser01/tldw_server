@@ -6,6 +6,7 @@ import type { NotificationStreamEvent } from "@/services/notifications"
 const subscribeNotificationsStreamMock = vi.fn()
 const getUnreadCountMock = vi.fn()
 const notifyMock = vi.fn()
+const listAuthSessionsMock = vi.fn()
 
 type StorageChange = { oldValue?: unknown; newValue?: unknown }
 type StorageWatcher = (change: StorageChange) => void
@@ -27,6 +28,11 @@ vi.mock("@/services/notifications", () => ({
   subscribeNotificationsStream: (...args: unknown[]) => subscribeNotificationsStreamMock(...args),
   getUnreadCount: (...args: unknown[]) => getUnreadCountMock(...args)
 }))
+
+vi.mock("@/services/auth-sessions", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("@/services/auth-sessions")
+  return { ...actual, listAuthSessions: (...args: unknown[]) => listAuthSessionsMock(...args) }
+})
 
 vi.mock("@/services/background-helpers", () => ({
   notify: (...args: unknown[]) => notifyMock(...args)
@@ -92,6 +98,7 @@ describe("notification subscription", () => {
     subscribeNotificationsStreamMock.mockReset()
     getUnreadCountMock.mockReset()
     notifyMock.mockReset()
+    listAuthSessionsMock.mockReset()
     getUnreadCountMock.mockResolvedValue({ unread_count: 4 })
   })
 
@@ -573,5 +580,70 @@ describe("notification subscription", () => {
 
     expect(storageState.get(ACTIVE_SCOPE_KEY)).toBeNull()
     expect((storageState.get(recordKey) as { state: string }).state).not.toBe("idle")
+  })
+
+  describe("new sign-in alerts", () => {
+    const sessionRow = (id: number, over: Record<string, unknown> = {}) => ({
+      id, ip_address: null, user_agent: null, device_label: "x", created_at: "", last_activity: "",
+      expires_at: "", is_current: false, same_install: false, ...over
+    })
+    const emit = async (payload: Record<string, unknown>) => {
+      let onEvent: ((event: NotificationStreamEvent) => void) | undefined
+      subscribeNotificationsStreamMock.mockImplementation((options: { onEvent: typeof onEvent }) => {
+        onEvent = options.onEvent
+        return () => undefined
+      })
+      await notificationSubscription.startNotificationSubscription(multiUserConfig("user-a"))
+      onEvent?.({ event: "notification", id: 1, payload } as NotificationStreamEvent)
+      await flushAsync()
+    }
+    const alertPayload = { kind: "new_sign_in", title: "New sign-in", message: "m", source_job_id: 10 }
+
+    it("raises no OS notification for a same_install session", async () => {
+      listAuthSessionsMock.mockResolvedValue([sessionRow(5, { is_current: true }), sessionRow(10, { same_install: true })])
+      await emit(alertPayload)
+      expect(notifyMock).not.toHaveBeenCalled()
+    })
+
+    it("raises no OS notification for the current session", async () => {
+      listAuthSessionsMock.mockResolvedValue([sessionRow(10, { is_current: true })])
+      await emit(alertPayload)
+      expect(notifyMock).not.toHaveBeenCalled()
+    })
+
+    it("raises the OS notification for another session", async () => {
+      listAuthSessionsMock.mockResolvedValue([sessionRow(5, { is_current: true }), sessionRow(10)])
+      await emit(alertPayload)
+      expect(notifyMock).toHaveBeenCalledWith("New sign-in", "m")
+    })
+
+    it("raises the OS notification when the session lookup fails", async () => {
+      listAuthSessionsMock.mockRejectedValue(new Error("no"))
+      await emit(alertPayload)
+      expect(notifyMock).toHaveBeenCalledWith("New sign-in", "m")
+    })
+
+    it("raises no OS notification when the scope changes while the session lookup is pending", async () => {
+      let release: (rows: unknown[]) => void = () => undefined
+      listAuthSessionsMock.mockReturnValue(new Promise((resolve) => { release = resolve }))
+      await emit(alertPayload)
+      await notificationSubscription.startNotificationSubscription(multiUserConfig("user-b"))
+      release([sessionRow(5, { is_current: true }), sessionRow(10)])
+      await flushAsync()
+      expect(notifyMock).not.toHaveBeenCalled()
+    })
+
+    it("survives a throwing OS notification (no unhandled rejection)", async () => {
+      listAuthSessionsMock.mockResolvedValue([sessionRow(5, { is_current: true }), sessionRow(10)])
+      notifyMock.mockImplementation(() => { throw new Error("blocked") })
+      await emit(alertPayload)
+      expect(notifyMock).toHaveBeenCalledWith("New sign-in", "m")
+    })
+
+    it("does not look up sessions for other kinds", async () => {
+      await emit({ kind: "job_failed", title: "Job failed", message: "m" })
+      expect(listAuthSessionsMock).not.toHaveBeenCalled()
+      expect(notifyMock).toHaveBeenCalledWith("Job failed", "m")
+    })
   })
 })

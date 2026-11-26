@@ -113,6 +113,8 @@ NotificationKind = Literal[
     "automation_run_timed_out",
     "automation_run_skipped",
     "automation_run_approval_required",
+    # New-sign-in alert (TASK-15649), written by core/AuthNZ/sign_in_alert.py.
+    "new_sign_in",
 ]
 
 
@@ -178,6 +180,7 @@ class NotificationsMarkReadResponse(BaseModel):
     """Result payload for mark-read operations."""
 
     updated: int
+    refused_ids: list[int] = Field(default_factory=list)
 
 
 class NotificationDismissResponse(BaseModel):

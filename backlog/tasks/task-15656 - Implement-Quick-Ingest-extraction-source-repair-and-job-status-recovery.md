@@ -33,6 +33,7 @@ The WebUI reads opt-in ephemeral articles from the authenticated web scrape API 
 Verification passed for 612 WebUI tests, 109 API tests, the frontend TypeScript check, scoped ESLint using the repository suppression baseline, generated OpenAPI checks, and Bandit on the changed Python code. Browser coverage exercises the clipboard, file and paste restoration, corrected links, cancellation, background progress and interrupted jobs.
 All ten Chromium scenarios passed together. Six screenshots in the PR show desktop and phone extraction, source repair, unconfirmed cancellation and minimized progress. GitHub confirmed the dev base, open PR and six image files. The repository requires the requester to supply their own Change summary before merge.
 Integrated the two verified TASK-15652 Media handoff commits and current dev for PR #3636. Regenerated the OpenAPI fingerprint from the combined schema using make openapi-fingerprint. ADR-069 governs this generated artifact. The same integration flows through #3638, #3639, #3640 and #3641.
+CI monitoring: each stacked head passed its hosted critical journey. After #3635 landed on dev, reconcile the combined OpenAPI contract and verify its canonical path union under ADR-069. Propagate the same verified resolution to #3638, #3639, #3640 and #3641 without changing their PR bases.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

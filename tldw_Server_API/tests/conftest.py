@@ -722,6 +722,20 @@ def pytest_collection_modifyitems(config, items):  # pragma: no cover - collecti
 
 
 @pytest.fixture(autouse=True)
+def _sign_in_alerts_silent_by_default(request, monkeypatch) -> None:
+    """Stub the new-sign-in alert unless the test is marked ``sign_in_alerts``.
+
+    Every production sign-in requests the alert, so any test that signs one user in twice would
+    otherwise write into the real ``Databases/user_databases/`` (git-ignored, so invisible).
+    """
+    if request.node.get_closest_marker("sign_in_alerts"):
+        return
+    from tldw_Server_API.app.core.AuthNZ import session_manager as session_manager_module
+
+    monkeypatch.setattr(session_manager_module, "schedule_new_sign_in_alert", lambda **_: None)
+
+
+@pytest.fixture(autouse=True)
 def _keep_app_main_reloads_from_leaking() -> Iterator[None]:
     """Undo any ``reload_app_main()`` the test performed.
 

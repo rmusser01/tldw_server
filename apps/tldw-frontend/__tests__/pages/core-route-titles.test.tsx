@@ -21,6 +21,7 @@ import Knowledge from "@web/pages/knowledge"
 import Flashcards from "@web/pages/flashcards"
 import ServerSettings from "@web/pages/settings/tldw"
 import ProviderKeys from "@web/pages/settings/provider-keys"
+import ActiveSessions from "@web/pages/settings/sessions"
 import Notes from "@web/pages/notes"
 import Prompts from "@web/pages/prompts"
 import Characters from "@web/pages/characters"
@@ -41,6 +42,7 @@ describe("core route title ownership", () => {
     [Flashcards, "Flashcards | tldw"],
     [ServerSettings, "Server Settings | tldw"],
     [ProviderKeys, "Provider Keys | tldw"],
+    [ActiveSessions, "Active sessions | tldw"],
     [Notes, "Notes | tldw"],
     [Prompts, "Prompts | tldw"],
     [Characters, "Characters | tldw"]
