@@ -195,7 +195,7 @@ class AccountSecurityLockedError(HTTPException):
 class StaleCredentialError(InvalidTokenError):
     """A token issued before credentials_valid_after."""
 
-class TakeBackUnavailableError(ValueError):
+class TakeBackUnavailableError(ValueError):     # also defined in account_lock_errors.py
     """The previous address now belongs to another account. Nothing was changed; the account is still locked."""
 
 def is_security_locked(user: Mapping[str, Any]) -> bool
@@ -232,12 +232,13 @@ async def clear_security_lock(self, user_id: int, *, locked_at: Any, valid_after
     # UPDATE users SET security_locked_at = NULL, credentials_valid_after = :valid_after
     #   WHERE id = :id AND security_locked_at = :locked_at     (the stored value exactly as read; compare-and-set)
     # True when one row changed
+async def force_security_lock(self, user_id: int, *, now: datetime) -> None
+    # UPDATE users SET security_locked_at = :now WHERE id = :id      (unconditional; take-back only)
+async def set_credentials_valid_after(self, user_id: int, *, valid_after: datetime) -> None
 async def find_locked_user_by_previous_email(self, email: str, *, since: datetime) -> dict | None
     # the user with security_locked_at set, lower(previous_email) = lower(:email) and email_changed_at > :since.
     # None when more than one row matches. SQLite compares with datetime(email_changed_at) > datetime(?).
 async def email_in_use_by_another_user(self, email: str, *, user_id: int) -> bool
-async def email_recently_released_by_another_user(self, email: str, *, user_id: int, since: datetime) -> bool
-    # another user has lower(previous_email) = lower(:email) and email_changed_at > :since
 
 # core/DB_Management/user_profile_writes.py
 async def restore_previous_email(connection, *, backend: str, user_id: int, previous_email: str, password_hash: str,
@@ -258,15 +259,15 @@ async def delete_identity_links_created_since(self, *, user_id: int, since: date
 
 `clear_lock(user_id, take_back=None)`, in this order:
 1. Read the user row once; every value below comes from this read. Not locked and `take_back is None`: return None. With `take_back`: if `email_in_use_by_another_user(take_back)`, raise `TakeBackUnavailableError`. Compute `since`: `locked_at - RECENT_API_KEY_DAYS` when locked; `email_changed_at - RECENT_API_KEY_DAYS` for a take-back of an unlocked account; the earlier of the two for a take-back of a locked one.
-2. A take-back of an account that is **not** locked calls `set_lock` first and uses that lock time from here on. From this point nothing can mint a credential until step 7.
+2. **Every** take-back, locked or not, first writes a fresh lock with `force_security_lock(now)` and then re-reads `security_locked_at`; that re-read stored value is "the lock value" from here on. From this point nothing can mint a credential until step 7, and a plain unlock racing this take-back loses its compare-and-set because the value changed.
 3. `suspend_keys_created_since(since)`.
 4. `revoke_all_user_sessions(user_id, reason=ACCOUNT_RESTORED_REVOKE_REASON)`. Failure is logged and the steps continue (the `iat` rule covers the tokens).
 5. With `take_back`: `restore_previous_email(...)` with `password_hash = PasswordService().hash_password(secrets.token_urlsafe(48))` (the column is NOT NULL on SQLite), then `FederatedIdentityRepo.delete_identity_links_created_since(since=since)` after `ensure_tables()`; if the federation tables are missing, log and continue.
 6. `suspend_keys_created_since(since)` again (idempotent; catches a key created between steps 1 and 2).
-7. `clear_security_lock(locked_at=<the stored value>, valid_after=max(floor(now), floor(locked_at) + 1))`. False (another request cleared this lock first): return None.
+7. `clear_security_lock(locked_at=<the lock value, bound exactly as it was read>, valid_after=max(floor(now), floor(locked_at) + 1))`. When it returns False another request cleared or replaced this lock first: a plain unlock returns None here. A take-back (which can only lose to another take-back) runs step 4 again, calls `set_credentials_valid_after(floor(now) + 1)`, and continues.
 8. Sleep until `valid_after` has begun (at most one second), then return it.
 
-`email_change.authorize_own_email_change` (`core/AuthNZ/email_change.py:34`): after the existing checks, refuse with code `email_recently_released` when `email_recently_released_by_another_user(new_email, since=now - 7 days)`. It reads on the `db_conn` it is given, like the rest of that function (Decision 18).
+`email_change.authorize_own_email_change` (`core/AuthNZ/email_change.py:34`): after the existing checks, refuse with code `email_recently_released` when any address in `new_emails` that differs from the stored one is another user's `previous_email` with `email_changed_at` inside the last 7 days. The gate must read **only on the `db_conn` it is given** (a pool read would break `tests/AuthNZ_Postgres/test_profile_update_pool_capacity_pg.py`), so the query is a connection-level helper beside `password_service.fetch_email_and_password_hash`: `async def email_recently_released_by_another_user(db_conn, emails: Sequence[str], *, user_id: int, is_postgres: bool) -> bool`, with the 7-day comparison in SQL per backend. The callers and the frontend need no change (Decision 18).
 
 `created_at` on `api_keys` is written by the database default: UTC text `YYYY-MM-DD HH:MM:SS` on SQLite and a naive `TIMESTAMP` on PostgreSQL. Compare inside SQL, per backend: SQLite `datetime(created_at) > datetime(?)`; PostgreSQL `created_at > $2::timestamptz` (the cast uses the session time zone, which is what the default wrote in).
 
@@ -343,6 +344,13 @@ async def test_take_back_of_an_unlocked_account_leaves_nothing_made_while_it_ran
     # session_manager.create_session. Then run the take-back.
     assert create_session_error_type is AccountSecurityLockedError          # step 2 locked the account first
     assert unsuspended_active_keys(user_id) == []                            # step 6 caught the key
+    assert row["security_locked_at"] is None and row["email"] == "old@example.com"   # and it ends unlocked and restored
+
+async def test_plain_unlock_racing_a_take_back_of_a_locked_account_does_not_win(pool, user_id, monkeypatch):
+    # locked, with a recent previous address. Wrap AuthnzApiKeysRepo.suspend_keys_created_since with a plain function
+    # that on its first call runs clear_lock(user_id) (the other link) and records the result, then run the take-back.
+    assert plain_unlock_result is None
+    assert row["email"] == "old@example.com" and row["security_locked_at"] is None and live_session_count(user_id) == 0
 
 async def test_take_back_removes_sso_links_made_since_the_week_before_the_email_change_even_if_the_email_moved_again(pool, user_id):
     # email changed 2 days ago, an identity link created 1 day ago, the email changed again 1 hour ago (previous_email is kept)
@@ -380,7 +388,7 @@ Where the check goes:
 | Refresh | `EP:2383-2393`, `:2422-2432`, `:2538-2565` | The blacklist branch (`:2391`) maps the lock reason to `AccountSecurityLockedError` under the same "locked right now" condition; after the user fetch, `assert_account_not_locked(user, token_iat=token_payload.get("iat"))`. Add `except AccountSecurityLockedError: raise` **before** `except _AUTH_NONCRITICAL_EXCEPTIONS` (which would turn it into a 500); `StaleCredentialError` is an `InvalidTokenError` and already becomes the 401. |
 | Password sign-in | `EP:1822-1827` | `assert_account_not_locked(user)` right after the `is_active` check: after the password is verified, before rehash and the MFA branch. |
 | SSO callback | `EP:678-682` | The same call right after the `is_active` check, before `upsert_identity_link`. |
-| `/mfa/login` | `EP:1883`, `EP:3572-3580` | The challenge payload gains `"issued_at": int(time.time())`. After the user fetch: `assert_account_not_locked(user, token_iat=payload.get("issued_at"))`; `StaleCredentialError` becomes the existing 400 "MFA session expired or invalid". A payload without `issued_at` (cached before the deploy) is checked for the lock only. |
+| `/mfa/login` | `EP:1883`, `EP:3572-3580` | The challenge payload gains `"issued_at": int(time.time())`. After the user fetch: `assert_account_not_locked(user, token_iat=payload.get("issued_at"))`; `StaleCredentialError` becomes the existing 400 "MFA session expired or invalid" through its own `except` clause (it is an `InvalidTokenError`, which the function's catch-all would turn into a 500). A payload without `issued_at` (cached before the deploy) is checked for the lock only. |
 | `reset-password` | `EP:2690-2756` | After the token-record lookup, load the user with `_auth_service.fetch_active_user_by_id(db, user_id)`. When a row comes back: `assert_account_not_locked(user, token_iat=payload.get("iat"))`, and refuse when the token's `email` claim differs (case-insensitive) from the user's email. Both the stale token and the email mismatch answer 400 "Invalid or expired reset token": catch `StaleCredentialError` in its own clause, because `InvalidTokenError` is inside `_AUTH_NONCRITICAL_EXCEPTIONS` and would otherwise become the 500 at `:2767`. When no row comes back (an inactive user), behave as today. |
 | Impersonation | `admin_impersonation.py:95-100` | `assert_account_not_locked(target_user)` after the inactive check. |
 | Cap transaction | `repos/sessions_repo.py:146-160` | On the same `conn`, after the PostgreSQL advisory lock (`:153`) and at the top of the SQLite transaction: `SELECT security_locked_at FROM users WHERE id = ...` (PostgreSQL adds `FOR SHARE`, so it waits for an uncommitted lock); a non-null value raises `AccountSecurityLockedError`. `HTTPException` is not in `_SESSION_MANAGER_NONCRITICAL_EXCEPTIONS`, so it reaches the endpoint unchanged. |
@@ -834,3 +842,4 @@ Read the refusal body each helper produces from the neighbouring assertions in t
 
 - 2026-11-26, first independent review (against `0d4cac9bc8`): not ready, five Critical. Fixed here: the take-back write goes through the versioned writer; the SQLite key lookup now really carries the owner's state; reset tokens are bound to `credentials_valid_after` and the account's email; a take-back always suspends keys and removes new SSO links; MFA is dropped from unlock (Q6); audit writes stay inside the layering baseline; the two-link race is closed by a second email check; the PostgreSQL race test now fails without `FOR SHARE`; cap evictions are audited; ACP trigger webhooks and Telegram approvals are covered; availability and the mail link read one value; the unsuspend route stays under the getter ceiling.
 - 2026-11-26, second review of the rewrite: ready after fixes, one new Critical. Fixed here: a take-back to an address another account holds is refused with the lock kept, and an account can no longer take an address released in the last 7 days; the 423 is given only while the user is locked; `clear_lock` locks first on a take-back, clears by compare-and-set, suspends keys twice and sets `credentials_valid_after` strictly after the lock second; the exceptions live in a leaf module; SSO links are removed from the key-suspension start; MFA challenges carry `issued_at`.
+- 2026-11-26, confirmation pass: no Critical. Fixed here: every take-back writes a fresh lock first, so a plain unlock racing it loses; the compare-and-set binds the re-read stored value; the released-address check reads on the gate's own connection; `mfa_login` gets its own clause for the stale challenge.
