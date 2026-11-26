@@ -21,11 +21,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import difflib
+import gc
 import json
 import os
 import re
 import socket
 import time as real_time
+import weakref
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -1056,3 +1058,26 @@ def test_golden_covers_every_appendix_c_case() -> None:
     """Nine non-stream and ten stream cases, as the plan's Appendix C lists them."""
     assert [c[:3] for c in GOLDEN_CASES if c.startswith("N")] == [f"N{n:02d}" for n in range(1, 10)]  # nosec B101
     assert [c[:3] for c in GOLDEN_CASES if c.startswith("S")] == [f"S{n:02d}" for n in range(1, 11)]  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_id", ["S01_direct", "S02_queued_worker_failover", "S10_queued_success"])
+async def test_stream_call_state_is_collected_after_the_response_is_consumed(monkeypatch: pytest.MonkeyPatch, case_id: str) -> None:
+    """Nothing the response or its callbacks hold keeps the call's StreamCall alive once the body is drained."""
+    from tldw_Server_API.app.core.Chat import call_state
+
+    original = call_state.StreamCall.from_call_locals.__func__
+    record: list[weakref.ref[Any]] = []
+
+    def spy(cls: Any, values: Any, /) -> Any:
+        state = original(cls, values)
+        record.append(weakref.ref(state))
+        return state
+
+    monkeypatch.setattr(call_state.StreamCall, "from_call_locals", classmethod(spy))
+    await run_case(case_id, monkeypatch)
+    assert len(record) == 1  # nosec B101
+    state_ref = record[0]
+    record.clear()
+    gc.collect()
+    assert state_ref() is None  # nosec B101

@@ -424,3 +424,38 @@ def test_unset_stream_call_slot_reads_like_an_unbound_local() -> None:
     with pytest.raises(AttributeError):
         _ = cst.zzz
     assert not hasattr(cst, "zzz")
+
+
+# ---- every cs.<attr> read in a destination resolves on chat_service ---------------------------
+
+
+def cs_attr_reads(text: str) -> set[str]:
+    """Attribute names read off the ``cs`` alias of ``chat_service`` (``from ... import chat_service as cs``) anywhere in ``text``."""
+    tree = ast.parse(text)
+    binds = any(
+        isinstance(n, ast.ImportFrom) and any(a.name == MODULE and a.asname == "cs" for a in n.names) for n in ast.walk(tree)
+    )
+    if not binds:
+        return set()
+    return {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "cs"}
+
+
+def test_cs_attr_reads_finds_the_alias_reads_only() -> None:
+    text = "from pkg.Chat import chat_service as cs\n\n\ndef f(cst):\n    return cs.a(cst.b, other.c)\n"
+    assert cs_attr_reads(text) == {"a"}
+    assert cs_attr_reads("def f(cs):\n    return cs.a\n") == set()
+
+
+def test_every_cs_attribute_a_chat_module_reads_exists_on_chat_service() -> None:
+    """A future unused-import cleanup in chat_service must not break moved code only at runtime (reads under ``suppress`` would hide it)."""
+    import importlib
+
+    cs = importlib.import_module("tldw_Server_API.app.core.Chat.chat_service")
+    reads = {
+        (module, attr)
+        for module in DESTINATIONS
+        if (CHAT_DIR / f"{module}.py").is_file()
+        for attr in cs_attr_reads((CHAT_DIR / f"{module}.py").read_text(encoding="utf-8"))
+    }
+    assert reads
+    assert sorted(f"{m}: cs.{a}" for m, a in reads if not hasattr(cs, a)) == []
