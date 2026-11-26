@@ -19,6 +19,7 @@ export const generateHistory = (
     images?: string[]
     tool_calls?: Record<string, unknown>[] | null
     tool_call_id?: string
+    moonshotReasoning?: string
     function_call?: Record<string, unknown>
     messageType?: string
   }[],
@@ -99,8 +100,11 @@ export const generateHistory = (
       if (decodeChatErrorPayload(message.content)) continue
       history.push(
         new AIMessage({
-          ...(options?.versioned && message.tool_calls
-            ? { additional_kwargs: { tool_calls: message.tool_calls } }
+          ...(options?.versioned
+            ? { additional_kwargs: {
+                ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
+                ...(message.moonshotReasoning ? { moonshotReasoning: message.moonshotReasoning } : {})
+              } }
             : {}),
           content: isCustom
             ? removeReasoning(message.content)

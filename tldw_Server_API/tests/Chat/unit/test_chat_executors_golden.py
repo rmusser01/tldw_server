@@ -38,6 +38,7 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+from tldw_Server_API.app.core.Chat.persistence_service import assistant_generation_extra
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import PromptCostGuardrailConfig
 from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionBatchResult,
@@ -937,6 +938,44 @@ async def test_golden_case_matches(case: str, monkeypatch: pytest.MonkeyPatch) -
     if want != got:
         diff = "".join(difflib.unified_diff(want.splitlines(True), got.splitlines(True), "golden", "actual"))
         pytest.fail(f"{case} drifted from the golden:\n{diff}")
+
+
+@pytest.mark.asyncio
+async def test_deferred_moonshot_tool_turn_saves_reasoning_for_both_replies(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = Rec()
+    _install_base(monkeypatch, rec)
+    _enable_autoexec(monkeypatch, rec, auto_continue=True)
+    first = completion("Calling a tool", tool_calls=[_TOOL_CALL])
+    first["choices"][0]["message"]["reasoning_content"] = "  Look up the answer.\n"
+    answer = '{"answer":"ok"}'
+    continuation = completion(answer, tag="cont")
+    continuation["choices"][0]["message"]["reasoning_content"] = "  Use the tool result.\n"
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", _async_provider(rec, "P2", continuation))
+
+    response = await chat_service.execute_non_stream_call(
+        **_kwargs(
+            rec,
+            stream=False,
+            llm=_provider(rec, "P", first),
+            provider="moonshot",
+            model="kimi-k3.1-pro",
+            cleaned_args={
+                "app_config": {"moonshot_api": {"api_base_url": "https://api.moonshot.cn/v1"}},
+                "response_format": _SCHEMA_FORMAT,
+            },
+            moderation_getter=lambda: FakeModeration(True),
+        )
+    )
+    await _settle(rec)
+
+    assert response["choices"][0]["message"]["content"] == answer
+    assert [payload["role"] for payload in rec.saved] == ["assistant", "tool", "assistant"]
+    assert rec.order.index("provider_async:P2:moonshot") < rec.order.index("save:assistant")
+    assert [
+        assistant_generation_extra(payload).get("moonshot_reasoning_content")
+        for payload in rec.saved
+        if payload["role"] == "assistant"
+    ] == ["  Look up the answer.\n", "  Use the tool result.\n"]
 
 
 @pytest.mark.asyncio

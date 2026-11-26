@@ -15,26 +15,32 @@ export function decodeReasoningText(text: string): string {
   return text.replace(/&#x0000(26|3c);/g, (_, code) => code === "26" ? "&" : "<");
 }
 
-function splitReasoning(text: string): ReasoningPart[] {
+function splitReasoning(text: string, forHistory = false): ReasoningPart[] {
   const result: ReasoningPart[] = [];
   const tagPattern = new RegExp(`<(/?)(${tags.join("|")})>`, "gi");
   const closingTagPattern = new RegExp(`</(${tags.join("|")})>`, "gi");
   let currentIndex = 0;
-  let depth = 0;
+  const openTags: string[] = [];
+  let closedThinking = false;
 
   for (const match of text.matchAll(tagPattern)) {
+    const name = match[2].toLowerCase();
     if (!match[1]) {
-      if (depth === 0) {
+      if (!openTags.length) {
         const content = text
           .slice(currentIndex, match.index)
           .replace(closingTagPattern, "");
         if (content) result.push({ type: "text", content });
         currentIndex = match.index! + match[0].length;
       }
-      depth += 1;
-    } else if (depth > 0) {
-      depth -= 1;
-      if (depth === 0) {
+      openTags.push(name);
+    } else if (!openTags.length && forHistory && closedThinking) {
+      // An old trace may have ended at a literal, unescaped closing tag.
+      currentIndex = match.index! + match[0].length;
+    } else if (openTags.length && (!forHistory || openTags.at(-1) === name)) {
+      openTags.pop();
+      if (!openTags.length) {
+        closedThinking = true;
         const content = text.slice(currentIndex, match.index);
         if (content) result.push({
           type: "reasoning",
@@ -48,13 +54,13 @@ function splitReasoning(text: string): ReasoningPart[] {
 
   if (currentIndex < text.length) {
     result.push({
-      type: depth > 0 ? "reasoning" : "text",
+      type: openTags.length > 0 ? "reasoning" : "text",
       content:
-        depth > 0
+        openTags.length > 0
           ? text.slice(currentIndex)
           : text.slice(currentIndex).replace(closingTagPattern, ""),
-      reasoning_running: depth > 0,
-      ...(depth > 0 && { range: { start: currentIndex, end: text.length } }),
+      reasoning_running: openTags.length > 0,
+      ...(openTags.length > 0 && { range: { start: currentIndex, end: text.length } }),
     });
   }
   return result;
@@ -94,7 +100,7 @@ export function isReasoningEnded(text: string): boolean {
 }
 
 export function removeReasoning(text: string): string {
-  return splitReasoning(text)
+  return splitReasoning(text, true)
     .filter((part) => part.type === "text")
     .map((part) => part.content)
     .join("")
