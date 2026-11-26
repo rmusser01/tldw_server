@@ -21,11 +21,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import difflib
+import gc
 import json
 import os
 import re
 import socket
 import time as real_time
+import weakref
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -38,6 +40,7 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+from tldw_Server_API.app.core.Chat.persistence_service import assistant_generation_extra
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import PromptCostGuardrailConfig
 from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionBatchResult,
@@ -940,6 +943,44 @@ async def test_golden_case_matches(case: str, monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
+async def test_deferred_moonshot_tool_turn_saves_reasoning_for_both_replies(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = Rec()
+    _install_base(monkeypatch, rec)
+    _enable_autoexec(monkeypatch, rec, auto_continue=True)
+    first = completion("Calling a tool", tool_calls=[_TOOL_CALL])
+    first["choices"][0]["message"]["reasoning_content"] = "  Look up the answer.\n"
+    answer = '{"answer":"ok"}'
+    continuation = completion(answer, tag="cont")
+    continuation["choices"][0]["message"]["reasoning_content"] = "  Use the tool result.\n"
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", _async_provider(rec, "P2", continuation))
+
+    response = await chat_service.execute_non_stream_call(
+        **_kwargs(
+            rec,
+            stream=False,
+            llm=_provider(rec, "P", first),
+            provider="moonshot",
+            model="kimi-k3.1-pro",
+            cleaned_args={
+                "app_config": {"moonshot_api": {"api_base_url": "https://api.moonshot.cn/v1"}},
+                "response_format": _SCHEMA_FORMAT,
+            },
+            moderation_getter=lambda: FakeModeration(True),
+        )
+    )
+    await _settle(rec)
+
+    assert response["choices"][0]["message"]["content"] == answer
+    assert [payload["role"] for payload in rec.saved] == ["assistant", "tool", "assistant"]
+    assert rec.order.index("provider_async:P2:moonshot") < rec.order.index("save:assistant")
+    assert [
+        assistant_generation_extra(payload).get("moonshot_reasoning_content")
+        for payload in rec.saved
+        if payload["role"] == "assistant"
+    ] == ["  Look up the answer.\n", "  Use the tool result.\n"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("case", list(GOLDEN_CASES))
 async def test_golden_case_is_deterministic(case: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Two runs in one process agree; a varying value belongs in the placeholders, never a blanket rule."""
@@ -1017,3 +1058,26 @@ def test_golden_covers_every_appendix_c_case() -> None:
     """Nine non-stream and ten stream cases, as the plan's Appendix C lists them."""
     assert [c[:3] for c in GOLDEN_CASES if c.startswith("N")] == [f"N{n:02d}" for n in range(1, 10)]  # nosec B101
     assert [c[:3] for c in GOLDEN_CASES if c.startswith("S")] == [f"S{n:02d}" for n in range(1, 11)]  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_id", ["S01_direct", "S02_queued_worker_failover", "S10_queued_success"])
+async def test_stream_call_state_is_collected_after_the_response_is_consumed(monkeypatch: pytest.MonkeyPatch, case_id: str) -> None:
+    """Nothing the response or its callbacks hold keeps the call's StreamCall alive once the body is drained."""
+    from tldw_Server_API.app.core.Chat import call_state
+
+    original = call_state.StreamCall.from_call_locals.__func__
+    record: list[weakref.ref[Any]] = []
+
+    def spy(cls: Any, values: Any, /) -> Any:
+        state = original(cls, values)
+        record.append(weakref.ref(state))
+        return state
+
+    monkeypatch.setattr(call_state.StreamCall, "from_call_locals", classmethod(spy))
+    await run_case(case_id, monkeypatch)
+    assert len(record) == 1  # nosec B101
+    state_ref = record[0]
+    record.clear()
+    gc.collect()
+    assert state_ref() is None  # nosec B101

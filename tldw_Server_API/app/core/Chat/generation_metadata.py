@@ -70,6 +70,21 @@ _MAX_TOKEN_COUNT = 2**53
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}")
 
 
+# Only the server's save callback may issue this terminal event.
+MOONSHOT_REASONING_EVENT = "moonshot_history_reasoning"
+
+
+def moonshot_reasoning_event(reasoning: str) -> dict[str, Any]:
+    """Build the settlement event from an already approved trace."""
+    return {
+        "event": MOONSHOT_REASONING_EVENT,
+        "data": {
+            "event": MOONSHOT_REASONING_EVENT,
+            "data": {"reasoning_content": reasoning},
+        },
+    }
+
+
 class GenerationMetadataError(ValueError):
     """Raised when generation metadata has unknown keys or invalid values."""
 
