@@ -622,17 +622,17 @@ async def _close_audio_cpp_response(response: object) -> None:
 async def _close_audio_cpp_response_before_cancellation(
     response: object,
 ) -> None:
+    """Drain response cleanup before propagating the caller's cancellation."""
     close_task = asyncio.create_task(_close_audio_cpp_response(response))
     caller_cancellation: asyncio.CancelledError | None = None
     while not close_task.done():
         try:
-            await asyncio.shield(close_task)
+            # Drain owned cleanup without installing a raw late-error logger.
+            await asyncio.wait({close_task})
         except asyncio.CancelledError as cancellation:
             current = asyncio.current_task()
             if current is not None and current.cancelling():
                 caller_cancellation = caller_cancellation or cancellation
-        except Exception:  # noqa: BLE001 - closer exception is inspected below
-            break
     try:
         close_task.result()
     except asyncio.CancelledError:
@@ -687,13 +687,12 @@ async def _open_audio_cpp_wav_async(
     caller_cancellation: asyncio.CancelledError | None = None
     while not open_task.done():
         try:
-            await asyncio.shield(open_task)
+            # The thread must finish before cancellation propagates, even on error.
+            await asyncio.wait({open_task})
         except asyncio.CancelledError as cancellation:
             current = asyncio.current_task()
             if current is not None and current.cancelling():
                 caller_cancellation = caller_cancellation or cancellation
-        except Exception:  # noqa: BLE001 - task result is inspected below
-            break
     try:
         handle = open_task.result()
     except BaseException:
@@ -849,6 +848,7 @@ async def _audio_cpp_discovery(
     afetch_fn: _Afetch,
     client: object | None,
 ) -> AudioCppDiscovery:
+    """Share one discovery result without letting a follower cancel the leader."""
     leader = False
     loop = asyncio.get_running_loop()
     with _audio_cpp_discovery_lock:
@@ -869,11 +869,15 @@ async def _audio_cpp_discovery(
         wrapped = asyncio.wrap_future(future)
 
         def consume_follower_exception(done: asyncio.Future[AudioCppDiscovery]) -> None:
+            """Retrieve a late failure even when this follower stopped waiting."""
             if not done.cancelled():
                 done.exception()
 
         wrapped.add_done_callback(consume_follower_exception)
-        return await asyncio.shield(wrapped)
+        if not wrapped.done():
+            # Keep the shared leader alive without shield's late-error logger.
+            await asyncio.wait({wrapped})
+        return wrapped.result()
 
     try:
         discovery = await _fetch_audio_cpp_discovery(

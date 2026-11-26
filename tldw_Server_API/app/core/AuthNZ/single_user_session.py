@@ -71,6 +71,7 @@ async def mint_single_user_session(
         device_id=f"{SESSION_DEVICE_ID}:{install_id}" if install_id else SESSION_DEVICE_ID,
         expires_at_override=expires_at,
         refresh_expires_at_override=expires_at,
+        alert_new_sign_in=True,
     )
     identity = SingleUserSessionIdentity(
         session_id=int(result["session_id"]),

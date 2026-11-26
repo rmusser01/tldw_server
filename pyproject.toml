@@ -582,6 +582,7 @@ filterwarnings = [
 markers = [
     "asyncio: mark test as async",
     "unit: marks tests as unit tests",
+    "sign_in_alerts: the test exercises the real new-sign-in alert; otherwise it is stubbed out so sign-ins write no inbox rows",
     "ambient_llm_provider_override_store: the test sees the import-time (unloaded, unhealthy) LLM provider override store, not the root conftest's healthy empty one",
     "packaging: marks tests that build distribution artifacts and shell out",
     "integration: marks tests as integration tests",

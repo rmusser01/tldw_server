@@ -149,6 +149,9 @@ describe("AccountMenu", () => {
     expect(
       screen.getByRole("link", { name: "Account settings" })
     ).toHaveAttribute("href", "/settings/tldw")
+    expect(
+      screen.getByRole("link", { name: "Active sessions" })
+    ).toHaveAttribute("href", "/settings/sessions")
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
       "href",
       "/settings"
