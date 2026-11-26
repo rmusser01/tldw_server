@@ -7,7 +7,7 @@ import re
 import weakref
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, NoReturn
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, TypeGuard
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -123,6 +123,14 @@ class BuddyConfigurationError(ValueError):
 
 class PersonaConversationError(RuntimeError):
     """Safe Persona Chat admission/completion failure without provider details."""
+
+
+class MCPResultSourceNotFoundError(ValueError):
+    """A retained MCP result handle is invalid, expired, or belongs to another run."""
+
+
+class MCPResultWorkerCancelledError(RuntimeError):
+    """An optional result worker cancelled itself without cancellation of the run."""
 
 
 class PersonaVoiceRecognitionError(RuntimeError):
@@ -606,7 +614,7 @@ class PromptImprovementDispatchError(RuntimeError):
         self.code = code if code in _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES else "internal_error"
         self.retryable = bool(retryable)
         try:
-            retry_after = int(retry_after_seconds)
+            retry_after = int(retry_after_seconds) if retry_after_seconds is not None else None
         except (TypeError, ValueError):
             retry_after = None
         if retry_after is not None and retry_after < 0:
@@ -1253,7 +1261,7 @@ def _is_embedding_sensitive_string(value: str) -> bool:
     return any(part in normalized for part in _EMBEDDING_SENSITIVE_VALUE_PARTS)
 
 
-def _is_embedding_safe_numeric_token_count(key: str, value: object) -> bool:
+def _is_embedding_safe_numeric_token_count(value: object, key: str) -> TypeGuard[int | float]:
     normalized = key.lower().replace("-", "_")
     return (
         normalized in _EMBEDDING_SAFE_NUMERIC_TOKEN_KEYS
@@ -1277,7 +1285,7 @@ def sanitize_embedding_public_details(details: list[SafeDetail] | None) -> list[
             if not isinstance(raw_key, str):
                 continue
 
-            if _is_embedding_safe_numeric_token_count(raw_key, raw_value):
+            if _is_embedding_safe_numeric_token_count(raw_value, raw_key):
                 safe_item[raw_key] = raw_value
                 continue
 
@@ -1306,7 +1314,7 @@ def sanitize_embedding_scalar_mapping(values: Mapping[str, object] | None) -> di
         if not isinstance(raw_key, str):
             continue
 
-        if _is_embedding_safe_numeric_token_count(raw_key, raw_value):
+        if _is_embedding_safe_numeric_token_count(raw_value, raw_key):
             sanitized[raw_key] = raw_value
             continue
 
@@ -2205,7 +2213,7 @@ class MacroExecutionError(RuntimeError):
 
 async def video_processing_exception_handler(
     _request: Request,
-    exc: VideoProcessingError,
+    exc: Exception,
 ) -> JSONResponse:
     logger.error("Video processing failed: {}", exc)
     return JSONResponse(
