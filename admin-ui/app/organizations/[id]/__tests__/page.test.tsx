@@ -273,7 +273,7 @@ describe('OrganizationDetailPage member search', () => {
     expect(screen.getByText('charlie')).toBeInTheDocument();
 
     // Type in search to filter
-    const searchInput = screen.getByPlaceholderText('Search members by name or email...');
+    const searchInput = screen.getByRole('textbox', { name: 'Search members' });
     await user.type(searchInput, 'alice');
 
     // Only alice should remain visible
@@ -292,7 +292,7 @@ describe('OrganizationDetailPage member search', () => {
 
     await screen.findByText('alice');
 
-    const searchInput = screen.getByPlaceholderText('Search members by name or email...');
+    const searchInput = screen.getByRole('textbox', { name: 'Search members' });
     await user.type(searchInput, 'nonexistent');
 
     expect(screen.getByText('No members match your search.')).toBeInTheDocument();
