@@ -45,6 +45,28 @@ describe('useMediaNavigationState permalink hydration', () => {
     vi.clearAllMocks()
   })
 
+  it('keeps the URL target through a layout update before the detail request finishes', async () => {
+    const record = { media_id: 7, content: { text: 'Saved file contents' } }
+    const detail = createDeferred<typeof record>()
+    vi.mocked(bgRequest).mockReturnValue(detail.promise)
+    const deps = createDeps([])
+    const { result } = renderHook(() => {
+      const nav = useMediaNavigationState(deps)
+      const location = useLocation()
+      const [, setReady] = React.useState(false)
+      React.useLayoutEffect(() => { setReady(true) }, [])
+      return { nav, location }
+    }, { wrapper: ({ children }) => <MemoryRouter initialEntries={['/media?id=7']}>{children}</MemoryRouter> })
+
+    await waitFor(() => expect(bgRequest).toHaveBeenCalled())
+    expect(result.current.location.search).toBe('?id=7')
+    await act(async () => {
+      detail.resolve(record)
+      await detail.promise
+    })
+    await waitFor(() => expect(result.current.nav.selectedContent).toBe('Saved file contents'))
+  })
+
   it('preserves a new URL target while the previous selection is still displayed', async () => {
     const next = createDeferred<any>()
     vi.mocked(bgRequest).mockImplementation(({ path }) => path === '/api/v1/media/9'

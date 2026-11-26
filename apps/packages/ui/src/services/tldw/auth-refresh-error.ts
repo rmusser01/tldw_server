@@ -1,4 +1,5 @@
 import type { ApiSendResponse } from "@/services/api-send"
+import { sanitizeResponseData } from "@/services/sanitize-response-data"
 
 /** Preserve refresh transport failures instead of treating them as revoked sessions. */
 export const createTokenRefreshError = (response: ApiSendResponse): Error => {
@@ -13,6 +14,6 @@ export const createTokenRefreshError = (response: ApiSendResponse): Error => {
     code: response.code,
     headers: response.headers,
     retryAfterMs: response.retryAfterMs,
-    details: response.data
+    details: response.ok ? undefined : sanitizeResponseData(response.data)
   })
 }
