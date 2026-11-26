@@ -28,6 +28,7 @@ Stages: 1. Implement and unit test the source queue, inline configuration and ou
 Verified all three destinations, scoped overwrite review, preserved receipts on retry, provider correction, and the sticky mobile footer. Two independent Chromium import journeys passed through the Media Review handoff. Captured the 1280×800 and 390×844 states; all phone edges, aligned row controls, and the full-width action measured within 1 px.
 Verification includes 412 Quick Ingest and launcher tests, 101 related persistence/service tests, three responsive browser cases and two end-to-end import journeys with simulated APIs. All 76 added or changed English labels match the generated locale catalog. Scoped TypeScript passed and ESLint reported no errors. The live API and worker accepted a file and persisted its contents; the Python smoke fixture was updated to use current credential metadata, a temporary job database and the displayed Media title.
 A live Chromium upload with an isolated FastAPI server and Media worker passed. The test opened the saved document and found its contents in Media search. Bandit has no new findings in the Python test/fixture. WebUI verification used Chromium desktop and phone viewports; physical device testing and user studies were outside this change.
+PR https://github.com/rmusser01/tldw_server/pull/3631 targets dev. The PR embeds the verified desktop and mobile PNGs at Docs/Design/assets/quick-ingest/.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
