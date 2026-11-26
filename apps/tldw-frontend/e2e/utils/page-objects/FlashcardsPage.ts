@@ -348,18 +348,6 @@ export class FlashcardsPage extends BasePage {
     return this.page.locator('[data-testid="flashcards-review-mode-toggle"]');
   }
 
-  get reviewModeCramOption(): Locator {
-    return this.reviewCramModeOption;
-  }
-
-  get reviewDueOnlyModeOption(): Locator {
-    return this.reviewModeToggle.getByText('Due only', { exact: true });
-  }
-
-  get reviewCramModeOption(): Locator {
-    return this.reviewModeToggle.getByText('Cram', { exact: true });
-  }
-
   get reviewCramTagInput(): Locator {
     return this.page.locator('[data-testid="flashcards-review-cram-tag"]');
   }
@@ -736,11 +724,12 @@ export class FlashcardsPage extends BasePage {
   }
 
   async setReviewMode(mode: 'due' | 'cram'): Promise<void> {
-    if (mode === 'cram') {
-      await this.reviewCramModeOption.click({ force: true });
-    } else {
-      await this.reviewDueOnlyModeOption.click({ force: true });
-    }
+    const label = mode === 'cram' ? 'Cram' : 'Due only';
+    const radio = this.reviewModeToggle.getByRole('radio', { name: label, exact: true });
+    // A newly selected deck can still be moving the adjacent Browse cards button.
+    if (await radio.isChecked()) return;
+    await this.reviewModeToggle.getByText(label, { exact: true }).click();
+    await expect(radio).toBeChecked();
   }
 
   getReviewRatingButton(key: '1' | '2' | '3' | '4'): Locator {
