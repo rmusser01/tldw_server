@@ -64,19 +64,26 @@ export const getSavedMediaIds = (results: WizardResultItem[]): Array<string | nu
   return [...ids.values()]
 }
 
+const hasRetrySource = (item: WizardResultItem, queueItems: WizardQueueItem[]): boolean => {
+  const queued = getEligibleQueueItems(queueItems).find((entry) => entry.id === item.id)
+  return Boolean(queued?.url || queued?.file)
+}
+
+export const canStartNewAttempt = (
+  item: WizardResultItem,
+  queueItems: WizardQueueItem[],
+  durableCollection: boolean
+): boolean => item.outcome === "cancelled" && item.cancellationConfirmed === true &&
+  (!durableCollection || item.collectionItemId != null) && hasRetrySource(item, queueItems)
+
 export const canRetryWizardResult = (
   item: WizardResultItem,
   queueItems: WizardQueueItem[]
 ): boolean => {
-  const queued = getEligibleQueueItems(queueItems).find((entry) => entry.id === item.id)
   return (
     (item.status === "error" || item.outcome === "failed" || item.outcome === "submit_failed") &&
     item.outcome !== "cancelled" &&
-    classifyError(item.error, item.data).retryable &&
-    Boolean(
-      queued?.validation.valid &&
-      queued.conferenceOverride?.selected !== false &&
-      (queued.url || queued.file)
-    )
+    classifyError(item.error, item.data, item.httpStatus).retryable &&
+    hasRetrySource(item, queueItems)
   )
 }

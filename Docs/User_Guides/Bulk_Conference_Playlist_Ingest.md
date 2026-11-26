@@ -16,7 +16,7 @@ Use this workflow when you have a playlist of related videos, such as a conferen
 ## Start From The WebUI
 
 1. Open **Media** and choose **Quick Ingest**.
-2. Paste the playlist URL into the URL input.
+2. Choose **Links** and paste the playlist URL.
 3. If the server advertises playlist preflight support, Quick Ingest shows **Playlist detected**.
 4. Select **Preview**.
 

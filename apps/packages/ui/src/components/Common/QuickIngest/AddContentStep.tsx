@@ -4,7 +4,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { PlaylistPreflightResult } from "@/services/tldw/playlist-preflight"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
-import { buildQuickIngestOpenDetailFromUrl, isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
+import { buildQuickIngestOpenDetailFromUrl, isQuickIngestPlaylistPreflightDetail, type FirstSourceQuickIngestKind } from "@/utils/quick-ingest-open"
 
 import { Button, Input, Tooltip, Typography } from "antd"
 import {
@@ -29,15 +29,19 @@ import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
 import { FileDropZone } from "./QueueTab/FileDropZone"
 import {
   getQuickIngestFileLimit,
+  QUICK_INGEST_ACCEPT_STRING,
   QUICK_INGEST_AV_LIMIT,
   QUICK_INGEST_DOCUMENT_LIMIT
 } from "./constants"
 import {
+  canPasteQueueItem,
   createUrlQueueItems,
   detectTypeFromUrl,
   getEligibleQueueItems,
   getQueueItemExclusionReason,
   isValidQueueUrl,
+  parseQueueUrls,
+  restoreQueueFile,
   validateQueueItem
 } from "./queue-items"
 import type {
@@ -150,6 +154,8 @@ const PASSIVE_ALERT_PROPS = {
 } as const
 
 type AddContentStepProps = {
+  oneScreen?: boolean
+  processingItems?: WizardQueueItem[]
   isOnlineForIngest?: boolean
   isCheckingConnection?: boolean
   connectionRecoveryMessage?: string
@@ -159,6 +165,8 @@ type AddContentStepProps = {
 }
 
 export const AddContentStep: React.FC<AddContentStepProps> = ({
+  oneScreen = false,
+  processingItems,
   isOnlineForIngest = true,
   isCheckingConnection = false,
   connectionRecoveryMessage,
@@ -181,6 +189,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     firstSourceAddMode,
   } = state
 
+  const [clearedItems, setClearedItems] = useState<WizardQueueItem[]>([])
+  const clearButton = React.useRef<React.ComponentRef<typeof Button>>(null)
+  const undoButton = React.useRef<React.ComponentRef<typeof Button>>(null)
+  const focusAfterClear = React.useRef<"undo" | "clear" | null>(null)
+  React.useEffect(() => {
+    if (focusAfterClear.current === "undo") undoButton.current?.focus()
+    if (focusAfterClear.current === "clear") clearButton.current?.focus()
+    focusAfterClear.current = null
+  }, [clearedItems])
   const [fileRejections, setFileRejections] = useState<string[]>([])
   const [urlInput, setUrlInput] = useState("")
   const [pastedTextInput, setPastedTextInput] = useState("")
@@ -191,8 +208,16 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   const [playlistPreflightError, setPlaylistPreflightError] = useState<string | null>(null)
   const { capabilities } = useServerCapabilities()
   const seededPlaylistUrlRef = React.useRef<string | null>(null)
-  const shouldShowPastedTextInput = firstSourceAddMode === "paste_text"
-  const shouldFocusUrlInput = firstSourceAddMode === "web_url"
+  const [sourceMode, setSourceMode] = useState<FirstSourceQuickIngestKind>(
+    () => firstSourceAddMode ?? (queueItems.length && queueItems.every(item => item.url) ? "web_url" : "file_upload")
+  )
+  React.useEffect(() => {
+    if (firstSourceAddMode) setSourceMode(firstSourceAddMode)
+  }, [firstSourceAddMode])
+  const showFiles = !oneScreen || sourceMode === "file_upload"
+  const showLinks = !oneScreen || sourceMode === "web_url"
+  const shouldShowPastedTextInput = (oneScreen ? sourceMode : firstSourceAddMode) === "paste_text"
+  const repairId = oneScreen && state.currentStep === 1 ? state.processingState.correctionItemIds?.[0] : undefined
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -211,6 +236,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         const detectedType = detectTypeFromFile(file)
         const item: WizardQueueItem = {
           id: crypto.randomUUID(),
+          kind: "file",
+          fileOrigin: "upload",
           fileName: file.name,
           file,
           detectedType,
@@ -243,12 +270,17 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   const handleAddPastedText = useCallback(() => {
     if (!pastedTextInput.trim()) return
 
-    const file = new File([pastedTextInput], "pasted-text.txt", {
+    const names = new Set([...queueItems, ...clearedItems].map(item => item.fileName))
+    let name = "pasted-text.txt"
+    for (let index = 2; names.has(name); index++) name = `pasted-text-${index}.txt`
+    const file = new File([pastedTextInput], name, {
       type: "text/plain"
     })
     const detectedType = detectTypeFromFile(file)
     const item: WizardQueueItem = {
       id: crypto.randomUUID(),
+      kind: "file",
+      fileOrigin: "paste",
       fileName: file.name,
       file,
       detectedType,
@@ -260,20 +292,18 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     item.validation = validateQueueItem(item)
     setQueueItems([...queueItems, item])
     setPastedTextInput("")
-  }, [pastedTextInput, queueItems, setQueueItems])
+  }, [pastedTextInput, queueItems, clearedItems, setQueueItems])
 
-  const playlistCandidateUrls = useMemo(
-    () =>
-      urlInput
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .filter(detectPlaylistPreflightCandidate),
-    [urlInput]
-  )
+  const pastedUrls = useMemo(() => oneScreen
+    ? parseQueueUrls(urlInput)
+    : urlInput.split("\n").map(url => url.trim()).filter(Boolean), [oneScreen, urlInput])
+  const playlistCandidateUrls = pastedUrls.filter(detectPlaylistPreflightCandidate)
   const primaryPlaylistCandidateUrl = playlistCandidateUrls[0] || ""
   const shouldOfferPlaylistPreflight =
     Boolean(capabilities?.hasMediaPlaylistPreflight) && Boolean(primaryPlaylistCandidateUrl)
+  const currentPreview = playlistPreflightUrl === primaryPlaylistCandidateUrl ? playlistPreflight : null
+  const webPlaylistPreview = oneScreen && shouldOfferPlaylistPreflight && Boolean(currentPreview)
+  const otherLinks = webPlaylistPreview ? pastedUrls.filter(url => !detectPlaylistPreflightCandidate(url)) : []
 
   const handlePreviewPlaylist = useCallback(async () => {
     if (!primaryPlaylistCandidateUrl) return
@@ -310,6 +340,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     if (!seededUrl) return
 
     seededPlaylistUrlRef.current = seededUrl
+    setSourceMode("web_url")
     setUrlInput(seededUrl)
     setPlaylistPreflight(null)
     setPlaylistPreflightUrl("")
@@ -327,7 +358,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     void handlePreviewPlaylist()
   }, [handlePreviewPlaylist, primaryPlaylistCandidateUrl, shouldOfferPlaylistPreflight])
 
-  const handleAddPreflightItems = useCallback(() => {
+  const handleAddPreflightItems = () => {
     if (!playlistPreflight) return
     const newItems: WizardQueueItem[] = []
     const selectedItems = playlistPreflight.items.filter(
@@ -345,6 +376,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         playlist: {
           playlistId: playlistPreflight.playlistId,
           playlistTitle: playlistPreflight.playlistTitle,
+          sourceTitle: preflightItem.title,
           ordinal: preflightItem.ordinal,
           normalizedSourceId: preflightItem.normalizedSourceId,
           duplicateStatus: preflightItem.duplicateStatus
@@ -359,9 +391,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       item.validation = validateQueueItem(item)
       newItems.push(item)
     }
+    if (webPlaylistPreview) {
+      // Expand this playlist in place; leave other playlists available to preview.
+      const precedingLinks = pastedUrls.indexOf(playlistPreflightUrl)
+      newItems.unshift(...createUrlQueueItems(otherLinks.slice(0, precedingLinks).join("\n")))
+      newItems.push(...createUrlQueueItems(otherLinks.slice(precedingLinks).join("\n")))
+    }
     if (newItems.length === 0) return
     setQueueItems([...queueItems, ...newItems])
-    setConferenceBatchMetadata({
+    if (selectedItems.length) setConferenceBatchMetadata({
       collectionName:
         conferenceBatchMetadata?.collectionName ||
         playlistPreflight.playlistTitle ||
@@ -373,26 +411,13 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       sourcePlaylistUrl:
         conferenceBatchMetadata?.sourcePlaylistUrl || playlistPreflightUrl,
     })
-    setUrlInput((current) =>
-      current
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line && line !== playlistPreflightUrl)
-        .join("\n")
-    )
+    const remainingUrls = webPlaylistPreview ? playlistCandidateUrls : pastedUrls
+    setUrlInput(remainingUrls.filter(url => url !== playlistPreflightUrl).join("\n"))
     setPlaylistPreflight(null)
     setPlaylistPreflightUrl("")
     setDuplicatePolicy("skip")
     setPlaylistPreflightError(null)
-  }, [
-    conferenceBatchMetadata,
-    duplicatePolicy,
-    playlistPreflight,
-    playlistPreflightUrl,
-    queueItems,
-    setConferenceBatchMetadata,
-    setQueueItems,
-  ])
+  }
 
   const handlePreflightItemSelectionChange = useCallback(
     (ordinal: number, selected: boolean) => {
@@ -452,8 +477,12 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
 
   // Clear all items
   const handleClearAll = useCallback(() => {
+    if (oneScreen) {
+      focusAfterClear.current = "undo"
+      setClearedItems(queueItems)
+    }
     setQueueItems([])
-  }, [setQueueItems])
+  }, [oneScreen, queueItems, setQueueItems])
 
   const captureMounted = React.useRef(true)
   const queueRef = React.useRef(queueItems)
@@ -525,14 +554,34 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   )
 
   return (
-    <div className="py-3">
+    <div className={oneScreen ? "space-y-5" : "py-3"}>
       {/* Drop zone + URL input area */}
       <div className="space-y-3">
+        {oneScreen && (
+          <div>
+            <h3 className="mb-1 text-base font-semibold text-text">{qi("source.title", "Add sources")}</h3>
+            <div role="group" aria-label={qi("source.method", "Source type")} className="flex gap-1 border-b border-border">
+              {([
+                ["file_upload", qi("source.files", "Files")],
+                ["web_url", qi("source.links", "Links")],
+                ["paste_text", qi("source.text", "Text")],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode} type="button" aria-pressed={mode === sourceMode}
+                  onClick={() => setSourceMode(mode)}
+                  className={`min-h-11 border-b-2 px-4 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${mode === sourceMode ? "border-primary text-text" : "border-transparent text-text-muted hover:text-text"}`}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {showFiles && <>
         <FileDropZone
+          singleBrowseControl={oneScreen}
           onFilesAdded={handleFilesAdded}
           onFilesRejected={setFileRejections}
           isOnlineForIngest={isOnlineForIngest}
-          autoFocus={firstSourceAddMode === "file_upload"}
+          autoFocus={!repairId && firstSourceAddMode === "file_upload"}
         />
         {fileRejections.length > 0 && (
           <div role="alert" className="text-sm text-danger">
@@ -540,18 +589,21 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           </div>
         )}
         <Typography.Text className="text-[11px] text-text-subtle">
-          {qi(
+          {oneScreen ? qi("source.fileLimits", "Documents up to {{documentLimit}} · Audio and video up to {{avLimit}}", {
+            documentLimit: QUICK_INGEST_DOCUMENT_LIMIT.label, avLimit: QUICK_INGEST_AV_LIMIT.label
+          }) : qi(
             "fileSizeLimits",
             "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, and video. Up to {{documentLimit}} for documents and {{avLimit}} for audio and video.",
             { documentLimit: QUICK_INGEST_DOCUMENT_LIMIT.label, avLimit: QUICK_INGEST_AV_LIMIT.label }
           )}
         </Typography.Text>
-        <Typography.Text className="block text-xs text-text-muted">
+        </>}
+        {!oneScreen && <Typography.Text className="block text-xs text-text-muted">
           {qi(
             "wizard.addReadinessPurpose",
             "Add URLs or files. Stored items appear in Media. Knowledge search availability depends on source readiness; analysis and vector indexing are separate."
           )}
-        </Typography.Text>
+        </Typography.Text>}
 
         {shouldShowPastedTextInput && (
           <div>
@@ -567,12 +619,12 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
                   "Paste article text, notes, or a short document..."
                 )}
                 autoSize={{ minRows: 3, maxRows: 6 }}
-                autoFocus
+                autoFocus={!repairId && (!oneScreen || firstSourceAddMode === "paste_text")}
                 aria-label={qi("pasteTextInputAria", "Pasted text input")}
                 className="flex-1"
               />
               <Button
-                type="primary"
+                type={oneScreen ? "default" : "primary"}
                 onClick={handleAddPastedText}
                 disabled={!pastedTextInput.trim()}
                 aria-label={qi("addPastedTextAria", "Add pasted text to queue")}
@@ -613,47 +665,44 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         )}
 
         {/* Multi-line URL paste area */}
-        <div>
+        {showLinks && <div>
           <Typography.Text className="text-xs text-text-muted">
-            {qi("pasteUrlsTitle", "Paste URLs (one per line):")}
+            {oneScreen ? qi("source.pasteLinks", "Paste links, one per line") : qi("pasteUrlsTitle", "Paste URLs (one per line):")}
           </Typography.Text>
-          <div className="mt-1 flex gap-2">
+          <div className={oneScreen ? "qi-link-entry mt-1 flex gap-2" : "mt-1 flex gap-2"}>
             <Input.TextArea
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              onKeyDown={handleUrlKeyDown}
+              onKeyDown={oneScreen ? undefined : handleUrlKeyDown}
               placeholder={qi(
                 "urlsPlaceholder",
                 "https://example.com/article\nhttps://youtube.com/watch?v=..."
               )}
               autoSize={{ minRows: 2, maxRows: 4 }}
-              autoFocus={shouldFocusUrlInput}
+              autoFocus={!repairId && firstSourceAddMode === "web_url"}
               aria-label={qi("urlsInputAria", "URL input area")}
               className="flex-1"
             />
-            <Button
-              type="primary"
+            {!webPlaylistPreview && <Button
+              type={oneScreen ? "default" : "primary"}
               onClick={handleAddUrls}
               disabled={!urlInput.trim()}
               aria-label={qi("addUrlsAria", "Add URLs to queue")}
               className="self-end"
             >
               <Plus className="mr-1 h-4 w-4" />
-              {qi("addUrls", "Add")}
-            </Button>
+              {oneScreen ? qi("source.addLinks", "Add links") : qi("addUrls", "Add")}
+            </Button>}
           </div>
-        </div>
+        </div>}
 
-        {shouldOfferPlaylistPreflight && (
+        {showLinks && shouldOfferPlaylistPreflight && (
           <PlaylistPreflightPanel
             candidateUrl={primaryPlaylistCandidateUrl}
             loading={playlistPreflightLoading}
             error={playlistPreflightError}
-            result={
-              playlistPreflightUrl === primaryPlaylistCandidateUrl
-                ? playlistPreflight
-                : null
-            }
+            result={currentPreview}
+            webPreview={oneScreen ? { otherLinks: otherLinks.length, qi } : undefined}
             onPreview={handlePreviewPlaylist}
             onAddItems={handleAddPreflightItems}
             onItemSelectionChange={handlePreflightItemSelectionChange}
@@ -705,7 +754,27 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       )}
 
       {/* Queued items list */}
-      {hasItems && (
+      {clearedItems.length > 0 && <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-border bg-surface2 px-3">
+        <p role="status" className="text-sm text-text">{qi("source.cleared", "{count, plural, one {# source cleared.} other {# sources cleared.}}", { count: clearedItems.length })}</p>
+        <Button ref={undoButton} type="link" className="min-h-11" onClick={() => {
+          focusAfterClear.current = "clear"
+          setQueueItems([...clearedItems, ...queueItems])
+          setClearedItems([])
+        }}>{qi("source.undo", "Undo")}</Button>
+      </div>}
+      {oneScreen && (hasItems || clearedItems.length > 0) && (
+        <SourceQueue
+          items={queueItems}
+          repairId={repairId}
+          processingItems={processingItems}
+          setItems={setQueueItems}
+          remove={handleRemoveItem}
+          clear={handleClearAll}
+          clearButton={clearButton}
+          qi={qi}
+        />
+      )}
+      {!oneScreen && hasItems && (
         <div className="mt-4">
           <div className="flex items-center justify-between">
             <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
@@ -867,7 +936,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       )}
 
       {/* Action buttons */}
-      <div className="mt-4 flex items-center justify-end gap-2">
+      {!oneScreen && <div className="mt-4 flex items-center justify-end gap-2">
         {hasItems && onQuickProcess && (
           <Button
             type="primary"
@@ -889,9 +958,168 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
           })}
           <span aria-hidden="true"> &gt;</span>
         </Button>
-      </div>
+      </div>}
     </div>
   )
 }
 
 export default AddContentStep
+
+type SourceQueueProps = {
+  items: WizardQueueItem[]
+  repairId?: string
+  processingItems?: WizardQueueItem[]
+  setItems: (items: WizardQueueItem[]) => void
+  remove: (id: string) => void
+  clear: () => void
+  clearButton: React.Ref<React.ComponentRef<typeof Button>>
+  qi: (key: string, fallback: string, values?: Record<string, unknown>) => string
+}
+
+function SourceQueue({ items, repairId, processingItems, setItems, remove, clear, clearButton, qi }: SourceQueueProps) {
+  const [editing, setEditing] = useState<{ id: string; value: string } | null>(() => {
+    const source = items.find(item => item.id === repairId && !item.validation.valid)
+    return source && (source.url || canPasteQueueItem(source)) ? { id: source.id, value: source.url ?? "" } : null
+  })
+  const submittedIds = processingItems && new Set(processingItems.map(item => item.id))
+  const counts = { ready: 0, duplicate: 0, invalid: 0, unselected: 0, outside: 0 }
+  const rows = items.map(item => {
+    const status = getQueueItemExclusionReason(item, items)
+      ?? (submittedIds && !submittedIds.has(item.id) ? "outside" : "ready")
+    counts[status]++
+    return { item, status }
+  })
+  const countSummary = [
+    qi("source.readyCount", "{{count}} ready", { count: counts.ready }),
+    counts.duplicate && qi("source.duplicateCount", "{count, plural, one {# duplicate} other {# duplicates}}", { count: counts.duplicate }),
+    counts.invalid && qi("source.invalidCount", "{{count}} invalid", { count: counts.invalid }),
+    counts.unselected && qi("source.unselectedCount", "{{count}} unselected", { count: counts.unselected }),
+    counts.outside && qi("source.outsideCount", "{{count}} outside this run", { count: counts.outside }),
+  ].filter(Boolean).join(" · ")
+  const rowLabels = {
+    ready: qi("source.ready", "Ready"),
+    duplicate: qi("source.duplicate", "Duplicate · skipped"),
+    invalid: qi("source.invalid", "Invalid · skipped"),
+    unselected: qi("source.unselected", "Unselected · skipped"),
+    outside: qi("source.outside", "Outside this run"),
+  }
+  function replaceItem(updated: WizardQueueItem) {
+    setItems(items.map(current => current.id === updated.id ? updated : current))
+  }
+  function attachFile(item: WizardQueueItem, file: File, origin: "upload" | "paste") {
+    const detectedType = detectTypeFromFile(file)
+    const mismatch = qi("wizard.results.reattachMismatch", "Choose the original file with the same name and size.")
+    replaceItem(restoreQueueFile(item, file, origin, mismatch, { detectedType, icon: ICON_NAME_MAP[detectedType] }))
+  }
+  function applyEdit(item: WizardQueueItem) {
+    if (editing?.id !== item.id) return
+    if (item.url) {
+      const url = editing.value.trim()
+      if (!isValidQueueUrl(url) || url === item.url) return
+      const detectedType = detectTypeFromUrl(url)
+      const updated = { ...item, url, detectedType, icon: ICON_NAME_MAP[detectedType] }
+      replaceItem({ ...updated, validation: validateQueueItem(updated) })
+    } else {
+      if (!editing.value.trim() || !item.fileName) return
+      attachFile(item, new File([editing.value], item.fileName, { type: "text/plain" }), "paste")
+    }
+    setEditing(null)
+  }
+  return (
+    <section hidden={!items.length} aria-label={qi("source.queue", "Queued sources")}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
+        <h3 className="text-base font-semibold text-text">
+          {qi("source.count", "{count, plural, one {# source} other {# sources}}", { count: items.length })}
+        </h3>
+        <span role="status" aria-label={qi("source.counts", "Source counts")} className="text-sm text-text-muted">{countSummary}</span>
+      </div>
+      <ul className="mt-2 divide-y divide-border border-y border-border">
+        {rows.map(({ item, status }) => {
+          const name = item.fileName || item.url || qi("untitledItem", "Untitled")
+          const isEditing = editing?.id === item.id
+          const needsRepair = status === "invalid" && (!repairId || repairId === item.id)
+          return (
+            <li key={item.id} tabIndex={-1} className="qi-source-row grid min-w-0 items-center gap-x-2 py-2">
+              {MEDIA_TYPE_ICONS[item.detectedType]}
+              <div className="min-w-0">
+                <p title={name} className="break-words text-sm font-medium text-text [overflow-wrap:anywhere]">{name}</p>
+                <p className={`text-xs ${status === "invalid" ? "text-danger" : "text-text-muted"}`}>
+                  {rowLabels[status]}{item.fileSize > 0 && ` · ${formatFileSize(item.fileSize)}`}
+                </p>
+                {item.validation.errors?.filter(message => message !== "Invalid URL format").map(message =>
+                  <p key={message} role="alert" className="text-xs text-danger">{message}</p>)}
+                {item.validation.warnings?.map(message => <p key={message} className="text-xs text-warn">{message}</p>)}
+              </div>
+              {needsRepair && item.url && !isEditing && (
+                <Button className="qi-source-repair" type="link" onClick={() => setEditing({ id: item.id, value: item.url! })}>
+                  {qi("source.edit", "Edit link")}
+                </Button>
+              )}
+              {needsRepair && canPasteQueueItem(item) && !isEditing && (
+                <Button className="qi-source-repair" type="link" onClick={() => setEditing({ id: item.id, value: "" })}>
+                  {qi("source.pasteAgain", "Paste again")}
+                </Button>
+              )}
+              {status === "duplicate" && (
+                <Button className="qi-source-repair" type="link" onClick={() => setItems(items.map(current =>
+                  current.id === item.id ? { ...current, processAgain: true } : current))}>
+                  {qi("source.includeAgain", "Include again")}
+                </Button>
+              )}
+              <button
+                type="button" onClick={() => remove(item.id)}
+                className="qi-source-remove inline-flex h-11 w-11 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-danger focus-visible:outline"
+                aria-label={qi("source.remove", "Remove {{name}}", { name })}
+              ><X className="h-4 w-4" aria-hidden="true" /></button>
+              {needsRepair && item.fileName && item.fileOrigin !== "paste" && !isEditing && (
+                <label className="col-start-2 col-span-2 inline-flex min-h-11 cursor-pointer items-center justify-self-start rounded text-sm text-primary focus-within:outline">
+                  {qi("source.chooseFile", "Choose file")}
+                  <input type="file" accept={QUICK_INGEST_ACCEPT_STRING} autoFocus={repairId === item.id}
+                    aria-label={qi("source.chooseFileFor", "Choose file for {{name}}", { name })}
+                    className="sr-only"
+                    onChange={event => {
+                      const file = event.currentTarget.files?.[0]
+                      if (file) {
+                        event.currentTarget.closest("li")?.focus()
+                        attachFile(item, file, "upload")
+                      }
+                      event.currentTarget.value = ""
+                    }} />
+                </label>
+              )}
+              {editing && isEditing && (
+                <form className="col-span-full space-y-1 py-1" onSubmit={event => {
+                  event.preventDefault()
+                  event.currentTarget.closest("li")?.focus()
+                  applyEdit(item)
+                }}>
+                  <label className="block text-sm">
+                    {item.url ? qi("source.correctLink", "Correct link") : qi("source.pasteAgain", "Paste again")}
+                    {item.url ? <input type="url" autoFocus value={editing.value}
+                      onChange={event => setEditing({ id: item.id, value: event.target.value })}
+                      className="mt-1 block w-full rounded border border-border bg-surface px-2 py-2 text-base text-text" />
+                      : <textarea autoFocus rows={4} value={editing.value}
+                        onChange={event => setEditing({ id: item.id, value: event.target.value })}
+                        className="mt-1 block w-full rounded border border-border bg-surface px-2 py-2 text-base text-text" />}
+                  </label>
+                  {item.url && <p className="text-xs text-text-muted">{qi("source.linkHelp", "Enter a full link starting with http:// or https://.")}</p>}
+                  <div className="flex gap-2">
+                    <Button htmlType="submit" disabled={item.url ? !isValidQueueUrl(editing.value) || editing.value.trim() === item.url : !editing.value.trim()}>
+                      {item.url ? qi("source.apply", "Apply link") : qi("source.applyText", "Apply text")}
+                    </Button>
+                    <Button type="text" onClick={event => { event.currentTarget.closest("li")?.focus(); setEditing(null) }}>
+                      {qi("source.cancelEdit", "Cancel edit")}
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {items.length > 1 && <Button ref={clearButton} size="small" type="text" onClick={clear} className="mt-1">
+        {qi("clearAll", "Clear all")}
+      </Button>}
+    </section>
+  )
+}

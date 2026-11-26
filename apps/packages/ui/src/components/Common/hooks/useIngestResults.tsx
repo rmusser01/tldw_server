@@ -24,6 +24,10 @@ import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
 import { resolvePerformChunking } from "@/services/tldw/ingest-defaults"
+import { extractCompletedIngestJobTerminalData } from "@/services/tldw/ingest-job-results"
+import { extractProcessingItems, getExtractedSourceText, isProcessingItem, resolveContent } from "../QuickIngest/processing-results"
+import type { ProcessingItem, ProcessingResultPayload } from "../QuickIngest/processing-results"
+export type { ProcessingItem, ProcessingResultPayload } from "../QuickIngest/processing-results"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { detectSections } from "@/utils/content-review"
 import {
@@ -35,45 +39,6 @@ import { getFileInstanceId, snapshotTypeDefaults, buildQueuedFileStub } from './
 // ---------------------------------------------------------------------------
 // Processing / result types (mirrored from QuickIngestModal)
 // ---------------------------------------------------------------------------
-
-export type ProcessingItem = {
-  id?: string | number
-  media_id?: string | number
-  pk?: string | number
-  uuid?: string | number
-  media?: ProcessingItem
-  status?: string
-  url?: string
-  input_ref?: string
-  media_type?: string
-  content?: string | Array<string | number>
-  text?: string
-  transcript?: string
-  transcription?: string
-  summary?: string
-  analysis_content?: string | null
-  analysis?: string | null
-  analysis_status?: string
-  analysis_error?: string
-  warnings?: string[]
-  prompt?: string
-  custom_prompt?: string
-  title?: string
-  metadata?: Record<string, any>
-  keywords?: string[] | string
-  segments?: Record<string, any>[]
-}
-
-export type ProcessingResultPayload =
-  | ProcessingItem[]
-  | ProcessingItem
-  | {
-      results?: ProcessingItem[]
-      articles?: ProcessingItem[]
-      result?: ProcessingItem | ProcessingItem[]
-    }
-  | null
-  | undefined
 
 export type ResultItem = {
   id: string
@@ -178,20 +143,6 @@ const normalizeKeywords = (value: ProcessingItem['keywords']): string[] => {
   return []
 }
 
-const resolveContent = (item: ProcessingItem): string => {
-  if (Array.isArray(item?.content)) {
-    return item.content
-      .filter((v: unknown) => typeof v === "string" || typeof v === "number")
-      .map((v: string | number) => String(v))
-      .join("\n")
-  }
-  const candidates = [item?.content, item?.text, item?.transcript, item?.transcription, item?.summary, item?.analysis_content]
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) return candidate
-  }
-  return ""
-}
-
 const resolveTitle = (item: ProcessingItem, fallback: string): string => {
   const title = item?.title || item?.metadata?.title || item?.input_ref || fallback
   return String(title || "").trim() || fallback
@@ -215,42 +166,6 @@ const inferContentFormat = (content: string): "plain" | "markdown" => {
   if (/```/.test(text)) return "markdown"
   if (/(^|\n)\s*[-*]\s+\S/.test(text)) return "markdown"
   return "plain"
-}
-
-const isResultsWrapper = (value: unknown): value is { results: ProcessingItem[] } => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false
-  return Array.isArray((value as { results?: unknown }).results)
-}
-
-const isArticlesWrapper = (value: unknown): value is { articles: ProcessingItem[] } => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false
-  return Array.isArray((value as { articles?: unknown }).articles)
-}
-
-const isResultWrapper = (value: unknown): value is { result: ProcessingItem | ProcessingItem[] } => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false
-  const result = (value as { result?: unknown }).result
-  return Array.isArray(result) || (typeof result === "object" && result !== null)
-}
-
-const isProcessingItem = (value: unknown): value is ProcessingItem => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false
-  if (isResultsWrapper(value) || isArticlesWrapper(value) || isResultWrapper(value)) return false
-  return (
-    "id" in value || "media_id" in value || "pk" in value || "uuid" in value ||
-    "content" in value || "text" in value || "transcript" in value ||
-    "analysis" in value || "analysis_content" in value
-  )
-}
-
-const extractProcessingItems = (data: ProcessingResultPayload): ProcessingItem[] => {
-  if (!data) return []
-  if (Array.isArray(data)) return data
-  if (isResultsWrapper(data)) return data.results
-  if (isArticlesWrapper(data)) return data.articles
-  if (isResultWrapper(data)) return Array.isArray(data.result) ? data.result : [data.result]
-  if (isProcessingItem(data)) return [data]
-  return []
 }
 
 const getProcessingStatusLabels = (data: ProcessingResultPayload): string[] =>
@@ -332,34 +247,62 @@ type ResultsFilter = (typeof RESULT_FILTERS)[keyof typeof RESULT_FILTERS]
 // Deps interface
 // ---------------------------------------------------------------------------
 
+/** Use the same source text as the WebUI reader, including segment-only transcripts. */
+function reviewableProcessingItems(data: unknown): ProcessingItem[] {
+  const payload = extractCompletedIngestJobTerminalData(data)
+  const items = typeof payload === "string" ? [{ content: payload }] : extractProcessingItems(payload)
+  return items.flatMap(item => {
+    const content = getExtractedSourceText(item)
+    return content ? [{ ...item, content }] : []
+  })
+}
+
 /** Shared by the shipped wizard and legacy modal. Existing batch IDs make
  * completion replay/reload idempotent without overwriting a user's edits. */
-export async function createReviewDraftsFromResults({ results, files, rows = [], processingOptions, operation, batchId = crypto.randomUUID() }: {
-  results: ResultItem[]
+export async function createReviewDraftsFromResults({ results, files, rows = [], processingOptions, operation, batchId = crypto.randomUUID(), requireReviewableContent = false }: {
+  results: Array<Omit<ResultItem, "data"> & { data?: unknown }>
   files: Map<string, File>
   rows?: Array<Pick<Entry, "id" | "url" | "type">>
   processingOptions: ProcessingOptions
   operation: QuickIngestOperation
   batchId?: string
+  requireReviewableContent?: boolean
 }): Promise<{ batchId: string; draftIds: string[]; skippedAssets: number } | null> {
   return withDraftTransaction(operation, async () => {
-    if (await getDraftBatchById(batchId, operation)) {
-      const drafts = await getDraftsByBatch(batchId, operation)
-      return { batchId, draftIds: drafts.map(draft => draft.id), skippedAssets: drafts.filter(draft => draft.source.kind === "file" && !draft.sourceAssetId).length }
-    }
+    const priorBatch = await getDraftBatchById(batchId, operation)
+    const priorDrafts = priorBatch ? await getDraftsByBatch(batchId, operation) : []
+    const draftIds = priorDrafts.map(draft => draft.id)
+    let skippedAssets = priorDrafts.filter(draft => draft.source.kind === "file" && !draft.sourceAssetId).length
     const okResults = results.filter(item => item.status === "ok")
-    if (!okResults.length) return null
+    const previousIds: string[] | undefined = priorBatch?.sourceDetails?.processedResultIds
+    if (priorBatch && !previousIds) {
+      // A legacy receipt has no per-source identity. Preserve its edited drafts and
+      // remember the current results so later successful retries can be appended.
+      await upsertDraftBatch({ ...priorBatch, sourceDetails: { ...priorBatch.sourceDetails, processedResultIds: okResults.map(item => item.id) } }, operation)
+      return { batchId, draftIds, skippedAssets }
+    }
+    const processedIds = new Set(previousIds)
+    const newResults = okResults.filter(item => !processedIds.has(item.id)).map(item => {
+      const items = requireReviewableContent ? reviewableProcessingItems(item.data) : extractProcessingItems(item.data)
+      const processedItems = items.filter(processed => {
+        const status = normalizeStatusLabel(processed.status)
+        return !RESULT_FAILURE_STATUS_TOKENS.includes(status) && !isSkippedStatus(status)
+      })
+      return { item, processedItems }
+    }).filter(({ processedItems }) => !requireReviewableContent || processedItems.length > 0)
+    if (!newResults.length) return priorBatch ? { batchId, draftIds, skippedAssets } : null
     const now = Date.now()
-    const batch: DraftBatch = { id: batchId, source: "quick_ingest", sourceDetails: { total: okResults.length }, createdAt: now, updatedAt: now }
+    newResults.forEach(({ item }) => processedIds.add(item.id))
+    const batch: DraftBatch = {
+      id: batchId, source: "quick_ingest", ...priorBatch,
+      sourceDetails: { ...priorBatch?.sourceDetails, total: processedIds.size, processedResultIds: [...processedIds] },
+      createdAt: priorBatch?.createdAt ?? now, updatedAt: now,
+    }
     await upsertDraftBatch(batch, operation)
-    const draftIds: string[] = []
-    let skippedAssets = 0
-    for (const item of okResults) {
+    for (const { item, processedItems } of newResults) {
       const sourceRow = rows.find(row => row.id === item.id)
       const localFile = files.get(item.id)
-      for (const processed of extractProcessingItems(item.data)) {
-        const status = normalizeStatusLabel(processed.status)
-        if (RESULT_FAILURE_STATUS_TOKENS.includes(status) || isSkippedStatus(status)) continue
+      for (const processed of processedItems) {
         const id = crypto.randomUUID()
         const content = resolveContent(processed)
         const title = resolveTitle(processed, sourceRow?.url || item.url || localFile?.name || item.fileName || i18n.t("playground:sharedWorkspace.untitled", "Untitled source"))
@@ -393,7 +336,7 @@ export async function createReviewDraftsFromResults({ results, files, rows = [],
         draftIds.push(id)
       }
     }
-    if (!draftIds.length) throw new Error("No processed content was returned for review.")
+    if (draftIds.length === priorDrafts.length) throw new Error("No processed content was returned for review.")
     return { batchId, draftIds, skippedAssets }
   })
 }

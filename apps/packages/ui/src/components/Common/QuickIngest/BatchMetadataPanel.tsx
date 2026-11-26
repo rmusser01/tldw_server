@@ -86,7 +86,7 @@ export const BatchMetadataPanel: React.FC = () => {
       className="mt-4 rounded-md border border-border bg-surface px-3 py-3"
       aria-label="Conference batch metadata"
     >
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <Typography.Text className="block text-sm font-medium text-text">
             Conference batch
@@ -96,9 +96,9 @@ export const BatchMetadataPanel: React.FC = () => {
           </Typography.Text>
         </div>
         {metadata.sharedTags.length > 0 && (
-          <div className="flex flex-wrap justify-end gap-1">
+          <div className="flex min-w-0 max-w-full flex-wrap gap-1">
             {metadata.sharedTags.map((tag) => (
-              <Tag key={tag} className="!mr-0">
+              <Tag key={tag} className="!mr-0 max-w-full !whitespace-normal [overflow-wrap:anywhere]">
                 {tag}
               </Tag>
             ))}

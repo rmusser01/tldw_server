@@ -187,10 +187,10 @@ const PATTERN_TABLE: PatternEntry[] = [
  * Pattern matching follows `PATTERN_TABLE` order so timeout, job-limit, and
  * client-configuration errors win before broader auth, validation, server, and
  * network patterns.
- * Confirmed extraction codes take precedence. Unknown or mixed extraction
- * failures do not establish that retrying is useful.
+ * Confirmed extraction codes take precedence. A rejected source request can
+ * retain its HTTP status even when the server uses a custom error message.
  */
-export function classifyError(error: string | undefined, data?: unknown): ErrorCategory {
+export function classifyError(error: string | undefined, data?: unknown, httpStatus?: number): ErrorCategory {
   const result = data && typeof data === "object" ? data as Record<string, unknown> : null
   const payload = result?.result && typeof result.result === "object"
     ? result.result as Record<string, unknown> : result
@@ -205,15 +205,15 @@ export function classifyError(error: string | undefined, data?: unknown): ErrorC
     return typeof code === "string" && Object.hasOwn(EXTRACTION_CATEGORIES, code) && codes.every(value => value === code)
       ? EXTRACTION_CATEGORIES[code] : UNKNOWN_CATEGORY
   }
-  if (!error) return UNKNOWN_CATEGORY
+  if (httpStatus === 404 || httpStatus === 410 || httpStatus === 415 || httpStatus === 422) return VALIDATION_CATEGORY
 
   for (const entry of PATTERN_TABLE) {
-    if (entry.patterns.test(error)) {
+    if (error && entry.patterns.test(error)) {
       return entry.category
     }
   }
 
-  return UNKNOWN_CATEGORY
+  return httpStatus !== undefined && httpStatus >= 500 && httpStatus < 600 ? SERVER_CATEGORY : UNKNOWN_CATEGORY
 }
 
 /**

@@ -134,11 +134,8 @@ export const extractCompletedIngestJobWarning = (
   value: unknown
 ): string | undefined => {
   const status = extractCompletedIngestJobStatusToken(value)
-  if (
-    (status !== "warning" && status !== "skipped") ||
-    !hasSavedMedia(value) ||
-    extractCompletedIngestJobError(value)
-  ) return undefined
+  const savedWithWarnings = (status === "warning" || status === "skipped") && hasSavedMedia(value)
+  if ((!savedWithWarnings && status !== "ephemeral-ok") || extractCompletedIngestJobError(value)) return undefined
 
   const warnings = extractCompletedIngestJobPayload(value)?.warnings
   const details = Array.isArray(warnings)

@@ -10,6 +10,10 @@ const isDuplicatePreflightStatus = (status: string | undefined): boolean =>
 
 type PlaylistPreflightPanelProps = {
   candidateUrl: string
+  webPreview?: {
+    otherLinks: number
+    qi: (key: string, fallback: string, values?: Record<string, unknown>) => string
+  }
   loading?: boolean
   error?: string | null
   result?: PlaylistPreflightResult | null
@@ -22,6 +26,7 @@ type PlaylistPreflightPanelProps = {
 
 export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
   candidateUrl,
+  webPreview,
   loading = false,
   error = null,
   result = null,
@@ -37,6 +42,20 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
     result?.duplicateCount ??
     result?.items.filter((item) => isDuplicatePreflightStatus(item.duplicateStatus)).length ??
     0
+  const qi = webPreview?.qi
+  const otherLinks = webPreview?.otherLinks ?? 0
+  const duplicateHelp = qi && duplicateCount > 0 && {
+    skip: qi("playlistPreview.skipHelp", "Duplicates are left out of the import."),
+    overwrite: qi("playlistPreview.overwriteHelp", "Selected duplicates can replace matching Media when saved."),
+    update_metadata_only: qi("playlistPreview.metadataHelp", "Selected duplicates update collection metadata where supported."),
+    include_existing: qi("playlistPreview.includeHelp", "Include existing items in the collection without processing them again."),
+  }[duplicatePolicy]
+  let addLabel = qi ? qi("playlistPreview.add", "Add {{count}} selected", { count: selectedCount }) : `Add ${selectedCount}`
+  if (qi && otherLinks > 0) {
+    addLabel = selectedCount
+      ? qi("playlistPreview.addWithLinks", "Add {selected} selected and {count, plural, one {# other link} other {# other links}}", { selected: selectedCount, count: otherLinks })
+      : qi("playlistPreview.addLinks", "Add {count, plural, one {# other link} other {# other links}}", { count: otherLinks })
+  }
 
   return (
     <div className="rounded-md border border-border bg-surface px-3 py-2">
@@ -68,10 +87,10 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
       {result && (
         <div className="mt-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="info">{result.itemCount} items</Badge>
+            <Badge variant="info">{qi ? qi("playlistPreview.items", "{count, plural, one {# item} other {# items}}", { count: result.itemCount }) : `${result.itemCount} items`}</Badge>
             <Badge variant="success">{selectedCount} selected</Badge>
             {duplicateCount > 0 && (
-              <Badge variant="warning">{duplicateCount} duplicates</Badge>
+              <Badge variant="warning">{qi ? qi("source.duplicateCount", "{count, plural, one {# duplicate} other {# duplicates}}", { count: duplicateCount }) : `${duplicateCount} duplicates`}</Badge>
             )}
           </div>
 
@@ -94,6 +113,7 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
                 <Radio value="update_metadata_only">Update metadata only</Radio>
                 <Radio value="include_existing">Include existing</Radio>
               </Radio.Group>
+              {duplicateHelp && <p role="status" className="mt-1 text-xs text-text">{duplicateHelp}</p>}
             </div>
           )}
 
@@ -106,7 +126,7 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
                 <Checkbox
                   className="mr-2"
                   checked={item.selected}
-                  disabled={!item.sourceUrl}
+                  disabled={!item.sourceUrl || Boolean(webPreview && duplicatePolicy === "skip" && isDuplicatePreflightStatus(item.duplicateStatus))}
                   aria-label={`Select ${item.title}`}
                   onChange={(event) =>
                     onItemSelectionChange?.(item.ordinal, event.target.checked)
@@ -122,7 +142,10 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
                 </div>
                 {isDuplicatePreflightStatus(item.duplicateStatus) && (
                   <Badge variant="warning" className="!mr-0">
-                    duplicate
+                    {qi ? item.duplicateStatus === "duplicate_existing"
+                      ? qi("playlistPreview.inMedia", "Already in Media")
+                      : qi("playlistPreview.repeated", "Repeated in playlist")
+                      : "duplicate"}
                   </Badge>
                 )}
               </List.Item>
@@ -134,10 +157,10 @@ export const PlaylistPreflightPanel: React.FC<PlaylistPreflightPanelProps> = ({
               size="small"
               type="primary"
               onClick={onAddItems}
-              disabled={selectedCount === 0}
+              disabled={selectedCount + otherLinks === 0}
               icon={<Plus className="h-3.5 w-3.5" />}
             >
-              Add {selectedCount}
+              {addLabel}
             </Button>
           </div>
         </div>

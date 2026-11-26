@@ -217,6 +217,7 @@ class WebScrapingService:
         auto_chunking_goal: str = "balanced",
         auto_chunking_use_llm: bool = False,
         summary_prompt_overrides: Mapping[str, str] | None = None,
+        include_extracted_content: bool = False,
     ) -> dict[str, Any]:
         """
         Process web scraping task with enhanced features.
@@ -425,6 +426,28 @@ class WebScrapingService:
             # Process results based on mode
             if mode == "ephemeral":
                 stored = await self._store_ephemeral(result, task_id, user_id)
+                if include_extracted_content:
+                    articles = []
+                    errors: list[str] = []
+                    failures: list[dict[str, str]] = []
+                    for article in result.get("articles", []):
+                        if not isinstance(article, dict):
+                            continue
+                        if article.get("extraction_successful") is False or article.get("error"):
+                            _record_extraction_failure(
+                                errors, failures, _classify_extraction_failure(article), article.get("url")
+                            )
+                        else:
+                            articles.append({
+                                key: article[key] for key in ("title", "url", "content") if key in article
+                            })
+                    stored["articles"] = articles
+                    if failures:
+                        stored["extraction_failures"] = failures
+                        if articles:
+                            stored["warnings"] = errors
+                        else:
+                            stored.update(status="error", errors=errors)
             else:
                 stored = await self._store_persistent(
                     result,

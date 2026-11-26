@@ -133,6 +133,7 @@ async def process_web_scraping_endpoint(
             temperature=payload.temperature,
             custom_cookies=payload.custom_cookies,
             mode=payload.mode,
+            **({"include_extracted_content": True} if payload.include_extracted_content else {}),
             user_id=current_user.id,
             user_agent=payload.user_agent,
             custom_headers=payload.custom_headers,

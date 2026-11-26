@@ -62,13 +62,9 @@ export async function ingestReviewDrafts(page: Page, contents: string[]): Promis
   await review.openQuickIngestButton.click();
   const dialog = page.getByRole('dialog', { name: /quick ingest/i });
   await expect(dialog).toBeVisible();
-  await dialog
-    .locator('[data-testid="qi-file-input"], input[type="file"]')
-    .first()
-    .setInputFiles(files);
-  await dialog
-    .getByRole('button', { name: new RegExp(`^configure ${files.length} items?$`, 'i') })
-    .click();
+  await dialog.getByRole('button', { name: 'Files', exact: true }).click();
+  await dialog.getByTestId('qi-file-input').setInputFiles(files);
+  await dialog.getByRole('button', { name: 'Change settings' }).click();
   for (const option of ['analysis', 'chunking']) {
     const toggle = dialog.getByRole('switch', {
       name: new RegExp(`^Ingestion options\\s*[–-]\\s*${option}$`, 'i'),
@@ -76,10 +72,9 @@ export async function ingestReviewDrafts(page: Page, contents: string[]): Promis
     await expect(toggle).toBeVisible();
     await toggle.setChecked(false);
   }
-  await dialog.getByRole('button', { name: /^advanced options$/i }).click();
-  await dialog.getByRole('switch', { name: 'Review before saving', exact: true }).setChecked(true);
-  await dialog.getByRole('button', { name: /^next$/i }).click();
-  await dialog.getByRole('button', { name: /start processing/i }).click();
+  await dialog.getByRole('combobox', { name: 'Destination' }).selectOption('draft');
+  await dialog.getByRole('button', { name: new RegExp(`^Create ${files.length} review drafts?$`, 'i') }).click();
+  await dialog.getByRole('button', { name: 'Open drafts' }).click({ timeout: 120_000 });
 
   // UAT396: require the actual Quick Ingest handoff before inspecting drafts.
   await expect(page).toHaveURL(

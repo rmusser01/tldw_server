@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest"
 import { classifyError } from "../ErrorClassification"
 
 describe("classifyError", () => {
+  it("keeps a transient transport failure retryable when its detail omits the HTTP code", () => {
+    expect(classifyError("Archive temporarily unavailable.", undefined, 503).retryable).toBe(true)
+  })
   it.each([
     { extraction_failures: [{ code: "extraction_timeout" }, { code: "extraction_failed" }] },
     { extraction_failures: [{ code: "constructor" }] },
