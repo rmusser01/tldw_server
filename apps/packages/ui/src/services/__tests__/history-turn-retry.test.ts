@@ -81,7 +81,12 @@ it.each(["unreviewed", "server", "unknown", "no-admission", "partial-output", "o
     else if (refusal === "record-session") boundary.load.mockResolvedValue([{ ...f.entry, scope: { ...f.entry.scope, client_session_id: "other-session" } }])
     else if (refusal === "record-changed") boundary.load.mockResolvedValue([{ ...f.entry, turn: { ...f.entry.turn, input_text: "changed original" } }])
     else if (refusal === "proof-missing") Object.assign(f.capture, { validated_admission: undefined })
-    else if (refusal === "proof-admission") f.capture.validated_admission.admission.selection_digest = "different receipt"
+    else if (refusal === "proof-admission") {
+      f.capture.validated_admission.admission = {
+        ...f.capture.validated_admission.admission,
+        selection_digest: "different receipt"
+      }
+    }
     else if (refusal === "proof-revision") f.capture.validated_admission.input_revision = "different capture"
     else boundary.load.mockResolvedValue([])
     expect((await retryHistoryTurnRecovery(f.controller, f.entry, f.review, f.submit)).status).toBe("failed")

@@ -101,6 +101,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     headers['User-Agent'] = req.headers['user-agent'];
   }
 
+  const installId = req.headers['x-tldw-device-id'];
+  if (typeof installId === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(installId)) {
+    headers['X-TLDW-Device-Id'] = installId;
+  }
+
   let backend: Response | undefined;
   try {
     backend = await fetch(`${policy.internalApiOrigin}${SESSION_PATH}`, {

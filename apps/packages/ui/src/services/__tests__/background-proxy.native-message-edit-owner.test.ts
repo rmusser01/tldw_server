@@ -146,14 +146,14 @@ describe("native message Save through the actual SDK and proxy", () => {
     controller.abort()
     await rejected
   })
-  it.each(["POST", "PATCH", "DELETE", "HEAD"])(
+  it.each(["POST", "PATCH", "DELETE", "HEAD"] as const)(
     "does not expand native Save permission to %s",
     async (method) => {
       await expect(
         bgRequest({
           ...requestScopeFields(requestScope),
-          path: "/api/v1/messages/message" as never,
-          method: method as never
+          path: "/api/v1/messages/message",
+          method
         })
       ).rejects.toThrow(/Service Prompt config/)
       expect(boundary.fetch).not.toHaveBeenCalled()
@@ -168,11 +168,11 @@ describe("native message Save through the actual SDK and proxy", () => {
     "/api/v1/messages//message",
     "/api/v1/messages/../message",
     "/api/v1/messages/owned%2Fforeign"
-  ])("does not expand native Save permission to %s", async (path) => {
+  ] as const)("does not expand native Save permission to %s", async (path) => {
     await expect(
       bgRequest({
         ...requestScopeFields(requestScope),
-        path: path as never,
+        path,
         method: "GET"
       })
     ).rejects.toThrow(/Service Prompt config/)
@@ -310,7 +310,7 @@ describe("native leaf Delete through the actual SDK and proxy", () => {
     await expect(
       bgRequest({
         ...requestScopeFields(requestScope),
-        path: `/api/v1/messages/message${query}` as never,
+        path: `/api/v1/messages/message${query}`,
         method: "DELETE"
       })
     ).rejects.toThrow(/Service Prompt config/)

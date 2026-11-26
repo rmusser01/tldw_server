@@ -10,28 +10,32 @@ class KnowledgeFlashcardError(ValueError):
     """The selected public turn cannot supply a complete flashcard."""
 
 
-_REASONING_TAG = re.compile(r"<(/?)(?:think|reason|reasoning|thought)>", re.IGNORECASE)
+_REASONING_DELIMITER = re.compile(r"<(/?)(think|reason|reasoning|thought)>", re.IGNORECASE)
 
 
 def split_reasoning_text(value: str) -> tuple[str, str]:
     """Separate answer and thinking text, preserving characters in each channel."""
     answer: list[str] = []
     thinking: list[str] = []
-    depth = start = 0
-    for tag in _REASONING_TAG.finditer(value):
-        if depth == 0:
-            answer.append(value[start:tag.start()])
-        if tag[1]:
-            if depth == 1:
-                thinking.append(value[start:tag.start()])
-            depth = max(0, depth - 1)
-            if depth == 0:
-                start = tag.end()
-        else:
-            if depth == 0:
-                start = tag.end()
-            depth += 1
-    (thinking if depth else answer).append(value[start:])
+    open_tags: list[str] = []
+    start = 0
+    for delimiter in _REASONING_DELIMITER.finditer(value):
+        name = delimiter[2].lower()
+        if not delimiter[1]:
+            if not open_tags:
+                answer.append(value[start:delimiter.start()])
+                start = delimiter.end()
+            open_tags.append(name)
+        elif open_tags and name == open_tags[-1]:
+            open_tags.pop()
+            if not open_tags:
+                thinking.append(value[start:delimiter.start()])
+                start = delimiter.end()
+        elif not open_tags:
+            # Old unescaped traces can contain an early closing tag.
+            (thinking if thinking else answer).append(value[start:delimiter.start()])
+            start = delimiter.end()
+    (thinking if open_tags else answer).append(value[start:])
     return "".join(answer), "".join(thinking)
 
 

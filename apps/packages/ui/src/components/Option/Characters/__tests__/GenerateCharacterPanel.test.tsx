@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
+import { QueryClient, QueryObserver, useQuery } from "@tanstack/react-query"
 import { useStorage } from "@plasmohq/storage/hook"
 import { GenerateCharacterPanel } from "../GenerateCharacterPanel"
 
@@ -49,15 +49,16 @@ describe("GenerateCharacterPanel", () => {
   })
 
   it("offers discovery Retry instead of claiming no generation models exist", async () => {
-    const retry = vi.fn()
-    useQueryMock.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isSuccess: false,
-      isFetching: false,
-      isError: true,
-      refetch: retry
-    } as ReturnType<typeof useQuery>)
+    const client = new QueryClient()
+    const observer = new QueryObserver(client, {
+      queryKey: ["test-model-discovery"],
+      queryFn: async () => { throw new Error("Could not check chat models") },
+      retry: false,
+      gcTime: 0
+    })
+    const failedQuery = await observer.refetch()
+    const retry = vi.fn(observer.refetch)
+    useQueryMock.mockReturnValue({ ...failedQuery, refetch: retry })
     render(
       <MemoryRouter>
         <GenerateCharacterPanel
@@ -201,7 +202,7 @@ describe("GenerateCharacterPanel", () => {
       )
       await user.type(screen.getByRole("textbox"), "A patient library guide")
       await user.click(
-        screen.getByRole("button", { name: "Generate", exact: true })
+        screen.getByRole("button", { name: "Generate" })
       )
       expect(onGenerate).toHaveBeenCalledWith(
         "A patient library guide",
@@ -214,9 +215,14 @@ describe("GenerateCharacterPanel", () => {
   it("keeps a unique legacy stored choice usable and sends its API model ID", async () => {
     useStorageMock.mockReturnValue([
       "tldw:legacy",
-      vi.fn(),
-      { isLoading: false }
-    ] as ReturnType<typeof useStorage>)
+      vi.fn(async () => {}),
+      {
+        isLoading: false,
+        setRenderValue: vi.fn(),
+        setStoreValue: vi.fn(async () => null),
+        remove: vi.fn()
+      }
+    ])
     useQueryMock.mockReturnValue({
       data: [
         { model: "tldw:legacy", provider: "openai", nickname: "Legacy chat" }
@@ -240,7 +246,7 @@ describe("GenerateCharacterPanel", () => {
     )
     await user.type(screen.getByRole("textbox"), "A patient library guide")
     await user.click(
-      screen.getByRole("button", { name: "Generate", exact: true })
+      screen.getByRole("button", { name: "Generate" })
     )
     expect(onGenerate).toHaveBeenCalledWith(
       "A patient library guide",
@@ -285,14 +291,14 @@ describe("GenerateCharacterPanel", () => {
     )
     await user.type(screen.getByRole("textbox"), "A patient library guide")
     expect(
-      screen.getByRole("button", { name: "Generate", exact: true })
+      screen.getByRole("button", { name: "Generate" })
     ).toBeDisabled()
     await user.click(
       screen.getByRole("button", { name: "Select AI model for generation" })
     )
     await user.click(screen.getByRole("menuitem", { name: "Cloud chat" }))
     await user.click(
-      screen.getByRole("button", { name: "Generate", exact: true })
+      screen.getByRole("button", { name: "Generate" })
     )
     expect(onGenerate).toHaveBeenCalledWith(
       "A patient library guide",

@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-import html
 import inspect
 import json as _json
 import os
@@ -76,6 +75,7 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
     GENERATION_STATUS_COMPLETE,
     GENERATION_STATUS_LENGTH,
     build_generation_metadata,
+    moonshot_reasoning_event,
 )
 from tldw_Server_API.app.core.Chat.history_selection import (
     REPLY_ACTION_REFUSED_QUESTION,
@@ -84,11 +84,12 @@ from tldw_Server_API.app.core.Chat.history_selection import (
     HistorySelectionSnapshotV1,
     reply_action_refusal,
 )
-from tldw_Server_API.app.core.Chat.knowledge_save import split_reasoning_text, strip_reasoning_blocks
+from tldw_Server_API.app.core.Chat.knowledge_save import strip_reasoning_blocks
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
     apply_output_safety_to_choices,
+    prepare_saved_stream_reply,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
     NativeStreamPersistence,
@@ -193,6 +194,7 @@ from tldw_Server_API.app.core.LLM_Calls.gateway import (  # used by build_call_p
     CHAT_COMPLETIONS_SURFACE,
     _provider_inventory_endpoint,
     _raise_inventory_failure,
+    official_moonshot_chat_base_url,
 )
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
@@ -207,6 +209,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
     resolve_provider_model_selection,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
+from tldw_Server_API.app.core.LLM_Calls.provider_results import MOONSHOT_REASONING_KEY, bounded_moonshot_reasoning
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
@@ -1665,6 +1668,10 @@ def build_call_params_from_request(
             and (not isinstance(declared_fields, Mapping) or key in declared_fields)
         )
     }
+    request_metadata = getattr(request_data, "metadata", None)
+    if isinstance(request_metadata, dict) and request_metadata.get("tldw_moonshot_reasoning_history_v1") is True:
+        call_params["_chat_moonshot_reasoning_history"] = True
+
     call_model = resolved_model if resolved_model is not None else call_params.get("model")
     if isinstance(call_model, str) and call_model.strip():
         call_params["model"] = call_model.strip()
@@ -2342,6 +2349,7 @@ def _build_assistant_message_payload(
     tool_calls: Any | None,
     function_call: Any | None,
     generation_metadata: dict[str, Any] | None = None,
+    moonshot_reasoning: str | None = None,
 ) -> dict[str, Any]:
     """Compatibility wrapper for tests/imports that use the old local helper."""
 
@@ -2352,6 +2360,21 @@ def _build_assistant_message_payload(
         tool_calls=tool_calls,
         function_call=function_call,
         generation_metadata=generation_metadata,
+        moonshot_reasoning=moonshot_reasoning,
+    )
+
+
+def _stream_generation_metadata(
+    generation: dict[str, Any] | None, *, model: str, provider: str
+) -> dict[str, Any]:
+    """Combine what the stream observed with the model and provider that produced it."""
+    observed = generation if isinstance(generation, dict) else {}
+    return build_generation_metadata(
+        generation_status=observed.get("generation_status", GENERATION_STATUS_COMPLETE),
+        model_id=model,
+        provider=provider,
+        finish_reason=observed.get("finish_reason"),
+        usage=observed.get("usage"),
     )
 
 
@@ -2956,6 +2979,15 @@ def _history_for_request(
     return formatted
 
 
+def _attach_saved_moonshot_reasoning(message: dict[str, Any], extra: Mapping[str, Any]) -> None:
+    """Carry approved reasoning only from stored Moonshot assistant turns."""
+    if message["role"] != "assistant" or extra.get("provider") != "moonshot":
+        return
+    reasoning = bounded_moonshot_reasoning(extra.get(MOONSHOT_REASONING_KEY))
+    if reasoning is not None:
+        message[MOONSHOT_REASONING_KEY] = reasoning
+
+
 def _format_selected_history_messages(
     snapshot: Any,
     content: Any,
@@ -3013,6 +3045,7 @@ def _format_selected_history_messages(
             ]
         if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
             entry["content"] = None
+        _attach_saved_moonshot_reasoning(entry, extra)
         if item.get("tool_calls") is not None:
             entry["tool_calls"] = item["tool_calls"]
         for key in ("function_call", "tool_call_id"):

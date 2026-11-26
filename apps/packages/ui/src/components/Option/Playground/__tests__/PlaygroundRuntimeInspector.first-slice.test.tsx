@@ -439,9 +439,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
         runtimeStatusDetail={null}
         messageCount={2}
         threadSearchOpen={false}
-        assistantSummary={{ mode: "none", name: null, detail: null }}
         onOpenModelSettings={vi.fn()}
-        onOpenAssistantSelect={vi.fn()}
         canStopStreaming
         onStopStreaming={vi.fn()}
       />,
@@ -459,9 +457,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
         runtimeStatusDetail="Provider metadata degraded"
         messageCount={2}
         threadSearchOpen={false}
-        assistantSummary={{ mode: "none", name: null, detail: null }}
         onOpenModelSettings={vi.fn()}
-        onOpenAssistantSelect={vi.fn()}
       />,
     );
 
@@ -478,9 +474,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
         runtimeStatusDetail="Provider failed"
         messageCount={2}
         threadSearchOpen={false}
-        assistantSummary={{ mode: "none", name: null, detail: null }}
         onOpenModelSettings={vi.fn()}
-        onOpenAssistantSelect={vi.fn()}
       />,
     );
 

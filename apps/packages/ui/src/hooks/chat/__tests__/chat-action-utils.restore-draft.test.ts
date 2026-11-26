@@ -21,7 +21,7 @@ describe("shouldRestoreDraftAfterSubmit", () => {
   })
 
   it("restores only refusals that ask for it", () => {
-    expect(shouldRestoreDraftAfterSubmit({ ...chatSubmitFailed("refused"), restoreDraft: true })).toBe(true)
+    expect(shouldRestoreDraftAfterSubmit({ status: "failed", errorMessage: "refused", restoreDraft: true })).toBe(true)
     expect(shouldRestoreDraftAfterSubmit(chatSubmitFailed("provider down"))).toBe(false)
     expect(shouldRestoreDraftAfterSubmit(chatSubmitSubmitted())).toBe(false)
   })

@@ -211,6 +211,12 @@ class Settings(BaseSettings):
         description="Refresh token expiration time in days"
     )
 
+    MAX_SESSIONS_PER_USER: int = Field(
+        default=4,
+        ge=1,
+        description="Live signed-in sessions per user; creating one more revokes the least recently active",
+    )
+
     MAGIC_LINK_EXPIRE_MINUTES: int = Field(
         default=15,
         description="Magic link token expiration time in minutes"

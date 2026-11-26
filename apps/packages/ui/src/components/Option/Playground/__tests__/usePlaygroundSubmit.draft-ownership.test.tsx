@@ -180,7 +180,6 @@ describe("Playground send owns only its captured composer draft", () => {
           handleImageUpload: vi.fn(),
           imageBackendDefaultTrimmed: "",
           imageBackendLabel: "none",
-          setOpenModelSettings: vi.fn(),
           currentMessage: composer.form.values.message,
           onNewChat: vi.fn(),
         });

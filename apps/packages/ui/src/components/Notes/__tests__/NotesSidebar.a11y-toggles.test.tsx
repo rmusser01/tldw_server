@@ -1,7 +1,8 @@
 import React from "react"
 import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import NotesSidebar, { type NotesSidebarProps } from "../NotesSidebar"
+import NotesSidebar from "../NotesSidebar"
+import { buildNotesSidebarProps } from "./notes-sidebar-test-props"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -30,105 +31,18 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
   default: () => <div data-testid="notes-list-panel" />
 }))
 
-const noopAsync = vi.fn(async () => {})
-const noop = vi.fn()
-
-const baseProps = {
-  isMobileViewport: false,
-  mobileSidebarOpen: false,
-  sidebarCollapsed: false,
-  sidebarHeight: 720,
-  listMode: "active",
-  listViewMode: "list",
-  page: 1,
-  pageSize: 20,
+const baseProps = buildNotesSidebarProps({
   total: 1,
-  sortOption: "modified_desc",
-  selectedId: null,
-  visibleNotes: [],
-  filteredCount: 0,
-  timelineSections: [],
-  recentNotes: [],
-  pinnedNoteIds: [],
-  pinnedNoteIdSet: new Set<string>(),
   queryInput: "server failure",
   hasActiveFilters: true,
   activeFilterSummary: {
     countText: "Showing 0 of 1 notes",
-    detailsText: 'Query: "server failure"',
+    detailsText: 'Query: "server failure"'
   },
-  keywordTokens: [],
-  keywordOptions: [],
-  availableKeywords: [],
-  notebookOptions: [],
-  selectedNotebookId: null,
-  selectedNotebook: null,
-  moodboards: [],
-  selectedMoodboardId: null,
-  selectedMoodboard: null,
-  isMoodboardsFetching: false,
-  moodboardTotalPages: 1,
-  moodboardCanGoPrev: false,
-  moodboardCanGoNext: false,
-  moodboardRangeStart: 0,
-  moodboardRangeEnd: 0,
-  bulkSelectedIds: [],
-  searchTipsContent: null,
   query: "server failure",
-  isFetching: false,
   hasListError: true,
-  listErrorMessage: "Backend unavailable",
-  isStaleResults: false,
-  isOnline: true,
-  demoEnabled: false,
-  capsLoading: false,
-  capabilities: { hasNotes: true } as any,
-  queuedOfflineDraftCount: 0,
-  showLargeListPaginationHint: false,
-  conversationLabelById: {},
-  importSubmitting: false,
-  exportProgress: null,
-  setMobileSidebarOpen: noop,
-  setListViewMode: noop,
-  setPage: noop,
-  setPageSize: noop,
-  setSortOption: noop,
-  setQueryInput: noop,
-  setSelectedMoodboardId: noop,
-  setSelectedNotebookId: noop,
-  setSearchTipsQuery: noop,
-  handleNewNote: noopAsync,
-  switchListMode: noop,
-  handleSelectNote: noopAsync,
-  handleClearFilters: noop,
-  retryList: noop,
-  handleKeywordFilterSearch: noop,
-  handleKeywordFilterChange: noop,
-  handleToggleBulkSelection: noop,
-  clearSearchQueryTimeout: noop,
-  setQuery: noop,
-  openKeywordPicker: noop,
-  createNotebookFromCurrentKeywords: noop,
-  removeSelectedNotebook: noopAsync,
-  createMoodboard: noopAsync,
-  renameMoodboard: noopAsync,
-  deleteMoodboard: noopAsync,
-  clearBulkSelection: noop,
-  exportSelectedBulk: noop,
-  addTagsToSelectedBulk: noopAsync,
-  deleteSelectedBulk: noopAsync,
-  toggleNotePinned: noopAsync,
-  restoreNote: noopAsync,
-  exportAll: noopAsync,
-  exportAllCSV: noopAsync,
-  exportAllJSON: noopAsync,
-  openImportPicker: noop,
-  onSyncFolder: noop,
-  resetEditor: noop,
-  renderKeywordLabelWithFrequency: (keyword: string) => keyword,
-  onOpenSettings: noop,
-  onOpenHealth: noop,
-} satisfies NotesSidebarProps
+  listErrorMessage: "Backend unavailable"
+})
 
 // AX-15 (#3124): the selected list mode and view must be exposed to assistive
 // technology, not only shown by button fill colour.

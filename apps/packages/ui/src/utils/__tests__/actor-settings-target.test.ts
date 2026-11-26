@@ -114,7 +114,7 @@ describe("scene target qualification from original address and H1 owner", () => 
     },
     {
       label: "organization",
-      scope: { ...scope, config: { ...scope.config, orgId: "another-org" } }
+      scope: { ...scope, config: { ...scope.config, orgId: 2 } }
     },
     { label: "user", scope: { ...scope, userId: 2 } },
     {
@@ -221,6 +221,7 @@ describe("scene target qualification from original address and H1 owner", () => 
   it("retains the original local H1 lease through later IO", () => {
     let current = true
     const h1 = receipt("local")
+    if (h1.owner.kind !== "local") throw new Error("Expected a local receipt")
     const target = captureActorSettingsTarget({
       ...captured(local),
       ...h1,

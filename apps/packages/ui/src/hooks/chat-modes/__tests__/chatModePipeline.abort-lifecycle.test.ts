@@ -860,7 +860,7 @@ it.each(["nickname", "retrieval preflight", "handled retrieval preflight", "prom
   if (boundary === "nickname") mocks.nickname.mockImplementationOnce(async () => { await hold(); return null })
   const heldMode = { ...mode,
     preflight: async () => { if (boundary === "retrieval preflight" || boundary === "handled retrieval preflight") await hold(); return boundary === "handled retrieval preflight" ? { handled: true as const, fullText: "Obsolete selected-source diagnostic" } : null },
-    preparePrompt: async () => { if (boundary === "prompt") await hold(); return { chatHistory: [{ role: "user", content: "ORIGINAL INPUT" }] } }
+    preparePrompt: async () => { if (boundary === "prompt") await hold(); return { chatHistory: [{ role: "user" as const, content: "ORIGINAL INPUT" }] } }
   }
   const pending = runChatPipeline(heldMode, "ORIGINAL INPUT", "", false, [], [], new AbortController().signal, buildParams({ actorSceneSend }))
   await entered

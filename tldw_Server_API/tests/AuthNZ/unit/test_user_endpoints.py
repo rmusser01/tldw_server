@@ -101,7 +101,7 @@ class TestUserEndpoints:
                 response = await client.put(
                     "/api/v1/users/me",
                     headers={"Authorization": f"Bearer {valid_access_token}"},
-                    json={"email": "newemail@example.com"},
+                    json={"email": "newemail@example.com", "current_password": test_user["password"]},
                 )
 
             assert response.status_code == 200

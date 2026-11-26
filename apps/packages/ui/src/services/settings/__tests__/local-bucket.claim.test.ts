@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Storage as PlasmoStorage } from "@plasmohq/storage"
+import { Storage as PlasmoStorage } from "../../../../../../tldw-frontend/extension/shims/plasmo-storage"
 import { createLocalRegistryBucket } from "../local-bucket"
 
 vi.mock("@plasmohq/storage", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+const persistence: { readonly hasPersistentBackend?: boolean } = PlasmoStorage.prototype
 const prefix = "registry:creation-claim-test:"
 const bucket = () => createLocalRegistryBucket<string>({ prefix })
 const locks = () => {
@@ -52,7 +53,7 @@ describe("existing registry durable creation reservation boundary", () => {
       const get = PlasmoStorage.prototype.get
       let persistent = true
       vi.spyOn(
-        PlasmoStorage.prototype,
+        persistence,
         "hasPersistentBackend",
         "get"
       ).mockImplementation(() => persistent)
@@ -129,7 +130,7 @@ describe("existing registry durable creation reservation boundary", () => {
   })
 
   it("refuses volatile persistence before strict read or conditional claim writes", async () => {
-    vi.spyOn(PlasmoStorage.prototype, "hasPersistentBackend", "get").mockReturnValue(false)
+    vi.spyOn(persistence, "hasPersistentBackend", "get").mockReturnValue(false)
     const write = vi.spyOn(PlasmoStorage.prototype, "set")
     await expect(bucket().get("intent", { failClosed: true })).rejects.toThrow()
     expect(await bucket().set("intent", "DISPATCH", Date.now(), null)).toBe(false)
@@ -137,7 +138,7 @@ describe("existing registry durable creation reservation boundary", () => {
   })
 
   it("refuses an uncertified storage instance even when backend flags are missing", async () => {
-    vi.spyOn(PlasmoStorage.prototype, "hasPersistentBackend", "get").mockReturnValue(undefined as unknown as boolean)
+    vi.spyOn(persistence, "hasPersistentBackend", "get").mockReturnValue(undefined)
     const write = vi.spyOn(PlasmoStorage.prototype, "set")
     await expect(bucket().get("intent", { failClosed: true })).rejects.toThrow()
     expect(await bucket().set("intent", "DISPATCH", Date.now(), null)).toBe(false)

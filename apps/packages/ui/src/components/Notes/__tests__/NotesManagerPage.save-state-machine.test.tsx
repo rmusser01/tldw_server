@@ -289,7 +289,7 @@ describe("NotesManagerPage save state machine", { timeout: 60_000 }, () => {
     type("Orchid body")
     fireEvent.click(screen.getByTestId(action === "new" ? "notes-save-button" : "notes-save-and-new-button"))
     await waitFor(() => expect(requestsTo("GET", "/api/v1/notes/51")).toHaveLength(1))
-    if (action === "new") fireEvent.click(screen.getAllByRole("button", { name: "New note", exact: true })[0])
+    if (action === "new") fireEvent.click(screen.getAllByRole("button", { name: "New note" })[0])
     try {
       expect(screen.getByPlaceholderText("Title")).toBeDisabled()
       expect(screen.getByPlaceholderText(EDITOR_PLACEHOLDER)).toHaveAttribute("readonly")
@@ -321,7 +321,7 @@ describe("NotesManagerPage save state machine", { timeout: 60_000 }, () => {
     type("Old session body")
     fireEvent.click(screen.getByTestId("notes-save-button"))
     await waitFor(() => expect(requestsTo("GET", "/api/v1/notes/51")).toHaveLength(1))
-    fireEvent.click(screen.getAllByRole("button", { name: "New note", exact: true })[0])
+    fireEvent.click(screen.getAllByRole("button", { name: "New note" })[0])
     try {
       expect(screen.getByPlaceholderText("Title")).toBeDisabled()
       act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
@@ -351,7 +351,7 @@ describe("NotesManagerPage save state machine", { timeout: 60_000 }, () => {
       renderPage()
       await openSavedNote()
       type("Old session edit")
-      fireEvent.click(screen.getAllByRole("button", { name: "New note", exact: true })[0])
+      fireEvent.click(screen.getAllByRole("button", { name: "New note" })[0])
       await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
       expect(decision?.okText).toBe(choice)
       act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))

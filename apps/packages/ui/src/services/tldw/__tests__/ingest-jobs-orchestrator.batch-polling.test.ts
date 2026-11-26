@@ -11,12 +11,17 @@ type BatchCall = {
   jobIds: number[]
 }
 
+type JobMeta = { id: string }
+type PollResult =
+  | { kind: "completed"; data?: unknown }
+  | { kind: "failed"; status?: string; error?: string; id?: string }
+  | { kind: "cancelled" }
+type PollOptions = Parameters<typeof pollTrackedIngestJobs<JobMeta, PollResult>>[0]
+
 const runPoll = async (options: {
   batchResponses?: Array<IngestJobStatusResponse | undefined>
-  fetchJob?: ReturnType<typeof vi.fn>
-  fetchJobs?: ReturnType<typeof vi.fn>
-}) => {
-  const tracker = createIngestJobsTracker<{ id: string }>()
+} & Partial<Pick<PollOptions, "fetchJob" | "fetchJobs">>) => {
+  const tracker = createIngestJobsTracker<JobMeta>()
   tracker.trackJobs(
     "batch-1",
     [1, 2, 3],
@@ -37,7 +42,7 @@ const runPoll = async (options: {
       return response ?? { ok: true, data: { jobs: [] } }
     })
 
-  const results = await pollTrackedIngestJobs({
+  const results = await pollTrackedIngestJobs<JobMeta, PollResult>({
     tracker,
     fetchJobs,
     fetchJob: options.fetchJob,
@@ -45,13 +50,13 @@ const runPoll = async (options: {
     pollIntervalMs: 1,
     isCancelled: () => false,
     onCancel: async () => {},
-    mapCompleted: (_item, data) => ({ kind: "completed" as const, data }),
+    mapCompleted: (_item, data) => ({ kind: "completed", data }),
     mapFailure: (_item, details) => ({
-      kind: "failed" as const,
+      kind: "failed",
       status: details.status,
       error: details.error
     }),
-    mapCancelled: () => ({ kind: "cancelled" as const })
+    mapCancelled: () => ({ kind: "cancelled" })
   })
 
   return { tracker, calls, fetchJobs, results }
@@ -125,39 +130,39 @@ describe("pollTrackedIngestJobs batch polling", () => {
   })
 
   it("propagates a failed batch response to every tracked job of that batch (auth-error mapping preserved)", async () => {
-    const tracker = createIngestJobsTracker<{ id: string }>()
+    const tracker = createIngestJobsTracker<JobMeta>()
     tracker.trackJobs("batch-x", [7, 8], { id: "a" })
 
     const authError = { ok: false, status: 401, error: "Not authenticated." }
-    const results = await pollTrackedIngestJobs({
+    const results = await pollTrackedIngestJobs<JobMeta, PollResult>({
       tracker,
       fetchJobs: vi.fn(async () => authError),
       timeoutMs: 10,
       pollIntervalMs: 1,
       isCancelled: () => false,
       onCancel: async () => {},
-      mapCompleted: () => ({ kind: "completed" as const }),
-      mapCancelled: () => ({ kind: "cancelled" as const }),
+      mapCompleted: () => ({ kind: "completed" }),
+      mapCancelled: () => ({ kind: "cancelled" }),
       mapFailure: (_item, details) => ({
-        kind: "failed" as const,
+        kind: "failed",
         status: details.status
       }),
       mapRequestError: (item, response) =>
         Number(response?.status || 0) === 401
-          ? { kind: "failed" as const, status: "auth", id: item.meta.id }
+          ? { kind: "failed", status: "auth", id: item.meta.id }
           : undefined
     })
 
     expect(results).toHaveLength(2)
-    expect(results.every((r) => (r as any).status === "auth")).toBe(true)
+    expect(results.every((r) => r.kind === "failed" && r.status === "auth")).toBe(true)
   })
 
   it("still supports the legacy per-job fetchJob path when fetchJobs is absent", async () => {
-    const tracker = createIngestJobsTracker<{ id: string }>()
+    const tracker = createIngestJobsTracker<JobMeta>()
     tracker.trackJobs("batch-legacy", [5, 6], { id: "a" })
 
     const perJobCalls: number[] = []
-    const results = await pollTrackedIngestJobs({
+    const results = await pollTrackedIngestJobs<JobMeta, PollResult>({
       tracker,
       fetchJob: async (jobId) => {
         perJobCalls.push(jobId)
@@ -170,9 +175,9 @@ describe("pollTrackedIngestJobs batch polling", () => {
       pollIntervalMs: 1,
       isCancelled: () => false,
       onCancel: async () => {},
-      mapCompleted: (_item, data) => ({ kind: "completed" as const, data }),
-      mapFailure: () => ({ kind: "failed" as const }),
-      mapCancelled: () => ({ kind: "cancelled" as const })
+      mapCompleted: (_item, data) => ({ kind: "completed", data }),
+      mapFailure: () => ({ kind: "failed" }),
+      mapCancelled: () => ({ kind: "cancelled" })
     })
 
     expect(perJobCalls).toEqual([5, 6])

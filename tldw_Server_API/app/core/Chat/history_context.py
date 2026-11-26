@@ -692,21 +692,15 @@ async def build_context_and_messages(
             except cs._CHAT_NONCRITICAL_EXCEPTIONS as meta_err:
                 cs.logger.debug("Metadata lookup failed for message {}: {}", db_msg.get("id"), meta_err)
 
-            tool_calls_meta = None
-            function_call_meta = None
-            content_placeholder_reason = None
-            tool_call_id_meta = None
-            stored_role = None
-            stored_name = None
-            if metadata:
-                tool_calls_meta = metadata.get("tool_calls")
-                extra_meta = metadata.get("extra") or {}
-                if isinstance(extra_meta, dict):
-                    function_call_meta = extra_meta.get("function_call")
-                    content_placeholder_reason = extra_meta.get("content_placeholder_reason")
-                    tool_call_id_meta = extra_meta.get("tool_call_id")
-                    stored_role = extra_meta.get("sender_role")
-                    stored_name = extra_meta.get("sender_name")
+            tool_calls_meta = metadata.get("tool_calls") if metadata else None
+            extra_meta = metadata.get("extra") if metadata else None
+            if not isinstance(extra_meta, dict):
+                extra_meta = {}
+            function_call_meta = extra_meta.get("function_call")
+            content_placeholder_reason = extra_meta.get("content_placeholder_reason")
+            tool_call_id_meta = extra_meta.get("tool_call_id")
+            stored_role = extra_meta.get("sender_role")
+            stored_name = extra_meta.get("sender_name")
 
             role_initial = cs.map_sender_to_role(sender_val, character_card.get("name") if character_card else None)
             role = stored_role if stored_role in {"user", "assistant", "system", "tool"} else role_initial
@@ -765,6 +759,7 @@ async def build_context_and_messages(
                     hist_entry["content"] = msg_parts[0].get("text", "")
                 else:
                     hist_entry["content"] = msg_parts or None
+                cs._attach_saved_moonshot_reasoning(hist_entry, extra_meta)
                 if role == "assistant":
                     name_source = stored_name or (character_card.get("name") if character_card else None)
                     if name_source:

@@ -62,7 +62,7 @@ describe("C02 preview refusal with the real service", () => {
     fireEvent.click(screen.getByTestId("structured-preview-button"))
     await waitFor(() => expect(screen.getByText(error)).toBeVisible())
     expect(screen.getByLabelText(/Prompt Name/)).toHaveValue("Unsaved correction")
-    expect(screen.getByRole("textbox", { name: "Block content", exact: true })).toHaveValue("{{missing}}")
+    expect(screen.getByRole("textbox", { name: "Block content" })).toHaveValue("{{missing}}")
     await waitFor(() => expect(screen.getByTestId("structured-preview-button")).toBeEnabled())
     expect(vi.mocked(apiSend).mock.calls.map(([request]) => [request.method, request.path])).toEqual([
       ["GET", "/api/v1/prompt-studio/prompts/get/71"],
@@ -97,7 +97,7 @@ describe("C02 preview refusal with the real service", () => {
     await waitFor(() => expect(screen.getByText("Unknown variable reference: missing")).toBeVisible())
     expect(screen.queryAllByText("Old server preview")).toHaveLength(0)
     expect(screen.getByLabelText(/Prompt Name/)).toHaveValue("Retained after refusal")
-    expect(screen.getByRole("textbox", { name: "Block content", exact: true })).toHaveValue("{{missing}}")
+    expect(screen.getByRole("textbox", { name: "Block content" })).toHaveValue("{{missing}}")
   })
 
 })
@@ -121,13 +121,13 @@ describe("C02 Save refusal with the real service", () => {
     if (operation === "create") {
       fireEvent.change(screen.getByLabelText(/User Prompt/), { target: { value: "Retain this unsaved text" } })
     }
-    fireEvent.click(screen.getByRole("button", { name: operation === "create" ? "Create Prompt" : "Save", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: operation === "create" ? "Create Prompt" : "Save" }))
     await waitFor(() => expect(vi.mocked(apiSend).mock.calls.filter(([request]) => request.method === (operation === "create" ? "POST" : "PUT"))).toHaveLength(1))
     await waitFor(() => expect(screen.getByText(error)).toBeVisible())
     expect(onClose).not.toHaveBeenCalled()
     expect(name).toHaveValue("Unsaved rejected Save")
     if (operation === "create") expect(screen.getByLabelText(/User Prompt/)).toHaveValue("Retain this unsaved text")
-    else expect(screen.getByRole("textbox", { name: "Block content", exact: true })).toHaveValue("{{missing}}")
+    else expect(screen.getByRole("textbox", { name: "Block content" })).toHaveValue("{{missing}}")
     expect(screen.queryByText(operation === "create" ? "Prompt created" : "Prompt updated")).toBeNull()
     expect(vi.mocked(apiSend).mock.calls.map(([request]) => [request.method, request.path])).toEqual(operation === "create"
       ? [["POST", "/api/v1/prompt-studio/prompts/create"]]

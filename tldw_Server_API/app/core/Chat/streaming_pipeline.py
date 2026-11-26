@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 import asyncio
 import contextlib
 import functools
-import html
 import os
 import uuid as _uuid
 from collections.abc import AsyncIterator
@@ -48,6 +47,7 @@ class StreamingPipelineRequest:
     user_message_id: str | None = None
     partial_save_callback: Callable[..., Any] | None = None
     forward_usage_chunk: bool | None = None
+    capture_provider_reasoning: bool | None = None
     retain_reasoning: bool | None = None
 
 
@@ -76,6 +76,7 @@ def create_chat_streaming_response(
         "history_persistence_ack": request.history_persistence_ack,
         "partial_save_callback": request.partial_save_callback,
         "forward_usage_chunk": request.forward_usage_chunk,
+        "capture_provider_reasoning": request.capture_provider_reasoning,
         "retain_reasoning": request.retain_reasoning,
     }
     factory_kwargs.update(
@@ -176,35 +177,8 @@ async def _record_clean_success_once(cst: "StreamCall") -> bool:
         return cst.clean_success_recorded
 
 
-def _stream_generation_metadata(cst: "StreamCall", generation: dict[str, Any] | None) -> dict[str, Any]:
-    """Combine what the stream observed with the model and provider that produced it."""
-    observed = generation if isinstance(generation, dict) else {}
-    return cs.build_generation_metadata(
-        generation_status=observed.get("generation_status", cs.GENERATION_STATUS_COMPLETE),
-        model_id=cst.model,
-        provider=cst.selected_provider,
-        finish_reason=observed.get("finish_reason"),
-        usage=observed.get("usage"),
-    )
-
-
-async def _prepare_saved_stream_reply(cst: "StreamCall", full_reply: str) -> tuple[str | None, bool]:
-    """Apply save policies to answer and thinking without checking synthetic tags."""
-    if cst.native_persistence != "retain_reasoning" or not cst.keep_partial_replies or cst.structured_request_context is not None:
-        return await _moderation_pipeline._apply_stream_output_policies(cst, full_reply)
-    answer, thinking = cs.split_reasoning_text(full_reply)
-    approved_answer, blocked = await _moderation_pipeline._apply_stream_output_policies(cst, answer)
-    if blocked or approved_answer != answer:
-        return approved_answer, blocked
-    if thinking:
-        thinking = html.unescape(thinking)
-        approved_thinking, thinking_blocked = await _moderation_pipeline._apply_stream_output_policies(
-            cst,
-            thinking, enforce_resolved_action=True
-        )
-        if thinking_blocked or approved_thinking != thinking:
-            return answer, False
-    return full_reply, False
+def _retain_stream_reasoning(cst: "StreamCall") -> bool:
+    return cst.keep_partial_replies and cst.native_persistence == "retain_reasoning" and cst.structured_request_context is None
 
 
 async def partial_save_callback(cst: "StreamCall", full_reply: str, *, generation: dict[str, Any]) -> str | None:
@@ -218,7 +192,9 @@ async def partial_save_callback(cst: "StreamCall", full_reply: str, *, generatio
         return None
     if cst.stream_mod_state.get("pending_stop_error") is not None:
         return None
-    full_reply_to_save, post_stream_blocked = await _prepare_saved_stream_reply(cst, full_reply)
+    full_reply_to_save, post_stream_blocked, _ = await cs.prepare_saved_stream_reply(
+        full_reply, functools.partial(_moderation_pipeline._apply_stream_output_policies, cst), retain_reasoning=_retain_stream_reasoning(cst),
+    )
     if post_stream_blocked or not isinstance(full_reply_to_save, str) or not full_reply_to_save.strip():
         return None
     message_payload = cs.build_assistant_message_payload(
@@ -227,7 +203,7 @@ async def partial_save_callback(cst: "StreamCall", full_reply: str, *, generatio
         content=full_reply_to_save,
         tool_calls=None,
         function_call=None,
-        generation_metadata=_stream_generation_metadata(cst, generation),
+        generation_metadata=cs._stream_generation_metadata(generation, model=cst.model, provider=cst.selected_provider),
     )
     return await cs.save_assistant_message(
         chat_db=cst.chat_db,
@@ -268,6 +244,7 @@ async def save_callback(
     *,
     generation: dict[str, Any] | None = None,
     stream_usage: cs._StreamUsage | None = None,
+    provider_reasoning: str | None = None,
 ):
     # The usage row and the token commit, once per stream, detached: a client drop or a failure during the
     # save below must not lose it (an early end records in _finalize_stream)
@@ -277,7 +254,11 @@ async def save_callback(
     saved_message_id: str | None = None
     tool_execution_payload: list[dict[str, Any]] | None = None
     structured_events: list[dict[str, Any]] = []
-    full_reply_to_save, post_stream_blocked = await _prepare_saved_stream_reply(cst, full_reply)
+    full_reply_to_save, post_stream_blocked, moonshot_reasoning = await cs.prepare_saved_stream_reply(
+        full_reply, functools.partial(_moderation_pipeline._apply_stream_output_policies, cst), retain_reasoning=_retain_stream_reasoning(cst),
+        provider_reasoning=provider_reasoning
+        if provider_reasoning and cs.official_moonshot_chat_base_url(cst.selected_provider, cst.cleaned_args) else None,
+    )
 
     if cst.structured_request_context is not None:
         try:
@@ -336,6 +317,9 @@ async def save_callback(
         outcome="blocked" if post_stream_blocked else "success",
     )
 
+    if moonshot_reasoning and cst.client_moonshot_history:
+        structured_events.append(cs.moonshot_reasoning_event(moonshot_reasoning))
+
     if cst.should_persist and cst.final_conversation_id and not post_stream_blocked and (
         full_reply_to_save or tool_calls or function_call
     ):
@@ -345,7 +329,8 @@ async def save_callback(
             content=full_reply_to_save,
             tool_calls=tool_calls,
             function_call=function_call,
-            generation_metadata=_stream_generation_metadata(cst, generation),
+            generation_metadata=cs._stream_generation_metadata(generation, model=cst.model, provider=cst.selected_provider),
+            moonshot_reasoning=moonshot_reasoning,
         )
         saved_message_id = await cs.save_assistant_message(
             chat_db=cst.chat_db,
@@ -571,9 +556,8 @@ async def tracked_streaming_generator(cst: "StreamCall"):
                 continuation_metadata=cst.normalized_continuation_metadata,
                 history_persistence_ack=bool(cst.native_persistence) or None,
                 forward_usage_chunk=cst.forward_usage_chunk,
-                retain_reasoning=(
-                    cst.native_persistence == "retain_reasoning" and cst.keep_partial_replies and cst.structured_request_context is None
-                ) or None,
+                capture_provider_reasoning=cst.capture_moonshot_reasoning or None,
+                retain_reasoning=_retain_stream_reasoning(cst) or None,
             ),
             stream_factory=cs.create_streaming_response_with_timeout,
         )
@@ -743,6 +727,7 @@ def _queued_processor(cst: "StreamCall"):
                         )
                         if not hasattr(result, "__aiter__") and hasattr(result, "__iter__"):
                             result = cs.wrap_sync_stream(result)
+                        cst.cleaned_args = refreshed_args
                         cst.selected_provider = fallback_provider
                         cst.usage_credential_source = cs.call_credential_source(refreshed_args)
                         # Update run-first metric context to reflect fallback provider/model
@@ -1245,6 +1230,9 @@ async def run_streaming_call(cst: "StreamCall") -> cs.StreamingResponse:
     # retry an unanswered turn with tldw_retry_failed_turn, and that contract
     # needs the failed turn to have no saved reply.
     cst.keep_partial_replies = bool(cst.should_persist and cst.native_persistence)
+
+    cst.client_moonshot_history = not cst.should_persist and cst.cleaned_args.get("_chat_moonshot_reasoning_history") is True
+    cst.capture_moonshot_reasoning = bool(cst.should_persist and cst.final_conversation_id) or cst.client_moonshot_history
 
     tracked_streaming_generator = functools.partial(cs._streaming_pipeline.tracked_streaming_generator, cst)
 

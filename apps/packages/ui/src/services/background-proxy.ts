@@ -1,4 +1,5 @@
 import { browser } from "wxt/browser"
+import { noteSessionReplaced } from "@/services/tldw/session-identity"
 import { captureDocumentGetSignal } from "./document-get-scope"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
@@ -752,6 +753,7 @@ const refreshAuthDirect = async (
             return
           }
           assertCurrent()
+          if ((error as { status?: number } | null)?.status === 401) noteSessionReplaced(error)
           if ((error as { status?: number } | null)?.status === 401 &&
               !await invalidateRefreshSessionIfCurrent(storage, cfg, assertCurrent)) {
             throw createServicePromptScopeChangedError()
