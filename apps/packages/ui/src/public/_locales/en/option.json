@@ -7355,6 +7355,24 @@
   "quickIngest_web_extractedForReview": {
     "message": "Extracted for review"
   },
+  "quickIngest_web_draftWritePending": {
+    "message": "Creating review drafts…"
+  },
+  "quickIngest_web_draftWriteFailed": {
+    "message": "Review drafts couldn’t be saved"
+  },
+  "quickIngest_web_draftWriteEmpty": {
+    "message": "No review drafts created"
+  },
+  "quickIngest_web_draftWriteFailedHelp": {
+    "message": "Retry to save drafts in this browser using the results of this import."
+  },
+  "quickIngest_web_draftWriteEmptyHelp": {
+    "message": "You can still read the extracted text below."
+  },
+  "quickIngest_web_retryDraftWrite": {
+    "message": "Retry saving drafts"
+  },
   "quickIngest_web_resultDraft": {
     "message": "1 draft ready for review"
   },

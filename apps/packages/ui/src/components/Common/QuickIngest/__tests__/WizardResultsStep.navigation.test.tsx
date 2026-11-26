@@ -104,6 +104,26 @@ describe("WizardResultsStep navigation buttons", () => {
     expect(review).toHaveBeenCalledWith([42, 8])
   })
 
+  it("reports each local write outcome and keeps the extraction available after a failed write", () => {
+    setSinglePdfResult({ title: "Field notes", mediaId: null, persisted: false, data: { content: "Along the coast" } })
+    const retry = vi.fn()
+    const props = { oneScreen: true, onClose: vi.fn() }
+    const { rerender } = render(<WizardResultsStep {...props} reviewDrafts={{ status: "pending" }} />)
+    expect(screen.getByRole("heading", { name: "Creating review drafts…" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Open drafts" })).toBeNull()
+    rerender(<WizardResultsStep {...props} reviewDrafts={{ status: "empty" }} />)
+    expect(screen.getByRole("heading", { name: "No review drafts created" })).toBeVisible()
+    rerender(<WizardResultsStep {...props} reviewDrafts={{ status: "failed", onRetry: retry }} />)
+    expect(screen.getByRole("heading", { name: "Review drafts couldn’t be saved" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "View text for Field notes" }))
+    expect(screen.getByText("Along the coast")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Back to results" }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry saving drafts" }))
+    expect(retry).toHaveBeenCalledTimes(1)
+    rerender(<WizardResultsStep {...props} reviewDrafts={{ status: "pending" }} />)
+    expect(screen.getByRole("heading", { name: "Creating review drafts…" })).toHaveFocus()
+  })
+
   it("reads and copies the exact extracted transcript and returns focus to the receipt action", async () => {
     const transcript = "  Opening line\r\n\n<think>quoted markup</think>\nClosing line  "
     userEvent.setup()
@@ -186,7 +206,7 @@ describe("WizardResultsStep navigation buttons", () => {
     const { rerender } = render(<WizardResultsStep oneScreen onClose={vi.fn()} />)
     expect(screen.getByRole("heading", { name: "1 extracted" })).toBeVisible()
     expect(screen.queryByRole("button", { name: "Open drafts" })).toBeNull()
-    rerender(<WizardResultsStep oneScreen onClose={vi.fn()} reviewDrafts={{ count: 1, onOpen: open }} />)
+    rerender(<WizardResultsStep oneScreen onClose={vi.fn()} reviewDrafts={{ status: "saved", count: 1, onOpen: open }} />)
     expect(screen.getByRole("heading", { name: "1 draft ready for review" })).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Open drafts" }))
     expect(open).toHaveBeenCalledOnce()
@@ -198,7 +218,7 @@ describe("WizardResultsStep navigation buttons", () => {
     wizardHarness.results.push({ id: "failed", type: "web", status: "error", error: "Timed out" })
     wizardHarness.queueItems = [{ id: "failed", url: "https://example.com", validation: { valid: true } }]
     render(<WizardResultsStep oneScreen onClose={vi.fn()} onRetryItems={vi.fn()}
-      reviewDrafts={{ count: 1, onOpen: open }} />)
+      reviewDrafts={{ status: "saved", count: 1, onOpen: open }} />)
     expect(screen.getByRole("button", { name: "Retry failed source" })).toBeVisible()
     fireEvent.click(screen.getByText("More actions"))
     fireEvent.click(screen.getByText("Open drafts"))

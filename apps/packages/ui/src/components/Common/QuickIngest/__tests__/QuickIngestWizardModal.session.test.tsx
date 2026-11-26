@@ -35,7 +35,7 @@ const mocks = vi.hoisted(() => ({
   reviewBatches: new Map<string, Record<string, unknown>>(),
   reviewDrafts: new Map<string, Record<string, unknown>>(),
   reviewFiles: new Map<string, File>(),
-  failReviewWrite: false,
+  reviewWriteError: null as Error | DOMException | null,
   reviewSelectionMirrorWait: null as Promise<void> | null,
   failReviewSelectionMirror: false,
   reviewSelectionMirrorStarted: vi.fn(),
@@ -60,10 +60,11 @@ vi.mock("@/db/dexie/drafts", () => ({
   getDraftBatchById: async (id: string) => mocks.reviewBatches.get(id),
   getDraftsByBatch: async (id: string) =>
     [...mocks.reviewDrafts.values()].filter((row) => row.batchId === id),
-  upsertDraftBatch: async (batch: Record<string, unknown>, operation: { authorityKey: string }) => {
+  upsertDraftBatch: async (batch: Record<string, unknown>, operation: { authorityKey: string; assertCurrent: () => void }) => {
     mocks.reviewWriteStarted()
     await mocks.reviewWriteWait
-    if (mocks.failReviewWrite) throw new Error("Review disk is full")
+    operation.assertCurrent()
+    if (mocks.reviewWriteError) throw mocks.reviewWriteError
     mocks.reviewBatches.set(String(batch.id), { ...batch, ownerScope: operation.authorityKey })
   },
   upsertContentDraft: async (draft: Record<string, unknown>, operation: { authorityKey: string }) => {
@@ -725,7 +726,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     // A later settings edit may retain results for a failed-only retry.
     useQuickIngestSessionStore.getState().upsertSession({ presetConfig: { ...presetConfig, reviewBeforeStorage: true } })
     const receipt = sessionStorage.getItem("tldw-quick-ingest-session")!
-    expect(JSON.parse(receipt).state.session.results[0]).toMatchObject({ id: "one", status: "ok" })
+    expect(JSON.parse(receipt).state.session.results[0]).toMatchObject({ id: "one", status: "ok", omitDataOnReload: true })
     expect(receipt).not.toContain(content)
     expect(receipt).not.toContain(partialContent)
     expect(JSON.parse(receipt).state.session.results[1].data.extraction_failures).toEqual([
@@ -762,10 +763,11 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
   })
 
-  it("names unresolved sources on the WebUI receipt and opens Media without submitting another job", async () => {
+  it.each([false, true])("names unresolved sources and opens Media without submitting another job (review=%s)", async reviewBeforeStorage => {
     mocks.useActualResultsStep = true
     useQuickIngestSessionStore.getState().createDraftSession({
       currentStep: 5, lifecycle: "interrupted",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage },
       processingState: { status: "error", perItemProgress: [{ id: "recording", status: "processing", currentStage: "Extracting pages", progressPercent: 40, estimatedRemaining: 0 }], estimatedRemaining: 0, elapsed: 2 },
       tracking: { mode: "webui-direct", jobIds: [51], jobIdToItemId: { "51": "recording" } },
       queueItems: [{ id: "recording", kind: "file", fileName: "Research interview.txt", detectedType: "document",
@@ -773,6 +775,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
     render(<RuntimeIngestModal open onClose={vi.fn()} />)
     const region = await screen.findByRole("region", { name: "Status unavailable" })
+    expect(screen.getByRole("heading", { name: "Status unavailable" })).toBeVisible()
     expect(region).toHaveTextContent("Research interview.txt")
     expect(region).toHaveTextContent("Last reported: Extracting pages · 40%")
     expect(screen.queryByText("No results to display.")).not.toBeInTheDocument()
@@ -802,6 +805,111 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
   })
 
+  it("retries a browser quota failure using retained output and opens only the confirmed drafts", async () => {
+    mocks.useActualResultsStep = true
+    const write = deferred<void>()
+    mocks.reviewWriteWait = write.promise
+    mocks.reviewWriteError = new DOMException("Review disk is full", "QuotaExceededError")
+    const session = useQuickIngestSessionStore.getState().createDraftSession({
+      currentStep: 5, lifecycle: "completed",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      results: [{ id: "cedar", status: "ok", type: "document", fileName: "cedar.txt",
+        data: { result: { results: [{ segments: [{ text: "Cedar field notes" }] }, { title: "No returned text" }] } } }],
+    })
+    const view = render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    expect(await screen.findByRole("heading", { name: "Creating review drafts…" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Open drafts" })).not.toBeInTheDocument()
+    await act(async () => { write.resolve() })
+    expect(await screen.findByRole("heading", { name: "Review drafts couldn’t be saved" })).toBeVisible()
+    expect(screen.queryByText("Review disk is full")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Open drafts" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /^View text for / }))
+    expect(screen.getByText("Cedar field notes")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Back to results" }))
+    mocks.reviewWriteError = null
+    fireEvent.click(screen.getByRole("button", { name: "Retry saving drafts" }))
+    expect(await screen.findByRole("heading", { name: "1 draft ready for review" })).toBeVisible()
+    const [draft] = [...mocks.reviewDrafts.values()]
+    expect(draft.content).toBe("Cedar field notes")
+    mocks.reviewDrafts.set(String(draft.id), { ...draft, content: "Edited field notes" })
+    view.unmount()
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Open drafts" }))
+    expect(mocks.navigate).toHaveBeenCalledWith("/content-review?batch=" + encodeURIComponent("quick-ingest-review:" + session.id))
+    expect([...mocks.reviewDrafts.values()].map(row => row.content)).toEqual(["Edited field notes"])
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+  })
+
+  it.each(["failed", "cancelled", "skipped"] as const)("preserves the %s receipt when no source reached draft creation", async outcome => {
+    mocks.useActualResultsStep = true
+    useQuickIngestSessionStore.getState().createDraftSession({
+      currentStep: 5, lifecycle: outcome === "failed" ? "partial_failure" : outcome === "cancelled" ? "cancelled" : "completed",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      results: [{ id: "cedar", type: "document", outcome, status: outcome === "skipped" ? "ok" : "error", error: "Network error" }],
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    expect(await screen.findByRole("heading", { name: "1 " + outcome })).toBeVisible()
+    expect(mocks.reviewWriteStarted).not.toHaveBeenCalled()
+  })
+
+  it("settles a review receipt with no usable output without storing blank or skipped drafts", async () => {
+    mocks.useActualResultsStep = true
+    useQuickIngestSessionStore.getState().createDraftSession({
+      currentStep: 5, lifecycle: "completed",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      results: [
+        { id: "empty", status: "ok", type: "document", data: { articles: [] } },
+        { id: "metadata", status: "ok", type: "document", data: { media_id: 11, content: "  " } },
+        { id: "generated", status: "ok", type: "document", data: { articles: [
+          { summary: "Generated summary only" }, { analysis_content: "Generated analysis only" },
+        ] } },
+        { id: "duplicate", status: "ok", outcome: "skipped", type: "document", data: { content: "Previously imported" } },
+      ],
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    expect(await screen.findByRole("heading", { name: /No review drafts created/ })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Retry saving drafts" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Open drafts" })).not.toBeInTheDocument()
+    expect(mocks.reviewDrafts.size).toBe(0)
+    expect(mocks.reviewBatches.size).toBe(0)
+  })
+
+  it("publishes only the active draft write after restoring the same session ID", async () => {
+    mocks.useActualResultsStep = true
+    const oldWrite = deferred<void>()
+    mocks.reviewWriteWait = oldWrite.promise
+    const seed = useQuickIngestSessionStore.getState().createDraftSession({
+      currentStep: 5, lifecycle: "completed",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      results: [{ id: "same-source", status: "ok", type: "document", data: { content: "Old notes" } }],
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    await waitFor(() => expect(mocks.reviewWriteStarted).toHaveBeenCalledTimes(1))
+    mocks.reviewWriteWait = null
+    act(() => { useQuickIngestSessionStore.getState().createDraftSession({
+      ...seed, results: [{ id: "same-source", status: "ok", type: "document", data: { content: "Restored notes" } }],
+    }) })
+    await act(async () => { oldWrite.resolve() })
+    expect(await screen.findByRole("heading", { name: "1 draft ready for review" })).toBeVisible()
+    expect([...mocks.reviewDrafts.values()].map(row => row.content)).toEqual(["Restored notes"])
+  })
+
+  it("reopens a batch after its final draft was deleted without recreating it", async () => {
+    mocks.useActualResultsStep = true
+    const session = useQuickIngestSessionStore.getState().createDraftSession({
+      currentStep: 5, lifecycle: "completed",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      results: [{ id: "notes", status: "ok", type: "document", data: { content: "Field notes" } }],
+    })
+    const batchId = "quick-ingest-review:" + session.id
+    mocks.reviewBatches.set(batchId, { id: batchId, sourceDetails: { processedResultIds: ["notes"] } })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    expect(await screen.findByRole("heading", { name: "No review drafts created" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Open drafts" })).not.toBeInTheDocument()
+    expect(mocks.reviewDrafts.size).toBe(0)
+  })
+
   it("opens one confirmed draft batch with both original and retried sources", async () => {
     mocks.useActualResultsStep = true
     const receipt = (id: string) => ({
@@ -812,15 +920,20 @@ describe("QuickIngestWizardModal session runtime", () => {
       currentStep: 5, lifecycle: "partial_failure",
       presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
       queueItems: ["first", "second"].map(id => ({ id, kind: "url", url: "https://source.test/" + id, detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } })),
-      results: [receipt("first"), { id: "second", type: "document", status: "error", error: "Network error" }],
+      results: [receipt("first"), { ...receipt("private"), omitDataOnReload: true },
+        { ...receipt("library"), mediaId: 31 }, { id: "second", type: "document", status: "error", error: "Network error" }],
     })
     mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-direct-draft-retry" })
     mocks.submitQuickIngestBatch.mockResolvedValue({ ok: true, results: [receipt("second")] })
     render(<RuntimeIngestModal open onClose={vi.fn()} />)
-    await waitFor(() => expect(mocks.reviewDrafts.size).toBe(1))
+    expect(await screen.findByRole("heading", { name: "1 draft ready for review" })).toBeVisible()
     expect(mocks.navigate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: /^View text for .*private/ }))
+    expect(within(screen.getByRole("region", { name: "Extracted text" })).getByText("private", { selector: "pre" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Back to results" }))
     fireEvent.click(screen.getByRole("button", { name: "Retry failed source" }))
-    await waitFor(() => expect(mocks.reviewDrafts.size).toBe(2))
+    expect(await screen.findByRole("heading", { name: "2 drafts ready for review" })).toBeVisible()
+    expect([...mocks.reviewDrafts.values()].map(row => row.content)).toEqual(["first", "second"])
     fireEvent.click(screen.getByRole("button", { name: "Open drafts" }))
     expect(mocks.navigate).toHaveBeenCalledWith("/content-review?batch=" + encodeURIComponent("quick-ingest-review:" + session.id))
   })
@@ -2034,7 +2147,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.reviewBatches.clear()
     mocks.reviewDrafts.clear()
     mocks.reviewFiles.clear()
-    mocks.failReviewWrite = false
+    mocks.reviewWriteError = null
     mocks.reviewWriteWait = null
     mocks.reviewSelectionMirrorWait = null
     mocks.failReviewSelectionMirror = false
@@ -2561,7 +2674,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   it("keeps failed draft creation recoverable and retries the actual saved results", async () => {
-    mocks.failReviewWrite = true
+    mocks.reviewWriteError = new Error("Review disk is full")
     useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed",
       presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
       processingState: { status: "complete", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
@@ -2570,7 +2683,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     render(<QuickIngestWizardModal open onClose={vi.fn()} />)
     await screen.findByText("Review disk is full")
     expect(mocks.navigate).not.toHaveBeenCalled()
-    mocks.failReviewWrite = false
+    mocks.reviewWriteError = null
     fireEvent.click(screen.getByRole("button", { name: "Retry saving review drafts" }))
     await waitFor(() => expect(mocks.reviewDrafts.size).toBe(1))
     expect([...mocks.reviewDrafts.values()][0].content).toBe("Retained after failure")

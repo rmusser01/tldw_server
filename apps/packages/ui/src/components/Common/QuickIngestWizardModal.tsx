@@ -57,7 +57,7 @@ import { IngestWizardStepper } from "./QuickIngest/IngestWizardStepper"
 import { ProcessingStep } from "./QuickIngest/ProcessingStep"
 import { ReviewStep } from "./QuickIngest/ReviewStep"
 import { WizardConfigureStep } from "./QuickIngest/WizardConfigureStep"
-import { WizardResultsStep } from "./QuickIngest/WizardResultsStep"
+import { WizardResultsStep, type ReviewDraftReceipt } from "./QuickIngest/WizardResultsStep"
 import { WebIngestDraft } from "./QuickIngest/WebIngestDraft"
 import {
   DUPLICATE_SKIP_MESSAGE,
@@ -2041,20 +2041,34 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       throw error
     }
   }, [navigateInPlace, onClose, operation, qi])
-  const [reviewError, setReviewError] = useState<string | null>(null)
-  const [reviewRetry, setReviewRetry] = useState(0)
-  const reviewSourceKey = useMemo(() => JSON.stringify(results.filter(item => item.status === "ok").map(item => item.id).sort()), [results])
-  const [draftBatch, setDraftBatch] = useState<{ batchId: string; count: number; sourceKey: string } | null>(null)
+  // A failed-only retry can change destination while retaining earlier Media
+  // saves and in-memory extractions alongside the new draft candidates.
+  const reviewResults = useMemo(() => results.filter(item => item.status === "ok" && (
+    !oneScreen || (!item.omitDataOnReload && item.outcome !== "skipped" && !getSavedMediaIds([item]).length)
+  )), [oneScreen, results])
+  const reviewSourceKey = useMemo(() => reviewResults.length
+    ? JSON.stringify(reviewResults.map(item => item.id).sort()) : null, [reviewResults])
+  const [draftOutcome, setDraftOutcome] = useState<(
+    | { status: "saved"; batchId: string; count: number }
+    | { status: "empty" }
+    | { status: "failed"; error: string }
+  ) & { sourceKey: string } | null>(null)
+  const currentDraftOutcome = draftOutcome?.sourceKey === reviewSourceKey ? draftOutcome : null
   const reviewCreationRef = useRef<{ sourceKey: string; promise: ReturnType<typeof createReviewDraftsFromResults> } | null>(null)
+  const retryDraftWrite = useCallback(() => {
+    if (!operation.isCurrent()) return
+    reviewCreationRef.current = null
+    setDraftOutcome(null)
+  }, [operation])
   useEffect(() => {
-    if (!open || currentStep !== 5 || !presetConfig.reviewBeforeStorage || (!oneScreen && reviewWasOpened()) || draftBatch?.sourceKey === reviewSourceKey || !results.some(item => item.status === "ok")) return
+    if (!open || currentStep !== 5 || !presetConfig.reviewBeforeStorage || (!oneScreen && reviewWasOpened()) || currentDraftOutcome || !reviewSourceKey) return
     if (reviewCreationRef.current?.sourceKey !== reviewSourceKey) {
-      setReviewError(null)
       const files = new Map<string, File>()
       for (const item of queueItems) if (item.file) files.set(item.id, item.file)
       const promise = createReviewDraftsFromResults({
-        results, files, operation,
+        results: reviewResults, files, operation,
         batchId: "quick-ingest-review:" + session.id,
+        requireReviewableContent: oneScreen,
         processingOptions: {
           perform_analysis: Boolean(presetConfig.common.perform_analysis),
           perform_chunking: Boolean(presetConfig.common.perform_chunking),
@@ -2068,19 +2082,35 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     // currently open wizard may publish its completion to the UI.
     let cancelled = false
     void reviewCreationRef.current.promise.then(batch => {
-      if (cancelled || !operation.isCurrent() || !batch) return
+      if (cancelled || !operation.isCurrent()) return
       if (oneScreen) {
-        setDraftBatch({ batchId: batch.batchId, count: batch.draftIds.length, sourceKey: reviewSourceKey })
+        setDraftOutcome(batch?.draftIds.length
+          ? { status: "saved", batchId: batch.batchId, count: batch.draftIds.length, sourceKey: reviewSourceKey }
+          : { status: "empty", sourceKey: reviewSourceKey })
         return
       }
-      if (reviewWasOpened()) return
+      if (!batch || reviewWasOpened()) return
       markReviewOpened()
       navigate("/content-review?batch=" + encodeURIComponent(batch.batchId), releaseReviewOpened)
     }).catch(error => {
-      if (!cancelled && operation.isCurrent()) setReviewError(error instanceof Error ? error.message : "Failed to save review drafts.")
+      if (!cancelled && operation.isCurrent()) setDraftOutcome({
+        status: "failed", sourceKey: reviewSourceKey,
+        error: error instanceof Error ? error.message : "Failed to save review drafts.",
+      })
     })
     return () => { cancelled = true }
-  }, [currentStep, draftBatch, navigate, oneScreen, open, operation, presetConfig, queueItems, results, reviewRetry, reviewSourceKey, session.id, reviewWasOpened, markReviewOpened, releaseReviewOpened])
+  }, [currentStep, currentDraftOutcome, navigate, oneScreen, open, operation, presetConfig, queueItems, reviewResults, reviewSourceKey, session.id, reviewWasOpened, markReviewOpened, releaseReviewOpened])
+
+  const reviewDrafts = useMemo<ReviewDraftReceipt | undefined>(() => {
+    if (!oneScreen || !presetConfig.reviewBeforeStorage || !reviewSourceKey) return undefined
+    if (currentDraftOutcome?.status === "empty") return { status: "empty" }
+    if (!currentDraftOutcome) return { status: "pending" }
+    if (currentDraftOutcome.status === "failed") return { status: "failed", onRetry: retryDraftWrite }
+    return {
+      status: "saved", count: currentDraftOutcome.count,
+      onOpen: () => navigate("/content-review?batch=" + encodeURIComponent(currentDraftOutcome.batchId)),
+    }
+  }, [oneScreen, presetConfig.reviewBeforeStorage, reviewSourceKey, currentDraftOutcome, retryDraftWrite, navigate])
 
   const handleSearchKnowledge = useCallback(
     (mediaIds: number[]) => {
@@ -2242,10 +2272,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
               <div role="alert">{INGEST_JOB_STATUS_INTERRUPTED}</div>
             )}
             {navigationError && <div role="alert">{navigationError}</div>}
-            {reviewError && (
+            {!oneScreen && currentDraftOutcome?.status === "failed" && (
               <div role="alert">
-                <p>{reviewError}</p>
-                <Button onClick={() => { reviewCreationRef.current = null; setReviewRetry(value => value + 1) }}>
+                <p>{currentDraftOutcome.error}</p>
+                <Button onClick={retryDraftWrite}>
                   {qi("reviewDraftsRetry", "Retry saving review drafts")}
                 </Button>
               </div>
@@ -2253,10 +2283,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             <WizardResultsStep
             oneScreen={oneScreen}
             interruption={interruption}
-            reviewDrafts={oneScreen && draftBatch?.sourceKey === reviewSourceKey && draftBatch.count > 0 ? {
-              count: draftBatch.count,
-              onOpen: () => navigate("/content-review?batch=" + encodeURIComponent(draftBatch.batchId)),
-            } : undefined}
+            reviewDrafts={reviewDrafts}
             onClose={onClose}
             onIngestMore={handleIngestMore}
             onOpenMedia={handleOpenMedia}
@@ -2276,14 +2303,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     connectionRecoveryMessage,
     oneScreen,
-    draftBatch,
-    reviewSourceKey,
+    reviewDrafts,
+    retryDraftWrite,
     replacementItems,
     requestStop,
     interruption,
-    navigate,
     currentStep,
-    reviewError,
+    currentDraftOutcome,
     navigationError,
     qi,
     handleCancelAll,
@@ -2508,7 +2534,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
 
   if (!authorityKey || !session || !initialState) return null
 
-  const providerKey = `${session.id}:${openRevision}`
+  const providerKey = JSON.stringify([authorityKey, session.id, generation, openRevision])
 
   return (
     <IngestWizardProvider

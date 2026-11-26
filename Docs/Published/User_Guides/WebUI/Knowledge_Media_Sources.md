@@ -37,6 +37,8 @@ If you use **Clear all** by mistake, choose **Undo** in the same draft to restor
 
 Use **View extracted text** and **Copy text** to take text from an extract-only run. For a batch, choose **View text** next to a source. Copy any text you want to keep before leaving the session.
 
+When creating review drafts, wait for the receipt to confirm how many were saved in this browser, then choose **Open drafts**. If the browser cannot save them, use **View text** to read or copy an extraction, or **Retry saving drafts** to save the same results. An empty receipt means there are no review drafts to open.
+
 Use **Edit link**, **Choose file**, or **Paste again** beside a source that needs repair. Quick Ingest retries the corrected source and keeps the other results. After a refresh, select the original file with the same name and size or paste the text again.
 
 Minimize an active import to keep working. The background indicator shows work still in progress alongside failures. If you stop an import, Quick Ingest waits for the server to confirm the outcome. When a job’s status is unavailable, use **Check status** or **Check Media** before trying again.

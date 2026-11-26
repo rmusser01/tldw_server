@@ -42,9 +42,15 @@ import {
 // Props
 // ---------------------------------------------------------------------------
 
+export type ReviewDraftReceipt =
+  | { status: "pending" }
+  | { status: "saved"; count: number; onOpen: () => void }
+  | { status: "empty" }
+  | { status: "failed"; onRetry: () => void }
+
 type WizardResultsStepProps = {
   oneScreen?: boolean
-  reviewDrafts?: { count: number; onOpen: () => void }
+  reviewDrafts?: ReviewDraftReceipt
   interruption?: {
     sources: Array<{ id: string; name: string; jobIds: number[]; lastProgress?: ItemProgress }>
     onCheckMedia: () => void
@@ -162,7 +168,7 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
           <div className="truncate" title={label}>{label}</div>
           <p className="text-xs text-text-muted">{getSavedMediaIds([item]).length
             ? qi("wizard.results.savedState", "Saved")
-            : reviewFirst ? qi("web.extractedForReview", "Extracted for review")
+            : reviewFirst && !item.omitDataOnReload ? qi("web.extractedForReview", "Extracted for review")
               : qi("wizard.results.extractedState", "Extracted content; not saved")}
             {item.data && typeof item.data === "object" && "analysis" in item.data && typeof item.data.analysis === "string" && item.data.analysis.trim()
               ? ` · ${qi("wizard.results.analysisAvailable", "Analysis available")}` : ""}</p>
@@ -470,6 +476,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     ? savedItems.filter(item => !getSavedMediaIds([item]).length)
       .map(item => [item.id, getExtractedSourceText(item.data)] as const)
     : []), [oneScreen, savedItems])
+  const receiptHeading = useRef<HTMLHeadingElement>(null)
   const [viewedItem, setViewedItem] = useState<WizardResultItem | null>(null)
   const viewTrigger = useRef<HTMLButtonElement | null>(null)
   const openExtraction = (item: WizardResultItem, trigger: HTMLButtonElement) => {
@@ -668,26 +675,41 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const extractedCount = savedItems.filter(item => !getSavedMediaIds([item]).length).length
   const failedCount = submitFailed.length + failedProcessing.length
   const skippedCount = skippedExisting.length + excludedItems.length
-  const confirmedDrafts = reviewDrafts && reviewDrafts.count > 0 ? reviewDrafts : undefined
+  const confirmedDrafts = reviewDrafts?.status === "saved" && reviewDrafts.count > 0 ? reviewDrafts : undefined
   const localDuplicateMessage = oneScreen
     ? qi("source.duplicate", "Duplicate · skipped")
     : qi("wizard.results.skippedAlreadyQueued", LOCAL_QUEUE_DUPLICATE_SKIP_MESSAGE)
-  const reviewFirst = oneScreen && state.presetConfig.reviewBeforeStorage
+  const reviewFirst = oneScreen && (Boolean(reviewDrafts) || state.presetConfig.reviewBeforeStorage)
+  const draftHelp = reviewDrafts?.status === "failed"
+    ? qi("web.draftWriteFailedHelp", "Retry to save drafts in this browser using the results of this import.")
+    : reviewDrafts?.status === "empty" && Array.from(extractionTexts.values()).some(Boolean)
+      ? qi("web.draftWriteEmptyHelp", "You can still read the extracted text below.")
+      : undefined
   const outcomeLabels = oneScreen ? [
+    reviewDrafts?.status === "pending" && qi("web.draftWritePending", "Creating review drafts…"),
+    reviewDrafts?.status === "failed" && qi("web.draftWriteFailed", "Review drafts couldn’t be saved"),
+    reviewDrafts?.status === "empty" && qi("web.draftWriteEmpty", "No review drafts created"),
     confirmedDrafts && (confirmedDrafts.count === 1 ? qi("web.resultDraft", "1 draft ready for review")
       : qi("web.resultDrafts", "{{count}} drafts ready for review", { count: confirmedDrafts.count })),
     newlySavedIds.length > 0 && qi("web.resultSaved", "{{count}} saved to Media", { count: newlySavedIds.length }),
-    extractedCount > 0 && !confirmedDrafts && (reviewFirst
-      ? qi("web.resultExtractedForReview", "{{count}} extracted for review", { count: extractedCount })
-      : qi("web.resultExtracted", "{{count}} extracted", { count: extractedCount })),
+    extractedCount > 0 && !reviewDrafts && qi("web.resultExtracted", "{{count}} extracted", { count: extractedCount }),
     failedCount > 0 && qi("web.resultFailed", "{{count}} failed", { count: failedCount }),
     skippedCount > 0 && qi("web.resultSkipped", "{{count}} skipped", { count: skippedCount }),
     cancelled.length > 0 && qi("web.resultCancelled", "{{count}} cancelled", { count: cancelled.length }),
   ].filter(Boolean) : []
 
-  let primaryAction: { kind: "retry" | "drafts" | "open" | "review" | "extract"; label: string; run: React.MouseEventHandler<HTMLButtonElement> } | undefined
+  let primaryAction: { kind: "retry" | "retryDrafts" | "drafts" | "open" | "review" | "extract"; label: string; run: React.MouseEventHandler<HTMLButtonElement> } | undefined
   if (oneScreen) {
-    if (retryableIds.length && onRetryItems) {
+    if (reviewDrafts?.status === "failed") {
+      primaryAction = {
+        kind: "retryDrafts",
+        label: qi("web.retryDraftWrite", "Retry saving drafts"),
+        run: () => {
+          receiptHeading.current?.focus()
+          reviewDrafts.onRetry()
+        },
+      }
+    } else if (retryableIds.length && onRetryItems) {
       primaryAction = {
         kind: "retry",
         label: retryableIds.length === 1 ? qi("web.retrySource", "Retry failed source")
@@ -704,7 +726,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         label: qi("web.reviewSources", "Review {{count}} saved sources", { count: newlySavedIds.length }),
         run: () => reviewSaved(newlySavedIds),
       }
-    } else if (results.length === 1 && extractionTexts.get(results[0].id)) {
+    } else if (!reviewDrafts && results.length === 1 && extractionTexts.get(results[0].id)) {
       primaryAction = {
         kind: "extract",
         label: qi("web.viewExtractedText", "View extracted text"),
@@ -809,8 +831,9 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     <div hidden={Boolean(viewedItem)} className={viewedItem ? "hidden" : "flex h-full min-h-0 flex-col"} data-testid="wizard-results-step">
       {/* Scrollable content area */}
       <div className={oneScreen ? "qi-web-scroll min-h-0 flex-1 overflow-y-auto" : "min-h-0 flex-1 overflow-y-auto px-4 py-3"}>
-        {oneScreen ? <div role="status" className="mb-4">
-          <h2 className="text-xl font-semibold text-text">{outcomeLabels[0] || (interruption ? qi("web.statusUnavailable", "Status unavailable") : qi("web.resultsTitle", "Import results"))}</h2>
+        {oneScreen ? <div role="status" aria-atomic="true" className="mb-4">
+          <h2 ref={receiptHeading} tabIndex={-1} className="text-xl font-semibold text-text">{outcomeLabels[0] || (interruption ? qi("web.statusUnavailable", "Status unavailable") : qi("web.resultsTitle", "Import results"))}</h2>
+          {draftHelp && <p className="mt-1 text-sm text-text-muted">{draftHelp}</p>}
           {outcomeLabels.length > 1 && <p className="mt-1 text-sm text-text-muted">{outcomeLabels.slice(1).join(" · ")}</p>}
         </div> : <p role="status" className="mb-3 text-sm text-text">
           {qi("wizard.results.batchAccounting", "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled", {

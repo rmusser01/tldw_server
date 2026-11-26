@@ -24,7 +24,8 @@ import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
 import { resolvePerformChunking } from "@/services/tldw/ingest-defaults"
-import { extractProcessingItems, isProcessingItem, resolveContent } from "../QuickIngest/processing-results"
+import { extractCompletedIngestJobTerminalData } from "@/services/tldw/ingest-job-results"
+import { extractProcessingItems, getExtractedSourceText, isProcessingItem, resolveContent } from "../QuickIngest/processing-results"
 import type { ProcessingItem, ProcessingResultPayload } from "../QuickIngest/processing-results"
 export type { ProcessingItem, ProcessingResultPayload } from "../QuickIngest/processing-results"
 import { useQuickIngestStore } from "@/store/quick-ingest"
@@ -246,15 +247,26 @@ type ResultsFilter = (typeof RESULT_FILTERS)[keyof typeof RESULT_FILTERS]
 // Deps interface
 // ---------------------------------------------------------------------------
 
+/** Use the same source text as the WebUI reader, including segment-only transcripts. */
+function reviewableProcessingItems(data: unknown): ProcessingItem[] {
+  const payload = extractCompletedIngestJobTerminalData(data)
+  const items = typeof payload === "string" ? [{ content: payload }] : extractProcessingItems(payload)
+  return items.flatMap(item => {
+    const content = getExtractedSourceText(item)
+    return content ? [{ ...item, content }] : []
+  })
+}
+
 /** Shared by the shipped wizard and legacy modal. Existing batch IDs make
  * completion replay/reload idempotent without overwriting a user's edits. */
-export async function createReviewDraftsFromResults({ results, files, rows = [], processingOptions, operation, batchId = crypto.randomUUID() }: {
-  results: ResultItem[]
+export async function createReviewDraftsFromResults({ results, files, rows = [], processingOptions, operation, batchId = crypto.randomUUID(), requireReviewableContent = false }: {
+  results: Array<Omit<ResultItem, "data"> & { data?: unknown }>
   files: Map<string, File>
   rows?: Array<Pick<Entry, "id" | "url" | "type">>
   processingOptions: ProcessingOptions
   operation: QuickIngestOperation
   batchId?: string
+  requireReviewableContent?: boolean
 }): Promise<{ batchId: string; draftIds: string[]; skippedAssets: number } | null> {
   return withDraftTransaction(operation, async () => {
     const priorBatch = await getDraftBatchById(batchId, operation)
@@ -270,22 +282,27 @@ export async function createReviewDraftsFromResults({ results, files, rows = [],
       return { batchId, draftIds, skippedAssets }
     }
     const processedIds = new Set(previousIds)
-    const newResults = okResults.filter(item => !processedIds.has(item.id))
+    const newResults = okResults.filter(item => !processedIds.has(item.id)).map(item => {
+      const items = requireReviewableContent ? reviewableProcessingItems(item.data) : extractProcessingItems(item.data)
+      const processedItems = items.filter(processed => {
+        const status = normalizeStatusLabel(processed.status)
+        return !RESULT_FAILURE_STATUS_TOKENS.includes(status) && !isSkippedStatus(status)
+      })
+      return { item, processedItems }
+    }).filter(({ processedItems }) => !requireReviewableContent || processedItems.length > 0)
     if (!newResults.length) return priorBatch ? { batchId, draftIds, skippedAssets } : null
     const now = Date.now()
-    newResults.forEach(item => processedIds.add(item.id))
+    newResults.forEach(({ item }) => processedIds.add(item.id))
     const batch: DraftBatch = {
       id: batchId, source: "quick_ingest", ...priorBatch,
       sourceDetails: { ...priorBatch?.sourceDetails, total: processedIds.size, processedResultIds: [...processedIds] },
       createdAt: priorBatch?.createdAt ?? now, updatedAt: now,
     }
     await upsertDraftBatch(batch, operation)
-    for (const item of newResults) {
+    for (const { item, processedItems } of newResults) {
       const sourceRow = rows.find(row => row.id === item.id)
       const localFile = files.get(item.id)
-      for (const processed of extractProcessingItems(item.data)) {
-        const status = normalizeStatusLabel(processed.status)
-        if (RESULT_FAILURE_STATUS_TOKENS.includes(status) || isSkippedStatus(status)) continue
+      for (const processed of processedItems) {
         const id = crypto.randomUUID()
         const content = resolveContent(processed)
         const title = resolveTitle(processed, sourceRow?.url || item.url || localFile?.name || item.fileName || i18n.t("playground:sharedWorkspace.untitled", "Untitled source"))

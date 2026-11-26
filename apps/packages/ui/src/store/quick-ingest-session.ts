@@ -695,7 +695,7 @@ const buildPersistedState = (
   if (storedSession) {
     storedSession.results = storedSession.results.map(result => {
       if (!result.omitDataOnReload) return result
-      const { data, omitDataOnReload: _omit, ...receipt } = result
+      const { data, ...receipt } = result
       if (result.status === "error" || result.outcome === "skipped") {
         const { extraction_failures, errors, db_message } = extractCompletedIngestJobPayload(data) ?? {}
         return { ...receipt, data: { extraction_failures, errors, db_message } }
