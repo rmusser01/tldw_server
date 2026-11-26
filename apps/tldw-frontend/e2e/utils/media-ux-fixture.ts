@@ -249,6 +249,10 @@ export async function installBrowserFixture(
       });
     if (path === '/api/v1/media/keywords')
       return fulfill({ keywords: ['research', 'retrieval', 'transcript'] });
+    if (path === '/api/v1/media/collections' && method === 'POST')
+      return fulfill({ id: 21, ...body }, 201);
+    if (path === '/api/v1/media/collections/21/items' && method === 'POST')
+      return fulfill({ id: state.requests.filter(r => r.path === path && r.method === method).length, collection_id: 21, ...body }, 201);
     if (path === '/api/v1/media/collections')
       return fulfill({ items: [], collections: [], total: 0 });
     const finishJob = (job: any) => {

@@ -982,6 +982,21 @@
     "saveFailed": "Failed to save prompt"
   },
   "quickIngest": {
+    "metadata": {
+      "source": "Source {{number}}",
+      "include": "Include",
+      "use": "Use",
+      "title": "Title",
+      "speaker": "Speaker",
+      "track": "Track",
+      "tags": "Tags",
+      "tagExample": "tag, tag",
+      "includeItem": "Include item {{number}}",
+      "titleItem": "Title override for item {{number}}",
+      "speakerItem": "Speaker for item {{number}}",
+      "trackItem": "Track for item {{number}}",
+      "tagsItem": "Tags for item {{number}}"
+    },
     "web": {
       "draftDestination": "Review drafts in this browser",
       "saveDestination": "Save to Media",

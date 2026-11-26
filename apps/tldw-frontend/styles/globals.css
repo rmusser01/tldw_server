@@ -57,6 +57,32 @@
 .qi-source-repair { grid-column: 3; }
 .qi-source-remove { grid-column: 4; grid-row: 1; }
 
+.qi-web-modal .qi-metadata-editor { container: qi-metadata / inline-size; }
+
+@container qi-metadata (max-width: 35rem) {
+  .qi-metadata-header { display: none; }
+  .qi-metadata-list { max-height: none; overflow: visible; }
+  .qi-metadata-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0 12px;
+    padding: 4px 12px;
+  }
+  .qi-metadata-toggle, .qi-metadata-include { display: flex; min-height: 44px; }
+  .qi-metadata-toggle { padding-block: 6px; }
+  .qi-metadata-label { display: block; }
+  .qi-metadata-fields {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 8px 0 12px;
+  }
+  .qi-metadata-fields[data-expanded="false"] { display: none; }
+  .qi-metadata-fields .ant-input { min-height: 44px; font-size: 16px; }
+  .qi-metadata-origin { white-space: normal; overflow-wrap: anywhere; }
+}
+
 @media (max-width: 640px) {
   .qi-web-wrap.ant-modal-wrap {
     top: var(--qi-visible-top, 0);
