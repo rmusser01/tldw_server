@@ -105,9 +105,17 @@ class VNPackImporter:
             "item_ids": [],
             "generated_file_ids": [],
         }
+        if json.loads(journal["created_records_json"]).get("writes_started") is False:
+            created_records["writes_started"] = False
 
         try:
             archive_data = _load_archive_payloads(archive_path)
+            if target_mode == "create_new":
+                await self._preflight_quota(archive_data["items"])
+            created_records["writes_started"] = True
+            self.repo.update_import_journal(
+                int(journal["id"]), {"created_records": created_records}, owner_user_id=self.owner_user_id
+            )
             if target_mode == "update_existing":
                 self._progress(progress, "updating_pack", {"target_pack_id": target_pack_id})
                 update_result = await self._update_existing_pack(
@@ -134,7 +142,6 @@ class VNPackImporter:
                     progress=progress,
                 )
 
-            await self._preflight_quota(archive_data["items"])
             character_id = self._resolve_character(
                 action=character_action,
                 target_character_id=target_character_id,
@@ -313,6 +320,7 @@ class VNPackImporter:
             archive_path=str(archive_path),
             archive_sha256=archive_sha256,
             canonical_payload_fingerprint=canonical_payload_fingerprint,
+            created_records={"writes_started": False},
         )
 
     def _resolve_character(

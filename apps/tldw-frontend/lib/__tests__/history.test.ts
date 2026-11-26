@@ -123,6 +123,18 @@ describe("request history", () => {
     expect(setItemSpy).toHaveBeenCalledTimes(1)
   })
 
+  it("records metadata for file transfers without retaining the archive", () => {
+    const blob = new Blob(["archive"], { type: "application/zip" })
+    const form = new FormData()
+    form.set("archive", blob, "pack.tldw-vnpack")
+    addRequestHistory(makeItem({ requestBody: form, responseBody: blob }))
+
+    expect(getRequestHistory()[0]).toMatchObject({
+      requestBody: "[Multipart form]",
+      responseBody: { type: "application/zip", bytes: 7 },
+    })
+  })
+
   it("truncates stored responseBody to 2 KB at insert, exactly once", () => {
     vi.useFakeTimers()
 

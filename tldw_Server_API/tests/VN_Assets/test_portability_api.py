@@ -13,7 +13,9 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints import vn_assets
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import (
     _job_manager,
     router as vn_assets_router,
@@ -69,7 +71,7 @@ class FakeJobManager:
 
     def cancel_job(self, job_id: int, *, reason: str | None = None) -> bool:
         job = self.jobs.get(int(job_id))
-        if job is None:
+        if job is None or job["status"] in {"completed", "failed", "cancelled", "quarantined"}:
             return False
         self.cancelled.append((int(job_id), reason))
         job["status"] = "cancelled"
@@ -214,18 +216,36 @@ def test_start_export_replays_same_idempotency_key_and_conflicts_on_different_pa
     payload = {"idempotency_key": "export-pack-1", "strict": True}
 
     first = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json=payload)
+    assert first.status_code == 202
+    assert client.delete(f"/api/v1/vn/vn-assets/packs/{pack.id}").status_code == 204
     replay = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/export", json=payload)
     conflict = client.post(
         f"/api/v1/vn/vn-assets/packs/{pack.id}/export",
         json={"idempotency_key": "export-pack-1", "strict": False},
     )
 
-    assert first.status_code == 202
     assert replay.status_code == 202
     assert replay.json() == first.json()
     assert len(fake_jobs.created) == 1
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_export_checks_captured_account_before_admission(
+    client: TestClient, fake_jobs: FakeJobManager, pack: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def principal(_request: Any) -> SimpleNamespace:
+        return SimpleNamespace(user_id=42)
+
+    monkeypatch.setattr(auth_deps, "get_auth_principal", principal)
+    endpoint = f"/api/v1/vn/vn-assets/packs/{pack.id}/export"
+    payload = {"idempotency_key": "export-scoped"}
+    stale = client.post(endpoint, json=payload, headers={"X-TLDW-Expected-User-ID": "43"})
+
+    assert stale.status_code == 412
+    assert stale.json()["detail"]["code"] == "request_config_scope_changed"
+    assert not fake_jobs.created
+    assert client.post(endpoint, json=payload, headers={"X-TLDW-Expected-User-ID": "42"}).status_code == 202
 
 
 def test_start_export_requires_idempotency_key(
@@ -514,11 +534,14 @@ def test_import_preview_cancel_routes_through_jobs_manager(
     assert preview["status"] == "cancelled"
 
 
+@pytest.mark.parametrize("preview_status", ["queued", "completed"])
 def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
     client: TestClient,
     fake_jobs: FakeJobManager,
     repo: VNAssetPacksRepository,
     tmp_path: Path,
+    preview_status: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     archive_path = _write_preview_archive(tmp_path / "preview.tldw-vnpack")
     with archive_path.open("rb") as archive_file:
@@ -529,19 +552,76 @@ def test_import_preview_delete_marks_preview_and_removes_uploaded_archive(
         )
     preview_id = started.json()["preview_id"]
     job_id = started.json()["job_id"]
+    fake_jobs.jobs[int(job_id)]["status"] = preview_status
+    repo.update_import_preview(preview_id, {"status": preview_status}, owner_user_id=42)
     preview = repo.get_import_preview(preview_id, owner_user_id=42)
     assert preview is not None
     uploaded_archive_path = Path(preview["archive_path"])
     assert uploaded_archive_path.is_file()
+    endpoint = f"/api/v1/vn/vn-assets/import/previews/{preview_id}"
 
-    response = client.delete(f"/api/v1/vn/vn-assets/import/previews/{preview_id}")
+    if preview_status == "completed":
+        async def fail_unlink(_path: Path) -> None:
+            raise OSError("file removal interrupted")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(vn_assets, "_remove_file_if_exists", fail_unlink)
+            with pytest.raises(OSError, match="file removal interrupted"):
+                client.delete(endpoint)
+        assert uploaded_archive_path.is_file()
+        assert client.get(endpoint).json()["vn_status"] == "deleting"
+
+    response = client.delete(endpoint)
 
     assert response.status_code == 204
     assert not uploaded_archive_path.exists()
     deleted_preview = repo.get_import_preview(preview_id, owner_user_id=42)
     assert deleted_preview is not None
     assert deleted_preview["status"] == "deleted"
-    assert fake_jobs.cancelled == [(int(job_id), "vn_pack_import_preview_delete_requested")]
+    assert client.delete(endpoint).status_code == 204
+    response = client.get(endpoint)
+    assert response.json()["vn_status"] == "deleted"
+    if preview_status == "queued":
+        assert fake_jobs.cancelled == [(int(job_id), "vn_pack_import_preview_delete_requested")]
+
+
+@pytest.mark.parametrize("journal_status", ["queued", "failed"])
+def test_preview_delete_keeps_archive_for_active_import(
+    client: TestClient,
+    fake_jobs: FakeJobManager,
+    repo: VNAssetPacksRepository,
+    tmp_path: Path,
+    journal_status: str,
+) -> None:
+    archive_path = _write_preview_archive(tmp_path / "active-import.tldw-vnpack")
+    with archive_path.open("rb") as archive_file:
+        started = client.post(
+            "/api/v1/vn/vn-assets/import/previews",
+            data={"idempotency_key": "preview-active-import"},
+            files={"archive": (archive_path.name, archive_file, "application/zip")},
+        )
+    preview_id = started.json()["preview_id"]
+    repo.update_import_preview(preview_id, {"status": "completed"}, owner_user_id=42)
+    fake_jobs.jobs[int(started.json()["job_id"])]["status"] = "completed"
+    admitted = client.post(
+        "/api/v1/vn/vn-assets/import/commit",
+        json={
+            "preview_id": preview_id,
+            "trust_mode": "trusted_restore",
+            "character_action": "import_included_character",
+            "idempotency_key": "active-import",
+        },
+    )
+    assert admitted.status_code == 202
+    repo.update_import_journal(admitted.json()["import_id"], {"status": journal_status}, owner_user_id=42)
+
+    response = client.delete(f"/api/v1/vn/vn-assets/import/previews/{preview_id}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "import_preview_has_active_import"
+    preview = repo.get_import_preview(preview_id, owner_user_id=42)
+    assert preview["status"] == "completed"
+    assert Path(preview["archive_path"]).is_file()
 
 
 def test_start_import_commit_creates_jobs_backed_journal_row(
@@ -622,18 +702,22 @@ def test_start_import_commit_replays_same_idempotency_key_and_conflicts_on_diffe
     }
 
     first = client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
+    assert first.status_code == 202
+    repo.update_import_preview(preview["id"], {"status": "deleted"}, owner_user_id=42)
     replay = client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
     conflict = client.post(
         "/api/v1/vn/vn-assets/import/commit",
         json={**payload, "trust_mode": "untrusted_import"},
     )
 
-    assert first.status_code == 202
     assert replay.status_code == 202
     assert replay.json() == first.json()
     assert len(fake_jobs.created) == 1
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+    different_start = client.post("/api/v1/vn/vn-assets/import/commit", json={**payload, "idempotency_key": "new"})
+    assert different_start.status_code == 409
+    assert different_start.json()["detail"] == "import_preview_not_completed"
 
 
 def test_start_import_commit_releases_idempotency_claim_on_enqueue_failure(
@@ -683,6 +767,32 @@ def test_start_import_commit_releases_idempotency_claim_on_enqueue_failure(
 
     assert retry.status_code == 202
     assert retry.json()["operation"] == "import_commit"
+
+
+def test_import_admission_failure_leaves_no_runnable_job_binding(
+    client: TestClient, fake_jobs: FakeJobManager, repo: VNAssetPacksRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    preview = repo.create_import_preview(owner_user_id=42, job_id="preview", status="completed", archive_path="preview.tldw-vnpack")
+    payload = {
+        "preview_id": preview["id"],
+        "trust_mode": "trusted_restore",
+        "character_action": "import_included_character",
+        "idempotency_key": "import-receipt-publish",
+    }
+    publish = VNAssetPackService.complete_idempotency_response
+
+    def fail_publication(self: VNAssetPackService, **kwargs: Any) -> None:
+        publish(self, **kwargs)
+        raise RuntimeError("import receipt readback failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(VNAssetPackService, "complete_idempotency_response", fail_publication)
+        with pytest.raises(RuntimeError, match="import receipt readback failed"):
+            client.post("/api/v1/vn/vn-assets/import/commit", json=payload)
+
+    failed_job = fake_jobs.created[0]
+    assert repo.get_portability_job_by_job_id(str(failed_job["id"]), owner_user_id=42) is None
+    assert client.post("/api/v1/vn/vn-assets/import/commit", json=payload).status_code == 202
 
 
 def test_start_import_commit_requires_idempotency_key(

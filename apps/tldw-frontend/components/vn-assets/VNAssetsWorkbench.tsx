@@ -8,6 +8,7 @@ import {
   type PendingVNAssetGeneration,
 } from '@web/lib/vnAssetIdempotency';
 import { useVNGenerationRecovery } from '@web/hooks/useVNGenerationRecovery';
+import type { ApiRequestConfig } from '@web/types/common';
 import { readVNCommands, sameVNCommandScope, type VNCommandScope } from '@web/lib/vnGenerationRecovery';
 import { isVNGenerationRejected } from '@web/lib/api/vnGenerationErrors';
 import { Badge } from '@web/components/ui/Badge';
@@ -616,6 +617,20 @@ export default function VNAssetsWorkbench() {
     }
   }, [selectedPack, refreshPackDetails]);
 
+  const handleOpenImportedPack = async (packId: number, config: ApiRequestConfig) => {
+    const capture = recovery.captureCurrent();
+    if (!capture) return;
+    const sourceSelection = selectedPackIdRef.current;
+    const nextPacks = await listVNAssetPacks(config);
+    if (!recovery.isCurrent(capture)) return;
+    setPacks(nextPacks);
+    if (selectedPackIdRef.current !== sourceSelection) return;
+    const pack = nextPacks.find((candidate) => candidate.id === packId);
+    if (!pack) throw new Error('Imported pack is unavailable.');
+    setSelectedPack(pack);
+    setActiveWorkflowStep('review');
+  };
+
   return (
     <main className="min-h-screen bg-bg text-text">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-6">
@@ -765,7 +780,12 @@ export default function VNAssetsWorkbench() {
               onSetPreferred={handleSetPreferred}
             />
 
-            <PortabilityPanel selectedPack={selectedPack} />
+            <PortabilityPanel
+              key={accountRevision}
+              selectedPack={selectedPack}
+              recovery={recovery}
+              onOpenImportedPack={handleOpenImportedPack}
+            />
           </div>
         </section>
       </div>

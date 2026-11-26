@@ -843,20 +843,19 @@ class VNAssetPacksRepository:
         owner_user_id: int | None = None,
     ) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
-        current = self.get_import_preview(preview_id, owner_user_id=owner_user_id)
-        if current is None:
-            return None
-
         update_values = _portability_update_values(
             fields,
             _IMPORT_PREVIEW_UPDATE_COLUMNS,
             _IMPORT_PREVIEW_JSON_DEFAULTS,
         )
         if not update_values:
-            return current
+            return self.get_import_preview(preview_id, owner_user_id=owner_user_id)
 
         with self.db.transaction() as conn:
-            where_clause = "id = ?"
+            # Polling and workers must respect a concurrent archive removal.
+            where_clause = "id = ? AND status <> 'deleted'"
+            if fields.get("status") != "deleted":
+                where_clause += " AND status <> 'deleting'"
             where_params: list[Any] = [preview_id]
             if owner_user_id is not None:
                 where_clause += " AND owner_user_id = ?"
@@ -868,7 +867,19 @@ class VNAssetPacksRepository:
                 where_clause=where_clause,
                 where_params=where_params,
             )
-        return self.get_import_preview(preview_id, owner_user_id=owner_user_id)
+            return self.get_import_preview(preview_id, owner_user_id=owner_user_id)
+
+    def list_import_jobs_for_preview(self, preview_id: int, *, owner_user_id: int) -> list[dict[str, Any]]:
+        """Find restore jobs that may still need the staged archive."""
+        self._ensure_schema_initialized()
+        rows = self.db.execute_query(
+            """
+            SELECT job_id, status FROM vn_pack_import_journal
+            WHERE preview_id = ? AND owner_user_id = ? AND status <> 'completed'
+            """,
+            (preview_id, owner_user_id),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def create_import_journal(
         self,
@@ -894,6 +905,9 @@ class VNAssetPacksRepository:
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
+            preview = self.get_import_preview(preview_id, owner_user_id=owner_user_id)
+            if preview is None or preview["status"] in {"deleting", "deleted"}:
+                raise ValueError("import_preview_unavailable")
             cursor = conn.execute(
                 """
                 INSERT INTO vn_pack_import_journal (
@@ -941,10 +955,10 @@ class VNAssetPacksRepository:
             )
             import_id = cursor.lastrowid
 
-        journal = self.get_import_journal(import_id, owner_user_id=owner_user_id)
-        if journal is None:
-            raise RuntimeError("created_import_journal_not_found")
-        return journal
+            journal = self.get_import_journal(import_id, owner_user_id=owner_user_id)
+            if journal is None:
+                raise RuntimeError("created_import_journal_not_found")
+            return journal
 
     def get_import_journal(
         self,
@@ -977,20 +991,22 @@ class VNAssetPacksRepository:
         owner_user_id: int | None = None,
     ) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
-        current = self.get_import_journal(import_id, owner_user_id=owner_user_id)
-        if current is None:
-            return None
-
-        update_values = _portability_update_values(
-            fields,
-            _IMPORT_JOURNAL_UPDATE_COLUMNS,
-            _IMPORT_JOURNAL_JSON_DEFAULTS,
-        )
-        if not update_values:
-            return current
-
         with self.db.transaction() as conn:
-            where_clause = "id = ?"
+            current = self.get_import_journal(import_id, owner_user_id=owner_user_id)
+            if current is None or current["status"] == "completed":
+                return current
+            if "created_records" in fields and json.loads(current["created_records_json"]).get("writes_started") is True:
+                # Keep evidence of writes across worker attempts and stale failure reports.
+                fields = {**fields, "created_records": {**(fields["created_records"] or {}), "writes_started": True}}
+            update_values = _portability_update_values(
+                fields,
+                _IMPORT_JOURNAL_UPDATE_COLUMNS,
+                _IMPORT_JOURNAL_JSON_DEFAULTS,
+            )
+            if not update_values:
+                return current
+            # A concurrent completion must survive stale status and cancel writes.
+            where_clause = "id = ? AND status <> 'completed'"
             where_params: list[Any] = [import_id]
             if owner_user_id is not None:
                 where_clause += " AND owner_user_id = ?"
@@ -1002,7 +1018,8 @@ class VNAssetPacksRepository:
                 where_clause=where_clause,
                 where_params=where_params,
             )
-        return self.get_import_journal(import_id, owner_user_id=owner_user_id)
+            # A failed readback must roll back the same update.
+            return self.get_import_journal(import_id, owner_user_id=owner_user_id)
 
     def create_pack(
         self,

@@ -174,3 +174,73 @@ def test_import_journal_round_trips(chacha_db: CharactersRAGDB) -> None:
     assert updated["archive_sha256"] == "archive-hash"
     assert json.loads(updated["created_records_json"]) == {"packs": [42]}
     assert json.loads(updated["warnings_json"]) == []
+
+    stale_write = repo.update_import_journal(
+        created["id"], {"status": "failed", "stage": "failed"}, owner_user_id=7
+    )
+    assert stale_write == updated
+
+
+def test_deleted_preview_rejects_stale_status_update(chacha_db: CharactersRAGDB) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    preview = repo.create_import_preview(owner_user_id=7, job_id="preview", status="completed", archive_path="preview.tldw-vnpack")
+    repo.update_import_preview(preview["id"], {"status": "deleted"}, owner_user_id=7)
+
+    updated = repo.update_import_preview(preview["id"], {"status": "completed"}, owner_user_id=7)
+
+    assert updated["status"] == "deleted"
+
+
+def test_import_journal_keeps_evidence_of_earlier_writes(chacha_db: CharactersRAGDB) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    preview = repo.create_import_preview(owner_user_id=7, job_id="preview", status="completed", archive_path="preview.tldw-vnpack")
+    journal = repo.create_import_journal(
+        owner_user_id=7,
+        preview_id=preview["id"],
+        job_id="import",
+        status="processing",
+        stage="creating_pack",
+        trust_mode="trusted_restore",
+        target_mode="create_new",
+        created_records={"writes_started": True},
+    )
+
+    updated = repo.update_import_journal(
+        journal["id"], {"status": "failed", "created_records": {"writes_started": False}}, owner_user_id=7
+    )
+
+    assert json.loads(updated["created_records_json"])["writes_started"] is True
+
+
+def test_import_journal_completion_rolls_back_if_readback_fails(
+    chacha_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    preview = repo.create_import_preview(
+        owner_user_id=7, job_id="preview", status="completed", archive_path="/tmp/preview.tldw-vnpack"
+    )
+    journal = repo.create_import_journal(
+        owner_user_id=7,
+        preview_id=preview["id"],
+        job_id="import",
+        status="processing",
+        stage="creating_items",
+        trust_mode="trusted_restore",
+        target_mode="create_new",
+    )
+    read_journal = repo.get_import_journal
+    reads = 0
+
+    def fail_second_read(import_id: int, *, owner_user_id: int | None = None) -> dict | None:
+        nonlocal reads
+        reads += 1
+        if reads == 2:
+            raise RuntimeError("journal readback failed")
+        return read_journal(import_id, owner_user_id=owner_user_id)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(repo, "get_import_journal", fail_second_read)
+        with pytest.raises(RuntimeError, match="journal readback failed"):
+            repo.update_import_journal(journal["id"], {"status": "completed"}, owner_user_id=7)
+
+    assert read_journal(journal["id"], owner_user_id=7) == journal

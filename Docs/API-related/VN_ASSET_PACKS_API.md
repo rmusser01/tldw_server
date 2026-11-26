@@ -15,6 +15,8 @@ All endpoints require the normal tldw_server API authentication:
 
 Pack metadata is owned by the authenticated user and stored in that user's `ChaChaNotes.db`, beside character cards and world-book data. Image bytes are stored through AuthNZ generated-file storage with `source_feature=vn_assets`; API responses expose `generated_file_id` and VN item metadata, not raw storage paths.
 
+Clients that captured an account for a request can send `X-TLDW-Expected-User-ID`. The server returns `412` if the current authenticated user differs from that ID.
+
 ## Limits
 
 - A pack may contain up to 300 item records.
@@ -37,6 +39,16 @@ The older `request_id` field remains a compatibility alias for export/import por
 
 Dry-run cleanup requests are intentionally not persisted as idempotent mutations.
 
+## Portability in the workbench
+
+In **VN asset packs**, open **Portability** to export the selected pack, validate a `.tldw-vnpack` archive, or restore a validated preview. The panel shows the job's progress and enables **Download export** when the backup is ready. **Open imported pack** opens the restored pack once the import journal records completion.
+
+Each browser tab saves the most recent portability requests for the verified server and account through reloads. If a start response is lost, recover the request to reuse its original idempotency key and options. For an unconfirmed upload, choose the same archive again.
+
+If a new-pack import fails its storage quota check before any attempt starts writing data, free space or have an administrator raise the quota, then use **Retry import**. Retries from copies of the same failed job share an idempotency key. For other import failures, review the pack and job details before starting another restore.
+
+Use **Remove staged archive** after validation or restore finishes to free the server's staging copy before uploading a replacement. The server blocks removal during an active restore and returns `vn_status: deleted` once the staged copy is removed.
+
 ## Endpoint Summary
 
 | Method | Path | Purpose |
@@ -55,7 +67,7 @@ Dry-run cleanup requests are intentionally not persisted as idempotent mutations
 | `POST` | `/import/previews` | Upload an import archive and start preview validation. |
 | `GET` | `/import/previews/{preview_id}` | Read import preview status and proposed plan. |
 | `POST` | `/import/previews/{preview_id}/cancel` | Cancel import preview validation. |
-| `DELETE` | `/import/previews/{preview_id}` | Delete a cancellable import preview and staged archive. |
+| `DELETE` | `/import/previews/{preview_id}` | Remove the staged archive when validation and restore are inactive. |
 | `POST` | `/import/commit` | Start an import commit job from a completed preview. |
 | `GET` | `/portability/imports/{job_id}` | Read import commit status. |
 | `POST` | `/portability/imports/{job_id}/cancel` | Cancel an import commit job. |

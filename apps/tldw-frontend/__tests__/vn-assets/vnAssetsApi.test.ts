@@ -21,6 +21,8 @@ import {
   createVNAssetPack,
   createVNPackImportPreview,
   deleteVNAssetPack,
+  deleteVNPackImportPreview,
+  downloadVNPackExport,
   exportVNAssetPack,
   getStarterMatrices,
   getVNAssetGeneration,
@@ -66,7 +68,7 @@ describe('vnAssets api client', () => {
       title: 'Starter',
       primary_character_id: 7,
     });
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/packs');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/packs', undefined);
     expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/packs/1');
     expect(mocks.apiClient.patch).toHaveBeenCalledWith('/vn/vn-assets/packs/1', { title: 'Updated' });
     expect(mocks.apiClient.delete).toHaveBeenCalledWith('/vn/vn-assets/packs/1');
@@ -119,6 +121,9 @@ describe('vnAssets api client', () => {
 
   it('calls portability export and import endpoints with expected paths and payloads', async () => {
     const archive = new File(['vnpack'], 'pack.tldw-vnpack', { type: 'application/zip' });
+    const { signal } = new AbortController();
+    const config = { baseURL: 'https://example.test/api/v1', headers: { 'X-TLDW-Expected-User-ID': '42' } };
+    const statusConfig = { ...config, signal };
 
     await exportVNAssetPack(9, {
       include_character_payload: true,
@@ -127,10 +132,11 @@ describe('vnAssets api client', () => {
       strict: true,
       warn_for_sharing: true,
       idempotency_key: 'export-1',
-    });
-    await getVNPackExportJob('job-export');
-    await createVNPackImportPreview(archive, 'preview-1');
-    await getVNPackImportPreview(33);
+    }, config);
+    await getVNPackExportJob('job-export', statusConfig);
+    await downloadVNPackExport('job-export', config);
+    await createVNPackImportPreview(archive, 'preview-1', config);
+    await getVNPackImportPreview(33, statusConfig);
     await commitVNPackImport({
       preview_id: 33,
       trust_mode: 'trusted_restore',
@@ -140,8 +146,9 @@ describe('vnAssets api client', () => {
       target_pack_id: 9,
       conflict_decisions: { confirm_all_risky_diffs: true },
       idempotency_key: 'commit-1',
-    });
-    await getVNPackImportJob('job-import');
+    }, config);
+    await getVNPackImportJob('job-import', statusConfig);
+    await deleteVNPackImportPreview(33, config);
 
     expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-assets/packs/9/export', {
       include_character_payload: true,
@@ -150,19 +157,22 @@ describe('vnAssets api client', () => {
       strict: true,
       warn_for_sharing: true,
       idempotency_key: 'export-1',
+    }, config);
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/portability/exports/job-export', statusConfig);
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/portability/exports/job-export/download', {
+      ...config, responseType: 'blob',
     });
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/portability/exports/job-export');
     expect(mocks.apiClient.post).toHaveBeenCalledWith(
       '/vn/vn-assets/import/previews',
       expect.any(FormData),
-      expect.objectContaining({ headers: expect.objectContaining({ 'Content-Type': 'multipart/form-data' }) })
+      config,
     );
     const formData = mocks.apiClient.post.mock.calls.find(
       ([url]) => url === '/vn/vn-assets/import/previews'
     )?.[1] as FormData;
     expect(formData.get('archive')).toBe(archive);
     expect(formData.get('idempotency_key')).toBe('preview-1');
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/import/previews/33');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/import/previews/33', statusConfig);
     expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn/vn-assets/import/commit', {
       preview_id: 33,
       trust_mode: 'trusted_restore',
@@ -172,7 +182,8 @@ describe('vnAssets api client', () => {
       target_pack_id: 9,
       conflict_decisions: { confirm_all_risky_diffs: true },
       idempotency_key: 'commit-1',
-    });
-    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/portability/imports/job-import');
+    }, config);
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn/vn-assets/portability/imports/job-import', statusConfig);
+    expect(mocks.apiClient.delete).toHaveBeenCalledWith('/vn/vn-assets/import/previews/33', config);
   });
 });

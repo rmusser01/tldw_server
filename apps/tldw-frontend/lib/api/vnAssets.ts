@@ -1,4 +1,5 @@
 import { apiClient } from '@web/lib/api';
+import type { ApiRequestConfig } from '@web/types/common';
 import type {
   VNAssetBulkReviewRequest,
   VNAssetGenerationRequest,
@@ -28,8 +29,8 @@ import type {
 
 const VN_ASSETS_BASE = '/vn/vn-assets';
 
-export function listVNAssetPacks(): Promise<VNAssetPack[]> {
-  return apiClient.get(`${VN_ASSETS_BASE}/packs`);
+export function listVNAssetPacks(config?: ApiRequestConfig): Promise<VNAssetPack[]> {
+  return apiClient.get(`${VN_ASSETS_BASE}/packs`, config);
 }
 
 export function createVNAssetPack(request: VNAssetPackCreate): Promise<VNAssetPack> {
@@ -142,37 +143,49 @@ export function previewVNAssetPrompt(
 
 export function exportVNAssetPack(
   packId: number,
-  request: VNPackExportRequest
+  request: VNPackExportRequest,
+  config?: ApiRequestConfig
 ): Promise<VNPackExportResponse> {
-  return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/export`, request);
+  return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/export`, request, config);
 }
 
-export function getVNPackExportJob(jobId: string): Promise<VNPackPortabilityJob> {
-  return apiClient.get(`${VN_ASSETS_BASE}/portability/exports/${jobId}`);
+export function getVNPackExportJob(jobId: string, config?: ApiRequestConfig): Promise<VNPackPortabilityJob> {
+  return apiClient.get(`${VN_ASSETS_BASE}/portability/exports/${encodeURIComponent(jobId)}`, config);
+}
+
+export function downloadVNPackExport(jobId: string, config?: ApiRequestConfig): Promise<Blob> {
+  return apiClient.get(`${VN_ASSETS_BASE}/portability/exports/${encodeURIComponent(jobId)}/download`, {
+    ...config,
+    responseType: 'blob',
+  });
 }
 
 export function createVNPackImportPreview(
   archive: File,
-  idempotencyKey: string
+  idempotencyKey: string,
+  config?: ApiRequestConfig
 ): Promise<VNPackImportPreviewStartResponse> {
   const formData = new FormData();
   formData.append('archive', archive);
   formData.append('idempotency_key', idempotencyKey);
-  return apiClient.post(`${VN_ASSETS_BASE}/import/previews`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  return apiClient.post(`${VN_ASSETS_BASE}/import/previews`, formData, config);
 }
 
-export function getVNPackImportPreview(previewId: number): Promise<VNPackImportPreview> {
-  return apiClient.get(`${VN_ASSETS_BASE}/import/previews/${previewId}`);
+export function getVNPackImportPreview(previewId: number, config?: ApiRequestConfig): Promise<VNPackImportPreview> {
+  return apiClient.get(`${VN_ASSETS_BASE}/import/previews/${previewId}`, config);
+}
+
+export function deleteVNPackImportPreview(previewId: number, config?: ApiRequestConfig): Promise<void> {
+  return apiClient.delete(`${VN_ASSETS_BASE}/import/previews/${previewId}`, config);
 }
 
 export function commitVNPackImport(
-  request: VNPackImportCommitRequest
+  request: VNPackImportCommitRequest,
+  config?: ApiRequestConfig
 ): Promise<VNPackImportCommitStartResponse> {
-  return apiClient.post(`${VN_ASSETS_BASE}/import/commit`, request);
+  return apiClient.post(`${VN_ASSETS_BASE}/import/commit`, request, config);
 }
 
-export function getVNPackImportJob(jobId: string): Promise<VNPackImportJob> {
-  return apiClient.get(`${VN_ASSETS_BASE}/portability/imports/${jobId}`);
+export function getVNPackImportJob(jobId: string, config?: ApiRequestConfig): Promise<VNPackImportJob> {
+  return apiClient.get(`${VN_ASSETS_BASE}/portability/imports/${encodeURIComponent(jobId)}`, config);
 }

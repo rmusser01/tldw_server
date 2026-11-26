@@ -87,8 +87,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 // Non-mutating deep copy that replaces known credential-bearing keys with a
-// placeholder. Returns the original reference for non-plain values so we never
-// corrupt Blobs/ArrayBuffers or other non-JSON payloads.
+// placeholder. File transfers keep only metadata so history cannot retain the bytes.
 function redactTokens(value: unknown, depth = 0): unknown {
   // Fail CLOSED past the depth limit: a security redactor must never return a
   // raw (unredacted) subtree, since credentials could be nested deeper than we
@@ -97,6 +96,8 @@ function redactTokens(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) => redactTokens(entry, depth + 1));
   }
+  if (value instanceof Blob) return { type: value.type, bytes: value.size };
+  if (value instanceof FormData) return '[Multipart form]';
   if (!isPlainObject(value)) {
     return value;
   }
