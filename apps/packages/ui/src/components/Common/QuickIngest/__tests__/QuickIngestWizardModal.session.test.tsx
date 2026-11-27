@@ -638,7 +638,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     // The upload deliberately has the generated paste filename. Origin must survive reload.
     const upload = new File(["bytes"], "pasted-text.txt", { type: "text/plain" })
     fireEvent.change(await screen.findByTestId("qi-file-input"), { target: { files: [upload] } })
-    fireEvent.click(screen.getByRole("button", { name: "Text", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Text" }))
     fireEvent.change(screen.getByRole("textbox", { name: "Pasted text input" }), { target: { value: "private first passage" } })
     fireEvent.click(screen.getByRole("button", { name: "Add pasted text to queue" }))
     const snapshot = JSON.parse(JSON.stringify(useQuickIngestSessionStore.getState().session))

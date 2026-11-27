@@ -35,6 +35,7 @@ All ten Chromium scenarios passed together. Six screenshots in the PR show deskt
 Integrated the two verified TASK-15652 Media handoff commits and current dev for PR #3636. Regenerated the OpenAPI fingerprint from the combined schema using make openapi-fingerprint. ADR-069 governs this generated artifact. The same integration flows through #3638, #3639, #3640 and #3641.
 CI monitoring: each stacked head passed its hosted critical journey. After #3635 landed on dev, reconcile the combined OpenAPI contract and verify its canonical path union under ADR-069. Propagate the same verified resolution to #3638, #3639, #3640 and #3641 without changing their PR bases.
 Pre-merge review found that repairing a conference link could write a new Media result against the old source URL. The client now clears link-specific duplicate decisions and confirms the correction on the same collection item before retry. The server checks the user, unresolved item, retry count and idempotency key. Verified the FastAPI and SQLite round trip, stale competing retry and immutable saved source (6 tests), 104 UI, executor and session tests, and the regenerated OpenAPI contract. ADR-069 governs the generated client contract; this repair uses the existing collection and retry model.
+Pre-merge review corrected the accessible role query in the source-recovery test; the string name already matches the Text tab exactly.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
