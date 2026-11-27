@@ -27,7 +27,9 @@ async def test_reset_password_integration_success(monkeypatch):
 
     mfa_stub_mod = types.ModuleType("mfa_service")
     setattr(mfa_stub_mod, "get_mfa_service", lambda: _StubMFA())
-    sys.modules['tldw_Server_API.app.core.AuthNZ.mfa_service'] = mfa_stub_mod
+    # monkeypatch, not an assignment: a stub left in sys.modules makes every later test's MFA lookup
+    # fail, so MFA sign-in never asks for a second factor (TASK-15679).
+    monkeypatch.setitem(sys.modules, 'tldw_Server_API.app.core.AuthNZ.mfa_service', mfa_stub_mod)
 
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-for-testing-only-needs-32-chars-minimum")
@@ -47,7 +49,8 @@ async def test_reset_password_integration_success(monkeypatch):
     async def _is_pg() -> bool:
         return True
 
-    auth.is_postgres_backend = _is_pg  # type: ignore
+    # Restored after the test: left in place it sends later SQLite requests down PostgreSQL paths.
+    monkeypatch.setattr(auth, "is_postgres_backend", _is_pg)
 
     # Override DB transaction dep with a stub
     class _StubDB:

@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import pyotp
 import pytest
 from fastapi import Depends
-from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
@@ -18,6 +17,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventType
 from tldw_Server_API.app.core.AuthNZ import api_key_audit
+from tldw_Server_API.app.core.AuthNZ import mfa_service as mfa_module
 from tldw_Server_API.app.core.AuthNZ.account_lock import AccountSecurityLockedError, set_lock
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.email_change import authorize_own_email_change
@@ -35,8 +35,6 @@ from tldw_Server_API.tests.AuthNZ_SQLite._account_lock_fixtures import (
     unlock_user,
 )
 from tldw_Server_API.tests.AuthNZ_SQLite._sessions_http_fixtures import bearer, login, session_id_of
-from tldw_Server_API.tests.AuthNZ_SQLite.test_mfa_login_sqlite import PASSWORD as MFA_PASSWORD
-from tldw_Server_API.tests.AuthNZ_SQLite.test_mfa_login_sqlite import _mfa_user
 
 pytestmark = pytest.mark.asyncio
 
@@ -162,21 +160,33 @@ async def test_refresh_of_a_locked_account_is_423_not_500(two_user_client) -> No
     assert_locked(two_user_client.client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}))
 
 
-async def test_mfa_sign_in_of_an_account_locked_after_the_password_step_is_423(tmp_path, monkeypatch) -> None:
-    """The password step left an MFA challenge; the account is locked before the second factor is sent."""
-    pool, user_id, secret = await _mfa_user(tmp_path, monkeypatch)
-    from tldw_Server_API.app.main import app
+async def test_mfa_sign_in_of_an_account_locked_after_the_password_step_is_423(two_user_client, monkeypatch) -> None:
+    """The password step left an MFA challenge; the account is locked before the second factor is sent. The
+    route refuses before it checks the code (the session insert would refuse too, so that is asserted)."""
+    ctx = two_user_client
+    monkeypatch.setattr(mfa_module, "_mfa_service", None)  # a service on this test's database
+    mfa = mfa_module.get_mfa_service()
+    await mfa.initialize()
+    secret = pyotp.random_base32()
+    assert await mfa.enable_mfa(ctx.alice_id, secret, ["backup-code-1"])
+    challenge = ctx.client.post("/api/v1/auth/login", data={"username": "alice", "password": ctx.password})
+    assert challenge.status_code == 202 and challenge.json()["mfa_required"] is True, challenge.text
+    await lock_user(ctx.alice_id)
+    checked: list[str] = []
+    verify_totp = mfa_module.MFAService.verify_totp
 
-    with TestClient(app) as client:
-        challenge = client.post("/api/v1/auth/login", data={"username": "mfa-user", "password": MFA_PASSWORD})
-        assert challenge.status_code == 202 and challenge.json()["mfa_required"] is True, challenge.text
-        await lock_user(user_id)
-        response = client.post(
-            "/api/v1/auth/mfa/login",
-            json={"session_token": challenge.json()["session_token"], "mfa_token": pyotp.TOTP(secret).now()},
-        )
-        assert_locked(response)
-        assert await AuthnzSessionsRepo(pool).get_active_sessions_for_user(user_id) == []
+    def _record_second_factor_check(self, totp_secret, token, window=None):
+        checked.append(token)
+        return verify_totp(self, totp_secret, token, window)
+
+    monkeypatch.setattr(mfa_module.MFAService, "verify_totp", _record_second_factor_check)
+    response = ctx.client.post(
+        "/api/v1/auth/mfa/login",
+        json={"session_token": challenge.json()["session_token"], "mfa_token": pyotp.TOTP(secret).now()},
+    )
+    assert_locked(response)
+    assert checked == []  # refused before the second factor was verified
+    assert await _live_sessions(ctx.alice_id) == []
 
 
 async def test_reset_password_token_minted_before_the_lock_is_refused_while_locked(two_user_client) -> None:
