@@ -325,7 +325,7 @@ export function ConferenceCollectionReview({
                   <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                   Open media
                 </button>
-                {activeItem.sourceUrl && (
+                {activeItem.sourceUrl && activeItem.sourceKind !== "file" && (
                   <a
                     href={activeItem.sourceUrl}
                     target="_blank"

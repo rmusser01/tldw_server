@@ -171,6 +171,8 @@ export type ConferenceCollectionItemPayload = {
 export type ConferenceCollectionItemMergeInput = {
   id: string
   url: string
+  sourceUrlEdited?: boolean
+  fileName?: string
   playlist?: PlaylistQueueMetadata
   processAgain?: boolean
   conferenceOverride?: ConferenceItemMetadataOverride
@@ -395,8 +397,8 @@ export const buildConferenceCollectionItemPayload = (
     ordinal,
     source_url: item.url,
     normalized_source_id: compactString(playlist?.normalizedSourceId ?? undefined) ?? null,
-    source_kind: playlistId ? "youtube_video" : null,
-    title: compactString(override?.title) ?? null,
+    source_kind: item.fileName ? "file" : playlistId ? "youtube_video" : null,
+    title: compactString(override?.title) ?? item.fileName ?? null,
     speaker: compactString(override?.speaker) ?? null,
     published_at:
       compactString(override?.talkDate) ??

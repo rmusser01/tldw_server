@@ -1931,6 +1931,45 @@ describe("submitQuickIngestBatch", () => {
     expect(result.results?.[0]).toMatchObject({ id: "repeat-talk", status: "ok", mediaId: 901 })
   })
 
+  it("saves per-source metadata for selected videos without shared metadata and binds uploaded files", async () => {
+    const directFile = new File(["video"], "local talk.mp4", { type: "video/mp4" })
+    const onTrackingMetadata = vi.fn()
+    let nextItem = 10
+    mocks.bgRequest.mockImplementation(async ({ path, body }) => {
+      if (path === "/api/v1/media/collections") return { id: 7, ...body }
+      if (path === "/api/v1/media/collections/7/items") {
+        const id = ++nextItem
+        return { id, collection_id: 7, ...body, idempotency_key: `item-${id}` }
+      }
+      if (path?.startsWith("/api/v1/media/collections/7/items/")) return body
+      return { ok: true, data: { status: "completed", result: { media_id: 901 } } }
+    })
+    mocks.bgUpload
+      .mockResolvedValueOnce({ batch_id: "remote", jobs: [{ id: 501 }] })
+      .mockResolvedValueOnce({ batch_id: "local", jobs: [{ id: 502 }] })
+    const result = await submitQuickIngestBatch({
+      entries: [{ id: "url", type: "video", url: "https://youtu.be/remote", conferenceOverride: {
+        selected: true, title: "Remote session", speaker: "Ada", track: "One", tags: ["remote"],
+      } }],
+      files: [{ id: "file", directFile, conferenceOverride: {
+        selected: true, title: "Local session", speaker: "Eve", track: "Two", tags: ["local"],
+      } }, { id: "excluded", directFile, conferenceOverride: { selected: false, title: "Excluded" } }],
+      storeRemote: true, processOnly: false, onTrackingMetadata,
+    })
+    const items = mocks.bgRequest.mock.calls.filter(([request]) => request.path === "/api/v1/media/collections/7/items")
+    expect(items.map(([request]) => request.body)).toMatchObject([
+      { source_url: "https://youtu.be/remote", title: "Remote session", speaker: "Ada", track: "One", tags: ["remote"] },
+      { source_url: "local://local%20talk.mp4", source_kind: "file", title: "Local session", speaker: "Eve", track: "Two", tags: ["local"] },
+    ])
+    expect(mocks.bgUpload.mock.calls[1][0]).toMatchObject({
+      directFile, fields: { media_collection_id: 7, media_collection_item_id: 12, idempotency_key: "item-12" },
+    })
+    expect(onTrackingMetadata).toHaveBeenCalledWith(expect.objectContaining({
+      collectionId: "7", plannedItemIds: ["12"], jobIdToCollectionItemId: { "502": "12" },
+    }))
+    expect(result.results[1]).toMatchObject({ id: "file", collectionItemId: 12, mediaId: 901 })
+  })
+
   it("creates planned conference collection items before direct job submission", async () => {
     const onTrackingMetadata = vi.fn()
 

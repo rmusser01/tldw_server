@@ -93,6 +93,7 @@ def test_submit_media_ingest_jobs_creates_one_job_per_item(
     data = {
         "media_type": "document",
         "urls": "https://example.com/doc1",
+        "planned_item_ids": json.dumps(["101"]),
     }
     files = [
         ("files", ("sample.txt", upload_path.read_bytes(), "text/plain")),
@@ -114,6 +115,8 @@ def test_submit_media_ingest_jobs_creates_one_job_per_item(
     file_payload = next(item for item in payloads if item.get("source_kind") == "file")
 
     assert url_payload["source"] == "https://example.com/doc1"
+    assert url_payload["planned_item_id"] == "101"
+    assert "planned_item_id" not in file_payload
     assert file_payload["original_filename"] == "sample.txt"
     assert file_payload.get("temp_dir")
     assert Path(file_payload["source"]).exists()
@@ -128,11 +131,12 @@ async def test_uploaded_txt_worker_and_detail_preserve_exact_source(
     monkeypatch,
     tmp_path,
 ):
-    """Keep the source body intact through real upload, Jobs, chunking, and storage."""
+    """Keep uploaded bytes and the collection binding through retries, Jobs, and storage."""
     import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
     from tldw_Server_API.app.api.v1.schemas.media_response_models import (
         MediaDetailResponse,
     )
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
     from tldw_Server_API.app.core.DB_Management.media_db.api import (
         get_full_media_details_rich,
         get_media_by_id,
@@ -151,26 +155,33 @@ async def test_uploaded_txt_worker_and_detail_preserve_exact_source(
     )
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
 
-    response = media_ingest_jobs_client.post(
-        "/api/v1/media/ingest/jobs",
-        data={
-            "media_type": "document",
-            "perform_analysis": "false",
-            "overwrite_existing": "false",
-            "perform_chunking": "true",
-            "chunking_mode": "manual",
-            "generate_embeddings": "false",
-        },
-        files=[("files", ("F-SOURCE.txt", source, "text/plain"))],
-        headers=auth_headers,
-    )
+    with CollectionsDatabase.for_user("1") as db:
+        collection = db.create_media_collection(name="Talks", kind="conference")
+        item = db.add_media_collection_item(
+            collection_id=collection.id, source_url="local://F-SOURCE.txt", source_kind="file",
+            title="Observatory", speaker="Mira", track="Astronomy", tags=["stars"],
+        )
+    data = {
+        "media_type": "document", "perform_analysis": "false", "overwrite_existing": "false",
+        "perform_chunking": "true", "chunking_mode": "manual", "generate_embeddings": "false",
+        "media_collection_id": str(collection.id), "media_collection_item_id": str(item.id),
+        "idempotency_key": f"conference-retry-{item.id}-1",
+    }
+    files = [("files", ("F-SOURCE.txt", source, "text/plain"))]
+    response = media_ingest_jobs_client.post("/api/v1/media/ingest/jobs", data=data, files=files, headers=auth_headers)
     assert response.status_code == 200, response.text  # nosec B101 # pytest regression assertion.
     jm = JobManager()
     job = jm.get_job(response.json()["jobs"][0]["id"])
     try:
+        replay = media_ingest_jobs_client.post("/api/v1/media/ingest/jobs", data=data, files=files, headers=auth_headers)
+        assert replay.json() == response.json()
         assert Path(job["payload"]["source"]).read_bytes() == source  # nosec B101 # pytest regression assertion.
         result = await worker._handle_job(job, jm, worker._ProgressState())
         assert result["status"] == "Success", result  # nosec B101 # pytest regression assertion.
+        with CollectionsDatabase.for_user(job["owner_user_id"]) as db:
+            persisted = db.get_media_collection_item(item.id)
+            assert (persisted.status, persisted.media_id) == ("completed", result["media_id"])
+            assert (persisted.title, persisted.speaker, persisted.track, persisted.tags) == ("Observatory", "Mira", "Astronomy", ["stars"])
         with scoped_context(user_id=int(job["owner_user_id"]), is_admin=False):
             db = worker._create_db(job["owner_user_id"])
             try:
@@ -191,10 +202,12 @@ async def test_uploaded_txt_worker_and_detail_preserve_exact_source(
         shutil.rmtree(job["payload"]["temp_dir"], ignore_errors=True)
 
 
+@pytest.mark.parametrize("source_kind", ["url", "file"])
 def test_submit_media_ingest_jobs_preserves_collection_item_binding(
     media_ingest_jobs_client,
     monkeypatch,
     tmp_path,
+    source_kind,
 ):
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
 
@@ -235,15 +248,18 @@ def test_submit_media_ingest_jobs_preserves_collection_item_binding(
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
     monkeypatch.setattr(jobs_manager.JobManager, "get_job", fake_get_job, raising=True)
 
+    data = {"media_type": "document", "media_collection_id": "42"}
+    files = None
+    if source_kind == "url":
+        data.update(urls="https://example.com/talk.pdf", planned_item_ids=json.dumps(["101"]),
+                    idempotency_keys=json.dumps(["conference-42-101-0"]))
+    else:
+        data.update(media_collection_item_id="101", idempotency_key="conference-42-101-0")
+        files = [("files", ("talk.txt", b"conference talk", "text/plain"))]
     resp = media_ingest_jobs_client.post(
         "/api/v1/media/ingest/jobs",
-        data={
-            "media_type": "video",
-            "urls": "https://www.youtube.com/watch?v=talk-1",
-            "media_collection_id": "42",
-            "planned_item_ids": json.dumps(["101"]),
-            "idempotency_keys": json.dumps(["conference-42-101-0"]),
-        },
+        data=data,
+        files=files,
         headers={"X-API-KEY": "test-api-key-12345"},
     )
 
@@ -267,6 +283,8 @@ def test_submit_media_ingest_jobs_preserves_collection_item_binding(
     assert status_body["collection_id"] == "42"
     assert status_body["planned_item_id"] == "101"
     assert status_body["idempotency_key"] == "conference-42-101-0"
+    if source_kind == "file":
+        shutil.rmtree(captured[0]["payload"]["temp_dir"])
 
 
 def test_submit_media_ingest_jobs_rejects_mismatched_collection_item_bindings(

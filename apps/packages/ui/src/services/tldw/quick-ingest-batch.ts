@@ -55,6 +55,7 @@ import {
   resolveConferenceDuplicatePolicy,
   type ApiMediaCollection,
   type ApiMediaCollectionItem,
+  type ConferenceCollectionItemMergeInput,
   type ConferenceRetryRequestItem,
   type MediaCollectionItemStatus,
 } from "@/services/tldw/conference-collections";
@@ -236,14 +237,17 @@ const buildJobIdToItemId = (
 ): Record<string, string> =>
   Object.fromEntries(jobIds.map((jobId) => [String(jobId), sourceItemId]));
 
-const buildJobIdToCollectionItemId = (
+const collectionJobTracking = (
   jobIds: number[],
   planned: PlannedConferenceCollectionItem | undefined,
-): Record<string, string> | undefined => {
-  if (!planned) return undefined;
-  return Object.fromEntries(
-    jobIds.map((jobId) => [String(jobId), String(planned.itemId)]),
-  );
+): Partial<PersistedQuickIngestTracking> => {
+  if (!planned) return {};
+  const itemId = String(planned.itemId);
+  return {
+    collectionId: String(planned.collectionId), plannedItemIds: [itemId],
+    jobIdToCollectionItemId: Object.fromEntries(jobIds.map(jobId => [String(jobId), itemId])),
+    durableMode: "durable_collection",
+  };
 };
 
 const requestBatchStop = async (
@@ -623,21 +627,14 @@ type PlannedConferenceCollection = {
   itemsByEntryId: Map<string, PlannedConferenceCollectionItem>;
 };
 
-const hasUsableConferenceMetadata = (
-  metadata: QuickIngestBatchInput["conferenceBatchMetadata"],
-): metadata is ConferenceBatchMetadata =>
-  Boolean(
-    metadata &&
-      typeof metadata === "object" &&
-      (
-        String(metadata.collectionName || "").trim() ||
-        String(metadata.conferenceName || "").trim() ||
-        String(metadata.sourcePlaylistUrl || "").trim() ||
-        (Array.isArray(metadata.sharedTags) && metadata.sharedTags.length > 0)
-      ),
-  );
+const hasItemMetadata = ({ conferenceOverride: item }: ConferenceCollectionItemMergeInput) =>
+  [item?.title, item?.speaker, item?.track, item?.talkDate, ...(item?.tags ?? [])].some(value => value?.trim());
 
-const getConferenceFallbackName = (entries: QuickIngestEntry[]): string | null => {
+const hasUsableConferenceMetadata = (metadata: QuickIngestBatchInput["conferenceBatchMetadata"]) =>
+  !!metadata && [metadata.collectionName, metadata.conferenceName, metadata.sourcePlaylistUrl,
+    metadata.eventDate, metadata.eventYear, ...(metadata.sharedTags ?? [])].some(value => value?.trim());
+
+const getConferenceFallbackName = (entries: ConferenceCollectionItemMergeInput[]): string | null => {
   for (const entry of entries) {
     const title = String(entry?.playlist?.playlistTitle || "").trim();
     if (title) return title;
@@ -647,7 +644,7 @@ const getConferenceFallbackName = (entries: QuickIngestEntry[]): string | null =
 
 const createPlannedConferenceCollection = async (
   input: QuickIngestBatchInput,
-  entries: QuickIngestEntry[],
+  entries: ConferenceCollectionItemMergeInput[],
 ): Promise<PlannedConferenceCollection | null> => {
   if (input.conferenceRetry) {
     const collectionId = Number(input.conferenceRetry.collectionId);
@@ -677,13 +674,10 @@ const createPlannedConferenceCollection = async (
     }
     return { collectionId, itemsByEntryId };
   }
-  if (!hasUsableConferenceMetadata(input.conferenceBatchMetadata)) return null;
-  const selectedEntries = entries.filter(
-    (entry) =>
-      String(entry?.url || "").trim() &&
-      entry?.conferenceOverride?.selected !== false,
-  );
+  const metadata = input.conferenceBatchMetadata ?? { collectionName: "", sharedTags: [] };
+  const selectedEntries = entries.filter(entry => String(entry?.url || "").trim());
   if (selectedEntries.length === 0) return null;
+  if (!hasUsableConferenceMetadata(metadata) && !selectedEntries.some(hasItemMetadata)) return null;
 
   const collection = normalizeMediaCollectionResponse(
     await scopedQuickIngestRequest<ApiMediaCollection>(input, {
@@ -691,7 +685,7 @@ const createPlannedConferenceCollection = async (
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: buildConferenceCollectionCreatePayload(
-        input.conferenceBatchMetadata,
+        metadata,
         getConferenceFallbackName(selectedEntries),
       ),
       timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
@@ -706,13 +700,7 @@ const createPlannedConferenceCollection = async (
         path: `/api/v1/media/collections/${encodeURIComponent(String(collection.id))}/items`,
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: buildConferenceCollectionItemPayload(input.conferenceBatchMetadata, {
-          id: entry.id,
-          url: entry.url,
-          playlist: entry.playlist,
-          processAgain: entry.processAgain,
-          conferenceOverride: entry.conferenceOverride,
-        }),
+        body: buildConferenceCollectionItemPayload(metadata, entry),
         timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
         ...DIRECT_QUICK_INGEST_TRANSPORT,
       }),
@@ -767,14 +755,15 @@ const getConferenceTerminalStatus = (
 const applyPlannedConferenceFields = (
   fields: Record<string, any>,
   planned: PlannedConferenceCollectionItem | undefined,
+  sourceKind: "url" | "file" = "url",
 ) => {
   if (!planned) return;
   fields.media_collection_id = planned.collectionId;
   fields.media_collection_item_id = planned.itemId;
-  fields.planned_item_ids = [String(planned.itemId)];
+  if (sourceKind === "url") fields.planned_item_ids = [String(planned.itemId)];
   if (planned.idempotencyKey) {
     fields.idempotency_key = planned.idempotencyKey;
-    fields.idempotency_keys = [planned.idempotencyKey];
+    if (sourceKind === "url") fields.idempotency_keys = [planned.idempotencyKey];
   }
 };
 
@@ -785,7 +774,9 @@ const runDirectQuickIngestBatch = async (
     ? input.entries.filter((entry) => entry?.conferenceOverride?.selected !== false)
     : [];
   const files = Array.isArray(input.files)
-    ? input.files.filter((file) => file?.conferenceOverride?.selected !== false)
+    ? input.files.filter((file) => file?.conferenceOverride?.selected !== false).map(file => ({
+        ...file, id: String(file.id || crypto.randomUUID()), name: file.directFile?.name || file.name || "upload",
+      }))
     : [];
   const fileDefaults =
     input.fileDefaults && typeof input.fileDefaults === "object"
@@ -887,11 +878,15 @@ const runDirectQuickIngestBatch = async (
     if (directSessionId) directRuns.set(directSessionId, { uploads, batchIds });
 
     if (shouldStoreRemote) {
+      const sources = [...entries, ...files.map(file => ({
+        id: file.id, fileName: file.name, url: `local://${encodeURIComponent(file.name)}`,
+        conferenceOverride: file.conferenceOverride,
+      }))];
       try {
-        conferencePlan = await createPlannedConferenceCollection(input, entries);
+        conferencePlan = await createPlannedConferenceCollection(input, sources);
       } catch (error) {
         assertQuickIngestRequestCurrent(input, error);
-        if (input.conferenceRetry) throw error;
+        if (input.conferenceRetry || sources.some(hasItemMetadata)) throw error;
         console.warn("[tldw] Conference collection planning failed", error);
       }
     }
@@ -1068,21 +1063,11 @@ const runDirectQuickIngestBatch = async (
               sessionId: directSessionId,
               batchId,
               batchIds: [batchId],
-              collectionId: plannedConferenceItem
-                ? String(plannedConferenceItem.collectionId)
-                : undefined,
-              plannedItemIds: plannedConferenceItem
-                ? [String(plannedConferenceItem.itemId)]
-                : undefined,
               jobIds,
               submittedItemIds: [entry.id],
               itemIds: [entry.id],
               jobIdToItemId: buildJobIdToItemId(jobIds, entry.id),
-              jobIdToCollectionItemId: buildJobIdToCollectionItemId(
-                jobIds,
-                plannedConferenceItem,
-              ),
-              durableMode: plannedConferenceItem ? "durable_collection" : undefined,
+              ...collectionJobTracking(jobIds, plannedConferenceItem),
               startedAt: Date.now(),
             });
             await patchConferenceCollectionItem(input, plannedConferenceItem, {
@@ -1219,30 +1204,39 @@ const runDirectQuickIngestBatch = async (
 
     for (const file of files) {
       assertQuickIngestRequestCurrent(input);
-      const id = String(file?.id || crypto.randomUUID());
+      const { id, name: fileName } = file;
       const directFile = file?.directFile;
-      const fileName = String(directFile?.name || file?.name || "upload");
       const mimeType = directFile ? directFile.type : file?.type;
       const mediaType = inferUploadMediaTypeFromFile(fileName, mimeType);
       const bytes = file?.data;
       const requestContext = directFile ? runContext : input;
       const timeoutMs = getNativeFileTimeout(directFile);
+      const planned = conferencePlan?.itemsByEntryId.get(id);
+      const receipt = planned ? {
+        collectionItemId: planned.itemId, retryAttempt: planned.retryAttempt ?? 0, idempotencyKey: planned.idempotencyKey,
+      } : {};
       if (uploads.signal.aborted) {
+        await patchConferenceCollectionItem(input, planned, { status: "cancelled", error_summary: "Stopped before submission." });
         recordResult({
-          id, fileName, type: mediaType, status: "error",
+          id, fileName, type: mediaType, status: "error", ...receipt,
           outcome: "cancelled", error: "Stopped before submission.",
         });
         continue;
       }
       let jobAcknowledged = false;
-      const recordFileFailure = (error: unknown) => {
+      let fallbackAttempted = false;
+      const recordFileFailure = async (error: unknown) => {
         assertQuickIngestRequestCurrent(input, error);
+        const message = error instanceof Error ? error.message : String(error || "Upload failed");
+        const outcome = jobAcknowledged || fallbackAttempted ? "failed" : "submit_failed";
+        await patchConferenceCollectionItem(input, planned, { status: outcome, error_summary: message });
         recordResult({
           id,
           status: "error",
           fileName,
           type: "file",
-          error: error instanceof Error ? error.message : String(error || "Upload failed"),
+          error: message,
+          ...(planned ? { outcome, ...receipt } : {}),
         });
       };
 
@@ -1267,6 +1261,7 @@ const runDirectQuickIngestBatch = async (
           ? { directFile }
           : { file: { name: fileName, type: mimeType || "application/octet-stream", data: bytes || [] } };
         if (shouldStoreRemote) {
+          applyPlannedConferenceFields(fields, planned, "file");
           try {
             const submitData = await scopedQuickIngestUpload<any>(requestContext, {
               path: "/api/v1/media/ingest/jobs",
@@ -1288,15 +1283,19 @@ const runDirectQuickIngestBatch = async (
               submittedItemIds: [id],
               itemIds: [id],
               jobIdToItemId: buildJobIdToItemId(jobIds, id),
+              ...collectionJobTracking(jobIds, planned),
               startedAt: Date.now(),
             });
             const firstJobId = jobIds[0];
+            await patchConferenceCollectionItem(input, planned, { latest_job_id: String(firstJobId) });
             const pollFile = async () => {
               const pollResult = await pollIngestJobStatus(firstJobId, id);
               if (pollResult.terminalStatus === "interrupted") return;
               if (pollResult.terminalStatus === "cancelled") {
+                await patchConferenceCollectionItem(input, planned, { status: "cancelled", error_summary: pollResult.error });
                 recordResult({
                   id,
+                  ...receipt,
                   status: "error",
                   outcome: "cancelled",
                   fileName,
@@ -1305,12 +1304,13 @@ const runDirectQuickIngestBatch = async (
                 });
                 return;
               }
-              if (pollResult.terminalStatus !== "completed") {
-                throw new Error(String(pollResult.error || "Upload failed"));
+              if (pollResult.terminalStatus !== "completed" || completedIngestJobIndicatesFailure(pollResult.data)) {
+                throw new Error(String(pollResult.error || extractCompletedIngestJobError(pollResult.data) || "Upload failed"));
               }
               const isDuplicate = completedIngestJobIndicatesSkipped(pollResult.data);
               recordResult({
                 id,
+                ...receipt,
                 status: "ok",
                 outcome: isDuplicate ? ("skipped" as const) : undefined,
                 fileName,
@@ -1327,20 +1327,27 @@ const runDirectQuickIngestBatch = async (
             if (uploads.signal.aborted || !shouldFallbackToPersistentAdd(error)) {
               throw error;
             }
+            fallbackAttempted = true;
             const data = await submitPersistentAdd(requestContext, {
               fields,
               ...upload,
             });
             const fallbackDuplicate = completedIngestJobIndicatesSkipped(data);
+            if (completedIngestJobIndicatesFailure(data)) throw new Error(extractCompletedIngestJobError(data) || "Upload failed");
+            const mediaId = extractCompletedIngestJobMediaId(data);
+            await patchConferenceCollectionItem(input, planned, {
+              status: getConferenceTerminalStatus(fallbackDuplicate, false), media_id: mediaId,
+            });
             recordResult({
               id,
+              ...receipt,
               status: "ok",
               outcome: fallbackDuplicate ? ("skipped" as const) : undefined,
               fileName,
               type: mediaType,
               data,
               message: fallbackDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
-              mediaId: extractCompletedIngestJobMediaId(data),
+              mediaId,
               persisted: shouldStoreRemote && shouldKeepOriginalFile(mediaType),
             });
           }
@@ -1376,7 +1383,7 @@ const runDirectQuickIngestBatch = async (
           interruptedItemIds.push(id);
           continue;
         }
-        recordFileFailure(error);
+        await recordFileFailure(error);
       }
     }
 
