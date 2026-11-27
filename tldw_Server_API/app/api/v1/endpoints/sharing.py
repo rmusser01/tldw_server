@@ -828,6 +828,7 @@ def _shared_chat_service_http_error(exc: SharedWorkspaceChatServiceError) -> HTT
         "retrieval_unavailable": 503,
         "no_provider_configured": 503,
         "generation_failed": 503,
+        "llm_policy_refused": 400,
         "shared_workspace_unavailable": 503,
     }
     code = exc.code if exc.code in status_by_code else "shared_workspace_unavailable"
