@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping.crawl import checkpoints
 from tldw_Server_API.app.core.Web_Scraping.crawl.checkpoints import CheckpointError, CheckpointStore
 from tldw_Server_API.app.core.Web_Scraping.crawl.engine import run_crawl
 from tldw_Server_API.app.core.Web_Scraping.crawl.models import CheckpointLimits, CheckpointScope, FrontierSnapshot
@@ -166,7 +167,7 @@ def test_read_is_bounded_before_json_parser(store, tmp_path, monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail("oversized input reached JSON decoder")
 
-    monkeypatch.setattr(json, "loads", unexpected)
+    monkeypatch.setattr(checkpoints, "json", SimpleNamespace(loads=unexpected))
     with pytest.raises(CheckpointError):
         store.load(plan=plan(), scope=store.scope)
 

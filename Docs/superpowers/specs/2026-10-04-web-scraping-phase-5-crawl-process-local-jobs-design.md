@@ -682,6 +682,6 @@ TASK-15453, with Tasks 3-11 at TASK-15454 through TASK-15462. Integration is tra
 by TASK-15452. The decision, design requirements and historical notes are unchanged.
 
 Final publication scan of 45 open PRs found later allocations of those IDs.
-Current tracking is ADR-096, integration TASK-15466, execution TASK-15467 and
+Current tracking is ADR-096, integration TASK-15493, execution TASK-15467 and
 Tasks 3-11 TASK-15468 through TASK-15476. Earlier correction notes are historical;
 the accepted design and decision remain unchanged.

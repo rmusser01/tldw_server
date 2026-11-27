@@ -1169,11 +1169,19 @@ def get_url_depth(url: str) -> int:
 
 
 def _get_sync_crawl_admission() -> _SyncCrawlAdmission:
-    """Replace inherited state before acquiring any potentially fork-held lock."""
-    services = app_services()
-    if services.sync_crawl_admission.pid != os.getpid():
-        services.sync_crawl_admission = _SyncCrawlAdmission(services.sync_crawl_admission.capacity)
-    return services.sync_crawl_admission
+    """Publish one domain-owned gate per process without taking an inherited lock."""
+    admissions = app_services().sync_crawl_admissions
+    pid = os.getpid()
+    gate = admissions.get(pid)
+    if gate is not None:
+        return gate
+    inherited = next(reversed(admissions.values()), None)
+    candidate = _SyncCrawlAdmission() if inherited is None else _SyncCrawlAdmission(inherited.capacity)
+    gate = admissions.setdefault(pid, candidate)
+    for inherited_pid in tuple(admissions):
+        if inherited_pid != pid:
+            admissions.pop(inherited_pid, None)
+    return gate
 
 
 def _configure_sync_crawl_capacity(capacity: int) -> None:
