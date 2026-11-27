@@ -14,7 +14,7 @@ from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import
 
 @pytest.fixture
 def provider_status(monkeypatch):
-    static_keys = {}
+    static_keys: dict[str, str] = {}
     for env_var in config_info._PROVIDER_ENV_KEY_MAP.values():
         monkeypatch.delenv(env_var, raising=False)
     monkeypatch.setattr(config_llm_providers, "get_api_keys", lambda: static_keys)
@@ -30,16 +30,19 @@ def provider_status(monkeypatch):
         yield client, static_keys
 
 
-def _set_override(**changes):
-    values = {
-        "provider": "deepseek",
-        "api_key": "encrypted-status-private-value",
-        "is_enabled": True,
-    }
-    values.update(changes)
-    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
-        {"deepseek": LLMProviderOverride(**values)},
+def _set_override(
+    *,
+    api_key: str | None = "encrypted-status-private-value",
+    is_enabled: bool = True,
+    credentials_invalid: bool = False,
+) -> None:
+    override = LLMProviderOverride(
+        provider="deepseek",
+        api_key=api_key,
+        is_enabled=is_enabled,
+        credentials_invalid=credentials_invalid,
     )
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({"deepseek": override})
 
 
 def _status(client):
