@@ -61,6 +61,8 @@ from tldw_Server_API.app.core.Audio.transcription_service import (
     _map_openai_audio_model_to_whisper,
 )
 from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
+from tldw_Server_API.tests.Audio.issued_credentials import issued_credentials
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionStatus,
     ResolvedByokCredentials,
@@ -714,6 +716,27 @@ async def _llm_stub(**kwargs: Any) -> AsyncIterator[str]:  # noqa: ARG002
     return _gen()
 
 
+class _StubRegistry(ChatProviderRegistry):
+    """The real provider-name lookups with every adapter lookup answered by one stub adapter."""
+
+    def __init__(self, adapter: Any) -> None:
+        super().__init__(include_defaults=False)
+        self._stub_adapter = adapter
+
+    def get_adapter(self, _name: str) -> Any:
+        return self._stub_adapter
+
+
+def _use_real_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Undo the autouse LLM stub so the turn runs through the gateway into the stub adapter registry."""
+    from tldw_Server_API.app.core.LLM_Calls import gateway
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        gateway.perform_chat_api_call_async,
+    )
+
+
 def _enable_chat_ws_control_v2(monkeypatch: pytest.MonkeyPatch) -> None:
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.ws_control_protocol import (
@@ -1229,11 +1252,7 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
 
         async def resolve(self, provider: str, *, model: str | None = None):
             lifecycle.append(("resolve", provider, model))
-            return SimpleNamespace(
-                api_key=captured_key,
-                app_config=config_a,
-                credentials_resolved=True,
-            )
+            return issued_credentials(provider, api_key=captured_key, app_config=config_a)
 
         async def mark_used(self, _handle: object) -> None:
             lifecycle.append("mark_used")
@@ -1281,6 +1300,21 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
             adapter_timeouts.append(timeout)
             raise NotImplementedError
 
+        def stream(
+            self,
+            request: dict[str, Any],
+            *,
+            timeout: float | None = None,
+        ) -> list[str]:
+            captured = dict(request)
+            boundary_requests.append(captured)
+            adapter_requests.append(captured)
+            adapter_timeouts.append(timeout)
+            return [
+                'data: {"choices":[{"delta":{"content":"hey "}}]}\n\n',
+                "data: [DONE]\n\n",
+            ]
+
     adapter = None
     if dispatch == "adapter":
         adapter = RecordingAdapter()
@@ -1305,8 +1339,11 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
         raising=False,
     )
     monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: False, raising=False)
-    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry", lambda: SimpleNamespace(get_adapter=lambda _p: adapter))
-    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", fallback_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry", lambda: _StubRegistry(adapter))
+    if adapter is None:
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", fallback_call)
+    else:
+        _use_real_gateway(monkeypatch)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service", lambda: asyncio.sleep(0, result=_DummyTTSService([b"tts"])))
 
     config_frame = _strict_chat_config()
@@ -1328,7 +1365,11 @@ async def test_audio_chat_ws_keeps_static_snapshot_at_llm_boundary(
 
     assert boundary_requests
     assert all(request["api_key"] == captured_key for request in boundary_requests)
-    assert all(request["app_config"] == config_a for request in boundary_requests)
+    # The gateway rebuilds the request and adds the (empty) provider config section; nothing else may change.
+    assert all(
+        request["app_config"] in (config_a, {**config_a, "stub_api": {}})
+        for request in boundary_requests
+    )
     assert all(request["credentials_resolved"] is True for request in boundary_requests)
     assert all("timeout" not in request for request in adapter_requests)
     assert all(
@@ -1752,7 +1793,8 @@ async def test_audio_chat_ws_accepts_bedrock_default_chain_runtime_auth(
     class Runtime:
         async def resolve(self, provider: str, *, model: str | None = None):
             assert (provider, model) == ("bedrock", "bedrock-model")
-            return SimpleNamespace(
+            return issued_credentials(
+                provider,
                 api_key=None,
                 app_config={
                     "bedrock_api": {
@@ -1760,7 +1802,6 @@ async def test_audio_chat_ws_accepts_bedrock_default_chain_runtime_auth(
                         "_runtime_auth_source": "aws_default_chain",
                     }
                 },
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -1792,8 +1833,9 @@ async def test_audio_chat_ws_accepts_bedrock_default_chain_runtime_auth(
     )
     monkeypatch.setattr(
         "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
-        lambda: SimpleNamespace(get_adapter=lambda _provider: Adapter()),
+        lambda: _StubRegistry(Adapter()),
     )
+    _use_real_gateway(monkeypatch)
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service",
         lambda: asyncio.sleep(0, result=_DummyTTSService([b"tts"])),
@@ -2064,13 +2106,14 @@ async def test_audio_chat_ws_concurrent_turns_keep_runtime_snapshots_isolated(
             lifecycle.append(("runtime_close", self.model))
 
     class Adapter:
-        def astream(
+        async def astream(
             self,
             request: dict[str, Any],
             *,
             timeout: float | None = None,
         ) -> AsyncIterator[str]:
-            acquisition_barrier.wait(timeout=5)
+            # The gateway calls astream on the event loop (the old direct path ran it on a worker thread).
+            await asyncio.to_thread(acquisition_barrier.wait, 5)
             boundary_requests.append(dict(request))
             model = str(request["model"])
             adapter_timeouts[model] = timeout
@@ -2086,8 +2129,9 @@ async def test_audio_chat_ws_concurrent_turns_keep_runtime_snapshots_isolated(
     monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", Runtime)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
-        lambda: SimpleNamespace(get_adapter=lambda _provider: Adapter()),
+        lambda: _StubRegistry(Adapter()),
     )
+    _use_real_gateway(monkeypatch)
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service",
         lambda: asyncio.sleep(0, result=_DummyTTSService([b"tts"])),
@@ -2243,8 +2287,9 @@ async def test_audio_chat_ws_keeps_empty_runtime_config_frozen_after_live_reload
     monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", Runtime)
     monkeypatch.setattr(
         "tldw_Server_API.app.core.LLM_Calls.adapter_registry.get_registry",
-        lambda: SimpleNamespace(get_adapter=lambda _provider: Adapter()),
+        lambda: _StubRegistry(Adapter()),
     )
+    _use_real_gateway(monkeypatch)
     monkeypatch.setattr(chat_calls, "load_and_log_configs", live_loader)
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts.get_tts_service",
@@ -2281,7 +2326,7 @@ async def test_audio_chat_ws_keeps_empty_runtime_config_frozen_after_live_reload
     for request in requests:
         model = request["model"]
         assert request["api_key"] == f"{model}-key"
-        assert request["app_config"] == {}
+        assert request["app_config"] == {"stub_api": {}}  # the gateway adds the provider section
         assert request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is handles[model]
     assert "after-resolve" not in repr(requests)
 

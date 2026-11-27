@@ -408,6 +408,7 @@ Only respond with valid JSON, no other text."""
                 api_key=None,  # Use configured key
                 temp=0.1,
                 max_tokens=200,
+                llm_surface="voice.assistant",
             )
 
             if not response:

@@ -365,7 +365,7 @@ def build_default_realtime_pipeline(
             try:
                 credentials = await await_owned_worker(runtime.resolve(kwargs["api_endpoint"], model=kwargs["model"]))
                 kwargs[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = credentials
-                result = await perform_chat_api_call_async(**kwargs)
+                result = await perform_chat_api_call_async(**kwargs, llm_surface="voice.realtime")
                 await await_owned_worker(runtime.mark_used(credentials))
                 if hasattr(result, "__aiter__"):
                     async for chunk in result:

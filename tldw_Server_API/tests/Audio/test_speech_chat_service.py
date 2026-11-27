@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     SpeechChatSTTConfig,
     SpeechChatTTSConfig,
 )
+from tldw_Server_API.tests.Audio.issued_credentials import issued_credentials
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
     ByokResolutionStatus,
@@ -32,6 +33,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime as RealProviderCredentialRuntime,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.registry import register_module, reset_module_registry
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
@@ -180,6 +182,16 @@ class _RecordingAdapterRegistry:
         return self.adapter
 
 
+def _route_through_gateway(monkeypatch: pytest.MonkeyPatch, registry_factory) -> None:
+    """Run the speech-chat LLM call through the real gateway against a stub adapter registry."""
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    monkeypatch.setattr(gateway, "_get_llm_registry", registry_factory)
+    monkeypatch.setattr(
+        speech_chat_service, "chat_api_call_async", gateway.perform_chat_api_call_async
+    )
+
+
 class _DummyActionModule(BaseModule):
     """MCP module stub exposing a deterministic action tool."""
 
@@ -238,9 +250,6 @@ def _patch_speech_chat_success_path(
         speech_chat_service,
         "transcribe_audio",
         lambda *_args, **_kwargs: transcript,
-    )
-    monkeypatch.setattr(
-        speech_chat_service, "get_registry", lambda: _NoAdapterRegistry(), raising=True
     )
 
     async def _fake_get_or_create_character_context(*_args, **_kwargs):
@@ -733,12 +742,7 @@ async def test_run_speech_chat_turn_passes_llm_extra_params_to_adapter(monkeypat
 
     _patch_speech_chat_success_path(monkeypatch, speech_chat_service)
     adapter = _RecordingAdapter()
-    monkeypatch.setattr(
-        speech_chat_service,
-        "get_registry",
-        lambda: _RecordingAdapterRegistry(adapter),
-        raising=True,
-    )
+    _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(adapter))
 
     req = SpeechChatRequest(
         session_id=None,
@@ -865,10 +869,10 @@ async def test_speech_chat_keeps_static_snapshot_at_llm_boundary(
 
         async def resolve(self, provider: str, *, model: str | None = None):
             lifecycle.append(("resolve", provider, model))
-            return SimpleNamespace(
+            return issued_credentials(
+                provider,
                 api_key=captured_key,
                 app_config=config_a,
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -909,10 +913,11 @@ async def test_speech_chat_keeps_static_snapshot_at_llm_boundary(
     adapter: _RecordingAdapter | None = None
     if dispatch == "adapter":
         adapter = _RecordingAdapter()
+        _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(adapter))
+        # The gateway makes its own key-required check (the direct path had none): let it pass the keyless case.
         monkeypatch.setattr(
-            speech_chat_service,
-            "get_registry",
-            lambda: _RecordingAdapterRegistry(adapter),
+            "tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key",
+            lambda _provider: False,
         )
         boundary_requests = adapter.requests
 
@@ -971,10 +976,10 @@ async def test_speech_chat_sync_adapter_cancellation_drains_before_runtime_close
     class Runtime:
         async def resolve(self, _provider: str, *, model: str | None = None):
             assert model == "model-a"
-            return SimpleNamespace(
+            return issued_credentials(
+                _provider,
                 api_key="runtime-key",
                 app_config={"openai_api": {"model": model}},
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -1013,11 +1018,7 @@ async def test_speech_chat_sync_adapter_cancellation_drains_before_runtime_close
         "ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
-    monkeypatch.setattr(
-        speech_chat_service,
-        "get_registry",
-        lambda: _RecordingAdapterRegistry(SyncFallbackAdapter()),
-    )
+    _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(SyncFallbackAdapter()))
 
     task = asyncio.create_task(
         run_speech_chat_turn(
@@ -1084,10 +1085,10 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
             self.runtime_id = runtime_count
 
         async def resolve(self, _provider: str, *, model: str | None = None):
-            return SimpleNamespace(
+            return issued_credentials(
+                _provider,
                 api_key="private-speech-credential-marker",
                 app_config={"openai_api": {"model": model}},
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -1125,12 +1126,8 @@ async def test_speech_chat_sync_adapter_timeout_capacity_and_recovery(
         "ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
-    monkeypatch.setattr(
-        speech_chat_service,
-        "get_registry",
-        lambda: registry,
-    )
-    monkeypatch.setattr(speech_chat_service, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    _route_through_gateway(monkeypatch, lambda: registry)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(speech_chat_service, "SPEECH_CHAT_LLM_TIMEOUT_SECONDS", 0.5)
 
     async def request_once() -> Any:
@@ -1200,10 +1197,10 @@ async def test_speech_chat_async_adapter_timeout_retains_runtime_until_release(
 
     class Runtime:
         async def resolve(self, _provider: str, *, model: str | None = None):
-            return SimpleNamespace(
+            return issued_credentials(
+                _provider,
                 api_key="runtime-secret-marker",
                 app_config={"openai_api": {"model": model}},
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -1230,11 +1227,7 @@ async def test_speech_chat_async_adapter_timeout_retains_runtime_until_release(
             return {"choices": [{"message": {"content": "late reply"}}]}
 
     monkeypatch.setattr(speech_chat_service, "ProviderCredentialRuntime", lambda **_kwargs: Runtime())
-    monkeypatch.setattr(
-        speech_chat_service,
-        "get_registry",
-        lambda: _RecordingAdapterRegistry(BlockingAdapter()),
-    )
+    _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(BlockingAdapter()))
     monkeypatch.setattr(speech_chat_service, "SPEECH_CHAT_LLM_TIMEOUT_SECONDS", 0.01, raising=False)
 
     task = asyncio.create_task(
@@ -1296,10 +1289,10 @@ async def test_speech_chat_late_usage_requires_valid_nonempty_content(
 
     class Runtime:
         async def resolve(self, _provider: str, *, model: str | None = None) -> Any:
-            return SimpleNamespace(
+            return issued_credentials(
+                _provider,
                 api_key="runtime-key",
                 app_config={"openai_api": {"model": model}},
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -1330,11 +1323,7 @@ async def test_speech_chat_late_usage_requires_valid_nonempty_content(
         "ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
-    monkeypatch.setattr(
-        speech_chat_service,
-        "get_registry",
-        lambda: _RecordingAdapterRegistry(Adapter()),
-    )
+    _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(Adapter()))
     monkeypatch.setattr(
         speech_chat_service,
         "SPEECH_CHAT_LLM_TIMEOUT_SECONDS",
@@ -1405,10 +1394,10 @@ async def test_registered_sync_adapter_late_result_releases_capacity_before_runt
 
     class Runtime:
         async def resolve(self, _provider: str, *, model: str | None = None) -> Any:
-            return SimpleNamespace(
+            return issued_credentials(
+                _provider,
                 api_key=secret,
                 app_config={"openai_api": {"model": model}},
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -1446,8 +1435,8 @@ async def test_registered_sync_adapter_late_result_releases_capacity_before_runt
         "ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
-    monkeypatch.setattr(speech_chat_service, "get_registry", lambda: registry)
-    monkeypatch.setattr(speech_chat_service, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    _route_through_gateway(monkeypatch, lambda: registry)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(speech_chat_service, "SPEECH_CHAT_LLM_TIMEOUT_SECONDS", 0.01)
 
     request_task = asyncio.create_task(
@@ -1541,10 +1530,10 @@ async def test_registered_native_async_adapter_isolated_from_saturated_sync_pool
 
     class Runtime:
         async def resolve(self, _provider: str, *, model: str | None = None) -> Any:
-            return SimpleNamespace(
+            return issued_credentials(
+                _provider,
                 api_key="native-key",
                 app_config={"native_test": {"model": model}},
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -1564,8 +1553,8 @@ async def test_registered_native_async_adapter_isolated_from_saturated_sync_pool
         "ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
-    monkeypatch.setattr(speech_chat_service, "get_registry", lambda: registry)
-    monkeypatch.setattr(speech_chat_service, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    _route_through_gateway(monkeypatch, lambda: registry)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
     try:
         assert holder_started.wait(timeout=1.0)
@@ -1590,88 +1579,6 @@ async def test_registered_native_async_adapter_isolated_from_saturated_sync_pool
         holder.join(timeout=1.0)
 
     assert pool.active_count == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("abandonment", ["timeout", "cancel"])
-async def test_speech_sync_boundary_never_queues_a_late_default_executor_start(
-    monkeypatch: pytest.MonkeyPatch,
-    abandonment: str,
-) -> None:
-    """Sync speech calls are admitted directly despite default-pool saturation."""
-    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
-    from tldw_Server_API.app.core.Streaming import speech_chat_service
-
-    loop = asyncio.get_running_loop()
-    default_started = asyncio.Event()
-    provider_started = asyncio.Event()
-    provider_finished = asyncio.Event()
-    cleanup_finished = asyncio.Event()
-    default_release = threading.Event()
-    provider_release = threading.Event()
-    call_count = 0
-
-    def occupy_default_executor() -> None:
-        loop.call_soon_threadsafe(default_started.set)
-        default_release.wait(timeout=2.0)
-
-    def provider_call() -> dict[str, Any]:
-        nonlocal call_count
-        call_count += 1
-        loop.call_soon_threadsafe(provider_started.set)
-        provider_release.wait(timeout=2.0)
-        loop.call_soon_threadsafe(provider_finished.set)
-        return {"choices": [{"message": {"content": "late"}}]}
-
-    async def cleanup() -> None:
-        cleanup_finished.set()
-
-    previous_executor = getattr(loop, "_default_executor", None)
-    executor = ThreadPoolExecutor(max_workers=1)
-    loop.set_default_executor(executor)
-    default_future = loop.run_in_executor(None, occupy_default_executor)
-    monkeypatch.setattr(
-        speech_chat_service,
-        "SYNC_ADAPTER_CALL_POOL",
-        BoundedDaemonPool(1),
-    )
-    monkeypatch.setattr(
-        speech_chat_service,
-        "SPEECH_CHAT_LLM_TIMEOUT_SECONDS",
-        0.01 if abandonment == "timeout" else 30.0,
-    )
-    operation = asyncio.create_task(
-        speech_chat_service._run_bounded_speech_sync_call(
-            provider_call,
-            on_abandoned=cleanup,
-            cleanup_claimed=threading.Event(),
-        )
-    )
-    try:
-        await asyncio.wait_for(default_started.wait(), timeout=1.0)
-        if abandonment == "cancel":
-            checkpoint = asyncio.Event()
-            loop.call_soon(checkpoint.set)
-            await checkpoint.wait()
-            operation.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await operation
-        else:
-            with pytest.raises(TimeoutError):
-                await operation
-        assert provider_started.is_set()
-        assert call_count == 1
-    finally:
-        provider_release.set()
-        default_release.set()
-        await asyncio.gather(default_future, return_exceptions=True)
-        await asyncio.gather(operation, return_exceptions=True)
-        executor.shutdown(wait=True)
-        loop.set_default_executor(previous_executor or ThreadPoolExecutor())
-
-    await asyncio.wait_for(provider_finished.wait(), timeout=1.0)
-    await asyncio.wait_for(cleanup_finished.wait(), timeout=1.0)
-    assert call_count == 1
 
 
 @pytest.mark.asyncio
@@ -1726,7 +1633,8 @@ async def test_speech_chat_accepts_bedrock_default_chain_runtime_auth(
     class Runtime:
         async def resolve(self, provider: str, *, model: str | None = None):
             assert (provider, model) == ("bedrock", "bedrock-model")
-            return SimpleNamespace(
+            return issued_credentials(
+                provider,
                 api_key=None,
                 app_config={
                     "bedrock_api": {
@@ -1734,7 +1642,6 @@ async def test_speech_chat_accepts_bedrock_default_chain_runtime_auth(
                         "_runtime_auth_source": "aws_default_chain",
                     }
                 },
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -1762,11 +1669,7 @@ async def test_speech_chat_accepts_bedrock_default_chain_runtime_auth(
         "ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
-    monkeypatch.setattr(
-        speech_chat_service,
-        "get_registry",
-        lambda: _RecordingAdapterRegistry(Adapter()),
-    )
+    _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(Adapter()))
 
     response = await run_speech_chat_turn(
         request_data=SpeechChatRequest(
@@ -1799,10 +1702,10 @@ async def test_speech_chat_empty_provider_response_is_not_marked_used(
 
     class Runtime:
         async def resolve(self, _provider: str, *, model: str | None = None):
-            return SimpleNamespace(
+            return issued_credentials(
+                _provider,
                 api_key="runtime-key",
                 app_config={"openai_api": {"model": model}},
-                credentials_resolved=True,
             )
 
         async def mark_used(self, _handle: object) -> None:
@@ -1829,11 +1732,7 @@ async def test_speech_chat_empty_provider_response_is_not_marked_used(
         "ProviderCredentialRuntime",
         lambda **_kwargs: Runtime(),
     )
-    monkeypatch.setattr(
-        speech_chat_service,
-        "get_registry",
-        lambda: _RecordingAdapterRegistry(Adapter()),
-    )
+    _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(Adapter()))
 
     with pytest.raises(HTTPException) as exc_info:
         await run_speech_chat_turn(
@@ -1936,11 +1835,7 @@ async def test_concurrent_speech_chat_calls_keep_runtime_snapshots_isolated(
         "ProviderCredentialRuntime",
         _runtime_factory,
     )
-    monkeypatch.setattr(
-        speech_chat_service,
-        "get_registry",
-        lambda: _RecordingAdapterRegistry(Adapter()),
-    )
+    _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(Adapter()))
 
     async def _run(model: str):
         return await run_speech_chat_turn(
@@ -2089,11 +1984,7 @@ async def test_concurrent_speech_chat_calls_keep_empty_runtime_config_frozen(
         return {"openai_api": dict(live_config)}
 
     monkeypatch.setattr(speech_chat_service, "ProviderCredentialRuntime", Runtime)
-    monkeypatch.setattr(
-        speech_chat_service,
-        "get_registry",
-        lambda: _RecordingAdapterRegistry(Adapter()),
-    )
+    _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(Adapter()))
     monkeypatch.setattr(chat_calls, "load_and_log_configs", live_loader)
 
     async def run_one(model: str):
@@ -2127,7 +2018,7 @@ async def test_concurrent_speech_chat_calls_keep_empty_runtime_config_frozen(
     for request in requests:
         model = request["model"]
         assert request["api_key"] == f"{model}-key"
-        assert request["app_config"] == {}
+        assert request["app_config"] == {"openai_api": {}}  # the gateway adds the provider section
         assert request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is handles[model]
     assert "after-resolve" not in repr(requests)
 
@@ -2320,11 +2211,7 @@ async def test_run_speech_chat_turn_sanitizes_adapter_http_exception(
             )
 
     if dispatch == "adapter":
-        monkeypatch.setattr(
-            speech_chat_service,
-            "get_registry",
-            lambda: _RecordingAdapterRegistry(_FailingAdapter()),  # type: ignore[arg-type]
-        )
+        _route_through_gateway(monkeypatch, lambda: _RecordingAdapterRegistry(_FailingAdapter()))  # type: ignore[arg-type]
     else:
         async def _failing_fallback(**_kwargs: Any) -> dict[str, Any]:
             raise HTTPException(
@@ -2378,9 +2265,6 @@ async def test_run_speech_chat_turn_happy_path(monkeypatch):
     # transcribe_audio is synchronous in the module; patch to simple function
     monkeypatch.setattr(
         speech_chat_service, "transcribe_audio", lambda *a, **k: "hello from audio"
-    )
-    monkeypatch.setattr(
-        speech_chat_service, "get_registry", lambda: _NoAdapterRegistry(), raising=True
     )
 
     # Stub character/conv helpers to avoid touching real DB schema
@@ -2540,9 +2424,6 @@ async def test_run_speech_chat_turn_invokes_action_when_enabled(monkeypatch):
         speech_chat_service,
         "transcribe_audio",
         lambda *_args, **_kwargs: "action transcript",
-    )
-    monkeypatch.setattr(
-        speech_chat_service, "get_registry", lambda: _NoAdapterRegistry(), raising=True
     )
 
     async def _fake_get_or_create_character_context(*_args, **_kwargs):
@@ -2736,9 +2617,6 @@ async def test_run_speech_chat_turn_uses_configured_tts_defaults_when_tts_config
     )
     monkeypatch.setattr(
         speech_chat_service, "transcribe_audio", lambda *a, **k: "hello from audio"
-    )
-    monkeypatch.setattr(
-        speech_chat_service, "get_registry", lambda: _NoAdapterRegistry(), raising=True
     )
 
     async def _fake_get_or_create_character_context(*_args, **_kwargs):
@@ -3096,9 +2974,6 @@ async def test_run_speech_chat_turn_blocks_disallowed_action(monkeypatch):
         speech_chat_service,
         "transcribe_audio",
         lambda *_args, **_kwargs: "blocked transcript",
-    )
-    monkeypatch.setattr(
-        speech_chat_service, "get_registry", lambda: _NoAdapterRegistry(), raising=True
     )
 
     async def _fake_get_or_create_character_context(*_args, **_kwargs):
