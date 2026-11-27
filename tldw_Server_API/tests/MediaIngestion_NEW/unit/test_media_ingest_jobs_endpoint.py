@@ -405,12 +405,10 @@ def test_collection_url_admission_race_keeps_each_acknowledged_job_in_its_batch(
 
 @pytest.mark.parametrize("kind", ["url", "file"])
 def test_collection_retry_survives_heavy_worker_routing_changes(kind, media_ingest_jobs_client, auth_headers, monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
     from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     jm = JobManager()
-    heavy_available = False
-    monkeypatch.setattr(ingest_jobs, "_heavy_media_ingest_worker_available", lambda: heavy_available)
+    monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "false")
     monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
     data = {"media_type": "document", "enable_ocr": "true", "media_collection_id": "7",
             "media_collection_item_id": "11", "idempotency_key": "conference-retry-11-1"}
@@ -428,7 +426,7 @@ def test_collection_retry_survives_heavy_worker_routing_changes(kind, media_inge
     first = submit()
     first_job = jm.get_job(first["jobs"][0]["id"])
     try:
-        heavy_available = True
+        monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "true")
         assert submit() == first
         with monkeypatch.context() as concurrent:
             # Both contenders saw an empty receipt slot before either insert committed.
@@ -444,7 +442,7 @@ def test_collection_retry_survives_heavy_worker_routing_changes(kind, media_inge
             idempotency_key=legacy_key if kind == "url" else f"media-upload:1:{legacy_key}",
             batch_group="older-heavy-batch", payload=payload,
         )
-        heavy_available = False
+        monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "false")
         restored = submit()
         assert (restored["batch_id"], restored["jobs"][0]["id"]) == ("older-heavy-batch", legacy["id"])
     finally:
@@ -452,19 +450,44 @@ def test_collection_retry_survives_heavy_worker_routing_changes(kind, media_inge
             shutil.rmtree(first_job["payload"]["temp_dir"], ignore_errors=True)
 
 
-def test_conflicting_native_receipt_preserves_existing_collection_status(media_ingest_jobs_client, auth_headers, monkeypatch):
-    from unittest.mock import Mock
+def test_conflicting_native_receipt_preserves_existing_collection_status(
+    media_ingest_jobs_client, auth_headers, monkeypatch, tmp_path
+):
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
-    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
-
-    mark_failed = Mock()
-    monkeypatch.setattr(ingest_jobs, "_mark_collection_item_submit_failed", mark_failed)
-    monkeypatch.setattr(ingest_jobs, "_find_collection_retry_job", lambda *_args: {"archived": True})
-    response = media_ingest_jobs_client.post("/api/v1/media/ingest/jobs", headers=auth_headers,
-        data={"media_type": "document", "media_collection_id": "7", "media_collection_item_id": "11", "idempotency_key": "retry"},
-        files=[("files", ("talk.txt", b"conference talk", "text/plain"))])
-    assert response.status_code == 409
-    mark_failed.assert_not_called()
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    manager = JobManager()
+    with CollectionsDatabase.for_user("1") as db:
+        collection = db.create_media_collection(name="Talks", kind="conference")
+        item = db.add_media_collection_item(
+            collection_id=collection.id, source_url="local://talk.txt", status="completed", media_id=42
+        )
+        job = manager.create_job(
+            owner_user_id="1",
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            idempotency_key="media-upload:1:retry",
+            payload={"source_kind": "file"},
+        )
+        assert manager.cancel_job(job["id"])
+        assert manager.prune_jobs(statuses=["cancelled"], older_than_days=0, domain="media_ingest") == 1
+        response = media_ingest_jobs_client.post(
+            "/api/v1/media/ingest/jobs",
+            headers=auth_headers,
+            data={
+                "media_type": "document",
+                "media_collection_id": str(collection.id),
+                "media_collection_item_id": str(item.id),
+                "idempotency_key": "retry",
+            },
+            files=[("files", ("talk.txt", b"conference talk", "text/plain"))],
+        )
+        assert response.status_code == 409, response.text
+        assert "archived" in response.json()["detail"].lower()
+        assert db.get_media_collection_item(item.id) == item
 
 
 def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(

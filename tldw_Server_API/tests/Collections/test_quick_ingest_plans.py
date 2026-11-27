@@ -125,8 +125,11 @@ def test_plan_failure_rolls_back_all_rows(backend, monkeypatch):
 
 
 def test_plan_api_validates_authority_and_recovers_current_receipt(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
     from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
     from tldw_Server_API.app.api.v1.endpoints.media import collections
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -155,17 +158,13 @@ def test_plan_api_validates_authority_and_recovers_current_receipt(tmp_path, mon
         assert put([source, source]).status_code == 422
         assert put([{**source, "item": {**source["item"], "media_id": 88}}]).status_code == 422
         # A direct source can be planned and reserved even when Jobs storage is offline.
-        from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
-
-        def jobs_offline():
-            raise RuntimeError("Jobs storage unavailable")
-
         with monkeypatch.context() as patch:
-            app.dependency_overrides[ingest_jobs.get_job_manager] = jobs_offline
-            patch.setattr(ingest_jobs, "get_job_manager", jobs_offline)
+            patch.setenv("JOBS_DB_PATH", str(tmp_path / "offline.sqlite"))
+            connect_jobs = Mock(side_effect=RuntimeError("Jobs storage unavailable"))
+            patch.setattr(JobManager, "__init__", connect_jobs)
             response = put([source])
             assert response.status_code == 200, response.text
-        app.dependency_overrides.pop(ingest_jobs.get_job_manager)
+            connect_jobs.assert_not_called()
         before = response.json()
         assert client.get(source_status).json() == {"collection_id": before["collection_id"], **before["items"][0]}
         assert client.get(url + "/sources/absent").status_code == 404

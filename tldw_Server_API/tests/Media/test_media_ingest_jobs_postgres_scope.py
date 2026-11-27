@@ -210,7 +210,7 @@ def test_bound_plan_recovers_only_the_owners_published_job_without_writing(owned
     from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 
     manager, _ = owned_jobs
-    monkeypatch.setattr(ingest_jobs, "get_job_manager", lambda: manager)
+    monkeypatch.setenv("JOBS_DB_URL", manager.db_url)
     backend = pg_restricted_backend
     try:
         db = CollectionsDatabase.from_backend("11", backend)

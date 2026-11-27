@@ -1,5 +1,6 @@
 """Verify that the receiving transport consumes one owner-bound Quick Ingest attempt."""
 
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -7,54 +8,10 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.media import quick_ingest_dispatch as dispatch
-
-
-class PlanStore:
-    def __init__(self):
-        self.item = SimpleNamespace(
-            id=11,
-            collection_id=7,
-            source_kind="url",
-            source_url="https://example.test/a",
-            idempotency_key="attempt",
-            retry_count=0,
-            status="processing",
-            media_id=None,
-            latest_job_id=None,
-        )
-        self.state = "reserved"
-        self.item.dispatch_state = self.state
-
-    def get_quick_ingest_source(self, plan_key, source_key):
-        assert (plan_key, source_key) == ("plan", "source")
-        return self.item
-
-    def begin_quick_ingest_dispatch(self, plan_key, source_key, *, retry_count, idempotency_key, transport):
-        if self.state not in ({"fallback_ready"} if transport == "add" else {"reserved"}):
-            return False, self.item
-        self.state = transport
-        self.item.dispatch_state = self.state
-        return True, self.item
-
-    def finish_quick_ingest_dispatch(
-        self,
-        plan_key,
-        source_key,
-        *,
-        retry_count,
-        idempotency_key,
-        transport,
-        status,
-        media_id=None,
-        latest_job_id=None,
-    ):
-        assert self.state == transport and (retry_count, idempotency_key) == (0, "attempt")
-        self.state = status
-        self.item.dispatch_state = self.state
-        if status != "fallback_ready":
-            self.item.status = status
-        self.item.media_id, self.item.latest_job_id = media_id, latest_job_id
-        return self.item
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.Ingestion_Media_Processing import input_sourcing
+from tldw_Server_API.app.core.Usage import quota_checks
+from tldw_Server_API.app.services.enhanced_web_scraping_service import WebScrapingService
 
 
 def args(transport):
@@ -68,9 +25,16 @@ def args(transport):
 
 
 @pytest.fixture
-def attempt(monkeypatch):
-    monkeypatch.setattr(dispatch, "_item_response", lambda item: vars(item).copy())
-    return dispatch.PlanAttempt("plan", "source", 0, "attempt", PlanStore())
+def plan_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
+    with CollectionsDatabase.for_user("1") as store:
+        yield store
+
+
+@pytest.fixture
+def attempt(plan_store):
+    query = _reserve(plan_store, "https://example.test/a", "url")
+    return dispatch.PlanAttempt("plan", "source", db=plan_store, **query)
 
 
 @pytest.mark.asyncio
@@ -86,7 +50,7 @@ async def test_lost_ack_returns_original_receipt_without_dispatching_again(attem
     first = await dispatch.receive(attempt, transport, args(transport), call)
     replay = await dispatch.receive(attempt, transport, args(transport), call)
     assert first["dispatched"] and not replay["dispatched"]
-    assert first["result"] == reply and replay["item"][identity[0]] == identity[1]
+    assert first["result"] == reply and getattr(replay["item"], identity[0]) == identity[1]
     call.assert_awaited_once()
 
 
@@ -102,7 +66,7 @@ async def test_only_a_definitive_jobs_quota_rejection_allows_the_sync_transport(
     assert not (await dispatch.receive(attempt, "jobs", args("jobs"), AsyncMock()))["dispatched"]
     call = AsyncMock(return_value={"results": [{"status": "Success", "db_id": 42}]})
     saved = await dispatch.receive(attempt, "add", args("add"), call)
-    assert saved["item"]["media_id"] == 42
+    assert saved["item"].media_id == 42
     assert not (await dispatch.receive(attempt, "add", args("add"), call))["dispatched"]
     call.assert_awaited_once()
 
@@ -124,20 +88,21 @@ async def test_mismatched_source_or_attempt_does_not_consume_the_valid_source(at
     wrong["payload"].url_input = "https://example.test/other"
     with pytest.raises(HTTPException) as mismatch:
         await dispatch.receive(attempt, "web", wrong, call)
-    assert mismatch.value.status_code == 409 and attempt.db.state == "reserved"
+    assert mismatch.value.status_code == 409
+    assert attempt.db.get_quick_ingest_source("plan", "source").dispatch_state == "reserved"
     stale = dispatch.PlanAttempt("plan", "source", 1, "old", attempt.db)
     with pytest.raises(HTTPException) as mismatch:
         await dispatch.receive(stale, "web", args("web"), call)
-    assert mismatch.value.status_code == 409 and attempt.db.state == "reserved"
+    assert mismatch.value.status_code == 409
+    assert attempt.db.get_quick_ingest_source("plan", "source").dispatch_state == "reserved"
     call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_changed_attempt_between_lookup_and_begin_does_not_replay_an_unrelated_result(attempt, monkeypatch):
-    def switch_attempt(*_args, **_kwargs):
-        attempt.db.item.retry_count = 1
-        attempt.db.item.idempotency_key = "new-attempt"
-        return False, attempt.db.item
+    def switch_attempt(plan_key, source_key, **_kwargs):
+        row = attempt.db.get_quick_ingest_source(plan_key, source_key)
+        return False, replace(row, retry_count=1, idempotency_key="new-attempt")
 
     monkeypatch.setattr(attempt.db, "begin_quick_ingest_dispatch", switch_attempt)
     with pytest.raises(HTTPException) as stale:
@@ -175,7 +140,7 @@ def test_planned_routes_reuse_every_existing_transport_permission_and_validated_
 
 
 @pytest.fixture
-def plan_client(tmp_path, monkeypatch):
+def plan_client(plan_store, tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -183,24 +148,19 @@ def plan_client(tmp_path, monkeypatch):
         get_collections_db_for_user,
         try_get_collections_db_for_user,
     )
-    from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-12345")
-    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
     monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
     app = FastAPI()
     app.include_router(dispatch.router, prefix="/api/v1/media")
     app.include_router(dispatch.ingest_jobs.router, prefix="/api/v1/media")
-    with (
-        CollectionsDatabase.for_user("1") as store,
-        TestClient(app, headers={"X-API-KEY": "test-api-key-12345"}) as client,
-    ):
-        app.dependency_overrides[get_collections_db_for_user] = lambda: store
-        app.dependency_overrides[try_get_collections_db_for_user] = lambda: store
-        yield store, client
+    app.dependency_overrides[get_collections_db_for_user] = lambda: plan_store
+    app.dependency_overrides[try_get_collections_db_for_user] = lambda: plan_store
+    with TestClient(app, headers={"X-API-KEY": "test-api-key-12345"}) as client:
+        yield plan_store, client
 
 
 def _reserve(store, source_url, source_kind):
@@ -224,8 +184,6 @@ def test_web_transport_publishes_real_plan_receipt_before_a_lost_http_ack(plan_c
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
 
-    from tldw_Server_API.app.api.v1.endpoints import media
-
     store, client = plan_client
     url = "https://example.test/plan-source"
     query = _reserve(store, url, "url")
@@ -237,7 +195,7 @@ def test_web_transport_publishes_real_plan_receipt_before_a_lost_http_ack(plan_c
         return {"status": "persist-ok", "media_ids": [42]}
 
     scrape = AsyncMock(side_effect=scrape_once)
-    monkeypatch.setattr(media, "process_web_scraping_task", scrape)
+    monkeypatch.setattr(WebScrapingService, "process_web_scraping_task", scrape)
     body = {
         "url_input": url,
         "scrape_method": "Individual URLs",
@@ -269,7 +227,6 @@ def test_native_dispatch_keeps_the_original_job_or_fallback_media(plan_client, m
     """Replay after a lost native acknowledgement returns its existing Job or saved Media."""
     from pathlib import Path
 
-    from tldw_Server_API.app.core.exceptions import BadRequestError
     from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     store, client = plan_client
@@ -286,10 +243,10 @@ def test_native_dispatch_keeps_the_original_job_or_fallback_media(plan_client, m
         # The isolated transport fixture has no account quota ledger.
         monkeypatch.setattr(StorageQuotaService, "check_quota", AsyncMock(return_value=(True, {})))
 
-        def reject(_manager, **_kwargs):
-            raise BadRequestError("Concurrent job limit exceeded")
-
-        monkeypatch.setattr(JobManager, "create_job", reject)
+        monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+        JobManager().create_job(
+            domain="media_ingest", queue="default", job_type="ingest", payload={}, owner_user_id="1"
+        )
         denied = post("jobs")
         assert denied.status_code == 429, denied.text
         assert denied.json()["detail"]["code"] == "plan_jobs_quota_rejected"
@@ -335,7 +292,7 @@ def test_legacy_jobs_cannot_publish_for_a_reserved_plan_source(plan_client, bind
         async def no_staging(*args, **kwargs):
             pytest.fail("The legacy route reached the upload staging boundary")
 
-        patch.setattr(dispatch.ingest_jobs._input_sourcing, "save_uploaded_files", no_staging)
+        patch.setattr(input_sourcing, "save_uploaded_files", no_staging)
         resp = client.post("/api/v1/media/ingest/jobs", data=data, files=files)
     assert resp.status_code == 409, resp.text
     assert store.get_quick_ingest_source("plan", "source").dispatch_state == "reserved"
@@ -384,7 +341,7 @@ async def test_late_quota_error_cannot_publish_fallback_for_a_new_attempt(attemp
 )
 async def test_direct_scrape_retains_confirmed_duplicate_or_presave_failure(attempt, reply, status, media_id):
     result = await dispatch.receive(attempt, "web", args("web"), AsyncMock(return_value=reply))
-    assert result["item"]["status"] == status and result["item"]["media_id"] == media_id
+    assert result["item"].status == status and result["item"].media_id == media_id
     assert result["result"] == reply
 
 
@@ -422,21 +379,28 @@ def test_empty_native_file_can_retry_the_same_source_after_validation(plan_clien
         source.parent.rmdir()
 
 
-def test_web_summary_quota_denied_before_fetch_permits_explicit_retry(plan_client, monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import media
+def _exhaust_analysis_quota(monkeypatch, retry_after: int) -> None:
+    """Give this user a spent token budget and a known reset interval."""
 
+    async def user_limit(user_id, key):
+        return 20 if user_id == 1 and key == quota_checks.LLM_TOKENS_PER_MONTH_KEY else None
+
+    monkeypatch.setattr(quota_checks, "user_quota", user_limit)
+    monkeypatch.setattr(quota_checks, "llm_tokens_this_month", AsyncMock(return_value=20))
+    monkeypatch.setattr(quota_checks, "seconds_until_utc_month_start", lambda: retry_after)
+
+
+def test_web_summary_quota_denied_before_fetch_permits_explicit_retry(plan_client, monkeypatch):
     store, client = plan_client
     url = "https://example.test/plan-source"
     query = _reserve(store, url, "url")
-    refusal = HTTPException(402, {"error": "limit_exceeded"}, headers={"Retry-After": "60"})
-    monkeypatch.setattr(
-        dispatch.process_web_scraping.usage_quota_deps, "enforce_llm_quota", AsyncMock(side_effect=refusal)
-    )
+    _exhaust_analysis_quota(monkeypatch, retry_after=60)
     scrape = AsyncMock(return_value={"status": "persist-ok", "media_ids": [22]})
-    monkeypatch.setattr(media, "process_web_scraping_task", scrape)
+    monkeypatch.setattr(WebScrapingService, "process_web_scraping_task", scrape)
     body = {"url_input": url, "scrape_method": "Individual URLs", "mode": "persist", "summarize_checkbox": True}
     denied = client.post(_PATH + "/web", params=query, json=body)
     assert denied.status_code == 402 and denied.headers["Retry-After"] == "60"
+    assert denied.json()["detail"]["category"] == "llm_tokens_month"
     scrape.assert_not_awaited()
     item = store.get_quick_ingest_source("plan", "source")
     assert item.status == "failed" and "quota" in item.error_summary.lower()
@@ -459,8 +423,7 @@ def test_fallback_analysis_quota_before_save_projects_retryable_failed_receipt(p
     assert won
     store.finish_quick_ingest_dispatch("plan", "source", transport="jobs", status="fallback_ready", **query)
     monkeypatch.setattr(StorageQuotaService, "check_quota", AsyncMock(return_value=(True, {})))
-    refusal = HTTPException(402, {"error": "limit_exceeded"}, headers={"Retry-After": "80"})
-    monkeypatch.setattr(dispatch.add, "admit_media_analysis", AsyncMock(side_effect=refusal))
+    _exhaust_analysis_quota(monkeypatch, retry_after=80)
     response = client.post(
         _PATH + "/add",
         params=query,
@@ -468,5 +431,6 @@ def test_fallback_analysis_quota_before_save_projects_retryable_failed_receipt(p
         files={"files": ("plan.txt", b"would have been ingested", "text/plain")},
     )
     assert response.status_code == 402 and response.headers["Retry-After"] == "80"
+    assert response.json()["detail"]["category"] == "llm_tokens_month"
     item = store.get_quick_ingest_source("plan", "source")
     assert item.status == "failed" and "quota" in item.error_summary.lower()
