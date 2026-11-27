@@ -48,6 +48,7 @@ Dry-run cleanup requests are intentionally not persisted as idempotent mutations
 | `PATCH` | `/packs/{pack_id}` | Update pack metadata. |
 | `DELETE` | `/packs/{pack_id}` | Soft-delete pack metadata only. |
 | `POST` | `/packs/{pack_id}/cleanup` | Preview or execute generated-file cleanup. |
+| `GET` | `/packs/{pack_id}/cleanup/history` | Read confirmed cleanup attempts for an owned pack. |
 | `POST` | `/packs/{pack_id}/export` | Start a pack export job. |
 | `GET` | `/portability/exports/{job_id}` | Read export status. |
 | `GET` | `/portability/exports/{job_id}/download` | Download a completed export archive. |
@@ -381,7 +382,11 @@ Response:
   "skipped_file_ids": [],
   "blocked_count": 0,
   "cleanup_blocked": [],
-  "reclaimed_bytes": 1536000
+  "reclaimed_bytes": 1536000,
+  "audit_id": null,
+  "unregistered_file_ids": [],
+  "unlinked_file_ids": [],
+  "failed_step": null
 }
 ```
 
@@ -414,6 +419,20 @@ Example approved cleanup request:
 ```
 
 Cleanup skips any generated file still referenced by another item. It also consults a pluggable cleanup blocker provider before deleting files; blocked files are added to `skipped_file_ids`, counted in `blocked_count`, and reported in `cleanup_blocked` with `item_id`, `file_id`, and blocker details.
+
+### Cleanup results and history
+
+A confirmed run returns an `audit_id`. `files_deleted` and `removed_file_count` count confirmed registration removals, and `unregistered_file_ids` lists those files. `reclaimed_bytes` adds the recorded sizes of the removed registrations. `unlinked_file_ids` lists files this run physically unlinked, and `removed_item_ids` lists pack items this run removed.
+
+If a cleanup step fails, cleanup stops and returns HTTP `200` with the effects it confirmed and a `failed_step` containing `item_id`, `file_id`, and `stage`. The stage is `resolve_path`, `unregister`, `remove_item`, or `unlink`. Check `failed_step` before reporting that cleanup succeeded. The same request and key replay the recorded result without repeating any deletions.
+
+Use `GET /packs/{pack_id}/cleanup/history` for the authenticated owner's history, including for soft-deleted packs. The response contains `entries` ordered newest first and a `next_before_id` cursor. Pass the cursor as `before_id` for the next page. `limit` defaults to 50 and accepts 1–100. Each entry includes the owner, pack, timestamps, effective filters, last recorded result, and status. The recorded selection keeps up to the first 300 item IDs. `item_ids_truncated` indicates omitted IDs.
+
+- `completed` means the run reached its normal end, including any reported skips or blockers.
+- `partial_failure` means the run stopped at the recorded `failed_step`.
+- `in_progress` means the run may still be active or may have been interrupted. `selection` and `result` are null until the first checkpoint. If `active_file` is set, verify that file's final state before taking further action. Replaying the original key returns `409` with `idempotency_key_in_progress`.
+
+Dry runs leave no history entry. Older completed receipts retain their recorded totals and may have no selection or per-file details. History omits confirmation strings, idempotency keys, storage paths, and internal errors.
 
 ## Worker And Backend Configuration
 

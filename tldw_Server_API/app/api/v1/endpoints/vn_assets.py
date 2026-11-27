@@ -10,11 +10,12 @@ import uuid
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import aiofiles
 import aiofiles.os
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import Path as PathParam
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -22,6 +23,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetBulkReviewRequest,
+    VNAssetCleanupHistoryResponse,
     VNAssetCleanupRequest,
     VNAssetCleanupResponse,
     VNAssetGenerationPreflightResponse,
@@ -55,6 +57,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
+from tldw_Server_API.app.core.VN_Assets.cleanup_audit import CleanupAudit, cleanup_audit_selection, cleanup_history
 from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
 from tldw_Server_API.app.core.VN_Assets.constants import DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
 from tldw_Server_API.app.core.VN_Assets.jobs import (
@@ -854,67 +857,90 @@ async def cleanup_pack(
     storage_service: Any = Depends(_storage_service),
     blocker_provider: Any | None = Depends(_cleanup_blocker_provider),
 ) -> VNAssetCleanupResponse:
+    scope = "vn_asset_cleanup"
+    resource_id = f"pack:{pack_id}"
     idempotency_key = None
     if not request.dry_run:
         idempotency_key = _require_idempotency_key(request.idempotency_key)
-    payload_hash = canonical_payload_hash(
-        {
-            "pack_id": pack_id,
-            "request": request.model_dump(mode="json", exclude={"idempotency_key"}),
-        }
-    )
-    replay = None
-    if not request.dry_run:
+        payload_hash = canonical_payload_hash(
+            {
+                "pack_id": pack_id,
+                "request": request.model_dump(mode="json", exclude={"idempotency_key"}),
+            }
+        )
         replay = _claim_or_replay_idempotency(
             service,
             owner_user_id=service.owner_user_id,
-            scope="vn_asset_cleanup",
-            resource_id=f"pack:{pack_id}",
+            scope=scope,
+            resource_id=resource_id,
             idempotency_key=idempotency_key,
             payload_hash=payload_hash,
             response_model=VNAssetCleanupResponse,
         )
-    if replay is not None:
-        return replay
+        if replay is not None:
+            return replay
+
     try:
+        audit = None
+        if idempotency_key is not None:
+            receipt = service.repo.get_idempotency_record(
+                owner_user_id=service.owner_user_id,
+                scope=scope,
+                resource_id=resource_id,
+                idempotency_key=idempotency_key,
+            )
+            if receipt is None:
+                raise RuntimeError("cleanup_audit_claim_not_found")
+            audit = CleanupAudit(
+                repo=service.repo,
+                owner_user_id=service.owner_user_id,
+                pack_id=pack_id,
+                audit_id=int(receipt["id"]),
+                selection=cleanup_audit_selection(request),
+            )
         response = await service.cleanup_pack(
             pack_id,
             request,
             files_repo=files_repo,
             unregister_generated_file=storage_service.unregister_generated_file,
             blocker_provider=blocker_provider,
+            checkpoint=audit.save if audit is not None else None,
         )
-    except ValueError as exc:
-        if not request.dry_run:
-            _release_idempotency_claim(
-                service,
-                owner_user_id=service.owner_user_id,
-                scope="vn_asset_cleanup",
-                resource_id=f"pack:{pack_id}",
-                idempotency_key=idempotency_key,
-            )
-        raise _handle_value_error(exc) from exc
-    except Exception:
-        if not request.dry_run:
-            _release_idempotency_claim(
-                service,
-                owner_user_id=service.owner_user_id,
-                scope="vn_asset_cleanup",
-                resource_id=f"pack:{pack_id}",
-                idempotency_key=idempotency_key,
-            )
-        raise
-    if not request.dry_run:
-        _record_idempotency_response(
+        if audit is not None:
+            await audit.save(response, None, complete=True)
+    except Exception as exc:
+        _release_idempotency_claim(
             service,
             owner_user_id=service.owner_user_id,
-            scope="vn_asset_cleanup",
-            resource_id=f"pack:{pack_id}",
+            scope=scope,
+            resource_id=resource_id,
             idempotency_key=idempotency_key,
-            payload_hash=payload_hash,
-            response=response,
         )
+        if isinstance(exc, ValueError):
+            raise _handle_value_error(exc) from exc
+        raise
     return response
+
+
+@router.get(
+    "/packs/{pack_id}/cleanup/history",
+    response_model=VNAssetCleanupHistoryResponse,
+    dependencies=[Depends(rbac_rate_limit("vn_assets.cleanup_history", per_user=True))],
+)
+def get_cleanup_history(
+    pack_id: Annotated[int, PathParam(ge=1, le=2**63 - 1)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before_id: Annotated[int | None, Query(ge=1, le=2**63 - 1)] = None,
+    service: VNAssetPackService = Depends(_service),
+) -> VNAssetCleanupHistoryResponse:
+    """List the authenticated owner's confirmed cleanup attempts for a pack."""
+    try:
+        return cleanup_history(
+            service.repo, owner_user_id=service.owner_user_id, pack_id=pack_id,
+            before_id=before_id, limit=limit,
+        )
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
 
 
 @router.post(

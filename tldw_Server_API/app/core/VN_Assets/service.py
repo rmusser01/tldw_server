@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from loguru import logger
@@ -62,8 +62,11 @@ from tldw_Server_API.app.core.VN_Assets.storage import (
 from tldw_Server_API.app.core.VN_Assets.vn_asset_schemas import (
     VALID_REVIEW_STATUSES,
     VNAssetBulkReviewRequest,
+    VNAssetCleanupFailure,
+    VNAssetCleanupFile,
     VNAssetCleanupRequest,
     VNAssetCleanupResponse,
+    VNAssetCleanupStage,
     VNAssetGenerationRequest,
     VNAssetGenerationStatusResponse,
     VNAssetItemResponse,
@@ -408,9 +411,11 @@ class VNAssetPackService:
         files_repo: Any,
         unregister_generated_file: Any | None = None,
         blocker_provider: Any | None = None,
+        checkpoint: Callable[[VNAssetCleanupResponse, VNAssetCleanupFile | None], Awaitable[None]] | None = None,
     ) -> VNAssetCleanupResponse:
+        """Preview cleanup or checkpoint the confirmed effects of its execution."""
         self._require_pack(pack_id)
-        statuses = _cleanup_statuses(request)
+        statuses = set(request.effective_statuses)
         if invalid_statuses := sorted(statuses - VALID_REVIEW_STATUSES):
             raise ValueError(f"invalid_review_status:{','.join(invalid_statuses)}")
 
@@ -495,60 +500,74 @@ class VNAssetPackService:
                 reclaimed_bytes=candidate_reclaimed_bytes,
             )
 
-        removed_item_ids: list[int] = []
-        files_deleted = 0
-        reclaimed_bytes = 0
-        for item, record, byte_count in candidates:
-            file_id = int(record["id"])
-            storage_path = str(record.get("storage_path") or "")
-            if storage_path:
-                try:
-                    resolve_vn_asset_storage_path(
-                        user_id=self.owner_user_id,
-                        storage_path=storage_path,
-                    )
-                except ValueError:
-                    logger.warning(
-                        "Skipping VN asset cleanup with invalid storage path: pack_id={} item_id={} file_id={}",
-                        pack_id,
-                        item["id"],
-                        file_id,
-                    )
-                    skipped_file_ids.append(file_id)
-                    continue
-
-            if not await _hard_delete_generated_file(
-                files_repo,
-                file_id,
-                unregister_generated_file=unregister_generated_file,
-            ):
-                skipped_file_ids.append(file_id)
-                continue
-
-            item_id = int(item["id"])
-            self.repo.delete_item(item_id)
-            if storage_path:
-                await asyncio.to_thread(
-                    unlink_vn_asset_storage_file,
-                    user_id=self.owner_user_id,
-                    storage_path=storage_path,
-                )
-
-            removed_item_ids.append(item_id)
-            files_deleted += 1
-            reclaimed_bytes += byte_count
-
-        return VNAssetCleanupResponse(
+        result = VNAssetCleanupResponse(
             dry_run=False,
-            removed_item_ids=removed_item_ids,
-            removed_file_count=files_deleted,
             files_would_delete=files_would_delete,
-            files_deleted=files_deleted,
             skipped_file_ids=skipped_file_ids,
             blocked_count=len(cleanup_blocked),
             cleanup_blocked=cleanup_blocked,
-            reclaimed_bytes=reclaimed_bytes,
         )
+        if checkpoint is not None:
+            await checkpoint(result, None)
+
+        for item, record, byte_count in candidates:
+            item_id = int(item["id"])
+            file_id = int(record["id"])
+            storage_path = str(record.get("storage_path") or "")
+            target = VNAssetCleanupFile(item_id=item_id, file_id=file_id)
+            if checkpoint is not None:
+                await checkpoint(result, target)
+            stage: VNAssetCleanupStage = "resolve_path"
+            try:
+                if storage_path:
+                    try:
+                        resolve_vn_asset_storage_path(user_id=self.owner_user_id, storage_path=storage_path)
+                    except ValueError:
+                        logger.warning(
+                            "Skipping VN asset cleanup with invalid storage path: pack_id={} item_id={} file_id={}",
+                            pack_id,
+                            item_id,
+                            file_id,
+                        )
+                        result.skipped_file_ids.append(file_id)
+                        continue
+
+                stage = "unregister"
+                if not await _hard_delete_generated_file(
+                    files_repo,
+                    file_id,
+                    unregister_generated_file=unregister_generated_file,
+                ):
+                    result.skipped_file_ids.append(file_id)
+                    continue
+
+                result.files_deleted += 1
+                result.removed_file_count += 1
+                result.reclaimed_bytes += byte_count
+                result.unregistered_file_ids.append(file_id)
+                stage = "remove_item"
+                if self.repo.delete_item(item_id):
+                    result.removed_item_ids.append(item_id)
+                stage = "unlink"
+                if storage_path and await asyncio.to_thread(
+                    unlink_vn_asset_storage_file, user_id=self.owner_user_id, storage_path=storage_path,
+                ):
+                    result.unlinked_file_ids.append(file_id)
+            except Exception as exc:
+                if checkpoint is None:
+                    raise
+                logger.warning(
+                    "VN asset cleanup stopped at {} for pack_id={} item_id={} file_id={} ({})",
+                    stage,
+                    pack_id,
+                    item_id,
+                    file_id,
+                    type(exc).__name__,
+                )
+                result.failed_step = VNAssetCleanupFailure(item_id=item_id, file_id=file_id, stage=stage)
+                break
+
+        return result
 
     async def upload_item(
         self,
@@ -1401,11 +1420,6 @@ def _planned_output_count_from_budget(value: Any) -> int | None:
     if planned is None:
         return None
     return _strict_int_count(planned, "invalid_generation_budget")
-
-
-def _cleanup_statuses(request: VNAssetCleanupRequest) -> set[str]:
-    statuses = request.item_statuses if request.item_statuses is not None else request.statuses
-    return {str(status) for status in statuses}
 
 
 def _validate_variant_index(slot: Mapping[str, Any], variant_index: int) -> None:

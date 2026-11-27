@@ -1833,6 +1833,7 @@ export type ApiPath =
   | "/api/v1/vn/vn-assets/packs"
   | "/api/v1/vn/vn-assets/packs/{pack_id}"
   | "/api/v1/vn/vn-assets/packs/{pack_id}/cleanup"
+  | "/api/v1/vn/vn-assets/packs/{pack_id}/cleanup/history"
   | "/api/v1/vn/vn-assets/packs/{pack_id}/export"
   | "/api/v1/vn/vn-assets/packs/{pack_id}/generate"
   | "/api/v1/vn/vn-assets/packs/{pack_id}/generation"
