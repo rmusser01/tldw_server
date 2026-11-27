@@ -107,7 +107,7 @@ async def run_moderation_adapter(config: dict[str, Any], context: dict[str, Any]
 
         # Get effective policy (no user_id required for moderation - stateless)
         user_id = resolve_context_user_id(context)
-        policy = service.get_effective_policy(user_id)
+        policy = service.get_effective_policy(user_id, surface=None)
 
         if action == "check":
             # Use check_text for basic flagging

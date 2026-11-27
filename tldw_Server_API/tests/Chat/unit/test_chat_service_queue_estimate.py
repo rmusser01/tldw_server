@@ -55,7 +55,7 @@ class DummyPolicy:
 
 
 class DummyModeration:
-    def get_effective_policy(self, _user_id):
+    def get_effective_policy(self, _user_id, surface=None):
         return DummyPolicy()
 
 

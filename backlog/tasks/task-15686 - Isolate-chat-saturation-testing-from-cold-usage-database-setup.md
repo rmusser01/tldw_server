@@ -1,5 +1,5 @@
 ---
-id: TASK-15652
+id: TASK-15686
 title: Isolate chat saturation testing from cold usage database setup
 status: In Progress
 labels:
@@ -30,6 +30,7 @@ The Chat executors gate on PR #3612 timed out while releasing the successful cal
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: no. This change isolates a test dependency and preserves the chat execution and usage accounting contracts.
 The hosted traceback reached the original saturation assertions and timed out while the successful holder waited for SQLite usage-schema initialization. A controlled stall in the same dependency reproduced the timeout before the fix. The existing usage-log test mock keeps the capacity, rejection, release and no-dispatch assertions unchanged. The controlled case passed after the fix. The entire fallback file passed 378 tests independently. The broader Chat unit selection passed 830 tests with 6 local PostgreSQL variants skipped. Ruff, whitespace and the Bandit baseline comparison passed with no new findings.
+Renumbered on PR #3612 after the Quick Ingest task reached dev with the same number.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

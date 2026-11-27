@@ -65,6 +65,69 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
 import { WizardResultsStep } from "../WizardResultsStep"
 
 describe("WizardResultsStep navigation buttons", () => {
+  it("opens the one newly saved source from the WebUI footer and keeps secondary actions collapsed", () => {
+    const openMedia = vi.fn()
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onOpenMedia={openMedia} onSearchKnowledge={vi.fn()} />)
+    expect(screen.getByRole("heading", { name: "1 saved to Media" })).toBeVisible()
+    const footer = within(screen.getByRole("group", { name: "Result actions" }))
+    fireEvent.click(footer.getByRole("button", { name: "Open in Media" }))
+    expect(openMedia).toHaveBeenCalledWith(wizardHarness.results[0])
+    expect(screen.getByText("Ask added items").closest("details")).not.toHaveAttribute("open")
+    expect(screen.queryByText("Knowledge readiness unconfirmed")).toBeNull()
+  })
+
+  it("retries only recoverable failed sources and counts all outcomes in a mixed WebUI import", () => {
+    const retry = vi.fn()
+    wizardHarness.results.push(
+      { id: "failed", type: "web", url: "https://example.com", status: "error", error: "Timed out", outcome: "failed" },
+      { id: "skip", type: "pdf", status: "ok", outcome: "skipped", mediaId: 55 },
+      { id: "extract", type: "pdf", status: "ok", persisted: false },
+    )
+    wizardHarness.queueItems = [
+      { id: "failed", url: "https://example.com", validation: { valid: true } },
+      { id: "duplicate", url: "https://example.com", validation: { valid: true } },
+    ]
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onRetryItems={retry} />)
+    expect(screen.getByRole("heading", { name: "1 saved to Media" })).toBeVisible()
+    expect(screen.getByText("1 extracted · 1 failed · 2 skipped")).toBeVisible()
+    expect(screen.getByText("Duplicate · skipped")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Retry failed source" }))
+    expect(retry).toHaveBeenCalledWith(["failed"], undefined)
+  })
+
+  it("opens the WebUI batch review with newly saved identities", () => {
+    const review = vi.fn()
+    wizardHarness.results.push({ id: "second", type: "pdf", status: "ok", mediaId: 8 })
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onReviewSavedItems={review} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review 2 saved sources" }))
+    expect(review).toHaveBeenCalledWith([42, 8])
+  })
+
+  it("offers Open drafts only with a confirmed draft handoff", () => {
+    const open = vi.fn()
+    setSinglePdfResult({ mediaId: undefined, persisted: false })
+    const { rerender } = render(<WizardResultsStep oneScreen onClose={vi.fn()} />)
+    expect(screen.getByRole("heading", { name: "1 extracted" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Open drafts" })).toBeNull()
+    rerender(<WizardResultsStep oneScreen onClose={vi.fn()} reviewDrafts={{ count: 1, onOpen: open }} />)
+    expect(screen.getByRole("heading", { name: "1 draft ready for review" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Open drafts" }))
+    expect(open).toHaveBeenCalledOnce()
+  })
+
+  it("keeps confirmed drafts reachable when another source can be retried", () => {
+    const open = vi.fn()
+    setSinglePdfResult({ mediaId: undefined })
+    wizardHarness.results.push({ id: "failed", type: "web", status: "error", error: "Timed out" })
+    wizardHarness.queueItems = [{ id: "failed", url: "https://example.com", validation: { valid: true } }]
+    render(<WizardResultsStep oneScreen onClose={vi.fn()} onRetryItems={vi.fn()}
+      reviewDrafts={{ count: 1, onOpen: open }} />)
+    expect(screen.getByRole("button", { name: "Retry failed source" })).toBeVisible()
+    fireEvent.click(screen.getByText("More actions"))
+    fireEvent.click(screen.getByText("Open drafts"))
+    expect(open).toHaveBeenCalledOnce()
+  })
+
   it.each([1, 2])("labels and opens exactly %s saved items", count => {
     setSinglePdfResult({ mediaId: 42, persisted: true })
     wizardHarness.results = Array.from({ length: count }, (_, index) => ({ ...wizardHarness.results[0], id: `saved-${index}`, mediaId: 42 + index }))

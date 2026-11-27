@@ -200,7 +200,7 @@ class _StubModerationService:
     def __init__(self, policy: _StubPolicy):
         self._policy = policy
 
-    def get_effective_policy(self, user_id: str):
+    def get_effective_policy(self, user_id: str, surface=None):
         return self._policy
 
     def check_text(self, text: str, policy: _StubPolicy, phase: str | None = None):
@@ -220,7 +220,7 @@ class _EvalModerationService:
     def __init__(self, policy: _StubPolicy):
         self._policy = policy
 
-    def get_effective_policy(self, user_id: str):
+    def get_effective_policy(self, user_id: str, surface=None):
         return self._policy
 
     def evaluate_action(self, text: str, policy: _StubPolicy, phase: str):

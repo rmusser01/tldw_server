@@ -1530,7 +1530,7 @@ class TestGuardianModerationProxySanitizers:
         base_policy = ModerationPolicy(enabled=True)
 
         class Base:
-            def get_effective_policy(self, user_id=None):  # noqa: ANN001, ANN202
+            def get_effective_policy(self, user_id=None, surface=None):  # noqa: ANN001, ANN202
                 return base_policy
 
         class Engine:
@@ -1542,7 +1542,7 @@ class TestGuardianModerationProxySanitizers:
         messages: list[str] = []
         sink_id = supervised_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
         try:
-            result = proxy.get_effective_policy("child1")
+            result = proxy.get_effective_policy("child1", surface=None)
         finally:
             supervised_module.logger.remove(sink_id)
 

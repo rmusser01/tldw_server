@@ -7,7 +7,8 @@ import { MEDIA_REVIEW_SELECTION_SETTING, MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING
 import { buildKnowledgeMediaScopePath } from "@/utils/knowledge-scope-handoff"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { type ConferenceRetryRequestItem,
-  buildConferenceRetryRequestItems
+  buildConferenceRetryRequestItems,
+  resolveConferenceDuplicatePolicy,
 } from "@/services/tldw/conference-collections"
 import {
   completedIngestJobIndicatesFailure,
@@ -37,6 +38,7 @@ import {
 } from "@/store/quick-ingest-session"
 import { ConnectionPhase } from "@/types/connection"
 import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { Button, Modal } from "antd"
 import { XCircle } from "lucide-react"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -56,6 +58,7 @@ import { ProcessingStep } from "./QuickIngest/ProcessingStep"
 import { ReviewStep } from "./QuickIngest/ReviewStep"
 import { WizardConfigureStep } from "./QuickIngest/WizardConfigureStep"
 import { WizardResultsStep } from "./QuickIngest/WizardResultsStep"
+import { WebIngestDraft } from "./QuickIngest/WebIngestDraft"
 import {
   DUPLICATE_SKIP_MESSAGE,
   isDbMessageDuplicate,
@@ -86,6 +89,7 @@ import { createReviewDraftsFromResults } from "./hooks/useIngestResults"
 // ---------------------------------------------------------------------------
 
 type QuickIngestWizardModalProps = {
+  oneScreen?: boolean
   open: boolean
   onClose: () => void
   /** When true, automatically skip to processing on mount (compat with old modal). */
@@ -540,7 +544,7 @@ const deriveLifecycleFromWizardState = (
   state: IngestWizardState,
   existingLifecycle?: QuickIngestSessionLifecycle
 ): QuickIngestSessionLifecycle => {
-  if (state.currentStep < 4 && state.processingState.status === "idle") {
+  if (state.currentStep < 4 && state.processingState.status === "idle" && !state.processingState.correctionItemIds?.length) {
     return "draft"
   }
 
@@ -631,7 +635,8 @@ const buildInitialWizardState = (
   session: QuickIngestSessionRecord
 ): IngestWizardState => ({
   currentStep: session.currentStep,
-  highestStep: Math.max(session.currentStep, 1) as IngestWizardState["highestStep"],
+  // A restored correction has already visited Results and can submit its retry.
+  highestStep: session.currentStep <= 3 && session.results.length ? 5 : session.currentStep,
   queueItems: hydrateQueueItems(session.queueItems),
   selectedPreset: session.selectedPreset,
   customBasePreset: session.customBasePreset,
@@ -919,6 +924,7 @@ const buildQuickIngestPayload = (
 // ---------------------------------------------------------------------------
 
 type WizardModalContentProps = {
+  oneScreen: boolean
   open: boolean
   onClose: () => void
   autoProcessQueued?: boolean
@@ -934,6 +940,7 @@ type WizardModalContentProps = {
 }
 
 const WizardModalContent: React.FC<WizardModalContentProps> = ({
+  oneScreen,
   open,
   onClose,
   autoProcessQueued = false,
@@ -963,6 +970,22 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     goNext,
   } = useIngestWizard()
   const { currentStep, queueItems, processingState, presetConfig, results } = state
+  const [mobileViewport, setMobileViewport] = useState<React.CSSProperties>()
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (!oneScreen || !open || state.isMinimized || !viewport) return
+    const measure = () => setMobileViewport({
+      "--qi-visible-height": `${viewport.height}px`,
+      "--qi-visible-top": `${viewport.offsetTop}px`,
+    } as React.CSSProperties)
+    measure()
+    viewport.addEventListener("resize", measure)
+    viewport.addEventListener("scroll", measure)
+    return () => {
+      viewport.removeEventListener("resize", measure)
+      viewport.removeEventListener("scroll", measure)
+    }
+  }, [oneScreen, open, state.isMinimized])
   const [analysisProviderWarning, setAnalysisProviderWarning] = useState<
     string | null
   >(null)
@@ -980,7 +1003,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const [retryIds, setRetryIds] = useState<string[] | null>(() =>
     currentStep === 4 && processingState.perItemProgress.length
       ? processingState.perItemProgress.map(item => item.id)
-      : null
+      : currentStep <= 3 ? processingState.correctionItemIds ?? null : null
   )
   const retryRequestsRef = useRef<ConferenceRetryRequestItem[]>(session.tracking?.retryItems ?? (session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(results) : []))
   const retryCollectionIdRef = useRef<string | undefined>(session.tracking?.collectionId)
@@ -993,6 +1016,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     () => resolveTrackedQueueItems(queueItems, session.tracking),
     [queueItems, session.tracking]
   )
+  const replacementItems = useMemo(() => {
+    if (!presetConfig.storeRemote || presetConfig.reviewBeforeStorage) return []
+    if (presetConfig.common.overwrite_existing) return validQueueItems
+    return validQueueItems.filter(item =>
+      resolveConferenceDuplicatePolicy(item.playlist?.duplicateStatus, item.conferenceOverride?.duplicatePolicy, item.processAgain).forceOverwrite)
+  }, [presetConfig, validQueueItems])
+  const requiresReplacementReview = replacementItems.length > 0
   const trackedJobIdsByItem = useMemo(() => {
     const tracking = session.tracking
     const result = new Map<string, number[]>()
@@ -1774,6 +1804,42 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     }
   }, [handleCancelAll, isProcessingActive, qi, minimize, onClose])
 
+  const beginRetry = useCallback((ids: string[]) => {
+    if (!ids.length) return
+    setRetryIds(ids)
+    const selected = resultsRef.current.filter(item => ids.includes(item.id))
+    const requests = session.tracking?.durableMode === "durable_collection"
+      ? buildConferenceRetryRequestItems(selected) : []
+    retryRequestsRef.current = requests
+    retryCollectionIdRef.current = session.tracking?.collectionId
+    const retained = resultsRef.current.filter(item => !ids.includes(item.id))
+    resultsRef.current = retained
+    setResults(retained)
+    cancelRequestedRef.current = false
+    hasStartedRunRef.current = false
+    activeSessionIdRef.current = null
+    runStartedAtRef.current = null
+    // A reload before acknowledgment must never reattach the previous attempt's jobs.
+    markProcessingTracking({
+      mode: "webui-direct",
+      sessionId: `qi-direct-retry-${crypto.randomUUID()}`,
+      startedAt: Date.now(),
+      ...(retryCollectionIdRef.current && requests.length ? {
+        collectionId: retryCollectionIdRef.current, retryItems: requests, durableMode: "durable_collection" as const,
+      } : {}),
+    })
+    updateProcessingState({
+      status: "running",
+      correctionItemIds: undefined,
+      perItemProgress: ids.map(id => ({
+        id, status: "queued", progressPercent: 0, currentStage: "", estimatedRemaining: 0,
+      })),
+      elapsed: 0,
+      estimatedRemaining: 0,
+    })
+    goToStep(4)
+  }, [goToStep, markProcessingTracking, session.tracking, setResults, updateProcessingState])
+
   // Quick-process callback for AddContentStep (skip to processing with defaults)
   const handleQuickProcess = useCallback(() => {
     if (!operation.isCurrent()) return
@@ -1789,6 +1855,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           "Choose an analysis provider before running ingest analysis."
         )
       )
+      if (oneScreen) return
       if (currentStep === 1) {
         goNext()
       } else {
@@ -1797,14 +1864,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       return
     }
     setAnalysisProviderWarning(null)
-    if (retryIds) {
-      const retained = resultsRef.current.filter(item => !retryIds.includes(item.id))
-      resultsRef.current = retained
-      setResults(retained)
-      hasStartedRunRef.current = false
-      cancelRequestedRef.current = false
-      updateProcessingState({ status: "running", perItemProgress: [], estimatedRemaining: 0 })
-      goToStep(4)
+    if (retryIds || resultsRef.current.length) {
+      beginRetry(validQueueItems.map(item => item.id))
     } else {
       skipToProcessing()
     }
@@ -1818,9 +1879,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.common,
     qi,
     skipToProcessing,
+    oneScreen,
     retryIds,
-    setResults,
-    updateProcessingState,
+    beginRetry,
+    validQueueItems,
     operation,
   ])
 
@@ -1839,10 +1901,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       !isCheckingConnection
     ) {
       autoProcessedRef.current = true
-      handleQuickProcess()
+      // An automatic launch must still let the user resolve prerequisites or review replacements.
+      if (!oneScreen || !requiresReplacementReview) {
+        handleQuickProcess()
+      }
     }
   }, [
     autoProcessQueued,
+    oneScreen,
+    requiresReplacementReview,
     handleQuickProcess,
     isCheckingConnection,
     isOnlineForIngest,
@@ -1854,45 +1921,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       if (!operation.isCurrent() || !isOnlineForIngest || isCheckingConnection) return
       const requested = new Set(requests?.map(item => item.resultId) ?? itemIds)
       const failed = resultsRef.current.filter(item => requested.has(item.id) && canRetryWizardResult(item, queueItems))
-      if (!failed.length) return
-      const ids = failed.map((item) => item.id)
-      setRetryIds(ids)
-      retryRequestsRef.current = session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(failed) : []
-      retryCollectionIdRef.current = session.tracking?.collectionId
-      // Remove only the failed attempt; successes remain available and survive reload.
-      const retained = resultsRef.current.filter(item => !ids.includes(item.id))
-      resultsRef.current = retained
-      setResults(retained)
-      cancelRequestedRef.current = false
-      hasStartedRunRef.current = false
-      activeSessionIdRef.current = null
-      runStartedAtRef.current = null
-      // Persist this attempt before upload/acknowledgment; old jobs must not be reattached.
-      markProcessingTracking({
-        mode: "webui-direct",
-        sessionId: `qi-direct-retry-${crypto.randomUUID()}`,
-        ...(retryCollectionIdRef.current && retryRequestsRef.current.length
-          ? {
-              collectionId: retryCollectionIdRef.current,
-              retryItems: retryRequestsRef.current,
-              durableMode: "durable_collection" as const
-            }
-          : {})
-      })
-      updateProcessingState({
-        status: "running",
-        perItemProgress: ids.map((id) => ({
-          id,
-          status: "queued",
-          progressPercent: 0,
-          currentStage: "",
-          estimatedRemaining: 0
-        })),
-        estimatedRemaining: 0
-      })
-      goToStep(4)
+      beginRetry(failed.map(item => item.id))
     },
-    [goToStep, isCheckingConnection, isOnlineForIngest, operation, queueItems, session.tracking, setResults, markProcessingTracking, updateProcessingState]
+    [beginRetry, isCheckingConnection, isOnlineForIngest, operation, queueItems]
   )
 
   const handleReattach = useCallback((id: string, file: File) => {
@@ -1908,6 +1939,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const handleCorrectItems = useCallback((ids: string[]) => {
     if (!operation.isCurrent()) return
     setRetryIds(ids)
+    updateProcessingState({ correctionItemIds: ids })
     retryRequestsRef.current = session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(resultsRef.current.filter(item => ids.includes(item.id))) : []
     retryCollectionIdRef.current = session.tracking?.collectionId
     goToStep(2)
@@ -1952,14 +1984,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [navigateInPlace, onClose, operation, qi])
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [reviewRetry, setReviewRetry] = useState(0)
-  const reviewCreationRef = useRef<ReturnType<typeof createReviewDraftsFromResults> | null>(null)
+  const reviewSourceKey = useMemo(() => JSON.stringify(results.filter(item => item.status === "ok").map(item => item.id).sort()), [results])
+  const [draftBatch, setDraftBatch] = useState<{ batchId: string; count: number; sourceKey: string } | null>(null)
+  const reviewCreationRef = useRef<{ sourceKey: string; promise: ReturnType<typeof createReviewDraftsFromResults> } | null>(null)
   useEffect(() => {
-    if (!open || currentStep !== 5 || !presetConfig.reviewBeforeStorage || reviewWasOpened() || !results.some(item => item.status === "ok")) return
-    if (!reviewCreationRef.current) {
+    if (!open || currentStep !== 5 || !presetConfig.reviewBeforeStorage || (!oneScreen && reviewWasOpened()) || draftBatch?.sourceKey === reviewSourceKey || !results.some(item => item.status === "ok")) return
+    if (reviewCreationRef.current?.sourceKey !== reviewSourceKey) {
       setReviewError(null)
       const files = new Map<string, File>()
       for (const item of queueItems) if (item.file) files.set(item.id, item.file)
-      reviewCreationRef.current = createReviewDraftsFromResults({
+      const promise = createReviewDraftsFromResults({
         results, files, operation,
         batchId: "quick-ingest-review:" + session.id,
         processingOptions: {
@@ -1969,19 +2003,25 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           advancedValues: { ...presetConfig.advancedValues }
         }
       })
+      reviewCreationRef.current = { sourceKey: reviewSourceKey, promise }
     }
     // Reuse the same write across rerenders and StrictMode, but only the
     // currently open wizard may publish its completion to the UI.
     let cancelled = false
-    void reviewCreationRef.current.then(batch => {
-      if (cancelled || !operation.isCurrent() || !batch || reviewWasOpened()) return
+    void reviewCreationRef.current.promise.then(batch => {
+      if (cancelled || !operation.isCurrent() || !batch) return
+      if (oneScreen) {
+        setDraftBatch({ batchId: batch.batchId, count: batch.draftIds.length, sourceKey: reviewSourceKey })
+        return
+      }
+      if (reviewWasOpened()) return
       markReviewOpened()
       navigate("/content-review?batch=" + encodeURIComponent(batch.batchId), releaseReviewOpened)
     }).catch(error => {
       if (!cancelled && operation.isCurrent()) setReviewError(error instanceof Error ? error.message : "Failed to save review drafts.")
     })
     return () => { cancelled = true }
-  }, [currentStep, navigate, onClose, open, operation, presetConfig, queueItems, results, reviewRetry, session.id, reviewWasOpened, markReviewOpened, releaseReviewOpened])
+  }, [currentStep, draftBatch, navigate, oneScreen, open, operation, presetConfig, queueItems, results, reviewRetry, reviewSourceKey, session.id, reviewWasOpened, markReviewOpened, releaseReviewOpened])
 
   const handleSearchKnowledge = useCallback(
     (mediaIds: number[]) => {
@@ -2056,6 +2096,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Render the current step
   const stepContent = useMemo(() => {
+    if (oneScreen && currentStep <= 3) {
+      return <WebIngestDraft processingItems={validQueueItems} replacementItems={replacementItems}
+        visible={open && !state.isMinimized}
+        isOnlineForIngest={isOnlineForIngest} isCheckingConnection={isCheckingConnection}
+        connectionRecoveryMessage={connectionRecoveryMessage} onRetryConnection={handleRetryConnection}
+        onProcess={handleQuickProcess} />
+    }
     switch (currentStep) {
       case 1:
         return (
@@ -2089,6 +2136,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       case 4:
         return (
           <ProcessingStep
+            oneScreen={oneScreen}
             onCancelAll={handleCancelAll}
             jobStatusUnavailable={jobStatusUnavailable}
             onCancelItem={handleCancelItem}
@@ -2113,6 +2161,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
               </div>
             )}
             <WizardResultsStep
+            oneScreen={oneScreen}
+            reviewDrafts={oneScreen && draftBatch?.sourceKey === reviewSourceKey && draftBatch.count > 0 ? {
+              count: draftBatch.count,
+              onOpen: () => navigate("/content-review?batch=" + encodeURIComponent(draftBatch.batchId)),
+            } : undefined}
             onClose={onClose}
             onIngestMore={handleIngestMore}
             onOpenMedia={handleOpenMedia}
@@ -2131,6 +2184,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     }
   }, [
     connectionRecoveryMessage,
+    oneScreen,
+    draftBatch,
+    reviewSourceKey,
+    replacementItems,
+    navigate,
     currentStep,
     reviewError,
     navigationError,
@@ -2166,18 +2224,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       <Modal
         open={open && !state.isMinimized}
         onCancel={handleCloseAttempt}
-        title={modalTitle}
+        title={oneScreen ? qi("wizard.title", "Quick Ingest") : modalTitle}
         footer={null}
-        width={800}
-        className="quick-ingest-modal quick-ingest-wizard-modal"
+        width={oneScreen ? 680 : 800}
+        centered={oneScreen}
+        classNames={oneScreen ? { wrapper: "qi-web-wrap", container: "qi-web-surface", header: "qi-web-header", body: "qi-web-body" } : undefined}
+        className={oneScreen ? "quick-ingest-modal qi-web-modal" : "quick-ingest-modal quick-ingest-wizard-modal"}
         getContainer={false}
-        styles={QUICK_INGEST_MODAL_STYLES}
+        styles={oneScreen ? { wrapper: mobileViewport } : QUICK_INGEST_MODAL_STYLES}
       >
-        {/* Stepper navigation */}
-        <IngestWizardStepper />
-
-        {/* Step content */}
-        <div className="min-h-[300px]">{stepContent}</div>
+        {oneScreen ? stepContent : <>
+          <IngestWizardStepper />
+          <div className="min-h-[300px]">{stepContent}</div>
+        </>}
       </Modal>
 
       {/* Floating progress widget (renders via portal when minimized) */}
@@ -2191,6 +2250,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 // ---------------------------------------------------------------------------
 
 export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
+  oneScreen = !isExtensionRuntime(),
   open,
   onClose,
   autoProcessQueued = false,
@@ -2329,6 +2389,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       presetMap={presetMap}
     >
       <WizardModalContent
+        oneScreen={oneScreen}
         open={open}
         onClose={onClose}
         autoProcessQueued={autoProcessQueued}

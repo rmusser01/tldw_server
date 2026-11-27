@@ -75,6 +75,7 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
         worker_lifecycle_session=worker_lifecycle_session,
     )
     calls: list[tuple[str, dict[str, object]]] = []
+    app.state.moderation_gateway_hooks_remover = lambda: calls.append(("moderation-remove", {}))
     recorded_totals: list[int] = []
     monotonic_values = iter((10.0, 10.25))
 
@@ -203,6 +204,7 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
         "engine",
         "post-cleanup",
         "final",
+        "moderation-remove",  # after every worker-drain step, so draining workers' calls stay moderated
     ]
     assert calls[0][1]["segment_name"] == "transition_handoff"
     assert calls[2][1]["worker_lifecycle_session"] is worker_lifecycle_session

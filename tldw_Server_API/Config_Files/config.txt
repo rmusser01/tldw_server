@@ -1590,6 +1590,10 @@ per_user_overrides = True
 pii_enabled = False
 categories_enabled =
 runtime_overrides_file = tldw_Server_API/Config_Files/moderation_runtime_overrides.json
+# Per-surface narrowing (can only turn moderation off for a surface; see Docs/Code_Documentation/Moderation-Guardrails.md)
+# surface.rag.generation = false
+# Output stream buffer size in chars (env MODERATION_STREAM_BUFFER_CHARS)
+# stream_buffer_chars = 1024
 
 [Redis]
 redis_enabled = False

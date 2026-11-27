@@ -979,6 +979,10 @@ async def run_tts_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
 
 async def main() -> None:
     """Bootstrap provider policy before accepting standalone TTS jobs."""
+
+    from tldw_Server_API.app.core.Moderation.gateway_hooks import register_moderation_gateway_hooks
+
+    register_moderation_gateway_hooks()
     await refresh_llm_provider_overrides(force=True)
     try:
         start_llm_provider_override_refresh_service()

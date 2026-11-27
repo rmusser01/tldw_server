@@ -259,6 +259,7 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
 // ---------------------------------------------------------------------------
 
 type ProcessingStepProps = {
+  oneScreen?: boolean
   onCancelAll?: () => void
   jobStatusUnavailable?: boolean
   onCancelItem?: ItemRowProps["onCancel"]
@@ -267,7 +268,7 @@ type ProcessingStepProps = {
   onMinimize?: () => void
 }
 
-export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, jobStatusUnavailable, onCancelItem, trackedJobIdsByItem, localItemCancellation = true, onMinimize }) => {
+export const ProcessingStep: React.FC<ProcessingStepProps> = ({ oneScreen = false, onCancelAll, jobStatusUnavailable, onCancelItem, trackedJobIdsByItem, localItemCancellation = true, onMinimize }) => {
   const { t } = useTranslation(["option"])
   const { state, cancelProcessing, cancelItem, minimize } = useIngestWizard()
   const { processingState, queueItems } = state
@@ -470,7 +471,8 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, job
   }, [failedItems, qi])
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <>
+    <div className={oneScreen ? "qi-web-scroll flex flex-col gap-4" : "flex flex-col gap-4 p-4"}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-text">
@@ -675,8 +677,8 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, job
         </div>
       )}
 
-      {/* Action buttons */}
-      <div className="flex items-center justify-end gap-2">
+    </div>
+      <div className={oneScreen ? "qi-web-footer" : "flex items-center justify-end gap-2 px-4 pb-4"}>
         {(processingState.status === "running" ||
           processingState.status === "idle") && (
           <button
@@ -698,7 +700,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, job
           </button>
         )}
       </div>
-    </div>
+    </>
   )
 }
 

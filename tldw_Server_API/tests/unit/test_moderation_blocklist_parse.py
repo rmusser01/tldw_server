@@ -521,7 +521,7 @@ def test_user_override_empty_categories_clears_gating():
             categories_enabled={"pii"},
         )
         svc._user_overrides = {"user1": {"categories_enabled": ""}}
-        pol = svc.get_effective_policy("user1")
+        pol = svc.get_effective_policy("user1", surface=None)
         assert pol.categories_enabled == set()
         act, _, _, cat = svc.evaluate_action("secret", pol, "input")
         assert act == "block"

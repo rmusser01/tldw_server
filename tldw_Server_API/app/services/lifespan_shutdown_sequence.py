@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from fastapi import FastAPI
+from loguru import logger
 
 from tldw_Server_API.app.services.lifecycle_worker_engine import LifecycleWorkerEngine
 from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
@@ -165,6 +166,15 @@ async def run_lifespan_shutdown_sequence(
         test_db_instance_ref=test_db_instance_ref,
         timed_shutdown_segment=timed_shutdown_segment,
     )
+
+    # Last, so calls the draining workers make during shutdown are still moderated.
+    try:
+        remover = getattr(app.state, "moderation_gateway_hooks_remover", None)
+        if remover is not None:
+            remover()
+            app.state.moderation_gateway_hooks_remover = None
+    except Exception as exc:  # noqa: BLE001 - best-effort teardown
+        logger.warning("Moderation gateway hook removal failed: {}", type(exc).__name__)
 
     record_shutdown_timing_total(
         app,

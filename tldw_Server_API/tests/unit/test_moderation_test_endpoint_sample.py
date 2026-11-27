@@ -216,7 +216,7 @@ def test_moderation_test_uses_canonical_evaluate_text_contract(monkeypatch):
             return {"enabled": True, "rules": ["canonical"]}
 
     class _StubService:
-        def get_effective_policy(self, user_id):
+        def get_effective_policy(self, user_id, surface=None):
             assert user_id == "alice"
             return _Policy()
 
@@ -328,7 +328,7 @@ def test_effective_policy_merges_user_rules_and_returns_warn_action():
         }
     }
 
-    policy = svc.get_effective_policy("alice")
+    policy = svc.get_effective_policy("alice", surface=None)
     action, _, sample, _ = svc.evaluate_action("please heads up now", policy, "output")
     assert action == "warn"
     assert sample
@@ -362,7 +362,7 @@ def test_effective_policy_user_rules_apply_with_category_filter_enabled():
         }
     }
 
-    policy = svc.get_effective_policy("alice")
+    policy = svc.get_effective_policy("alice", surface=None)
     action, category, _, _ = svc.evaluate_action("please heads up now", policy, "input")
     flagged, _ = svc.check_text("please heads up now", policy, phase="input")
 
