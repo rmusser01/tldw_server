@@ -17,9 +17,9 @@
 
 **Spec:** `Docs/Design/2026-11-23-session-cap-alert-lock-design.md`, section "3. Account lock and email-link unlock (PR 3)", with "Decisions made by the owner" 3-5 and 7, "Anti-goals", "Known limits", and the owner decisions of 2026-11-25 (below). Section 4 (background pause) is PR 4 and out of scope.
 
-## Questions for the owner
+## Questions for the owner (decided 2026-11-26)
 
-The plan is written with the recommended answer to each. Q1 and Q6 change Task 6; the others change scope.
+The owner chose 1A, confirmed the split (Q2) and no MFA step on unlock (Q6), and accepted the defaults of Q3-Q5 as written. Nothing here blocks execution.
 
 1. **The decision the design left open: an intruder who has the password changes the email and the password.** You decided the unlock link also goes to the previous address for 7 days. That alone leaves a stalemate: both parties get a link, and the intruder still holds the password and the email. Options:
    - **A (recommended, in the plan): the link sent to the previous address takes the account back, and it wins even if the newer address clicked first.** Redeeming it restores that address as the account's email, replaces the password with an unusable one (the owner sets a new one through forgot-password), ends every session and token, suspends every API key created since a week before the email change, removes SSO links added since the email change, and signs the redeemer in. A link sent to the newer address stops working once this has happened.
