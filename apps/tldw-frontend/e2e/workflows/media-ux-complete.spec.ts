@@ -7,7 +7,7 @@ async function screenshot(page: Page, name: string) {
   if (evidence) await page.screenshot({ path: path.join(evidence, `${name}.png`) });
 }
 async function media(page: Page) {
-  await page.goto(`${FRONTEND_URL}/media`);
+  await page.goto(`${FRONTEND_URL}/media`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('button', { name: /Select media:/ }).first()).toBeVisible();
 }
 
@@ -19,21 +19,21 @@ test.describe('Complete Media UX against isolated simulated outcomes', () => {
     page,
   }) => {
     const state = await installBrowserFixture(page, { empty: true, processingPolls: 50 });
-    await page.goto(`${FRONTEND_URL}/media`);
+    await page.goto(`${FRONTEND_URL}/media`, { waitUntil: 'domcontentloaded' });
     const source = 'https://example.com/first-native-source';
     await page.getByPlaceholder('Paste a YouTube URL...').fill(source);
     await page.getByRole('button', { name: 'Ingest', exact: true }).click();
     const wizard = page.getByRole('dialog', { name: 'Quick Ingest' });
     await expect(wizard.getByText(source, { exact: true }).first()).toBeVisible();
-    await wizard.locator('input[type=file]').setInputFiles({
+    await wizard.getByRole('button', { name: 'Files', exact: true }).click();
+    await wizard.getByTestId('qi-file-input').setInputFiles({
       name: 'resume.txt',
       mimeType: 'text/plain',
       buffer: Buffer.from('safe simulated resume source'),
     });
-    await wizard.getByRole('button', { name: /Configure.*2/ }).click();
-    await wizard.getByRole('button', { name: /^Quick/ }).click();
-    await wizard.getByRole('button', { name: 'Next', exact: true }).click();
-    await wizard.getByRole('button', { name: 'Start processing', exact: true }).click();
+    await wizard.getByRole('button', { name: 'Change settings' }).click();
+    await wizard.getByLabel('Processing preset').selectOption('quick');
+    await wizard.getByRole('button', { name: 'Save 2 sources', exact: true }).click();
     await wizard.getByRole('button', { name: 'Minimize to Background', exact: true }).click();
     await expect(wizard).not.toBeVisible();
     await page.getByTestId('media-ingest-jobs-toggle').click();
@@ -44,12 +44,11 @@ test.describe('Complete Media UX against isolated simulated outcomes', () => {
     ).toBeVisible();
     state.processingPolls = 0;
     for (const job of state.jobs.values()) job.polls = 0;
-    await expect(
-      wizard.getByRole('status').filter({ hasText: /added.*excluded\/skipped/ })
-    ).toContainText('2 succeeded (2 saved)', { timeout: 45000 });
+    await expect(wizard.getByRole('heading', { name: '2 saved to Media' })).toBeVisible({ timeout: 45000 });
     await screenshot(page, 'webui-empty-first-source-resumed');
-    await wizard.getByRole('button', { name: 'Review these 2 saved items', exact: true }).click();
+    await wizard.getByRole('button', { name: 'Review 2 saved sources', exact: true }).click();
     await expect(wizard).not.toBeVisible();
+    await expect(page).toHaveURL(/\/media-multi(?:\?|$)/, { timeout: 45_000 });
     await expect(page.getByTestId('media-review-reading-window')).toContainText('of 2 selected');
     await expect(
       page.getByRole('button', { name: 'Chat about selection (2)', exact: true })
@@ -63,39 +62,34 @@ test.describe('Complete Media UX against isolated simulated outcomes', () => {
     await media(page);
     await page.getByRole('button', { name: 'Add media', exact: true }).click();
     const wizard = page.getByRole('dialog', { name: 'Quick Ingest' });
+    await wizard.getByRole('button', { name: 'Links', exact: true }).click();
     await wizard
       .getByRole('textbox', { name: 'Paste URLs input' })
       .fill(
         'https://example.com/saved-one, https://example.com/fail-once\nhttps://example.com/saved-one\ninvalid\nhttps://example.com/a,b'
       );
     await wizard.getByRole('button', { name: 'Add URLs to queue', exact: true }).click();
-    await wizard.locator('input[type=file]').setInputFiles({
+    await wizard.getByRole('button', { name: 'Files', exact: true }).click();
+    await wizard.getByTestId('qi-file-input').setInputFiles({
       name: 'evidence.txt',
       mimeType: 'text/plain',
       buffer: Buffer.from('isolated simulated evidence'),
     });
-    await wizard.getByRole('button', { name: /Configure.*4/ }).click();
-    await wizard.getByRole('button', { name: /^Quick/ }).click();
-    await wizard.getByRole('button', { name: 'Next', exact: true }).click();
+    await wizard.getByRole('button', { name: 'Change settings' }).click();
+    await wizard.getByLabel('Processing preset').selectOption('quick');
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(wizard.getByText(/Replacement disabled:/)).toBeVisible();
+    await expect(wizard.getByRole('switch', { name: /overwrite existing/i })).not.toBeChecked();
+    await expect(wizard.getByRole('status', { name: 'Source counts' })).toHaveText('4 ready · 1 duplicate · 1 invalid');
     await screenshot(page, 'webui-mobile-review');
-    await wizard.getByRole('button', { name: 'Start processing', exact: true }).click();
-    await expect(
-      wizard.getByRole('status').filter({ hasText: /added.*excluded\/skipped/ })
-    ).toContainText('1 failed', { timeout: 45_000 });
-    await expect(
-      wizard.getByRole('status').filter({ hasText: /added.*excluded\/skipped/ })
-    ).toContainText('3 succeeded (3 saved)');
-    await expect(
-      wizard.getByRole('status').filter({ hasText: /added.*excluded\/skipped/ })
-    ).toContainText('2 excluded/skipped');
+    await wizard.getByRole('button', { name: 'Save 4 sources', exact: true }).click();
+    const receipt = wizard.getByTestId('wizard-results-step').getByRole('status').first();
+    await expect(receipt).toContainText('1 failed', { timeout: 45_000 });
+    await expect(receipt).toContainText('3 saved to Media');
+    await expect(receipt).toContainText('2 skipped');
     await wizard
-      .getByRole('button', { name: 'Retry https://example.com/fail-once', exact: true })
+      .getByRole('button', { name: 'Retry failed source', exact: true })
       .click();
-    await expect(
-      wizard.getByRole('status').filter({ hasText: /added.*excluded\/skipped/ })
-    ).toContainText('4 succeeded (4 saved)', {
+    await expect(receipt).toContainText('4 saved to Media', {
       timeout: 45_000,
     });
     expect(state.attempts.get('https://example.com/saved-one')).toBe(1);
@@ -104,9 +98,10 @@ test.describe('Complete Media UX against isolated simulated outcomes', () => {
     expect(
       state.requests.filter((r) => r.method === 'POST' && r.path === '/api/v1/media/ingest/jobs')
     ).toHaveLength(1);
-    await expect(wizard.getByText('Knowledge readiness unconfirmed')).toHaveCount(4);
+    await wizard.getByText('More actions', { exact: true }).click();
+    await expect(wizard.getByText('Availability in Knowledge search depends on source readiness.')).toBeVisible();
     await screenshot(page, 'webui-mobile-results');
-    await wizard.getByRole('button', { name: 'Close the ingest wizard', exact: true }).click();
+    await wizard.getByRole('button', { name: 'Done', exact: true }).click();
     await page.reload();
     await page.getByTestId('media-ingest-jobs-toggle').click();
     const history = page.getByTestId('media-ingest-jobs-panel');
@@ -124,6 +119,7 @@ test.describe('Complete Media UX against isolated simulated outcomes', () => {
       )
       .toBeGreaterThan(0);
     await history.getByRole('button', { name: 'Review 4 saved items', exact: true }).click();
+    await expect(page).toHaveURL(/\/media-multi(?:\?|$)/, { timeout: 45_000 });
     await expect(page.getByTestId('media-review-reading-window')).toContainText('of 4 selected');
     await screenshot(page, 'webui-mobile-saved-set');
   });

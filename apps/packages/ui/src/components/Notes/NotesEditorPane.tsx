@@ -130,6 +130,7 @@ export interface NotesEditorPaneProps {
   title: string
   content: string
   editorDisabled: boolean
+  saveUnavailableReason?: string | null
   isDirty: boolean
   isOnline: boolean
   /** The notes list cannot reach the server; edits fall back to this device (NL-16). */
@@ -359,6 +360,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   title,
   content,
   editorDisabled,
+  saveUnavailableReason = null,
   isDirty,
   notesServerUnavailable = false,
   isOnline,
@@ -711,11 +713,13 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         backlinkMessageId={backlinkMessageId}
         sourceLinks={noteRelations.sources}
         editorDisabled={editorDisabled}
+        saveUnavailableReason={saveUnavailableReason}
         openingLinkedChat={openingLinkedChat}
         editorMode={editorMode}
         hasContent={content.trim().length > 0}
         canSave={
           !editorDisabled &&
+          !saveUnavailableReason &&
           !saving &&
           (title.trim().length > 0 || content.trim().length > 0)
         }

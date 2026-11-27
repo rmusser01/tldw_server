@@ -9,6 +9,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router-dom"
 import OptionNotes from "@/routes/option-notes"
 import { getFlashcardSourceMeta } from "@/components/Flashcards/utils/source-reference"
 import { Modal } from "antd"
+import { tldwAuth } from "@/services/tldw/TldwAuth"
 
 const {
   mockBgRequest,
@@ -343,6 +344,10 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     // NS-01); start every test without the previous test's drafts.
     localStorage.clear()
     canonicalBoundary.userId = 7
+    vi.mocked(tldwAuth.getCurrentUser).mockReset().mockImplementation(async () => ({
+      id: canonicalBoundary.userId,
+      is_active: true
+    } as Awaited<ReturnType<typeof tldwAuth.getCurrentUser>>))
     canonicalBoundary.storage = {
       serverUrl: "https://notes.test",
       authMode: "multi-user",
@@ -356,6 +361,50 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
     seedBaseNotesMock()
+  })
+
+  it("keeps a draft editable but Save unavailable until its initial owner is verified", async () => {
+    const owner = deferred<Awaited<ReturnType<typeof tldwAuth.getCurrentUser>>>()
+    vi.spyOn(tldwAuth, "getCurrentUser").mockImplementation(() => owner.promise)
+    renderPage()
+    await act(async () => {})
+    const content = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+    fireEvent.change(content, { target: { value: "Draft awaiting its verified owner" } })
+
+    expect(content).not.toHaveAttribute("readonly")
+    expect(screen.getByTestId("notes-save-button")).toBeDisabled()
+    expect(screen.getByTestId("notes-save-and-new-button")).toBeDisabled()
+    expect(createCalls()).toHaveLength(0)
+    expect(screen.getByTestId("notes-save-button")).toHaveAccessibleDescription("Saving is unavailable until your account is verified")
+    expect(screen.getByTestId("notes-save-and-new-button")).toHaveAccessibleDescription("Saving is unavailable until your account is verified")
+
+    await act(async () => {
+      owner.resolve({ id: 7, is_active: true } as Awaited<ReturnType<typeof tldwAuth.getCurrentUser>>)
+      await owner.promise
+    })
+    await waitFor(() => expect(screen.getByTestId("notes-save-button")).toBeEnabled())
+    expect(content).toHaveValue("Draft awaiting its verified owner")
+    fireEvent.click(screen.getByTestId("notes-save-button"))
+    await waitFor(() => expect(createCalls()).toHaveLength(1))
+    expect(createCalls()[0][0]).toMatchObject({
+      body: expect.objectContaining({ content: "Draft awaiting its verified owner" }),
+      headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "7" })
+    })
+  })
+
+  it.each(["unavailable", "inactive"])("keeps Save unavailable when the initial owner is %s", async (state) => {
+    const lookup = vi.spyOn(tldwAuth, "getCurrentUser")
+    if (state === "unavailable") lookup.mockRejectedValue(new Error("Owner lookup unavailable"))
+    else lookup.mockResolvedValue({ id: 7, is_active: false } as Awaited<ReturnType<typeof tldwAuth.getCurrentUser>>)
+    renderPage()
+    await act(async () => {})
+    const content = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+    fireEvent.change(content, { target: { value: "Keep this unowned draft" } })
+
+    expect(screen.getByTestId("notes-save-button")).toBeDisabled()
+    expect(screen.getByTestId("notes-save-and-new-button")).toBeDisabled()
+    expect(content).toHaveValue("Keep this unowned draft")
+    expect(createCalls()).toHaveLength(0)
   })
 
   it("opens an owned saved Flashcard Note source through the actual route even outside the list page", async () => {
