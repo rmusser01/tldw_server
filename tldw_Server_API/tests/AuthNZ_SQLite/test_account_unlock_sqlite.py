@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,6 +26,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite._account_lock_fixtures import (  # noqa
 )
 from tldw_Server_API.tests.AuthNZ_SQLite._sessions_http_fixtures import api_key_for, bearer, login
 from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+from tldw_Server_API.tests.AuthNZ_SQLite.test_account_lock_schema_sqlite import _identity_links, _link_identity
 
 pytestmark = pytest.mark.asyncio
 
@@ -35,6 +37,7 @@ FORGOT = "/api/v1/auth/forgot-password"
 SESSIONS = "/api/v1/auth/sessions"
 LOGIN = "/api/v1/auth/login"
 PROFILE = "/api/v1/users/me/profile"
+ME = "/api/v1/users/me"
 KEYS = "/api/v1/users/api-keys"
 OWNER, INTRUDER = "alice@example.com", "new@example.com"
 INVALID_LINK = {"detail": "Invalid magic link token"}
@@ -186,6 +189,42 @@ async def test_take_back_after_the_newer_address_unlocked_first_leaves_the_intru
     for key in (created_key, unsuspended_key):
         refused = ctx.client.get(PROFILE, headers={"X-API-KEY": key})
         assert refused.status_code == 401 and refused.json()["detail"] == INVALID_KEY
+
+
+@pytest.mark.parametrize("locked_again", [False, True], ids=["unlocked", "locked-again"])
+async def test_take_back_link_wins_after_the_intruder_unlocked_and_reverted_the_email(
+    two_user_client, lockable, locked_again
+):
+    """The intruder redeems the newer address's link first, changes the email back to the owner's (the stored
+    previous address is then the email too) and makes a key and an SSO link. The owner's link, mailed with the
+    first lock, still takes the account back, also when the account was locked again meanwhile (TASK-15679)."""
+    ctx = two_user_client
+    await _set_email(ctx.alice_id, INTRUDER, previous=OWNER)
+    _lock(ctx)
+    signed_in = _redeem(ctx, lockable, INTRUDER)
+    assert signed_in.status_code == 200, signed_in.text
+    intruder = signed_in.json()
+    reverted = ctx.client.put(ME, json={"email": OWNER, "current_password": ctx.password}, headers=bearer(intruder))
+    assert reverted.status_code == 200 and reverted.json()["email"] == OWNER, reverted.text
+    assert (await _row(ctx.alice_id))["previous_email"] == OWNER
+    created_key = api_key_for(ctx.client, intruder)
+    alice = SimpleNamespace(pool=await get_db_pool(), user_id=ctx.alice_id)
+    await _link_identity(alice, "intruder")
+    if locked_again:  # a lock now mails one plain link; the take-back link of the first lock is still valid
+        relocked = ctx.client.post(LOCK, headers=bearer(intruder))
+        assert relocked.status_code == 200 and relocked.json()["locked"] is True, relocked.text
+
+    response = _redeem(ctx, lockable, OWNER)
+    assert response.status_code == 200, response.text
+    row = await _row(ctx.alice_id)
+    assert (row["email"], row["previous_email"], row["security_locked_at"]) == (OWNER, None, None)
+    refused = ctx.client.post(LOGIN, data={"username": "alice", "password": ctx.password})
+    assert refused.status_code == 401 and refused.json()["detail"] == "Incorrect username or password"
+    dead_session = ctx.client.get(SESSIONS, headers=bearer(intruder))
+    assert dead_session.status_code == 401 and dead_session.json() == DEAD_TOKEN
+    refused_key = ctx.client.get(PROFILE, headers={"X-API-KEY": created_key})
+    assert refused_key.status_code == 401 and refused_key.json()["detail"] == INVALID_KEY
+    assert await _identity_links(alice) == []
 
 
 async def test_take_back_committed_during_the_other_links_verify_revokes_its_session(

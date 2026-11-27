@@ -418,6 +418,43 @@ async def test_take_back_after_the_newer_address_unlocked_first_leaves_the_intru
     assert [took_back["took_back_address"] for _event, took_back in unlock_audit] == [False, True]
 
 
+@pytest.mark.parametrize("locked_again", [False, True], ids=["unlocked", "locked-again"])
+async def test_take_back_link_wins_after_the_intruder_unlocked_and_reverted_the_email_pg(
+    lock_db, unlock_audit, locked_again
+) -> None:
+    """The intruder unlocks first, changes the email back to the owner's address (the stored previous address
+    is then the email too) and makes a key and an SSO link; the owner's take-back link still wins."""
+    from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
+    from tldw_Server_API.tests.AuthNZ_SQLite.test_account_lock_schema_sqlite import (
+        NEW,
+        _identity_links,
+        _link_identity,
+        _live_session_count,
+        _move_email,
+        _password_verifies,
+    )
+
+    await _move_email(lock_db, NEW)
+    await lock_user(lock_db.user_id)
+    assert await _redeem(lock_db, _unlock_claims(NEW, restores=False)) is True
+    await (await get_session_manager()).create_session(user_id=lock_db.user_id, access_token="a", refresh_token="r")
+    await _move_email(lock_db, OLD)  # inside 7 days, so previous_email stays OLD
+    assert (await _pg_user(lock_db))["previous_email"] == OLD
+    created, keys = await _pg_key(lock_db)
+    await _link_identity(lock_db, "intruder")
+    if locked_again:
+        await lock_user(lock_db.user_id)
+
+    assert await _redeem(lock_db, _unlock_claims(OLD, restores=True)) is True
+    row = await _pg_user(lock_db)
+    assert (row["email"], row["previous_email"], row["security_locked_at"]) == (OLD, None, None)
+    assert await _password_verifies(lock_db) is False
+    assert await _live_session_count(lock_db) == 0
+    assert await keys.validate_api_key(created["key"]) is None
+    assert await _identity_links(lock_db) == []
+    assert [took_back["took_back_address"] for _event, took_back in unlock_audit] == [False, True]
+
+
 async def test_list_users_carries_the_lock_pg(lock_db) -> None:
     from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
     from tldw_Server_API.app.core.AuthNZ.password_service import hash_password

@@ -144,14 +144,24 @@ async def is_user_security_locked(user_id: int) -> bool:
     return user is not None and is_security_locked(user)
 
 
-def security_mail_recipients(user: Mapping[str, Any], *, now: datetime | None = None) -> list[tuple[str, bool]]:
-    """``[(address, is_previous_address)]``: the current email, then the previous one while it is recent."""
-    current = str(user.get("email") or "").strip()
-    recipients = [(current, False)] if current else []
+def _recent_previous_address(user: Mapping[str, Any], now: datetime | None) -> str:
+    """The stored previous address while the email change is inside the 7-day window, else ``""``."""
     previous = str(user.get("previous_email") or "").strip()
     changed_at = parse_iso_utc(user.get("email_changed_at"))
     window_start = (now or datetime.now(timezone.utc)) - timedelta(days=PREVIOUS_ADDRESS_MAIL_DAYS)
-    if previous and previous.lower() != current.lower() and changed_at is not None and changed_at > window_start:
+    return previous if changed_at is not None and changed_at > window_start else ""
+
+
+def security_mail_recipients(user: Mapping[str, Any], *, now: datetime | None = None) -> list[tuple[str, bool]]:
+    """``[(address, is_previous_address)]``: the current email, then the previous one while it is recent.
+
+    A previous address equal to the current one is not listed, so a lock set after an email was changed back
+    mails one plain link (a benign change and change back must not void the password on an ordinary unlock).
+    """
+    current = str(user.get("email") or "").strip()
+    recipients = [(current, False)] if current else []
+    previous = _recent_previous_address(user, now)
+    if previous and previous.lower() != current.lower():
         recipients.append((previous, True))
     return recipients
 
@@ -159,14 +169,15 @@ def security_mail_recipients(user: Mapping[str, Any], *, now: datetime | None = 
 def take_back_address(
     user: Mapping[str, Any], token_payload: Mapping[str, Any], *, now: datetime | None = None
 ) -> str | None:
-    """The token's email when the token restores it and it is the user's recent previous address."""
+    """The token's email when the token restores it and it is the user's recent previous address.
+
+    Also when that address is the email again: an intruder who unlocked first and changed the email back
+    leaves ``previous_email`` set, and the link mailed to it still takes the account back (TASK-15679).
+    """
     if token_payload.get("restore_email") is not True:
         return None
     email = str(token_payload.get("email") or "").strip()
-    for address, is_previous in security_mail_recipients(user, now=now):
-        if is_previous and address.lower() == email.lower():
-            return email
-    return None
+    return email if _same_address(email, _recent_previous_address(user, now)) else None
 
 
 async def set_lock(user_id: int) -> datetime | None:
@@ -351,9 +362,13 @@ async def redeem_unlock(
     user_id = int(user["id"])
     take_back = take_back_address(user, token_payload)
     restores = token_payload.get("restore_email") is True
-    if take_back is None and restores and not _same_address(token_payload.get("email"), user.get("email")):
-        # A take-back link whose window closed since rule 1 never does a plain unlock: the lock stays. One
-        # whose address is the email again (a second link after a completed take-back) unlocks plainly.
+    # A take-back cleared previous_email; a second link to the same address then finds it is the email.
+    second_link = not str(user.get("previous_email") or "").strip() and _same_address(
+        token_payload.get("email"), user.get("email")
+    )
+    if take_back is None and restores and not second_link:
+        # A take-back link whose window closed since rule 1 never does a plain unlock: the lock stays. Only a
+        # second link after a completed take-back unlocks plainly.
         logger.info("Take-back link of user {} is past its window; nothing unlocked", user_id)
         return False
     if await clear_lock(user_id, take_back=take_back) is None:
