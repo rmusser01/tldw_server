@@ -405,6 +405,8 @@ def _create_media_ingest_job(
     if payload.get("source_kind") == "file" and job_key:
         # Collection item IDs are local to each owner's database.
         job_key = f"media-upload:{current_user.id}:{job_key}"
+    elif payload.get("planned_item_id") and job_key:
+        job_key = _collection_url_job_key(str(current_user.id), job_key)
     try:
         return jm.create_job(
             domain="media_ingest",
@@ -580,6 +582,67 @@ def _resolve_batch_or_session_id(
     raise HTTPException(status_code=400, detail="Either batch_id or session_id is required")
 
 
+def _collection_url_job_key(owner: str, key: str) -> str:
+    """Scope the Jobs key while preserving the client-facing collection retry key."""
+    return f"media-collection-url:{len(owner)}:{owner}:{key}"
+
+
+def _url_job_item(row: dict[str, Any], payload: dict[str, Any]) -> MediaIngestJobItem:
+    """Build the submit receipt from its confirmed URL job and collection binding."""
+    return MediaIngestJobItem(
+        id=int(row["id"]), uuid=row.get("uuid"), source=payload["source"], source_kind="url",
+        status=row.get("status"), collection_id=payload.get("collection_id"),
+        planned_item_id=payload.get("planned_item_id"), idempotency_key=payload.get("idempotency_key"),
+    )
+
+
+def _confirmed_url_job_batch(row: dict[str, Any], payload: dict[str, Any], owner: str) -> str:
+    """Verify the persisted owner and source before acknowledging an idempotent URL job."""
+    stored = _normalize_payload(row.get("payload"))
+    if (row.get("archived") or str(row.get("owner_user_id")) != owner or not stored.get("batch_id")
+            or any(stored.get(field) != payload.get(field) for field in
+                   ("source", "source_kind", "collection_id", "planned_item_id", "idempotency_key"))):
+        raise HTTPException(status_code=409, detail="This retry identity does not match an active job for this source.")
+    return str(stored["batch_id"])
+
+
+def _require_exact_replay_group(jm: JobManager, owner: str, batch_id: str, job_ids: set[int]) -> None:
+    """A replay receipt may cancel only its own set of jobs."""
+    members = _collect_jobs_for_batch(jm=jm, batch_id=batch_id, owner_filter=owner, limit=len(job_ids) + 1)
+    if {int(member["id"]) for member in members} != job_ids:
+        raise HTTPException(status_code=409, detail="Retry the original batch together to keep its cancellation scope.")
+
+
+def _existing_collection_url_batch(
+    jm: JobManager, owner: str, queue: str, urls: list[str], collection_id: str | None,
+    planned_ids: list[str], keys: list[str], has_uploads: bool,
+) -> SubmitMediaIngestJobsResponse | None:
+    """Resolve same-owner current and legacy receipts before admitting any new source."""
+    if not urls or not planned_ids or not keys:
+        return None
+    jobs = []
+    groups = set()
+    for url, item_id, key in zip(urls, planned_ids, keys, strict=True):
+        for candidate in (_collection_url_job_key(owner, key), key):
+            row = jm.get_job_or_archived_by_idempotency_key(
+                idempotency_key=candidate, owner_user_id=owner, domain="media_ingest", queue=queue,
+                job_type="media_ingest_item",
+            )
+            if row is not None:
+                payload = {"source": url, "source_kind": "url", "collection_id": collection_id,
+                           "planned_item_id": item_id, "idempotency_key": key}
+                groups.add(_confirmed_url_job_batch(row, payload, owner))
+                jobs.append(_url_job_item(row, payload))
+                break
+    if not jobs:
+        return None
+    if has_uploads or len(jobs) != len(urls) or len(groups) != 1:
+        raise HTTPException(status_code=409, detail="Submit new sources separately from previously accepted jobs.")
+    batch_id = groups.pop()
+    _require_exact_replay_group(jm, owner, batch_id, {job.id for job in jobs})
+    return SubmitMediaIngestJobsResponse(batch_id=batch_id, jobs=jobs)
+
+
 @router.post(
     "/ingest/jobs",
     response_model=SubmitMediaIngestJobsResponse,
@@ -648,8 +711,8 @@ async def submit_media_ingest_jobs(
     first_url_submit_exception: Exception | None = None
     url_failure_count = 0
 
-    url_list = form_data.urls or []
-    valid_url_count = len([url for url in url_list if url and str(url).strip()])
+    url_list = [str(url).strip() for url in form_data.urls or [] if url and str(url).strip()]
+    valid_url_count = len(url_list)
     single_upload = not valid_url_count and len(files or []) == 1
     collection_id_value, planned_item_values, idempotency_key_values = _resolve_submit_bindings(
         url_count=valid_url_count,
@@ -661,11 +724,14 @@ async def submit_media_ingest_jobs(
         idempotency_key=idempotency_key,
         idempotency_keys=idempotency_keys,
     )
+    owner = str(current_user.id)
+    replay = _existing_collection_url_batch(
+        jm, owner, selected_queue, url_list, collection_id_value, planned_item_values, idempotency_key_values, bool(files),
+    )
+    if replay is not None:
+        return replay
 
-    url_index = 0
-    for url in url_list:
-        if not url or not str(url).strip():
-            continue
+    for url_index, url in enumerate(url_list):
         planned_item_id = planned_item_values[url_index] if planned_item_values else None
         item_idempotency_key = idempotency_key_values[url_index] if idempotency_key_values else None
         payload = {
@@ -695,7 +761,19 @@ async def submit_media_ingest_jobs(
             row_id = row.get("id")
             if row_id is None:
                 raise ValueError(f"Job creation returned no id: {row!r}")
+            if item_idempotency_key:
+                actual_batch = _confirmed_url_job_batch(row, payload, owner)
+                if actual_batch != batch_id:
+                    if valid_url_count != 1 or files:
+                        raise HTTPException(status_code=409, detail="This source was accepted in a concurrent batch.")
+                    _require_exact_replay_group(jm, owner, actual_batch, {int(row_id)})
+                    return SubmitMediaIngestJobsResponse(batch_id=actual_batch, jobs=[_url_job_item(row, payload)])
         except Exception as exc:
+            if isinstance(exc, HTTPException) and exc.status_code == 409:
+                if not jobs:
+                    raise
+                errors.append(f"{url}: {exc.detail}")
+                continue
             url_failure_count += 1
             if first_url_submit_exception is None:
                 first_url_submit_exception = exc
@@ -706,21 +784,8 @@ async def submit_media_ingest_jobs(
                 error_summary=error_message,
             )
             errors.append(f"{payload['source']}: {error_message}")
-            url_index += 1
             continue
-        jobs.append(
-            MediaIngestJobItem(
-                id=int(row_id),
-                uuid=row.get("uuid"),
-                source=payload["source"],
-                source_kind="url",
-                status=row.get("status"),
-                collection_id=payload.get("collection_id"),
-                planned_item_id=payload.get("planned_item_id"),
-                idempotency_key=payload.get("idempotency_key"),
-            )
-        )
-        url_index += 1
+        jobs.append(_url_job_item(row, payload))
 
     if files:
         for upload in files:

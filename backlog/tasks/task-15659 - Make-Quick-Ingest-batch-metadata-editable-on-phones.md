@@ -1,7 +1,7 @@
 ---
 id: TASK-15659
 title: Make Quick Ingest batch metadata editable on phones
-status: In Progress
+status: Done
 labels:
 - webui
 - ux
@@ -34,6 +34,7 @@ Follow-up saved per-source-only metadata with the default collection name and ad
 Resolve the cross-review failure path: a partial item plan must stop all ingest dispatches including shared-only edits, and its already-created rows must reflect the failure.
 Also verify the owner and collection binding on URL retry replay, preserve an actual cancellation target when a grouped request reuses jobs, and retain unbound clients’ existing idempotency keys.
 Partial shared-only planning reproduced two unintended uploads. After the correction 80 service tests passed, including both a rejected second row and an accepted second row whose response was lost. All confirmed pending rows become submit_failed and no source is dispatched. Frontend TypeScript, scoped ESLint and whitespace checks passed.
+Bound URL retries now validate the authenticated owner, stored URL and collection item before acknowledgment. Intact replays reuse the original cancellation batch (including same-owner legacy raw keys); known split groups return 409 before new admissions. During a competing admission, already-accepted jobs have a truthful batch and rejected sources are identified individually. Unbound client keys retain their existing storage format. The original implementation reproduced a fresh batch ID on replay. Final verification passed 68 SQLite endpoint, worker and collection tests plus the two focused identity/race regressions after adding an unbound-key assertion. Bandit reports zero application findings; the test-only B106 and the three Ruff import findings match baseline. API guides and published copy agree. Existing Jobs/collection architecture and ADR assessment still apply.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

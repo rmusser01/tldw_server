@@ -220,10 +220,12 @@ def test_submit_media_ingest_jobs_preserves_collection_item_binding(
         *,
         payload,
         batch_group=None,
+        owner_user_id,
         **_kwargs,
     ):
         captured.append({"payload": payload, "batch_group": batch_group})
-        return {"id": len(captured), "uuid": f"u{len(captured)}", "status": "queued"}
+        return {"id": len(captured), "uuid": f"u{len(captured)}", "status": "queued",
+                "payload": payload, "owner_user_id": owner_user_id}
 
     def fake_get_job(self, job_id):
         payload = captured[int(job_id) - 1]["payload"]
@@ -317,6 +319,88 @@ def test_submit_media_ingest_jobs_rejects_mismatched_collection_item_bindings(
 
     assert resp.status_code == 422, resp.text
     assert "planned_item_ids must match the number of URL items" in resp.text
+
+
+def test_collection_url_retries_respect_owner_cancellation_batch_and_legacy_rows(media_ingest_jobs_client, auth_headers):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    client = media_ingest_jobs_client
+    owner = 1
+    client.app.dependency_overrides[get_request_user] = lambda: User(id=owner, username=f"owner-{owner}")
+    urls = ["https://example.test/one.pdf", "https://example.test/two.pdf"]
+    keys = ["conference-retry-11-1", "conference-retry-12-1"]
+
+    def submit(sources, item_ids, item_keys, files=None):
+        return client.post("/api/v1/media/ingest/jobs", headers=auth_headers, files=files, data={
+            "media_type": "pdf", "urls": sources, "media_collection_id": "7",
+            "planned_item_ids": json.dumps(item_ids), "idempotency_keys": json.dumps(item_keys),
+        })
+
+    first = submit(urls, ["11", "12"], keys)
+    assert first.status_code == 200, first.text
+    original = first.json()
+    assert submit(urls, ["11", "12"], keys).json() == original
+    owner = 2
+    other = submit(urls, ["11", "12"], keys)
+    assert other.status_code == 200, other.text
+    assert {job["id"] for job in original["jobs"]}.isdisjoint(job["id"] for job in other.json()["jobs"])
+    assert all(jm.get_job(job["id"])["owner_user_id"] == "2" for job in other.json()["jobs"])
+    assert submit(urls, ["11", "12"], keys).json() == other.json()
+
+    before = len(jm.list_jobs(domain="media_ingest", owner_user_id="2"))
+    mixed = submit(["https://example.test/new.pdf", urls[0]], ["13", "11"], ["new-13", keys[0]])
+    assert mixed.status_code == 409, mixed.text
+    assert len(jm.list_jobs(domain="media_ingest", owner_user_id="2")) == before
+    cancelled = client.post("/api/v1/media/ingest/jobs/cancel", params={"batch_id": other.json()["batch_id"]}, headers=auth_headers)
+    assert cancelled.json()["cancelled"] == 2
+    assert all(jm.get_job(job["id"])["status"] == "queued" for job in original["jobs"])
+
+    legacy_key = "conference-retry-21-1"
+    legacy = jm.create_job(
+        domain="media_ingest", queue="default", job_type="media_ingest_item", owner_user_id="1",
+        idempotency_key=legacy_key, batch_group="older-batch",
+        payload={"source_kind": "url", "source": urls[0], "batch_id": "older-batch", "collection_id": "7",
+                 "planned_item_id": "21", "idempotency_key": legacy_key},
+    )
+    owner = 1
+    replay = submit([urls[0]], ["21"], [legacy_key]).json()
+    assert (replay["batch_id"], replay["jobs"][0]["id"]) == ("older-batch", legacy["id"])
+    owner = 2
+    assert submit([urls[0]], ["21"], [legacy_key]).json()["jobs"][0]["id"] != legacy["id"]
+
+    unbound = client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data={
+        "media_type": "pdf", "urls": urls[0], "idempotency_key": "unbound-client-key",
+    })
+    assert unbound.status_code == 200, unbound.text
+    assert jm.get_job(unbound.json()["jobs"][0]["id"])["idempotency_key"] == "unbound-client-key"
+
+
+def test_collection_url_admission_race_keeps_each_acknowledged_job_in_its_batch(media_ingest_jobs_client, auth_headers, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    client = media_ingest_jobs_client
+    urls = ["https://example.test/first.pdf", "https://example.test/second.pdf"]
+    data = {"media_type": "pdf", "media_collection_id": "7", "urls": urls[1],
+            "planned_item_ids": json.dumps(["12"]), "idempotency_keys": json.dumps(["second"])}
+    original = client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data).json()
+    # Model another request winning admission after our lookup completed.
+    monkeypatch.setattr(JobManager, "get_job_or_archived_by_idempotency_key", lambda *_args, **_kwargs: None)
+    assert client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data).json() == original
+    data.update(urls=urls, planned_item_ids=json.dumps(["11", "12"]), idempotency_keys=json.dumps(["first", "second"]))
+    raced = client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data).json()
+    assert [job["source"] for job in raced["jobs"]] == urls[:1]
+    assert len(raced["errors"]) == 1
+    assert jm.get_job(raced["jobs"][0]["id"])["batch_group"] == raced["batch_id"]
+    assert raced["batch_id"] != original["batch_id"]
+
+    def mismatched_admission(*_args, payload, **_kwargs):
+        return {"id": 999, "uuid": "another-owner", "owner_user_id": "2", "status": "queued", "payload": payload}
+    monkeypatch.setattr(JobManager, "create_job", mismatched_admission)
+    conflict = client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data)
+    assert conflict.status_code == 409
+    assert "another-owner" not in conflict.text
 
 
 def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(
