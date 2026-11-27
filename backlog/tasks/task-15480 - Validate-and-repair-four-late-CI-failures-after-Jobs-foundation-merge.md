@@ -1,7 +1,7 @@
 ---
 id: TASK-15480
 title: Validate and repair four late CI failures after Jobs foundation merge
-status: In Progress
+status: Done
 labels:
 - ci
 - testing
@@ -49,12 +49,13 @@ Fresh affected verification will qualify the rebased source and waiver/authoriza
 Fresh post-rebase verification passed 277 tests, no failures/errors/skips (848 existing warnings): 22 Logging, ten inventory, 212 Docs and 33 quality/task-ratchet cases. Ruff, scoped Black, compilation, whitespace, canonical task normalization and unique IDs pass. Bandit against exact current dev retains three inherited B105 synthetic-secret findings with zero new findings/errors, B101 excluded consistently. Rebase source/helper/config inputs are byte-identical to prior qualified Python trees. Historical old-head hosted core-server-smoke is now confirmed SUCCESS, with no failing check reported; new-head hosted checks remain independently required. PR #3406 remains open at the same independently validated head. Final publication uses the verified c3ccd5a3298b82d9b4f68deced61192e7795f5e4 lease; mark ready and arm normal auto-merge only after the final live review/check refresh.
 2026-11-13: rebased PR #3438 from 983fe26a12 onto live dev 4b6b9ec446. Resolved both generated inventory conflicts and the fallback fixture conflict by retaining newer dev versions, including the queue-drain regression. Retained only the distinct held-lock regression in Python. All 11 old-head dependency setup failures were HTTP 504; dev carries the pinned wheel bootstrap. Dev also carries the MCP spy and AuthNZ membership-context repairs. Dev tree matched #3461 head 7044613f96, with hosted admin-backup-core success after the pool shutdown repair. The historical AuthNZ timeout stack was in the VN quota-lock subprocess; seven exact containing-file and teardown cases pass with real PostgreSQL, no skips. The old timeout cause and full AuthNZ shard are not certified. Fresh focused scope: 152 passes including 63 MCP with autoload disabled. No new ADR; see plan for individual dispositions. Temporarily disarmed auto-merge for rebase, restore after exact-head publication.
 Final rebase qualification: 254 Logging, Docs, task and Python setup action checks passed, no skips. Scoped Ruff, Black, compilation and whitespace passed. Bandit reports no new findings or errors against dev, with three inherited B105 literals and B101 excluded consistently. No source fix was justified for the old AuthNZ timeout after the focused cases passed. The new hosted head must run its own gates.
+2026-11-27 closeout: GitHub records PR #3438 merged into dev on 2026-11-15 as c0ea830d6064422bd49589da6852f7429b510eda. Verified that merge is on current dev and all eight required checks succeeded on final PR head b4b269dcfeed23c4b0c33c2337da15ef46d76352. The earlier full Ubuntu/Python 3.12 suite passed in run 43476417936 on f52c08f91a79c2fa686c10dfea49d37a512345f0, not on the final head. The later full run covered the previously failing Admin backup, AuthNZ, and MCP shards; it does not establish the cause of the historical AuthNZ timeout. The overlapping work in PR #3406 is no longer pending: it merged as ac98eff0d581c01b829a45eaa565f6de14d0ebdc. This is a tracker-only closeout; no new code, CI policy, or architecture decision. Bandit is not applicable to this metadata change.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Validated the original Jobs follow-up failures and independently checked the overlapping repairs. Current dev includes the logging fixture, regenerated inventory, MCP spies, membership context and newer CI setup and pool fixes. PR #3438 retains the held-lock isolation regression and evidence; protected auto-merge remains authorized with the requester summary waiver. Landing remains pending.
+Closed the four late CI dispositions after PR #3438 landed. Dev includes the held-lock isolation regression and the logging, inventory, MCP and AuthNZ fixes without duplicated changes. All eight required checks passed on the final PR head; the full suite passed on the preceding head. Completion backend routing remains a separate phase under ADR-082.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
