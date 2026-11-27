@@ -10,8 +10,9 @@
 
 **Spec:** [Approved design](../specs/2026-11-02-chunker-shared-execution-refactor-design.md).
 
-**ADR:** [Accepted ADR-096](../../ADR/096-chunker-execution-live-context-boundary.md)
-(renumbered from ADR-086 on 2026-11-07; accepted decision unchanged).
+**ADR:** [Accepted ADR-105](../../ADR/105-chunker-execution-live-context-boundary.md)
+(ADR-086 became ADR-096 on 2026-11-07, then ADR-105 on 2026-11-27;
+accepted decision unchanged).
 
 **Tracking:** Implementation `TASK-15416`; completed planning `TASK-15415`; approved design `TASK-15414` (renumbered from colliding TASK-15413). Implementation links this exact plan, spec and ADR rather than executing under a completed planning task.
 
@@ -591,6 +592,44 @@ Fresh hosted verification on PR #3405 remains separate from the upstream
 pass. GitHub reports conflicts with current dev; this draft update does
 not rebase or resolve unrelated conflicts. On the prior head, frontend and
 critical E2E failed at Playwright installation, separately from AuthNZ.
+
+## Dev Rebase Follow-Up (2026-11-27)
+
+The requester authorized rebasing draft PR #3405 onto live dev
+`2053ec5ad4b9f329b1c7828c29d59584396bc795`. The original published tip
+`72725af4c8` is preserved on local backup branch
+`codex/chunker-execution-pre-rebase-20261127`. Replayed all 19 commits.
+Execution production files and the PR's execution tests are byte-identical
+to the old head. The newer tests already on dev are preserved.
+
+- Retain dev's fixture repairs, WebScraping inventory, and four-way AuthNZ
+  partition, including dev's expanded selection and six-matrix contract.
+  The PR still assigns the Workspaces module to the optional matrix and
+  runs it as a separate step in the required backend job.
+- Dev now uses ADR-096 for tiered CI. Renumber the Chunker record alone to
+  ADR-105, preserve the accepted decision and rationale, and refresh
+  published docs with the standard generator. The ADR links the same
+  immutable spec and plan blobs through their rebased, reachable commit.
+  **ADR required: no** new decision; [ADR-105](../../ADR/105-chunker-execution-live-context-boundary.md)
+  continues to govern the extraction.
+- Verify the full Chunking suite, Workspaces, workload ownership, env-read
+  ratchets, and published docs locally before publication. Verify exact-head
+  required checks separately through normal PR CI. Dev PRs use light CI
+  by design; a skipped broad shard is not a verified AuthNZ run.
+
+Local evidence: 1,017 Chunking passed with 21 skips on this environment; 84
+Workspaces passed. The workflow, task-format, env-read, size, and docs
+contracts passed in the combined run; the only failure was the generated
+WebScraping inventory. It reproduced on dev's inputs. Refreshing the two
+artifacts with the existing generator recorded three moved imports, one
+new upstream test import, and five shifted anchors; all 10 inventory
+tests then passed. No scanner, assertion, or source changed. The AuthNZ
+owners cover all 62 files exactly once in each matrix, and the Linux 3.12
+shard selections collect 198, 126, 153, and 216 cases locally. Collection
+does not establish hosted test results or elapsed time.
+
+Keep the PR draft and unarmed. Do not alter required contexts, dispatch a
+required gate, change the merge queue, or change branch rules.
 
 ## Final Verification Commands
 

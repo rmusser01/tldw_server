@@ -1,11 +1,11 @@
-# ADR-096: Chunker Execution Live-Context Boundary
+# ADR-105: Chunker Execution Live-Context Boundary
 
 **Status:** Accepted
 **Date:** 2026-11-02
 **Backfilled from:** not backfilled
 **Decision owner:** Requester + Codex collaboration; explicitly approved 2026-11-02
 **Related task:** TASK-15414 (renumbered from TASK-15413), TASK-15415
-**Related spec/plan:** [Shared execution design (repository source)](https://github.com/rmusser01/tldw_server/blob/b3bfae3ca5c4511e15f0d9ce62b8fc946fa49fab/Docs/superpowers/specs/2026-11-02-chunker-shared-execution-refactor-design.md), [implementation plan (repository source)](https://github.com/rmusser01/tldw_server/blob/b3bfae3ca5c4511e15f0d9ce62b8fc946fa49fab/Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md)
+**Related spec/plan:** [Shared execution design (repository source)](https://github.com/rmusser01/tldw_server/blob/9d5214f2f363f87aec5ba65d7330f10e11f51d97/Docs/superpowers/specs/2026-11-02-chunker-shared-execution-refactor-design.md), [implementation plan (repository source)](https://github.com/rmusser01/tldw_server/blob/9d5214f2f363f87aec5ba65d7330f10e11f51d97/Docs/superpowers/plans/2026-11-02-chunker-shared-execution-refactor.md)
 
 ## Decision
 
