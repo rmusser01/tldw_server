@@ -355,9 +355,10 @@ class _TableColumnProbeConnection:
     def __init__(self, existing: set[str]) -> None:
         self.existing = existing
         self.executed: list[str] = []
+        self.probes: list[tuple[str, str, str]] = []
 
     async def fetchval(self, query: str, table: str, column: str) -> bool:
-        assert "information_schema.columns" in query
+        self.probes.append((query, table, column))
         return column in self.existing
 
     async def execute(self, query: str) -> None:
@@ -379,3 +380,8 @@ def test_account_lock_columns_are_altered_only_when_missing(existing, expected) 
     conn = _TableColumnProbeConnection(existing)
     asyncio.run(pg_migrations_extra._ensure_account_lock_columns(conn))
     assert conn.executed == expected
+    assert [(table, column) for _query, table, column in conn.probes] == [
+        ("users", "security_locked_at"),
+        ("users", "credentials_valid_after"),
+    ]
+    assert all("information_schema.columns" in query for query, _table, _column in conn.probes)
