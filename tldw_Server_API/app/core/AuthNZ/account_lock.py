@@ -14,10 +14,12 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
+from fastapi import HTTPException, status
 from loguru import logger
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventCategory, AuditEventType
@@ -30,16 +32,27 @@ from tldw_Server_API.app.core.AuthNZ.account_lock_errors import (
     StaleCredentialError,
     TakeBackUnavailableError,
 )
+from tldw_Server_API.app.core.AuthNZ.device_label import device_label
+from tldw_Server_API.app.core.AuthNZ.email_service import _mask_email, get_email_service
 from tldw_Server_API.app.core.AuthNZ.exceptions import RollbackSignal, UserRegistrationException
+from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
 from tldw_Server_API.app.core.AuthNZ.repos.federated_identity_repo import FederatedIdentityRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import restore_previous_email
 from tldw_Server_API.app.core.exceptions import ServiceInitializationError
 from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc
 
 __all__ = [
+    "UNLOCK_PURPOSE",
+    "LockAvailability",
+    "LockResult",
+    "lock_account",
+    "lock_availability",
+    "lock_availability_for_user",
+    "send_lock_mail",
     "ACCOUNT_LOCKED_CODE",
     "ACCOUNT_LOCK_REVOKE_REASON",
     "ACCOUNT_RESTORED_REVOKE_REASON",
@@ -60,6 +73,8 @@ __all__ = [
 
 RECENT_API_KEY_DAYS = 7
 PREVIOUS_ADDRESS_MAIL_DAYS = 7  # the window in which update_user_email keeps the previous address
+
+UNLOCK_PURPOSE = "account_unlock"  # the magic-link ``purpose`` claim of an unlock link
 
 _TAKE_BACK_ATTEMPTS = 3
 
@@ -325,3 +340,130 @@ async def unsuspend_api_key(*, user_id: int, key_id: int) -> dict | None:
     row = dict(row)
     row.pop("key_hash", None)
     return row
+
+
+@dataclass(frozen=True)
+class LockAvailability:
+    available: bool
+    reason: str | None
+    sent_to: list[str]  # masked addresses the unlock link would go to
+
+
+@dataclass(frozen=True)
+class LockResult:
+    locked_at: datetime
+    email_sent: bool
+    sent_to: list[str]  # masked addresses that were mailed
+
+
+def lock_availability(user: Mapping[str, Any]) -> LockAvailability:
+    """Whether the user may lock: only when the unlock link can reach a verified address."""
+    mail = get_email_service()
+    recipients = [_mask_email(address) for address, _ in security_mail_recipients(user)]
+    reason = None
+    if get_settings().AUTH_MODE == "single_user":
+        reason = "single_user_mode"
+    elif mail.provider != "smtp":
+        reason = "mail_not_configured"
+    elif mail.public_web_base_url() is None:
+        reason = "public_url_not_configured"
+    elif not user.get("is_verified"):
+        reason = "email_not_verified"
+    return LockAvailability(available=reason is None, reason=reason, sent_to=recipients)
+
+
+async def lock_availability_for_user(user_id: int) -> LockAvailability:
+    """``lock_availability`` of the stored user row (an unknown id is never available)."""
+    return lock_availability(await (await AuthnzUsersRepo.from_pool()).get_user_by_id(int(user_id)) or {})
+
+
+async def send_lock_mail(
+    user: Mapping[str, Any],
+    *,
+    locked_at: datetime | None,
+    device: str,
+    ip_address: str | None,
+    only_address: str | None = None,
+) -> list[str]:
+    """Mail one unlock link per recipient (or only ``only_address``); the masked addresses whose send succeeded."""
+    recipients = security_mail_recipients(user)
+    if only_address is not None:
+        recipients = [r for r in recipients if r[0].lower() == only_address.lower()] or recipients
+    minutes = max(1, int(get_settings().MAGIC_LINK_EXPIRE_MINUTES))
+    jwt = get_jwt_service()
+    mail = get_email_service()
+
+    async def _send(address: str, is_previous: bool) -> bool:
+        try:
+            token = jwt.create_magic_link_token(
+                email=address,
+                user_id=int(user["id"]),
+                expires_in_minutes=minutes,
+                additional_claims={"purpose": UNLOCK_PURPOSE, "restore_email": is_previous},
+            )
+            return bool(
+                await mail.send_account_locked_email(
+                    to_email=address,
+                    username=user.get("username"),
+                    magic_token=token,
+                    expires_in_minutes=minutes,
+                    locked_at=locked_at,
+                    device=device,
+                    ip_address=ip_address,
+                    restores_address=is_previous,
+                )
+            )
+        except _ACCOUNT_LOCK_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning("Lock mail not sent for user {}: {}", user.get("id"), type(exc).__name__)
+            return False
+
+    results = await asyncio.gather(*(_send(address, is_previous) for address, is_previous in recipients))
+    return [_mask_email(address) for (address, _), ok in zip(recipients, results) if ok]
+
+
+async def lock_account(
+    *, user_id: int, acting_session_id: int, ip_address: str | None, user_agent: str | None
+) -> LockResult:
+    """Lock the caller's own account, sign every session out and mail the unlock link."""
+    user = await (await AuthnzUsersRepo.from_pool()).get_user_by_id(int(user_id))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    availability = lock_availability(user)
+    if not availability.available:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "lock_unavailable", "reason": availability.reason},
+        )
+    locked_at = await set_lock(user_id)
+    if locked_at is None:
+        raise AccountSecurityLockedError()
+    try:
+        from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
+
+        manager = await get_session_manager()
+        await manager.revoke_all_user_sessions(user_id, reason=ACCOUNT_LOCK_REVOKE_REASON, revoked_by=user_id)
+    except _ACCOUNT_LOCK_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning("Revoking sessions during lock failed for user {}: {}", user_id, type(exc).__name__)
+    sent_to: list[str] = []
+    try:
+        sent_to = await send_lock_mail(
+            user, locked_at=locked_at, device=device_label(user_agent), ip_address=ip_address
+        )
+    except _ACCOUNT_LOCK_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning("Lock mail failed for user {}: {}", user_id, type(exc).__name__)
+    await write_account_audit(
+        AuditEventType.AUTH_ACCOUNT_LOCKED,
+        user_id=user_id,
+        session_id=acting_session_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    await write_account_audit(
+        AuditEventType.AUTH_ACCOUNT_LOCK_EMAIL_SENT,
+        user_id=user_id,
+        session_id=acting_session_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        metadata={"recipient_count": len(sent_to)},
+    )
+    return LockResult(locked_at=locked_at, email_sent=bool(sent_to), sent_to=sent_to)

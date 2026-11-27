@@ -60,6 +60,8 @@ from tldw_Server_API.app.api.v1.API_Deps.federation_deps import (
 #
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
+    AccountLockResponse,
+    LockAvailabilityResponse,
     DeprecatedUserResponse,
     MagicLinkRequest,
     MagicLinkVerifyRequest,
@@ -82,6 +84,8 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.account_lock import (
     AccountSecurityLockedError,
+    lock_account,
+    lock_availability_for_user,
     StaleCredentialError,
     assert_account_not_locked,
 )
@@ -2313,6 +2317,30 @@ async def revoke_all_sessions(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to revoke sessions"
         ) from e
+
+
+@router.get("/account/lock-availability", response_model=LockAvailabilityResponse)
+async def account_lock_availability(
+    interactive: InteractiveSession = Depends(require_interactive_session),
+) -> LockAvailabilityResponse:
+    """Whether the caller can lock their own account, and the masked addresses the unlock link would go to."""
+    result = await lock_availability_for_user(interactive.user_id)
+    return LockAvailabilityResponse(available=result.available, reason=result.reason, sent_to=result.sent_to)
+
+
+@router.post("/account/lock", response_model=AccountLockResponse)
+async def lock_own_account(
+    http_request: Request,
+    interactive: InteractiveSession = Depends(require_interactive_session),
+) -> AccountLockResponse:
+    """Lock the caller's own account: every session is signed out and only the mailed link unlocks it."""
+    result = await lock_account(
+        user_id=interactive.user_id,
+        acting_session_id=interactive.session_id,
+        ip_address=_auth_request_client_ip(http_request),
+        user_agent=http_request.headers.get("User-Agent"),
+    )
+    return AccountLockResponse(locked=True, email_sent=result.email_sent, sent_to=result.sent_to)
 
 
 #######################################################################################################################

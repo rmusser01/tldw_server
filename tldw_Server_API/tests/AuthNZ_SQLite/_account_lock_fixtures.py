@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import re
+
+import pytest
+
+from tldw_Server_API.app.core.AuthNZ import email_service
 from tldw_Server_API.app.core.AuthNZ.account_lock import ACCOUNT_LOCK_REVOKE_REASON, clear_lock, set_lock
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 
@@ -21,3 +26,26 @@ def assert_locked(response) -> None:
     """The 423 a locked account gets, with its machine-readable code."""
     assert response.status_code == 423, response.text
     assert response.json()["detail"]["code"] == "account_locked"
+
+
+@pytest.fixture
+def lockable(monkeypatch):
+    """SMTP mail with a public URL, delivery captured: the list of ``(to_address, plain_text_body)`` sent."""
+    monkeypatch.setenv("EMAIL_PROVIDER", "smtp")
+    monkeypatch.setenv("PUBLIC_WEB_BASE_URL", "https://app.example.com")
+    monkeypatch.setattr(email_service, "_email_service", None)
+    outbox: list[tuple[str, str]] = []
+
+    def _capture(self, message) -> None:
+        plain = message.get_payload()[0].get_payload(decode=True).decode()
+        outbox.append((message["To"], plain))
+
+    monkeypatch.setattr(email_service.EmailService, "_deliver_smtp_message", _capture)
+    yield outbox
+    email_service._email_service = None
+
+
+def unlock_token_from(outbox: list[tuple[str, str]], address: str) -> str:
+    """The ``token=`` value of the unlock link mailed to ``address``."""
+    body = next(text for to, text in outbox if to == address)
+    return re.search(r"token=([\w.\-]+)", body).group(1)
