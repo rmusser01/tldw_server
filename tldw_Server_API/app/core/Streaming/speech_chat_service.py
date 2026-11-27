@@ -5,7 +5,7 @@ Non-streaming Speech-to-Speech chat orchestration (STT → LLM → TTS).
 
 This module wires together:
   - STT: Audio_Transcription_Lib.transcribe_audio
-  - LLM: adapter registry (async) with legacy fallback
+  - LLM: the gateway (moderation hooks, model validation), with the voice.speech_chat surface
   - TTS: TTSServiceV2.generate_speech
   - Session storage: ChaChaNotes conversations/messages
 
@@ -501,7 +501,7 @@ async def run_speech_chat_turn(
       1. Decode and normalize input audio to mono.
       2. Run STT to obtain a user transcript.
       3. Resolve character + conversation and load recent history.
-      4. Call LLM via adapter registry (async) with legacy fallback.
+      4. Call the LLM through the gateway (surface voice.speech_chat).
       5. Persist user/assistant messages into ChaChaNotes.
       6. Run TTS to synthesize assistant reply and base64-encode it.
     """

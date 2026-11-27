@@ -331,3 +331,125 @@ def test_client_extra_params_cannot_name_the_surface():
     from tldw_Server_API.app.core.Streaming.speech_chat_service import _provider_llm_extra_params
 
     assert _provider_llm_extra_params({"llm_surface": "chat.completions", "seed": 1}) == {"seed": 1}
+
+
+def test_realtime_refusal_reaches_the_client_as_llm_policy_refused():
+    """A refusal at the LLM stage is a coded error event at the session boundary, not a generic failure, and is not retried."""
+    from tldw_Server_API.app.core.Audio.Realtime.models import (
+        AppendAudioCommand,
+        CommitAudioCommand,
+        CreateResponseCommand,
+        RealtimeErrorEvent,
+        ResponseDoneEvent,
+    )
+    from tldw_Server_API.app.core.Audio.Realtime.default_pipeline import RealtimePipelineError
+    from tldw_Server_API.app.core.Audio.Realtime.session import RealtimeSession
+
+    refusal = LLMPolicyRefusal("Input violates moderation policy")
+
+    class _Pipeline:
+        async def transcribe_pcm16(self, audio, *, sample_rate_hz, language):
+            return "forbidden"
+
+        async def stream_turn(self, transcript, *, config):
+            if False:
+                yield None
+            raise RealtimePipelineError(stage="llm", message=str(refusal.detail), cause=refusal, code="llm_policy_refused")
+
+    async def go():
+        session = RealtimeSession(pipeline=_Pipeline())
+        await session.append_audio(AppendAudioCommand(event_id="a", audio=b"\x00\x01"))
+        await session.commit_audio(CommitAudioCommand(event_id="c"))
+        return [e async for e in session.create_response(CreateResponseCommand(event_id="r"))]
+
+    events = asyncio.run(go())
+    errors = [e for e in events if isinstance(e, RealtimeErrorEvent)]
+    assert [e.code for e in errors] == ["llm_policy_refused"]
+    assert errors[0].message == "Input violates moderation policy"
+    done = [e for e in events if isinstance(e, ResponseDoneEvent)][-1]
+    assert done.status == "failed"
+    assert done.status_details["error"]["code"] == "llm_policy_refused"
+
+
+def test_realtime_pipeline_wraps_a_refusal_with_its_code_and_asks_once():
+    """The real pipeline turns the gateway's refusal into a coded llm-stage error and does not ask again."""
+    from tldw_Server_API.app.core.Audio.Realtime.default_pipeline import RealtimePipelineError
+    from tldw_Server_API.app.core.Audio.Realtime.models import RealtimeSessionConfig
+    from tldw_Server_API.tests.Audio.test_realtime_default_pipeline import _pipeline
+
+    calls: list[int] = []
+
+    async def chat(**_kwargs):
+        calls.append(1)
+        raise LLMPolicyRefusal("Input violates moderation policy")
+
+    async def go():
+        return [e async for e in _pipeline(chat_call=chat).stream_turn("forbidden", config=RealtimeSessionConfig())]
+
+    with pytest.raises(RealtimePipelineError) as caught:
+        asyncio.run(go())
+    assert (caught.value.stage, caught.value.code) == ("llm", "llm_policy_refused")
+    assert str(caught.value) == "Input violates moderation policy"
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_speech_chat_sync_adapter_is_admitted_to_the_pool_before_abandonment(monkeypatch, stub_llm_registry):
+    """M1: a sync adapter reached through the gateway on the speech-chat path takes a SYNC_ADAPTER_CALL_POOL slot
+    up front, so a timeout while the default executor is saturated starts no late default-executor work."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+    from tldw_Server_API.app.core.Streaming import speech_chat_service as service
+
+    loop = asyncio.get_running_loop()
+    default_started, provider_started = asyncio.Event(), asyncio.Event()
+    default_release, provider_release = threading.Event(), threading.Event()
+    calls: list[int] = []
+
+    def occupy() -> None:
+        loop.call_soon_threadsafe(default_started.set)
+        default_release.wait(timeout=2.0)
+
+    def blocking_chat(request, *, timeout=None):
+        calls.append(1)
+        loop.call_soon_threadsafe(provider_started.set)
+        provider_release.wait(timeout=2.0)
+        return reply("late")
+
+    monkeypatch.setattr(stub_llm_registry, "chat", blocking_chat)
+    pool = BoundedDaemonPool(1)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
+    previous = getattr(loop, "_default_executor", None)
+    executor = ThreadPoolExecutor(max_workers=1)
+    loop.set_default_executor(executor)
+    default_future = loop.run_in_executor(None, occupy)
+    try:
+        await asyncio.wait_for(default_started.wait(), timeout=1.0)
+        with pytest.raises(TimeoutError):
+            await service.await_bounded_owned_operation(
+                gateway.perform_chat_api_call_async(
+                    api_endpoint=_PROVIDER, model="m", api_key="k", messages_payload=[{"role": "user", "content": "hi"}],
+                    credentials_resolved=False,
+                ),
+                timeout_seconds=0.05,
+                timeout_message="speech-chat-provider-call timed out",
+                on_abandoned=_noop_async,
+                cleanup_claimed=threading.Event(),
+            )
+        assert provider_started.is_set() and calls == [1]
+        assert pool.active_count == 1  # still holding its slot: admitted directly, not queued on the default pool
+    finally:
+        provider_release.set()
+        default_release.set()
+        await asyncio.gather(default_future, return_exceptions=True)
+        executor.shutdown(wait=True)
+        loop.set_default_executor(previous or ThreadPoolExecutor())
+    await asyncio.sleep(0.2)
+    assert calls == [1]
+    assert pool.active_count == 0
+
+
+async def _noop_async() -> None:
+    return None

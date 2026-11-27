@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineTranscriptDone,
     RealtimePipelineTurnDone,
 )
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 
@@ -35,9 +36,12 @@ DEFAULT_REALTIME_OUTPUT_SAMPLE_RATE_HZ = 24000
 class RealtimePipelineError(RuntimeError):
     """Raised when one stage of the realtime pipeline fails."""
 
-    def __init__(self, *, stage: PipelineStage, message: str, cause: BaseException | None = None) -> None:
+    def __init__(
+        self, *, stage: PipelineStage, message: str, cause: BaseException | None = None, code: str | None = None
+    ) -> None:
         super().__init__(message)
         self.stage = stage
+        self.code = code  # client-safe error code when the failure is not a generic one
         self.__cause__ = cause
 
 
@@ -136,6 +140,10 @@ class DefaultRealtimePipeline:
                 await events.put(None)
             except RealtimePipelineError as exc:
                 await events.put(exc)
+            except LLMPolicyRefusal as exc:
+                await events.put(
+                    RealtimePipelineError(stage="llm", message=str(exc.detail), cause=exc, code="llm_policy_refused")
+                )
             except Exception as exc:  # noqa: BLE001 - normalize arbitrary provider failures at the stream boundary
                 await events.put(RealtimePipelineError(stage="llm", message="Realtime LLM streaming failed", cause=exc))
             finally:
