@@ -26,9 +26,10 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsRepository
+from tldw_Server_API.app.core.VN_Assets import service as vn_asset_service
 from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
-from tldw_Server_API.app.core.VN_Platform.idempotency import canonical_multipart_payload_hash
+from tldw_Server_API.app.core.VN_Platform.idempotency import canonical_multipart_payload_hash, canonical_payload_hash
 
 USER_ID = 42
 PNG_BYTES = b"\x89PNG\r\n\x1a\nvn-asset-test"
@@ -709,6 +710,9 @@ def test_cleanup_endpoint_dry_run(
     assert response.status_code == 200
     assert response.json()["files_would_delete"] == 1
     assert fake_generated_files_repo.hard_deleted_ids == []
+    history = client.get(f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup/history")
+    assert history.status_code == 200
+    assert history.json()["entries"] == []
 
 
 def test_cleanup_endpoint_replays_same_idempotency_key_and_conflicts_on_different_payload(
@@ -725,6 +729,8 @@ def test_cleanup_endpoint_replays_same_idempotency_key_and_conflicts_on_differen
     payload = {
         "dry_run": False,
         "statuses": ["hidden"],
+        "item_ids": [asset_with_generated_file.item_id],
+        "confirmation_text": "private-confirmation-input",
         "idempotency_key": "cleanup-pack-1",
     }
 
@@ -747,6 +753,244 @@ def test_cleanup_endpoint_replays_same_idempotency_key_and_conflicts_on_differen
     assert fake_generated_files_repo.hard_deleted_ids == [asset_with_generated_file.file_id]
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+    assert first.json()["unlinked_file_ids"] == [asset_with_generated_file.file_id]
+    history = client.get(f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup/history")
+    assert history.status_code == 200
+    entry, = history.json()["entries"]
+    assert entry["id"] == first.json()["audit_id"]
+    assert entry["owner_user_id"] == USER_ID
+    assert entry["pack_id"] == asset_with_generated_file.pack_id
+    assert entry["status"] == "completed"
+    assert entry["selection"] == {
+        "statuses": ["hidden"], "item_ids": [asset_with_generated_file.item_id],
+        "include_approved": False, "item_ids_truncated": False,
+    }
+    assert entry["result"] == first.json()
+    assert "cleanup-pack-1" not in history.text
+    assert "private-confirmation-input" not in history.text
+    assert "vn_assets/fixture.png" not in history.text
+
+
+def test_cleanup_history_pages_legacy_receipts_and_protects_archived_pack(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack_id = asset_with_generated_file.pack_id
+    payload_hash = canonical_payload_hash({
+        "pack_id": pack_id,
+        "request": VNAssetCleanupRequest(dry_run=False).model_dump(mode="json", exclude={"idempotency_key"}),
+    })
+    receipts = ((USER_ID, "legacy-older", 1), (43, "other-owner", 9), (USER_ID, "legacy-newest", 2))
+    for owner, key, deleted in receipts:
+        repo.create_idempotency_record(
+            owner_user_id=owner, scope="vn_asset_cleanup", resource_id=f"pack:{pack_id}",
+            idempotency_key=key, payload_hash=payload_hash, response={"dry_run": False, "files_deleted": deleted},
+        )
+    repo.soft_delete_pack(pack_id)
+    cleanup_endpoint = f"/api/v1/vn/vn-assets/packs/{pack_id}/cleanup"
+    endpoint = f"{cleanup_endpoint}/history"
+
+    first = client.get(endpoint, params={"limit": 1})
+    assert first.status_code == 200
+    newer, = first.json()["entries"]
+    assert first.json()["next_before_id"] == newer["id"]
+    assert newer["selection"] is None
+    assert newer["result"]["files_deleted"] == 2
+    second = client.get(endpoint, params={"limit": 1, "before_id": newer["id"]})
+    assert second.status_code == 200
+    older, = second.json()["entries"]
+    assert older["id"] < newer["id"] and older["owner_user_id"] == USER_ID
+    assert second.json()["next_before_id"] is None
+
+    replay = client.post(cleanup_endpoint, json={"dry_run": False, "idempotency_key": "legacy-newest"})
+    assert replay.status_code == 200
+    assert replay.json()["files_deleted"] == 2
+    assert fake_generated_files_repo.hard_deleted_ids == []
+
+    async def other_user() -> User:
+        return User(id=43, username="other-owner")
+
+    client.app.dependency_overrides[get_request_user] = other_user
+    assert client.get(endpoint).status_code == 404
+
+
+def test_cleanup_history_shows_claim_interrupted_before_first_checkpoint(
+    client: TestClient, chacha_db: CharactersRAGDB, asset_with_generated_file: SimpleNamespace,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack_id = asset_with_generated_file.pack_id
+    key = "interrupted-before-planning"
+    request = VNAssetCleanupRequest(dry_run=False, idempotency_key=key)
+    payload_hash = canonical_payload_hash({
+        "pack_id": pack_id,
+        "request": request.model_dump(mode="json", exclude={"idempotency_key"}),
+    })
+    receipt, claimed = repo.claim_idempotency_record(
+        owner_user_id=USER_ID, scope="vn_asset_cleanup", resource_id=f"pack:{pack_id}",
+        idempotency_key=key, payload_hash=payload_hash,
+    )
+    assert claimed
+    endpoint = f"/api/v1/vn/vn-assets/packs/{pack_id}/cleanup"
+
+    history = client.get(f"{endpoint}/history")
+
+    assert history.status_code == 200
+    entry, = history.json()["entries"]
+    assert entry["id"] == receipt["id"]
+    assert entry["status"] == "in_progress"
+    assert entry["result"] is None and entry["selection"] is None
+    replay = client.post(endpoint, json=request.model_dump(mode="json"))
+    assert replay.status_code == 409
+    assert replay.json()["detail"]["code"] == "idempotency_key_in_progress"
+
+
+def test_cleanup_rejected_confirmation_leaves_no_history_entry(
+    client: TestClient, asset_with_generated_file: SimpleNamespace,
+) -> None:
+    endpoint = f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup"
+    result = client.post(endpoint, json={
+        "dry_run": False,
+        "statuses": ["approved"],
+        "include_approved": True,
+        "idempotency_key": "missing-confirmation",
+    })
+
+    assert result.status_code == 400
+    assert result.json()["detail"] == "cleanup_confirmation_required"
+    assert client.get(f"{endpoint}/history").json()["entries"] == []
+
+
+def test_cleanup_audit_bounds_retained_selection_without_limiting_cleanup(
+    client: TestClient, chacha_db: CharactersRAGDB, asset_with_generated_file: SimpleNamespace,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    item = asset_with_generated_file
+    repo.update_item_review(item.item_id, review_status="hidden", preferred=False)
+    endpoint = f"/api/v1/vn/vn-assets/packs/{item.pack_id}/cleanup"
+    other_ids = list(range(1001, 1301))
+
+    response = client.post(endpoint, json={
+        "dry_run": False,
+        "idempotency_key": "large-selection",
+        "statuses": ["rejected"],
+        "item_statuses": ["hidden", "hidden"],
+        "item_ids": [*other_ids, item.item_id],
+    })
+
+    assert response.status_code == 200
+    assert response.json()["removed_item_ids"] == [item.item_id]
+    entry, = client.get(f"{endpoint}/history").json()["entries"]
+    assert entry["selection"] == {
+        "statuses": ["hidden"], "item_ids": other_ids,
+        "include_approved": False, "item_ids_truncated": True,
+    }
+
+
+@pytest.mark.parametrize("failure_stage", ["resolve_path", "unlink"])
+def test_cleanup_audit_preserves_partial_effects_and_replays_the_failure(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    outputs_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack_id = asset_with_generated_file.pack_id
+    first_id = asset_with_generated_file.item_id
+    first_file_id = asset_with_generated_file.file_id
+    second_file_id = first_file_id + 1
+    second_path = "vn_assets/second.png"
+    second = repo.create_item(
+        pack_id=pack_id, slot_id=asset_with_generated_file.slot_id, variant_index=1,
+        generated_file_id=second_file_id, mime_type="image/png",
+    )
+    for item_id in (first_id, second["id"]):
+        repo.update_item_review(item_id, review_status="rejected", preferred=False)
+    (outputs_dir / second_path).write_bytes(PNG_BYTES)
+    fake_generated_files_repo.records[second_file_id] = {
+        **fake_generated_files_repo.records[first_file_id],
+        "id": second_file_id, "source_ref": f"vn_asset_item:{second['id']}", "storage_path": second_path,
+    }
+    function_name = {
+        "resolve_path": "resolve_vn_asset_storage_path", "unlink": "unlink_vn_asset_storage_file",
+    }[failure_stage]
+    operate_on_file = getattr(vn_asset_service, function_name)
+    attempted_paths = []
+
+    def fail_second_file(*, user_id: int, storage_path: str) -> Any:
+        attempted_paths.append(storage_path)
+        if storage_path == second_path:
+            raise OSError("private error details")
+        return operate_on_file(user_id=user_id, storage_path=storage_path)
+
+    monkeypatch.setattr(vn_asset_service, function_name, fail_second_file)
+    endpoint = f"/api/v1/vn/vn-assets/packs/{pack_id}/cleanup"
+    payload = {"dry_run": False, "idempotency_key": "partial-cleanup"}
+
+    response = client.post(endpoint, json=payload)
+    replay = client.post(endpoint, json=payload)
+
+    assert response.status_code == replay.status_code == 200
+    result = response.json()
+    assert result == replay.json()
+    removed_item_ids = [first_id, second["id"]] if failure_stage == "unlink" else [first_id]
+    unregistered_file_ids = [first_file_id, second_file_id] if failure_stage == "unlink" else [first_file_id]
+    assert result["files_deleted"] == len(unregistered_file_ids)
+    assert result["unregistered_file_ids"] == unregistered_file_ids
+    assert result["removed_item_ids"] == removed_item_ids
+    assert result["unlinked_file_ids"] == [first_file_id]
+    assert result["failed_step"] == {"item_id": second["id"], "file_id": second_file_id, "stage": failure_stage}
+    assert fake_generated_files_repo.hard_deleted_ids == unregistered_file_ids
+    assert len(attempted_paths) == 2
+    assert (outputs_dir / second_path).exists()
+    history = client.get(f"{endpoint}/history")
+    entry, = history.json()["entries"]
+    assert entry["status"] == "partial_failure" and entry["result"] == result
+    assert "private error details" not in history.text and second_path not in history.text
+
+
+@pytest.mark.parametrize("failed_checkpoint", [2, 3])
+def test_cleanup_audit_retains_started_claim_when_checkpoint_write_fails(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_checkpoint: int,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    item_id = asset_with_generated_file.item_id
+    file_id = asset_with_generated_file.file_id
+    repo.update_item_review(item_id, review_status="rejected", preferred=False)
+    save = VNAssetPacksRepository.save_cleanup_checkpoint
+    count = 0
+
+    def fail_checkpoint(repository: VNAssetPacksRepository, **kwargs: Any) -> None:
+        nonlocal count
+        count += 1
+        if count == failed_checkpoint:
+            raise OSError("audit write interrupted")
+        save(repository, **kwargs)
+
+    monkeypatch.setattr(VNAssetPacksRepository, "save_cleanup_checkpoint", fail_checkpoint)
+    endpoint = f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup"
+    payload = {"dry_run": False, "idempotency_key": "interrupted-cleanup"}
+    with pytest.raises(OSError, match="audit write interrupted"):
+        client.post(endpoint, json=payload)
+
+    entry, = client.get(f"{endpoint}/history").json()["entries"]
+    assert entry["status"] == "in_progress"
+    assert entry["result"]["removed_item_ids"] == []
+    assert entry["active_file"] == ({"item_id": item_id, "file_id": file_id} if failed_checkpoint == 3 else None)
+    retry = client.post(endpoint, json=payload)
+    assert retry.status_code == 409
+    assert retry.json()["detail"]["code"] == "idempotency_key_in_progress"
+    assert fake_generated_files_repo.hard_deleted_ids == ([file_id] if failed_checkpoint == 3 else [])
 
 
 def test_upload_endpoint_creates_draft_uploaded_item(

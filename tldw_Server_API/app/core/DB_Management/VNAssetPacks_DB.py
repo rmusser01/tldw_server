@@ -570,6 +570,60 @@ class VNAssetPacksRepository:
                 raise ValueError("idempotency_key_conflict")
             return record
 
+    def save_cleanup_checkpoint(
+        self,
+        *,
+        audit_id: int,
+        owner_user_id: int,
+        pack_id: int,
+        snapshot: Mapping[str, Any],
+        complete: bool = False,
+    ) -> None:
+        """Persist progress for an admitted cleanup or finalize its replay result."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE vn_asset_idempotency_records
+                SET response_json = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND owner_user_id = ? AND resource_id = ?
+                  AND scope = 'vn_asset_cleanup' AND status = 'in_progress'
+                  AND batch_id IS NULL
+                """,
+                (
+                    _json_dump(dict(snapshot)),
+                    "completed" if complete else "in_progress",
+                    audit_id,
+                    owner_user_id,
+                    f"pack:{pack_id}",
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("cleanup_audit_claim_not_found")
+
+    def list_cleanup_receipts(
+        self,
+        *,
+        owner_user_id: int,
+        pack_id: int,
+        before_id: int | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Read a page of durable cleanup receipts without returning key material."""
+        self._ensure_schema_initialized()
+        cursor = self.db.execute_query(
+            """
+            SELECT id, status, response_json, created_at, updated_at
+            FROM vn_asset_idempotency_records
+            WHERE owner_user_id = ? AND scope = 'vn_asset_cleanup' AND resource_id = ?
+              AND (? IS NULL OR id < ?)
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (owner_user_id, f"pack:{pack_id}", before_id, before_id, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def release_idempotency_claim(
         self,
         *,
@@ -578,7 +632,7 @@ class VNAssetPacksRepository:
         resource_id: str,
         idempotency_key: str,
     ) -> None:
-        """Remove an in-progress idempotency claim after a failed side effect."""
+        """Release a failed claim while retaining started cleanup receipts."""
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
             conn.execute(
@@ -590,6 +644,7 @@ class VNAssetPacksRepository:
                   AND idempotency_key = ?
                   AND status = 'in_progress'
                   AND batch_id IS NULL
+                  AND (scope <> 'vn_asset_cleanup' OR response_json = '{}')
                 """,
                 (owner_user_id, scope, resource_id, idempotency_key),
             )

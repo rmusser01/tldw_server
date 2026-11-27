@@ -334,6 +334,27 @@ class VNAssetCleanupRequest(BaseModel):
     confirmation_token: str | None = None
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
 
+    @property
+    def effective_statuses(self) -> list[ReviewStatus]:
+        """Return the status filter, including the legacy field override."""
+        return self.item_statuses if self.item_statuses is not None else self.statuses
+
+
+class VNAssetCleanupFile(BaseModel):
+    """Pack item and generated-file identities for a cleanup operation."""
+
+    item_id: int
+    file_id: int
+
+
+VNAssetCleanupStage = Literal["resolve_path", "unregister", "remove_item", "unlink"]
+
+
+class VNAssetCleanupFailure(VNAssetCleanupFile):
+    """The cleanup stage that failed for the specified file."""
+
+    stage: VNAssetCleanupStage
+
 
 class VNAssetCleanupResponse(BaseModel):
     """Cleanup result summary."""
@@ -347,6 +368,40 @@ class VNAssetCleanupResponse(BaseModel):
     blocked_count: int = 0
     cleanup_blocked: list[dict[str, Any]] = Field(default_factory=list)
     reclaimed_bytes: int = 0
+    audit_id: int | None = None
+    unregistered_file_ids: list[int] = Field(default_factory=list)
+    unlinked_file_ids: list[int] = Field(default_factory=list)
+    failed_step: VNAssetCleanupFailure | None = None
+
+
+class VNAssetCleanupSelection(BaseModel):
+    """Cleanup filters safe to show in history."""
+
+    statuses: list[ReviewStatus]
+    item_ids: list[int] | None
+    include_approved: bool
+    item_ids_truncated: bool = False
+
+
+class VNAssetCleanupAuditEntry(BaseModel):
+    """Last durable progress or terminal result for a confirmed cleanup."""
+
+    id: int
+    owner_user_id: int
+    pack_id: int
+    created_at: str
+    updated_at: str
+    status: Literal["in_progress", "completed", "partial_failure"]
+    selection: VNAssetCleanupSelection | None
+    result: VNAssetCleanupResponse | None
+    active_file: VNAssetCleanupFile | None
+
+
+class VNAssetCleanupHistoryResponse(BaseModel):
+    """Owner-visible audit entries in descending receipt ID order."""
+
+    entries: list[VNAssetCleanupAuditEntry]
+    next_before_id: int | None = None
 
 
 VALID_REVIEW_STATUSES = {
