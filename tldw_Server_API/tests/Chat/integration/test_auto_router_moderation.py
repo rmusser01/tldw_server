@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import configparser
 import json
 from unittest.mock import patch
 
 import pytest
 
 from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 from tldw_Server_API.app.core.LLM_Calls.routing import runtime
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RouterRequest, RoutingPolicy
 from tldw_Server_API.app.core.Moderation.policy_evaluator import PolicyEvaluator
@@ -36,6 +38,10 @@ _LISTING = {
     ],
     "default_provider": "openrouter",
 }
+# The provider listing reads these (their home modules), so chat.py's bound get_configured_providers is not patched.
+_CONFIG = configparser.ConfigParser()
+_CONFIG.read_string("[API]\nopenrouter_api_key = sk-test\nopenrouter_model = anthropic/claude-4.5-sonnet, openai/gpt-4.1-mini\n")
+_DISCOVERED = ModelDiscoveryResult("ready", ("anthropic/claude-4.5-sonnet", "openai/gpt-4.1-mini"))
 _CHOICE = '{"provider":"openrouter","model":"anthropic/claude-4.5-sonnet"}'
 
 
@@ -63,7 +69,8 @@ def _post(client, headers, content: str, manager: _Manager | None = None):
                 "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.get_configured_providers", return_value=_LISTING),
+        patch("tldw_Server_API.app.core.config.load_comprehensive_config", return_value=_CONFIG),
+        patch("tldw_Server_API.app.core.LLM_Calls.provider_model_inventory.discover_provider_models", return_value=_DISCOVERED),
         patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=manager or _Manager()),
         patch("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", side_effect=fake_execute),
     ):
@@ -81,7 +88,7 @@ def test_router_input_block_returns_400_without_record_failure(
     make_service(enabled=True, **{"surface.chat.completions": False})
     manager = _Manager()
     response, dispatched = _post(client, headers, "this is forbidden", manager)
-    assert response.status_code == 400, response.text
+    assert response.status_code == 400 and response.json() == {"detail": "Input violates moderation policy"}, response.text
     assert stub_llm_registry.requests == [] and manager.failures == [] and dispatched == []
 
 

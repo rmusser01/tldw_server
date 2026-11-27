@@ -56,14 +56,6 @@ async def run_lifespan_shutdown_sequence(
     except startup_guard_exceptions + import_exceptions:
         pass
 
-    try:
-        remover = getattr(app.state, "moderation_gateway_hooks_remover", None)
-        if remover is not None:
-            remover()
-            app.state.moderation_gateway_hooks_remover = None
-    except Exception as exc:  # noqa: BLE001 - best-effort teardown
-        logger.warning("Moderation gateway hook removal failed: {}", type(exc).__name__)
-
     legacy_shutdown_plan: list[Any] = []
     with timed_shutdown_segment(app, "transition_handoff"):
         from tldw_Server_API.app.services.shutdown_transition_handoff import (
@@ -174,6 +166,15 @@ async def run_lifespan_shutdown_sequence(
         test_db_instance_ref=test_db_instance_ref,
         timed_shutdown_segment=timed_shutdown_segment,
     )
+
+    # Last, so calls the draining workers make during shutdown are still moderated.
+    try:
+        remover = getattr(app.state, "moderation_gateway_hooks_remover", None)
+        if remover is not None:
+            remover()
+            app.state.moderation_gateway_hooks_remover = None
+    except Exception as exc:  # noqa: BLE001 - best-effort teardown
+        logger.warning("Moderation gateway hook removal failed: {}", type(exc).__name__)
 
     record_shutdown_timing_total(
         app,
