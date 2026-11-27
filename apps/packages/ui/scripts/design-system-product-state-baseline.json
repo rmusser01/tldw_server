@@ -121,50 +121,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx:Alert#antd-alert-chatworkflowspage-type-error-unable-to-load-t-rynbj",
-    "path": "src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx:Alert#antd-alert-chatworkflowspage-type-info-reusable-template-12ulmlq",
-    "path": "src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx:Alert#antd-alert-chatworkflowspage-type-success-workflow-compl-1ogqfzm",
-    "path": "src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx:Alert#antd-alert-chatworkflowspage-type-warning-workflow-cance-1qyszfm",
-    "path": "src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/ChatWorkflows/ChatWorkflowsPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/ChunkingPlayground/ChunkingCapabilitiesPanel.tsx:Alert",
     "path": "src/components/Option/ChunkingPlayground/ChunkingCapabilitiesPanel.tsx",
     "rule": "antd-product-state-import",

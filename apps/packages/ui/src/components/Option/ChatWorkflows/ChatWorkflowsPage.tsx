@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Empty,
@@ -30,6 +29,7 @@ import { useNavigate } from "react-router-dom"
 import { DismissibleBetaAlert } from "@/components/Common/DismissibleBetaAlert"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
+import { Alert } from "@/components/ui/primitives"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import {
   useCancelChatWorkflowRun,
@@ -709,6 +709,19 @@ export const ChatWorkflowsPage: React.FC = () => {
   }, [draft, notification, startRunMutation, t, validateDraft])
 
   const activeRun = activeRunQuery.data
+  const terminalRunNotice = activeRun?.status === "completed"
+    ? {
+        variant: "success" as const,
+        title: "Workflow complete",
+        description: "The guided run is finished. Continue into chat only if you want to leave the structured flow."
+      }
+    : activeRun?.status === "canceled"
+      ? {
+          variant: "warning" as const,
+          title: "Workflow canceled",
+          description: "This run has been stopped. You can return to the library or launch a fresh run."
+        }
+      : null
   const activeRunPrompt = activeRun?.current_prompt || activeRun?.current_question
   const isDialogueStep = activeRun?.current_step_kind === "dialogue_round_step"
   const runHistoryMessages = buildRunHistoryMessages(
@@ -863,6 +876,12 @@ export const ChatWorkflowsPage: React.FC = () => {
         className="mb-6"
       />
 
+      <p role="status" aria-label="Workflow run status" aria-atomic="true" className="sr-only">
+        {activeTab === "run" && activeRunId && !activeRunQuery.isError && terminalRunNotice
+          ? `${terminalRunNotice.title}. ${terminalRunNotice.description}`
+          : null}
+      </p>
+
       <Tabs
         activeKey={activeTab}
         destroyOnHidden
@@ -874,11 +893,14 @@ export const ChatWorkflowsPage: React.FC = () => {
             children: (
               <div className="space-y-4">
                 <Alert
-                  type="info"
-                  showIcon
-                  title="Reusable templates"
-                  description="Keep authored workflows here, then launch a guided run whenever you want the assistant to ask one question at a time."
-                />
+                  variant="info"
+                  aria-live="off"
+                  title={<span className="text-text">Reusable templates</span>}
+                >
+                  <span className="text-text">
+                    Keep authored workflows here, then launch a guided run whenever you want the assistant to ask one question at a time.
+                  </span>
+                </Alert>
                 {templatesQuery.isLoading ? (
                   <div className="flex min-h-[240px] items-center justify-center">
                     <Spin />
@@ -1475,11 +1497,13 @@ export const ChatWorkflowsPage: React.FC = () => {
               </div>
             ) : activeRunQuery.isError ? (
               <Alert
-                type="error"
-                showIcon
-                title="Unable to load the active workflow run."
-                description={activeRunQuery.error?.message || "Try starting the run again."}
-              />
+                variant="error"
+                title={<span className="text-text">Unable to load the active workflow run.</span>}
+              >
+                <span className="text-text">
+                  {activeRunQuery.error?.message || "Try starting the run again."}
+                </span>
+              </Alert>
             ) : activeRun ? (
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
                 <Card
@@ -1525,23 +1549,17 @@ export const ChatWorkflowsPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {activeRun.status === "completed" ? (
-                      <Alert
-                        type="success"
-                        showIcon
-                        title="Workflow complete"
-                        description="The guided run is finished. Continue into chat only if you want to leave the structured flow."
-                      />
-                    ) : null}
-
-                    {activeRun.status === "canceled" ? (
-                      <Alert
-                        type="warning"
-                        showIcon
-                        title="Workflow canceled"
-                        description="This run has been stopped. You can return to the library or launch a fresh run."
-                      />
-                    ) : null}
+                    {terminalRunNotice && (
+                      <div aria-hidden="true">
+                        <Alert
+                          variant={terminalRunNotice.variant}
+                          aria-live="off"
+                          title={<span className="text-text">{terminalRunNotice.title}</span>}
+                        >
+                          <span className="text-text">{terminalRunNotice.description}</span>
+                        </Alert>
+                      </div>
+                    )}
 
                     <Card size="small" title="Run history" className="border border-border bg-surface">
                       {runHistoryMessages.length === 0 ? (
