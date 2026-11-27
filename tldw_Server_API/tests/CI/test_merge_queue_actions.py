@@ -142,7 +142,7 @@ class FakeGh:
                  reread=None, dispatch_refused=(), rebase_lag=1, disarm_error=False, line_page_size=None,
                  late_runs=None, late_statuses=None, dispatch_status=422,
                  late_nodes=None, rebase_error_text="gh: rebase refused (HTTP 422)", approve_error=None, rerun_error=None,
-                 run_status=None, behind_by=None):
+                 run_status=None, behind_by=None, license_runs=None):
         self.nodes = {n["number"]: n for n in nodes}
         self.checks = checks or {}
         self.statuses = statuses or {}
@@ -164,6 +164,8 @@ class FakeGh:
         self.run_status = run_status or {}
         self.run_reads = {}
         self.behind_by = behind_by or {}
+        self.license_runs = license_runs or []
+        self.license_requests = []
         self.line_reads = 0
         self.runs_reads = {}
         self.statuses_reads = {}
@@ -252,6 +254,11 @@ class FakeGh:
         return items[(page - 1) * mq.PER_PAGE:page * mq.PER_PAGE]
 
     def rest(self, method, path, fields=None):
+        if method == "GET" and f"/actions/workflows/{LICENSE_GATE}/runs?" in path:
+            self.license_requests.append(path)
+            status = re.search(r"[?&]status=([^&]+)", path).group(1)
+            runs = [r for r in self.license_runs if r["status"] == status]
+            return {"total_count": len(runs), "workflow_runs": self._page(runs, path)}
         if method == "GET" and "/check-runs" in path:
             self.reads += 1
             assert "filter=all" in path, "a re-run's earlier failure must stay visible"
@@ -454,7 +461,7 @@ def test_a_failed_license_status_retries_only_the_license_gate_on_dev():
     gh = FakeGh([_node(5, state="BLOCKED")], **_green(statuses=[_status("failure", url=None)]))
     decision = _run(gh)[0][1]
     assert (decision.kind, decision.links) == ("retry", ())
-    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "5"})]
+    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "5", "inputs[head]": OLD})]
     comment = next(c for c in gh.calls if c[0] == "comment")
     assert comment[2] == (f"<!-- merge-queue:retry-{LICENSE}:{OLD} -->\nMerge queue: {LICENSE} failed once on "
                           f"`{OLD[:10]}`; dispatched the license gate on `dev` again.")
@@ -775,6 +782,108 @@ def test_a_license_status_that_turned_pending_since_the_decision_is_not_dispatch
     assert gh.calls == []
 
 
+def _license_dispatch():
+    """A dispatch runs dev's commit; its title identifies the intended PR head."""
+    return _run_of(
+        LICENSE_GATE, 91, status="queued", event="workflow_dispatch",
+        head_branch="dev", head_sha="c" * 40, head_repository={"full_name": mq.REPO},
+        display_title=f"Frontend license gate: PR #1 at {OLD}",
+    )
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress", "waiting", "requested", "pending"])
+@pytest.mark.parametrize("prior_status", [None, "failure"], ids=["missing", "retry"])
+def test_a_live_license_dispatch_without_a_posted_status_is_not_replaced(status, prior_status):
+    run = _license_dispatch()
+    run["status"] = status
+    statuses = [] if prior_status is None else [_status(prior_status)]
+    gh = FakeGh([_node(1, state="BLOCKED")], license_runs=[run], **_green(statuses=statuses))
+
+    assert _run(gh)[0][1].contexts == (LICENSE,)
+    assert gh.calls == [], "a queued dispatch must survive until its runner can post the policy status"
+    assert gh.license_requests
+    assert all("event=workflow_dispatch" in path and "branch=dev" in path
+               and "head_sha=" not in path for path in gh.license_requests)
+
+
+@pytest.mark.parametrize("changes", [
+    {"display_title": f"Frontend license gate: PR #2 at {OLD}"},
+    {"display_title": f"Frontend license gate: PR #1 at {NEW}"},
+    {"display_title": "Frontend License Gate Audit"},
+    {"display_title": "Frontend license gate: PR #1 at unbound"},
+    {"head_branch": "feature"},
+    {"head_repository": {"full_name": "someone/fork"}},
+    {"path": ".github/workflows/other.yml"},
+    {"event": "pull_request_target"},
+    {"status": "completed", "conclusion": "success"},
+    {"status": "completed", "conclusion": "cancelled"},
+], ids=["other-pr", "old-head", "old-title", "manual-unbound", "other-ref", "fork", "other-workflow",
+        "other-event", "completed", "cancelled"])
+def test_an_unrelated_or_finished_license_dispatch_does_not_block_a_needed_request(changes):
+    run = {**_license_dispatch(), **changes}
+    gh = FakeGh([_node(1, state="BLOCKED")], license_runs=[run], **_green(statuses=[]))
+
+    _run(gh)
+
+    assert [c[1] for c in gh.dispatched()] == [LICENSE_GATE]
+
+
+def test_a_matching_license_dispatch_on_a_later_page_is_not_replaced():
+    unrelated = [{**_license_dispatch(), "id": i, "display_title": f"other PR {i}"}
+                 for i in range(mq.PER_PAGE)]
+    gh = FakeGh([_node(1, state="BLOCKED")], license_runs=[*unrelated, _license_dispatch()],
+                **_green(statuses=[]))
+
+    _run(gh)
+
+    assert gh.calls == []
+
+
+def test_reusing_a_license_dispatch_still_starts_an_unrelated_held_gate():
+    gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [_held(35, "e2e-required.yml")]},
+                license_runs=[_license_dispatch()])
+
+    mq.apply(gh, _pr_state(), mq.Action("start", "missing contexts", contexts=(LICENSE, E2E)),
+             lambda message: None, lambda seconds: None, lambda: NOW)
+
+    assert gh.calls == [("approve", "35")]
+
+
+def test_a_queued_license_dispatch_that_starts_between_api_reads_is_not_replaced():
+    run = _license_dispatch()
+
+    class Starting(FakeGh):
+        def rest(self, method, path, fields=None):
+            result = super().rest(method, path, fields)
+            if method == "GET" and f"/actions/workflows/{LICENSE_GATE}/runs?" in path:
+                run["status"] = "in_progress"
+            return result
+
+    gh = Starting([_node(1, state="BLOCKED")], license_runs=[run], **_green(statuses=[]))
+
+    _run(gh)
+
+    assert gh.calls == []
+
+
+@pytest.mark.parametrize("incomplete", [False, True], ids=["api-error", "page-cap"])
+def test_unreadable_live_license_dispatches_fail_before_any_replacement(incomplete):
+    class Unreadable(FakeGh):
+        def rest(self, method, path, fields=None):
+            if method == "GET" and f"/actions/workflows/{LICENSE_GATE}/runs?" in path:
+                if incomplete:
+                    return {"total_count": mq.PER_PAGE * (mq.MAX_PAGES + 1),
+                            "workflow_runs": [_license_dispatch()] * mq.PER_PAGE}
+                raise mq.GhError("gh: Server Error (HTTP 502)")
+            return super().rest(method, path, fields)
+
+    gh = Unreadable([_node(1, state="BLOCKED")], **_green(statuses=[]))
+
+    with pytest.raises(mq.GhError):
+        _run(gh)
+    assert gh.calls == []
+
+
 # --- refused dispatches ----------------------------------------------------------------------
 
 
@@ -922,7 +1031,7 @@ def test_gh_argument_typing():
     assert kick_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/workflows/security-required.yml/dispatches",
                          "-f", "ref=dev", "-f", "inputs[queue_kick]=true", "-f", "inputs[wait_run]=42"]
     assert license_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/workflows/frontend-license-gate.yml/dispatches",
-                            "-f", "ref=dev", "-f", "inputs[pr]=7"]
+                            "-f", "ref=dev", "-f", "inputs[pr]=7", "-f", f"inputs[head]={OLD}"]
     assert approve_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/runs/31/approve"]
     assert rerun_args == ["api", "-X", "POST", f"repos/{mq.REPO}/actions/runs/31/rerun-failed-jobs"]
 
@@ -992,7 +1101,7 @@ def test_main_drives_the_real_gh_argv_end_to_end(monkeypatch, tmp_path, server_c
     mutating = [a for a in seen if a[3:4] in (["POST"], ["DELETE"]) or a[4:5] == [f"query={mq.REBASE_MUTATION}"]]
     assert mutating[0] == ["gh", "api", "graphql", "-f", f"query={mq.REBASE_MUTATION}", "-f", "id=PR_7", "-f", f"oid={OLD}"]
     assert mutating[1] == ["gh", "api", "-X", "POST", f"{repo}/actions/workflows/frontend-license-gate.yml/dispatches",
-                           "-f", "ref=dev", "-f", "inputs[pr]=7"]
+                           "-f", "ref=dev", "-f", "inputs[pr]=7", "-f", f"inputs[head]={NEW}"]
     approvals = [31 + i for i in range(len(GATE_FILES))]
     deletions = [40, 41]
     if server_ci_required:
@@ -1199,7 +1308,7 @@ def test_rebase_dispatches_the_license_then_approves_exactly_the_gates_then_clea
     assert _run(gh)[0][1].kind == "rebase"
     calls = gh.calls
     assert calls[0] == ("rebase", "PR_1", OLD)
-    license_at = calls.index(("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1"}))
+    license_at = calls.index(("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1", "inputs[head]": NEW}))
     approvals = [i for i, c in enumerate(calls) if c[0] == "approve"]
     assert sorted(calls[i][1] for i in approvals) == sorted(str(r["id"]) for r in held)
     assert license_at < min(approvals), "spec 4.4: the license is dispatched before any gate is approved"
@@ -1332,7 +1441,7 @@ def test_start_approves_a_held_gate_run_the_decide_step_could_not_approve():
 def test_start_dispatches_a_missing_license_on_dev_and_nothing_for_the_gates_that_have_runs():
     gh = FakeGh([_node(1, state="BLOCKED")], **_green(statuses=[]))
     assert _run(gh)[0][1].contexts == (LICENSE,)
-    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1"})]
+    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1", "inputs[head]": OLD})]
 
 
 def test_start_with_no_run_at_all_warns_then_evicts_after_the_gap():
@@ -1546,7 +1655,7 @@ def test_a_missing_license_is_dispatched_while_the_gates_run():
     gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [_run_of("e2e-required.yml", 70)]},
                 **_green({E2E: None}, statuses=[]))
     assert _run(gh)[0][1].contexts == (LICENSE,)
-    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1"})]
+    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1", "inputs[head]": OLD})]
 
 
 def test_a_non_gate_held_run_listed_after_the_first_cleanup_is_deleted_too():
@@ -1721,7 +1830,7 @@ def test_missing_contexts_are_started_without_any_gate_dispatch():
                 **_green({CONTAINER: "cancelled"}, statuses=[]))
     decision = _run(gh)[0][1]
     assert (decision.kind, decision.contexts) == ("start", (CONTAINER, LICENSE))
-    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1"})]
+    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1", "inputs[head]": OLD})]
     assert ("rerun", "71", "all") in gh.calls
 
 
@@ -1746,7 +1855,7 @@ def test_on_mode_rebases_the_front_only():
     gh = FakeGh([_node(1), _node(2, armed="2026-10-04T11:00:00Z")], runs=runs)
     _run(gh)
     assert [c for c in gh.calls if c[0] == "rebase"] == [("rebase", "PR_1", OLD)]
-    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1"})]
+    assert gh.dispatched() == [("dispatch", LICENSE_GATE, {"ref": "dev", "inputs[pr]": "1", "inputs[head]": NEW})]
     assert [c for c in gh.calls if c[0] == "cancel"] == [("cancel", "11"), ("cancel", "12")]
     comment = next(c for c in gh.calls if c[0] == "comment")
     assert comment[1] == 1 and f"<!-- merge-queue:rebased:{NEW} -->" in comment[2]
@@ -1818,7 +1927,7 @@ def test_the_queue_never_dispatches_a_check_context():
 def _assert_only_allowed_dispatches(gh):
     for _, workflow, fields in gh.dispatched():
         assert fields["ref"] == "dev", fields
-        license_call = workflow == LICENSE_GATE and set(fields) == {"ref", "inputs[pr]"}
+        license_call = workflow == LICENSE_GATE and set(fields) == {"ref", "inputs[pr]", "inputs[head]"}
         kick = (workflow == "security-required.yml" and fields.get("inputs[queue_kick]") == "true"
                 and set(fields) <= {"ref", "inputs[queue_kick]", "inputs[wait_run]"})
         assert license_call or kick, (workflow, fields)

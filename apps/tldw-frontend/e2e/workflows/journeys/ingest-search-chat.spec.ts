@@ -85,16 +85,19 @@ test.describe('Ingest -> Search -> Chat journey', () => {
           const fileName = `${runId}-${fixture}.txt`;
           const filePath = testInfo.outputPath(fileName);
           await writeFile(filePath, text, 'utf8');
-          await ingestAndWaitForReady(page, { file: filePath });
-          // Never accept the helper's job/batch/unknown media-ID fallback.
+          const id = await ingestAndWaitForReady(page, { file: filePath });
           await page
             .getByRole('dialog', { name: /quick ingest/i })
-            .getByRole('button', { name: /^Open .+ in Media$/i })
+            .getByRole('group', { name: 'Result actions', exact: true })
+            .getByRole('button', { name: 'Open in Media', exact: true })
             .click();
-          await expect(page).toHaveURL(/\/media\?[^#]*\bid=\d+/);
-          const id = new URL(page.url()).searchParams.get('id')!;
+          await expect(page).toHaveURL(
+            url => url.pathname === '/media' && url.searchParams.get('id') === id
+          );
           const record = await apiGet(`/api/v1/media/${id}`);
           const savedSource = readMediaRecord(record, id, text, runId);
+          await expect(page.getByRole('region', { name: 'Media content', exact: true }))
+            .toContainText(text.trim());
           owned.push(savedSource);
           evidence[fixture] = {
             id,

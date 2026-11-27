@@ -64,6 +64,8 @@ const nextTypeDefaults = (
 }
 
 type WizardConfigureStepProps = {
+  inline?: boolean
+  expanded?: boolean
   processingItems?: WizardQueueItem[]
   isStepVisible?: boolean
   analysisProviderWarning?: string | null
@@ -72,6 +74,8 @@ type WizardConfigureStepProps = {
 
 export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
   processingItems,
+  inline = false,
+  expanded = false,
   isStepVisible = true,
   analysisProviderWarning = null,
   focusAnalysisProvider = false,
@@ -111,13 +115,14 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
   >(null)
   const [showAdvanced, setShowAdvanced] = React.useState(false)
   const [attemptedNext, setAttemptedNext] = React.useState(false)
+  const [editingProvider, setEditingProvider] = React.useState(false)
   const requiredAnalysisProviderWarning = getQuickIngestAnalysisProviderWarning({
     common: presetConfig.common,
     advancedValues: presetConfig.advancedValues,
   })
   const visibleAnalysisProviderWarning =
     analysisProviderWarning ||
-    (attemptedNext && requiredAnalysisProviderWarning
+    ((inline || attemptedNext) && requiredAnalysisProviderWarning
       ? qi("analysisProvider.required", requiredAnalysisProviderWarning)
       : null)
   const handleNext = () => {
@@ -158,13 +163,14 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
   const normalizedTranscriptionModel =
     typeof rawTranscriptionModel === "string" ? rawTranscriptionModel.trim() : ""
   const shouldLoadTranscriptionModels =
-    hasTranscriptionItems && isStepVisible
+    hasTranscriptionItems && isStepVisible && (!inline || (expanded && showAdvanced))
   const normalizedAnalysisProvider =
     typeof presetConfig.advancedValues?.api_name === "string"
       ? presetConfig.advancedValues.api_name.trim()
       : ""
   const shouldLoadAnalysisProviders =
-    isStepVisible && presetConfig.common.perform_analysis
+    isStepVisible && presetConfig.common.perform_analysis &&
+    (!inline || expanded || Boolean(requiredAnalysisProviderWarning) || editingProvider)
 
   React.useEffect(() => {
     if (focusAnalysisProvider) {
@@ -630,15 +636,129 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
     }
   }, [presetConfig.reviewBeforeStorage, presetConfig.storeRemote, setCustomOptions])
 
+  const providerField = presetConfig.common.perform_analysis ? (
+    <div className="rounded-md border border-border bg-surface2 p-3">
+      <label
+        id="quick-ingest-analysis-provider-label"
+        htmlFor="quick-ingest-analysis-provider"
+        className="mb-1 block text-sm font-medium text-text"
+      >
+        {qi("analysisProvider.label", "Analysis provider")}
+      </label>
+      <AutoComplete
+        ref={analysisProviderRef}
+        id="quick-ingest-analysis-provider"
+        className="w-full"
+        aria-label={qi("analysisProvider.label", "Analysis provider")}
+        aria-describedby={`quick-ingest-analysis-provider-help${visibleAnalysisProviderWarning ? " quick-ingest-analysis-provider-warning" : ""}`}
+        aria-invalid={visibleAnalysisProviderWarning ? true : undefined}
+        autoFocus={focusAnalysisProvider}
+        value={normalizedAnalysisProvider}
+        options={analysisProviderOptions}
+        allowClear
+        placeholder={qi(
+          "analysisProvider.placeholder",
+          "Choose or enter a provider"
+        )}
+        notFoundContent={
+          analysisProvidersLoading
+            ? qi(
+                "analysisProvider.loading",
+                "Loading configured providers…"
+              )
+            : qi(
+                "analysisProvider.empty",
+                "No configured providers found. Enter a provider name."
+              )
+        }
+        onFocus={inline ? () => setEditingProvider(true) : undefined}
+        onBlur={inline ? () => setEditingProvider(false) : undefined}
+        onChange={handleAnalysisProviderChange}
+        onClear={() => handleAnalysisProviderChange("")}
+      />
+      <p
+        id="quick-ingest-analysis-provider-help"
+        className="mt-1 text-xs text-text-muted"
+      >
+        {qi(
+          "analysisProvider.help",
+          "Configured providers are suggestions. This choice is only for this ingest."
+        )}
+      </p>
+      {visibleAnalysisProviderWarning ? (
+        <p
+          id="quick-ingest-analysis-provider-warning"
+          role="alert"
+          aria-live="assertive"
+          className="mt-1 text-xs text-danger"
+        >
+          {visibleAnalysisProviderWarning}
+        </p>
+      ) : null}
+      {inline && requiredAnalysisProviderWarning && (
+        <Button type="link" className="!h-auto !px-0 !py-1" onClick={() => handleAnalysisToggle(false)}>
+          {qi("oneScreen.skipAnalysis", "Skip analysis for this import")}
+        </Button>
+      )}
+    </div>
+  ) : null
+
+  if (inline && !expanded) {
+    return requiredAnalysisProviderWarning || editingProvider ? providerField : null
+  }
+
+  const advancedToggle = (
+    <button
+      type="button"
+      onClick={() => setShowAdvanced(v => !v)}
+      className="mt-3 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface2 transition-colors"
+      aria-expanded={showAdvanced}
+    >
+      <ChevronRight
+        className={`h-3.5 w-3.5 transition-transform duration-150 ${showAdvanced ? "rotate-90" : ""}`}
+        aria-hidden="true"
+      />
+      {showAdvanced
+        ? qi("configure.hideAdvanced", "Hide advanced options")
+        : qi("configure.showAdvanced", "Advanced options")}
+    </button>
+  )
+
   return (
     <div className="space-y-5 py-3">
-      <p className="text-sm text-text-muted">{qi("configureEligibleCount", eligibleItems.length === 1 ? "{{count}} eligible item in this run" : "{{count}} eligible items in this run", { count: eligibleItems.length })}</p>
+      {!inline && <p className="text-sm text-text-muted">{qi("configureEligibleCount", eligibleItems.length === 1 ? "{{count}} eligible item in this run" : "{{count}} eligible items in this run", { count: eligibleItems.length })}</p>}
       <PresetSelector
         qi={qi}
         value={selectedPreset}
         onChange={setPreset}
         queueItems={eligibleItems}
+        compact={inline}
       />
+
+      {inline && (
+        <div className="flex flex-col gap-1 text-sm font-medium text-text">
+          <label htmlFor="quick-ingest-destination">{qi("oneScreen.destination", "Destination")}</label>
+          <select
+            id="quick-ingest-destination"
+            aria-describedby={presetConfig.reviewBeforeStorage ? "quick-ingest-draft-help" : undefined}
+            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
+            value={presetConfig.reviewBeforeStorage ? "draft" : presetConfig.storeRemote ? "media" : "extract"}
+            onChange={event => setCustomOptions({
+              storeRemote: event.target.value !== "extract",
+              reviewBeforeStorage: event.target.value === "draft",
+            })}
+          >
+            <option value="media">{qi("oneScreen.saveToMedia", "Save to Media")}</option>
+            <option value="draft">{qi("oneScreen.createDrafts", "Create review drafts")}</option>
+            <option value="extract">{qi("oneScreen.extractOnly", "Extract without saving")}</option>
+          </select>
+          {presetConfig.reviewBeforeStorage && (
+            <p id="quick-ingest-draft-help" className="text-xs font-normal text-text-muted">
+              {qi("oneScreen.reviewDraftHelp", "Review extracted content in this browser before saving it to Media.")}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="rounded-md border border-border bg-surface p-4">
         <div className="space-y-4">
@@ -719,67 +839,10 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
             </Tooltip>
           </div>
 
-          {presetConfig.common.perform_analysis ? (
-            <div className="rounded-md border border-border bg-surface2 p-3">
-              <label
-                id="quick-ingest-analysis-provider-label"
-                htmlFor="quick-ingest-analysis-provider"
-                className="mb-1 block text-sm font-medium text-text"
-              >
-                {qi("analysisProvider.label", "Analysis provider")}
-              </label>
-              <AutoComplete
-                ref={analysisProviderRef}
-                id="quick-ingest-analysis-provider"
-                className="w-full"
-                aria-label={qi("analysisProvider.label", "Analysis provider")}
-                aria-describedby={`quick-ingest-analysis-provider-help${visibleAnalysisProviderWarning ? " quick-ingest-analysis-provider-warning" : ""}`}
-                aria-invalid={visibleAnalysisProviderWarning ? true : undefined}
-                autoFocus={focusAnalysisProvider}
-                value={normalizedAnalysisProvider}
-                options={analysisProviderOptions}
-                allowClear
-                placeholder={qi(
-                  "analysisProvider.placeholder",
-                  "Choose or enter a provider"
-                )}
-                notFoundContent={
-                  analysisProvidersLoading
-                    ? qi(
-                        "analysisProvider.loading",
-                        "Loading configured providers…"
-                      )
-                    : qi(
-                        "analysisProvider.empty",
-                        "No configured providers found. Enter a provider name."
-                      )
-                }
-                onChange={handleAnalysisProviderChange}
-                onClear={() => handleAnalysisProviderChange("")}
-              />
-              <p
-                id="quick-ingest-analysis-provider-help"
-                className="mt-1 text-xs text-text-muted"
-              >
-                {qi(
-                  "analysisProvider.help",
-                  "Configured providers are suggestions. This choice is only for this ingest."
-                )}
-              </p>
-              {visibleAnalysisProviderWarning ? (
-                <p
-                  id="quick-ingest-analysis-provider-warning"
-                  role="alert"
-                  aria-live="assertive"
-                  className="mt-1 text-xs text-danger"
-                >
-                  {visibleAnalysisProviderWarning}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+          {providerField}
 
-          {presetConfig.common.perform_chunking && (
+          {inline && (presetConfig.common.perform_chunking || hasDocumentItems || hasTranscriptionItems) && advancedToggle}
+          {presetConfig.common.perform_chunking && (!inline || showAdvanced) && (
             <div className="rounded-md border border-border bg-surface2 p-3">
               <div className="flex flex-col gap-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -859,25 +922,11 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
             </div>
           )}
 
-          {/* Advanced options toggle */}
-          <button
-            type="button"
-            onClick={() => setShowAdvanced(v => !v)}
-            className="mt-3 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface2 transition-colors"
-            aria-expanded={showAdvanced}
-          >
-            <ChevronRight
-              className={`h-3.5 w-3.5 transition-transform duration-150 ${showAdvanced ? "rotate-90" : ""}`}
-              aria-hidden="true"
-            />
-            {showAdvanced
-              ? qi("configure.hideAdvanced", "Hide advanced options")
-              : qi("configure.showAdvanced", "Advanced options")}
-          </button>
+          {!inline && advancedToggle}
 
           {showAdvanced && (
             <div className="mt-3 space-y-4">
-              <div className={`space-y-2 ${!hasTranscriptionItems ? "opacity-50" : ""}`}>
+              <div hidden={inline && !hasTranscriptionItems} className={`space-y-2 ${!hasTranscriptionItems ? "opacity-50" : ""}`}>
                 <Typography.Title level={5} className="!mb-1">
                   {t("quickIngest.audioOptions") || "Audio options"}
                   {!hasTranscriptionItems && (
@@ -956,7 +1005,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
                 />
               </div>
 
-              <div className={`space-y-2 ${!hasDocumentItems ? "opacity-50" : ""}`}>
+              <div hidden={inline && !hasDocumentItems} className={`space-y-2 ${!hasDocumentItems ? "opacity-50" : ""}`}>
                 <Typography.Title level={5} className="!mb-1">
                   {t("quickIngest.documentOptions") || "Document options"}
                   {!hasDocumentItems && (
@@ -977,7 +1026,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
                 </label>
               </div>
 
-              <div className={`space-y-2 ${!hasVideoItems ? "opacity-50" : ""}`}>
+              <div hidden={inline && !hasVideoItems} className={`space-y-2 ${!hasVideoItems ? "opacity-50" : ""}`}>
                 <Typography.Title level={5} className="!mb-1">
                   {t("quickIngest.videoOptions") || "Video options"}
                   {!hasVideoItems && (
@@ -998,7 +1047,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
                 </label>
               </div>
 
-              <div className="rounded-md border border-border bg-surface2 p-3">
+              <div hidden={inline} className="rounded-md border border-border bg-surface2 p-3">
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -1094,16 +1143,18 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
         </div>
       </div>
 
-      <div className="flex items-center justify-between pt-2">
-        <Button onClick={goBack}>
-          <ArrowLeft className="mr-1 h-4 w-4" />
-          {qi("wizard.back", "Back")}
-        </Button>
-        <Button type="primary" onClick={handleNext}>
-          {qi("wizard.next", "Next")}
-          <ArrowRight className="ml-1 h-4 w-4" />
-        </Button>
-      </div>
+      {!inline && (
+        <div className="flex items-center justify-between pt-2">
+          <Button onClick={goBack}>
+            <ArrowLeft className="mr-1 h-4 w-4" />
+            {qi("wizard.back", "Back")}
+          </Button>
+          <Button type="primary" onClick={handleNext}>
+            {qi("wizard.next", "Next")}
+            <ArrowRight className="ml-1 h-4 w-4" />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

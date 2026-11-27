@@ -27,8 +27,7 @@ import {
   assertQuickIngestCompletedResults,
   openQuickIngestDialog,
   queueFileForQuickIngest,
-  advanceQuickIngestToConfigureStep,
-  reachQuickIngestOptionInConstrainedViewport
+  queueUrlForQuickIngest
 } from "../utils/journey-helpers"
 import * as path from "path"
 import * as fs from "fs"
@@ -952,10 +951,8 @@ test.describe("Media Ingestion Workflow", () => {
         )
         .toBe(true)
       await expect(dialog).toBeVisible({ timeout: 15_000 })
-      await expect(dialog).toContainText(
-        /Add URLs or files\. Stored items appear in Media/i
-      )
-      await expect(dialog).toContainText(/Max file size: 50 MB/i)
+      await expect(dialog.getByRole("button", { name: "Files", pressed: true })).toBeVisible()
+      await expect(dialog).toContainText(/Documents up to 250 MB · Audio and video up to 1 GB/i)
 
       await assertNoCriticalErrors(diagnostics)
     })
@@ -968,6 +965,7 @@ test.describe("Media Ingestion Workflow", () => {
       await waitForConnection(authedPage)
 
       const dialog = await openQuickIngestDialog(authedPage)
+      await dialog.getByRole("button", { name: "Links", exact: true }).click()
       const urlInput = dialog
         .getByLabel(/url input area|paste urls input/i)
         .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
@@ -975,8 +973,9 @@ test.describe("Media Ingestion Workflow", () => {
       await urlInput.fill("https://example.com/valid\nnot-a-url")
       await dialog.getByRole("button", { name: /add urls/i }).first().click()
 
-      await expect(dialog).toContainText(/1 valid \/ 1 invalid/i)
-      await expect(dialog).toContainText(/Invalid URL format/i)
+      await expect(dialog.getByRole("status", { name: "Source counts" })).toHaveText("1 ready · 1 invalid")
+      await dialog.getByRole("button", { name: "Edit link" }).click()
+      await expect(dialog.getByRole("textbox", { name: "Correct link" })).toHaveValue("not-a-url")
 
       await assertNoCriticalErrors(diagnostics)
     })
@@ -1153,16 +1152,11 @@ test.describe("Media Ingestion Workflow", () => {
 
       await authedPage.setViewportSize({ width: 390, height: 720 })
       const dialog = await openQuickIngestDialog(authedPage)
-      await advanceQuickIngestToConfigureStep(dialog, quickIngestFixtureUrl)
-
-      await expect(dialog).toContainText(
-        "Presets are starting points. Adjust any settings below or in Advanced options to fit this run."
-      )
-
-      const overwriteToggle = await reachQuickIngestOptionInConstrainedViewport(
-        dialog,
-        /overwrite existing/i
-      )
+      await queueUrlForQuickIngest(dialog, quickIngestFixtureUrl)
+      await dialog.getByRole("button", { name: "Change settings" }).click()
+      await expect(dialog.getByRole("combobox", { name: "Processing preset" })).toHaveValue("standard")
+      const overwriteToggle = dialog.getByRole("switch", { name: /overwrite existing/i })
+      await overwriteToggle.scrollIntoViewIfNeeded()
       await expect(overwriteToggle).toBeEnabled()
       const initialChecked = await overwriteToggle.getAttribute("aria-checked")
       await overwriteToggle.click()
@@ -1213,7 +1207,7 @@ test.describe("Media Ingestion Workflow", () => {
       })
 
       let dialog = await openQuickIngestDialog(authedPage)
-      await advanceQuickIngestToConfigureStep(dialog, ingestUrl, { proceedToConfigure: false })
+      await queueUrlForQuickIngest(dialog, ingestUrl)
       await authedPage.reload({ waitUntil: "domcontentloaded" })
       dialog = await reopenQuickIngest(authedPage)
       await expect(dialog).toContainText(ingestUrl)
@@ -1254,8 +1248,8 @@ test.describe("Media Ingestion Workflow", () => {
       await authedPage.reload({ waitUntil: "domcontentloaded" })
       const reopened = await reopenQuickIngest(authedPage)
       await expect(reopened).toContainText(/reattach this file after refresh/i)
-      await expect(reopened.getByRole("button", { name: /use defaults & process/i })).toBeDisabled()
-      await expect(reopened.getByRole("button", { name: /configure 0 items/i })).toBeDisabled()
+      await expect(reopened.getByRole("status", { name: "Source counts" })).toContainText("0 ready")
+      await expect(reopened.getByRole("button", { name: "Save 0 sources" })).toBeDisabled()
 
       await assertNoCriticalErrors(diagnostics)
     })
@@ -1278,7 +1272,7 @@ test.describe("Media Ingestion Workflow", () => {
         processingResponses: 5
       })
       let dialog = await openQuickIngestDialog(authedPage)
-      await advanceQuickIngestToConfigureStep(dialog, ingestUrl, { proceedToConfigure: false })
+      await queueUrlForQuickIngest(dialog, ingestUrl)
       await dismissQuickIngest(authedPage)
 
       dialog = await reopenQuickIngest(authedPage)
@@ -1311,6 +1305,7 @@ test.describe("Media Ingestion Workflow", () => {
       await authedPage.goto("/media", { waitUntil: "domcontentloaded" })
       await waitForConnection(authedPage)
       const dialog = await openQuickIngestDialog(authedPage)
+      await dialog.getByRole("button", { name: "Links", exact: true }).click()
       const urlInput = dialog.locator("textarea").first()
 
       await urlInput.fill(bulkConferencePlaylistUrl)
@@ -1334,7 +1329,7 @@ test.describe("Media Ingestion Workflow", () => {
       await metadataPanel.getByLabel("Event year").fill("2010")
       await metadataPanel.getByLabel("Shared tags").fill("conference, talks")
 
-      await dialog.getByRole("button", { name: /configure 33 items/i }).click()
+      await dialog.getByRole("button", { name: "Change settings" }).click()
       for (const option of ["analysis", "chunking"]) {
         const toggle = dialog
           .getByRole("switch", {
@@ -1347,22 +1342,19 @@ test.describe("Media Ingestion Workflow", () => {
           await expect(toggle).toHaveAttribute("aria-checked", "false")
         }
       }
-      await dialog.getByRole("button", { name: "Next" }).click()
-      await expect(dialog).toContainText("Ready to Process")
-      await dialog.getByRole("button", { name: /start processing/i }).click()
+      await dialog.getByRole("button", { name: "Save 33 sources", exact: true }).click()
 
       await expect(dialog.getByTestId("wizard-results-step")).toBeVisible({
         timeout: 120_000,
       })
-      await expect(dialog).toContainText("Succeeded (30)")
-      await expect(dialog).toContainText("Skipped existing (2)")
-      await expect(dialog).toContainText("Failed during processing (1)")
-      await expect(dialog).toContainText(
-        "Total: 30 succeeded, 2 skipped, 0 not submitted, 1 failed, 0 cancelled"
-      )
+      const receipt = dialog.getByTestId("wizard-results-step").getByRole("status").first()
+      await expect(receipt).toContainText("30 saved to Media")
+      await expect(receipt).toContainText("2 skipped")
+      await expect(receipt).toContainText("1 failed")
       expect(bulkApis.getSubmittedJobCount()).toBe(31)
 
-      await dialog.getByRole("button", { name: "Open collection" }).click()
+      await dialog.getByText("More actions", { exact: true }).click()
+      await dialog.getByRole("button", { name: /open.*collection/i }).click()
       await expect(authedPage).toHaveURL(/\/media-collections\/700/, {
         timeout: 20_000,
       })
