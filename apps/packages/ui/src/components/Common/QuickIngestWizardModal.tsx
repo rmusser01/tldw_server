@@ -110,6 +110,7 @@ type QuickIngestRequestPayload = {
     playlist?: PlaylistQueueMetadata
     conferenceOverride?: ConferenceItemMetadataOverride
     processAgain?: boolean
+    sourceUrlEdited?: boolean
   }>
   files: Array<{
     id: string
@@ -376,6 +377,7 @@ const buildPersistedQueueItems = (
     playlist: item.playlist,
     conferenceOverride: item.conferenceOverride,
     processAgain: item.processAgain,
+    sourceUrlEdited: item.sourceUrlEdited,
     fileStub:
       item.file || item.fileStub
         ? {
@@ -506,6 +508,7 @@ const hydrateQueueItems = (
         playlist: item.playlist,
         conferenceOverride: item.conferenceOverride,
         processAgain: item.processAgain,
+        sourceUrlEdited: item.sourceUrlEdited,
       }
     }
 
@@ -529,6 +532,7 @@ const hydrateQueueItems = (
       playlist: item.playlist,
       conferenceOverride: item.conferenceOverride,
       processAgain: item.processAgain,
+      sourceUrlEdited: item.sourceUrlEdited,
       fileStub: item.fileStub || {
         key: item.key,
         lastModified: item.lastModified,
@@ -889,6 +893,7 @@ const buildQuickIngestPayload = (
       playlist: item.playlist,
       conferenceOverride: item.conferenceOverride,
       processAgain: item.processAgain,
+      sourceUrlEdited: item.sourceUrlEdited,
     }))
 
   const files = validItems

@@ -274,6 +274,32 @@ describe("submitQuickIngestBatch", () => {
     expect(result.results).toEqual([expect.objectContaining({ id: "failed", mediaId: 99, collectionItemId: 81, retryAttempt: 1 })])
     expect(mocks.sendMessage).not.toHaveBeenCalled()
   })
+  it.each([true, false])("checks the repaired collection URL before retrying a job (accepted=%s)", async accepted => {
+    const url = "https://example.org/corrected.pdf"
+    mocks.bgRequest.mockImplementation(async request => {
+      if (request.body?.source_url) {
+        expect(mocks.bgUpload).not.toHaveBeenCalled()
+        return { id: 81, source_url: accepted ? url : "https://example.org/rejected.pdf" }
+      }
+      return { ok: true, data: { status: "completed", result: { media_id: 99 } } }
+    })
+    mocks.bgUpload.mockResolvedValue({ batch_id: "retry", jobs: [{ id: 99 }] })
+    const run = submitQuickIngestBatch({
+      entries: [{ id: "edited", type: "pdf", url, sourceUrlEdited: true }], files: [], storeRemote: true, processOnly: false,
+      conferenceRetry: { collectionId: "7", items: [{ resultId: "edited", collectionItemId: "81", retryAttempt: 1, idempotencyKey: "conference-retry-81-1" }] },
+    })
+    if (accepted) {
+      expect((await run).results).toEqual([expect.objectContaining({ mediaId: 99, collectionItemId: 81 })])
+    } else {
+      await expect(run).rejects.toThrow(/source URL/i)
+      expect(mocks.bgUpload).not.toHaveBeenCalled()
+    }
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: "PATCH", path: "/api/v1/media/collections/7/items/81",
+      body: { source_url: url, retry_count: 1, idempotency_key: "conference-retry-81-1" },
+    }))
+  })
+
   it.each([false, true])(
     "reuses durable collection identity and retry metadata (extension=%s)",
     async (extension) => {

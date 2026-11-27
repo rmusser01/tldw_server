@@ -73,6 +73,7 @@ type QuickIngestEntry = {
   keywords?: string;
   playlist?: PlaylistQueueMetadata;
   processAgain?: boolean;
+  sourceUrlEdited?: boolean;
   conferenceOverride?: ConferenceItemMetadataOverride;
   audio?: { language?: string; diarize?: boolean };
   document?: { ocr?: boolean };
@@ -658,6 +659,19 @@ const createPlannedConferenceCollection = async (
       const itemId = Number(request?.collectionItemId);
       if (!request || !Number.isSafeInteger(itemId) || itemId <= 0 || !Number.isSafeInteger(request.retryAttempt) || request.retryAttempt <= 0 || !request.idempotencyKey) {
         throw new Error("Invalid retry item identity");
+      }
+      if (entry.sourceUrlEdited && entry.url) {
+        const receipt = await scopedQuickIngestRequest<ApiMediaCollectionItem>(input, {
+          path: `/api/v1/media/collections/${collectionId}/items/${itemId}`,
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: { source_url: entry.url, retry_count: request.retryAttempt, idempotency_key: request.idempotencyKey },
+          timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
+          ...DIRECT_QUICK_INGEST_TRANSPORT,
+        });
+        if (Number(receipt?.id) !== itemId || receipt.source_url !== entry.url) {
+          throw new Error("The collection did not confirm the corrected source URL.");
+        }
       }
       itemsByEntryId.set(entry.id, { collectionId, itemId, retryAttempt: request.retryAttempt, idempotencyKey: request.idempotencyKey });
     }

@@ -71,6 +71,7 @@ export type PersistedWizardQueueItem = {
   validation: QueueItemValidation
   playlist?: PlaylistQueueMetadata
   processAgain?: boolean
+  sourceUrlEdited?: boolean
   conferenceOverride?: ConferenceItemMetadataOverride
   fileStub?: {
     key?: string
@@ -425,6 +426,7 @@ const sanitizeQueueItems = (
             : undefined,
       validation: item?.validation || { valid: true },
       processAgain: item?.processAgain === true,
+      sourceUrlEdited: item?.sourceUrlEdited === true,
       playlist: item?.playlist,
       conferenceOverride: item?.conferenceOverride,
     }

@@ -1004,7 +1004,13 @@ function SourceQueue({ items, repairId, processingItems, setItems, remove, clear
       const url = editing.value.trim()
       if (!isValidQueueUrl(url) || url === item.url) return
       const detectedType = detectTypeFromUrl(url)
-      const updated = { ...item, url, detectedType, icon: ICON_NAME_MAP[detectedType] }
+      const updated = {
+        ...item, url, detectedType, icon: ICON_NAME_MAP[detectedType],
+        sourceUrlEdited: true,
+        processAgain: false,
+        playlist: item.playlist ? { ordinal: item.playlist.ordinal } : undefined,
+        conferenceOverride: item.conferenceOverride ? { ...item.conferenceOverride, duplicatePolicy: undefined } : undefined,
+      }
       replaceItem({ ...updated, validation: validateQueueItem(updated) })
     } else {
       if (!editing.value.trim() || !item.fileName) return

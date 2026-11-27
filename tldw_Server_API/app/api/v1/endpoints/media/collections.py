@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import (
-    get_collections_db_for_user,
-)
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     rbac_rate_limit,
+)
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import (
+    get_collections_db_for_user,
 )
 from tldw_Server_API.app.api.v1.schemas.media_collections import (
     MediaCollectionCreateRequest,
@@ -24,7 +24,6 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import (
     MediaCollectionItemRow,
     MediaCollectionRow,
 )
-
 
 router = APIRouter()
 
@@ -254,6 +253,19 @@ async def update_media_collection_item(
         current = db.get_media_collection_item(item_id)
         if current.collection_id != collection_id:
             raise KeyError("media_collection_item_not_found")
+        if "source_url" in payload.model_fields_set:
+            if (
+                payload.model_fields_set != {"source_url", "retry_count", "idempotency_key"}
+                or not (payload.source_url and payload.source_url.strip())
+                or not (payload.retry_count and payload.idempotency_key and payload.idempotency_key.strip())
+            ):
+                raise ValueError("A source correction requires its URL, retry count and idempotency key.")
+            repaired = db.repair_media_collection_item_source(
+                current, payload.source_url.strip(), payload.retry_count, payload.idempotency_key.strip(),
+            )
+            if repaired is None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The collection source or its attempt has changed.")
+            return _item_response(repaired)
         row = db.update_media_collection_item(
             item_id,
             **payload.model_dump(exclude_unset=True),
