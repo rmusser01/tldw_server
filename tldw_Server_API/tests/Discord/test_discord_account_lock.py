@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.api.v1.utils.chatops.policy import locked_actor_error
 from tldw_Server_API.app.core.AuthNZ import account_lock
 from tldw_Server_API.tests.Discord.test_discord_policy_hardening import (  # noqa: F401  (fixtures)
     _post_interaction,
@@ -68,3 +69,21 @@ def test_discord_actor_that_is_not_a_tldw_user_id_is_untouched(discord_policy_cl
 
     assert response.json()["status"] == "queued"
     assert [job["owner_user_id"] for job in jm._jobs.values()] == ["U123"]
+
+
+@pytest.mark.parametrize(
+    ("actor_id", "looked_up"),
+    [("123456789012345678", []), ("0", []), ("78", [78])],
+    ids=["discord-snowflake", "zero", "user-id"],
+)
+async def test_only_an_actor_id_in_the_user_id_range_is_looked_up(monkeypatch, actor_id, looked_up) -> None:
+    """An unmapped Discord actor's snowflake does not fit users.id (int4 on PostgreSQL): no lookup, no 500."""
+    calls: list[int] = []
+
+    async def _record(user_id: int) -> bool:
+        calls.append(user_id)
+        return False
+
+    monkeypatch.setattr(account_lock, "is_user_security_locked", _record)
+    assert await locked_actor_error(actor_id) is None
+    assert calls == looked_up
