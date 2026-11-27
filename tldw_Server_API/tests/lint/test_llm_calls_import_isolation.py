@@ -59,6 +59,18 @@ def test_importing_does_not_load(module: str, forbidden: str) -> None:
     assert loaded == [], f"importing {module} loaded {loaded[:5]}"
 
 
+# TASK-13950.27: config_sections.moderation (loaded through core.config) reads the pure-data surface
+# registry, so these two load. Nothing else under core.Moderation may: the hooks module, the service
+# and the evaluator reach the gateway only through add_policy_hooks.
+MODERATION = "tldw_Server_API.app.core.Moderation"
+PURE_DATA_MODERATION = {MODERATION, f"{MODERATION}.surfaces"}
+
+
+def test_importing_the_gateway_loads_no_moderation_logic() -> None:
+    loaded = set(forbidden_loads("tldw_Server_API.app.core.LLM_Calls.gateway", MODERATION))
+    assert loaded - PURE_DATA_MODERATION == set()
+
+
 def test_the_guard_sees_a_forbidden_load() -> None:
     # The api module is now a re-export that must load the core-owned model: a known violator.
     assert forbidden_loads("tldw_Server_API.app.api.v1.schemas.chat_request_schemas", "tldw_Server_API.app.core.Chat")

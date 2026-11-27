@@ -229,3 +229,41 @@ def test_a_stream_wrapper_consumed_in_another_thread_sees_the_user(fake_provider
 
     assert chunks == ["data: a\n\n", "data: b\n\n"]
     assert seen == [(41, None), (41, None)]  # the call kept the user; the consuming thread's context has none
+
+
+def test_public_runners_run_the_registered_hooks_in_order(fake_provider):
+    from tldw_Server_API.app.core.LLM_Calls.gateway import GatewayCall, run_policy_post_hooks, run_policy_pre_hooks
+
+    order = []
+    removers = [
+        gateway.add_policy_hooks(
+            pre_call=lambda call, n=n: order.append(("pre", n)),
+            post_call=lambda call, result, n=n: (order.append(("post", n)), result + [n])[1],
+        )
+        for n in (1, 2)
+    ]
+    call = GatewayCall(surface=None, provider="e2e-fake", request={}, stream=False, user_id=None)
+    try:
+        run_policy_pre_hooks(call)
+        assert run_policy_post_hooks(call, []) == [1, 2]
+    finally:
+        for remove in removers:
+            remove()
+    assert order == [("pre", 1), ("pre", 2), ("post", 1), ("post", 2)]
+    assert run_policy_post_hooks(call, "same") == "same"
+
+
+def test_public_runners_refuse_async_hooks(fake_provider):
+    from tldw_Server_API.app.core.LLM_Calls.gateway import GatewayCall, run_policy_pre_hooks
+
+    async def async_pre(call):
+        return None
+
+    remove = gateway.add_policy_hooks(pre_call=async_pre)
+    try:
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            with pytest.raises(TypeError, match="async_pre"):
+                run_policy_pre_hooks(GatewayCall(surface=None, provider="p", request={}, stream=False, user_id=None))
+    finally:
+        remove()

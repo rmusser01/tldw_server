@@ -1,0 +1,518 @@
+"""Moderation hooks for the LLM gateway (TASK-13950.27 PR C).
+
+``register_moderation_gateway_hooks()`` adds one pre-call and one post-call hook to
+``core.LLM_Calls.gateway``. They moderate the input messages and the model output of every
+surface that is not skipped (see ``resolve_policy``). The text functions are public so surfaces
+without a gateway call (Tasks 5, 9 and 10) moderate the same way.
+
+Rules this module keeps:
+
+- Hooks never log the request (it carries ``api_key``); a log line carries phase, action,
+  surface, provider and the integer user id, never message text.
+- A post hook never raises. An evaluator failure on output is treated as a block (fail closed).
+- When moderation changes a chunk or a response, ``provider_response`` is dropped from it,
+  because it carries the original text.
+- Not moderated (documented in Task 11): non-text content parts, tool-call arguments,
+  ``reasoning_content``, ``system`` messages and anything on a chunk without ``choices``.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import contextvars
+import functools
+import json
+import threading
+from collections.abc import AsyncIterator, Callable, Iterator
+from typing import Any
+
+from loguru import logger
+
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls.gateway import GatewayCall, add_policy_hooks
+from tldw_Server_API.app.core.LLM_Calls.sse import sse_data, sse_done
+from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
+from tldw_Server_API.app.core.Moderation.surfaces import CALLER_MODERATED_SURFACES, EXEMPT_SURFACES
+
+INPUT_REFUSAL = "Input violates moderation policy"
+OUTPUT_REFUSAL = "Output violates moderation policy"
+_MODERATED_ROLES = frozenset({"user", "tool"})  # chat's MODERATED_ROLES
+_DEFAULT_BUFFER_CHARS = 1024
+_SKIP = object()  # stored on the call: resolved, nothing to moderate
+_UNRESOLVED = object()
+_IN_HOOK: contextvars.ContextVar[bool] = contextvars.ContextVar("moderation_gateway_hook_active", default=False)
+# Chunk keys that are metadata only: a chunk with just these and an empty delta carries nothing.
+_CHUNK_METADATA_KEYS = frozenset({"choices", "id", "object", "created", "model", "system_fingerprint", "provider_response"})
+
+
+@contextlib.contextmanager
+def _evaluating() -> Iterator[None]:
+    """Mark this context as inside a hook, so a gateway call made while evaluating is not moderated."""
+    token = _IN_HOOK.set(True)
+    try:
+        yield
+    finally:
+        _IN_HOOK.reset(token)
+
+
+def _log_action(phase: str, action: str, surface: str | None, provider: str | None, user_id: int | None) -> None:
+    if action != "pass":
+        logger.warning(
+            "moderation {} {} surface={} provider={} user_id={}", phase, action, surface, provider, user_id
+        )
+
+
+# --------------------------------------------------------------------------- config
+
+
+@functools.lru_cache(maxsize=1)
+def _stream_buffer_chars() -> int:
+    """``[Moderation] stream_buffer_chars``, read once per process; a bad value warns and uses 1024."""
+    try:
+        from tldw_Server_API.app.core.config import load_comprehensive_config
+        from tldw_Server_API.app.core.config_sections.moderation import load_moderation_surface_config
+
+        return load_moderation_surface_config(load_comprehensive_config()).stream_buffer_chars
+    except Exception as exc:  # a bad value must not stop moderation; the service logs the rest
+        logger.warning("Invalid [Moderation] stream_buffer_chars ({}); using {}", type(exc).__name__, _DEFAULT_BUFFER_CHARS)
+        return _DEFAULT_BUFFER_CHARS
+
+
+# --------------------------------------------------------------------------- guardian
+
+# ponytail: one SupervisedPolicyEngine per user id, never evicted (it holds a compiled-rule cache with
+# its own 60 s TTL); an unbounded number of distinct users is the ceiling. Add an LRU if that matters.
+_GUARDIAN_ENGINES: dict[int, Any] = {}
+_GUARDIAN_LOCK = threading.Lock()
+
+
+def _guardian_engine(user_id: int) -> Any | None:
+    """The user's cached engine, or None when Guardian is off or the user has no Guardian DB (none is created)."""
+    from tldw_Server_API.app.core.feature_flags import is_guardian_enabled
+
+    if not is_guardian_enabled():
+        return None
+    with _GUARDIAN_LOCK:
+        engine = _GUARDIAN_ENGINES.get(user_id)
+    if engine is not None:
+        return engine
+    try:
+        from tldw_Server_API.app.core.DB_Management.guardian_db_resolver import resolve_existing_guardian_db_for_user_id
+        from tldw_Server_API.app.core.Moderation.supervised_policy import get_supervised_policy_engine
+
+        engine = get_supervised_policy_engine(resolve_existing_guardian_db_for_user_id(user_id))
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        logger.debug("Guardian overlay unavailable: {}", type(exc).__name__)
+        return None
+    with _GUARDIAN_LOCK:
+        return _GUARDIAN_ENGINES.setdefault(user_id, engine)
+
+
+def _with_guardian(policy: Any, user_id: int | None) -> Any:
+    if user_id is None:
+        return policy
+    engine = _guardian_engine(user_id)
+    if engine is None:
+        return policy
+    try:
+        return engine.build_moderation_policy_overlay(str(user_id), policy, chat_type="regular")
+    except Exception as exc:  # an engine failure keeps the base policy
+        logger.debug("Guardian policy overlay skipped: {}", type(exc).__name__)
+        return policy
+
+
+# --------------------------------------------------------------------------- policy
+
+
+def resolve_policy(call_or_surface: GatewayCall | str | None, user_id: int | None = None) -> Any | None:
+    """The policy to apply, or ``None`` for a skip.
+
+    Skips: a ``None`` surface (until Task 11), a caller-moderated or exempt surface, re-entry
+    from a hook, and a disabled policy. The policy user is ``str(user_id)``; ``None`` means the
+    default policy.
+    """
+    surface = call_or_surface.surface if isinstance(call_or_surface, GatewayCall) else call_or_surface
+    if isinstance(call_or_surface, GatewayCall) and user_id is None:
+        user_id = call_or_surface.user_id
+    if surface is None or surface in CALLER_MODERATED_SURFACES or surface in EXEMPT_SURFACES or _IN_HOOK.get():
+        return None
+    policy = get_moderation_service().get_effective_policy(None if user_id is None else str(user_id), surface=surface)
+    policy = _with_guardian(policy, user_id)
+    return policy if policy.enabled else None
+
+
+# --------------------------------------------------------------------------- text functions
+
+
+def _moderate_text(text: str, policy: Any, phase: str) -> tuple[str, str]:
+    """(text, action) for one string. A redact returns the redacted text; a block returns ``text`` unchanged."""
+    service = get_moderation_service()
+    with _evaluating():
+        action, redacted, _pattern, _category = service.evaluate_action(text, policy, phase)
+        if action == "redact":
+            redacted = redacted if isinstance(redacted, str) else service.redact_text(text, policy, phase)
+            return redacted, action
+    return text, action
+
+
+def _moderate_content(content: Any, policy: Any, note: Callable[[str], None]) -> Any:
+    """``content`` moderated as input: a string, or the text parts of a list. Same object when unchanged."""
+    if isinstance(content, str):
+        new, action = _moderate_text(content, policy, "input")
+        note(action)
+        return new
+    if not isinstance(content, list):
+        return content
+    parts: list[Any] | None = None
+    for i, part in enumerate(content):
+        if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            new, action = _moderate_text(part["text"], policy, "input")
+            note(action)
+            if new != part["text"]:
+                parts = list(content) if parts is None else parts
+                parts[i] = {**part, "text": new}
+    return content if parts is None else parts
+
+
+def _moderate_input(
+    messages: list[dict], policy: Any, surface: str | None, provider: str | None, user_id: int | None
+) -> list[dict]:
+    if not policy.enabled or not policy.input_enabled:
+        return messages
+    actions: list[str] = []
+
+    def note(action: str) -> None:
+        actions.append(action)
+        _log_action("input", action, surface, provider, user_id)
+        if action == "block":
+            raise LLMPolicyRefusal(INPUT_REFUSAL)
+
+    out: list[dict] | None = None
+    for i, message in enumerate(messages):
+        if not isinstance(message, dict) or message.get("role") not in _MODERATED_ROLES:
+            continue
+        content = message.get("content")
+        new = _moderate_content(content, policy, note)
+        if new is not content:
+            out = list(messages) if out is None else out
+            out[i] = {**message, "content": new}
+    return messages if out is None else out
+
+
+def moderate_input_messages_for_surface(
+    messages: list[dict], *, surface: str | None, user_id: int | None, policy: Any = None
+) -> list[dict]:
+    """Input moderation for one surface: the same list when nothing changes, a new list on redact,
+    ``LLMPolicyRefusal`` on block. Only ``user`` and ``tool`` text is moderated, as in chat."""
+    policy = resolve_policy(surface, user_id) if policy is None else policy
+    if policy is None:
+        return messages
+    return _moderate_input(messages, policy, surface, None, user_id)
+
+
+def _moderate_output(
+    text: str, policy: Any, surface: str | None, provider: str | None, user_id: int | None
+) -> tuple[str, str]:
+    if not policy.enabled or not policy.output_enabled:
+        return text, "pass"
+    try:
+        new, action = _moderate_text(text, policy, "output")
+    except Exception as exc:  # fail closed: an evaluator failure must not release unchecked text
+        logger.warning("moderation output evaluator failed ({}); blocking surface={}", type(exc).__name__, surface)
+        new, action = text, "block"
+    _log_action("output", action, surface, provider, user_id)
+    return (OUTPUT_REFUSAL if action == "block" else new), action
+
+
+def moderate_output_text_for_surface(
+    text: str, *, surface: str | None, user_id: int | None, policy: Any = None
+) -> tuple[str, str]:
+    """Output moderation for one string: ``(text, action)`` with action ``pass|warn|redact|block``.
+    On block the text is the refusal text."""
+    policy = resolve_policy(surface, user_id) if policy is None else policy
+    if policy is None:
+        return text, "pass"
+    return _moderate_output(text, policy, surface, None, user_id)
+
+
+# --------------------------------------------------------------------------- streaming
+
+
+class StreamModerator:
+    """Moderates one choice's streamed text, holding back the last ``holdback`` characters so a match
+    that spans chunks is seen whole before any of it is released."""
+
+    def __init__(self, policy: Any, *, holdback: int | None = None, on_action: Callable[[str], None] | None = None):
+        self._policy = policy
+        self._holdback = max(0, _stream_buffer_chars() if holdback is None else holdback)
+        self._held = ""
+        self._on_action = on_action
+        self._seen: set[str] = set()
+
+    @property
+    def held(self) -> str:
+        return self._held
+
+    def feed(self, text: str) -> tuple[str, bool]:
+        """``(text to emit now, blocked)``. After a block nothing is held."""
+        full = self._held + text
+        try:
+            full, action = _moderate_text(full, self._policy, "output") if self._policy.output_enabled else (full, "pass")
+        except Exception as exc:  # fail closed
+            logger.warning("moderation output evaluator failed ({}); blocking stream", type(exc).__name__)
+            action = "block"
+        if action != "pass" and action not in self._seen:
+            self._seen.add(action)
+            if self._on_action is not None:
+                self._on_action(action)
+        if action == "block":
+            self._held = ""
+            return "", True
+        cut = len(full) - self._holdback
+        self._held = full[cut:] if cut > 0 else full
+        return (full[:cut] if cut > 0 else ""), False
+
+    def flush(self) -> str:
+        """The held text. It was evaluated with the text after it, so it is released as is."""
+        held, self._held = self._held, ""
+        return held
+
+
+def _data_payload(item: str) -> str | None:
+    """The joined ``data:`` lines of one SSE item, or None when it has none."""
+    lines = [line[5:][1:] if line[5:].startswith(" ") else line[5:] for line in item.splitlines() if line.startswith("data:")]
+    return "\n".join(lines) if lines else None
+
+
+def _content_frame(index: int, text: str) -> str:
+    return sse_data({"choices": [{"index": index, "delta": {"content": text}}]})
+
+
+def _choice_index(choice: dict) -> int:
+    index = choice.get("index", 0)
+    return index if isinstance(index, int) and not isinstance(index, bool) else 0
+
+
+class _StreamState:
+    """The stream wrapper's logic, shared by the sync and async wrappers. ``process`` maps one source
+    item to the items to yield, ``finish`` the items to yield when the source ends."""
+
+    def __init__(self, policy: Any, surface: str | None, provider: str | None, user_id: int | None):
+        self._policy = policy
+        self._moderators: dict[int, StreamModerator] = {}
+        self._context = (surface, provider, user_id)
+        self.stopped = False  # a block or a [DONE] ended the stream
+        self.blocked = False
+
+    def _moderator(self, index: int) -> StreamModerator:
+        if index not in self._moderators:
+            surface, provider, user_id = self._context
+            self._moderators[index] = StreamModerator(
+                self._policy, on_action=lambda action: _log_action("output", action, surface, provider, user_id)
+            )
+        return self._moderators[index]
+
+    def _flush_all(self) -> list[str]:
+        return [_content_frame(i, held) for i, m in sorted(self._moderators.items()) if (held := m.flush())]
+
+    def finish(self) -> list[str]:
+        return [] if self.stopped else self._flush_all()
+
+    def _block(self, index: int) -> list[str]:
+        self.stopped = self.blocked = True
+        finish = {"choices": [{"index": index, "delta": {}, "finish_reason": "content_filter"}]}
+        return [_content_frame(index, OUTPUT_REFUSAL), sse_data(finish), sse_done()]
+
+    def process(self, item: Any) -> list[Any]:
+        data = _data_payload(item) if isinstance(item, str) and not self.stopped else None
+        if data is None:
+            return [item]
+        if data.strip() == "[DONE]":
+            frames: list[Any] = self._flush_all()
+            self.stopped = True
+            return [*frames, item]
+        try:
+            chunk = json.loads(data)
+        except ValueError:
+            return [item]
+        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+        if not isinstance(choices, list) or not any(isinstance(c, dict) for c in choices):
+            return [item]
+        return self._process_chunk(item, chunk, choices)
+
+    def _process_chunk(self, item: str, chunk: dict, choices: list) -> list[Any]:
+        pre: list[str] = []  # held text released before a finish_reason chunk
+        new_choices: list[Any] = []
+        changed = False
+        for choice in choices:
+            if not isinstance(choice, dict):
+                new_choices.append(choice)
+                continue
+            index = _choice_index(choice)
+            delta = choice.get("delta")
+            text = delta.get("content") if isinstance(delta, dict) else None
+            text = text if isinstance(text, str) and text else None
+            moderator = self._moderator(index) if text else self._moderators.get(index)
+            emit = text
+            if text:
+                emit, blocked = moderator.feed(text)
+                if blocked:
+                    return self._block(index)
+            if choice.get("finish_reason") and moderator is not None:
+                held = moderator.flush()
+                if text:
+                    emit = (emit or "") + held
+                elif held:
+                    pre.append(_content_frame(index, held))
+            if text is None or (emit == text and not moderator.held):
+                new_choices.append(choice)
+                continue
+            changed = True
+            new_delta = {k: v for k, v in delta.items() if k != "content"}
+            if emit:
+                new_delta["content"] = emit
+            # logprobs carry the original tokens, like provider_response
+            new_choices.append({**{k: v for k, v in choice.items() if k != "logprobs"}, "delta": new_delta})
+        if not changed:
+            return [*pre, item]
+        return [*pre, *_rebuilt(chunk, new_choices)]
+
+
+def _rebuilt(chunk: dict, choices: list) -> list[str]:
+    """The changed chunk without ``provider_response``, or nothing when it only carried held text."""
+    rebuilt = {k: v for k, v in chunk.items() if k != "provider_response"}
+    rebuilt["choices"] = choices
+    carries = any(k not in _CHUNK_METADATA_KEYS for k in rebuilt) or any(
+        not isinstance(c, dict) or set(c) - {"index", "delta"} or c.get("delta") for c in choices
+    )
+    return [sse_data(rebuilt)] if carries else []
+
+
+def _close(source: Any) -> None:
+    close = getattr(source, "close", None)
+    if callable(close):
+        with contextlib.suppress(Exception):
+            close()
+
+
+def _sync_stream(source: Any, state: _StreamState) -> Iterator[Any]:
+    try:
+        for item in source:
+            yield from state.process(item)
+            if state.blocked:
+                return
+        yield from state.finish()
+    finally:
+        _close(source)
+
+
+async def _async_stream(source: Any, state: _StreamState) -> AsyncIterator[Any]:
+    try:
+        async for item in source:
+            for out in state.process(item):
+                yield out
+            if state.blocked:
+                return
+        for out in state.finish():
+            yield out
+    finally:
+        aclose = getattr(source, "aclose", None)
+        if callable(aclose):
+            with contextlib.suppress(Exception):
+                await aclose()
+        else:
+            _close(source)
+
+
+# --------------------------------------------------------------------------- hooks
+
+
+def _policy_of(call: GatewayCall) -> Any | None:
+    stored = getattr(call, "_moderation_policy", _UNRESOLVED)
+    if stored is _UNRESOLVED:
+        stored = resolve_policy(call) or _SKIP
+        call._moderation_policy = stored  # type: ignore[attr-defined]
+    return None if stored is _SKIP else stored
+
+
+def pre_call(call: GatewayCall) -> None:
+    """Resolve the policy once, store it on the call, then moderate the request's messages."""
+    policy = _policy_of(call)
+    messages = call.request.get("messages")
+    if policy is None or not isinstance(messages, list):
+        return
+    moderated = _moderate_input(messages, policy, call.surface, call.provider, call.user_id)
+    if moderated is not messages:
+        call.request["messages"] = moderated
+
+
+def _moderate_result(call: GatewayCall, result: dict, policy: Any) -> dict:
+    choices = result.get("choices")
+    if not isinstance(choices, list):
+        return result
+    out: list[Any] = []
+    changed = False
+    for choice in choices:
+        message = choice.get("message") if isinstance(choice, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str):
+            out.append(choice)
+            continue
+        new, action = _moderate_output(content, policy, call.surface, call.provider, call.user_id)
+        if action not in ("redact", "block"):
+            out.append(choice)
+            continue
+        changed = True
+        new_message = {**message, "content": new}
+        new_choice = {k: v for k, v in choice.items() if k not in ("provider_response", "logprobs")}
+        if action == "block":
+            new_message.pop("tool_calls", None)
+            new_message.pop("function_call", None)
+            new_choice["finish_reason"] = "content_filter"
+        out.append({**new_choice, "message": new_message})
+    if not changed:
+        return result
+    return {**{k: v for k, v in result.items() if k != "provider_response"}, "choices": out}
+
+
+def post_call(call: GatewayCall, result: Any) -> Any:
+    """Moderate the provider's answer: a dict (non-stream) or a sync/async stream iterator. Never raises."""
+    try:
+        policy = _policy_of(call)
+        if policy is None or not policy.output_enabled:
+            return result
+        if isinstance(result, dict):
+            return _moderate_result(call, result, policy)
+        state = _StreamState(policy, call.surface, call.provider, call.user_id)
+        if hasattr(result, "__aiter__"):
+            return _async_stream(result, state)
+        if hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
+            return _sync_stream(result, state)
+    except Exception as exc:
+        logger.warning("moderation post hook failed ({}) surface={}", type(exc).__name__, call.surface)
+    return result
+
+
+# --------------------------------------------------------------------------- registration
+
+_REGISTRATION: dict[str, Callable[[], None] | None] = {"remove": None}
+_REGISTRATION_LOCK = threading.Lock()
+
+
+def _unregister() -> None:
+    with _REGISTRATION_LOCK:
+        remove = _REGISTRATION["remove"]
+        _REGISTRATION["remove"] = None
+        if remove is not None:
+            remove()
+
+
+def register_moderation_gateway_hooks() -> Callable[[], None]:
+    """Register the hooks once; a second call while registered adds nothing. The returned remover
+    unregisters them and resets the flag, so a later call registers again."""
+    with _REGISTRATION_LOCK:
+        if _REGISTRATION["remove"] is None:
+            _REGISTRATION["remove"] = add_policy_hooks(pre_call=pre_call, post_call=post_call)
+    return _unregister
