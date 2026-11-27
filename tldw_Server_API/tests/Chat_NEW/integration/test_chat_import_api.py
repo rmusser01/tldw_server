@@ -15,6 +15,7 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.tests.Chat_NEW.integration.test_document_chat_links import activate_document_sync_profile
 from tldw_Server_API.tests.Chat_NEW.integration.test_document_chat_links import document_api as document_api
 
 pytestmark = pytest.mark.integration
@@ -78,8 +79,6 @@ def _message_count(db: CharactersRAGDB) -> int:
 
 def test_document_chat_import_replays_citations(document_api, monkeypatch) -> None:
     """The same acknowledged import retains sources and uses one native chat."""
-    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions
-
     client, db, media, headers = document_api
     target = {"document_media_id": 1, "document_media_uuid": media[1]["uuid"]}
     citation = {"media_uuid": media[1]["uuid"], "title": "Sample EPUB", "excerpt": "Saved passage."}
@@ -100,7 +99,7 @@ def test_document_chat_import_replays_citations(document_api, monkeypatch) -> No
     assert stored["metadata_extra"]["document_chat_sources_v1"] == [citation]
 
     assert db.hard_delete_conversation(CHAT_ID)
-    monkeypatch.setattr(character_chat_sessions, "_active_chat_sync_service", lambda *_: object())
+    activate_document_sync_profile(monkeypatch)
     unsupported = client.post(PATH, headers=headers, params=target, json=body)
     assert unsupported.status_code == 409
     assert unsupported.json()["detail"]["error_code"] == "sync_chat_import_unsupported"

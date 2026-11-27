@@ -151,11 +151,13 @@ import {
   aggregateChatSubmitResults,
   chatSubmitFailed,
   chatSubmitSkipped,
+  getLastThreadMessageId,
   normalizeChatSubmitResult,
   resolveTurnContextFiles,
   resolveTurnFileRetrievalEnabled,
   resolveTurnUploadedFiles,
   resolveTurnRagMediaIds,
+  shouldIncludeMessageForModel,
   shouldUseRagForTurn,
   type ChatModeOverrides,
   type ChatSubmitResult
@@ -3318,26 +3320,6 @@ export const useChatActions = ({
     [t]
   )
 
-  const getMessageModelKey = (message: Message) =>
-    message.modelId || message.modelName || message.name
-
-  const shouldIncludeMessageForModel = (
-    message: Message,
-    modelId: string
-  ) => {
-    if (!message.isBot) {
-      if (message.messageType === "compare:perModelUser") {
-        return message.modelId === modelId
-      }
-      return true
-    }
-    const messageModel = getMessageModelKey(message)
-    if (!messageModel) {
-      return false
-    }
-    return messageModel === modelId
-  }
-
   const buildHistoryFromMessages = React.useCallback(
     (items: Message[]): ChatHistory =>
       excludeLocalRagDiagnostics(items)
@@ -3361,27 +3343,6 @@ export const useChatActions = ({
     buildHistoryFromMessages(
       items.filter((message) => shouldIncludeMessageForModel(message, modelId))
     )
-
-  const getCompareUserMessageId = (items: Message[], clusterId: string) =>
-    items.find(
-      (message) =>
-        message.messageType === "compare:user" &&
-        message.clusterId === clusterId
-    )?.id || null
-
-  const getLastThreadMessageId = (
-    items: Message[],
-    clusterId: string,
-    modelId: string
-  ) => {
-    const threadMessages = items.filter(
-      (message) =>
-        message.clusterId === clusterId &&
-        getMessageModelKey(message) === modelId
-    )
-    const lastThreadMessage = threadMessages[threadMessages.length - 1]
-    return lastThreadMessage?.id || getCompareUserMessageId(items, clusterId)
-  }
 
   const refreshHistoryFromMessages = React.useCallback(() => {
     const next = buildHistoryFromMessages(messagesRef.current)

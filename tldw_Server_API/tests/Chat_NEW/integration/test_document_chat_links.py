@@ -32,6 +32,22 @@ def document_api(request, credentialed_test_client, tmp_path, monkeypatch, auth_
         db.backend.get_pool().close_all()
 
 
+def activate_document_sync_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Expose the fixture owner's personal dataset through the real Sync lookup."""
+    dataset = SimpleNamespace(
+        scope_type="personal", metadata={"default_personal": True, "client_family": "chatbook"},
+    )
+    service = SimpleNamespace(store=SimpleNamespace(list_datasets_for_user=lambda _: [dataset]))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sync.v2.factory.sync_v2_storage_exists_for_user",
+        lambda user_id: user_id == "1",
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sync.v2.factory.sync_v2_service_for_user",
+        lambda _: service,
+    )
+
+
 def _list(client, headers, media_uuid, **query):
     return client.get(
         "/api/v1/media/1/chat-conversations", params={"media_uuid": media_uuid, **query}, headers=headers,

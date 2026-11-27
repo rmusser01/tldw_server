@@ -21,6 +21,14 @@ class DocumentChatTarget:
     media_uuid: UUID
 
 
+@dataclass(frozen=True)
+class DocumentChatRequest:
+    """An authenticated chat request and its optional authorized Media target."""
+
+    user: User
+    document: DocumentChatTarget | None
+
+
 def document_chat_unavailable() -> HTTPException:
     """Use the same response for missing, inaccessible and replaced targets."""
     return HTTPException(status_code=404, detail="Document chat unavailable")
@@ -54,6 +62,13 @@ async def _document_chat_query(
 
 
 DocumentChatQuery = Annotated[DocumentChatTarget | None, Depends(_document_chat_query)]
+
+
+def get_document_chat_request(
+    user: Annotated[User, Depends(get_request_user)], document: DocumentChatQuery,
+) -> DocumentChatRequest:
+    """Resolve both the chat actor and document through the same user dependency."""
+    return DocumentChatRequest(user, document)
 
 
 def require_linked_document_chat(

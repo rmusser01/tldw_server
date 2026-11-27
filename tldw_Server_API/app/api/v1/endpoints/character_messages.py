@@ -23,8 +23,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.document_chat_scope import (
-    DocumentChatQuery,
+    DocumentChatRequest,
     document_chat_unavailable,
+    get_document_chat_request,
     require_linked_document_chat,
 )
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
@@ -389,6 +390,38 @@ async def append_roleplay_resume_input(
         raise map_db_error_to_http(exc, default_detail="Unable to append the Resume input.") from exc
 
 
+async def _verify_message_send_access(
+    db: CharactersRAGDB, chat_id: str, user: User, scope: ConversationScopeParams, message: MessageCreate,
+) -> dict[str, Any]:
+    """Check message quotas, conversation ownership, and an explicit parent."""
+    rate_limiter = get_character_rate_limiter()
+    await rate_limiter.check_message_send_rate(user.id)
+    conversation = _verify_conversation_access(db, chat_id, user.id, scope)
+    try:
+        msg_count = db.count_messages_for_conversation(chat_id)
+        await rate_limiter.check_message_limit(chat_id, msg_count + 1)
+    except HTTPException:
+        raise
+    except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "count_messages_for_conversation failed for chat_id={} include_deleted={} error={}",
+            chat_id, False, exc, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to validate chat message limit right now.",
+        ) from exc
+
+    if message.parent_message_id and message.tldw_history_selection_v1 is None:
+        parent = _verify_message_access(db, message.parent_message_id, user.id, scope)
+        if parent.get("conversation_id") != chat_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Parent message must be from the same conversation",
+            )
+    return conversation
+
+
 @router.post("/chats/{chat_id}/messages", response_model=MessageResponse,
              status_code=status.HTTP_201_CREATED,
              summary="Send a message in a chat", tags=["Messages"])
@@ -399,9 +432,8 @@ async def send_message(
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    current_user: User = Depends(get_request_user),
+    chat_request: DocumentChatRequest = Depends(get_document_chat_request),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    document: DocumentChatQuery = None,
 ):
     """
     Add a new message to a chat session.
@@ -410,7 +442,7 @@ async def send_message(
         chat_id: Chat session ID
         message_data: Message content and metadata
         db: Database instance
-        current_user: Authenticated user
+        chat_request: Authenticated user and optional document target
 
     Returns:
         Created message details
@@ -422,6 +454,7 @@ async def send_message(
             live child is refused with code `history_branch_changed` plus
             `conversation_id`, `parent_message_id`, `leaf_ids` and `history_version`.
     """
+    current_user, document = chat_request.user, chat_request.document
     try:
         scope = _resolve_message_scope(scope_type, workspace_id)
         citations = message_data.document_chat_sources_v1
@@ -444,39 +477,7 @@ async def send_message(
                 except ValueError as exc:
                     raise HTTPException(422, detail=str(exc)) from None
         document_write = {"document_media_uuid": str(document.media_uuid)} if document else {}
-        # Check rate limits (per-minute + per-chat message count)
-        rate_limiter = get_character_rate_limiter()
-        await rate_limiter.check_message_send_rate(current_user.id)
-
-        # Verify conversation access
-        conversation = _verify_conversation_access(db, chat_id, current_user.id, scope)
-        # Enforce per-chat message cap (using efficient count instead of loading all messages)
-        try:
-            msg_count = db.count_messages_for_conversation(chat_id)
-            await rate_limiter.check_message_limit(chat_id, msg_count + 1)
-        except HTTPException:
-            raise
-        except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(
-                "count_messages_for_conversation failed for chat_id={} include_deleted={} error={}",
-                chat_id,
-                False,
-                e,
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Unable to validate chat message limit right now.",
-            ) from e
-
-        # Validate parent message if provided
-        if message_data.parent_message_id and message_data.tldw_history_selection_v1 is None:
-            parent_msg = _verify_message_access(db, message_data.parent_message_id, current_user.id, scope)
-            if parent_msg.get('conversation_id') != chat_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Parent message must be from the same conversation"
-                )
+        conversation = await _verify_message_send_access(db, chat_id, current_user, scope, message_data)
 
         # Map role to sender format used in database
         sender_map = {

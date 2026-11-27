@@ -49,7 +49,12 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.document_chat_scope import DocumentChatQuery, document_chat_unavailable
+from tldw_Server_API.app.api.v1.API_Deps.document_chat_scope import (
+    DocumentChatQuery,
+    DocumentChatRequest,
+    document_chat_unavailable,
+    get_document_chat_request,
+)
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
@@ -3540,6 +3545,22 @@ def _compute_greetings_checksum(character: dict[str, Any]) -> str:
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
 
+def _refresh_created_chat_greetings(
+    db: CharactersRAGDB, chat_id: str, conversation: dict[str, Any], character: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist the greeting checksum and return the updated conversation version."""
+    try:
+        checksum = _compute_greetings_checksum(character)
+        updated = db.upsert_conversation_settings(chat_id, {"greetingsChecksum": checksum})
+        if updated:
+            latest = db.get_conversation_by_id(chat_id)
+            if isinstance(latest, dict):
+                return latest
+    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Could not record the greeting checksum for chat {}", chat_id)
+    return conversation
+
+
 def _check_greeting_staleness(
     settings: dict[str, Any],
     character: dict[str, Any],
@@ -4658,12 +4679,11 @@ async def create_chat_session(
     session_data: ChatSessionCreate,
     response: Response,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    current_user: User = Depends(get_request_user),
+    chat_request: DocumentChatRequest = Depends(get_document_chat_request),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     seed_first_message: bool = Query(False, description="If true, seed the chat with an initial assistant greeting"),
     greeting_strategy: Literal["default", "alternate_random", "alternate_index"] = Query("default", description="How to choose the initial assistant greeting when seeding"),
     alternate_index: Optional[int] = Query(None, ge=0, description="Index for alternate greeting when greeting_strategy=alternate_index"),
-    document: DocumentChatQuery = None,
 ):
     """
     Create a new chat session, optionally with a tracked character or persona identity.
@@ -4671,7 +4691,7 @@ async def create_chat_session(
     Args:
         session_data: Chat session creation data
         db: Database instance
-        current_user: Authenticated user
+        chat_request: Authenticated user and optional document target
 
     Notes:
         This API does not automatically create a first assistant message. Clients
@@ -4693,6 +4713,7 @@ async def create_chat_session(
         HTTPException: 404 if character not found, 409/410 for an unavailable
             client id, 429 if rate limited
     """
+    current_user, document = chat_request.user, chat_request.document
     owner_id = str(current_user.id)
     client_chat_id = session_data.id
     create_fingerprint: str | None = None
@@ -5002,21 +5023,8 @@ async def create_chat_session(
         elif seed_first_message:
             seed_status = "no_greeting"
 
-        # Persist a greetings checksum so staleness can be detected later.
         if character is not None and sync_service is None and not created_with_factory:
-            try:
-                checksum = _compute_greetings_checksum(character)
-                updated_settings = db.upsert_conversation_settings(
-                    created_id,
-                    {"greetingsChecksum": checksum},
-                )
-                # Keep optimistic-locking version in response in sync with DB.
-                if updated_settings:
-                    latest_conv = db.get_conversation_by_id(created_id)
-                    if isinstance(latest_conv, dict):
-                        created_conv = latest_conv
-            except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
-                pass  # best-effort; staleness detection degrades gracefully
+            created_conv = _refresh_created_chat_greetings(db, created_id, created_conv, character)
 
         if response is not None and seed_status is not None:
             try:

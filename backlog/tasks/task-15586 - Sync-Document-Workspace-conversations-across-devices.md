@@ -47,6 +47,7 @@ The final opt-in Chromium run passed all four cases without skips. After a lost 
 The [full shared UI typecheck](https://github.com/rmusser01/tldw_server/pull/3607) exposed two inherited Document Workspace message fixtures without source lists. Added empty lists to those fixtures. The shared UI typecheck and 436 focused shared UI tests passed on the preview built from current Dev and PR #3534.
 Dev merged [PR #3534](https://github.com/rmusser01/tldw_server/pull/3534) at 42e8a3fcf9 after all eight required checks passed. Rebased TASK-15586 onto that merge. All 492 focused shared UI tests and 74 SQLite and PostgreSQL tests passed on the new base. Shared UI and WebUI type checking and the OpenAPI drift check passed. Bandit reported no findings on changed production lines.
 Dev PR #3647 exposed a duplicate ADR number and invalid published links. Assigned the proposed decision ADR-100, updated its links in the spec and plan, and regenerated the public docs from their canonical sources.
+Fixed Dev CI size and endpoint-patching checks by reusing the shared compare helpers, grouping the chat actor and optional document dependency, extracting greeting and message access work, and supplying the test Sync profile through the service factory. The generated API diff changes only descriptions on the create-chat and send-message operations. The focused SQLite and PostgreSQL suite passed all 74 cases, and the shared UI lint and import-cycle gates passed locally.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
