@@ -1816,6 +1816,79 @@ class VNAssetPacksRepository:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def storage_work_is_active(
+        self, *, owner_user_id: int, pack_id: int | None = None, include_bound_portability: bool = True,
+    ) -> bool:
+        """Detect generation and the local side of pending portability admission."""
+        self._ensure_schema_initialized()
+        row = self.db.execute_query(
+            """
+            SELECT 1
+            FROM vn_asset_batches AS batch
+            JOIN vn_asset_packs AS pack ON pack.id = batch.pack_id
+            WHERE pack.owner_user_id = ? AND (? IS NULL OR pack.id = ?)
+              AND batch.status IN ('planned', 'queued', 'enqueued', 'processing')
+            UNION ALL
+            SELECT 1 FROM vn_pack_portability_jobs
+            WHERE owner_user_id = ? AND (? IS NULL OR pack_id = ?) AND operation = 'export'
+              AND status IN ('queued', 'enqueued', 'processing')
+              AND (? OR (job_id GLOB '*[^0-9]*' AND datetime(updated_at) > datetime('now', '-1 day')))
+            UNION ALL
+            SELECT 1 FROM vn_pack_import_journal
+            WHERE owner_user_id = ? AND status IN ('queued', 'enqueued', 'processing')
+              AND completed_at IS NULL
+              AND (? IS NULL OR target_pack_id = ? OR
+                   (target_pack_id IS NULL AND target_mode = 'update_existing'))
+              AND (? OR (job_id GLOB '*[^0-9]*' AND datetime(updated_at) > datetime('now', '-1 day')))
+            LIMIT 1
+            """,
+            (
+                owner_user_id, pack_id, pack_id,
+                owner_user_id, pack_id, pack_id, include_bound_portability,
+                owner_user_id, pack_id, pack_id, include_bound_portability,
+            ),
+        ).fetchone()
+        return row is not None
+
+    def list_storage_items(self, *, owner_user_id: int, offset: int, limit: int) -> list[dict[str, Any]]:
+        """Page through published file pointers in the owner's packs, including retained packs."""
+        self._ensure_schema_initialized()
+        rows = self.db.execute_query(
+            """
+            SELECT item.id, item.pack_id, item.generated_file_id, item.storage_ref, item.created_at, item.updated_at
+            FROM vn_asset_items AS item
+            JOIN vn_asset_packs AS pack ON pack.id = item.pack_id
+            WHERE pack.owner_user_id = ? AND item.generated_file_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM vn_asset_generation_recipes AS recipe
+                  WHERE recipe.item_id = item.id AND recipe.outcome_status != 'completed'
+              )
+            ORDER BY item.id
+            LIMIT ? OFFSET ?
+            """,
+            (owner_user_id, limit, offset),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def storage_reference_exists(
+        self, *, owner_user_id: int, item_id: int, storage_ref: str, generated_file_id: int | None = None,
+    ) -> bool:
+        """Protect all pointers in this content database, including unpublished and soft-deleted packs."""
+        self._ensure_schema_initialized()
+        row = self.db.execute_query(
+            """
+            SELECT 1 FROM vn_asset_items AS item
+            JOIN vn_asset_packs AS pack ON pack.id = item.pack_id
+            WHERE pack.owner_user_id = ? AND (
+                (item.id = ? AND (item.generated_file_id IS NULL OR COALESCE(item.storage_ref, '') = ''))
+                OR item.storage_ref IN (?, ?) OR item.generated_file_id = ?
+            )
+            LIMIT 1
+            """,
+            (owner_user_id, item_id, storage_ref, storage_ref.replace("/", "\\"), generated_file_id),
+        ).fetchone()
+        return row is not None
+
     def count_items_for_generation(self, pack_id: int) -> int:
         """Count visible items and active reservations, excluding terminal reservations."""
         self._ensure_schema_initialized()

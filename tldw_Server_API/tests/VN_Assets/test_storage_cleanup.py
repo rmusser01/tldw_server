@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio as real_asyncio
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from os import utime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -25,10 +26,11 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
 from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsRepository
 from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
-from tldw_Server_API.app.core.VN_Platform.idempotency import canonical_multipart_payload_hash
+from tldw_Server_API.app.core.VN_Platform.idempotency import canonical_multipart_payload_hash, canonical_payload_hash
 
 USER_ID = 42
 PNG_BYTES = b"\x89PNG\r\n\x1a\nvn-asset-test"
@@ -74,6 +76,24 @@ class FakeGeneratedFilesRepo:
 
     async def get_file_by_id(self, file_id: int) -> dict[str, Any] | None:
         return self.records.get(file_id)
+
+    async def get_files_by_ids(self, file_ids: list[int]) -> list[dict[str, Any]]:
+        return [self.records[file_id] for file_id in file_ids if file_id in self.records]
+
+    async def list_files(
+        self, *, user_id: int, source_feature: str, offset: int, limit: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        records = [
+            record for record in self.records.values()
+            if record["user_id"] == user_id and record["source_feature"] == source_feature and not record["is_deleted"]
+        ]
+        return records[offset:offset + limit], len(records)
+
+    async def registered_storage_paths(self, *, user_id: int, storage_paths: list[str]) -> set[str]:
+        return {
+            record["storage_path"] for record in self.records.values()
+            if record["user_id"] == user_id and record["storage_path"] in storage_paths
+        }
 
     async def update_accessed_at(self, file_id: int) -> None:
         self.accessed_ids.append(file_id)
@@ -709,6 +729,345 @@ def test_cleanup_endpoint_dry_run(
     assert response.status_code == 200
     assert response.json()["files_would_delete"] == 1
     assert fake_generated_files_repo.hard_deleted_ids == []
+
+
+@pytest.mark.parametrize(
+    ("review_status", "age_days", "eligible"),
+    [
+        ("rejected", 29, False),
+        ("rejected", 30, True),
+        ("hidden", 6, False),
+        ("hidden", 7, True),
+        ("approved", 45, False),
+        ("draft", 45, False),
+        ("hidden", None, False),
+    ],
+)
+def test_retention_preview_applies_age_and_review_policy(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    review_status: str,
+    age_days: int | None,
+    eligible: bool,
+) -> None:
+    item_id = asset_with_generated_file.item_id
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    repo.update_item_review(item_id, review_status=review_status, preferred=False)
+    old = datetime.now(timezone.utc) - timedelta(days=60)
+    updated = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat() if age_days is not None else "invalid"
+    with chacha_db.transaction() as conn:
+        conn.execute("UPDATE vn_asset_items SET created_at = ?, updated_at = ? WHERE id = ?", (old.isoformat(), updated, item_id))
+
+    response = client.post(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup",
+        json={"retention_only": True, "statuses": [review_status]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["candidate_item_ids"] == ([item_id] if eligible else [])
+    assert response.json()["files_would_delete"] == int(eligible)
+    assert fake_generated_files_repo.hard_deleted_ids == []
+
+
+@pytest.mark.parametrize("operation", ["generation", "export", "import"])
+def test_retention_preview_defers_active_pack_work(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    operation: str,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack_id = asset_with_generated_file.pack_id
+    if operation == "generation":
+        repo.create_batch(pack_id=pack_id, requested_by_user_id=USER_ID, status="processing")
+    elif operation == "export":
+        repo.create_portability_job(
+            owner_user_id=USER_ID, job_id="export", operation="export", status="queued", stage="queued", pack_id=pack_id,
+        )
+    else:
+        preview = repo.create_import_preview(
+            owner_user_id=USER_ID, job_id="preview", status="completed", archive_path="staged.tldw-vnpack",
+        )
+        repo.create_import_journal(
+            owner_user_id=USER_ID, preview_id=preview["id"], job_id="import", status="queued", stage="queued",
+            trust_mode="trusted_restore", target_mode="update_existing",
+        )
+
+    response = client.post(
+        f"/api/v1/vn/vn-assets/packs/{pack_id}/cleanup", json={"retention_only": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["retention_deferred"] is True
+    assert response.json()["candidate_item_ids"] == []
+
+
+def test_retention_mode_cannot_execute_cleanup(
+    client: TestClient, asset_with_generated_file: SimpleNamespace, fake_generated_files_repo: FakeGeneratedFilesRepo,
+) -> None:
+    response = client.post(
+        f"/api/v1/vn/vn-assets/packs/{asset_with_generated_file.pack_id}/cleanup",
+        json={"dry_run": False, "retention_only": True, "idempotency_key": "retention-conflict"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "retention_preview_requires_dry_run"
+    assert fake_generated_files_repo.hard_deleted_ids == []
+
+
+def test_cleanup_replays_receipt_created_before_retention_preview(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+) -> None:
+    pack_id = asset_with_generated_file.pack_id
+    payload = {"dry_run": False, "statuses": ["rejected"], "idempotency_key": "old-cleanup"}
+    old_request = VNAssetCleanupRequest.model_validate(payload).model_dump(
+        mode="json", exclude={"idempotency_key", "retention_only"},
+    )
+    VNAssetPacksRepository.initialized(chacha_db).create_idempotency_record(
+        owner_user_id=USER_ID, scope="vn_asset_cleanup", resource_id=f"pack:{pack_id}",
+        idempotency_key="old-cleanup", payload_hash=canonical_payload_hash({"pack_id": pack_id, "request": old_request}),
+        response={"dry_run": False, "files_deleted": 2},
+    )
+
+    response = client.post(f"/api/v1/vn/vn-assets/packs/{pack_id}/cleanup", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["files_deleted"] == 2
+    assert fake_generated_files_repo.hard_deleted_ids == []
+
+
+def _write_orphan_scan_fixture(outputs_dir: Path, item_id: int, *, age_hours: int = 48) -> str:
+    ref = f"vn_assets/2025/10/01/vn_asset_{item_id}_20251001_120000_abcdef012345.png"
+    path = outputs_dir / ref
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(PNG_BYTES)
+    timestamp = (datetime.now(timezone.utc) - timedelta(hours=age_hours)).timestamp()
+    utime(path, (timestamp, timestamp))
+    return ref
+
+
+def test_orphan_report_pages_owned_files_without_flagging_live_or_trashed_paths(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    outputs_dir: Path,
+    tmp_path: Path,
+) -> None:
+    orphan = _write_orphan_scan_fixture(outputs_dir, 8001)
+    _write_orphan_scan_fixture(outputs_dir, 8002, age_hours=1)
+    trashed = _write_orphan_scan_fixture(outputs_dir, 8003)
+    other_feature = _write_orphan_scan_fixture(outputs_dir, 8004)
+    owner_item_path = _write_orphan_scan_fixture(outputs_dir, 8005)
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    repo.update_item_storage(
+        asset_with_generated_file.item_id, storage_ref=owner_item_path,
+        generated_file_id=asset_with_generated_file.file_id, mime_type="image/png",
+        bytes=len(PNG_BYTES), width=None, height=None,
+    )
+    for file_id, user_id, storage_path, deleted in (
+        (901, 43, orphan, False),
+        (902, USER_ID, trashed.replace("/", "\\"), True),
+        (903, USER_ID, other_feature, False),
+    ):
+        fake_generated_files_repo.records[file_id] = {
+            "id": file_id, "user_id": user_id, "source_feature": "image_generation",
+            "storage_path": storage_path, "is_deleted": deleted,
+        }
+    symlink = (outputs_dir / orphan).with_name("vn_asset_8006_20251001_120000_abcdef012345.png")
+    outside = tmp_path / "elsewhere.png"
+    outside.write_bytes(PNG_BYTES)
+    symlink.symlink_to(outside)
+    endpoint = "/api/v1/vn/vn-assets/storage/orphans"
+
+    findings: list[dict[str, Any]] = []
+    for offset, next_offset in ((0, 2), (2, 4), (4, None)):
+        response = client.get(endpoint, params={"source": "files", "offset": offset, "limit": 2})
+        assert response.status_code == 200
+        assert response.json()["next_offset"] == next_offset
+        findings.extend(response.json()["findings"])
+
+    assert [(row["kind"], row["storage_ref"], row["bytes"]) for row in findings] == [
+        ("unregistered_bytes", orphan, len(PNG_BYTES)),
+    ]
+    assert all((outputs_dir / path).is_file() for path in [orphan, trashed, other_feature, owner_item_path])
+    assert fake_generated_files_repo.hard_deleted_ids == []
+
+
+def test_orphan_report_separates_missing_and_orphaned_registrations(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    outputs_dir: Path,
+    character_id: int,
+) -> None:
+    ago = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    files = fake_generated_files_repo.records
+    files[700]["created_at"] = ago
+    (outputs_dir / files[700]["storage_path"]).unlink()
+    orphan = _write_orphan_scan_fixture(outputs_dir, 8001)
+    runtime = _write_orphan_scan_fixture(outputs_dir, 8002)
+    for file_id, item_id, path in ((701, 8001, orphan), (702, 8002, runtime)):
+        files[file_id] = {**files[700], "id": file_id, "source_ref": f"vn_asset_item:{item_id}", "storage_path": path}
+    scripts = VNScriptsRepository.initialized(chacha_db)
+    script = scripts.create_script(
+        owner_user_id=USER_ID, title="Published route", primary_asset_pack_id=asset_with_generated_file.pack_id,
+        policy_profile_id="local_default", generation_profile_id="story_default", status="published",
+    )
+    scripts.create_manifest_snapshot(
+        owner_user_id=USER_ID, script_id=script["id"], asset_pack_id=asset_with_generated_file.pack_id, version_id=1,
+        manifest={"assets": {"sprites": [{"generated_file_id": 702}]}}, manifest_hash="runtime-file",
+    )
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    missing = repo.create_item(
+        pack_id=asset_with_generated_file.pack_id, slot_id=asset_with_generated_file.slot_id,
+        variant_index=1, generated_file_id=799,
+    )
+    trashed = repo.create_item(
+        pack_id=asset_with_generated_file.pack_id, slot_id=asset_with_generated_file.slot_id,
+        variant_index=2, generated_file_id=703,
+    )
+    files[703] = {**files[700], "id": 703, "source_ref": f"vn_asset_item:{trashed['id']}", "is_deleted": True}
+    foreign = VNAssetPackService(chacha_db, owner_user_id=43).create_pack(
+        VNAssetPackCreate(title="Other owner's pack", primary_character_id=character_id),
+    )
+    foreign_slot = repo.create_slot(pack_id=foreign.id, asset_type="sprite", slot_key="foreign")
+    foreign_item = repo.create_item(pack_id=foreign.id, slot_id=foreign_slot["id"], generated_file_id=798)
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            "UPDATE vn_asset_items SET updated_at = ? WHERE id IN (?, ?, ?)",
+            (ago, missing["id"], trashed["id"], foreign_item["id"]),
+        )
+    endpoint = "/api/v1/vn/vn-assets/storage/orphans"
+    registrations = client.get(endpoint, params={"source": "registrations"})
+    items = client.get(endpoint, params={"source": "items"})
+
+    assert registrations.status_code == items.status_code == 200
+    assert [(row["kind"], row["generated_file_id"]) for row in registrations.json()["findings"]] == [
+        ("missing_bytes", 700), ("unreferenced_registration", 701),
+    ]
+    assert [(row["kind"], row["item_id"]) for row in items.json()["findings"]] == [
+        ("missing_registration", missing["id"]),
+    ]
+    assert (outputs_dir / orphan).exists() and (outputs_dir / runtime).exists()
+    assert set(files) == {700, 701, 702, 703}
+    assert client.get(endpoint, params={"limit": 101}).status_code == 422
+    assert client.get(endpoint, params={"offset": 2**63}).status_code == 422
+
+
+def test_orphan_report_distinguishes_replaced_files_from_unfinished_item_bindings(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    outputs_dir: Path,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    bound_item = asset_with_generated_file.item_id
+    repo.update_item_storage(
+        bound_item, generated_file_id=asset_with_generated_file.file_id, storage_ref="vn_assets/fixture.png",
+        mime_type="image/png", width=None, height=None, bytes=len(PNG_BYTES),
+    )
+    replaced_path = _write_orphan_scan_fixture(outputs_dir, bound_item)
+    pending = repo.create_item(
+        pack_id=asset_with_generated_file.pack_id, slot_id=asset_with_generated_file.slot_id, variant_index=1,
+    )
+    pending_path = _write_orphan_scan_fixture(outputs_dir, pending["id"])
+    published_path = _write_orphan_scan_fixture(outputs_dir, 8001)
+    scripts = VNScriptsRepository.initialized(chacha_db)
+    script = scripts.create_script(
+        owner_user_id=USER_ID, title="Published route", primary_asset_pack_id=asset_with_generated_file.pack_id,
+        policy_profile_id="local_default", generation_profile_id="story_default", status="published",
+    )
+    scripts.create_manifest_snapshot(
+        owner_user_id=USER_ID, script_id=script["id"], asset_pack_id=asset_with_generated_file.pack_id,
+        version_id=1, manifest={"assets": {"sprites": [{"storage_ref": published_path}]}}, manifest_hash="runtime-path",
+    )
+    play_path = _write_orphan_scan_fixture(outputs_dir, 8002)
+    play = VNPlayRepository.initialized(chacha_db)
+    session = play.create_session(
+        owner_user_id=USER_ID, mode="freeform", title="Published scene",
+        primary_character_id=repo.get_pack(asset_with_generated_file.pack_id)["primary_character_id"],
+        vn_asset_pack_id=asset_with_generated_file.pack_id,
+    )
+    play.append_event(
+        session_id=session["id"], owner_user_id=USER_ID, event_type="scene_updated",
+        event_payload={"assets": [{"storage_ref": play_path}]},
+    )
+
+    response = client.get("/api/v1/vn/vn-assets/storage/orphans", params={"source": "files"})
+
+    assert response.status_code == 200
+    assert [row["storage_ref"] for row in response.json()["findings"]] == [replaced_path]
+    assert (outputs_dir / pending_path).exists()
+    assert (outputs_dir / published_path).exists()
+    assert (outputs_dir / play_path).exists()
+
+
+def test_orphan_report_defers_during_active_owner_storage_work(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    character_id: int,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    other_pack = VNAssetPackService(chacha_db, owner_user_id=43).create_pack(
+        VNAssetPackCreate(title="Other owner's pack", primary_character_id=character_id),
+    )
+    repo.create_batch(pack_id=other_pack.id, requested_by_user_id=43, status="processing")
+    endpoint = "/api/v1/vn/vn-assets/storage/orphans"
+    assert client.get(endpoint, params={"source": "files"}).json()["scan_deferred"] is False
+
+    repo.create_batch(
+        pack_id=asset_with_generated_file.pack_id, requested_by_user_id=USER_ID, status="enqueued",
+    )
+
+    response = client.get(endpoint, params={"source": "files"})
+
+    assert response.status_code == 200
+    assert response.json()["scan_deferred"] is True
+    assert response.json()["findings"] == []
+
+
+def test_storage_reports_use_scoped_jobs_for_bound_portability_activity(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    character_id: int,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    other_pack = VNAssetPackService(chacha_db, owner_user_id=USER_ID).create_pack(
+        VNAssetPackCreate(title="Second pack", primary_character_id=character_id),
+    )
+    jobs: list[dict[str, Any]] = []
+
+    def list_jobs(*, owner_user_id: str, domain: str, job_type: str, status: str, limit: int) -> list[dict[str, Any]]:
+        assert owner_user_id == str(USER_ID) and domain == "vn_assets"
+        return [job for job in jobs if job["job_type"] == job_type and job["status"] == status][:limit]
+
+    client.app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: SimpleNamespace(list_jobs=list_jobs)
+    first_pack = asset_with_generated_file.pack_id
+    repo.create_portability_job(
+        owner_user_id=USER_ID, job_id="17", operation="export", status="processing", stage="archive", pack_id=first_pack,
+    )
+    root = "/api/v1/vn/vn-assets"
+    assert client.get(f"{root}/storage/orphans").json()["scan_deferred"] is False
+
+    jobs.append({
+        "job_type": "vn_pack_import_commit", "status": "queued",
+        "payload": {"target_mode": "update_existing", "target_pack_id": other_pack.id},
+    })
+    first = client.post(f"{root}/packs/{first_pack}/cleanup", json={"retention_only": True})
+    second = client.post(f"{root}/packs/{other_pack.id}/cleanup", json={"retention_only": True})
+
+    assert first.json()["retention_deferred"] is False
+    assert second.json()["retention_deferred"] is True
+    assert client.get(f"{root}/storage/orphans").json()["scan_deferred"] is True
 
 
 def test_cleanup_endpoint_replays_same_idempotency_key_and_conflicts_on_different_payload(

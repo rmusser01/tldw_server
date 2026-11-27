@@ -1860,6 +1860,7 @@ export type ApiPath =
   | "/api/v1/vn/vn-assets/portability/imports/{job_id}"
   | "/api/v1/vn/vn-assets/portability/imports/{job_id}/cancel"
   | "/api/v1/vn/vn-assets/starter-matrices"
+  | "/api/v1/vn/vn-assets/storage/orphans"
   | "/api/v1/vn/vn-capabilities"
   | "/api/v1/vn/vn-play/sessions"
   | "/api/v1/vn/vn-play/sessions/{session_id}"

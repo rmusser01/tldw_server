@@ -14,8 +14,9 @@ from typing import Any
 
 import aiofiles
 import aiofiles.os
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
@@ -40,6 +41,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetSlotResponse,
     VNAssetSlotUpdate,
     VNAssetStarterMatricesResponse,
+    VNAssetStorageOrphanReport,
     VNPackExportRequest,
     VNPackExportResponse,
     VNPackImportCommitRequest,
@@ -48,6 +50,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNPackImportPreviewResponse,
     VNPackImportPreviewStartResponse,
     VNPackPortabilityJobResponse,
+    VNStorageScanSource,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -73,6 +76,7 @@ from tldw_Server_API.app.core.VN_Assets.storage import (
     image_format_from_mime_type,
     resolve_vn_asset_storage_path,
 )
+from tldw_Server_API.app.core.VN_Assets.storage_inventory import inspect_storage_orphans
 from tldw_Server_API.app.core.VN_Platform.errors import (
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
     ERROR_POLICY_BLOCKED,
@@ -854,13 +858,17 @@ async def cleanup_pack(
     storage_service: Any = Depends(_storage_service),
     blocker_provider: Any | None = Depends(_cleanup_blocker_provider),
 ) -> VNAssetCleanupResponse:
+    if request.retention_only and not request.dry_run:
+        raise _handle_value_error(ValueError("retention_preview_requires_dry_run"))
+
     idempotency_key = None
     if not request.dry_run:
         idempotency_key = _require_idempotency_key(request.idempotency_key)
     payload_hash = canonical_payload_hash(
         {
             "pack_id": pack_id,
-            "request": request.model_dump(mode="json", exclude={"idempotency_key"}),
+            # Retention previews never write a receipt. Keep old cleanup request identities.
+            "request": request.model_dump(mode="json", exclude={"idempotency_key", "retention_only"}),
         }
     )
     replay = None
@@ -915,6 +923,30 @@ async def cleanup_pack(
             response=response,
         )
     return response
+
+
+@router.get(
+    "/storage/orphans",
+    response_model=VNAssetStorageOrphanReport,
+    dependencies=[Depends(rbac_rate_limit("vn_assets.preflight", per_user=True))],
+)
+async def get_storage_orphans(
+    source: VNStorageScanSource = "registrations",
+    offset: int = Query(default=0, ge=0, le=2_147_483_647),
+    limit: int = Query(default=50, ge=1, le=100),
+    service: VNAssetPackService = Depends(_service),
+    files_repo: AuthnzGeneratedFilesRepo = Depends(_generated_files_repo),
+    blocker_provider: VNAssetCleanupBlockerProvider = Depends(_cleanup_blocker_provider),
+) -> VNAssetStorageOrphanReport:
+    """Inspect owner-local VN storage without deleting files or changing metadata."""
+    try:
+        return await inspect_storage_orphans(
+            service.repo, files_repo, blocker_provider, owner_user_id=service.owner_user_id,
+            source=source, offset=offset, limit=limit, jobs_manager=service.jobs_manager,
+        )
+    except OSError as exc:
+        logger.warning("VN storage scan unavailable for user {} ({})", service.owner_user_id, type(exc).__name__)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="vn_storage_scan_unavailable") from exc
 
 
 @router.post(

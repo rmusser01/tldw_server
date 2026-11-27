@@ -7,6 +7,7 @@ import inspect
 import json
 import sqlite3
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -58,6 +59,11 @@ from tldw_Server_API.app.core.VN_Assets.storage import (
     image_format_from_mime_type,
     resolve_vn_asset_storage_path,
     unlink_vn_asset_storage_file,
+)
+from tldw_Server_API.app.core.VN_Assets.storage_inventory import (
+    VN_RETENTION_DAYS,
+    retention_has_elapsed,
+    storage_work_is_active,
 )
 from tldw_Server_API.app.core.VN_Assets.vn_asset_schemas import (
     VALID_REVIEW_STATUSES,
@@ -414,6 +420,17 @@ class VNAssetPackService:
         if invalid_statuses := sorted(statuses - VALID_REVIEW_STATUSES):
             raise ValueError(f"invalid_review_status:{','.join(invalid_statuses)}")
 
+        retention_now = None
+        if request.retention_only:
+            if not request.dry_run:
+                raise ValueError("retention_preview_requires_dry_run")
+            if await storage_work_is_active(
+                self.repo, owner_user_id=self.owner_user_id, pack_id=pack_id, jobs_manager=self.jobs_manager,
+            ):
+                return VNAssetCleanupResponse(dry_run=True, retention_deferred=True)
+            statuses.intersection_update(VN_RETENTION_DAYS)
+            retention_now = datetime.now(timezone.utc)
+
         includes_approved = ITEM_REVIEW_STATUS_APPROVED in statuses
         if includes_approved and not request.include_approved:
             raise ValueError("cleanup_approved_requires_include_approved")
@@ -429,6 +446,8 @@ class VNAssetPackService:
             if item_ids and item_id not in item_ids:
                 continue
             if str(item["review_status"]) not in statuses:
+                continue
+            if retention_now is not None and not retention_has_elapsed(item, now=retention_now):
                 continue
             raw_file_id = item["generated_file_id"]
             if raw_file_id is None:
@@ -483,6 +502,10 @@ class VNAssetPackService:
 
         files_would_delete = len(candidates)
         if request.dry_run:
+            if request.retention_only and await storage_work_is_active(
+                self.repo, owner_user_id=self.owner_user_id, pack_id=pack_id, jobs_manager=self.jobs_manager,
+            ):
+                return VNAssetCleanupResponse(dry_run=True, retention_deferred=True)
             return VNAssetCleanupResponse(
                 dry_run=True,
                 removed_item_ids=[],
@@ -493,6 +516,7 @@ class VNAssetPackService:
                 blocked_count=len(cleanup_blocked),
                 cleanup_blocked=cleanup_blocked,
                 reclaimed_bytes=candidate_reclaimed_bytes,
+                candidate_item_ids=[int(item["id"]) for item, _, _ in candidates],
             )
 
         removed_item_ids: list[int] = []

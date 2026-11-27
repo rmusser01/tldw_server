@@ -25,13 +25,15 @@ def vn_asset_source_ref(item_id: int) -> str:
     return f"vn_asset_item:{item_id}"
 
 
-def generated_file_matches_vn_asset(record: dict[str, Any], *, user_id: int, item_id: int) -> bool:
+def generated_file_matches_vn_asset(
+    record: dict[str, Any], *, user_id: int, item_id: int, include_deleted: bool = False,
+) -> bool:
     """Check AuthNZ generated-file metadata against the expected VN asset owner/item."""
     return (
         int(record.get("user_id") or 0) == user_id
         and record.get("source_feature") == SOURCE_FEATURE_VN_ASSETS
         and record.get("source_ref") == vn_asset_source_ref(item_id)
-        and not bool(record.get("is_deleted"))
+        and (include_deleted or not bool(record.get("is_deleted")))
     )
 
 

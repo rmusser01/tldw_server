@@ -34,6 +34,13 @@ class _DBOwnedConnection:
             return {"id": 7, "user_id": 5, "tags": '["vn"]', "is_deleted": False}
         return None
 
+    async def fetch(self, query: str, *params: Any) -> list[dict[str, str]]:
+        """Record the bound PostgreSQL inventory lookup."""
+        caller = inspect.currentframe().f_back
+        assert ".DB_Management." in caller.f_globals["__name__"], "VN SQL must be DB-owned"
+        self.calls.append((" ".join(query.split()), params))
+        return [{"storage_path": "vn_assets/trashed.png"}]
+
 
 class _OwningPool:
     """Only the outer owner may enter a transaction or borrow from the pool."""
@@ -92,6 +99,23 @@ async def test_vn_locks_and_replay_queries_are_db_owned_on_one_transaction() -> 
 
 
 @pytest.mark.asyncio
+async def test_inventory_path_lookup_uses_bounded_owned_postgres_query() -> None:
+    """Read owned paths including trash without replacing the writer's transaction."""
+    conn = _DBOwnedConnection()
+    pool = _OwningPool(conn)
+    async with AuthnzGeneratedFilesRepo(pool).vn_item_transaction(user_id=5, source_ref="vn_asset_item:42") as bound:
+        paths = await bound.registered_storage_paths(
+            user_id=5, storage_paths=["vn_assets/trashed.png", "vn_assets/new.png"],
+        )
+
+    assert paths == {"vn_assets/trashed.png"}
+    statement, params = conn.calls[-1]
+    assert statement == "SELECT storage_path FROM generated_files WHERE user_id = $1 AND storage_path = ANY($2::text[])"
+    assert params == (5, ["vn_assets/trashed.png", "vn_assets/new.png"])
+    assert pool.transactions == 1
+
+
+@pytest.mark.asyncio
 async def test_db_lookup_scopes_real_sqlite_rows_without_committing() -> None:
     """Catch missing live/owner/feature filters, interpolation and hidden commits."""
     from tldw_Server_API.app.core.DB_Management.vn_generated_files_queries import VNGeneratedFilesQueries
@@ -109,6 +133,8 @@ async def test_db_lookup_scopes_real_sqlite_rows_without_committing() -> None:
             (3, 6, "vn_assets", "vn_asset_item:42", "vn_assets/live.png", 0),
             (4, 5, "image_gen", "vn_asset_item:42", "images/live.png", 0),
             (5, 5, "vn_assets", "vn_asset_item:42", "vn_assets/live.png", 1),
+            (6, 5, "image_gen", "elsewhere", "vn_assets/trashed.png", 1),
+            (7, 6, "vn_assets", "elsewhere", "vn_assets/foreign.png", 0),
         ])
         await conn.commit()
         await conn.execute("BEGIN IMMEDIATE")
@@ -124,6 +150,10 @@ async def test_db_lookup_scopes_real_sqlite_rows_without_committing() -> None:
             user_id=5, source_feature="vn_assets", source_ref="vn_asset_item:42' OR 1=1 --",
         ) is None
         assert await queries.find_live_by_storage_path(user_id=5, storage_path="missing' OR 1=1 --") is None
+        paths = await queries.registered_storage_paths(
+            user_id=5, storage_paths=["vn_assets/live.png", "vn_assets/trashed.png", "vn_assets/foreign.png", "missing.png"],
+        )
+        assert paths == {"vn_assets/live.png", "vn_assets/trashed.png"}
         assert conn.in_transaction
         await conn.rollback()
 

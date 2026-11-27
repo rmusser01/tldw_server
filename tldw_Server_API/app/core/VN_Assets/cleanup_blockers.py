@@ -19,11 +19,11 @@ class VNAssetCleanupBlockerProvider:
     def find_blockers(
         self,
         *,
-        pack_id: int,
+        pack_id: int | None,
         owner_user_id: int,
         candidates: list[dict[str, Any]],
     ) -> dict[int, list[dict[str, str]]]:
-        """Return cleanup blockers keyed by generated file ID."""
+        """Return blockers keyed by file ID, across the owner's packs when pack_id is absent."""
         file_ids = {
             int(candidate["generated_file_id"])
             for candidate in candidates
@@ -51,3 +51,12 @@ class VNAssetCleanupBlockerProvider:
         for file_id, entries in play_blockers.items():
             blockers.setdefault(file_id, []).extend(entries)
         return blockers
+
+    def find_runtime_storage_paths(self, *, owner_user_id: int, storage_paths: set[str]) -> set[str]:
+        """Keep raw bytes referenced even when their file registration has been removed."""
+        if not storage_paths:
+            return set()
+        paths = storage_paths | {path.replace("/", "\\") for path in storage_paths}
+        refs = self.scripts_repo.find_published_storage_paths(owner_user_id=owner_user_id, storage_paths=paths)
+        refs.update(self.play_repo.find_runtime_storage_paths(owner_user_id=owner_user_id, storage_paths=paths))
+        return {ref.replace("\\", "/") for ref in refs}

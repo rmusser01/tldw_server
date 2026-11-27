@@ -94,3 +94,18 @@ class VNGeneratedFilesQueries:
         async with cursor:
             row = await cursor.fetchone()
             return dict(zip((col[0] for col in cursor.description), row)) if row is not None else None
+
+    async def registered_storage_paths(self, *, user_id: int, storage_paths: list[str]) -> set[str]:
+        """Find exact owned registrations across features and trash for a bounded page of paths."""
+        if not storage_paths:
+            return set()
+        if self.postgres:
+            rows = await self.conn.fetch(
+                "SELECT storage_path FROM generated_files WHERE user_id = $1 AND storage_path = ANY($2::text[])",
+                user_id, storage_paths,
+            )
+            return {row["storage_path"] for row in rows}
+        placeholders = ", ".join("?" for _ in storage_paths)
+        query = f"SELECT storage_path FROM generated_files WHERE user_id = ? AND storage_path IN ({placeholders})"  # nosec B608
+        async with self.conn.execute(query, (user_id, *storage_paths)) as cursor:
+            return {row[0] for row in await cursor.fetchall()}
