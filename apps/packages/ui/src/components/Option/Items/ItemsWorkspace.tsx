@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Button,
   Checkbox,
   Dropdown,
-  Empty,
   Input,
   Modal,
   Pagination,
@@ -13,10 +12,12 @@ import {
   message
 } from "antd"
 import type { MenuProps } from "antd"
-import { Filter, RefreshCw, Search, Star, Trash2 } from "lucide-react"
+import { Filter, Inbox, RefreshCw, Search, Star, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
+import { EmptyState } from "@/components/ui/feedback/EmptyState"
+import { StatePanel } from "@/components/ui/state"
 import { safeExternalUrl } from "@/utils/safe-external-url"
 import { dedupeTags } from "@/utils/tag-identity"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
@@ -59,6 +60,8 @@ const STATUS_OPTIONS: Array<{ value: ItemStatus | "all"; label: string }> = [
   { value: "archived", label: "Archived" }
 ]
 
+const ITEMS_LOAD_ERROR = "Failed to load items"
+
 const normalizeBulkTags = (raw: string): string[] => (raw ? dedupeTags(raw.split(",")) : [])
 
 const getBulkFailureLines = (response: SharedItemsBulkResponse, maxLines = 10): string[] => {
@@ -82,7 +85,6 @@ export const ItemsWorkspace: React.FC = () => {
   const { showUndoNotification } = useUndoNotification()
 
   const [items, setItems] = useState<SharedItem[]>([])
-  const [itemsLoading, setItemsLoading] = useState(false)
   const [itemsError, setItemsError] = useState<string | null>(null)
   const [itemsTotal, setItemsTotal] = useState(0)
   const [itemsPage, setItemsPage] = useState(1)
@@ -115,11 +117,10 @@ export const ItemsWorkspace: React.FC = () => {
   const selectedCount = selectedItemIds.length
   const allPageSelected = items.length > 0 && selectedCount === items.length
 
-  const fetchItems = useCallback(async () => {
-    setItemsLoading(true)
-    setItemsError(null)
-    try {
-      const response = await api.getItems({
+  const itemsQuery = useMemo(
+    () => ({
+      api,
+      params: {
         page: itemsPage,
         size: itemsPageSize,
         q: itemsSearch || undefined,
@@ -129,7 +130,36 @@ export const ItemsWorkspace: React.FC = () => {
         domain: domainFilter || undefined,
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined
-      })
+      }
+    }),
+    [
+      api,
+      itemsPage,
+      itemsPageSize,
+      itemsSearch,
+      statusFilter,
+      favoriteFilter,
+      tagsFilter,
+      domainFilter,
+      dateFrom,
+      dateTo
+    ]
+  )
+  // Bulk and undo actions can refresh after the active filters change.
+  const itemsQueryRef = useRef<typeof itemsQuery | null>(null)
+  const itemsRequestIdRef = useRef(0)
+  const [settledItemsQuery, setSettledItemsQuery] = useState<typeof itemsQuery | null>(null)
+  const itemsLoading = settledItemsQuery !== itemsQuery
+
+  const fetchItems = useCallback(async () => {
+    const query = itemsQueryRef.current
+    if (!query) return
+    const requestId = ++itemsRequestIdRef.current
+    setSettledItemsQuery(null)
+    setItemsError(null)
+    try {
+      const response = await query.api.getItems(query.params)
+      if (requestId !== itemsRequestIdRef.current) return
       const nextItems = Array.isArray(response?.items) ? response.items : []
       setItems(nextItems)
       setItemsTotal(Number(response?.total || nextItems.length))
@@ -139,28 +169,25 @@ export const ItemsWorkspace: React.FC = () => {
       })
       setAvailableTags(Array.from(tagSet).sort())
     } catch (error: any) {
-      const msg = error?.message || "Failed to load items"
+      if (requestId !== itemsRequestIdRef.current) return
+      const msg = error?.message || ITEMS_LOAD_ERROR
       setItemsError(msg)
       message.error(msg)
     } finally {
-      setItemsLoading(false)
+      if (requestId === itemsRequestIdRef.current) {
+        setSettledItemsQuery(query)
+      }
     }
-  }, [
-    api,
-    itemsPage,
-    itemsPageSize,
-    itemsSearch,
-    statusFilter,
-    favoriteFilter,
-    tagsFilter,
-    domainFilter,
-    dateFrom,
-    dateTo
-  ])
+  }, [])
 
   useEffect(() => {
+    itemsQueryRef.current = itemsQuery
     void fetchItems()
-  }, [fetchItems])
+    return () => {
+      itemsQueryRef.current = null
+      itemsRequestIdRef.current += 1
+    }
+  }, [fetchItems, itemsQuery])
 
   useEffect(() => {
     const pageIds = new Set(items.map((item) => item.id))
@@ -538,6 +565,8 @@ export const ItemsWorkspace: React.FC = () => {
     domainFilter.trim().length > 0 ||
     Boolean(dateFrom) ||
     Boolean(dateTo)
+  const itemsTitle = t("collections:itemsTitle", "Items")
+  const emptyTitle = hasFilters ? "No items match your filters" : "No items available"
 
   const resetFilters = useCallback(() => {
     setItemsSearch("")
@@ -552,7 +581,7 @@ export const ItemsWorkspace: React.FC = () => {
 
   return (
     <WorkspaceConnectionGate
-      featureName={t("collections:itemsTitle", "Items")}
+      featureName={itemsTitle}
       setupDescription={t(
         "collections:itemsSetupRequired",
         "Items depends on your connected tldw server to load, update, and generate outputs from saved reading items."
@@ -561,7 +590,7 @@ export const ItemsWorkspace: React.FC = () => {
     >
       <PageShell className="py-6 space-y-4" maxWidthClassName="max-w-6xl">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold text-text">Items</h1>
+          <h1 className="text-2xl font-semibold text-text">{itemsTitle}</h1>
           <p className="text-sm text-text-muted">
             Manage shared items with bulk actions and output generation.
           </p>
@@ -784,19 +813,26 @@ export const ItemsWorkspace: React.FC = () => {
         </div>
       )}
 
+      <p role="status" aria-label={itemsTitle} aria-atomic="true" className="sr-only">
+        {!itemsLoading && !itemsError && items.length === 0 ? emptyTitle : ""}
+      </p>
       {itemsLoading && items.length === 0 ? (
         <div className="flex items-center justify-center py-12">
           <Spin size="large" />
         </div>
-      ) : itemsError ? (
-        <Empty description={itemsError} image={Empty.PRESENTED_IMAGE_SIMPLE}>
-          <Button onClick={fetchItems}>Retry</Button>
-        </Empty>
-      ) : items.length === 0 ? (
-        <Empty
-          description={hasFilters ? "No items match your filters" : "No items available"}
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
+      ) : !itemsLoading && itemsError ? (
+        <StatePanel
+          state="error"
+          title={ITEMS_LOAD_ERROR}
+          message={itemsError === ITEMS_LOAD_ERROR ? undefined : itemsError}
+          className="mx-auto max-w-md break-words border-border"
+          primaryAction={{
+            label: t("common:retry", "Retry"),
+            onClick: () => void fetchItems()
+          }}
         />
+      ) : items.length === 0 ? (
+        <EmptyState variant="inline" icon={Inbox} title={emptyTitle} />
       ) : (
         <div className="space-y-3">
           {items.map((item) => {
