@@ -1,4 +1,5 @@
 import type { RoleplayResumeRecovery } from "@/services/tldw/roleplay-resume"
+import { DOCUMENT_CHAT_SOURCES, readDocumentChatCitations } from "@/utils/document-chat-citations"
 /** Local H1 authority. All hashes run synchronously within the owning Dexie transaction. */
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
@@ -26,6 +27,7 @@ import type {
 import {
   bindSelectedHistoryContent,
   HistorySelectionError,
+  isLocalHistoryOwnerKey,
   LOCAL_HISTORY_OWNER_KEY_PREFIX,
   resolveHistorySelection,
   resolveParentPath,
@@ -1431,7 +1433,10 @@ export const saveHistoryTurnRecovery = async (
       detached.existing_selection.selection_digest !== detached.selection_digest ||
       detached.existing_selection.request_context_digest !== detached.request_context_digest ||
       selectionDigest(detached.existing_selection) !== detached.selection_digest)) fail("history_operation_conflict")
-    if (detached.settlement_payload && (!detached.existing_selection ||
+    if (detached.settlement_payload && (!(detached.existing_selection || (
+      detached.admission && !isLocalHistoryOwnerKey(detached.owner_key) &&
+      readDocumentChatCitations(detached.settlement_payload.metadataExtra?.[DOCUMENT_CHAT_SOURCES])
+    )) ||
       detached.settlement_payload.id !== detached.assistant_id ||
       detached.settlement_payload.history_id !== detached.conversation_id ||
       detached.settlement_payload.role !== "assistant" ||

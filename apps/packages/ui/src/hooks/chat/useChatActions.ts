@@ -151,11 +151,13 @@ import {
   aggregateChatSubmitResults,
   chatSubmitFailed,
   chatSubmitSkipped,
+  getLastThreadMessageId,
   normalizeChatSubmitResult,
   resolveTurnContextFiles,
   resolveTurnFileRetrievalEnabled,
   resolveTurnUploadedFiles,
   resolveTurnRagMediaIds,
+  shouldIncludeMessageForModel,
   shouldUseRagForTurn,
   type ChatModeOverrides,
   type ChatSubmitResult
@@ -439,6 +441,7 @@ const characterIdsMatch = (
 
 type UseChatActionsOptions = {
   historyDocumentId?: string
+  documentBrowserOnly?: boolean
   onDocumentHistorySaved?: (historyId: string) => Promise<void>
   capturePrivateScene?: (commandIsCurrent: () => boolean) => ReturnType<typeof captureActorSceneSend>
   t: TFunction
@@ -627,12 +630,14 @@ export const useChatActions = ({
   setVisualIdentityManualExpressionOverride,
   capturePrivateScene,
   historyDocumentId,
+  documentBrowserOnly = false,
   onDocumentHistorySaved
 }: UseChatActionsOptions) => {
-  const historySelection = useHistorySelectionContext()
-  const captureSceneForCommand = (isCurrent: () => boolean) => historySelection
-    ? captureActorSceneSend(historySelection, isCurrent)
-    : capturePrivateScene?.(isCurrent) ?? null
+  const defaultHistorySelection = useHistorySelectionContext()
+  const historySelection = defaultHistorySelection
+  const captureSceneForCommand = (isCurrent: () => boolean) => capturePrivateScene
+    ? capturePrivateScene(isCurrent)
+    : historySelection ? captureActorSceneSend(historySelection, isCurrent) : null
   const renderedDraftRevision = useStoreMessageOption.getState().chatDraftRevision
   const renderedSettingsDraft = useStoreMessageOption.getState().chatDraftAddress
   const renderedContinuationFence = historySelection?.fence()
@@ -3315,26 +3320,6 @@ export const useChatActions = ({
     [t]
   )
 
-  const getMessageModelKey = (message: Message) =>
-    message.modelId || message.modelName || message.name
-
-  const shouldIncludeMessageForModel = (
-    message: Message,
-    modelId: string
-  ) => {
-    if (!message.isBot) {
-      if (message.messageType === "compare:perModelUser") {
-        return message.modelId === modelId
-      }
-      return true
-    }
-    const messageModel = getMessageModelKey(message)
-    if (!messageModel) {
-      return false
-    }
-    return messageModel === modelId
-  }
-
   const buildHistoryFromMessages = React.useCallback(
     (items: Message[]): ChatHistory =>
       excludeLocalRagDiagnostics(items)
@@ -3358,27 +3343,6 @@ export const useChatActions = ({
     buildHistoryFromMessages(
       items.filter((message) => shouldIncludeMessageForModel(message, modelId))
     )
-
-  const getCompareUserMessageId = (items: Message[], clusterId: string) =>
-    items.find(
-      (message) =>
-        message.messageType === "compare:user" &&
-        message.clusterId === clusterId
-    )?.id || null
-
-  const getLastThreadMessageId = (
-    items: Message[],
-    clusterId: string,
-    modelId: string
-  ) => {
-    const threadMessages = items.filter(
-      (message) =>
-        message.clusterId === clusterId &&
-        getMessageModelKey(message) === modelId
-    )
-    const lastThreadMessage = threadMessages[threadMessages.length - 1]
-    return lastThreadMessage?.id || getCompareUserMessageId(items, clusterId)
-  }
 
   const refreshHistoryFromMessages = React.useCallback(() => {
     const next = buildHistoryFromMessages(messagesRef.current)
@@ -3516,7 +3480,9 @@ export const useChatActions = ({
     historyServerExistingInput,
     historyRecoveryRetry,
     historyRecoveryRetryIsCurrent,
-    historyRecoveryRetrySystemPrompts
+    historyRecoveryRetrySystemPrompts,
+    documentHistorySelection,
+    documentLocalOnly = documentBrowserOnly
   }: {
     message: string
     image: string
@@ -3562,7 +3528,11 @@ export const useChatActions = ({
     historyRecoveryRetry?: boolean
     historyRecoveryRetryIsCurrent?: () => boolean
     historyRecoveryRetrySystemPrompts?: string[]
+    documentHistorySelection?: import("@/hooks/chat/useHistorySelection").HistorySelectionController
+    documentLocalOnly?: boolean
   }, beginResponse: () => boolean): Promise<ChatSubmitResult> => {
+    const historySelection = documentHistorySelection ?? defaultHistorySelection
+    const documentTurn = Boolean(historyDocumentId && capturePrivateScene)
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
     if (historyServerExistingInput && (compareModeActive || temporaryChat || isRegenerate || isContinue ||
         !historyServerExistingInput.isCurrent())) return chatSubmitFailed("unsupported_history_action_context")
@@ -3717,7 +3687,7 @@ export const useChatActions = ({
       requestOverrides,
       ragMediaIds
     })
-    const turnFileRetrievalEnabled = resolveTurnFileRetrievalEnabled({
+    const turnFileRetrievalEnabled = !documentTurn && resolveTurnFileRetrievalEnabled({
       requestOverrides,
       fileRetrievalEnabled
     })
@@ -3758,8 +3728,8 @@ export const useChatActions = ({
         routingSelectedAssistant
       )
     })
-    const turnResolvedSendMode =
-      getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
+    const turnResolvedSendMode = documentTurn ? "plain"
+      : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
       routingSelectedAssistant?.kind === "persona"
         ? "tracked_persona"
         : getAssistantSelectionMode(routingSelectedAssistant) === "tracked" &&
@@ -3824,6 +3794,9 @@ export const useChatActions = ({
       currentHistorySelection?.owner?.kind === "local" &&
       !isRegenerate && !isContinue && !compareModeActive && !turnUsesImageMode &&
       (turnResolvedSendMode === "plain" || turnResolvedSendMode === "overlay")
+    const selectedDocumentTurn = selectedHistoryTurn && currentHistorySelection?.owner?.kind === "native" &&
+      currentHistorySelection.owner.documentTarget && !isRegenerate && !isContinue && !compareModeActive &&
+      !turnContextFiles.length && !docs?.length && !documentContext?.length
 
     if ((historyEditBoundary || historyRegenerateBoundary) && (
       historySelection?.getCurrent().owner?.kind !== "local" || temporaryChat ||
@@ -3919,7 +3892,7 @@ export const useChatActions = ({
           (isRegenerate && !historyRegenerate) ||
           isContinue ||
           turnUsesImageMode ||
-          (!selectedLocalContextTurn && (turnContextFiles.length ||
+          (!selectedLocalContextTurn && !selectedDocumentTurn && (turnContextFiles.length ||
             docs?.length || documentContext?.length || turnShouldUseRag)))
       ) {
         throw new Error("unsupported_history_action_context")
@@ -4023,6 +3996,9 @@ export const useChatActions = ({
         actorSceneSend,
         {
           ...(requestOverrides ?? {}),
+          // A first document send can bind a native chat before React rerenders.
+          ...(documentHistorySelection && serverChatIdOverride
+            ? { serverChatId: serverChatIdOverride, historyId: null } : {}),
           ...(!historySelection && !temporaryChat && !compareModeActive && (needsSavedNormalScope || turnResolvedSendMode === "tracked_persona" || (turnShouldUseRag && scope?.type === "workspace")) && !Object.prototype.hasOwnProperty.call(requestOverrides ?? {}, "historyId")
             ? { historyId: historyIdOverride ?? historyId } : {}),
           ragMediaIds: turnRagMediaIds,
@@ -4225,7 +4201,7 @@ export const useChatActions = ({
         return toChatSubmitResult(imageResult)
       }
       const alternateHistoryParams = historySelection && !temporaryChat && !isRegenerate && !compareModeActive &&
-        (selectedLocalContextTurn || (!selectedHistoryTurn && !chatModeParams.historyId && !chatModeParams.serverChatId &&
+        (selectedLocalContextTurn || selectedDocumentTurn || (!selectedHistoryTurn && !chatModeParams.historyId && !chatModeParams.serverChatId &&
           normalHistoryPreparation.sourceDraft?.kind === "fresh")) ? {
           surface: "playground" as const,
           historyPreparation: normalHistoryPreparation,
@@ -4279,7 +4255,7 @@ export const useChatActions = ({
       }
 
       if (turnShouldUseRag) {
-        const workspaceServerChat = alternateHistoryParams.historySelection
+        const workspaceServerChat = alternateHistoryParams.historySelection || documentLocalOnly
           ? { chatId: null, historyId: chatModeParams.historyId, sceneSend: actorSceneSend, viewIsCurrent: undefined }
           : await ensureWorkspaceServerChatForTurn({
           message,
@@ -4293,7 +4269,7 @@ export const useChatActions = ({
           ...alternateHistoryParams,
           actorSceneSend: workspaceServerChat.sceneSend,
           servicePromptSnapshot: turnServicePromptSnapshot,
-          ...(historyDocumentId && !chatModeParams.serverChatId ? { saveToDb: false } : {})
+          ...(documentLocalOnly || (historyDocumentId && !chatModeParams.serverChatId) ? { saveToDb: false } : {})
         }
         const scopedRagModeParams = workspaceServerChat.chatId
           ? {
@@ -4585,7 +4561,7 @@ export const useChatActions = ({
                     effectiveAssistantState.systemPromptSnapshot ?? undefined
                 }
               : servicePromptChatModeParams
-          const workspaceServerChat = normalHistorySelection
+          const workspaceServerChat = normalHistorySelection || documentLocalOnly
             ? { chatId: null, historyId: chatModeParams.historyId, sceneSend: actorSceneSend, viewIsCurrent: undefined }
             : await ensureWorkspaceServerChatForTurn({
                 message,
@@ -4595,7 +4571,10 @@ export const useChatActions = ({
                 allowGlobal: true
               })
           sdkViewIsCurrent = workspaceServerChat.viewIsCurrent
-          const normalParamsWithSdkScene = { ...normalModeParams, actorSceneSend: workspaceServerChat.sceneSend }
+          const normalParamsWithSdkScene = {
+            ...normalModeParams, actorSceneSend: workspaceServerChat.sceneSend,
+            ...(documentLocalOnly ? { saveToDb: false } : {})
+          }
           const scopedNormalModeParams = workspaceServerChat.chatId
             ? {
                 ...normalParamsWithSdkScene,

@@ -1393,7 +1393,8 @@ const captureNormalHistoryTurn = async (
       await saveRecord(record(turn, "", "accepted_unsent"))
     },
     stageSettlementPayload: async (message) => {
-      if (!turn.existingSelection || message.id !== turn.assistantId ||
+      const documentReply = turn.owner.kind === "native" && turn.owner.documentTarget && turn.admission
+      if ((!turn.existingSelection && !documentReply) || message.id !== turn.assistantId ||
           message.parent_message_id !== turn.input?.id)
         throw new Error("history_operation_conflict")
       stopCheckpoints()
@@ -1616,7 +1617,8 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
     if (params.historySelection) {
       if (isRegenerate && !params.historySelection.regenerate) throw new Error("unsupported_history_action")
       const originalOwner = params.historySelection.controller.getCurrent().owner
-      if (originalOwner?.kind === "native" && mode.id !== "normal")
+      if (originalOwner?.kind === "native" && mode.id !== "normal" &&
+          !(mode.id === "rag" && originalOwner.documentTarget))
         throw new Error("unsupported_history_action_context")
       if (params.uploadedFiles?.length && mode.id === "normal")
         throw new Error("unsupported_history_message_assets")
@@ -1679,7 +1681,8 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
         params.userParentMessageId !== selectedParent
       )
         throw new Error("unsupported_history_reply_target")
-      historyTurn.clientManagedContext = params.historyForModel !== undefined
+      historyTurn.clientManagedContext = params.historyForModel !== undefined ||
+        (historyTurn.owner.kind === "native" && Boolean(historyTurn.owner.documentTarget))
       if (!regenerate) messages = displayMessages
       params = {
         ...params,

@@ -40,6 +40,7 @@ export type ServerCapabilities = {
   hasChatDictionaries: boolean
   hasChatKnowledgeSave: boolean
   hasChatDocuments: boolean
+  hasDocumentChatSync: boolean
   hasChatbooks: boolean
   hasChatQueue: boolean
   hasChatSaveToDb: boolean
@@ -94,6 +95,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasChatDictionaries: false,
   hasChatKnowledgeSave: false,
   hasChatDocuments: false,
+  hasDocumentChatSync: false,
   hasChatbooks: false,
   hasChatQueue: false,
   hasChatSaveToDb: false,
@@ -798,6 +800,12 @@ const applyIngestionSourceCapabilityGates = (
   }
 }
 
+export const hasDocumentChatSync = (spec: unknown): boolean => {
+  const paths = (spec as { paths?: Record<string, Record<string, unknown>> } | null)?.paths
+  return Boolean(paths?.["/api/v1/media/{media_id}/chat-conversations"]?.get &&
+    paths?.["/api/v1/media/{media_id}/chat-conversations/{chat_id}"]?.put)
+}
+
 const computeCapabilities = (
   spec: any | null | undefined,
   specSource: "authoritative" | "fallback" = "authoritative"
@@ -880,6 +888,7 @@ const computeCapabilities = (
     hasChatDictionaries: has("/api/v1/chat/dictionaries"),
     hasChatKnowledgeSave: has("/api/v1/chat/knowledge/save"),
     hasChatDocuments: has("/api/v1/chat/documents") || has("/api/v1/chat/documents/generate"),
+    hasDocumentChatSync: specSource === "authoritative" && hasDocumentChatSync(spec),
     hasChatbooks: has("/api/v1/chatbooks/export") || has("/api/v1/chatbooks/health"),
     hasChatQueue: has("/api/v1/chat/queue/status") || has("/api/v1/chat/queue/activity"),
     hasChatSaveToDb,

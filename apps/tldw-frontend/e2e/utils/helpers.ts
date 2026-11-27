@@ -56,7 +56,9 @@ const fulfillJson = async (route: Route, status: number, data: unknown): Promise
  */
 export async function seedAuth(
   page: Page,
-  config: Partial<typeof TEST_CONFIG> = {}
+  config: Partial<typeof TEST_CONFIG> & {
+    authTokens?: { access_token: string; refresh_token: string }
+  } = {}
 ): Promise<void> {
   const finalConfig = {
     ...TEST_CONFIG,
@@ -240,12 +242,12 @@ export async function seedAuth(
 
     const authConfig = {
       serverUrl: cfg.serverUrl,
-      authMode: 'single-user',
+      authMode: cfg.authTokens ? 'multi-user' : 'single-user',
       authSource: 'manual',
       credentialSource: 'manual',
-      apiKeyPersistence: 'device',
-      apiKeyServerOrigin: new URL(cfg.serverUrl).origin,
-      apiKey: cfg.apiKey,
+      ...(cfg.authTokens
+        ? { accessToken: cfg.authTokens.access_token, refreshToken: cfg.authTokens.refresh_token }
+        : { apiKeyPersistence: 'device', apiKeyServerOrigin: new URL(cfg.serverUrl).origin, apiKey: cfg.apiKey }),
     };
 
     try {
@@ -288,8 +290,8 @@ export async function seedAuth(
       localStorage.setItem("serverUrl", cfg.serverUrl);
       localStorage.setItem("tldwServerUrl", cfg.serverUrl);
       localStorage.setItem("tldw-api-host", cfg.serverUrl);
-      localStorage.setItem("authMode", "single-user");
-      localStorage.setItem("apiKey", cfg.apiKey);
+      localStorage.setItem("authMode", authConfig.authMode);
+      if (!cfg.authTokens) localStorage.setItem("apiKey", cfg.apiKey);
     } catch {}
     // Suppress connection error modals by setting test bypass
     try {

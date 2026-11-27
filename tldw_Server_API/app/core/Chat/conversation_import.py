@@ -405,7 +405,8 @@ def _parents_first(messages: Sequence[Mapping[str, Any]]) -> list[int]:
 
 
 def chat_import_fingerprint(
-    conversation_id: str, conversation: Mapping[str, Any], messages: Sequence[Mapping[str, Any]]
+    conversation_id: str, conversation: Mapping[str, Any], messages: Sequence[Mapping[str, Any]],
+    *, document_media_uuid: str | None = None,
 ) -> str:
     """Hash a normalized import canonically.
 
@@ -429,6 +430,7 @@ def chat_import_fingerprint(
         "conversation_id": conversation_id,
         "conversation": {field: conversation.get(field) for field in _CONVERSATION_FIELDS},
         "messages": list(messages),
+        **({"document_media_uuid": document_media_uuid} if document_media_uuid else {}),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
     return hashlib.sha256(encoded.encode("ascii")).hexdigest()
@@ -441,6 +443,7 @@ def prepare_chat_import(
     now: datetime,
     inspect_image: Callable[[bytes], str],
     content_length: Callable[[str], int] = len,
+    document_media_uuid: str | None = None,
 ) -> PreparedChatImport:
     """Validate an import request and return what to write.
 
@@ -490,6 +493,11 @@ def prepare_chat_import(
         moment = _timestamp(message.get("timestamp"), field="timestamp", latest=latest, message_id=message_id)
         newest = moment if newest is None or moment > newest else newest
         metadata = _generation_metadata(message.get("metadata"), role=role, message_id=message_id)
+        citations = message.get("document_chat_sources_v1")
+        if citations:
+            if document_media_uuid is None or role != "assistant":
+                raise ChatImportError("invalid_document_chat_sources", 422, "Document sources require a scoped reply.")
+            metadata["document_chat_sources_v1"] = citations
 
         images: list[dict[str, Any]] = []
         digests: list[list[Any]] = []
@@ -570,7 +578,8 @@ def prepare_chat_import(
         conversation=conversation,
         messages=tuple(normalized[index] for index in order),
         fingerprint=chat_import_fingerprint(
-            conversation_id, conversation, [canonical[index] for index in stored_order]
+            conversation_id, conversation, [canonical[index] for index in stored_order],
+            document_media_uuid=document_media_uuid,
         ),
     )
 

@@ -17,6 +17,8 @@ import type {
 } from "@/types/history-selection"
 import type { HistoryBookmarkScope, Message, UploadedFile } from "@/db/dexie/types"
 import type { ServicePromptRequestScope } from "./tldw/domains/service-prompts"
+import type { DocumentChatTarget } from "./tldw/domains/media"
+import { DOCUMENT_CHAT_SOURCES, readDocumentChatCitations } from "@/utils/document-chat-citations"
 import { tldwClient, type ChatMessage } from "./tldw/TldwApiClient"
 import {
   acknowledgeHistoryConfirmation,
@@ -46,6 +48,7 @@ export type NativeHistoryOwnerV1 = {
   readonly owner_key?: string
   readonly request_scope: ServicePromptRequestScope
   readonly scope?: ChatScope
+  readonly documentTarget?: DocumentChatTarget
   readonly validate_lease: () => boolean
 }
 export type HistoryOwnerV1 =
@@ -282,7 +285,8 @@ const localOptions = (
 const nativeOptions = (owner: NativeHistoryOwnerV1, signal?: AbortSignal) => ({
   requestScope: owner.request_scope,
   scope: owner.scope,
-  signal
+  signal,
+  ...(owner.documentTarget ? { documentTarget: owner.documentTarget } : {})
 })
 const assertNativeBinding = (
   owner: NativeHistoryOwnerV1,
@@ -349,8 +353,9 @@ export const captureHistorySnapshot = async (
     )
   } catch (error) {
     assertOwnerLease(owner, { signal })
-    if ([404, 405, 501].includes(Number((error as { status?: unknown } | null)?.status)) ||
-        (requiredCapability && Number((error as { status?: unknown } | null)?.status) === 422))
+    const status = Number((error as { status?: unknown } | null)?.status)
+    if (owner.documentTarget && [403, 404].includes(status)) fail("document_chat_unavailable")
+    if ([404, 405, 501].includes(status) || (requiredCapability && status === 422))
       fail("unsupported_history_capability")
     throw error
   }
@@ -1111,8 +1116,13 @@ export const confirmLegacyHistoryProjection = async (
 
 /** MessageCreate supports text and a single inline image; reject other lost state. */
 export const nativeHistoryMessagePayload = (
-  message: Message
+  message: Message,
+  documentTarget?: DocumentChatTarget
 ): Record<string, unknown> => {
+  const rawCitations = message.metadataExtra?.[DOCUMENT_CHAT_SOURCES]
+  const citations = documentTarget && message.role === "assistant" && rawCitations !== undefined
+    ? readDocumentChatCitations(rawCitations, documentTarget)
+    : null
   const images = (message.images ?? []).filter((image) => image !== "")
   if (!images.length && message.image) images.push(message.image)
   if (
@@ -1133,7 +1143,8 @@ export const nativeHistoryMessagePayload = (
     message.reasoning_time_taken != null ||
     (message.metadataExtra &&
       Object.entries(message.metadataExtra).some(
-        ([key, value]) => key !== "sender_role" || value !== message.role
+        ([key, value]) => !(key === "sender_role" && value === message.role) &&
+          !(key === DOCUMENT_CHAT_SOURCES && citations)
       ))
   )
     fail("unsupported_message_payload")
@@ -1176,6 +1187,7 @@ export const nativeHistoryMessagePayload = (
     ...(message.parent_message_id !== undefined
       ? { parent_message_id: message.parent_message_id }
       : {}),
+    ...(citations ? { [DOCUMENT_CHAT_SOURCES]: citations } : {}),
     ...(parsed ? { image_base64: image } : {})
   }
 }
@@ -1313,7 +1325,7 @@ export const settleAcceptedAssistant = async (
   const response = await tldwClient.addChatMessage(
     owner.conversation_id,
     {
-      ...nativeHistoryMessagePayload(input),
+      ...nativeHistoryMessagePayload(input, owner.documentTarget),
       tldw_history_admission_v1: historyAdmissionReference(admission)
     },
     nativeOptions(owner, opts?.signal)

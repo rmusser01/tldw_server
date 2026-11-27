@@ -281,6 +281,7 @@ def get_full_media_details_rich(
 
     return {
         "media_id": media_id,
+        "uuid": media.get("uuid"),
         "source": {
             "url": media.get("url"),
             "title": media.get("title"),

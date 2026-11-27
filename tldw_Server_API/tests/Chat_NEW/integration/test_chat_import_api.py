@@ -15,6 +15,8 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.tests.Chat_NEW.integration.test_document_chat_links import activate_document_sync_profile
+from tldw_Server_API.tests.Chat_NEW.integration.test_document_chat_links import document_api as document_api
 
 pytestmark = pytest.mark.integration
 
@@ -73,6 +75,35 @@ def _message_count(db: CharactersRAGDB) -> int:
             "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?", (CHAT_ID,), read_only=True
         ).fetchone()["n"]
     )
+
+
+def test_document_chat_import_replays_citations(document_api, monkeypatch) -> None:
+    """The same acknowledged import retains sources and uses one native chat."""
+    client, db, media, headers = document_api
+    target = {"document_media_id": 1, "document_media_uuid": media[1]["uuid"]}
+    citation = {"media_uuid": media[1]["uuid"], "title": "Sample EPUB", "excerpt": "Saved passage."}
+    body = _body()
+    body["messages"][1]["document_chat_sources_v1"] = [citation]
+    invalid = _body()
+    invalid["messages"][1]["document_chat_sources_v1"] = [{**citation, "media_uuid": media[2]["uuid"]}]
+    assert client.post(PATH, headers=headers, params=target, json=invalid).status_code == 422
+    assert db.get_conversation_by_id(CHAT_ID) is None
+    first = client.post(PATH, headers=headers, params=target, json=body)
+    replay = client.post(PATH, headers=headers, params=target, json=body)
+    assert first.status_code == 201, first.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["id"] == first.json()["id"]
+    assert first.json()["document_chat_record"] == replay.json()["document_chat_record"]
+    details = client.get(f"/api/v1/chats/{CHAT_ID}/messages", headers=headers, params={"include_metadata": True})
+    stored = next(row for row in details.json()["messages"] if row["id"] == "pa_full_a1")
+    assert stored["metadata_extra"]["document_chat_sources_v1"] == [citation]
+
+    assert db.hard_delete_conversation(CHAT_ID)
+    activate_document_sync_profile(monkeypatch)
+    unsupported = client.post(PATH, headers=headers, params=target, json=body)
+    assert unsupported.status_code == 409
+    assert unsupported.json()["detail"]["error_code"] == "sync_chat_import_unsupported"
+    assert db.get_conversation_by_id(CHAT_ID) is None
 
 
 def test_import_is_readable_and_continuable_in_the_full_app(import_api) -> None:

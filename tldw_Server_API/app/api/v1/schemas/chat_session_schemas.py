@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from pydantic import AnyHttpUrl, BaseModel, Field, StrictBool, field_validator, model_serializer, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.document_chat_schemas import DocumentChatCitations
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     HISTORY_BRANCH_FIELD_DESCRIPTION,
     HISTORY_EDIT_FIELD_DESCRIPTION,
@@ -243,6 +244,7 @@ class ChatSessionListItem(BaseModel):
 class ChatSessionResponse(ChatSessionListItem):
     """Detailed chat session response with authoritative resume metadata."""
 
+    document_chat_record: str | None = Field(default=None, exclude_if=lambda value: value is None)
     behavior_snapshot: "BehaviorSnapshotStatus" = Field(
         default_factory=lambda: BehaviorSnapshotStatus(status="missing")
     )
@@ -348,6 +350,7 @@ class MessageCreate(BaseModel):
     tldw_history_edit_v1: HistoryEditTargetV1 | None = Field(None, description=HISTORY_EDIT_FIELD_DESCRIPTION)
     tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
     tldw_history_existing_input_v1: HistorySelectionV1 | None = None
+    document_chat_sources_v1: DocumentChatCitations | None = None
 
     @model_validator(mode="after")
     def _validate_history_fields(self) -> "MessageCreate":

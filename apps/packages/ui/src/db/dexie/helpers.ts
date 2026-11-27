@@ -5,6 +5,7 @@ import { ensureLocalProfileId } from "./history-selection"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { isLocalHistoryOwnerKey } from "@/utils/history-selection"
 import { WORKSPACE_RAG_SOURCES_KEY, restoreWorkspaceRagSources } from "@/utils/workspace-rag-sources"
+import { DOCUMENT_CHAT_SOURCES, restoreDocumentChatSources } from "@/utils/document-chat-citations"
 import {
   type ChatHistory as ChatHistoryType,
   type Message as MessageType,
@@ -59,7 +60,8 @@ export const saveHistory = async (
   message_source?: "copilot" | "web-ui" | "branch" | "server",
   doc_id?: string,
   server_chat_id?: string,
-  requestScope?: ServicePromptSnapshot["requestScope"]
+  requestScope?: ServicePromptSnapshot["requestScope"],
+  documentMediaUuid?: string
 ) => {
   const id = generateID()
   const createdAt = Date.now()
@@ -70,6 +72,7 @@ export const saveHistory = async (
     is_rag: is_rag || false,
     message_source,
     doc_id,
+    ...(documentMediaUuid ? { document_media_uuid: documentMediaUuid } : {}),
     server_chat_id,
     ...(requestScope ? { server_scope_key: serverChatMirrorOwnerKey({ requestScope }) } : {})
   }
@@ -413,7 +416,8 @@ export const formatSelectedHistory = (capture: import("@/types/history-selection
       // RAG sources saved with a reply are shown again after reload (CM-04). Rows carry
       // display source objects, as saveMessage's `source` does, despite Message's type.
       ...(displayRoles.get(node.id) === "assistant" && !local.sources?.length
-        ? { sources: restoreWorkspaceRagSources(metadata[WORKSPACE_RAG_SOURCES_KEY]) as unknown as Message["sources"] } : {}),
+        ? { sources: (restoreDocumentChatSources(metadata[DOCUMENT_CHAT_SOURCES]) ??
+            restoreWorkspaceRagSources(metadata[WORKSPACE_RAG_SOURCES_KEY])) as unknown as Message["sources"] } : {}),
       // Canonical partial status must survive reload into either chat surface.
       generationInfo: serverOwned && displayRoles.get(node.id) === "assistant" &&
         (metadata.generation_status === "stopped" || metadata.generation_status === "interrupted")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import sqlite3
 from collections.abc import Callable, Sequence
@@ -28,6 +30,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     logger,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.exceptions import ConversationSettingsTargetMissing
 
 if TYPE_CHECKING:
@@ -42,6 +45,12 @@ _ALLOWED_CONVERSATION_ASSISTANT_KINDS: tuple[str, ...] = ("character", "persona"
 _ALLOWED_PERSONA_MEMORY_MODES: tuple[str, ...] = ("read_only", "read_write")
 _ALLOWED_SCOPE_TYPES: tuple[str, ...] = ("global", "workspace")
 
+_LIVE_DOCUMENT_CHAT_JOIN = """
+    FROM document_chat_links AS link
+    JOIN conversations AS c ON c.id = link.conversation_id
+      AND c.source_incarnation_id = link.source_incarnation_id AND c.client_id = link.owner_id
+    WHERE link.owner_id = ? AND link.media_uuid = ? AND NOT c.deleted AND c.scope_type = 'global'
+"""
 
 
 def _sync_cannot_carry_conversation(row: dict[str, Any]) -> bool:
@@ -663,6 +672,65 @@ class ConversationStore:
         except CharactersRAGDBError as exc:
             logger.error(f"Database error fetching conversation ID {conversation_id}: {exc}")
             raise
+
+    @staticmethod
+    def document_chat_record(conversation: dict[str, Any]) -> str:
+        """Project the original Chat record as an opaque attachment precondition."""
+        identity = f"document-chat-v1\0{conversation['id']}\0{conversation['source_incarnation_id']}"
+        return hashlib.sha256(identity.encode()).hexdigest()
+
+    def attach_document_chat(
+        self, conversation_id: str, *, owner_id: str, media_uuid: str, expected_record: str,
+    ) -> None:
+        """Attach a live owned conversation once, allowing exact replays."""
+        with self._ctx.transaction(preserve_existing=True) as conn:
+            lock = " FOR UPDATE" if self._ctx.backend_type == BackendType.POSTGRESQL else ""
+            row = conn.execute(
+                "SELECT id, source_incarnation_id FROM conversations "  # nosec B608 - fixed dialect lock suffix.
+                "WHERE id = ? AND client_id = ? AND NOT deleted AND scope_type = 'global'" + lock,
+                (conversation_id, owner_id),
+            ).fetchone()
+            if not row or not hmac.compare_digest(self.document_chat_record(dict(row)), expected_record):
+                raise NotFoundError("Document chat unavailable")
+            existing = conn.execute(
+                "SELECT media_uuid, owner_id, source_incarnation_id FROM document_chat_links WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+            if existing:
+                if (
+                    existing["media_uuid"], existing["owner_id"], existing["source_incarnation_id"],
+                ) != (media_uuid, owner_id, row["source_incarnation_id"]):
+                    raise ConflictError("Document chat already linked", entity="conversations", entity_id=conversation_id)
+                return
+            conn.execute(
+                "INSERT INTO document_chat_links (conversation_id, source_incarnation_id, owner_id, media_uuid) "
+                "VALUES (?, ?, ?, ?)",
+                (conversation_id, row["source_incarnation_id"], owner_id, media_uuid),
+            )
+
+    def get_document_chat_link(
+        self, conversation_id: str, *, owner_id: str, media_uuid: str, conn: Any = None,
+    ) -> dict[str, Any] | None:
+        """Read a live link even before its first saved message."""
+        lock = " FOR UPDATE OF c" if conn is not None and self._ctx.backend_type == BackendType.POSTGRESQL else ""
+        sql = "SELECT link.* " + _LIVE_DOCUMENT_CHAT_JOIN + " AND c.id = ?" + lock  # nosec B608 - fixed SQL fragments.
+        params = (owner_id, media_uuid, conversation_id)
+        row = (
+            conn.execute(sql, params) if conn is not None else self._ctx.execute_query(sql, params, read_only=True)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_document_chats(
+        self, *, owner_id: str, media_uuid: str, limit: int, offset: int,
+    ) -> list[dict[str, Any]]:
+        """Read recent, nonempty, live conversations for this owner and document."""
+        rows = self._ctx.execute_query(
+            "SELECT c.id, c.title, c.last_modified " + _LIVE_DOCUMENT_CHAT_JOIN  # nosec B608 - fixed SQL fragments.
+            + " AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND NOT m.deleted)"
+            " ORDER BY c.last_modified DESC, c.id DESC LIMIT ? OFFSET ?",
+            (owner_id, media_uuid, limit, offset), read_only=True,
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def _lock_receipt_admission(
         self, conversation_id: str, destination: tuple[str, str | None], *, conn: Any,

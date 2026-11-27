@@ -30,6 +30,7 @@ import {
 import { mediaMethods } from "@/services/tldw/domains/media"
 import { characterMethods } from "@/services/tldw/domains/characters"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
+import { isServicePromptRequestPath } from "@/services/tldw/service-prompt-scope-error"
 
 const requestScope = {
   config: {
@@ -51,6 +52,38 @@ const expectedScopeFields = {
 }
 
 describe("TldwApiClient captured request scope", () => {
+  it("pins document chat listing, attachment and native writes to the verified account and Media UUID", async () => {
+    const client = new TldwApiClient()
+    const target = { mediaId: 12, mediaUuid: "b679f16d-b053-4f9d-9f39-a6153d2d3cab" }
+    const signal = new AbortController().signal
+    const options = { requestScope, signal, documentTarget: target }
+    mocks.bgRequest.mockResolvedValue({ id: "chat-12" })
+    await client.listDocumentChats(target, { ...options, offset: 0, limit: 50 })
+    await client.attachDocumentChat(target, "chat-12", "record", options)
+    await client.captureHistorySelection("chat-12", { view: {} as never, purpose: "send" }, options)
+    await client.addChatMessage("chat-12", { role: "assistant", content: "Saved" }, options)
+    await client.importDocumentChat(target, { id: target.mediaUuid, title: "Browser chat", created_at: "", messages: [] }, options)
+    const requests = mocks.bgRequest.mock.calls.map(([request]) => request)
+    expect(requests.map(request => request.path)).toEqual([
+      `/api/v1/media/12/chat-conversations?media_uuid=${target.mediaUuid}&limit=50&offset=0`,
+      "/api/v1/media/12/chat-conversations/chat-12",
+      `/api/v1/chat/conversations/chat-12/history/selection?scope_type=global&document_media_id=12&document_media_uuid=${target.mediaUuid}`,
+      `/api/v1/chats/chat-12/messages?scope_type=global&document_media_id=12&document_media_uuid=${target.mediaUuid}`,
+      `/api/v1/chats/import?document_media_id=12&document_media_uuid=${target.mediaUuid}`
+    ])
+    expect(requests[1].body).toEqual({ media_uuid: target.mediaUuid, document_chat_record: "record" })
+    for (const request of requests) {
+      expect(isServicePromptRequestPath(request.path, request.method)).toBe(true)
+      expect(request).toMatchObject({
+        abortSignal: signal,
+        headers: { "X-TLDW-Expected-User-ID": "42" },
+        servicePromptConfig: expectedScopeFields.servicePromptConfig
+      })
+    }
+    expect(isServicePromptRequestPath(requests[0].path, "PUT")).toBe(false)
+    expect(isServicePromptRequestPath(requests[1].path, "GET")).toBe(false)
+  })
+
   it("pins Deep Research bundle reads to the captured owner and retains the plain caller", async () => {
     const client = new TldwApiClient()
     const signal = new AbortController().signal

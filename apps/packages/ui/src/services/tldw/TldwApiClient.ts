@@ -1145,6 +1145,7 @@ export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
 
 export interface ServerChatSummary extends RoleplayResumeMetadata {
   id: string
+  document_chat_record?: string
   title: string
   created_at: string
   updated_at?: string | null
@@ -4410,6 +4411,7 @@ export class TldwApiClientBase {
       seedFirstMessage?: boolean
       greetingStrategy?: "default" | "alternate_random" | "alternate_index"
       alternateIndex?: number
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<ServerChatSummary> {
     return chatRagMethods.createChat.call(this as unknown as TldwApiClientCore, payload, options)
@@ -4443,7 +4445,7 @@ export class TldwApiClientBase {
 
   async getChat(
     chat_id: string | number,
-    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean; documentTarget?: DocumentChatTarget } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     return chatRagMethods.getChat.call(this as unknown as TldwApiClientCore, chat_id, options)
   }
@@ -4858,10 +4860,11 @@ export class TldwApiClientBase {
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope
+      documentTarget?: DocumentChatTarget
     }
   ): Promise<ServerChatMessage> {
     const cid = String(chat_id)
-    const query = this.buildQuery(toChatScopeParams(options?.scope))
+    const query = this.buildQuery({ ...toChatScopeParams(options?.scope), ...documentChatQuery(options?.documentTarget) })
     const scopeFields = requestScopeFields(options?.requestScope)
     const res = await bgRequest<ServerChatMessage>({
       path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
@@ -5581,7 +5584,7 @@ export class TldwApiClientBase {
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { adminMethods } from "./domains/admin"
-import { mediaMethods } from "./domains/media"
+import { documentChatQuery, mediaMethods, type DocumentChatTarget } from "./domains/media"
 import { characterMethods } from "./domains/characters"
 import {
   chatRagMethods,

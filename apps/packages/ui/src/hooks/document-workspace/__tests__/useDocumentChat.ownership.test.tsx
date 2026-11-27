@@ -12,8 +12,22 @@ import type { HistoryInfo, Message } from "@/db/dexie/types"
 
 const io = vi.hoisted(() => ({
   loadSnapshot: vi.fn(), listHistories: vi.fn(), getHistoryInfo: vi.fn(), getFull: vi.fn(), saveHistory: vi.fn(), saveMessage: vi.fn(), release: vi.fn(),
+  listDocumentChats: vi.fn(), getOpenAPISpec: vi.fn(), loadConversation: vi.fn(), reset: vi.fn(),
   requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }
 }))
+vi.mock("@/services/tldw", () => ({ tldwClient: {
+  listDocumentChats: io.listDocumentChats, getOpenAPISpec: io.getOpenAPISpec
+} }))
+vi.mock("@/hooks/chat/useHistorySelection", () => ({
+  useHistorySelection: () => ({ loadConversation: io.loadConversation, reset: io.reset, getCurrent: getSelection })
+}))
+const getSelection = () => {
+  const conversation_id = io.loadConversation.mock.calls.at(-1)?.[0]?.serverChatId
+  return { status: "ready", capture: conversation_id ? {
+    status: "captured", rows: [], selected_content: [],
+    view: { conversation_id }, snapshot: { conversation_id, owner_key: "native-owner", nodes: [] }
+  } : null }
+}
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: (...args: unknown[]) => io.loadSnapshot(...args)
 }))
@@ -67,6 +81,41 @@ describe("document Chat fallback ownership", () => {
       return { requestScope: io.requestScope, scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal, release: io.release }
     })
     useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null, selectedKnowledge: null, ragMediaIds: null, ragSources: ["media_db"] })
+  })
+
+  it("resolves one tab per verified server chat and preserves its draft on foreground refresh", async () => {
+    const target = { mediaId: 1, mediaUuid: "b679f16d-b053-4f9d-9f39-a6153d2d3cab" }
+    io.getOpenAPISpec.mockResolvedValue({ paths: {
+      "/api/v1/media/{media_id}/chat-conversations": { get: {} },
+      "/api/v1/media/{media_id}/chat-conversations/{chat_id}": { put: {} }
+    } })
+    const linked = { id: "linked", title: "Cross-device conversation", last_modified: "2026-11-24T00:00:00Z" }
+    io.listDocumentChats.mockResolvedValueOnce({ items: [linked], has_more: true })
+      .mockResolvedValue({ items: [linked], has_more: false })
+    io.loadConversation.mockResolvedValue(true)
+    const view = renderHook(() => useDocumentChat(1, operation, undefined, target))
+    await waitFor(() => expect(view.result.current.conversations.filter(tab => tab.serverChatId === linked.id)).toHaveLength(1))
+    expect(io.loadConversation).toHaveBeenCalledWith(expect.objectContaining({
+      documentTarget: target, serverChatId: linked.id
+    }))
+    act(() => view.result.current.setInputValue("Keep this local draft"))
+    act(() => window.dispatchEvent(new Event("focus")))
+    await waitFor(() => expect(io.listDocumentChats).toHaveBeenCalledTimes(3))
+    expect(view.result.current.inputValue).toBe("Keep this local draft")
+    expect(view.result.current.conversations.filter(tab => tab.serverChatId === linked.id)).toHaveLength(1)
+  })
+
+  it("opens browser history when the server has no document chat capability", async () => {
+    const target = { mediaId: 1, mediaUuid: "b679f16d-b053-4f9d-9f39-a6153d2d3cab" }
+    const history = savedHistory("older-browser-tab")
+    io.getOpenAPISpec.mockResolvedValue({ paths: { "/api/v1/media/{media_id}": { get: {} } } })
+    io.listHistories.mockResolvedValue([history])
+    io.getFull.mockResolvedValue(savedChat(history, "Kept on this browser"))
+    const { result } = renderHook(() => useDocumentChat(1, operation, undefined, target))
+    await waitFor(() => expect(result.current.messages[0]?.message).toBe("Kept on this browser"))
+    expect(result.current.isChatReady).toBe(true)
+    expect(result.current.canSaveToServer).toBe(false)
+    expect(io.listDocumentChats).not.toHaveBeenCalled()
   })
 
   const mountWithUnpersistedMessage = async () => {

@@ -1,7 +1,7 @@
-import React, { useState, useRef, useCallback, Suspense, useLayoutEffect, useId } from "react"
+import React, { useState, useRef, useCallback, Suspense, useLayoutEffect, useId, useMemo } from "react"
 import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
-import { Empty, Spin, Switch, Tooltip } from "antd"
+import { Empty, Modal, Spin, Switch, Tooltip } from "antd"
 import {
   SendHorizontal,
   Plus,
@@ -16,7 +16,11 @@ import { useDocumentChat, type DocumentChatCache } from "@/hooks/document-worksp
 import { useDocumentMetadata } from "@/hooks/document-workspace/useDocumentMetadata"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { markChatTurnStoppedByUser } from "@/hooks/chat/abort-turn-cleanup"
+import { chatSubmitFailed, chatSubmitSkipped } from "@/hooks/chat/chat-action-utils"
 import { SuggestedQuestions } from "./SuggestedQuestions"
+import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
+import { tldwClient } from "@/services/tldw"
+import { readDocumentChatCitations, type DocumentChatCitation } from "@/utils/document-chat-citations"
 
 const PlaygroundMessage = React.lazy(() =>
   import("@/components/Common/Playground/Message").then((m) => ({
@@ -44,6 +48,7 @@ export const DocumentChat: React.FC<{
   const activeTabRef = useRef<HTMLButtonElement | null>(null)
   const focusDraftRef = useRef<string | null>(null)
   const panelId = useId()
+  const [turnPending, setTurnPending] = useState(false)
 
   // Get active document from workspace store
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
@@ -52,13 +57,19 @@ export const DocumentChat: React.FC<{
     (s) => s.activeDocumentType
   )
 
-  // Use the document chat hook to scope RAG
+  const { data: documentMetadata, isLoading: documentLoading } = useDocumentMetadata(activeDocumentId, operation)
+  const mediaUuid = documentMetadata?.uuid
+  const documentTarget = useMemo(() => activeDocumentId != null && mediaUuid
+    ? { mediaId: activeDocumentId, mediaUuid }
+    : undefined, [activeDocumentId, mediaUuid])
+
   const {
     messages,
     streaming,
     isProcessing,
     isServerAvailable,
     isChatReady,
+    canShowTranscript,
     historyDocumentId,
     capturePrivateScene,
     conversations,
@@ -70,10 +81,25 @@ export const DocumentChat: React.FC<{
     selectConversation,
     retryConversation,
     onHistorySaved,
+    nativeHistory,
+    linkedServerChatId,
+    syncSupported,
+    syncIssue,
+    browserOnly,
+    canChooseSaveMode,
+    setBrowserOnly,
+    prepareLinkedSend,
+    refreshAfterSend,
+    canSaveToServer,
+    saveNeedsConfirmation,
+    saveNeedsReview,
+    saveFeedback,
+    savingToServer,
+    saveToServer,
     trackTurn,
     ragEnabled,
     setRagEnabled
-  } = useDocumentChat(activeDocumentId, operation, workspaceConversations)
+  } = useDocumentChat(activeDocumentId, operation, workspaceConversations, documentTarget)
 
   // Get full message option for onSubmit and other actions
   const {
@@ -89,15 +115,15 @@ export const DocumentChat: React.FC<{
     actionInfo,
     selectedModel
   } = useMessageOption({
-    hydrateServerChat: isChatReady,
+    hydrateServerChat: isChatReady && !linkedServerChatId,
     capturePrivateScene,
     historyDocumentId,
+    documentBrowserOnly: syncSupported && !linkedServerChatId,
     onDocumentHistorySaved: onHistorySaved
   })
   const waitingForChatDetails = isChatReady && Boolean(serverChatId) && !serverChatMetaLoaded
-  const canSend = isChatReady && !waitingForChatDetails
-
-  const { data: documentMetadata } = useDocumentMetadata(activeDocumentId)
+  const canSend = isChatReady && !documentLoading && !waitingForChatDetails && !turnPending &&
+    !(linkedServerChatId && temporaryChat)
 
   const isResearchPaper = React.useMemo(() => {
     if (activeDocumentType !== "pdf") return false
@@ -125,9 +151,7 @@ export const DocumentChat: React.FC<{
 
   // Scroll to bottom when new messages arrive
   React.useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: smoothScrollBehavior() })
-    }
+    messagesEndRef.current?.scrollIntoView?.({ behavior: smoothScrollBehavior() })
   }, [messages.length])
 
   React.useEffect(() => {
@@ -137,6 +161,29 @@ export const DocumentChat: React.FC<{
   useLayoutEffect(() => {
     activeTabRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" })
   }, [activeConversationKey])
+
+  const openCitation = useCallback(async (citation: DocumentChatCitation) => {
+    if (!documentTarget || citation.media_uuid !== documentTarget.mediaUuid || !operation.isCurrent()) return
+    setSendError(null)
+    const { mediaId, mediaUuid } = documentTarget
+    const current = () => operation.isCurrent() && useDocumentWorkspaceStore.getState().activeDocumentId === mediaId
+    try {
+      const document = await tldwClient.getMediaDetails(mediaId, {
+        include_content: false, requestScope: operation.requestScope, signal: operation.signal
+      })
+      if (!current()) return
+      if (document?.uuid !== mediaUuid) throw new Error("Document identity changed")
+      if (activeDocumentType === "epub" && citation.epub_cfi) {
+        window.dispatchEvent(new CustomEvent("epub-navigate-cfi", {
+          detail: { cfi: citation.epub_cfi, documentId: mediaId }
+        }))
+      } else if (activeDocumentType === "pdf" && citation.page) {
+        useDocumentWorkspaceStore.getState().setCurrentPage(citation.page)
+      }
+    } catch {
+      if (current()) setSendError(t("option:documentWorkspace.citationUnavailable", "Could not open this source."))
+    }
+  }, [activeDocumentType, documentTarget, operation, t])
 
   useLayoutEffect(() => {
     if (!activeConversationKey || !pendingSelectionPrompt || !operation.isCurrent() ||
@@ -160,6 +207,7 @@ export const DocumentChat: React.FC<{
     const controller = activeTurn.current
     if (!controller) return
     activeTurn.current = null
+    setTurnPending(false)
     markChatTurnStoppedByUser(controller.signal)
     controller.abort()
   }, [])
@@ -169,16 +217,53 @@ export const DocumentChat: React.FC<{
     if (activeTurn.current || !canSend) return
     const controller = new AbortController()
     activeTurn.current = controller
+    setTurnPending(true)
     try {
       return await trackTurn(() => send(controller))
     } finally {
-      if (activeTurn.current === controller) activeTurn.current = null
+      if (activeTurn.current === controller) {
+        activeTurn.current = null
+        setTurnPending(false)
+      }
     }
   }, [canSend, trackTurn])
 
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [confirmSave, setConfirmSave] = useState(false)
+  useLayoutEffect(() => {
+    setSendError(null)
+    setConfirmSave(false)
+  }, [activeConversationKey])
+
   const submitQuestion = useCallback((question: string, isContinue = false) =>
-    runTurn(controller => onSubmit({ message: question, image: "", controller, isContinue })),
-  [onSubmit, runTurn])
+    runTurn(async controller => {
+      setSendError(null)
+      try {
+        const linked = syncSupported || syncIssue === "unavailable"
+          ? await prepareLinkedSend(question, controller.signal) : undefined
+        if (!operation.isCurrent() || controller.signal.aborted) return
+        if (linked?.firstInputAlreadySaved) {
+          await refreshAfterSend()
+          return chatSubmitSkipped("Question already saved", { questionKept: true })
+        }
+        const chatId = linked?.chatId
+        const result = await onSubmit({
+          message: question, image: "", controller, isContinue,
+          ...(syncSupported ? { documentLocalOnly: !chatId } : {}),
+          ...(chatId ? { serverChatIdOverride: chatId, documentHistorySelection: nativeHistory } : {})
+        })
+        if (!operation.isCurrent() || controller.signal.aborted) return
+        if (result?.status === "failed") setSendError(result.errorMessage)
+        if (chatId) await refreshAfterSend(result?.status !== "submitted")
+        return result
+      } catch (error) {
+        if (!operation.isCurrent() || controller.signal.aborted) return
+        const message = error instanceof Error ? error.message : t("option:documentWorkspace.chatDetailsError", "Could not load chat details.")
+        setSendError(message)
+        return chatSubmitFailed(message)
+      }
+    }),
+  [nativeHistory, onSubmit, operation, prepareLinkedSend, refreshAfterSend, runTurn, syncIssue, syncSupported, t])
 
   // Handle sending a message
   const handleSend = useCallback(async () => {
@@ -192,12 +277,9 @@ export const DocumentChat: React.FC<{
       setSuggestionsCollapsed(true)
     }
 
-    setInputValue("")
-
     const result = await submitQuestion(trimmedMessage)
-    if (result?.status === "failed" && result.restoreDraft && result.restoreDraftIsCurrent?.() !== false) {
-      setInputValue(current => current || inputValue)
-    }
+    if (result?.status === "submitted" || (result?.status === "skipped" && result.questionKept))
+      setInputValue(current => current === inputValue ? "" : current)
   }, [
     canSend,
     hasSelectedModel,
@@ -269,7 +351,7 @@ export const DocumentChat: React.FC<{
   }
 
   // Server not available state
-  if (!isServerAvailable) {
+  if (!isServerAvailable && !activeConversationKey) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
         <AlertCircle className="mb-2 h-10 w-10 text-warning" />
@@ -289,7 +371,7 @@ export const DocumentChat: React.FC<{
     )
   }
 
-  const hasMessages = isChatReady && messages.length > 0
+  const hasMessages = canShowTranscript && messages.length > 0
   const showSuggestions = isChatReady && !suggestionsCollapsed
   const newChatLabel = t("option:documentWorkspace.newConversation", "New chat")
   const useDocumentLabel = t("option:documentWorkspace.enableRag", "Use document content")
@@ -411,10 +493,14 @@ export const DocumentChat: React.FC<{
                       images={message.images || []}
                       currentMessageIndex={index}
                       totalMessages={messages.length}
-                      onRegenerate={() => runTurn(controller => regenerateLastMessage({ controller }))}
+                      onRegenerate={() => {
+                        if (!linkedServerChatId) return runTurn(controller => regenerateLastMessage({ controller }))
+                      }}
+                      hideEditAndRegenerate={Boolean(linkedServerChatId)}
                       isProcessing={isProcessing}
                       sources={message.sources}
                       onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+                        if (linkedServerChatId) return
                         return trackTurn(() => editMessage(
                           index,
                           value,
@@ -424,7 +510,7 @@ export const DocumentChat: React.FC<{
                           editOriginIsCurrent
                         ))
                       }}
-                      onDeleteMessage={() => {
+                      onDeleteMessage={linkedServerChatId ? undefined : () => {
                         return deleteMessage(index)
                       }}
                       isTTSEnabled={ttsEnabled}
@@ -435,7 +521,7 @@ export const DocumentChat: React.FC<{
                       createdAt={message?.createdAt}
                       temporaryChat={temporaryChat}
                       onStopStreaming={stopConversationTurn}
-                      onContinue={() => submitQuestion("", true)}
+                      onContinue={linkedServerChatId ? undefined : () => submitQuestion("", true)}
                       documents={message?.documents}
                       actionInfo={actionInfo}
                       serverChatId={serverChatId}
@@ -444,12 +530,11 @@ export const DocumentChat: React.FC<{
                       discoSkillComment={message.discoSkillComment}
                       conversationInstanceId={`doc-${activeDocumentId}-${activeConversationKey}`}
                       hideCopy={false}
-                      hideEditAndRegenerate={false}
                       toolCalls={message?.toolCalls}
                       toolResults={message?.toolResults}
                     />
                     {message.isBot && message.sources && message.sources.length > 0 && (
-                        <div className="ml-10 mt-1 flex items-center gap-1 text-xs text-text-muted">
+                        <div className="ml-10 mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">
                           <Tooltip
                             title={t(
                               "option:documentWorkspace.usesDocumentContext",
@@ -463,6 +548,24 @@ export const DocumentChat: React.FC<{
                               </span>
                             </span>
                           </Tooltip>
+                          {documentTarget && readDocumentChatCitations(
+                            message.sources.map(source => source?.documentCitation), documentTarget
+                          )?.map((citation, index) => {
+                            const label = activeDocumentType === "pdf" && citation.page
+                              ? t("option:documentWorkspace.openCitationPage", { defaultValue: "Open page {{page}}", page: citation.page })
+                              : activeDocumentType === "epub" && citation.epub_cfi
+                                ? t("option:documentWorkspace.openCitationPassage", "Open passage") : null
+                            return label && (
+                              <button
+                                key={index}
+                                type="button"
+                                onClick={() => void openCitation(citation)}
+                                className="rounded px-1 py-0.5 text-text underline hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                              >
+                                {label}
+                              </button>
+                            )
+                          })}
                         </div>
                       )}
                   </div>
@@ -485,7 +588,29 @@ export const DocumentChat: React.FC<{
           )}
         </div>
 
+        {(saveNeedsReview || (linkedServerChatId && nativeHistory.recoveries?.length > 0)) &&
+          <HistorySelectionReview selection={nativeHistory} />}
+        <Modal
+          title={t("option:documentWorkspace.confirmChatDocument", "Confirm this document")}
+          open={confirmSave}
+          onCancel={() => setConfirmSave(false)}
+          onOk={() => {
+            setConfirmSave(false)
+            void saveToServer(true)
+          }}
+          okText={t("option:documentWorkspace.saveToServer", "Save to server")}>
+          <p>{t("option:documentWorkspace.confirmChatSaveBody", {
+            defaultValue: 'Save this conversation with “{{title}}”?',
+            title: documentMetadata?.title
+          })}</p>
+        </Modal>
         <div className="border-t border-border p-3">
+          {saveFeedback && <p role="status" className="mb-2 text-xs text-text-muted">{saveFeedback}</p>}
+          {(sendError || syncIssue === "unavailable" || !isServerAvailable) && (
+            <p role="status" className="mb-2 text-xs text-text-muted">
+              {sendError ?? t("option:documentWorkspace.chatSyncUnavailable", "Server conversations are temporarily unavailable.")}
+            </p>
+          )}
           {waitingForChatDetails && (
             serverChatLoadState === "failed" ? (
               <div className="mb-2 flex items-center justify-between gap-2 text-xs">
@@ -517,6 +642,24 @@ export const DocumentChat: React.FC<{
               />
               <span>{useDocumentLabel}</span>
             </div>
+            {canChooseSaveMode && !temporaryChat && (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={!browserOnly} disabled={turnPending} onChange={event => setBrowserOnly(!event.target.checked)} />
+                {t("option:documentWorkspace.saveToServer", "Save to server")}
+              </label>
+            )}
+            {canSaveToServer && (
+              <button
+                type="button"
+                className="rounded border border-border px-2 py-1 text-text hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                disabled={savingToServer || turnPending || streaming || isProcessing}
+                onClick={() => {
+                  if (saveNeedsConfirmation) setConfirmSave(true)
+                  else void saveToServer()
+                }}>
+                {savingToServer ? t("common:saving", "Saving…") : t("option:documentWorkspace.saveToServer", "Save to server")}
+              </button>
+            )}
             {!hasSelectedModel && (
               <span className="text-warning">
                 {t(

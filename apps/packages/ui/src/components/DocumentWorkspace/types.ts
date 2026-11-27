@@ -130,6 +130,7 @@ export interface Figure {
 
 export interface DocumentMetadata {
   id: number
+  uuid?: string
   title: string
   authors?: string[]
   creator?: string
