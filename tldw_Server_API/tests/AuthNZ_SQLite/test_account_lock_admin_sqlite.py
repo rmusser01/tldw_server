@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventType
+from tldw_Server_API.app.core.AuthNZ import api_key_audit, reset_admin_password
 from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
@@ -114,11 +118,35 @@ async def test_admin_changing_another_users_email_is_unchanged(admin_client) -> 
     assert (await _row(ctx.alice_id))["email"] == "alice2@example.com"
 
 
-async def test_reset_admin_password_cli_clears_a_lock(admin_client) -> None:
+@pytest.mark.real_audit
+async def test_reset_admin_password_cli_clears_a_lock(real_audit_service, admin_client, capsys) -> None:
     ctx = admin_client
     await set_lock(ctx.bob_id)
     ok = await reset_user_password("bob", "Tr1cky-Harbor-Quartz!")
     row = await _row(ctx.bob_id)
     verified, _ = PasswordService().verify_password("Tr1cky-Harbor-Quartz!", row["password_hash"])
+    service = await api_key_audit._get_or_create_audit_service(ctx.bob_id)
+    events = await service.query_events(user_id=str(ctx.bob_id), event_types=[AuditEventType.AUTH_ACCOUNT_UNLOCKED])
     assert ok is True and verified
     assert row["security_locked_at"] is None and row["credentials_valid_after"] is not None
+    assert [json.loads(event["metadata"]) for event in events] == [{"via": "cli"}]
+    assert "[reset-password] The account's security lock was cleared." in capsys.readouterr().out.splitlines()
+
+
+async def test_reset_admin_password_cli_reports_a_lock_it_could_not_clear(admin_client, monkeypatch, capsys) -> None:
+    ctx = admin_client
+    await set_lock(ctx.bob_id)
+
+    async def _clear_lock_fails(user_id, **kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(reset_admin_password, "clear_lock", _clear_lock_fails)
+    ok = await reset_user_password("bob", "Tr1cky-Harbor-Quartz!")
+    row = await _row(ctx.bob_id)
+    verified, _ = PasswordService().verify_password("Tr1cky-Harbor-Quartz!", row["password_hash"])
+    printed = capsys.readouterr().out.splitlines()
+    assert ok is False and verified and row["security_locked_at"] is not None
+    assert printed == [
+        "[reset-password] The password of user 'bob' was changed, but the account's security lock could not be"
+        " cleared. Check server logs for details."
+    ]

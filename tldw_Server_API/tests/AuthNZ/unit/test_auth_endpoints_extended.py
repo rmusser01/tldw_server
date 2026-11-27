@@ -173,8 +173,11 @@ async def test_reset_password_weak_and_success(monkeypatch):
     async def _fake_is_pg() -> bool:
         return False
 
+    revoked: list[tuple] = []
+
     class _StubBlacklist:
-        async def revoke_all_user_tokens(self, *_args, **_kwargs):
+        async def revoke_all_user_tokens(self, *args, **_kwargs):
+            revoked.append(args)
             return 0
 
     monkeypatch.setattr(_auth, "is_postgres_backend", _fake_is_pg)
@@ -211,6 +214,8 @@ async def test_reset_password_weak_and_success(monkeypatch):
         password_service=_StubPwd(weak=False),
     )
     assert "success" in out.get("message", "").lower()
+    # No request transaction owns an after-commit scope here, so the revoke runs inside the call.
+    assert revoked == [(42, "Password reset")]
 
 
 @pytest.mark.asyncio

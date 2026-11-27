@@ -188,6 +188,23 @@ async def test_resent_link_has_no_when_and_where(two_user_client, lockable):
     assert "token=" in lockable[0][1] and "Locked at" not in lockable[0][1]
 
 
+async def test_resent_link_goes_only_to_the_named_address(two_user_client, lockable):
+    user = {
+        "id": two_user_client.alice_id, "username": "alice", "email": "alice@example.com",
+        "previous_email": "old@example.com", "email_changed_at": datetime.now(timezone.utc) - timedelta(days=1),
+    }
+
+    async def _send(only_address: str) -> tuple[list[str], list[str]]:
+        lockable.clear()
+        sent = await send_lock_mail(
+            user, locked_at=None, device="Chrome on macOS", ip_address="203.0.113.9", only_address=only_address
+        )
+        return sent, [to for to, _ in lockable]
+
+    assert await _send("  ALICE@example.com ") == (["a***@example.com"], ["alice@example.com"])
+    assert await _send("nobody@example.com") == ([], [])
+
+
 def test_single_user_mode_cannot_lock(monkeypatch):
     monkeypatch.setattr(account_lock, "get_settings", lambda: SimpleNamespace(AUTH_MODE="single_user"))
     user = {"email": "alice@example.com", "is_verified": True}

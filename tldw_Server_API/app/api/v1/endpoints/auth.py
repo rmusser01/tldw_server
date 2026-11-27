@@ -2824,11 +2824,12 @@ async def reset_password(
             now_utc=now_utc,
         )
 
-        # Revoke sessions once the reset commits: on SQLite this request holds the write lock until then.
+        # Sign every session out: on PostgreSQL inside the request (an error it raises rolls the reset back),
+        # on SQLite once the reset commits (this request holds the write lock until then).
         async def _revoke_sessions() -> None:
             await _token_blacklist.get_token_blacklist().revoke_all_user_tokens(user_id, "Password reset")
 
-        if not defer_until_after_commit(_revoke_sessions):
+        if is_pg or not defer_until_after_commit(_revoke_sessions):
             await _revoke_sessions()
 
         if __settings.get_settings().PII_REDACT_LOGS:

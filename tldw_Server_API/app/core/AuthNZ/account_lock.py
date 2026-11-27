@@ -350,8 +350,10 @@ async def redeem_unlock(
     """
     user_id = int(user["id"])
     take_back = take_back_address(user, token_payload)
-    if take_back is None and token_payload.get("restore_email") is True:
-        # A take-back link whose window closed since rule 1 never does a plain unlock: the lock stays.
+    restores = token_payload.get("restore_email") is True
+    if take_back is None and restores and not _same_address(token_payload.get("email"), user.get("email")):
+        # A take-back link whose window closed since rule 1 never does a plain unlock: the lock stays. One
+        # whose address is the email again (a second link after a completed take-back) unlocks plainly.
         logger.info("Take-back link of user {} is past its window; nothing unlocked", user_id)
         return False
     if await clear_lock(user_id, take_back=take_back) is None:
@@ -493,10 +495,11 @@ async def send_lock_mail(
     ip_address: str | None,
     only_address: str | None = None,
 ) -> list[str]:
-    """Mail one unlock link per recipient (or only ``only_address``); the masked addresses whose send succeeded."""
+    """Mail one unlock link per recipient (or only ``only_address``, when it is one); the masked addresses whose
+    send succeeded."""
     recipients = security_mail_recipients(user)
     if only_address is not None:
-        recipients = [r for r in recipients if r[0].lower() == only_address.lower()] or recipients
+        recipients = [r for r in recipients if _same_address(r[0], only_address)]
     minutes = max(1, int(get_settings().MAGIC_LINK_EXPIRE_MINUTES))
     jwt = get_jwt_service()
     mail = get_email_service()

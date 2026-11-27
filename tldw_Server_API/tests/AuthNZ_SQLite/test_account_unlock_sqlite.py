@@ -263,6 +263,27 @@ async def test_take_back_link_past_its_window_does_not_unlock(two_user_client):
     assert row["security_locked_at"] is not None and row["email"] == INTRUDER
 
 
+async def test_second_take_back_link_unlocks_once_its_address_is_current(two_user_client):
+    """Two links to the previous address (the lock mail and a resent one): the first takes the account back;
+    once it is locked again, the second finds its address is the account's email and unlocks it plainly."""
+    ctx = two_user_client
+    await _set_email(ctx.alice_id, INTRUDER, previous=OWNER)
+    await lock_user(ctx.alice_id)
+    take_back = {"email": OWNER, "restore_email": True, "purpose": "account_unlock"}
+
+    async def _redeem_take_back_link() -> bool:
+        return await account_lock.redeem_unlock(
+            await _row(ctx.alice_id), take_back, via="magic_link", ip_address=None, user_agent=None
+        )
+
+    first = await _redeem_take_back_link()
+    await lock_user(ctx.alice_id)
+    second = await _redeem_take_back_link()
+    row = await _row(ctx.alice_id)
+    assert (first, second) == (True, True)
+    assert (row["security_locked_at"], row["email"], row["previous_email"]) == (None, OWNER, None)
+
+
 async def test_send_me_a_new_link_for_a_username_mails_nothing(two_user_client, lockable):
     """A username is not an address of the account: no link goes to any of its addresses."""
     ctx = two_user_client
