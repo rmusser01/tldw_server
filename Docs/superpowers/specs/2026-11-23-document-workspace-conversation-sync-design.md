@@ -48,4 +48,4 @@ Use server capability discovery to select browser-only behavior on older servers
 
 ## ADR check
 
-**ADR required:** Yes. Document discovery adds a durable association and an authorization boundary across Media and Chat. [Proposed ADR-098](../../ADR/098-document-workspace-chat-association.md) records that rule. [ADR-049](../../ADR/049-chat-history-selection-ownership.md) governs history selection and continuation.
+**ADR required:** Yes. Document discovery adds a durable association and an authorization boundary across Media and Chat. [Proposed ADR-100](../../ADR/100-document-workspace-chat-association.md) records that rule. [ADR-049](../../ADR/049-chat-history-selection-ownership.md) governs history selection and continuation.

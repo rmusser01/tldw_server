@@ -1,11 +1,11 @@
-# ADR-098: Server-owned document chat associations
+# ADR-100: Server-owned document chat associations
 
 **Status:** Proposed
 **Date:** 2026-11-23
 **Backfilled from:** not backfilled
 **Decision owner:** Project owner
-**Related task:** [TASK-15586](../../backlog/tasks/task-15586%20-%20Sync-Document-Workspace-conversations-across-devices.md)
-**Related spec:** [Cross-device conversations in Document Workspace](../superpowers/specs/2026-11-23-document-workspace-conversation-sync-design.md)
+**Related task:** [TASK-15586](https://github.com/rmusser01/tldw_server/blob/dev/backlog/tasks/task-15586%20-%20Sync-Document-Workspace-conversations-across-devices.md)
+**Related spec:** [Cross-device conversations in Document Workspace](https://github.com/rmusser01/tldw_server/blob/dev/Docs/superpowers/specs/2026-11-23-document-workspace-conversation-sync-design.md)
 
 ## Decision
 

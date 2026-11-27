@@ -10,7 +10,7 @@
 
 **Spec** [Cross-device conversations in Document Workspace](../specs/2026-11-23-document-workspace-conversation-sync-design.md)
 
-**ADR check** ADR required. [Proposed ADR-098](../../ADR/098-document-workspace-chat-association.md) records the Media–Chat link and access boundary. [ADR-049](../../ADR/049-chat-history-selection-ownership.md) governs continuation. [TASK-15586](../../../backlog/tasks/task-15586%20-%20Sync-Document-Workspace-conversations-across-devices.md) tracks delivery.
+**ADR check** ADR required. [Proposed ADR-100](../../ADR/100-document-workspace-chat-association.md) records the Media–Chat link and access boundary. [ADR-049](../../ADR/049-chat-history-selection-ownership.md) governs continuation. [TASK-15586](../../../backlog/tasks/task-15586%20-%20Sync-Document-Workspace-conversations-across-devices.md) tracks delivery.
 
 ## Global constraints
 
