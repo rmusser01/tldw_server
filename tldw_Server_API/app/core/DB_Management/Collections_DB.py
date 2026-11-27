@@ -63,6 +63,11 @@ from .backends.factory import (
     is_factory_managed_backend,
     release_managed_backend,
 )
+from .backends.pg_rls_policies import (
+    QUICK_INGEST_PLAN_OWNER,
+    QUICK_INGEST_PLAN_TABLES,
+    build_quick_ingest_plan_rls_sql,
+)
 from .backends.query_utils import prepare_backend_statement
 from .db_path_utils import DatabasePaths, normalize_output_storage_filename
 
@@ -848,6 +853,31 @@ def _postgres_predicate_matches(actual: str | None, expected: str | None) -> boo
 
 
 
+def _validate_postgres_plan_policies(backend: DatabaseBackend, connection: Any = None) -> None:
+    """Require one enforced owner policy per ledger, including its write predicate."""
+    rows = backend.execute(
+        """
+        SELECT c.relname, c.relrowsecurity AND c.relforcerowsecurity AS enforced,
+               p.polname, p.polcmd, p.polpermissive, p.polroles = ARRAY[0::oid] AS public_role,
+               pg_get_expr(p.polqual, c.oid) AS read_predicate,
+               pg_get_expr(p.polwithcheck, c.oid) AS write_predicate
+        FROM pg_catalog.pg_class c JOIN pg_catalog.pg_policy p ON p.polrelid = c.oid
+        WHERE c.relnamespace = 'public'::regnamespace AND c.relname IN (?, ?, ?)
+        """,
+        QUICK_INGEST_PLAN_TABLES,
+        connection=connection,
+    ).rows
+    protected = {
+        row["relname"] for row in rows
+        if row["enforced"] and row["polname"] == "quick_ingest_owner" and row["polcmd"] == "*"
+        and row["polpermissive"] and row["public_role"]
+        and _postgres_predicate_matches(row["read_predicate"], QUICK_INGEST_PLAN_OWNER)
+        and _postgres_predicate_matches(row["write_predicate"], QUICK_INGEST_PLAN_OWNER)
+    }
+    if len(rows) != len(QUICK_INGEST_PLAN_TABLES) or protected != set(QUICK_INGEST_PLAN_TABLES):
+        raise DatabaseError("Collections PostgreSQL plan owner policies require owner migration")
+
+
 QUICK_INGEST_PLAN_DDL = """
 CREATE TABLE IF NOT EXISTS quick_ingest_plans (
     user_id TEXT NOT NULL,
@@ -1185,6 +1215,17 @@ SQLITE_CONTENT_DDL = """
             """
 
 
+def _create_collection_content_tables(backend: DatabaseBackend) -> None:
+    """Give new or existing PostgreSQL ledgers enforced owner policies before committing schema setup."""
+    if backend.backend_type == BackendType.POSTGRESQL:
+        schema = POSTGRES_CONTENT_DDL + QUICK_INGEST_PLAN_DDL + "\n".join(build_quick_ingest_plan_rls_sql())
+        with backend.transaction() as conn:
+            backend.create_tables(schema, connection=conn)
+            _validate_postgres_plan_policies(backend, connection=conn)
+    else:
+        backend.create_tables(SQLITE_CONTENT_DDL + QUICK_INGEST_PLAN_DDL)
+
+
 @_decorate_collections_public_operations
 class CollectionsDatabase:
     """Adapter for Collections tables stored in the per-user Media DB."""
@@ -1304,7 +1345,8 @@ class CollectionsDatabase:
 
     @staticmethod
     def _validate_postgres_runtime_schema(backend: DatabaseBackend) -> None:
-        """Admit only readable canonical columns and immediate valid unique arbiters."""
+        """Admit only tenant-isolated ledgers, readable canonical columns and valid unique arbiters."""
+        _validate_postgres_plan_policies(backend)
         columns = backend.execute(
             "SELECT table_name,column_name, "
             "has_column_privilege(current_user,format('%I.%I',table_schema,table_name),column_name,'SELECT') "
@@ -2885,12 +2927,8 @@ class CollectionsDatabase:
         self._backfill_audiobook_project_ids()
         # Collections layer tables
         fts_available = self.backend.backend_type == BackendType.SQLITE
-        if self.backend.backend_type == BackendType.POSTGRESQL:
-            content_ddl = POSTGRES_CONTENT_DDL
-        else:
-            content_ddl = SQLITE_CONTENT_DDL
         try:
-            self.backend.create_tables(content_ddl + QUICK_INGEST_PLAN_DDL)
+            _create_collection_content_tables(self.backend)
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.bind(error_type=type(e).__name__[:80]).error(
                 "Collections content_items schema init failed"

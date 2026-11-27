@@ -18,6 +18,24 @@ except Exception:  # pragma: no cover
     class DatabaseError(Exception): ...  # type: ignore
 
 
+QUICK_INGEST_PLAN_TABLES = ("quick_ingest_plans", "quick_ingest_plan_sources", "quick_ingest_plan_attempts")
+QUICK_INGEST_PLAN_OWNER = "user_id = NULLIF(current_setting('app.current_user_id'::text, true), ''::text)"
+
+
+def build_quick_ingest_plan_rls_sql() -> list[str]:
+    """Bind every plan ledger to its authenticated owner in the Collections migration transaction."""
+    statements: list[str] = []
+    for table in QUICK_INGEST_PLAN_TABLES:
+        statements.extend((
+            f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;",
+            f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;",
+            f"DROP POLICY IF EXISTS quick_ingest_owner ON {table};",
+            f"CREATE POLICY quick_ingest_owner ON {table} "
+            f"USING ({QUICK_INGEST_PLAN_OWNER}) WITH CHECK ({QUICK_INGEST_PLAN_OWNER});",
+        ))
+    return statements
+
+
 def build_prompt_studio_rls_sql() -> list[str]:
     stmts: list[str] = []
 

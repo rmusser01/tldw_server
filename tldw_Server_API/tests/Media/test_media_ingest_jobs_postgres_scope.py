@@ -208,10 +208,12 @@ def test_bound_plan_recovers_only_the_owners_published_job_without_writing(owned
     """A lost submit ACK on PostgreSQL reads the original job under the ordinary user's FORCE policy."""
     from tldw_Server_API.app.api.v1.endpoints.media.collections import _recover_plan_job
     from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+    from tldw_Server_API.app.core.DB_Management.scope_context import reset_scope, set_scope
 
     manager, _ = owned_jobs
     monkeypatch.setenv("JOBS_DB_URL", manager.db_url)
     backend = pg_restricted_backend
+    token = set_scope(user_id=11)
     try:
         db = CollectionsDatabase.from_backend("11", backend)
         _, rows = db.put_quick_ingest_plan(
@@ -244,4 +246,5 @@ def test_bound_plan_recovers_only_the_owners_published_job_without_writing(owned
         assert db.get_quick_ingest_source("draft", "talk").latest_job_id is None
         assert _recover_plan_job(db, "draft", "talk", row, ingest_jobs.get_job_manager).latest_job_id == str(job["id"])
     finally:
+        reset_scope(token)
         CollectionsDatabase._bootstrapped_backend_targets.discard(CollectionsDatabase._backend_target_key(backend))
