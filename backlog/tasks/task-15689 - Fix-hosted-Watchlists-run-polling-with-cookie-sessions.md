@@ -1,5 +1,5 @@
 ---
-id: TASK-15672
+id: TASK-15689
 title: Fix hosted Watchlists run polling with cookie sessions
 status: Done
 assignee:
@@ -63,6 +63,7 @@ Rebased #3580 onto dev while retaining its Watchlists React Query migration. Hos
 Renumbered for PR #3580 after backend-required found that TASK-15620 was already assigned to the quick-launch production WebUI build on dev. This is the same original Watchlists work record under a free ID.
 Independent review found that patching a completed row in a Running list could leave the row and total stale and stop that list polling. Both filter shapes failed the new regression on the original branch. Updated the account-scoped patch to refetch filtered membership after status transitions while keeping compatible row patches for other pages. Watchlists verification on the prepared dev replay: 112 accessibility tests, 56 scale tests, and 3 static checks passed. No Python files changed. The previously recorded Change summary waiver applies to PR #3580. Hosted deployment acceptance remains pending.
 A second independent review reproduced three timing failures. Delayed active details could replace a terminal Activity row, reopening the same run during a cancel could strand its synthetic snapshot, and changing items page mid-cancel refreshed the old page. Reproduced all three failures before fixing them. Terminal list rows now reject active regressions. Successful hosted cancellation reconciles the exact run and its item pages in the same account, with view-specific UI guarded independently. Exact prepared replay passed 23 drawer tests, 115 accessibility tests including the drawer suite, 56 scale tests, 3 static checks, and WebUI TypeScript.
+Renumbered during CI preflight because open PR #3655 had already claimed the interim TASK-15672. This remains the same Watchlists record from #3580.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
