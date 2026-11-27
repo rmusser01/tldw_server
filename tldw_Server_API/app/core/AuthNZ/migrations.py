@@ -6583,7 +6583,24 @@ def get_authnz_migrations() -> list[Migration]:
         ),
         Migration(107, "Add llm_provider_overrides.denied_models", migration_107_add_override_denied_models),
         Migration(108, "Add users.previous_email and users.email_changed_at", migration_108_add_users_email_change_columns),
+        Migration(109, "Add account security lock columns", migration_109_add_account_lock_columns),
     ]
+
+
+def migration_109_add_account_lock_columns(conn: sqlite3.Connection) -> None:
+    """Add the account-lock columns: ``users.security_locked_at``, ``users.credentials_valid_after``, ``api_keys.suspended_at`` (TASK-15671)."""
+    for table, columns in (
+        ("users", ("security_locked_at", "credentials_valid_after")),
+        ("api_keys", ("suspended_at",)),
+    ):
+        if not _sqlite_table_exists(conn, table):
+            logger.info(f"Migration 109: {table} table not present; skipping")
+            continue
+        present = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for column in columns:
+            if column not in present:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TIMESTAMP")
+    logger.info("Migration 109: Added account lock columns")
 
 
 def migration_108_add_users_email_change_columns(conn: sqlite3.Connection) -> None:

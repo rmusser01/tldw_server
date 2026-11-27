@@ -1494,6 +1494,7 @@ _CREATE_API_KEYS_TABLES = [
     ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP", ()),
     ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS revoked_by INTEGER", ()),
     ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS revoke_reason TEXT", ()),
+    ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ", ()),
     # Virtual key fields
     ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS is_virtual BOOLEAN DEFAULT FALSE", ()),
     ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS parent_key_id INTEGER REFERENCES api_keys(id)", ()),
@@ -3689,6 +3690,25 @@ async def _ensure_users_email_change_columns(conn: Any) -> None:
             await conn.execute(alter_statement)
 
 
+_ACCOUNT_LOCK_COLUMNS = (
+    ("users", "security_locked_at"),
+    ("users", "credentials_valid_after"),
+)
+
+
+async def _ensure_account_lock_columns(conn: Any) -> None:
+    """Add the users lock columns only when missing, so a normal start never locks ``users`` (TASK-15671)."""
+    for table, column in _ACCOUNT_LOCK_COLUMNS:
+        present = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2)",
+            table,
+            column,
+        )
+        if present is not True:
+            await conn.execute(f"ALTER TABLE public.{table} ADD COLUMN IF NOT EXISTS {column} TIMESTAMPTZ")
+
+
 async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure core AuthNZ tables exist for PostgreSQL backends.
 
@@ -3711,6 +3731,7 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
                 await conn.execute(statement)
             await ensure_postgres_session_last_activity(conn)
             await _ensure_users_email_change_columns(conn)
+            await _ensure_account_lock_columns(conn)
             has_legacy_uses = await conn.fetchval(
                 "SELECT EXISTS ("
                 "SELECT 1 FROM information_schema.columns "
