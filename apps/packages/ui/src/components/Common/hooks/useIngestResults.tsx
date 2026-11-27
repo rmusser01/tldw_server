@@ -343,18 +343,30 @@ export async function createReviewDraftsFromResults({ results, files, rows = [],
   batchId?: string
 }): Promise<{ batchId: string; draftIds: string[]; skippedAssets: number } | null> {
   return withDraftTransaction(operation, async () => {
-    if (await getDraftBatchById(batchId, operation)) {
-      const drafts = await getDraftsByBatch(batchId, operation)
-      return { batchId, draftIds: drafts.map(draft => draft.id), skippedAssets: drafts.filter(draft => draft.source.kind === "file" && !draft.sourceAssetId).length }
-    }
+    const priorBatch = await getDraftBatchById(batchId, operation)
+    const priorDrafts = priorBatch ? await getDraftsByBatch(batchId, operation) : []
+    const draftIds = priorDrafts.map(draft => draft.id)
+    let skippedAssets = priorDrafts.filter(draft => draft.source.kind === "file" && !draft.sourceAssetId).length
     const okResults = results.filter(item => item.status === "ok")
-    if (!okResults.length) return null
+    const previousIds: string[] | undefined = priorBatch?.sourceDetails?.processedResultIds
+    if (priorBatch && !previousIds) {
+      // A legacy receipt has no per-source identity. Preserve its edited drafts and
+      // remember the current results so later successful retries can be appended.
+      await upsertDraftBatch({ ...priorBatch, sourceDetails: { ...priorBatch.sourceDetails, processedResultIds: okResults.map(item => item.id) } }, operation)
+      return { batchId, draftIds, skippedAssets }
+    }
+    const processedIds = new Set(previousIds)
+    const newResults = okResults.filter(item => !processedIds.has(item.id))
+    if (!newResults.length) return priorBatch ? { batchId, draftIds, skippedAssets } : null
     const now = Date.now()
-    const batch: DraftBatch = { id: batchId, source: "quick_ingest", sourceDetails: { total: okResults.length }, createdAt: now, updatedAt: now }
+    newResults.forEach(item => processedIds.add(item.id))
+    const batch: DraftBatch = {
+      id: batchId, source: "quick_ingest", ...priorBatch,
+      sourceDetails: { ...priorBatch?.sourceDetails, total: processedIds.size, processedResultIds: [...processedIds] },
+      createdAt: priorBatch?.createdAt ?? now, updatedAt: now,
+    }
     await upsertDraftBatch(batch, operation)
-    const draftIds: string[] = []
-    let skippedAssets = 0
-    for (const item of okResults) {
+    for (const item of newResults) {
       const sourceRow = rows.find(row => row.id === item.id)
       const localFile = files.get(item.id)
       for (const processed of extractProcessingItems(item.data)) {
@@ -393,7 +405,7 @@ export async function createReviewDraftsFromResults({ results, files, rows = [],
         draftIds.push(id)
       }
     }
-    if (!draftIds.length) throw new Error("No processed content was returned for review.")
+    if (draftIds.length === priorDrafts.length) throw new Error("No processed content was returned for review.")
     return { batchId, draftIds, skippedAssets }
   })
 }

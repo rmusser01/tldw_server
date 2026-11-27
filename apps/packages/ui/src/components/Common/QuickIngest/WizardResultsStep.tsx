@@ -41,6 +41,8 @@ import {
 // ---------------------------------------------------------------------------
 
 type WizardResultsStepProps = {
+  oneScreen?: boolean
+  reviewDrafts?: { count: number; onOpen: () => void }
   onClose: () => void
   onIngestMore?: () => void
   onRetryItems?: (
@@ -125,6 +127,8 @@ function groupResultItems(results: WizardResultItem[]): ResultGroups {
 // ---------------------------------------------------------------------------
 
 type SuccessRowProps = {
+  oneScreen?: boolean
+  reviewFirst?: boolean
   item: WizardResultItem
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
   onOpenMedia?: (item: WizardResultItem) => void
@@ -132,7 +136,7 @@ type SuccessRowProps = {
 }
 
 const SuccessRow: React.FC<SuccessRowProps> = React.memo(
-  ({ item, qi, onOpenMedia, onDiscussInChat }) => {
+  ({ item, qi, onOpenMedia, onDiscussInChat, oneScreen, reviewFirst }) => {
     const label = item.title || item.fileName || item.url || item.id
     const duration = formatDuration(item.durationMs)
     const showOpenMedia = Boolean(onOpenMedia) && canOpenMedia(item)
@@ -149,10 +153,11 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
           <div className="truncate" title={label}>{label}</div>
           <p className="text-xs text-text-muted">{getSavedMediaIds([item]).length
             ? qi("wizard.results.savedState", "Saved")
-            : qi("wizard.results.extractedState", "Extracted content; not saved")}
+            : reviewFirst ? qi("web.extractedForReview", "Extracted for review")
+              : qi("wizard.results.extractedState", "Extracted content; not saved")}
             {item.data && typeof item.data === "object" && "analysis" in item.data && typeof item.data.analysis === "string" && item.data.analysis.trim()
               ? ` · ${qi("wizard.results.analysisAvailable", "Analysis available")}` : ""}</p>
-          {getSavedMediaIds([item]).length > 0 && <p className="text-xs text-text-muted">{qi("wizard.results.knowledgeUnconfirmed", "Knowledge readiness unconfirmed")}</p>}
+          {!oneScreen && getSavedMediaIds([item]).length > 0 && <p className="text-xs text-text-muted">{qi("wizard.results.knowledgeUnconfirmed", "Knowledge readiness unconfirmed")}</p>}
           {item.warning && <p className="whitespace-pre-line break-words text-xs text-warn">{item.warning}</p>}
         </div>
         {duration && (
@@ -193,6 +198,7 @@ SuccessRow.displayName = "SuccessRow"
 // ---------------------------------------------------------------------------
 
 type SkippedRowProps = {
+  localDuplicateMessage: string
   item: WizardResultItem
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
   onOpenMedia?: (item: WizardResultItem) => void
@@ -200,13 +206,13 @@ type SkippedRowProps = {
 }
 
 const SkippedRow: React.FC<SkippedRowProps> = React.memo(
-  ({ item, qi, onOpenMedia, onDiscussInChat }) => {
+  ({ item, qi, onOpenMedia, onDiscussInChat, localDuplicateMessage }) => {
     const label = item.title || item.fileName || item.url || item.id
     const showOpenMedia = Boolean(onOpenMedia) && canOpenMedia(item)
     const skippedReason = resolveSkippedResultReason(item)
     const skippedMessage =
       skippedReason === "local-queue-duplicate"
-        ? qi("wizard.results.skippedAlreadyQueued", LOCAL_QUEUE_DUPLICATE_SKIP_MESSAGE)
+        ? localDuplicateMessage
         : skippedReason === "library-duplicate"
           ? qi("wizard.results.skippedAlreadyInLibrary", LIBRARY_DUPLICATE_SKIP_MESSAGE)
           : item.message || qi("wizard.results.skippedDefaultMessage", GENERIC_SKIPPED_MESSAGE)
@@ -369,6 +375,8 @@ ErrorRow.displayName = "ErrorRow"
 // ---------------------------------------------------------------------------
 
 export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
+  oneScreen = false,
+  reviewDrafts,
   onClose,
   onIngestMore,
   onRetryItems,
@@ -421,8 +429,9 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const collectionId = tracking?.collectionId
   const hasDurableCollection =
     Boolean(collectionId) && tracking?.durableMode === "durable_collection"
-  const savedMediaIds = getSavedMediaIds(savedItems)
-    .filter(id => savedIds.includes(id))
+  // A skipped library duplicate can open existing media but was not saved by this run.
+  const newlySavedIds = getSavedMediaIds(savedItems).filter(id => savedIds.includes(id))
+  const savedMediaIds = newlySavedIds
     .map((id) => Number(id))
     .filter((id) => Number.isSafeInteger(id) && id > 0)
   const collectionMediaIds = savedIds
@@ -565,6 +574,12 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     reset()
   }, [onIngestMore, reset])
 
+  const reviewSaved = (ids: Array<string | number>) => {
+    void Promise.resolve(onReviewSavedItems?.(ids)).catch(() =>
+      setExportNotice(qi("wizard.results.savedReviewFailed", "Unable to open saved items. Try again."))
+    )
+  }
+
   // -- Elapsed time ---------------------------------------------------------
 
   const elapsedLabel = useMemo(
@@ -574,18 +589,155 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
 
   // -- Render ---------------------------------------------------------------
 
+  const singleSaved = newlySavedIds.length === 1
+    ? savedItems.find(item => getSavedMediaIds([item]).includes(newlySavedIds[0]))
+    : undefined
+  const extractedCount = savedItems.filter(item => !getSavedMediaIds([item]).length).length
+  const failedCount = submitFailed.length + failedProcessing.length
+  const skippedCount = skippedExisting.length + excludedItems.length
+  const confirmedDrafts = reviewDrafts && reviewDrafts.count > 0 ? reviewDrafts : undefined
+  const localDuplicateMessage = oneScreen
+    ? qi("source.duplicate", "Duplicate · skipped")
+    : qi("wizard.results.skippedAlreadyQueued", LOCAL_QUEUE_DUPLICATE_SKIP_MESSAGE)
+  const reviewFirst = oneScreen && state.presetConfig.reviewBeforeStorage
+  const outcomeLabels = oneScreen ? [
+    confirmedDrafts && (confirmedDrafts.count === 1 ? qi("web.resultDraft", "1 draft ready for review")
+      : qi("web.resultDrafts", "{{count}} drafts ready for review", { count: confirmedDrafts.count })),
+    newlySavedIds.length > 0 && qi("web.resultSaved", "{{count}} saved to Media", { count: newlySavedIds.length }),
+    extractedCount > 0 && !confirmedDrafts && (reviewFirst
+      ? qi("web.resultExtractedForReview", "{{count}} extracted for review", { count: extractedCount })
+      : qi("web.resultExtracted", "{{count}} extracted", { count: extractedCount })),
+    failedCount > 0 && qi("web.resultFailed", "{{count}} failed", { count: failedCount }),
+    skippedCount > 0 && qi("web.resultSkipped", "{{count}} skipped", { count: skippedCount }),
+    cancelled.length > 0 && qi("web.resultCancelled", "{{count}} cancelled", { count: cancelled.length }),
+  ].filter(Boolean) : []
+
+  let primaryAction: { kind: "retry" | "drafts" | "open" | "review"; label: string; run: () => void } | undefined
+  if (oneScreen) {
+    if (retryableIds.length && onRetryItems) {
+      primaryAction = {
+        kind: "retry",
+        label: retryableIds.length === 1 ? qi("web.retrySource", "Retry failed source")
+          : qi("web.retrySources", "Retry {{count}} failed sources", { count: retryableIds.length }),
+        run: handleRetryAll,
+      }
+    } else if (confirmedDrafts) {
+      primaryAction = { kind: "drafts", label: qi("web.openDrafts", "Open drafts"), run: confirmedDrafts.onOpen }
+    } else if (singleSaved && onOpenMedia) {
+      primaryAction = { kind: "open", label: qi("wizard.results.open", "Open in Media"), run: () => onOpenMedia(singleSaved) }
+    } else if (newlySavedIds.length > 1 && onReviewSavedItems) {
+      primaryAction = {
+        kind: "review",
+        label: qi("web.reviewSources", "Review {{count}} saved sources", { count: newlySavedIds.length }),
+        run: () => reviewSaved(newlySavedIds),
+      }
+    }
+  }
+  const ActionsPanel = oneScreen ? "details" : "div"
+  const ActionsTitle = oneScreen ? "summary" : "p"
+  const primaryStyle = "rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+  const secondaryStyle = "rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text hover:bg-surface2"
+
+  const nextSteps = (showNextSteps || oneScreen) && (
+    <ActionsPanel className={oneScreen ? "my-3 border-y border-border py-2" : "mt-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3"}>
+      <ActionsTitle className={oneScreen ? "cursor-pointer py-1 text-sm font-medium text-text" : "mb-2 text-xs font-medium text-text-muted"}>
+        {oneScreen ? qi("web.moreActions", "More actions") : qi("wizard.results.nextSteps", "What's next?")}
+      </ActionsTitle>
+      <div className={oneScreen ? "mt-2 flex flex-wrap gap-2" : "flex flex-wrap gap-2"}>
+        {oneScreen && confirmedDrafts && primaryAction?.kind !== "drafts" && (
+          <button type="button" onClick={confirmedDrafts.onOpen} className={secondaryStyle}>
+            {qi("web.openDrafts", "Open drafts")}
+          </button>
+        )}
+        {savedIds.length > 0 && onReviewSavedItems && (primaryAction?.kind !== "review" || newlySavedIds.length !== savedIds.length) && <button type="button" onClick={() => reviewSaved(savedIds)} className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text hover:bg-surface2">
+          {qi("wizard.results.reviewSaved", savedIds.length === 1 ? "Review this {{count}} saved item" : "Review these {{count}} saved items", { count: savedIds.length })}
+        </button>}
+        {showCollectionOpen && collectionId && (
+          <button
+            type="button"
+            onClick={handleOpenCollection}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
+            aria-label={qi(
+              "wizard.results.openCollectionAria",
+              "Open collection {{collectionId}}",
+              { collectionId }
+            )}
+          >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+            {qi("wizard.results.openCollection", "Open collection")}
+          </button>
+        )}
+        {canAskCollection && (
+          <button
+            type="button"
+            onClick={() => onSearchKnowledge?.(collectionMediaIds)}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
+            aria-label={qi("wizard.results.askCollectionAria", "Ask this collection")}
+          >
+            <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+            {qi("wizard.results.askCollection", "Ask this collection")}
+          </button>
+        )}
+        {showGenericSearch && onSearchKnowledge && (
+          <button
+            type="button"
+            onClick={() => onSearchKnowledge(savedMediaIds)}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
+            aria-label={qi(
+              "wizard.results.askAddedItemsAria",
+              "Ask added items",
+            )}
+          >
+            <Search className="h-3.5 w-3.5" aria-hidden="true" />
+            {qi("wizard.results.askAddedItems", "Ask added items")}
+          </button>
+        )}
+        {hasWorkspaceOpenTarget && onOpenWorkspace && (
+          <button
+            type="button"
+            onClick={() => {
+              const docItem = savedItems.find(s => s.persisted && shouldKeepOriginalFile(s.type))
+              if (docItem) onOpenWorkspace(docItem)
+            }}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
+            aria-label={qi("wizard.results.openDocumentWorkspaceAria", "Open in Document Workspace")}
+          >
+            <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+            {qi("wizard.results.openDocumentWorkspace", "Open in Document Workspace")}
+          </button>
+        )}
+        {oneScreen && (
+          <button type="button" onClick={handleIngestMore} className={secondaryStyle}>
+            {qi("web.ingestMore", "Add more sources")}
+          </button>
+        )}
+        {oneScreen && failures.length > 0 && (
+          <button type="button" onClick={handleExportFailedItems} className={secondaryStyle}>
+            {qi("wizard.results.exportFailedListAria", "Export failed items list")}
+          </button>
+        )}
+      </div>
+      {oneScreen && (showGenericSearch || canAskCollection) && (
+        <p className="mt-2 text-xs text-text-muted">{qi("web.searchReadiness", "Availability in Knowledge search depends on source readiness.")}</p>
+      )}
+    </ActionsPanel>
+  )
+
   return (
-    <div className="flex h-full flex-col" data-testid="wizard-results-step">
+    <div className="flex h-full min-h-0 flex-col" data-testid="wizard-results-step">
       {/* Scrollable content area */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <p role="status" className="mb-3 text-sm text-text">
+      <div className={oneScreen ? "qi-web-scroll min-h-0 flex-1 overflow-y-auto" : "min-h-0 flex-1 overflow-y-auto px-4 py-3"}>
+        {oneScreen ? <div role="status" className="mb-4">
+          <h2 className="text-xl font-semibold text-text">{outcomeLabels[0] || qi("web.resultsTitle", "Import results")}</h2>
+          {outcomeLabels.length > 1 && <p className="mt-1 text-sm text-text-muted">{outcomeLabels.slice(1).join(" · ")}</p>}
+        </div> : <p role="status" className="mb-3 text-sm text-text">
           {qi("wizard.results.batchAccounting", "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled", {
             added: new Set([...queueItems.map(item => item.id), ...results.map(item => item.id)]).size,
             excluded: excludedItems.length + skippedExisting.length,
             succeeded: savedItems.length, saved: savedIds.length,
             failed: submitFailed.length + failedProcessing.length, cancelled: cancelled.length,
           })}
-        </p>
+        </p>}
         {excludedItems.length > 0 && <section aria-label={qi("wizard.results.excludedSection", "Excluded inputs")} className="mb-4 space-y-2">
           {excludedItems.map(item => <div key={item.id} className="text-sm text-text">
             <p className="break-words">{item.fileName || item.url || item.id}</p>
@@ -593,13 +745,13 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               ? item.validation.errors?.join("; ") || qi("wizard.results.invalidExcluded", "Invalid input. Correct it before processing.")
               : getQueueItemExclusionReason(item, queueItems) === "unselected"
                 ? qi("wizard.results.unselectedExcluded", "Not selected for this run.")
-                : qi("wizard.results.skippedAlreadyQueued", LOCAL_QUEUE_DUPLICATE_SKIP_MESSAGE)}</p>
+                : localDuplicateMessage}</p>
           </div>)}
         </section>}
         {/* Successes */}
         {successes.length > 0 && (
           <section aria-label={qi("wizard.results.completedSection", "Completed items")}>
-            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-muted">
+            <h3 className={oneScreen ? "sr-only" : "mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-text-muted"}>
               <Check className="h-3.5 w-3.5 text-green-500" aria-hidden="true" />
               {qi("wizard.results.succeededHeading", "Succeeded ({{count}})", {
                 count: successes.length,
@@ -611,7 +763,9 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                   key={item.id}
                   item={item}
                   qi={qi}
-                  onOpenMedia={onOpenMedia}
+                  oneScreen={oneScreen}
+                  reviewFirst={reviewFirst}
+                  onOpenMedia={primaryAction?.kind === "open" && singleSaved === item ? undefined : onOpenMedia}
                   onDiscussInChat={onDiscussInChat}
                 />
               ))}
@@ -627,81 +781,15 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
             </h3>
             <div className="space-y-0.5">
               {warnings.map((item) => (
-                <SuccessRow key={item.id} item={item} qi={qi} onOpenMedia={onOpenMedia} onDiscussInChat={onDiscussInChat} />
+                <SuccessRow key={item.id} item={item} qi={qi} oneScreen={oneScreen} reviewFirst={reviewFirst}
+                  onOpenMedia={primaryAction?.kind === "open" && singleSaved === item ? undefined : onOpenMedia}
+                  onDiscussInChat={onDiscussInChat} />
               ))}
             </div>
           </section>
         )}
 
-        {/* Next steps CTAs */}
-        {showNextSteps && (
-          <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
-            <p className="mb-2 text-xs font-medium text-text-muted">
-              {qi("wizard.results.nextSteps", "What's next?")}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {savedIds.length > 0 && onReviewSavedItems && <button type="button" onClick={() => {
-                void Promise.resolve(onReviewSavedItems(savedIds)).catch(() => setExportNotice(qi("wizard.results.savedReviewFailed", "Unable to open saved items. Try again.")))
-              }} className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text hover:bg-surface2">
-                {qi("wizard.results.reviewSaved", savedIds.length === 1 ? "Review this {{count}} saved item" : "Review these {{count}} saved items", { count: savedIds.length })}
-              </button>}
-              {showCollectionOpen && collectionId && (
-                <button
-                  type="button"
-                  onClick={handleOpenCollection}
-                  className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
-                  aria-label={qi(
-                    "wizard.results.openCollectionAria",
-                    "Open collection {{collectionId}}",
-                    { collectionId }
-                  )}
-                >
-                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                  {qi("wizard.results.openCollection", "Open collection")}
-                </button>
-              )}
-              {canAskCollection && (
-                <button
-                  type="button"
-                  onClick={() => onSearchKnowledge?.(collectionMediaIds)}
-                  className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
-                  aria-label={qi("wizard.results.askCollectionAria", "Ask this collection")}
-                >
-                  <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
-                  {qi("wizard.results.askCollection", "Ask this collection")}
-                </button>
-              )}
-              {showGenericSearch && onSearchKnowledge && (
-                <button
-                  type="button"
-                  onClick={() => onSearchKnowledge(savedMediaIds)}
-                  className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
-                  aria-label={qi(
-                    "wizard.results.askAddedItemsAria",
-                    "Ask added items",
-                  )}
-                >
-                  <Search className="h-3.5 w-3.5" aria-hidden="true" />
-                  {qi("wizard.results.askAddedItems", "Ask added items")}
-                </button>
-              )}
-              {hasWorkspaceOpenTarget && onOpenWorkspace && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const docItem = savedItems.find(s => s.persisted && shouldKeepOriginalFile(s.type))
-                    if (docItem) onOpenWorkspace(docItem)
-                  }}
-                  className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
-                  aria-label={qi("wizard.results.openDocumentWorkspaceAria", "Open in Document Workspace")}
-                >
-                  <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
-                  {qi("wizard.results.openDocumentWorkspace", "Open in Document Workspace")}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+        {!oneScreen && nextSteps}
 
         {/* Skipped (duplicates) */}
         {skippedExisting.length > 0 && (
@@ -719,6 +807,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               {skippedExisting.map((item) => (
                 <SkippedRow
                   key={item.id}
+                  localDuplicateMessage={localDuplicateMessage}
                   item={item}
                   qi={qi}
                   onOpenMedia={onOpenMedia}
@@ -730,7 +819,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         )}
 
         {/* Failure export/retry actions */}
-        {failures.length > 0 && (
+        {!oneScreen && failures.length > 0 && (
           <div
             className={
               savedItems.length > 0 || skippedExisting.length > 0
@@ -865,6 +954,8 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         )}
 
         {/* Empty state */}
+        {oneScreen && nextSteps}
+        {oneScreen && exportNotice && <p role="status" className="text-sm text-text-muted">{exportNotice}</p>}
         {results.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center text-text-muted">
             <AlertTriangle className="mb-2 h-8 w-8 opacity-40" aria-hidden="true" />
@@ -876,7 +967,16 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
       </div>
 
       {/* Footer summary + actions */}
-      {results.length > 0 && (
+      {oneScreen ? (
+        <div className="qi-web-footer flex flex-wrap items-center justify-end gap-2" role="group" aria-label={qi("web.resultActions", "Result actions")}>
+          <button type="button" onClick={onClose} className={primaryAction ? secondaryStyle : primaryStyle}>
+            {qi("wizard.results.done", "Done")}
+          </button>
+          {primaryAction && <button type="button" onClick={primaryAction.run} className={primaryStyle}>
+            {primaryAction.label}
+          </button>}
+        </div>
+      ) : results.length > 0 && (
         <div className="border-t border-border px-4 py-3">
           {/* Summary line */}
           <p className="mb-3 text-center text-xs text-text-muted">

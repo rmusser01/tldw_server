@@ -341,8 +341,9 @@ def test_policy_resolved_once_per_call(moderation_hooks, stub_llm_registry, monk
     monkeypatch.setattr(
         moderation_hooks, "get_effective_policy", lambda uid, *, surface: (calls.append(surface), real(uid, surface=surface))[1]
     )
-    _call()
+    result = _call()
     assert calls == [SURFACE]
+    assert result["choices"][0]["message"]["content"] == "provider reply"
 
 
 def test_post_call_resolves_when_no_pre_hook_ran(moderation_hooks):
@@ -564,7 +565,10 @@ def test_closing_the_sync_wrapper_before_first_next_closes_the_source(moderation
             closed.append(1)
 
     call = GatewayCall(surface=SURFACE, provider=PROVIDER, request={}, stream=True, user_id=None)
-    hooks_mod.post_call(call, Source()).close()
+    source = Source()
+    wrapper = hooks_mod.post_call(call, source)
+    assert wrapper is not source  # moderation is on: the stream is wrapped, not passed through
+    wrapper.close()
     assert closed == [1]
 
 

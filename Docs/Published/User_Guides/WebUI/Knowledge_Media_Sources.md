@@ -25,6 +25,14 @@ Use these pages when you want to add material, organize it, ask cited questions,
 | `/connectors`, `/connectors/browse`, `/connectors/jobs`, `/connectors/sources` | Advanced self-hosted | Browse connector placeholders, connector jobs, and connector source surfaces. | External systems, source adapters, connector status. |
 | `/shared`, `/share/[token]` | Advanced self-hosted | View shared resources and public share links. | Collaboration, read-only links, shared workspaces. |
 
+## Add sources with Quick Ingest
+
+Open **Quick Ingest** in Media. Choose **Files**, **Links**, or **Text**. You can switch between them to build one batch. The source list shows what is ready and why an item will be skipped. Use **Edit link** to repair an invalid URL.
+
+Check the destination above the main button. **Change settings** lets you save to Media, create drafts to review in this browser, or extract content without saving. If your preset uses AI analysis, choose a provider or select **Skip analysis for this import**. When an import can replace existing Media, review the sources and confirm.
+
+You can minimize an active import and reopen it to see progress. On completion, use **Open in Media** for a saved source, **Open drafts** for a review batch, or retry a failed source. Further actions are under **More actions**.
+
 ## Larger Systems
 
 Knowledge workflows depend on source ownership. Media, notes, collections, sources, and workspaces create or organize material. Knowledge QA searches selected indexed material and produces cited answers. Research Workspace adds a higher-level project shell around source organization, chat, export, sharing, and recovery states.

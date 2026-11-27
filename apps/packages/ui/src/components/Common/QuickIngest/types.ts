@@ -356,6 +356,8 @@ export type WizardResultItem = ResultItem & {
 export type WizardProcessingState = {
   /** Overall status. */
   status: ProcessingStatus
+  /** Failed sources selected for correction before starting the next attempt. */
+  correctionItemIds?: string[]
   /** Per-item progress entries. */
   perItemProgress: ItemProgress[]
   /** Elapsed time in seconds since processing started. */

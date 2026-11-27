@@ -244,7 +244,10 @@ def test_conditional_required_lanes_run_whenever_change_detection_ran() -> None:
         (".github/workflows/e2e-required.yml", "e2e-required"),
     ):
         job = _load(workflow_path)["jobs"][job_name]
-        assert job["needs"] == ["changes", "admission", "await_license"]
+        expected_needs = ["changes", "admission", "await_license"]
+        if job_name == "coverage-required":
+            expected_needs += ["global-coverage", "authnz-coverage"]
+        assert job["needs"] == expected_needs
         condition = " ".join(job["if"].split())
         assert "needs.changes.result" not in condition
         assert (
@@ -257,9 +260,10 @@ def test_conditional_required_lanes_run_whenever_change_detection_ran() -> None:
         ]
 
 
-def test_coverage_required_installs_portaudio_for_pyaudio_builds() -> None:
+@pytest.mark.parametrize("job_id", ["global-coverage", "authnz-coverage"])
+def test_coverage_required_installs_portaudio_for_pyaudio_builds(job_id: str) -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
-    steps = workflow["jobs"]["coverage-required"]["steps"]
+    steps = workflow["jobs"][job_id]["steps"]
     install_step = _get_step(steps, "Install FFmpeg and PortAudio (Linux)")
     assert install_step["uses"] == "./.github/actions/setup-ffmpeg"
     assert install_step["with"]["install-ffmpeg"] == "false"
@@ -268,7 +272,7 @@ def test_coverage_required_installs_portaudio_for_pyaudio_builds() -> None:
 
 def test_coverage_required_uses_documented_global_floor() -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
-    steps = workflow["jobs"]["coverage-required"]["steps"]
+    steps = workflow["jobs"]["global-coverage"]["steps"]
     coverage_step = _get_step(steps, "Run global coverage floor")
     assert "--cov-fail-under=12" in coverage_step["run"]
 
@@ -287,7 +291,7 @@ def test_global_coverage_floor_measures_only_application_code() -> None:
         None.
     """
     workflow = _load(".github/workflows/coverage-required.yml")
-    steps = workflow["jobs"]["coverage-required"]["steps"]
+    steps = workflow["jobs"]["global-coverage"]["steps"]
     run = _get_step(steps, "Run global coverage floor")["run"]
 
     tokens = run.split()
@@ -307,7 +311,7 @@ def test_global_coverage_floor_measures_only_application_code() -> None:
 
 def test_coverage_required_enforces_authnz_coverage_floor() -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
-    steps = workflow["jobs"]["coverage-required"]["steps"]
+    steps = workflow["jobs"]["authnz-coverage"]["steps"]
     authnz_step = _get_step(steps, "AuthNZ coverage floor")
     assert "--cov-fail-under=35" in authnz_step["run"]
 
