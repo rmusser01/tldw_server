@@ -8,11 +8,13 @@ import pytest
 
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ import api_key_audit
+from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 
 from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
+from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.tests.AuthNZ_SQLite._account_lock_fixtures import lock_user, unlock_user
 from tldw_Server_API.tests.AuthNZ_SQLite._sessions_http_fixtures import api_key_for, bearer, login
 
@@ -91,6 +93,8 @@ async def test_api_key_of_a_locked_owner_is_invalid_and_usage_is_not_recorded(tw
     assert working.status_code == 200 and working.json()["user"]["id"] == ctx.alice_id
     before = await _key_row(key)
     await lock_user(ctx.alice_id)
+    # Clear the per-key usage throttle so a usage write would happen if the key were accepted.
+    (await get_api_key_manager())._clear_usage_touch(before["id"])
     response = ctx.client.get(PROFILE, headers={"X-API-KEY": key})
     after = await _key_row(key)
     assert response.status_code == 401 and response.json()["detail"] == "Invalid API key"
@@ -152,13 +156,13 @@ async def test_cannot_unsuspend_another_users_key(two_user_client) -> None:
 
 async def test_a_suspended_key_cannot_be_rotated(two_user_client) -> None:
     ctx = two_user_client
-    _old_id, old_key, new_id, _new_key, _tokens = await _two_keys_across_a_lock(ctx)
+    old_id, old_key, new_id, _new_key, _tokens = await _two_keys_across_a_lock(ctx)
     response = ctx.client.post(f"{KEYS}/{new_id}/rotate", json={}, headers={"X-API-KEY": old_key})
     rows = await (await get_db_pool()).fetchall(
         "SELECT id, status FROM api_keys WHERE user_id = ? AND status = 'active'", ctx.alice_id
     )
     assert response.status_code == 409 and response.json()["detail"]["code"] == "api_key_suspended"
-    assert sorted(r["id"] for r in rows) == sorted([_old_id, new_id])
+    assert sorted(r["id"] for r in rows) == sorted([old_id, new_id])
 
 
 async def test_bobs_key_keeps_working_while_alice_is_locked(two_user_client) -> None:
@@ -198,6 +202,22 @@ async def test_unsuspend_writes_its_audit_event(two_user_client, monkeypatch) ->
     monkeypatch.setattr(api_key_audit, "emit_mandatory_api_key_management_audit", _recording_audit)
     response = ctx.client.post(_unsuspend(new_id), headers=bearer(tokens))
     assert response.status_code == 200 and response.json()["suspended_at"] is None
-    assert [(c["action"], c["resource_id"], c["user_id"]) for c in calls] == [
-        ("api_key.unsuspend", str(new_id), ctx.alice_id)
+    assert [(c["action"], c["resource_id"], c["user_id"], c["actor_kind"]) for c in calls] == [
+        ("api_key.unsuspend", str(new_id), ctx.alice_id, "user")
     ]
+
+
+async def test_admin_cannot_rotate_a_suspended_key(two_user_client) -> None:
+    ctx = two_user_client
+    _old_id, _old_key, new_id, new_key, _tokens = await _two_keys_across_a_lock(ctx)
+    await AuthnzUsersRepo(await get_db_pool()).assign_role_if_missing(user_id=ctx.bob_id, role_name="admin")
+    admin = login(ctx.client, "bob", ctx.password)
+    response = ctx.client.post(
+        f"/api/v1/admin/users/{ctx.alice_id}/api-keys/{new_id}/rotate", json={}, headers=bearer(admin)
+    )
+    rows = await (await get_db_pool()).fetchall(
+        "SELECT id FROM api_keys WHERE user_id = ? AND status = 'active'", ctx.alice_id
+    )
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "api_key_suspended"
+    assert new_id in [r["id"] for r in rows] and len(rows) == 2
+    assert (await _key_row(new_key))["suspended_at"] is not None

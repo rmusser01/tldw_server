@@ -317,6 +317,7 @@ async def unsuspend_api_key(*, user_id: int, key_id: int) -> dict | None:
             action="api_key.unsuspend",
             resource_id=str(key_id),
             actor_user_id=user_id,
+            actor_kind="user",
         )
     row = await repo.fetch_key_for_user(key_id=key_id, user_id=user_id)
     if row is None:

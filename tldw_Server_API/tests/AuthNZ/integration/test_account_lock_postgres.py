@@ -223,7 +223,9 @@ async def test_suspended_key_is_invalid_pg(lock_db) -> None:
     from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
 
     created, manager = await _pg_key(lock_db)
-    assert (await manager.validate_api_key(created["key"]))["user_id"] == lock_db.user_id
+    info = await manager.validate_api_key(created["key"])
+    assert info["user_id"] == lock_db.user_id
+    assert "owner_is_active" not in info and "owner_security_locked_at" not in info
     await set_lock(lock_db.user_id)
     assert await manager.validate_api_key(created["key"]) is None
     await unlock_user(lock_db.user_id)
