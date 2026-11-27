@@ -456,15 +456,17 @@ async def test_take_back_that_never_wins_its_compare_and_set_gives_up_with_the_a
     compare_and_set = AuthnzUsersRepo.clear_security_lock
     attempts = 0
 
-    async def _another_take_back_always_relocks_first(self, user_id, **kwargs):
+    async def _another_link_unlocks_first(self, user_id, **kwargs):
+        """A plain unlock wins first every time: the account is left unlocked, so only the take-back's own
+        final lock can leave it locked."""
         nonlocal attempts
         attempts += 1
-        await self.force_security_lock(user_id, now=datetime.now(timezone.utc))
+        await self.db_pool.execute("UPDATE users SET security_locked_at = NULL WHERE id = ?", user_id)
         return await compare_and_set(self, user_id, **kwargs)
 
-    monkeypatch.setattr(AuthnzUsersRepo, "clear_security_lock", _another_take_back_always_relocks_first)
-    assert await clear_lock(uid, take_back=OLD) is None
-    assert attempts == 3
+    monkeypatch.setattr(AuthnzUsersRepo, "clear_security_lock", _another_link_unlocks_first)
+    result = await clear_lock(uid, take_back=OLD)
+    assert result is None and attempts == 3
     assert (await _row(lock_db))["security_locked_at"] is not None
 
 
