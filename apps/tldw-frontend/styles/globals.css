@@ -83,6 +83,10 @@
     border-radius: 0;
   }
 
+  .qi-processing-prompt .ant-btn {
+    width: 100%;
+    min-height: 44px;
+  }
   .qi-web-modal .qi-web-body { flex: 1; }
   .qi-web-wrap .qi-web-modal .ant-modal-header.qi-web-header { padding-left: 16px; }
   .qi-web-scroll { padding: 8px 16px; }

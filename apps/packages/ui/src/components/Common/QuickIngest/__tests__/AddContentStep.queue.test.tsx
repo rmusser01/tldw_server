@@ -67,6 +67,25 @@ const mountOneScreen = (processingItems?: WizardQueueItem[]) => render(
 );
 
 describe("one-screen source queue", () => {
+  it("discards the rejected link's identity and replacement permission on repair", () => {
+    const changed = vi.fn();
+    render(<IngestWizardProvider onStateChange={changed} initialState={{ queueItems: [{
+      id: "slot", kind: "url", url: "https://example.org/rejected", detectedType: "video", icon: "Film", fileSize: 0,
+      validation: { valid: false }, processAgain: true,
+      playlist: { playlistId: "old-list", ordinal: 3, normalizedSourceId: "rejected", duplicateStatus: "duplicate_existing" },
+      conferenceOverride: { selected: true, title: "Opening talk", duplicatePolicy: "overwrite" },
+    }] }}>
+      <AddContentStep oneScreen />
+    </IngestWizardProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Edit link" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Correct link" }), { target: { value: "https://example.org/new.pdf" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply link" }));
+    const [item] = changed.mock.lastCall![0].queueItems;
+    expect(item).toMatchObject({ id: "slot", url: "https://example.org/new.pdf", sourceUrlEdited: true, processAgain: false, validation: { valid: true } });
+    expect(item.playlist).toEqual({ ordinal: 3 });
+    expect(item.conferenceOverride).toEqual({ selected: true, title: "Opening talk", duplicatePolicy: undefined });
+  });
+
   it("keeps different pasted texts of the same size eligible", () => {
     mountOneScreen();
     fireEvent.click(screen.getByRole("button", { name: "Text" }));

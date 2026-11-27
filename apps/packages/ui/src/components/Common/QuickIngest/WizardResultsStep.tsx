@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Check,
@@ -12,8 +12,10 @@ import {
   BookOpen,
   Download,
 } from "lucide-react"
-import { getQueueItemExclusionReason, getEligibleQueueItems } from "./queue-items"
-import type { WizardResultItem } from "./types"
+import { canPasteQueueItem, getQueueItemExclusionReason, getEligibleQueueItems } from "./queue-items"
+import type { ItemProgress, WizardQueueItem, WizardResultItem } from "./types"
+import { getExtractedSourceText } from "./processing-results"
+import { ExtractedTextViewer } from "./ExtractedTextViewer"
 import { shouldKeepOriginalFile } from "@/services/tldw/media-routing"
 import {
   buildConferenceFailedResultExportText,
@@ -43,6 +45,11 @@ import {
 type WizardResultsStepProps = {
   oneScreen?: boolean
   reviewDrafts?: { count: number; onOpen: () => void }
+  interruption?: {
+    sources: Array<{ id: string; name: string; jobIds: number[]; lastProgress?: ItemProgress }>
+    onCheckMedia: () => void
+    onCheckStatus?: () => void
+  }
   onClose: () => void
   onIngestMore?: () => void
   onRetryItems?: (
@@ -55,7 +62,7 @@ type WizardResultsStepProps = {
   onOpenWorkspace?: (item: WizardResultItem) => void
   onOpenCollection?: (collectionId: string) => void
   onReviewSavedItems?: (ids: Array<string | number>) => void | Promise<void>
-  onCorrectItems?: (ids: string[]) => void
+  onCorrectItems?: (ids: string[], repairSource?: boolean) => void
   onReattach?: (id: string, file: File) => void
 }
 
@@ -129,6 +136,8 @@ function groupResultItems(results: WizardResultItem[]): ResultGroups {
 type SuccessRowProps = {
   oneScreen?: boolean
   reviewFirst?: boolean
+  extractedText?: string
+  onViewText?: (item: WizardResultItem, trigger: HTMLButtonElement) => void
   item: WizardResultItem
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
   onOpenMedia?: (item: WizardResultItem) => void
@@ -136,7 +145,7 @@ type SuccessRowProps = {
 }
 
 const SuccessRow: React.FC<SuccessRowProps> = React.memo(
-  ({ item, qi, onOpenMedia, onDiscussInChat, oneScreen, reviewFirst }) => {
+  ({ item, qi, onOpenMedia, onDiscussInChat, oneScreen, reviewFirst, extractedText, onViewText }) => {
     const label = item.title || item.fileName || item.url || item.id
     const duration = formatDuration(item.durationMs)
     const showOpenMedia = Boolean(onOpenMedia) && canOpenMedia(item)
@@ -159,6 +168,9 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
               ? ` · ${qi("wizard.results.analysisAvailable", "Analysis available")}` : ""}</p>
           {!oneScreen && getSavedMediaIds([item]).length > 0 && <p className="text-xs text-text-muted">{qi("wizard.results.knowledgeUnconfirmed", "Knowledge readiness unconfirmed")}</p>}
           {item.warning && <p className="whitespace-pre-line break-words text-xs text-warn">{item.warning}</p>}
+          {extractedText === "" && <p className="mt-1 text-xs text-text-muted">{item.data == null
+            ? qi("web.extractionUnavailable", "Extracted text is unavailable in this receipt.")
+            : qi("web.emptyExtraction", "No readable text was returned for this source.")}</p>}
         </div>
         {duration && (
           <span className="flex-shrink-0 text-xs tabular-nums text-text-muted">
@@ -166,6 +178,13 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
           </span>
         )}
         <div className="flex flex-shrink-0 items-center gap-1">
+          {extractedText && onViewText && (
+            <button type="button" onClick={event => onViewText(item, event.currentTarget)}
+              className="min-h-11 rounded px-2 text-sm font-medium text-primary hover:bg-primary/10"
+              aria-label={qi("web.viewTextFor", "View text for {{name}}", { name: label })}>
+              {qi("web.viewText", "View text")}
+            </button>
+          )}
           {showOpenMedia && (
             <button
               type="button"
@@ -272,17 +291,33 @@ type ErrorRowProps = {
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
   onRetry?: (item: WizardResultItem) => void
   onRemove?: (id: string) => void
-  onCorrect?: () => void
+  onCorrect?: (repairSource?: boolean) => void
   onReattach?: (file: File) => void
-  reattachError?: string
+  source?: WizardQueueItem
+  oneScreen: boolean
 }
 
 const MAX_LISTED_FAILED_SOURCES = 5
 
+function sourceRepairLabel(source: WizardQueueItem, qi: ErrorRowProps["qi"]): string {
+  if (source.url) return qi("source.edit", "Edit link")
+  if (canPasteQueueItem(source)) return qi("source.pasteAgain", "Paste again")
+  return qi("source.chooseFile", "Choose file")
+}
+
 const ErrorRow: React.FC<ErrorRowProps> = React.memo(
-  ({ item, category, qi, onRetry, onRemove, onCorrect, onReattach, reattachError }) => {
+  ({ item, category, qi, onRetry, onRemove, onCorrect, onReattach, source, oneScreen }) => {
     const label = item.title || item.fileName || item.url || item.id
+    const missingFile = source && !source.url && !source.file
+    const settingsFailure = (
+      !category.retryable && /\b(?:api_name|api_provider|analysis provider|transcription model)\b/i.test(item.error ?? "")
+    )
     const failedSources = extractionFailureSources(item.data)
+    const rejectedSource = !settingsFailure && (category.classification === "validation" || (!category.retryable && failedSources.length > 0) || /\b(?:404|410|415|422)\b/.test(item.error ?? ""))
+    const repairLabel = oneScreen && source && (rejectedSource || missingFile)
+      ? sourceRepairLabel(source, qi) : null
+    const showFilePicker = missingFile && onReattach && (!oneScreen || ((category.retryable || settingsFailure) && source.fileOrigin !== "paste"))
+    const reattachError = source?.validation.errors?.join("; ")
     const hiddenSourceCount = failedSources.length - MAX_LISTED_FAILED_SOURCES
 
     const handleRetry = useCallback(() => onRetry?.(item), [item, onRetry])
@@ -299,7 +334,9 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
             </span>
             {/* Plain-language explanation */}
             <p className="mt-1 text-xs text-text-subtle">
-              {category.userMessage} {category.suggestion}
+              {oneScreen && rejectedSource && source?.url && !failedSources.length
+                ? qi("source.rejectedLink", "The server could not process this link. Check the address and try again.")
+                : <>{category.userMessage} {category.suggestion}</>}
             </p>
             {item.error && (
               <details className="mt-1 text-xs text-text-subtle">
@@ -329,16 +366,21 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
           </span>
 
           <div className="flex flex-wrap items-center gap-2">
-            {onReattach && <label className="text-xs text-text">
+            {showFilePicker && <label className="text-xs text-text">
               {qi("wizard.results.reattach", "Reattach {{name}}", { name: label })}
               <input type="file" aria-label={qi("wizard.results.reattach", "Reattach {{name}}", { name: label })}
                 className="mt-1 block max-w-full text-xs" onChange={event => { const file = event.target.files?.[0]; if (file) onReattach(file); event.target.value = "" }} />
               {reattachError && <span role="alert" className="block text-danger">{reattachError}</span>}
             </label>}
-            {onCorrect && !onRetry && !onReattach && <button type="button" onClick={onCorrect}
+            {onCorrect && repairLabel && (!showFilePicker || (source && canPasteQueueItem(source))) && (
+              <button type="button" onClick={() => onCorrect(true)} className="rounded px-2 py-1 text-sm text-primary hover:bg-primary/10">
+                {repairLabel}
+              </button>
+            )}
+            {onCorrect && !onRetry && !showFilePicker && !repairLabel && (!oneScreen || (source && settingsFailure)) && <button type="button" onClick={() => onCorrect()}
               className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
-              aria-label={qi("wizard.results.correctItem", "Correct settings for {{name}}", { name: label })}>
-              {qi("wizard.results.correct", "Correct settings")}
+              aria-label={oneScreen ? qi("source.editSettingsFor", "Edit settings for {{name}}", { name: label }) : qi("wizard.results.correctItem", "Correct settings for {{name}}", { name: label })}>
+              {oneScreen ? qi("source.editSettings", "Edit settings") : qi("wizard.results.correct", "Correct settings")}
             </button>}
             {category.retryable && onRetry && (
               <button
@@ -377,6 +419,7 @@ ErrorRow.displayName = "ErrorRow"
 export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   oneScreen = false,
   reviewDrafts,
+  interruption,
   onClose,
   onIngestMore,
   onRetryItems,
@@ -395,8 +438,11 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const queueItems = useMemo(() => state.queueItems ?? [], [state.queueItems]);
   const eligibleIds = new Set(getEligibleQueueItems(queueItems).map(item => item.id))
   const savedIds = getSavedMediaIds(results.filter(item => !queueItems.some(source => source.id === item.id) || eligibleIds.has(item.id) || queueItems.some(source => source.id === item.id && source.kind === "file" && !source.file)))
-  const excludedItems = queueItems.filter(item => getQueueItemExclusionReason(item, queueItems) && !results.some(result => result.id === item.id))
-  const missingFileIds = new Set(queueItems.filter(item => !item.url && !item.file).map(item => item.id))
+  const excludedItems = queueItems.filter(item =>
+    getQueueItemExclusionReason(item, queueItems) &&
+    !results.some(result => result.id === item.id) &&
+    !interruption?.sources.some(source => source.id === item.id)
+  )
   const tracking = useQuickIngestSessionStore((store) => store.session?.tracking)
   const { capabilities } = useServerCapabilities()
   const [exportNotice, setExportNotice] = useState<string | null>(null)
@@ -420,6 +466,22 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     cancelled,
   } = useMemo(() => groupResultItems(results), [results])
   const savedItems = useMemo(() => [...successes, ...warnings], [successes, warnings])
+  const extractionTexts = useMemo(() => new Map(oneScreen
+    ? savedItems.filter(item => !getSavedMediaIds([item]).length)
+      .map(item => [item.id, getExtractedSourceText(item.data)] as const)
+    : []), [oneScreen, savedItems])
+  const [viewedItem, setViewedItem] = useState<WizardResultItem | null>(null)
+  const viewTrigger = useRef<HTMLButtonElement | null>(null)
+  const openExtraction = (item: WizardResultItem, trigger: HTMLButtonElement) => {
+    viewTrigger.current = trigger
+    setViewedItem(item)
+  }
+  useEffect(() => {
+    if (!viewedItem && viewTrigger.current) {
+      viewTrigger.current.focus()
+      viewTrigger.current = null
+    }
+  }, [viewedItem])
 
   const failures = useMemo(
     () => [...submitFailed, ...failedProcessing, ...cancelled],
@@ -566,6 +628,17 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     ]
   )
 
+  const renderErrorRow = (item: WizardResultItem) => (
+    <ErrorRow
+      key={item.id} item={item} oneScreen={oneScreen}
+      source={queueItems.find(source => source.id === item.id)}
+      category={errorCategories.get(item.id) ?? classifyError(item.error, item.data)}
+      qi={qi}
+      onRetry={getRetryHandlerForItem(item)}
+      onCorrect={onCorrectItems ? repair => repair ? onCorrectItems([item.id], true) : onCorrectItems([item.id]) : undefined}
+      onReattach={onReattach ? file => onReattach(item.id, file) : undefined}
+    />
+  )
   const handleIngestMore = useCallback(() => {
     if (onIngestMore) {
       onIngestMore()
@@ -612,7 +685,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     cancelled.length > 0 && qi("web.resultCancelled", "{{count}} cancelled", { count: cancelled.length }),
   ].filter(Boolean) : []
 
-  let primaryAction: { kind: "retry" | "drafts" | "open" | "review"; label: string; run: () => void } | undefined
+  let primaryAction: { kind: "retry" | "drafts" | "open" | "review" | "extract"; label: string; run: React.MouseEventHandler<HTMLButtonElement> } | undefined
   if (oneScreen) {
     if (retryableIds.length && onRetryItems) {
       primaryAction = {
@@ -630,6 +703,12 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         kind: "review",
         label: qi("web.reviewSources", "Review {{count}} saved sources", { count: newlySavedIds.length }),
         run: () => reviewSaved(newlySavedIds),
+      }
+    } else if (results.length === 1 && extractionTexts.get(results[0].id)) {
+      primaryAction = {
+        kind: "extract",
+        label: qi("web.viewExtractedText", "View extracted text"),
+        run: event => openExtraction(results[0], event.currentTarget),
       }
     }
   }
@@ -724,11 +803,14 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="wizard-results-step">
+    <>
+    {viewedItem && <ExtractedTextViewer item={viewedItem}
+      text={extractionTexts.get(viewedItem.id) ?? ""} qi={qi} onBack={() => setViewedItem(null)} />}
+    <div hidden={Boolean(viewedItem)} className={viewedItem ? "hidden" : "flex h-full min-h-0 flex-col"} data-testid="wizard-results-step">
       {/* Scrollable content area */}
       <div className={oneScreen ? "qi-web-scroll min-h-0 flex-1 overflow-y-auto" : "min-h-0 flex-1 overflow-y-auto px-4 py-3"}>
         {oneScreen ? <div role="status" className="mb-4">
-          <h2 className="text-xl font-semibold text-text">{outcomeLabels[0] || qi("web.resultsTitle", "Import results")}</h2>
+          <h2 className="text-xl font-semibold text-text">{outcomeLabels[0] || (interruption ? qi("web.statusUnavailable", "Status unavailable") : qi("web.resultsTitle", "Import results"))}</h2>
           {outcomeLabels.length > 1 && <p className="mt-1 text-sm text-text-muted">{outcomeLabels.slice(1).join(" · ")}</p>}
         </div> : <p role="status" className="mb-3 text-sm text-text">
           {qi("wizard.results.batchAccounting", "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled", {
@@ -738,6 +820,29 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
             failed: submitFailed.length + failedProcessing.length, cancelled: cancelled.length,
           })}
         </p>}
+        {interruption && <section aria-label={qi("web.statusUnavailable", "Status unavailable")} className="mb-4">
+          <p role="alert" className="text-sm text-text">
+            {qi("web.unconfirmedHelp", "The server could not confirm the outcome. Check before importing these sources again.")}
+          </p>
+          <ul className="my-3 space-y-2">
+            {interruption.sources.map(source => <li key={source.id} className="break-words text-sm text-text">
+              {source.name}
+              {source.lastProgress && source.lastProgress.status !== "unknown" && <span className="block text-xs text-text-muted">
+                {qi("web.lastReported", "Last reported: {{stage}}", {
+                  stage: source.lastProgress.currentStage || qi("processing.status." + source.lastProgress.status, source.lastProgress.status),
+                })}
+                {source.lastProgress.progressPercent > 0 && ` · ${source.lastProgress.progressPercent}%`}
+              </span>}
+              {source.jobIds.length > 0 && <span className="block text-xs text-text-muted">
+                {qi("web.trackedJobs", "Job IDs: {{ids}}", { ids: source.jobIds.join(", ") })}
+              </span>}
+            </li>)}
+          </ul>
+          <div className="flex flex-wrap gap-2">
+            {interruption.onCheckStatus && <button type="button" className={primaryStyle} onClick={interruption.onCheckStatus}>{qi("web.checkStatus", "Check status")}</button>}
+            <button type="button" className={secondaryStyle} onClick={interruption.onCheckMedia}>{qi("web.checkMedia", "Check Media")}</button>
+          </div>
+        </section>}
         {excludedItems.length > 0 && <section aria-label={qi("wizard.results.excludedSection", "Excluded inputs")} className="mb-4 space-y-2">
           {excludedItems.map(item => <div key={item.id} className="text-sm text-text">
             <p className="break-words">{item.fileName || item.url || item.id}</p>
@@ -746,6 +851,12 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               : getQueueItemExclusionReason(item, queueItems) === "unselected"
                 ? qi("wizard.results.unselectedExcluded", "Not selected for this run.")
                 : localDuplicateMessage}</p>
+            {oneScreen && onCorrectItems && !item.validation.valid && item.conferenceOverride?.selected !== false && (
+              <button type="button" onClick={() => onCorrectItems([item.id], true)}
+                className="rounded px-2 py-1 text-sm text-primary hover:bg-primary/10">
+                {sourceRepairLabel(item, qi)}
+              </button>
+            )}
           </div>)}
         </section>}
         {/* Successes */}
@@ -765,6 +876,8 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                   qi={qi}
                   oneScreen={oneScreen}
                   reviewFirst={reviewFirst}
+                  extractedText={extractionTexts.get(item.id)}
+                  onViewText={primaryAction?.kind === "extract" ? undefined : openExtraction}
                   onOpenMedia={primaryAction?.kind === "open" && singleSaved === item ? undefined : onOpenMedia}
                   onDiscussInChat={onDiscussInChat}
                 />
@@ -782,6 +895,8 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
             <div className="space-y-0.5">
               {warnings.map((item) => (
                 <SuccessRow key={item.id} item={item} qi={qi} oneScreen={oneScreen} reviewFirst={reviewFirst}
+                  extractedText={extractionTexts.get(item.id)}
+                  onViewText={primaryAction?.kind === "extract" ? undefined : openExtraction}
                   onOpenMedia={primaryAction?.kind === "open" && singleSaved === item ? undefined : onOpenMedia}
                   onDiscussInChat={onDiscussInChat} />
               ))}
@@ -879,18 +994,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               })}
             </h3>
             <div className="space-y-2">
-              {submitFailed.map((item) => (
-                <ErrorRow
-                  key={item.id}
-                  item={item}
-                  category={errorCategories.get(item.id) ?? classifyError(item.error, item.data)}
-                  qi={qi}
-                  onRetry={getRetryHandlerForItem(item)}
-                  onCorrect={onCorrectItems ? () => onCorrectItems([item.id]) : undefined}
-                  onReattach={missingFileIds.has(item.id) && onReattach ? file => onReattach(item.id, file) : undefined}
-                  reattachError={queueItems.find(source => source.id === item.id)?.validation.errors?.join("; ")}
-                />
-              ))}
+              {submitFailed.map(renderErrorRow)}
             </div>
           </section>
         )}
@@ -908,18 +1012,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               })}
             </h3>
             <div className="space-y-2">
-              {failedProcessing.map((item) => (
-                <ErrorRow
-                  key={item.id}
-                  item={item}
-                  category={errorCategories.get(item.id) ?? classifyError(item.error, item.data)}
-                  qi={qi}
-                  onRetry={getRetryHandlerForItem(item)}
-                  onCorrect={onCorrectItems ? () => onCorrectItems([item.id]) : undefined}
-                  onReattach={missingFileIds.has(item.id) && onReattach ? file => onReattach(item.id, file) : undefined}
-                  reattachError={queueItems.find(source => source.id === item.id)?.validation.errors?.join("; ")}
-                />
-              ))}
+              {failedProcessing.map(renderErrorRow)}
             </div>
           </section>
         )}
@@ -937,18 +1030,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
               })}
             </h3>
             <div className="space-y-2">
-              {cancelled.map((item) => (
-                <ErrorRow
-                  key={item.id}
-                  item={item}
-                  category={errorCategories.get(item.id) ?? classifyError(item.error, item.data)}
-                  qi={qi}
-                  onRetry={getRetryHandlerForItem(item)}
-                  onCorrect={onCorrectItems ? () => onCorrectItems([item.id]) : undefined}
-                  onReattach={missingFileIds.has(item.id) && onReattach ? file => onReattach(item.id, file) : undefined}
-                  reattachError={queueItems.find(source => source.id === item.id)?.validation.errors?.join("; ")}
-                />
-              ))}
+              {cancelled.map(renderErrorRow)}
             </div>
           </section>
         )}
@@ -956,7 +1038,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         {/* Empty state */}
         {oneScreen && nextSteps}
         {oneScreen && exportNotice && <p role="status" className="text-sm text-text-muted">{exportNotice}</p>}
-        {results.length === 0 && (
+        {results.length === 0 && !interruption && (
           <div className="flex flex-col items-center justify-center py-12 text-center text-text-muted">
             <AlertTriangle className="mb-2 h-8 w-8 opacity-40" aria-hidden="true" />
             <p className="text-sm">
@@ -1009,6 +1091,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         </div>
       )}
     </div>
+    </>
   )
 }
 

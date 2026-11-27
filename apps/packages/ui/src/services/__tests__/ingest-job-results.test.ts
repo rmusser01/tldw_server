@@ -9,6 +9,16 @@ import {
 } from "@/services/tldw/ingest-job-results"
 
 describe("ingest job result helpers", () => {
+  it("reports partial web extraction warnings alongside the returned articles", () => {
+    const payload = {
+      status: "ephemeral-ok",
+      articles: [{ content: "Field notes" }],
+      warnings: ["One source could not be accessed."],
+    }
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(false)
+    expect(extractCompletedIngestJobWarning(payload)).toBe(payload.warnings[0])
+  })
+
   it("surfaces saved-source processing warnings instead of reporting full success", () => {
     const payload = {
       status: "completed",
