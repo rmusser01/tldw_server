@@ -329,17 +329,20 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
   test(`VN generation retries a failed slot and refreshes progress at ${viewport.width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await seedAuth(page);
-    const requests: Array<Record<string, unknown>> = [];
+    const requests: Array<VNPendingCommand['request']> = [];
     let retried = false;
     const slot = {
       id: 12, pack_id: 7, slot_key: 'sprite_neutral', asset_type: 'sprite',
       variant_count: 1, status: 'failed', last_error: 'image_backend_unavailable',
     };
+    await page.route(/\/api\/v1\/users\/me\/profile(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, { user: { id: 1, is_active: true } });
+    });
     await page.route(/\/api\/v1\/vn\/vn-assets(?:\/.*)?$/, async (route) => {
       const path = new URL(route.request().url()).pathname.replace('/api/v1/vn/vn-assets', '');
       if (path === '/starter-matrices') return fulfillJson(route, 200, { matrices: [] });
       if (path === '/packs') return fulfillJson(route, 200, [
-        { id: 7, title: 'Recovery pack', primary_character_id: 42, status: 'draft' },
+        { id: 7, owner_user_id: 1, title: 'Recovery pack', primary_character_id: 42, status: 'draft' },
       ]);
       if (path === '/packs/7/slots') return fulfillJson(route, 200, [
         retried ? { ...slot, status: 'reviewing', last_error: null } : slot,
@@ -357,7 +360,10 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
       });
       if (path === '/packs/7/generation') return fulfillJson(route, 200, {
         status: retried ? 'completed' : 'failed',
+        batch_id: retried ? 2 : 1,
         failed_count: retried ? 0 : 1, completed_count: retried ? 1 : 0,
+        failed_slot_batch_ids: retried ? {} : { 12: 1 },
+        failed_slot_recipe_available: retried ? {} : { 12: true },
       });
       if (path === '/packs/7/slots/12/retry') {
         requests.push(route.request().postDataJSON());
@@ -375,12 +381,15 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await page.screenshot({ path: testInfo.outputPath('generation-failure.png'), fullPage: true });
     await retry.click();
     await expect.poll(() => requests.length).toBe(1);
+    expect(requests[0]).toEqual({ idempotency_key: expect.any(String), source_batch_id: 1 });
     await expect(retry).toBeDisabled();
     const recover = page.getByRole('button', { name: 'Recover pending request' });
     await expect(recover).toBeEnabled();
+    await page.reload();
+    await expect(recover).toBeEnabled();
+    expect(requests).toHaveLength(1);
     await recover.click();
     await expect.poll(() => requests.length).toBe(2);
-    expect(requests[0].idempotency_key).toEqual(expect.any(String));
     expect(requests[1]).toEqual(requests[0]);
     await expect(page.getByRole('status', { name: 'Generation status' })).toHaveText('completed');
     await expect(retry).toHaveCount(0);

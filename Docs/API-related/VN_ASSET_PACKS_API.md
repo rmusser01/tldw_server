@@ -183,14 +183,22 @@ worker flags, not liveness. Separate workers may have different settings.
 These checks neither contact a provider nor prove credentials, GPU availability
 or worker health; they are advisory and do not block generation on another host.
 
-The WebUI supplies an idempotency key for Start and each slot Retry. An ambiguous
-failure retains that operation's key while the page remains mounted, so clicking
-the same action again replays the request safely. Active generation progress
-refreshes automatically; the refresh control also retries a failed status or
-configuration check. Refreshing/reopening the entire page does not preserve
-unacknowledged client keys. Accepted generation batches now store a versioned
-recipe; recovery after a crash between output persistence and job completion
-remains tracked in issue #2021.
+### Generation requests and recovery
+
+Before sending Start or a slot Retry, the WebUI saves the request target, body and
+idempotency key in the tab's session storage, scoped to the verified server API
+base and account. If the response is lost, reload in the same tab and select
+**Recover pending request** after the WebUI verifies the account. The saved
+command waits for this action. Recovery sends the original body and key, including
+the original source batch for a slot Retry. Until the request is resolved, the
+WebUI holds Start, Retry and Cancel for that pack.
+
+Active generation progress refreshes automatically. Use **Refresh generation
+status** to recheck status and preflight. The monitor displays preflight
+warnings under **Generation configuration** and gives recovery guidance beside
+each failed slot. If the browser session or its storage is lost, check the
+pack's generation status before submitting a new request. For storage errors
+and recovery details, see the [pending command recovery design](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/VN_PENDING_COMMAND_RECOVERY.md).
 
 Start generation:
 
@@ -228,6 +236,14 @@ are not copied or pinned.
 If fanout confirms that every selected slot has zero variants, the accepted
 batch completes without child jobs. Empty batches do not block later lazy-depth
 generation, and replay does not reopen them.
+
+When Jobs redelivers a variant after a worker interruption, the worker reuses a
+durable completed or failed outcome without counting it twice. A valid deletion
+receipt preserves a deliberate removal. If the output file was registered before
+the interruption, the worker can attach the matching file and finish without
+calling the provider again. An interruption before any recoverable output was
+recorded can require another provider call. Cancellation uses the current job
+lease and stored batch state to prevent late publication.
 
 Status response:
 
@@ -440,6 +456,32 @@ Backend concurrency is process-local and defaults to:
 - Per-backend override: `VN_ASSETS_BACKEND_CONCURRENCY_<BACKEND_NAME>`
 
 For example, `VN_ASSETS_BACKEND_CONCURRENCY_STABLE_DIFFUSION_CPP=1` keeps local `stable_diffusion_cpp` generation serialized to reduce VRAM exhaustion risk.
+
+### Deployment acceptance
+
+The [generation jobs tests](https://github.com/rmusser01/tldw_server/blob/dev/tldw_Server_API/tests/VN_Assets/test_generation_jobs.py)
+and [parent recovery tests](https://github.com/rmusser01/tldw_server/blob/dev/tldw_Server_API/tests/VN_Assets/test_parent_job_recovery.py)
+exercise frozen recipes, duplicate delivery, partial fanout, cancellation and
+interrupted output registration. The [Chromium recovery scenarios](https://github.com/rmusser01/tldw_server/blob/dev/apps/tldw-frontend/e2e/smoke/vn-assets.spec.ts)
+exercise the workbench against mocked API responses. Run the following checks to
+qualify a deployment with its real workers, databases and image provider.
+
+1. Check preflight for an owned test pack with one slot. Confirm that the parent
+   and variant workers consume their configured queues, share the intended Jobs
+   database, and can read the owner's VN database and generated-file storage.
+2. Start the small batch using the deployed provider and model. Confirm that one
+   accepted batch reaches completion and its output can be opened. Exercise a
+   lost acknowledgement by dropping the response after acceptance in a test
+   environment. Reload the same tab, recover the saved request and check that
+   the batch ID stays the same. For a failed slot with a stored recipe, confirm
+   Retry returns a new batch with the expected source batch ID.
+3. In a test batch, stop a worker during generation and resume with the configured
+   lease settings. Verify redelivery after lease expiry, stable variant counts and
+   one published item per completed variant. Check a cancellation separately and
+   verify that cancelled variants produce no late items.
+4. For a GPU-backed model, run these checks on the worker host with the deployed
+   GPU runtime and model, including the expected number of concurrent workers.
+   Check Redis connectivity and service recovery where the deployment uses Redis.
 
 ## Known V1 Limitations
 
