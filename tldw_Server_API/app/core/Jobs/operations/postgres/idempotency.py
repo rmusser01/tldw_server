@@ -150,17 +150,20 @@ def get_job_or_archived_by_idempotency_key(
     *,
     idempotency_key: str,
     domain: str,
-    queue: str,
+    queue: str | None,
     job_type: str,
     owner_user_id: str,
 ) -> dict[str, Any] | None:
     """Resolve one exact stable idempotency authority in a single snapshot."""
 
-    values = (idempotency_key, domain, queue, job_type, owner_user_id)
+    values = (idempotency_key, domain, job_type, owner_user_id)
+    where_sql = "idempotency_key=%s AND domain=%s AND job_type=%s AND owner_user_id=%s"
+    if queue is not None:
+        values += (queue,)
+        where_sql += " AND queue=%s"
     if any(not isinstance(value, str) or not value.strip() for value in values):
         raise ValueError("scoped idempotency lookup values must be non-empty strings")
     projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
-    where_sql = "idempotency_key=%s AND domain=%s AND queue=%s AND job_type=%s AND owner_user_id=%s"
     cur.execute(
         f"""
         SELECT {projection}, NULL AS payload_compressed,

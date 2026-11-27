@@ -403,6 +403,70 @@ def test_collection_url_admission_race_keeps_each_acknowledged_job_in_its_batch(
     assert "another-owner" not in conflict.text
 
 
+@pytest.mark.parametrize("kind", ["url", "file"])
+def test_collection_retry_survives_heavy_worker_routing_changes(kind, media_ingest_jobs_client, auth_headers, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager()
+    heavy_available = False
+    monkeypatch.setattr(ingest_jobs, "_heavy_media_ingest_worker_available", lambda: heavy_available)
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    data = {"media_type": "document", "enable_ocr": "true", "media_collection_id": "7",
+            "media_collection_item_id": "11", "idempotency_key": "conference-retry-11-1"}
+    files = None
+    if kind == "url":
+        data["urls"] = "https://example.test/talk.txt"
+    else:
+        files = [("files", ("talk.txt", b"conference talk", "text/plain"))]
+
+    def submit():
+        result = media_ingest_jobs_client.post("/api/v1/media/ingest/jobs", headers=auth_headers, data=data, files=files)
+        assert result.status_code == 200, result.text
+        return result.json()
+
+    first = submit()
+    first_job = jm.get_job(first["jobs"][0]["id"])
+    try:
+        heavy_available = True
+        assert submit() == first
+        with monkeypatch.context() as concurrent:
+            # Both contenders saw an empty receipt slot before either insert committed.
+            concurrent.setattr(JobManager, "get_job_or_archived_by_idempotency_key", lambda *_args, **_kwargs: None)
+            assert submit() == first
+        # A pre-cutover row can live on a queue that this deployment no longer selects.
+        data["media_collection_item_id"] = "22"
+        data["idempotency_key"] = legacy_key = "conference-retry-22-1"
+        payload = {**first_job["payload"], "batch_id": "older-heavy-batch", "planned_item_id": "22",
+                   "idempotency_key": legacy_key}
+        legacy = jm.create_job(
+            domain="media_ingest", queue="low", job_type="media_ingest_item", owner_user_id="1",
+            idempotency_key=legacy_key if kind == "url" else f"media-upload:1:{legacy_key}",
+            batch_group="older-heavy-batch", payload=payload,
+        )
+        heavy_available = False
+        restored = submit()
+        assert (restored["batch_id"], restored["jobs"][0]["id"]) == ("older-heavy-batch", legacy["id"])
+    finally:
+        if kind == "file":
+            shutil.rmtree(first_job["payload"]["temp_dir"], ignore_errors=True)
+
+
+def test_conflicting_native_receipt_preserves_existing_collection_status(media_ingest_jobs_client, auth_headers, monkeypatch):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    mark_failed = Mock()
+    monkeypatch.setattr(ingest_jobs, "_mark_collection_item_submit_failed", mark_failed)
+    monkeypatch.setattr(ingest_jobs, "_find_collection_retry_job", lambda *_args: {"archived": True})
+    response = media_ingest_jobs_client.post("/api/v1/media/ingest/jobs", headers=auth_headers,
+        data={"media_type": "document", "media_collection_id": "7", "media_collection_item_id": "11", "idempotency_key": "retry"},
+        files=[("files", ("talk.txt", b"conference talk", "text/plain"))])
+    assert response.status_code == 409
+    mark_failed.assert_not_called()
+
+
 def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(
     media_ingest_jobs_client,
     monkeypatch,

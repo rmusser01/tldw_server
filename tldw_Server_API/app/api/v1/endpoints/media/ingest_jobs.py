@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Utils.jobs_operation_contracts import IdempotentOperationUnavailableError
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.exceptions import BadRequestError
@@ -377,8 +378,13 @@ def _heavy_media_ingest_worker_available() -> bool:
     )
 
 
+def _default_media_ingest_queue() -> str:
+    """Return the queue served by the primary media worker."""
+    return (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "default").strip() or "default"
+
+
 def _resolve_media_ingest_queue(form_data: AddMediaForm) -> str:
-    default_queue = (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "default").strip() or "default"
+    default_queue = _default_media_ingest_queue()
     route_heavy = _is_truthy(os.getenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true"))
     if not route_heavy:
         return default_queue
@@ -405,8 +411,14 @@ def _create_media_ingest_job(
     if payload.get("source_kind") == "file" and job_key:
         # Collection item IDs are local to each owner's database.
         job_key = f"media-upload:{current_user.id}:{job_key}"
+        previous = _find_collection_retry_job(jm, str(current_user.id), job_key)
+        if previous and previous.get("archived"):
+            raise HTTPException(status_code=409, detail="The original upload job was archived.")
+        # Keep multipart admission (including cancellation) authoritative on replay.
+        selected_queue = str(previous["queue"]) if previous else _default_media_ingest_queue()
     elif payload.get("planned_item_id") and job_key:
         job_key = _collection_url_job_key(str(current_user.id), job_key)
+        selected_queue = _default_media_ingest_queue()
     try:
         return jm.create_job(
             domain="media_ingest",
@@ -587,6 +599,16 @@ def _collection_url_job_key(owner: str, key: str) -> str:
     return f"media-collection-url:{len(owner)}:{owner}:{key}"
 
 
+def _find_collection_retry_job(jm: JobManager, owner: str, key: str) -> dict[str, Any] | None:
+    """Recover prior routing without assuming the heavy worker is still available."""
+    try:
+        return jm.get_job_or_archived_by_idempotency_key(
+            idempotency_key=key, owner_user_id=owner, domain="media_ingest", queue=None, job_type="media_ingest_item",
+        )
+    except IdempotentOperationUnavailableError as exc:
+        raise HTTPException(status_code=409, detail="Could not verify a unique stored job for this retry key.") from exc
+
+
 def _url_job_item(row: dict[str, Any], payload: dict[str, Any]) -> MediaIngestJobItem:
     """Build the submit receipt from its confirmed URL job and collection binding."""
     return MediaIngestJobItem(
@@ -614,7 +636,7 @@ def _require_exact_replay_group(jm: JobManager, owner: str, batch_id: str, job_i
 
 
 def _existing_collection_url_batch(
-    jm: JobManager, owner: str, queue: str, urls: list[str], collection_id: str | None,
+    jm: JobManager, owner: str, urls: list[str], collection_id: str | None,
     planned_ids: list[str], keys: list[str], has_uploads: bool,
 ) -> SubmitMediaIngestJobsResponse | None:
     """Resolve same-owner current and legacy receipts before admitting any new source."""
@@ -624,10 +646,7 @@ def _existing_collection_url_batch(
     groups = set()
     for url, item_id, key in zip(urls, planned_ids, keys, strict=True):
         for candidate in (_collection_url_job_key(owner, key), key):
-            row = jm.get_job_or_archived_by_idempotency_key(
-                idempotency_key=candidate, owner_user_id=owner, domain="media_ingest", queue=queue,
-                job_type="media_ingest_item",
-            )
+            row = _find_collection_retry_job(jm, owner, candidate)
             if row is not None:
                 payload = {"source": url, "source_kind": "url", "collection_id": collection_id,
                            "planned_item_id": item_id, "idempotency_key": key}
@@ -726,7 +745,7 @@ async def submit_media_ingest_jobs(
     )
     owner = str(current_user.id)
     replay = _existing_collection_url_batch(
-        jm, owner, selected_queue, url_list, collection_id_value, planned_item_values, idempotency_key_values, bool(files),
+        jm, owner, url_list, collection_id_value, planned_item_values, idempotency_key_values, bool(files),
     )
     if replay is not None:
         return replay
@@ -867,9 +886,10 @@ async def submit_media_ingest_jobs(
                     )
                 )
             except HTTPException as exc:
-                _mark_collection_item_submit_failed(
-                    collections_db=collections_db, planned_item_id=planned_item_id, error_summary=_submit_failure_message(exc),
-                )
+                if exc.status_code != 409:
+                    _mark_collection_item_submit_failed(
+                        collections_db=collections_db, planned_item_id=planned_item_id, error_summary=_submit_failure_message(exc),
+                    )
                 if temp_dir_path:
                     _cleanup_dir(temp_dir_path)
                 raise

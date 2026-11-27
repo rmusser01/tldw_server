@@ -132,6 +132,13 @@ def test_pg_exact_scoped_idempotency_lookup_is_active_first_and_archive_aware(mo
         owner_user_id="pg-owner-lookup",
     )
     assert archived is not None and archived["uuid"] == job["uuid"] and archived["archived"] is True
+    query = {"idempotency_key": "pg-run-lookup", "domain": "notes", "queue": None,
+             "job_type": "note_graph_suggestions", "owner_user_id": "pg-owner-lookup"}
+    assert jm.get_job_or_archived_by_idempotency_key(**query)["uuid"] == job["uuid"]
+    jm.create_job(**{**query, "queue": "default"}, payload={"run_id": "pg-run-lookup"})
+    from tldw_Server_API.app.core.Utils.jobs_operation_contracts import IdempotentOperationUnavailableError
+    with pytest.raises(IdempotentOperationUnavailableError):
+        jm.get_job_or_archived_by_idempotency_key(**query)
 
 
 def test_pg_create_job_rejects_secret_payload_without_persisting(monkeypatch):

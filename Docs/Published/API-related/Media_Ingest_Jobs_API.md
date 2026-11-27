@@ -26,6 +26,7 @@ Google Drive and Microsoft OneDrive source sync runs are queued through the conn
   - Body: multipart form-data matching `/media/add` fields plus optional `files`
   - Response: `{ batch_id, jobs: [{ id, uuid, source, source_kind, status }], errors: [] }`
   - Retrying a full set of collection URL jobs returns the original job IDs and cancellation batch for that owner. Submit new sources separately. A known mismatch returns HTTP 409 before job creation. If two requests race after one has accepted a source, `errors` identifies the affected source and `jobs` lists the jobs accepted into the returned batch.
+  - New uploads with idempotency keys and new collection-bound URL retries use the primary media worker queue. A retry can recover an existing job from its original queue when heavy-worker availability changes.
   - Notes: `errors` contains per-item staging failures; if every item fails, response uses HTTP 207.
 
 - GET `/ingest/jobs?batch_id=...` - List jobs for a batch (owner or admin)

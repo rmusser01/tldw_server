@@ -782,6 +782,8 @@ const updateConferenceCollectionItem = async (
 const patchConferenceCollectionItem = (...args: Parameters<typeof updateConferenceCollectionItem>) =>
   updateConferenceCollectionItem(...args).catch(() => undefined);
 
+const isIngestConflict = (error: unknown) => (error as { status?: number } | null)?.status === 409;
+
 const getConferenceTerminalStatus = (
   duplicate: boolean,
   failed: boolean,
@@ -983,15 +985,13 @@ const runDirectQuickIngestBatch = async (
         assertQuickIngestRequestCurrent(input, error);
         const outcome =
           jobSubmitted || localProcessingAttempted ? "failed" : "submit_failed";
-        await patchConferenceCollectionItem(input, plannedConferenceItem, {
-          status: outcome,
-          latest_job_id:
-            typeof latestJobId === "number" ? String(latestJobId) : undefined,
-          error_summary:
-            error instanceof Error
-              ? error.message
-              : String(error || "Request failed"),
-        });
+        if (!isIngestConflict(error)) {
+          await patchConferenceCollectionItem(input, plannedConferenceItem, {
+            status: outcome,
+            latest_job_id: typeof latestJobId === "number" ? String(latestJobId) : undefined,
+            error_summary: error instanceof Error ? error.message : String(error || "Request failed"),
+          });
+        }
         recordResult({
           id: entry.id,
           status: "error",
@@ -1277,7 +1277,7 @@ const runDirectQuickIngestBatch = async (
         assertQuickIngestRequestCurrent(input, error);
         const message = error instanceof Error ? error.message : String(error || "Upload failed");
         const outcome = jobAcknowledged || fallbackAttempted ? "failed" : "submit_failed";
-        await patchConferenceCollectionItem(input, planned, { status: outcome, error_summary: message });
+        if (!isIngestConflict(error)) await patchConferenceCollectionItem(input, planned, { status: outcome, error_summary: message });
         recordResult({
           id,
           status: "error",

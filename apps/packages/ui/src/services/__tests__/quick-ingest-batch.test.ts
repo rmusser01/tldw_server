@@ -2002,6 +2002,22 @@ describe("submitQuickIngestBatch", () => {
     expect(result.results[1]).toMatchObject({ id: "file", collectionItemId: 12, mediaId: 901 })
   })
 
+  it("keeps the durable collection state when a URL or upload retry conflicts", async () => {
+    mocks.bgUpload.mockRejectedValue(Object.assign(new Error("Retry identity conflict"), { status: 409 }))
+    const response = await submitQuickIngestBatch({
+      entries: [{ id: "url", type: "video", url: "https://youtu.be/old" }],
+      files: [{ id: "file", directFile: new File(["sample"], "old.mp4") }],
+      storeRemote: true, processOnly: false, conferenceRetry: {
+        collectionId: "7", items: [
+          { resultId: "url", collectionItemId: "11", retryAttempt: 1, idempotencyKey: "retry-11" },
+          { resultId: "file", collectionItemId: "12", retryAttempt: 1, idempotencyKey: "retry-12" },
+        ],
+      },
+    })
+    expect(response.results).toMatchObject([{ id: "url", status: "error" }, { id: "file", status: "error" }])
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
   it("creates planned conference collection items before direct job submission", async () => {
     const onTrackingMetadata = vi.fn()
 
