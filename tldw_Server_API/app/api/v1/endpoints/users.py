@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.interactive_session_deps import (
     get_current_session_id,
     require_interactive_session,
 )
+from tldw_Server_API.app.core.AuthNZ import account_lock
 from tldw_Server_API.app.core.AuthNZ.interactive_session import InteractiveSession
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequireRole,
@@ -75,7 +76,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
-from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected, APIKeySuspendedError
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.UserProfiles.contracts import (
     ProfileContractMode,
@@ -942,6 +943,11 @@ async def rotate_api_key(
             actor_kind=principal.kind,
             actor_roles=list(principal.roles or []),
         )
+    except APIKeySuspendedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "api_key_suspended", "message": "This API key is suspended; restore it first"},
+        ) from exc
     except APIKeyRotationRejected as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found") from exc
     except MandatoryAuditWriteError as exc:
@@ -950,6 +956,29 @@ async def rotate_api_key(
             detail="Mandatory audit persistence unavailable",
         ) from exc
     return APIKeyCreateResponse(**result)
+
+
+@router.post("/api-keys/{key_id}/unsuspend", response_model=APIKeyMetadata)
+async def unsuspend_api_key(
+    key_id: int,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    interactive: InteractiveSession = Depends(require_interactive_session),
+) -> APIKeyMetadata:
+    """Restore one API key that an account lock suspended (browser session only)."""
+    user_context = await _require_principal_active_verified(principal)
+    try:
+        row = await account_lock.unsuspend_api_key(user_id=int(user_context["id"]), key_id=key_id)
+    except MandatoryAuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mandatory audit persistence unavailable",
+        ) from exc
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "api_key_not_suspended", "message": "API key not found or not suspended"},
+        )
+    return APIKeyMetadata(**row)
 
 
 @router.delete(

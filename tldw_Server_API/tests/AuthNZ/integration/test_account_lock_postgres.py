@@ -190,3 +190,43 @@ async def test_sign_in_waits_for_an_uncommitted_lock_and_is_refused_pg(lock_db) 
     finally:
         await locker.close()
     assert await lock_db.pool.fetchval("SELECT COUNT(*) FROM sessions WHERE user_id = $1", lock_db.user_id) == 0
+
+
+async def _pg_key(lock_db) -> tuple[dict, "APIKeyManager"]:
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
+
+    manager = APIKeyManager(lock_db.pool)
+    await manager.initialize()
+    return await manager.create_api_key(user_id=lock_db.user_id, name="pg-lock"), manager
+
+
+async def test_key_lookup_carries_owner_state_pg(lock_db) -> None:
+    from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
+    from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
+
+    created, _manager = await _pg_key(lock_db)
+    repo = AuthnzApiKeysRepo(db_pool=lock_db.pool)
+    identifier = created["key"].removeprefix("tldw_").split(".")[0]
+    first = await repo.fetch_active_by_key_id(identifier)
+    by_hash_before = await repo.fetch_active_by_hash_candidates([first["key_hash"]])
+    await set_lock(lock_db.user_id)
+    by_id_after = await repo.fetch_active_by_key_id(identifier)
+    by_hash_after = await repo.fetch_active_by_hash_candidates([first["key_hash"]])
+    for before in (first, by_hash_before):
+        assert before["owner_security_locked_at"] is None and before["owner_is_active"] is True
+        assert before["suspended_at"] is None
+    for after in (by_id_after, by_hash_after):
+        assert after["owner_security_locked_at"] is not None
+
+
+async def test_suspended_key_is_invalid_pg(lock_db) -> None:
+    from tldw_Server_API.app.core.AuthNZ.account_lock import set_lock
+
+    created, manager = await _pg_key(lock_db)
+    assert (await manager.validate_api_key(created["key"]))["user_id"] == lock_db.user_id
+    await set_lock(lock_db.user_id)
+    assert await manager.validate_api_key(created["key"]) is None
+    await unlock_user(lock_db.user_id)
+    assert await manager.validate_api_key(created["key"]) is None
+    suspended = await lock_db.pool.fetchval("SELECT suspended_at FROM api_keys WHERE id = $1", int(created["id"]))
+    assert suspended is not None

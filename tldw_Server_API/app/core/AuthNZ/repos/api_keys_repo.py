@@ -41,6 +41,9 @@ _SQLITE_API_KEY_LOOKUP_COLUMNS = (
     ("llm_allowed_providers", "llm_allowed_providers", "NULL"),
     ("llm_allowed_models", "llm_allowed_models", "NULL"),
     ("metadata", "metadata", "NULL"),
+    ("suspended_at", "suspended_at", "NULL"),
+    ("owner_security_locked_at", "(SELECT security_locked_at FROM users WHERE users.id = api_keys.user_id)", None),
+    ("owner_is_active", "(SELECT is_active FROM users WHERE users.id = api_keys.user_id)", None),
 )
 
 _SQLITE_API_KEY_LIMIT_COLUMNS = (
@@ -194,7 +197,9 @@ class AuthnzApiKeysRepo:
                            llm_budget_day_tokens, llm_budget_month_tokens,
                            llm_budget_day_usd, llm_budget_month_usd,
                            llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
-                           metadata
+                           metadata, suspended_at,
+                           (SELECT security_locked_at FROM users WHERE users.id = api_keys.user_id) AS owner_security_locked_at,
+                           (SELECT is_active FROM users WHERE users.id = api_keys.user_id) AS owner_is_active
                     FROM api_keys
                     WHERE key_hash = ANY($1::text[]) AND status = $2
                     ORDER BY created_at DESC
@@ -248,7 +253,9 @@ class AuthnzApiKeysRepo:
                            llm_budget_day_tokens, llm_budget_month_tokens,
                            llm_budget_day_usd, llm_budget_month_usd,
                            llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
-                           metadata
+                           metadata, suspended_at,
+                           (SELECT security_locked_at FROM users WHERE users.id = api_keys.user_id) AS owner_security_locked_at,
+                           (SELECT is_active FROM users WHERE users.id = api_keys.user_id) AS owner_is_active
                     FROM api_keys
                     WHERE key_id = $1 AND status = $2
                     ORDER BY created_at DESC

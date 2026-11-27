@@ -20,7 +20,7 @@ from typing import Any
 import asyncpg
 from loguru import logger
 
-from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
+from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventCategory, AuditEventType
 from tldw_Server_API.app.core.AuthNZ import api_key_audit
 from tldw_Server_API.app.core.AuthNZ.account_lock_errors import (
     ACCOUNT_LOCK_REVOKE_REASON,
@@ -301,3 +301,24 @@ async def write_account_audit(
         return
     if not flushed:
         logger.warning("Audit event {} not flushed for user {}", event_type.value, user_id)
+
+
+async def unsuspend_api_key(*, user_id: int, key_id: int) -> dict | None:
+    """Restore one suspended key of the user; its metadata row, or None when it is not theirs or not suspended."""
+    repo = AuthnzApiKeysRepo(db_pool=(await AuthnzUsersRepo.from_pool()).db_pool)
+    if not await repo.unsuspend_key_for_user(key_id=key_id, user_id=user_id):
+        return None
+    await api_key_audit.emit_mandatory_api_key_management_audit(
+        user_id=user_id,
+        event_type=AuditEventType.DATA_UPDATE,
+        category=AuditEventCategory.DATA_MODIFICATION,
+        action="api_key.unsuspend",
+        resource_id=str(key_id),
+        actor_user_id=user_id,
+    )
+    row = await repo.fetch_key_for_user(key_id=key_id, user_id=user_id)
+    if row is None:
+        return None
+    row = dict(row)
+    row.pop("key_hash", None)
+    return row
