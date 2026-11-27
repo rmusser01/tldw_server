@@ -48,6 +48,7 @@ Dry-run cleanup requests are intentionally not persisted as idempotent mutations
 | `PATCH` | `/packs/{pack_id}` | Update pack metadata. |
 | `DELETE` | `/packs/{pack_id}` | Soft-delete pack metadata only. |
 | `POST` | `/packs/{pack_id}/cleanup` | Preview or execute generated-file cleanup. |
+| `GET` | `/storage/orphans` | Inspect the current owner's VN item, registration, or file storage for discrepancies. |
 | `POST` | `/packs/{pack_id}/export` | Start a pack export job. |
 | `GET` | `/portability/exports/{job_id}` | Read export status. |
 | `GET` | `/portability/exports/{job_id}/download` | Download a completed export archive. |
@@ -381,6 +382,8 @@ Response:
   "skipped_file_ids": [],
   "blocked_count": 0,
   "cleanup_blocked": [],
+  "candidate_item_ids": [12, 19, 24],
+  "retention_deferred": false,
   "reclaimed_bytes": 1536000
 }
 ```
@@ -414,6 +417,42 @@ Example approved cleanup request:
 ```
 
 Cleanup skips any generated file still referenced by another item. It also consults a pluggable cleanup blocker provider before deleting files; blocked files are added to `skipped_file_ids`, counted in `blocked_count`, and reported in `cleanup_blocked` with `item_id`, `file_id`, and blocker details.
+
+### Retention preview
+
+Send `{"retention_only": true}` to the same cleanup endpoint for an age-aware
+dry run. After the last item update, rejected assets wait 30 days and hidden
+assets wait 7 days. The creation time is used when the update time is absent.
+Approved and draft assets, items with invalid dates, and existing references
+remain protected. If generation, import, or export is active for the pack,
+the response sets `retention_deferred`. Wait for the work to finish and retry.
+
+The preview lists eligible `candidate_item_ids`. Existing manual cleanup
+accepts explicit item IDs after review. A retention request with
+`dry_run: false` returns `retention_preview_requires_dry_run`.
+
+### Orphan detection
+
+`GET /storage/orphans?source=registrations&limit=50` scans one page for the
+authenticated owner. The source controls which discrepancy the report checks.
+
+| Source | Findings |
+| --- | --- |
+| `items` | `missing_registration` flags a published item without a matching, owner-attributed VN registration. |
+| `registrations` | `missing_bytes` flags a registration whose file is missing. `unreferenced_registration` flags a registration with bytes and no known VN item or runtime reference. |
+| `files` | `unregistered_bytes` flags a managed VN image without an owned registration or VN item reference. |
+
+The report uses a 24-hour settling period and defers while the owner has active
+generation, import, or export work. The scan checks bound portability activity
+against the owner's Jobs queue. Disk scans recognize the image writer's
+filenames under the owner's VN outputs directory. Symbolic links, preview
+archives, and unrecognized names are skipped. Owned registrations from any
+feature, restorable trash, and retained pack references keep paths protected.
+
+Continue with `offset=next_offset` until `next_offset` is `null`. A page with
+zero findings can still have a next page. When `scan_deferred` is true, retry
+the same page after active work settles. Findings describe storage at the time
+of the scan. The report never removes files or metadata.
 
 ## Worker And Backend Configuration
 

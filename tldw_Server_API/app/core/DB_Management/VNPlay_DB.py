@@ -2858,7 +2858,7 @@ class VNPlayRepository:
         self,
         *,
         owner_user_id: int,
-        asset_pack_id: int,
+        asset_pack_id: int | None,
         generated_file_ids: set[int],
         item_ids_by_file_id: Mapping[int, int],
     ) -> dict[int, list[dict[str, str]]]:
@@ -2875,10 +2875,10 @@ class VNPlayRepository:
             SELECT id
             FROM vn_play_sessions
             WHERE owner_user_id = ?
-              AND vn_asset_pack_id = ?
+              AND (? IS NULL OR vn_asset_pack_id = ?)
               AND deleted = 0
             """,
-            (owner_user_id, asset_pack_id),
+            (owner_user_id, asset_pack_id, asset_pack_id),
         ).fetchall()
         blockers: dict[int, list[dict[str, str]]] = {}
         for session_row in session_rows:
@@ -2950,6 +2950,33 @@ class VNPlayRepository:
                     source_id=int(scene_row["id"]),
                 )
         return blockers
+
+    def find_runtime_storage_paths(self, *, owner_user_id: int, storage_paths: set[str]) -> set[str]:
+        """Match exact paths in retained play sessions, event history and checkpoints."""
+        self._ensure_schema_initialized()
+        rows = self.db.execute_query(
+            """
+            WITH retained_sessions AS (
+                SELECT id FROM vn_play_sessions WHERE owner_user_id = ? AND deleted = 0
+            ),
+            payloads(body) AS (
+                SELECT event_payload_json FROM vn_play_events
+                WHERE owner_user_id = ? AND session_id IN (SELECT id FROM retained_sessions)
+                UNION ALL
+                SELECT scene_state_snapshot_json FROM vn_play_checkpoints
+                WHERE owner_user_id = ? AND session_id IN (SELECT id FROM retained_sessions)
+                UNION ALL
+                SELECT active_sprite_items_json FROM vn_play_scene_state
+                WHERE owner_user_id = ? AND session_id IN (SELECT id FROM retained_sessions)
+            )
+            SELECT DISTINCT ref.value FROM payloads
+            JOIN json_tree(CASE WHEN json_valid(payloads.body) THEN payloads.body ELSE '{}' END) AS ref
+            WHERE ref.key = 'storage_ref' AND ref.type = 'text'
+              AND ref.value IN (SELECT value FROM json_each(?))
+            """,
+            (owner_user_id, owner_user_id, owner_user_id, owner_user_id, json.dumps(sorted(storage_paths))),
+        ).fetchall()
+        return {row["value"] for row in rows}
 
     def list_checkpoints(
         self,

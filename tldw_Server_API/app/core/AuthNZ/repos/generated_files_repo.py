@@ -372,6 +372,15 @@ class AuthnzGeneratedFilesRepo:
             )
         return self._normalize_record(row) if row else None
 
+    async def registered_storage_paths(self, *, user_id: int, storage_paths: list[str]) -> set[str]:
+        """Match the owner's paths against registered files, including restorable trash."""
+        if not storage_paths:
+            return set()
+        async with self.db_pool.acquire() as conn:
+            return await VNGeneratedFilesQueries(conn, postgres=self._is_postgres()).registered_storage_paths(
+                user_id=user_id, storage_paths=storage_paths,
+            )
+
     async def get_files_by_ids(self, file_ids: list[int]) -> list[dict[str, Any]]:
         """Fetch generated file records for a bounded list of IDs."""
         if not file_ids:
@@ -510,7 +519,7 @@ class AuthnzGeneratedFilesRepo:
                     select_sql_template = """
                         SELECT * FROM generated_files
                         WHERE {where_clause}
-                        ORDER BY created_at DESC
+                        ORDER BY created_at DESC, id DESC
                         OFFSET {offset_param} LIMIT {limit_param}
                     """
                     select_sql = select_sql_template.format_map(locals())  # nosec B608
@@ -520,7 +529,7 @@ class AuthnzGeneratedFilesRepo:
                     select_sql_template = """
                         SELECT * FROM generated_files
                         WHERE {where_clause}
-                        ORDER BY created_at DESC
+                        ORDER BY created_at DESC, id DESC
                         LIMIT ? OFFSET ?
                     """
                     select_sql = select_sql_template.format_map(locals())  # nosec B608

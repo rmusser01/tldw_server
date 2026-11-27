@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -500,7 +500,7 @@ class VNScriptsRepository:
         self,
         *,
         owner_user_id: int,
-        asset_pack_id: int,
+        asset_pack_id: int | None,
         generated_file_ids: set[int],
     ) -> dict[int, list[dict[str, str]]]:
         """Find generated files referenced by published script manifest snapshots."""
@@ -512,10 +512,10 @@ class VNScriptsRepository:
             SELECT id, manifest_json
             FROM vn_script_manifest_snapshots
             WHERE owner_user_id = ?
-              AND asset_pack_id = ?
+              AND (? IS NULL OR asset_pack_id = ?)
               AND version_id IS NOT NULL
             """,
-            (owner_user_id, asset_pack_id),
+            (owner_user_id, asset_pack_id, asset_pack_id),
         )
         blockers: dict[int, list[dict[str, str]]] = {}
         for row in cursor.fetchall():
@@ -535,6 +535,22 @@ class VNScriptsRepository:
                     }
                 )
         return blockers
+
+    def find_published_storage_paths(self, *, owner_user_id: int, storage_paths: set[str]) -> set[str]:
+        """Match exact paths retained by this owner's published manifest snapshots."""
+        self._ensure_schema_initialized()
+        rows = self.db.execute_query(
+            """
+            SELECT DISTINCT ref.value
+            FROM vn_script_manifest_snapshots AS snapshot
+            JOIN json_tree(CASE WHEN json_valid(snapshot.manifest_json) THEN snapshot.manifest_json ELSE '{}' END) AS ref
+            WHERE snapshot.owner_user_id = ? AND snapshot.version_id IS NOT NULL
+              AND ref.key = 'storage_ref' AND ref.type = 'text'
+              AND ref.value IN (SELECT value FROM json_each(?))
+            """,
+            (owner_user_id, json.dumps(sorted(storage_paths))),
+        ).fetchall()
+        return {row["value"] for row in rows}
 
     def create_version(
         self,

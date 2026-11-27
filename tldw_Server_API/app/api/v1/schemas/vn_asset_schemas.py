@@ -30,6 +30,8 @@ from tldw_Server_API.app.core.VN_Assets.vn_asset_schemas import (  # noqa: F401 
     VNAssetSlotPreflight,
     VNAssetSlotResponse,
     VNAssetSlotUpdate,
+    VNAssetStorageOrphanReport,
+    VNStorageScanSource,
 )
 
 

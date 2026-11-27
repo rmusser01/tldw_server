@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 from tldw_Server_API.app.core.VN_Assets.constants import (
     DEFAULT_VN_ASSET_SLOT_VARIANT_LIMIT,
@@ -326,6 +326,7 @@ class VNAssetCleanupRequest(BaseModel):
     """Request body for VN asset generated-file cleanup previews or execution."""
 
     dry_run: bool = True
+    retention_only: StrictBool = False
     statuses: list[ReviewStatus] = Field(default_factory=lambda: ["rejected", "hidden"])
     item_statuses: list[ReviewStatus] | None = None
     item_ids: list[int] | None = None
@@ -347,6 +348,32 @@ class VNAssetCleanupResponse(BaseModel):
     blocked_count: int = 0
     cleanup_blocked: list[dict[str, Any]] = Field(default_factory=list)
     reclaimed_bytes: int = 0
+    candidate_item_ids: list[int] = Field(default_factory=list)
+    retention_deferred: bool = False
+
+
+VNStorageScanSource = Literal["items", "registrations", "files"]
+
+
+class VNAssetStorageFinding(BaseModel):
+    """An owner-local discrepancy observed during a storage scan."""
+
+    kind: Literal["missing_registration", "missing_bytes", "unreferenced_registration", "unregistered_bytes"]
+    item_id: int
+    pack_id: int | None = None
+    generated_file_id: int | None = None
+    storage_ref: str | None = None
+    bytes: int | None = None
+
+
+class VNAssetStorageOrphanReport(BaseModel):
+    """One read-only batch of observations from the requested storage source."""
+
+    source: VNStorageScanSource
+    findings: list[VNAssetStorageFinding] = Field(default_factory=list)
+    scanned_count: int = 0
+    next_offset: int | None = None
+    scan_deferred: bool = False
 
 
 VALID_REVIEW_STATUSES = {
