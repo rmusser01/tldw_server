@@ -6,6 +6,8 @@ Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md. `frontend-require
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -299,6 +301,10 @@ def _outcome(job: dict, row: Row) -> str:
             return "license"
         if step.get("name") == CHANGES_STEP and _evaluate(step["if"], row.values):
             return "changes"
+        if step.get("name") == "Reject cancelled coverage execution" and _evaluate(
+            step["if"], row.values, row.cancelled
+        ):
+            return "cancelled"
     return "proceeds"
 
 
@@ -310,12 +316,14 @@ def _gate_rows(name: str, *, reachable_only: bool = True) -> list[Row]:
 
 
 def _expected_outcome(name: str, row: Row) -> str:
-    if row.cancelled:
+    if row.cancelled and name != "coverage-required.yml":
         return "skipped"  # a cancelled run stays cancelled
     if row.license_negative:
         return "license"  # every gate turns a cancelled, failed or negative license wait red (TASK-13502)
     if not row.admitted:
         return "skipped"  # e.g. workflow_run with admission declined: skipped by design
+    if row.cancelled and row.changes == "success":
+        return "cancelled"  # coverage must report unverified work instead of a skipped required result
     return "proceeds" if row.changes == "success" else "changes"
 
 
@@ -389,6 +397,13 @@ def test_change_detection_guard_fails_before_any_other_work(name):
     assert "continue-on-error" not in guard and "continue-on-error" not in gate
     for step in steps[index + 1:]:
         condition = str(step.get("if", ""))
+        if name == "coverage-required.yml" and step.get("name") == "Reject cancelled coverage execution":
+            assert step == {
+                "name": "Reject cancelled coverage execution",
+                "if": "cancelled()",
+                "run": 'echo "::error::Coverage workflow was cancelled; coverage is unverified."\nexit 1\n',
+            }
+            continue
         if " ".join(condition.split()) == "always() && needs.changes.result == 'success'":
             continue
         assert not re.search(r"\b(always|failure|cancelled)\(\)", condition), step.get("name")
@@ -745,3 +760,91 @@ def test_server_ci_wake_only_handles_this_repository_pr_failures(mode, event, he
     assert len(job["steps"]) == 1
     assert "rules/branches/dev" in job["steps"][0]["run"]
     assert '== "Server CI verdict"' in job["steps"][0]["run"]
+
+
+@pytest.mark.parametrize(
+    ("job_id", "step_name", "digest"),
+    [
+        ("global-coverage", "Run global coverage floor",
+         "14996dc3ac2432f01223fc7d1df48a0841f228263e5086d53b260edd6dac5178"),
+        ("authnz-coverage", "AuthNZ coverage floor",
+         "f9e3f60c9777835ee1ff663d370509a2c3b9ca3f2083908e8bafd91bbdae49f1"),
+    ],
+)
+def test_coverage_execution_has_an_independent_budget_and_unchanged_workload(job_id, step_name, digest):
+    """TASK-15637: the two floors must not consume one shared 30-minute budget."""
+    jobs = _wf("coverage-required.yml")["jobs"]
+    assert job_id in jobs, "Each unchanged coverage execution needs its own runner and budget"
+    job = jobs[job_id]
+    assert job["timeout-minutes"] == 30
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["needs"] == ["changes", "admission", "await_license"]
+    assert not job.get("continue-on-error", False)
+    step = _step(job, step_name)
+    assert hashlib.sha256(json.dumps(step, sort_keys=True, separators=(",", ":")).encode()).hexdigest() == digest
+    assert not any(s.get("name") == step_name for s in jobs["coverage-required"]["steps"])
+    assert jobs["coverage-required"]["needs"] == [
+        "changes", "admission", "await_license", "global-coverage", "authnz-coverage",
+    ]
+
+
+@pytest.mark.parametrize("job_id", ["global-coverage", "authnz-coverage"])
+def test_coverage_children_require_successful_license_and_relevant_change_detection(job_id):
+    jobs = _wf("coverage-required.yml")["jobs"]
+    assert job_id in jobs
+    for row, relevant in product(_rows(reachable_only=False), (False, True)):
+        values = {**row.values, "needs.changes.outputs.coverage_required": str(relevant).lower()}
+        expected = row.admitted and row.changes == "success" and relevant and not row.cancelled
+        assert _evaluate(jobs[job_id]["if"], values, row.cancelled) is expected, (row, relevant)
+
+
+@pytest.mark.parametrize(
+    ("global_result", "authnz_result"),
+    product(("success", "failure", "cancelled", "skipped", "timed_out", ""), repeat=2),
+)
+def test_coverage_rollup_requires_both_actual_executions_to_succeed(global_result, authnz_result):
+    gate = _gate("coverage-required.yml")
+    matching = [s for s in gate["steps"] if s.get("name") == "Require coverage executions to have passed"]
+    assert len(matching) == 1, "The protected result must reject incomplete coverage executions"
+    step = matching[0]
+    assert step["env"] == {
+        "GLOBAL_RESULT": "${{ needs.global-coverage.result }}",
+        "AUTHNZ_RESULT": "${{ needs.authnz-coverage.result }}",
+    }
+    assert not step.get("continue-on-error", False)
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        env={**os.environ, "GLOBAL_RESULT": global_result, "AUTHNZ_RESULT": authnz_result},
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert (result.returncode == 0) is (global_result == authnz_result == "success"), result.stdout
+
+
+def test_coverage_rollup_keeps_the_existing_irrelevant_change_noop():
+    gate = _gate("coverage-required.yml")
+    noop = _step(gate, "No-op pass (coverage not required)")
+    matching = [s for s in gate["steps"] if s.get("name") == "Require coverage executions to have passed"]
+    assert len(matching) == 1
+    result = matching[0]
+    for relevant in (False, True):
+        values = {"needs.changes.outputs.coverage_required": str(relevant).lower()}
+        assert _evaluate(result["if"], values) is relevant
+        assert _evaluate(noop["if"], values) is (not relevant)
+
+
+@pytest.mark.parametrize("event", ["pull_request", "workflow_dispatch"])
+@pytest.mark.parametrize("relevant", [False, True])
+def test_coverage_rollup_reports_cancellation_instead_of_skipping(event, relevant):
+    gate = _gate("coverage-required.yml")
+    row = Row(event, "skipped", "", "success" if event == "pull_request" else "skipped",
+              "true" if event == "pull_request" else "", "success", True)
+    values = {**row.values, "needs.changes.outputs.coverage_required": str(relevant).lower()}
+    assert _evaluate(gate["if"], values, cancelled=True)
+    refusal = _step(gate, "Reject cancelled coverage execution")
+    assert _evaluate(refusal["if"], values, cancelled=True)
+    assert not _evaluate(refusal["if"], values, cancelled=False)
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", refusal["run"]],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode != 0

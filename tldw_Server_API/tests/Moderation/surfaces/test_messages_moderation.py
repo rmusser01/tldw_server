@@ -61,6 +61,21 @@ def _stream_frames(*texts: str, thinking: str | None = None) -> list[str]:
 
 
 @pytest.fixture
+def byok_native_provider(monkeypatch, messages_endpoint):
+    """A resolved BYOK credential and provider base URL, so a native call needs no real credential store."""
+    class Runtime:
+        def __init__(self, **_kw): ...
+        async def resolve(self, provider, *, model=None):
+            return SimpleNamespace(provider=provider, api_key="k", app_config={}, credentials_resolved=True)
+        async def mark_used(self, _h): ...
+        async def close(self): ...
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope", lambda _r, user: (user.id_int, [], [], False))
+    monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", Runtime)
+    monkeypatch.setattr(messages_endpoint, "_resolve_messages_base_url", lambda _p, _c: "http://provider.test/v1")
+
+
+@pytest.fixture
 def messages_endpoint():
     """The endpoint module, handed over by a fixture so the endpoint-monkeypatch ratchet does not count the patches."""
     return importlib.import_module("tldw_Server_API.app.api.v1.endpoints.messages")
@@ -277,7 +292,7 @@ def test_block_refusal_uses_the_triggering_block_or_an_unused_index(make_service
     assert events[-5][1]["index"] == 1
 
 
-async def test_a_blocked_native_stream_is_recorded_with_output_tokens(make_service, monkeypatch, messages_endpoint):
+async def test_a_blocked_native_stream_is_recorded_with_output_tokens(make_service, monkeypatch, messages_endpoint, byok_native_provider):
     """The source is closed at the block, so the injected message_delta must carry the usage accounting records."""
     make_service(enabled=True)
     rows: list[dict] = []
@@ -285,18 +300,8 @@ async def test_a_blocked_native_stream_is_recorded_with_output_tokens(make_servi
     async def log(**kwargs):
         rows.append(kwargs)
 
-    class Runtime:
-        def __init__(self, **_kw): ...
-        async def resolve(self, provider, *, model=None):
-            return SimpleNamespace(provider=provider, api_key="k", app_config={}, credentials_resolved=True)
-        async def mark_used(self, _h): ...
-        async def close(self): ...
-
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.usage_tracker.log_llm_usage", log)
     monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
-    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope", lambda _r, user: (user.id_int, [], [], False))
-    monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", Runtime)
-    monkeypatch.setattr(messages_endpoint, "_resolve_messages_base_url", lambda _p, _c: "http://provider.test/v1")
     frames = _stream_frames("some long answer text ", "forbidden")
 
     async def prepare(*_a, **_k):

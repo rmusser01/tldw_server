@@ -99,22 +99,6 @@ const dismissAssistantSetupBlockingModal = async (
   )
 }
 
-const waitForQuickIngestDialog = async (page: Page): Promise<Locator> => {
-  const dialog = page.getByRole("dialog", { name: /quick ingest/i }).first()
-  await expect(dialog).toBeVisible({ timeout: 30_000 })
-  return dialog
-}
-
-const findQuickIngestUrlInput = (dialog: Locator): Locator =>
-  dialog
-    .getByLabel(/url input area|paste urls input/i)
-    .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
-    .or(dialog.locator("textarea"))
-    .first()
-
-const findQuickIngestFileInput = (dialog: Locator): Locator =>
-  dialog.getByTestId("qi-file-input")
-
 const clickQuickIngestTrigger = async (page: Page): Promise<void> => {
   const dialog = page.getByRole("dialog", { name: /quick ingest/i }).first()
   const triggers = [
@@ -172,35 +156,6 @@ const requestQuickIngestDialogFromPage = async (page: Page): Promise<void> => {
   })
 }
 
-const waitForQuickIngestQueueAdvance = async (
-  dialog: Locator,
-  timeoutMs: number
-): Promise<void> => {
-  await expect
-    .poll(
-      async () => {
-        const useDefaultsVisible = await dialog
-          .getByRole("button", { name: /use defaults/i })
-          .isVisible()
-          .catch(() => false)
-        const configureVisible = await dialog
-          .getByRole("button", { name: /^configure \d+ items?$/i })
-          .isVisible()
-          .catch(() => false)
-        const startProcessingVisible = await dialog
-          .getByRole("button", { name: /start processing/i })
-          .isVisible()
-          .catch(() => false)
-        return useDefaultsVisible || configureVisible || startProcessingVisible
-      },
-      {
-        timeout: Math.min(timeoutMs, 20_000),
-        message: "Timed out waiting for quick ingest to queue the submitted input",
-      }
-    )
-    .toBe(true)
-}
-
 const waitForQuickIngestProcessingUi = async (
   dialog: Locator,
   timeoutMs: number
@@ -232,32 +187,6 @@ const waitForQuickIngestCompletionUi = async (
     .toBe(true)
 }
 
-const waitForQuickIngestConfigureUi = async (
-  dialog: Locator,
-  timeoutMs: number
-): Promise<void> => {
-  const ingestionOptionsHeading = dialog.getByText(/ingestion options/i).first()
-  const nextButton = dialog.getByRole("button", { name: /^next$/i }).first()
-  const backButton = dialog.getByRole("button", { name: /^back$/i }).first()
-
-  await expect
-    .poll(
-      async () => {
-        const headingVisible = await ingestionOptionsHeading.isVisible().catch(() => false)
-        if (headingVisible) return true
-
-        const nextVisible = await nextButton.isVisible().catch(() => false)
-        const backVisible = await backButton.isVisible().catch(() => false)
-        return nextVisible && backVisible
-      },
-      {
-        timeout: timeoutMs,
-        message: "Timed out waiting for the quick ingest configure step",
-      }
-    )
-    .toBe(true)
-}
-
 type QuickIngestCompletionExpectation = {
   mediaId?: string
   sourceUrl?: string
@@ -273,11 +202,6 @@ type QueueUrlAndStartProcessingOptions = {
   performAnalysis?: boolean
   performChunking?: boolean
   requireJobSubmit?: boolean
-  timeoutMs?: number
-}
-
-type AdvanceQuickIngestToConfigureStepOptions = {
-  proceedToConfigure?: boolean
   timeoutMs?: number
 }
 
@@ -307,36 +231,14 @@ const clickQuickIngestCloseControl = async (
   await page.keyboard.press("Escape")
 }
 
-const ensureQuickIngestAddStep = async (
-  dialog: Locator,
-  timeoutMs: number
+const selectQuickIngestSource = async (
+  dialog: Locator, source: "Files" | "Links", timeoutMs: number
 ): Promise<void> => {
-  const urlInput = findQuickIngestUrlInput(dialog)
-  if (await urlInput.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    return
+  if (await dialog.getByTestId("wizard-results-step").isVisible()) {
+    await dialog.getByText("More actions", { exact: true }).click()
+    await dialog.getByRole("button", { name: "Add more sources", exact: true }).click()
   }
-
-  const ingestMoreBtn = dialog.getByRole("button", { name: /start a new ingest|ingest more/i }).first()
-  if (await ingestMoreBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await ingestMoreBtn.click()
-  }
-  await expect(urlInput).toBeVisible({ timeout: timeoutMs })
-}
-
-const advanceQuickIngestToReviewStep = async (
-  dialog: Locator,
-  timeoutMs: number,
-  options: Pick<QueueUrlAndStartProcessingOptions, "performAnalysis" | "performChunking"> = {}
-): Promise<void> => {
-  await applyQuickIngestProcessOptions(dialog, options, timeoutMs)
-
-  const nextBtn = dialog.getByRole("button", { name: /^next$/i }).first()
-  await expect(nextBtn).toBeVisible({ timeout: timeoutMs })
-  await nextBtn.click()
-  await expect(dialog.getByRole("button", { name: /start processing/i }).first()).toBeVisible({
-    timeout: timeoutMs,
-  })
-  await assertQuickIngestReviewProcessOptions(dialog, options, timeoutMs)
+  await dialog.getByRole("button", { name: source, exact: true }).click({ timeout: timeoutMs })
 }
 
 const quickIngestOptionName = (option: "analysis" | "chunking"): RegExp =>
@@ -364,79 +266,18 @@ const setQuickIngestProcessOptionEnabled = async (
   )
 }
 
-const applyQuickIngestProcessOptions = async (
-  dialog: Locator,
-  options: Pick<QueueUrlAndStartProcessingOptions, "performAnalysis" | "performChunking">,
-  timeoutMs: number
-): Promise<void> => {
-  if (options.performAnalysis !== true) {
-    await setQuickIngestProcessOptionEnabled(dialog, "analysis", false, timeoutMs)
-  }
-  if (options.performChunking !== true) {
-    await setQuickIngestProcessOptionEnabled(dialog, "chunking", false, timeoutMs)
-  }
-}
-
-const assertQuickIngestReviewProcessOptions = async (
-  dialog: Locator,
-  options: Pick<QueueUrlAndStartProcessingOptions, "performAnalysis" | "performChunking">,
-  timeoutMs: number
-): Promise<void> => {
-  const itemList = dialog.getByRole("list", { name: /items to process/i }).first()
-  await expect(itemList).toBeVisible({ timeout: timeoutMs })
-  if (options.performAnalysis !== true) {
-    await expect(itemList).not.toContainText(/\bAnalyze\b/i, { timeout: timeoutMs })
-  }
-  if (options.performChunking !== true) {
-    await expect(itemList).not.toContainText(/\bChunk\b/i, { timeout: timeoutMs })
-  }
-}
-
-const startQuickIngestProcessing = async (
-  dialog: Locator,
-  timeoutMs: number
-): Promise<void> => {
-  const startProcessingBtn = dialog.getByRole("button", { name: /start processing/i }).first()
-  await expect(startProcessingBtn).toBeVisible({ timeout: timeoutMs })
-  await startProcessingBtn.click()
-}
-
-const startQueuedQuickIngestFromCurrentStep = async (
+const startQueuedSources = async (
   dialog: Locator,
   timeoutMs: number,
   options: Pick<QueueUrlAndStartProcessingOptions, "performAnalysis" | "performChunking"> = {}
 ): Promise<void> => {
-  const configureBtn = dialog
-    .getByRole("button", { name: /^configure \d+ items?$/i })
-    .first()
-  if (await configureBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await configureBtn.click()
-    await waitForQuickIngestConfigureUi(dialog, timeoutMs)
-    await advanceQuickIngestToReviewStep(dialog, timeoutMs, options)
-    await startQuickIngestProcessing(dialog, timeoutMs)
-    return
-  }
-
-  const startProcessingBtn = dialog.getByRole("button", { name: /start processing/i }).first()
-  if (await startProcessingBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await startProcessingBtn.click()
-    return
-  }
-
-  const useDefaultsBtn = dialog.getByRole("button", { name: /use defaults/i }).first()
-  if (
-    options.performAnalysis === true &&
-    (await useDefaultsBtn.isVisible({ timeout: 3_000 }).catch(() => false))
-  ) {
-    await useDefaultsBtn.click()
-    return
-  }
-
-  await expect(configureBtn).toBeVisible({ timeout: timeoutMs })
-  await configureBtn.click()
-  await waitForQuickIngestConfigureUi(dialog, timeoutMs)
-  await advanceQuickIngestToReviewStep(dialog, timeoutMs, options)
-  await startQuickIngestProcessing(dialog, timeoutMs)
+  const settings = dialog.getByRole("button", { name: "Change settings", exact: true })
+  if (await settings.isVisible()) await settings.click()
+  await setQuickIngestProcessOptionEnabled(dialog, "analysis", options.performAnalysis === true, timeoutMs)
+  await setQuickIngestProcessOptionEnabled(dialog, "chunking", options.performChunking === true, timeoutMs)
+  const action = dialog.getByRole("button", { name: /^save [1-9]\d* sources?$/i })
+  await expect(action).toBeEnabled({ timeout: timeoutMs })
+  await action.click()
 }
 
 /**
@@ -517,7 +358,7 @@ export async function reopenQuickIngest(
 }
 
 /**
- * Add a URL, advance through the quick ingest steps, and start processing.
+ * Queue a URL and submit it from the hosted Quick Ingest dialog.
  */
 export async function queueUrlAndStartProcessing(
   page: Page,
@@ -537,9 +378,8 @@ export async function queueUrlAndStartProcessing(
     timeoutMs
   )
 
-  await advanceQuickIngestToConfigureStep(dialog, url, { timeoutMs })
-  await advanceQuickIngestToReviewStep(dialog, timeoutMs, options)
-  await startQuickIngestProcessing(dialog, timeoutMs)
+  await queueUrlForQuickIngest(dialog, url, timeoutMs)
+  await startQueuedSources(dialog, timeoutMs, options)
 
   await submitRequest
 
@@ -571,7 +411,7 @@ export async function startQueuedQuickIngestProcessing(
     timeoutMs
   )
 
-  await startQueuedQuickIngestFromCurrentStep(dialog, timeoutMs, options)
+  await startQueuedSources(dialog, timeoutMs, options)
   await submitRequest
 
   if (options.waitForState === "processing") {
@@ -630,20 +470,10 @@ export async function assertQuickIngestCompletedResults(
     sawSkippedRegion = await skippedRegion.isVisible().catch(() => false)
   }
 
-  await expect(
-    dialog.getByText(
-      /Total:\s*\d+\s+succeeded(?:,\s*\d+\s+skipped)?(?:,\s*\d+\s+not submitted)?,\s*\d+\s+failed(?:,\s*\d+\s+cancelled)?/i
-    )
-  ).toBeVisible({
-    timeout: timeoutMs,
-  })
-
+  const summary = dialog.getByTestId("wizard-results-step").getByRole("status").first()
+  await expect(summary).toContainText(/\d+ (?:saved to Media|extracted|skipped|failed|cancelled)/i, { timeout: timeoutMs })
   if (sawSkippedRegion) {
-    await expect(
-      dialog.getByText(/already exists|overwrite/i).first()
-    ).toBeVisible({
-      timeout: timeoutMs,
-    })
+    await expect(skippedRegion).toContainText(/already|duplicate|overwrite/i, { timeout: timeoutMs })
   }
 
   const candidateTexts = [
@@ -682,92 +512,18 @@ export async function queueFileForQuickIngest(
   filePath: string,
   timeoutMs = 30_000
 ): Promise<void> {
-  await ensureQuickIngestAddStep(dialog, timeoutMs)
-  const fileInput = findQuickIngestFileInput(dialog)
-  await fileInput.setInputFiles(filePath)
-  await waitForQuickIngestQueueAdvance(dialog, timeoutMs)
-
+  await selectQuickIngestSource(dialog, "Files", timeoutMs)
+  await dialog.getByTestId("qi-file-input").setInputFiles(filePath)
   const fileName = filePath.split(/[\\/]/).pop() || filePath
-  await expect(dialog.getByText(fileName, { exact: false })).toBeVisible({
-    timeout: timeoutMs,
-  })
+  await expect(dialog.getByRole("region", { name: "Queued sources" })).toContainText(fileName, { timeout: timeoutMs })
 }
 
-/**
- * Advance a queued URL into the configure step.
- */
-export async function advanceQuickIngestToConfigureStep(
-  dialog: Locator,
-  url: string,
-  options: AdvanceQuickIngestToConfigureStepOptions = {}
-): Promise<void> {
-  const timeoutMs = options.timeoutMs ?? 60_000
-  await ensureQuickIngestAddStep(dialog, timeoutMs)
-  const urlInput = findQuickIngestUrlInput(dialog)
-  await urlInput.fill(url)
-
-  const addUrlsBtn = dialog.getByRole("button", { name: /add url/i }).first()
-  if (await addUrlsBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await addUrlsBtn.click()
-  } else {
-    await dialog.getByRole("button", { name: /^add$/i }).first().click()
-  }
-
-  await waitForQuickIngestQueueAdvance(dialog, timeoutMs)
-
-  if (options.proceedToConfigure === false) {
-    return
-  }
-
-  const configureBtn = dialog
-    .getByRole("button", { name: /^configure \d+ items?$/i })
-    .first()
-  await configureBtn.click()
-  await waitForQuickIngestConfigureUi(dialog, timeoutMs)
-}
-
-/**
- * Reach a configurable quick ingest option in a constrained viewport.
- */
-export async function reachQuickIngestOptionInConstrainedViewport(
-  dialog: Locator,
-  optionLabel: RegExp,
-  timeoutMs = 30_000
-): Promise<Locator> {
-  const option = dialog.getByLabel(optionLabel).first()
-  await expect(option).toBeAttached({ timeout: timeoutMs })
-  await expect
-    .poll(
-      async () => {
-        const visible = await option.isVisible().catch(() => false)
-        if (visible) return true
-        await option
-          .evaluate((element) => {
-            if (!(element instanceof HTMLElement)) return
-            element.scrollIntoView({ block: "center", inline: "nearest" })
-            let current: HTMLElement | null = element.parentElement
-            while (current) {
-              const style = window.getComputedStyle(current)
-              const scrollable =
-                /(auto|scroll)/.test(style.overflowY) &&
-                current.scrollHeight > current.clientHeight
-              if (scrollable) {
-                current.scrollTop = Math.max(0, element.offsetTop - current.clientHeight / 2)
-                break
-              }
-              current = current.parentElement
-            }
-          })
-          .catch(() => {})
-        return option.isVisible().catch(() => false)
-      },
-      {
-        timeout: timeoutMs,
-        message: `Timed out reaching quick ingest option ${String(optionLabel)}`,
-      }
-    )
-    .toBe(true)
-  return option
+/** Select Links and add the source to the same queue as file uploads. */
+export async function queueUrlForQuickIngest(dialog: Locator, url: string, timeoutMs = 60_000): Promise<void> {
+  await selectQuickIngestSource(dialog, "Links", timeoutMs)
+  await dialog.getByRole("textbox", { name: /url input area|paste urls input/i }).fill(url)
+  await dialog.getByRole("button", { name: /add urls to queue/i }).click()
+  await expect(dialog.getByRole("region", { name: "Queued sources" })).toContainText(url, { timeout: timeoutMs })
 }
 
 export const waitForCompletedIngestJob = async (
@@ -823,47 +579,11 @@ export async function ingestAndWaitForReady(
   )
 
   if ("url" in input) {
-    await advanceQuickIngestToConfigureStep(quickIngestDialog, input.url)
-
-    await applyQuickIngestProcessOptions(quickIngestDialog, {}, timeoutMs)
-    const nextBtn = quickIngestDialog.getByRole("button", { name: /^next$/i }).first()
-    if (await nextBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await nextBtn.click()
-      await expect(quickIngestDialog.getByText(/ready to process/i)).toBeVisible({
-        timeout: 20_000,
-      })
-      await assertQuickIngestReviewProcessOptions(quickIngestDialog, {}, timeoutMs)
-    }
-
-    const startProcessingBtn = quickIngestDialog
-      .getByRole("button", { name: /start processing/i })
-      .first()
-    await startProcessingBtn.click()
+    await queueUrlForQuickIngest(quickIngestDialog, input.url, timeoutMs)
   } else {
     await queueFileForQuickIngest(quickIngestDialog, input.file, timeoutMs)
-
-    const configureBtn = quickIngestDialog
-      .getByRole("button", { name: /^configure \d+ items?$/i })
-      .first()
-    await expect(configureBtn).toBeVisible({ timeout: 15_000 })
-    await configureBtn.click()
-    await waitForQuickIngestConfigureUi(quickIngestDialog, timeoutMs)
-
-    await applyQuickIngestProcessOptions(quickIngestDialog, {}, timeoutMs)
-    const nextBtn = quickIngestDialog.getByRole("button", { name: /^next$/i }).first()
-    if (await nextBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await nextBtn.click()
-      await expect(quickIngestDialog.getByText(/ready to process/i)).toBeVisible({
-        timeout: timeoutMs,
-      })
-      await assertQuickIngestReviewProcessOptions(quickIngestDialog, {}, timeoutMs)
-    }
-
-    const startProcessingBtn = quickIngestDialog
-      .getByRole("button", { name: /start processing/i })
-      .first()
-    await startProcessingBtn.click()
   }
+  await startQueuedSources(quickIngestDialog, timeoutMs)
 
   const { response } = await submitRequest
   expect(response.ok(), `Ingestion submission returned HTTP ${response.status()}`).toBe(true)
