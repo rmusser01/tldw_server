@@ -15,7 +15,12 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.exceptions import LegacyDisplayReconciliationError, VNAssetGenerationError
+from tldw_Server_API.app.core.exceptions import (
+    LegacyDisplayReconciliationError,
+    VNAssetApprovalConflict,
+    VNAssetGenerationError,
+)
+from tldw_Server_API.app.core.VN_Assets.models import VNAssetApprovalFile
 from tldw_Server_API.app.core.VN_Assets.state import derive_slot_status
 
 LegacyActivityReader = Callable[
@@ -1913,7 +1918,9 @@ class VNAssetPacksRepository:
         *,
         review_status: str,
         preferred: bool | None = None,
+        verified_file: VNAssetApprovalFile | None = None,
     ) -> dict[str, Any] | None:
+        """Update review state only while the verified approval reference matches."""
         self._ensure_schema_initialized()
         current_item = self.get_item(item_id)
         if current_item is None:
@@ -1923,6 +1930,7 @@ class VNAssetPacksRepository:
         if review_status != "approved":
             next_preferred = False
 
+        file_id, mime_type = verified_file or (None, None)
         with self.db.transaction() as conn:
             if next_preferred is True:
                 conn.execute(
@@ -1933,24 +1941,16 @@ class VNAssetPacksRepository:
                     """,
                     (current_item["pack_id"], current_item["slot_id"], item_id),
                 )
-            if next_preferred is None:
-                conn.execute(
-                    """
-                    UPDATE vn_asset_items
-                    SET review_status = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                    """,
-                    (review_status, item_id),
-                )
-            else:
-                conn.execute(
-                    """
-                    UPDATE vn_asset_items
-                    SET review_status = ?, preferred = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                    """,
-                    (review_status, int(next_preferred), item_id),
-                )
+            cursor = conn.execute(
+                """
+                UPDATE vn_asset_items
+                SET review_status = ?, preferred = COALESCE(?, preferred), updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND (? = 0 OR (generated_file_id = ? AND COALESCE(mime_type, '') = ?))
+                """,
+                (review_status, next_preferred, item_id, int(verified_file is not None), file_id, mime_type or ""),
+            )
+            if verified_file is not None and cursor.rowcount != 1:
+                raise VNAssetApprovalConflict(item_id)
         return self.get_item(item_id)
 
     def bulk_update_item_review(
@@ -1958,7 +1958,9 @@ class VNAssetPacksRepository:
         item_ids: list[int],
         *,
         review_status: str,
+        verified_files: Mapping[int, VNAssetApprovalFile] | None = None,
     ) -> list[dict[str, Any]]:
+        """Apply review state atomically, rolling back if an approval reference changed."""
         self._ensure_schema_initialized()
         if not item_ids:
             return []
@@ -1966,14 +1968,17 @@ class VNAssetPacksRepository:
         with self.db.transaction() as conn:
             for item_id in item_ids:
                 if review_status == "approved":
-                    conn.execute(
+                    file_id, mime_type = verified_files[item_id] if verified_files is not None else (None, None)
+                    cursor = conn.execute(
                         """
                         UPDATE vn_asset_items
                         SET review_status = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
+                        WHERE id = ? AND (? = 0 OR (generated_file_id = ? AND COALESCE(mime_type, '') = ?))
                         """,
-                        (review_status, item_id),
+                        (review_status, item_id, int(verified_files is not None), file_id, mime_type or ""),
                     )
+                    if verified_files is not None and cursor.rowcount != 1:
+                        raise VNAssetApprovalConflict(item_id)
                 else:
                     conn.execute(
                         """

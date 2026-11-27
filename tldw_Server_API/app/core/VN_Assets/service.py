@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from loguru import logger
@@ -23,8 +23,10 @@ from tldw_Server_API.app.core.VN_Assets.constants import (
     ERROR_ITEM_LIMIT_EXCEEDED,
     ERROR_SLOT_VARIANT_LIMIT_EXCEEDED,
     ITEM_REVIEW_STATUS_APPROVED,
+    SLOT_STATUS_APPROVED,
     SLOT_STATUS_CANCELLED,
     SLOT_STATUS_FAILED,
+    SLOT_STATUS_REVIEWING,
     SLOT_STATUS_SKIPPED,
     WARNING_DEPTH_UNAVAILABLE,
 )
@@ -39,6 +41,7 @@ from tldw_Server_API.app.core.VN_Assets.manifest import build_manifest as build_
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.models import (
     SlotReadiness,
+    VNAssetApprovalFile,
     VNAssetItem,
     VNAssetPack,
     VNAssetSlot,
@@ -49,6 +52,11 @@ from tldw_Server_API.app.core.VN_Assets.recipe import (
     load_execution_recipe,
     load_recipe,
     slot_recipe,
+)
+from tldw_Server_API.app.core.VN_Assets.runtime_integrity import (
+    VNAssetRuntimeFileLoader,
+    inspect_runtime_assets,
+    manifest_runtime_references,
 )
 from tldw_Server_API.app.core.VN_Assets.state import derive_pack_readiness, derive_slot_status
 from tldw_Server_API.app.core.VN_Assets.storage import (
@@ -614,14 +622,18 @@ class VNAssetPackService:
         pack_id: int,
         item_id: int,
         request: VNAssetReviewRequest,
+        *,
+        verified_file: VNAssetApprovalFile | None = None,
     ) -> VNAssetItemResponse:
         self._require_item_in_pack(pack_id, item_id)
-        return self.review_item(item_id, request)
+        return self.review_item(item_id, request, verified_file=verified_file)
 
     def review_item(
         self,
         item_id: int,
         request: VNAssetReviewRequest,
+        *,
+        verified_file: VNAssetApprovalFile | None = None,
     ) -> VNAssetItemResponse:
         if request.review_status not in VALID_REVIEW_STATUSES:
             raise ValueError("invalid_review_status")
@@ -632,6 +644,7 @@ class VNAssetPackService:
             item_id,
             review_status=request.review_status,
             preferred=request.preferred,
+            verified_file=verified_file,
         )
         if item is None:
             raise ValueError("item_not_found")
@@ -642,6 +655,8 @@ class VNAssetPackService:
     def bulk_review_items(
         self,
         request: VNAssetBulkReviewRequest,
+        *,
+        verified_files: Mapping[int, VNAssetApprovalFile] | None = None,
     ) -> list[VNAssetItemResponse]:
         if request.review_status not in VALID_REVIEW_STATUSES:
             raise ValueError("invalid_review_status")
@@ -651,6 +666,7 @@ class VNAssetPackService:
         updated_items = self.repo.bulk_update_item_review(
             request.item_ids,
             review_status=request.review_status,
+            verified_files=verified_files,
         )
         if request.review_status == ITEM_REVIEW_STATUS_APPROVED:
             for item in updated_items:
@@ -661,11 +677,13 @@ class VNAssetPackService:
         self,
         pack_id: int,
         request: VNAssetBulkReviewRequest,
+        *,
+        verified_files: Mapping[int, VNAssetApprovalFile] | None = None,
     ) -> list[VNAssetItemResponse]:
         self._require_pack(pack_id)
         for item_id in request.item_ids:
             self._require_item_in_pack(pack_id, item_id)
-        return self.bulk_review_items(request)
+        return self.bulk_review_items(request, verified_files=verified_files)
 
     def set_preferred_item(self, pack_id: int, item_id: int) -> VNAssetItemResponse:
         item = self._require_item_in_pack(pack_id, item_id)
@@ -675,9 +693,42 @@ class VNAssetPackService:
         )
 
     def get_readiness(self, pack_id: int) -> VNAssetReadinessResponse:
+        """Derive readiness for callers that already manage file availability."""
         self._require_pack(pack_id)
         slots = [self._slot_model(row) for row in self.repo.list_slots(pack_id)]
+        return self._readiness_for_metadata(slots, self._items_by_slot_id(pack_id))
+
+    async def get_runtime_readiness(
+        self, pack_id: int, *, load_file_records: VNAssetRuntimeFileLoader,
+    ) -> VNAssetReadinessResponse:
+        """Check emitted assets and required slots against the same pack metadata."""
+        pack = self._pack_model(self._require_pack(pack_id))
+        slots = [self._slot_model(row) for row in self.repo.list_slots(pack_id)]
         items_by_slot_id = self._items_by_slot_id(pack_id)
+        assets = build_core_manifest(
+            pack=pack, slots=slots, items=(item for group in items_by_slot_id.values() for item in group),
+        )["assets"]
+        runtime_slot_ids = {asset["slot_id"] for collection in assets.values() for asset in collection}
+        issues = await inspect_runtime_assets(
+            manifest_runtime_references(assets),
+            user_id=self.owner_user_id,
+            load_file_records=load_file_records,
+        )
+        return self._readiness_for_metadata(
+            slots,
+            items_by_slot_id,
+            runtime_slot_ids=runtime_slot_ids,
+            approved_item_errors=(f"{issue['code']}:{issue['item_id']}" for issue in issues),
+        )
+
+    def _readiness_for_metadata(
+        self,
+        slots: list[VNAssetSlot],
+        items_by_slot_id: dict[int, list[VNAssetItem]],
+        *,
+        runtime_slot_ids: set[int] | None = None,
+        approved_item_errors: Iterable[str] = (),
+    ) -> VNAssetReadinessResponse:
         required: list[SlotReadiness] = []
         optional: list[SlotReadiness] = []
 
@@ -687,6 +738,8 @@ class VNAssetPackService:
                 for item in items_by_slot_id.get(slot.id or 0, [])
             ]
             status = self._derived_slot_status(slot, review_statuses)
+            if status == SLOT_STATUS_APPROVED and runtime_slot_ids is not None and slot.id not in runtime_slot_ids:
+                status = SLOT_STATUS_REVIEWING
             warnings = self._slot_warnings(slot, status)
             readiness = SlotReadiness(
                 slot_id=slot.id or 0,
@@ -702,7 +755,7 @@ class VNAssetPackService:
             required_slots=required,
             optional_slots=optional,
             active_jobs=sum(1 for slot in slots if slot.status == "generating"),
-            approved_item_errors=[],
+            approved_item_errors=approved_item_errors,
         )
         return VNAssetReadinessResponse(
             ready=readiness.ready,

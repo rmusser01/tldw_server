@@ -52,7 +52,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
+from tldw_Server_API.app.core.exceptions import VNAssetApprovalConflict, VNAssetGenerationError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
@@ -63,15 +63,21 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     create_pack_import_preview_job,
 )
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
+from tldw_Server_API.app.core.VN_Assets.models import VNAssetApprovalFile
 from tldw_Server_API.app.core.VN_Assets.portability.archive import DEFAULT_MAX_ARCHIVE_SIZE_BYTES
 from tldw_Server_API.app.core.VN_Assets.portability.constants import VNPACK_EXTENSION
 from tldw_Server_API.app.core.VN_Assets.preflight import generation_preflight
+from tldw_Server_API.app.core.VN_Assets.runtime_integrity import (
+    VNAssetRuntimeIssue,
+    VNAssetRuntimeReference,
+    inspect_runtime_assets,
+    manifest_runtime_references,
+)
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Assets.storage import (
     VN_ASSET_CONTENT_NOT_FOUND,
-    generated_file_matches_vn_asset,
     image_format_from_mime_type,
-    resolve_vn_asset_storage_path,
+    resolve_registered_vn_asset_content,
 )
 from tldw_Server_API.app.core.VN_Platform.errors import (
     ERROR_IDEMPOTENCY_KEY_CONFLICT,
@@ -206,6 +212,14 @@ def _cleanup_blocker_provider(
 
 def _handle_value_error(exc: ValueError) -> HTTPException:
     detail = str(exc) or "invalid_request"
+    if isinstance(exc, VNAssetApprovalConflict):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=vn_error_detail(
+                detail, "The VN asset file changed during approval. Refresh the item and try again.",
+                details={"item_id": exc.item_id}, retryable=True,
+            ),
+        )
     if detail in GENERATION_RECIPE_CONFLICTS:
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -692,18 +706,6 @@ def _content_not_found() -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=VN_ASSET_CONTENT_NOT_FOUND)
 
 
-def _validated_item_file_mime_type(mime_type: str, *, require_image: bool) -> str:
-    normalized = mime_type.split(";", 1)[0].strip().lower()
-    if not normalized:
-        raise ValueError("vn_asset_content_missing_mime_type")
-    if normalized.startswith("image/"):
-        image_format_from_mime_type(normalized)
-        return mime_type
-    if not require_image and normalized == "application/octet-stream":
-        return mime_type
-    raise ValueError("vn_asset_content_disallowed_mime_type")
-
-
 async def _touch_generated_file(files_repo: Any, file_id: int) -> None:
     update_accessed_at = getattr(files_repo, "update_accessed_at", None)
     if not callable(update_accessed_at):
@@ -713,27 +715,33 @@ async def _touch_generated_file(files_repo: Any, file_id: int) -> None:
         await result
 
 
-def _truthy_policy_flag(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "blocked", "policy_blocked"}
-    return False
+async def _load_runtime_file_records(file_ids: list[int]) -> list[dict[str, Any]]:
+    files_repo = await _generated_files_repo()
+    return await files_repo.get_files_by_ids(file_ids)
 
 
-def _raise_if_policy_blocked(item: VNAssetItemResponse, file_record: dict[str, Any]) -> None:
-    if not _truthy_policy_flag(file_record.get("policy_blocked")):
-        return
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=vn_error_detail(
-            ERROR_POLICY_BLOCKED,
-            "VN asset item content is blocked by policy.",
-            details={"pack_id": item.pack_id, "item_id": item.id},
-        ),
+def _raise_runtime_asset_conflict(issues: list[VNAssetRuntimeIssue]) -> None:
+    if issues:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=vn_error_detail(
+                "vn_asset_runtime_integrity_failed",
+                "Some VN assets are unavailable for runtime use. Check the affected items and try again.",
+                details={"issues": issues},
+            ),
+        )
+
+
+async def _validate_approval_assets(
+    service: VNAssetPackService, pack_id: int, item_ids: list[int],
+) -> dict[int, VNAssetApprovalFile]:
+    items = [service.get_item_for_pack(pack_id, item_id) for item_id in dict.fromkeys(item_ids)]
+    references = [VNAssetRuntimeReference(item.id, item.generated_file_id, item.mime_type) for item in items]
+    issues = await inspect_runtime_assets(
+        references, user_id=service.owner_user_id, load_file_records=_load_runtime_file_records,
     )
+    _raise_runtime_asset_conflict(issues)
+    return {ref.item_id: (ref.file_id, ref.mime_type) for ref in references if ref.file_id is not None}
 
 
 async def _item_file_response(
@@ -755,36 +763,31 @@ async def _item_file_response(
 
     user_id = _current_user_id(current_user)
     file_record = await files_repo.get_file_by_id(item.generated_file_id)
-    if not file_record or not generated_file_matches_vn_asset(file_record, user_id=user_id, item_id=item_id):
+    if not file_record:
         raise _content_not_found()
 
-    mime_type = str(file_record.get("mime_type") or item.mime_type or "")
     try:
-        media_type = _validated_item_file_mime_type(mime_type, require_image=require_image)
+        full_path, media_type = resolve_registered_vn_asset_content(
+            file_record, user_id=user_id, item_id=item_id, fallback_mime_type=item.mime_type,
+            require_image=require_image,
+        )
     except ValueError as exc:
+        if str(exc) == ERROR_POLICY_BLOCKED:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=vn_error_detail(
+                    ERROR_POLICY_BLOCKED,
+                    "VN asset item content is blocked by policy.",
+                    details={"pack_id": item.pack_id, "item_id": item.id},
+                ),
+            ) from exc
         raise _content_not_found() from exc
-
-    file_category = str(file_record.get("file_category") or "").strip().lower()
-    if file_category and file_category != "image":
-        raise _content_not_found()
-
-    _raise_if_policy_blocked(item, file_record)
-
-    storage_path = str(file_record.get("storage_path") or "")
-    try:
-        full_path = resolve_vn_asset_storage_path(user_id=user_id, storage_path=storage_path)
-    except ValueError as exc:
-        raise _content_not_found() from exc
-
-    # lgtm[py/path-injection]: full_path is resolved by resolve_vn_asset_storage_path.
-    if not full_path.is_file():
-        raise _content_not_found()
 
     await _touch_generated_file(files_repo, item.generated_file_id)
 
     raw_filename = file_record.get("original_filename") or file_record.get("filename") or f"vn_asset_item_{item_id}"
     filename = Path(str(raw_filename)).name
-    # lgtm[py/path-injection] full_path is resolved by resolve_vn_asset_storage_path.
+    # lgtm[py/path-injection] full_path is resolved by resolve_registered_vn_asset_content.
     return FileResponse(path=str(full_path), filename=filename, media_type=media_type)
 
 
@@ -1687,7 +1690,10 @@ async def review_item(
     service: VNAssetPackService = Depends(_service),
 ) -> VNAssetItemResponse:
     try:
-        return service.review_item_for_pack(pack_id, item_id, request)
+        verified_file = None
+        if request.review_status == "approved":
+            verified_file = (await _validate_approval_assets(service, pack_id, [item_id]))[item_id]
+        return service.review_item_for_pack(pack_id, item_id, request, verified_file=verified_file)
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -1762,7 +1768,10 @@ async def bulk_review_items(
     service: VNAssetPackService = Depends(_service),
 ) -> list[VNAssetItemResponse]:
     try:
-        return service.bulk_review_items_for_pack(pack_id, request)
+        verified_files = None
+        if request.review_status == "approved":
+            verified_files = await _validate_approval_assets(service, pack_id, request.item_ids)
+        return service.bulk_review_items_for_pack(pack_id, request, verified_files=verified_files)
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -1874,9 +1883,16 @@ async def get_manifest(
     service: VNAssetPackService = Depends(_service),
 ) -> VNAssetManifestResponse:
     try:
-        return service.build_manifest(pack_id)
+        manifest = service.build_manifest(pack_id)
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
+    issues = await inspect_runtime_assets(
+        manifest_runtime_references(manifest.assets),
+        user_id=service.owner_user_id,
+        load_file_records=_load_runtime_file_records,
+    )
+    _raise_runtime_asset_conflict(issues)
+    return manifest
 
 
 @router.get(
@@ -1903,7 +1919,7 @@ async def get_readiness(
     service: VNAssetPackService = Depends(_service),
 ) -> VNAssetReadinessResponse:
     try:
-        return service.get_readiness(pack_id)
+        return await service.get_runtime_readiness(pack_id, load_file_records=_load_runtime_file_records)
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 

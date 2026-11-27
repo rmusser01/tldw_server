@@ -1,13 +1,16 @@
 import sqlite3
 from collections.abc import Generator, Iterator
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from PIL import Image
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints import vn_assets as vn_assets_endpoint
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetBulkReviewRequest,
@@ -22,6 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.VN_Assets.constants import (
     ERROR_ITEM_LIMIT_EXCEEDED,
@@ -96,7 +100,7 @@ def pack_with_items(
     pack = service.create_pack(
         VNAssetPackCreate(title="Starter Pack", primary_character_id=character_id)
     )
-    slot = service.apply_matrix(pack.id, "starter", {"variant_count": 1})[0]
+    slot = service.create_slot(pack.id, VNAssetSlotCreate(asset_type="background", slot_key="background.fixture"))
     repo = VNAssetPacksRepository.initialized(chacha_db)
     approved_item = repo.create_item(
         pack_id=pack.id,
@@ -110,9 +114,39 @@ def pack_with_items(
 
     return SimpleNamespace(
         id=pack.id,
+        slot_id=slot.id,
         approved_item_id=approved_item["id"],
         draft_item_id=draft_item["id"],
     )
+
+
+@pytest.fixture
+def runtime_file(
+    pack_with_items: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
+    path = tmp_path / "fixture.png"
+    Image.new("RGB", (1, 1)).save(path)
+    record = {
+        "id": 1001,
+        "user_id": 42,
+        "storage_path": path.name,
+        "mime_type": "image/png",
+        "file_size_bytes": path.stat().st_size,
+        "source_feature": "vn_assets",
+        "source_ref": f"vn_asset_item:{pack_with_items.approved_item_id}",
+        "is_deleted": False,
+    }
+    records = {1001: record}
+
+    async def get_files_by_ids(file_ids: list[int]) -> list[dict]:
+        return [records[file_id] for file_id in file_ids if file_id in records]
+
+    async def get_files_repo() -> SimpleNamespace:
+        return SimpleNamespace(get_files_by_ids=get_files_by_ids)
+
+    monkeypatch.setattr(vn_assets_endpoint, "_generated_files_repo", get_files_repo)
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", staticmethod(lambda user_id: tmp_path))
+    return SimpleNamespace(path=path, record=record, records=records)
 
 
 def test_create_pack_endpoint_returns_pack(
@@ -335,13 +369,17 @@ def test_manifest_endpoint_omits_unapproved_items(
     client: TestClient,
     auth_headers: dict[str, str],
     pack_with_items: SimpleNamespace,
+    runtime_file: SimpleNamespace,
 ) -> None:
+    runtime_file.record.pop("file_size_bytes")
+    runtime_file.record.pop("mime_type")
     response = client.get(
         f"/api/v1/vn/vn-assets/packs/{pack_with_items.id}/manifest",
         headers=auth_headers,
     )
 
     assert response.status_code == 200
+    assert response.json()["schema_version"] == "vn_asset_manifest.v1"
     item_ids = [
         item["item_id"]
         for collection in response.json()["assets"].values()
@@ -349,6 +387,175 @@ def test_manifest_endpoint_omits_unapproved_items(
     ]
     assert pack_with_items.approved_item_id in item_ids
     assert pack_with_items.draft_item_id not in item_ids
+
+
+@pytest.mark.parametrize(("problem", "expected_code"), [
+    ("unregistered", "vn_asset_registration_unavailable"),
+    ("foreign_owner", "vn_asset_registration_unavailable"),
+    ("wrong_source", "vn_asset_registration_unavailable"),
+    ("deleted", "vn_asset_registration_unavailable"),
+    ("missing_bytes", "vn_asset_content_not_found"),
+    ("truncated", "vn_asset_content_size_mismatch"),
+    ("invalid_mime", "vn_asset_content_metadata_invalid"),
+    ("policy", "policy_blocked"),
+])
+def test_manifest_and_readiness_report_invalid_approved_files(
+    client: TestClient,
+    pack_with_items: SimpleNamespace,
+    runtime_file: SimpleNamespace,
+    problem: str,
+    expected_code: str,
+) -> None:
+    if problem == "unregistered":
+        runtime_file.records.clear()
+    elif problem == "missing_bytes":
+        runtime_file.path.unlink()
+    elif problem == "truncated":
+        runtime_file.path.write_bytes(b"truncated")
+    else:
+        field, value = {
+            "foreign_owner": ("user_id", 7),
+            "wrong_source": ("source_ref", "vn_asset_item:9999"),
+            "deleted": ("is_deleted", True),
+            "invalid_mime": ("mime_type", "text/plain"),
+            "policy": ("policy_blocked", True),
+        }[problem]
+        runtime_file.record[field] = value
+
+    base = f"/api/v1/vn/vn-assets/packs/{pack_with_items.id}"
+    item_id = pack_with_items.approved_item_id
+    manifest = client.get(f"{base}/manifest")
+    readiness = client.get(f"{base}/readiness")
+
+    assert manifest.status_code == 409
+    assert manifest.json()["detail"]["code"] == "vn_asset_runtime_integrity_failed"
+    assert manifest.json()["detail"]["details"]["issues"] == [{"item_id": item_id, "code": expected_code}]
+    assert readiness.status_code == 200
+    assert readiness.json()["ready"] is False
+    assert f"{expected_code}:{item_id}" in readiness.json()["errors"]
+
+
+def test_readiness_uses_same_metadata_snapshot_for_slots_and_file_validation(
+    client: TestClient,
+    service: VNAssetPackService,
+    pack_with_items: SimpleNamespace,
+    runtime_file: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service.review_item(pack_with_items.draft_item_id, VNAssetReviewRequest(review_status="rejected"))
+    load_records = vn_assets_endpoint._load_runtime_file_records
+
+    async def reject_after_fetch(file_ids: list[int]) -> list[dict]:
+        records = await load_records(file_ids)
+        service.review_item(pack_with_items.approved_item_id, VNAssetReviewRequest(review_status="rejected"))
+        return records
+
+    monkeypatch.setattr(vn_assets_endpoint, "_load_runtime_file_records", reject_after_fetch)
+    url = f"/api/v1/vn/vn-assets/packs/{pack_with_items.id}/readiness"
+
+    first = client.get(url)
+    subsequent = client.get(url)
+
+    assert first.status_code == 200
+    assert first.json()["ready"] is True
+    assert subsequent.json()["ready"] is False
+    assert f"required_slot_not_ready:{pack_with_items.slot_id}" in subsequent.json()["errors"]
+
+
+def test_readiness_requires_an_emitted_asset_for_required_depth_slot(
+    client: TestClient,
+    service: VNAssetPackService,
+    pack_with_items: SimpleNamespace,
+    runtime_file: SimpleNamespace,
+) -> None:
+    service.review_item(pack_with_items.draft_item_id, VNAssetReviewRequest(review_status="rejected"))
+    depth = service.create_slot(pack_with_items.id, VNAssetSlotCreate(
+        asset_type="depth_companion", slot_key="depth.fixture", depends_on_slot_id=pack_with_items.slot_id,
+    ))
+    service.repo.create_item(
+        pack_id=pack_with_items.id, slot_id=depth.id, review_status="approved",
+        parent_item_id=pack_with_items.draft_item_id, generated_file_id=1002,
+    )
+
+    base = f"/api/v1/vn/vn-assets/packs/{pack_with_items.id}"
+    readiness = client.get(f"{base}/readiness")
+
+    assert readiness.status_code == 200
+    assert readiness.json()["ready"] is False
+    assert readiness.json()["errors"] == [f"required_slot_not_ready:{depth.id}"]
+    assert client.get(f"{base}/manifest").json()["assets"]["depth_companions"] == []
+
+
+def test_approval_rejects_items_without_runtime_files_before_updating_review_state(
+    client: TestClient, service: VNAssetPackService, pack_with_items: SimpleNamespace, runtime_file: SimpleNamespace,
+) -> None:
+    pack_id = pack_with_items.id
+    invalid_id = pack_with_items.draft_item_id
+    valid_id = pack_with_items.approved_item_id
+    service.review_item(valid_id, VNAssetReviewRequest(review_status="rejected"))
+    items_url = f"/api/v1/vn/vn-assets/packs/{pack_id}/items"
+
+    single = client.patch(f"{items_url}/{invalid_id}/review", json={"review_status": "approved"})
+    bulk = client.post(
+        f"{items_url}/bulk-review", json={"item_ids": [valid_id, invalid_id], "review_status": "approved"},
+    )
+
+    for response in (single, bulk):
+        assert response.status_code == 409
+        assert response.json()["detail"]["details"]["issues"] == [
+            {"item_id": invalid_id, "code": "vn_asset_registration_unavailable"},
+        ]
+    assert service.get_item_for_pack(pack_id, valid_id).review_status == "rejected"
+    assert service.get_item_for_pack(pack_id, invalid_id).review_status == "draft"
+
+    approved = client.patch(f"{items_url}/{valid_id}/review", json={"review_status": "approved"})
+    assert approved.status_code == 200
+    assert approved.json()["review_status"] == "approved"
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+def test_approval_rejects_storage_changed_during_validation(
+    client: TestClient,
+    service: VNAssetPackService,
+    pack_with_items: SimpleNamespace,
+    runtime_file: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    bulk: bool,
+) -> None:
+    pack_id = pack_with_items.id
+    valid_id = pack_with_items.approved_item_id
+    changed_id = pack_with_items.draft_item_id
+    service.review_item(valid_id, VNAssetReviewRequest(review_status="rejected"))
+
+    def attach_file(file_id: int) -> None:
+        service.repo.update_item_storage(
+            changed_id, generated_file_id=file_id, storage_ref=runtime_file.path.name, mime_type="image/png",
+            width=1, height=1, bytes=runtime_file.path.stat().st_size, backend_metadata=None,
+        )
+
+    attach_file(1002)
+    runtime_file.records[1002] = {**runtime_file.record, "id": 1002, "source_ref": f"vn_asset_item:{changed_id}"}
+    load_records = vn_assets_endpoint._load_runtime_file_records
+
+    async def replace_after_fetch(file_ids: list[int]) -> list[dict]:
+        records = await load_records(file_ids)
+        attach_file(1003)
+        return records
+
+    monkeypatch.setattr(vn_assets_endpoint, "_load_runtime_file_records", replace_after_fetch)
+    base = f"/api/v1/vn/vn-assets/packs/{pack_id}/items"
+    if bulk:
+        response = client.post(
+            f"{base}/bulk-review", json={"item_ids": [valid_id, changed_id], "review_status": "approved"},
+        )
+    else:
+        response = client.patch(f"{base}/{changed_id}/review", json={"review_status": "approved"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "vn_asset_approval_asset_changed"
+    assert response.json()["detail"]["details"]["item_id"] == changed_id
+    assert service.get_item_for_pack(pack_id, valid_id).review_status == "rejected"
+    assert service.get_item_for_pack(pack_id, changed_id).review_status == "draft"
 
 
 def test_preferred_endpoint_requires_existing_approved_item(
@@ -387,6 +594,7 @@ def test_pack_endpoints_deny_cross_user_access(
     current_user_id["value"] = 7
 
     assert client.get(f"/api/v1/vn/vn-assets/packs/{pack_id}", headers=auth_headers).status_code == 404
+    assert client.get(f"/api/v1/vn/vn-assets/packs/{pack_id}/manifest", headers=auth_headers).status_code == 404
     assert client.patch(
         f"/api/v1/vn/vn-assets/packs/{pack_id}",
         json={"title": "Not Mine"},

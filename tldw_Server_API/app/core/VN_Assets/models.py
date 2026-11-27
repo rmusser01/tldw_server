@@ -11,6 +11,8 @@ from tldw_Server_API.app.core.VN_Assets.constants import (
     SLOT_STATUS_PLANNED,
 )
 
+VNAssetApprovalFile = tuple[int, str | None]
+
 
 @dataclass(slots=True, kw_only=True)
 class VNAssetPack:
