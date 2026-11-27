@@ -61,6 +61,7 @@ Final 2026-11-24 rebase base: dev b4a9550f76. The PR's advisory scope and ADR-09
 ADR assessment: no new ADR is required for the delivery record. ADR-098 records the proposed advisory-only policy. Any required enforcement needs a separate owner decision and CI policy change.
 Fresh local verification on clean 2053ec5ad4 used Node 24.6.0 and Bun 1.3.2. The advisory report completed with clean provenance, 3,863 analyzed files across all four roots, 4,220 advisory findings, 1,267 coverage diagnostics, and zero operational errors. All 232 focused reporter and product-state guard tests passed.
 Hosted validation: verified the report generation, upload, and job-summary steps and downloaded the resulting JSON from https://github.com/rmusser01/tldw_server/actions/runs/46053191753/job/140694788637. The artifact reports complete and clean provenance at ed36f29369, a post-delivery PR head, with 3,863 analyzed files and zero operational errors. Five documentation links or anchors and git diff --check passed. Bandit is inapplicable because the closeout changes only Markdown.
+Closeout pull request: https://github.com/rmusser01/tldw_server/pull/3670
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
