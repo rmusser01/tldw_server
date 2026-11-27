@@ -34,6 +34,7 @@ Collections remains under the long-tail issue #1670 at the requester’s directi
 Base verified against remote dev at eb48892630330498346153332d6d3951fe942f41. The Collections baseline went from seven allowances to zero and the #1670 path map went from fourteen to seven. The repository-wide verifier still exits 1 with the same 97 blocked findings and 28 stale baseline entries as dev. The baseline combines cleanly with the changes in PRs #3671 and #3672.
 All 48 focused Vitest tests passed across 15 files. Shared UI type checking and scoped ESLint passed. Bandit found no Python files in the touched Collections scope. The independent code review identified a missing partial-import announcement, which is now tested with a completed job that has errors and zero skipped items.
 Visual QA covered Collections at 1440×900 and 390×844 in Chromium with fixtures. The selected source guidance stayed legible, the ZIP warning and its focused link fit at phone width, and Enter switched to JSONL with the selection intact. Desktop also covered upload progress, partial result counts and visible error details, and Import More. The packaged Chrome extension displayed the digest error and recovered on Retry. Saved before and final captures locally.
+Pull request https://github.com/rmusser01/tldw_server/pull/3673
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
