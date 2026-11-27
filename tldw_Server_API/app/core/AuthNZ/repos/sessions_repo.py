@@ -6,6 +6,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.account_lock_errors import AccountSecurityLockedError
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_locks import acquire_schema_lock
@@ -160,11 +161,21 @@ class AuthnzSessionsRepo:
                     # lock holder's commit, which REPEATABLE READ / SERIALIZABLE would hide.
                     await conn.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                     await acquire_schema_lock(conn.execute, SESSION_CAP_LOCK_NAMESPACE, str(user_id))
+                    # FOR SHARE waits for an uncommitted lock; a plain READ COMMITTED read would miss it.
+                    locked_at = await conn.fetchval(
+                        "SELECT security_locked_at FROM users WHERE id = $1 FOR SHARE", user_id
+                    )
+                    if locked_at is not None:
+                        raise AccountSecurityLockedError()
                     live = await conn.fetchval(
                         f"SELECT COUNT(*) FROM sessions WHERE user_id = $1 AND {LIVE_SESSION_PREDICATE_PG}",
                         user_id,
                     )
                 else:
+                    cursor = await conn.execute("SELECT security_locked_at FROM users WHERE id = ?", (user_id,))
+                    row = await cursor.fetchone()
+                    if row is not None and row[0] is not None:
+                        raise AccountSecurityLockedError()
                     cursor = await conn.execute(
                         f"SELECT COUNT(*) FROM sessions WHERE user_id = ? AND {LIVE_SESSION_PREDICATE_SQLITE}",
                         (user_id,),
@@ -230,6 +241,8 @@ class AuthnzSessionsRepo:
                     refresh_jti=refresh_jti,
                 )
                 return new_id, evicted
+        except AccountSecurityLockedError:
+            raise  # a refusal, not a persistence failure
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.bind(
                 operation="create_session_record_with_cap",

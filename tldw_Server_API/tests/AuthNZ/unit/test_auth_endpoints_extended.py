@@ -1012,6 +1012,7 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
     response = Response()
     form_data = SimpleNamespace(username="mfa_user", password="password")
     session_manager = _StubSessionManager()
+    started = int(time.time())
 
     result = await auth.login(
         request=request,
@@ -1031,6 +1032,8 @@ async def test_login_returns_mfa_challenge_when_enabled(monkeypatch):
     assert result.session_token
     assert session_manager.cached
     cached = json.loads(session_manager.stored_value)
+    # issued_at: an unlock refuses a challenge started before it (TASK-15671).
+    assert started <= cached.pop("issued_at") <= int(time.time())
     assert cached == {"user_id": 5, "login_lockout_key": build_login_client_lockout_key("203.0.113.9", "mfa_user")}
     assert "203.0.113.9" not in session_manager.stored_value
     assert "mfa_user" not in session_manager.stored_value

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 # API Dependencies
 from tldw_Server_API.app.api.v1.API_Deps.v1_endpoint_deps import oauth2_scheme
+from tldw_Server_API.app.core.AuthNZ.account_lock import StaleCredentialError, assert_account_not_locked
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError, TokenExpiredError
@@ -467,6 +468,23 @@ async def verify_single_user_api_key(
     return True
 
 
+def _enforce_account_state(
+    user: User, user_data: dict, payload: dict, credentials_exception: HTTPException
+) -> None:
+    """Refuse an inactive user, a locked account (423) and a token issued before the last unlock (401)."""
+    if not user.is_active:
+        if get_settings().PII_REDACT_LOGS:
+            logger.warning("Authentication attempt by inactive user (details redacted)")
+        else:
+            logger.warning(f"Authentication attempt by inactive user: {user.username} (ID: {user.id})")
+        raise InactiveUserError("Inactive user")
+    try:
+        assert_account_not_locked(user_data, token_iat=payload.get("iat"))
+    except StaleCredentialError as exc:
+        logger.warning("Token issued before the last account unlock for user {}", user.id)
+        raise credentials_exception from exc
+
+
 async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth2_scheme)) -> User:
     """
     Dependency to verify JWT and fetch user details.
@@ -685,12 +703,7 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         ) from e
 
     # --- Final User Status Check ---
-    if not user.is_active:
-        if pii_redact_logs:
-            logger.warning("Authentication attempt by inactive user (details redacted)")
-        else:
-            logger.warning(f"Authentication attempt by inactive user: {user.username} (ID: {user.id})")
-        raise InactiveUserError("Inactive user")
+    _enforce_account_state(user, user_data, payload, credentials_exception)
 
     # Attach user id for downstream context (usage logging, RBAC rate limits)
     with contextlib.suppress(_USER_DB_NONCRITICAL_EXCEPTIONS):

@@ -80,6 +80,11 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
+from tldw_Server_API.app.core.AuthNZ.account_lock import (
+    AccountSecurityLockedError,
+    StaleCredentialError,
+    assert_account_not_locked,
+)
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     resolve_effective_csrf_enabled,
@@ -680,6 +685,7 @@ async def federation_callback(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is inactive. Please contact support.",
         )
+    assert_account_not_locked(user)
 
     await provisioning_service.upsert_identity_link(
         provider=provider,
@@ -1826,6 +1832,7 @@ async def login(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is inactive. Please contact support."
             )
+        assert_account_not_locked(user)
 
         # If password needs rehashing, update it
         if needs_rehash:
@@ -1879,7 +1886,11 @@ async def login(
             await _ensure_mfa_cache_available(session_manager, settings)
             session_token = secrets.token_urlsafe(32)
             ttl_seconds = _get_mfa_login_ttl_seconds()
-            payload = {"user_id": int(user["id"]), "login_lockout_key": client_login_lockout_key}
+            payload = {
+                "user_id": int(user["id"]),
+                "login_lockout_key": client_login_lockout_key,
+                "issued_at": int(time.time()),
+            }
             try:
                 await session_manager.store_ephemeral_value(
                     _mfa_login_cache_key(session_token),
@@ -2389,8 +2400,11 @@ async def refresh_token(
                         response.headers["X-TLDW-Refresh-Reason"] = "revoked"
                     except _AUTH_NONCRITICAL_EXCEPTIONS:
                         pass
-                if await session_manager.get_revoke_reason(payload.refresh_token) == SESSION_CAP_REVOKE_REASON:
+                revoke_reason = await session_manager.get_revoke_reason(payload.refresh_token)
+                if revoke_reason == SESSION_CAP_REVOKE_REASON:
                     raise SessionReplacedError()
+                if await session_manager.revoked_by_current_lock(payload.refresh_token, revoke_reason):
+                    raise AccountSecurityLockedError()
                 raise InvalidTokenError("Refresh token has been revoked")
 
             # JWT standard uses 'sub' for subject (user ID)
@@ -2456,6 +2470,7 @@ async def refresh_token(
             new_access_token = single_user_key
             new_refresh_token = single_user_key
         else:
+            assert_account_not_locked(user, token_iat=token_payload.get("iat"))
             # Access token always refreshed; preserve session_id claim when available
             scope_claims = await _build_scope_claims(int(user["id"]))
             add_claims = dict(scope_claims)
@@ -2538,6 +2553,8 @@ async def refresh_token(
 
     except asyncio.CancelledError:
         raise
+    except AccountSecurityLockedError:
+        raise  # an HTTPException, which the noncritical clause below would turn into a 500
     except (DatabaseLockError, ConnectionPoolExhaustedError, DatabaseConcurrencyConflict) as e:
         log_counter("auth_refresh_database_busy")
         log_histogram("auth_refresh_duration", time.perf_counter() - start_time)
@@ -2729,6 +2746,19 @@ async def reset_password(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This reset token has already been used",
             )
+
+        # A locked account (423), a token from before the last unlock, or one for an address the
+        # account no longer has (400). No row (an inactive user): as before.
+        user = await _auth_service.fetch_active_user_by_id(db, user_id)
+        if user:
+            try:
+                assert_account_not_locked(user, token_iat=payload.get("iat"))
+            except StaleCredentialError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token"
+                ) from None
+            if str(payload.get("email") or "").strip().lower() != str(user.get("email") or "").strip().lower():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
 
         # Validate new password (service raises WeakPasswordError on failure)
         try:
@@ -3580,6 +3610,14 @@ async def mfa_login(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
             )
+        try:
+            # A challenge cached before issued_at existed carries none and is checked for the lock only.
+            assert_account_not_locked(user, token_iat=payload.get("issued_at"))
+        except StaleCredentialError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="MFA session expired or invalid",
+            ) from None
 
         mfa_service = _get_mfa_service()
         mfa_status = await mfa_service.get_user_mfa_status(user_id)

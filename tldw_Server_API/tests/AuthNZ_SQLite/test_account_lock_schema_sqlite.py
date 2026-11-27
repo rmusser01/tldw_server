@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.federated_identity_repo import Federa
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
 from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
 from tldw_Server_API.app.core.exceptions import ServiceInitializationError
@@ -308,10 +309,8 @@ async def test_take_back_is_refused_and_the_lock_kept_when_another_user_holds_th
 
 
 async def test_take_back_of_an_unlocked_account_leaves_nothing_made_while_it_ran(lock_db, monkeypatch) -> None:
-    """The intruder unlocked first; a key made while the take-back runs is caught by its second sweep.
-
-    Task 3 adds the other half: a ``session_manager.create_session`` attempt made during the take-back
-    raises ``AccountSecurityLockedError`` (the take-back locked the account again first).
+    """The intruder unlocked first; a key made while the take-back runs is caught by its second sweep,
+    and a sign-in attempted meanwhile is refused (the take-back locked the account again first).
     """
     uid = lock_db.user_id
     await _move_email(lock_db, NEW)
@@ -324,6 +323,8 @@ async def test_take_back_of_an_unlocked_account_leaves_nothing_made_while_it_ran
         suspended = await sweep(self, **kwargs)
         if not made:
             made["key"] = await _key(lock_db, "made-while-taking-back")
+            with pytest.raises(AccountSecurityLockedError):
+                await (await get_session_manager()).create_session(user_id=uid, access_token="a", refresh_token="r")
         return suspended
 
     monkeypatch.setattr(AuthnzApiKeysRepo, "suspend_keys_created_since", _intruder_makes_a_key_after_the_first_sweep)
