@@ -127,7 +127,7 @@ def get_job_or_archived_by_idempotency_key(
 ) -> dict[str, Any] | None:
     """Resolve one exact stable idempotency authority in a single snapshot."""
 
-    values = (idempotency_key, domain, job_type, owner_user_id)
+    values: tuple[str, ...] = (idempotency_key, domain, job_type, owner_user_id)
     where_sql = "idempotency_key=? AND domain=? AND job_type=? AND owner_user_id=?"
     if queue is not None:
         values += (queue,)

@@ -631,7 +631,7 @@ def _url_job_item(row: dict[str, Any], payload: dict[str, Any]) -> MediaIngestJo
     """Build the submit receipt from its confirmed URL job and collection binding."""
     return MediaIngestJobItem(
         id=int(row["id"]), uuid=row.get("uuid"), source=payload["source"], source_kind="url",
-        status=row.get("status"), collection_id=payload.get("collection_id"),
+        status=row["status"], collection_id=payload.get("collection_id"),
         planned_item_id=payload.get("planned_item_id"), idempotency_key=payload.get("idempotency_key"),
     )
 
@@ -727,7 +727,7 @@ async def submit_media_ingest_jobs(
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_scoped_job_manager),
     collections_db: CollectionsDatabase | None = Depends(try_get_collections_db_for_user),
-) -> SubmitMediaIngestJobsResponse:
+) -> SubmitMediaIngestJobsResponse | JSONResponse:
     rid = ensure_request_id(request) if request is not None else None
     tp = ensure_traceparent(request) if request is not None else ""
 
@@ -773,7 +773,7 @@ async def submit_media_ingest_jobs(
     for url_index, url in enumerate(url_list):
         planned_item_id = planned_item_values[url_index] if planned_item_values else None
         item_idempotency_key = idempotency_key_values[url_index] if idempotency_key_values else None
-        payload = {
+        payload: dict[str, Any] = {
             "batch_id": batch_id,
             "media_type": str(form_data.media_type),
             "source": str(url).strip(),

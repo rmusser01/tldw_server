@@ -6,7 +6,7 @@ import inspect
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NotRequired, TypedDict, Unpack
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -23,7 +23,7 @@ from tldw_Server_API.app.api.v1.schemas.media_collections import (
     QuickIngestDispatchState,
     positive_quick_ingest_media_id,
 )
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, MediaCollectionItemRow
 from tldw_Server_API.app.core.exceptions import BadRequestError
 
 
@@ -41,6 +41,13 @@ class DispatchReceipt(BaseModel):
     dispatch_state: QuickIngestDispatchState
     item: MediaCollectionItemResponse
     result: Any = None
+
+
+class _DispatchOutcome(TypedDict):
+    status: str
+    media_id: NotRequired[int | None]
+    latest_job_id: NotRequired[str]
+    error_summary: NotRequired[str]
 
 
 def _attempt(
@@ -74,7 +81,7 @@ def _validate_source(item: Any, transport: str, inputs: dict[str, Any]) -> None:
         raise HTTPException(409, "The submitted source does not match the collection plan.")
 
 
-def _outcome(transport: str, result: Any) -> dict[str, Any] | None:
+def _outcome(transport: str, result: Any) -> _DispatchOutcome | None:
     """Project only a single authoritative Job or Media identity for this source."""
     if not isinstance(result, dict):
         return None
@@ -125,13 +132,14 @@ async def receive(
     """Consume one reservation, run the original handler, and commit its exact receipt."""
     db = attempt.db
     slot = (attempt.plan_key, attempt.source_key)
-    identity = {"retry_count": attempt.retry_count, "idempotency_key": attempt.idempotency_key, "transport": transport}
     try:
         item = db.get_quick_ingest_source(*slot)
         if (item.retry_count, item.idempotency_key) != (attempt.retry_count, attempt.idempotency_key):
             raise HTTPException(409, "The source attempt has changed.")
         _validate_source(item, transport, inputs)
-        won, item = db.begin_quick_ingest_dispatch(*slot, **identity)
+        won, item = db.begin_quick_ingest_dispatch(
+            *slot, retry_count=attempt.retry_count, idempotency_key=attempt.idempotency_key, transport=transport
+        )
     except KeyError as exc:
         raise HTTPException(404, "Collection plan source not found.") from exc
     except ValueError as exc:
@@ -145,9 +153,15 @@ async def receive(
             "result": result,
         }
 
-    def finish(**outcome: Any) -> Any:
+    def finish(**outcome: Unpack[_DispatchOutcome]) -> MediaCollectionItemRow:
         try:
-            return db.finish_quick_ingest_dispatch(*slot, **identity, **outcome)
+            return db.finish_quick_ingest_dispatch(
+                *slot,
+                retry_count=attempt.retry_count,
+                idempotency_key=attempt.idempotency_key,
+                transport=transport,
+                **outcome,
+            )
         except KeyError as exc:
             raise HTTPException(404, "Collection plan source not found.") from exc
         except ValueError as exc:
@@ -184,7 +198,7 @@ async def receive(
 
     result = raw.model_dump(mode="json") if isinstance(raw, BaseModel) else raw
     if isinstance(raw, Response):
-        result = json.loads(raw.body)
+        result = json.loads(bytes(raw.body))
         response = inputs.get("response")
         if isinstance(response, Response):
             for key, value in raw.headers.items():

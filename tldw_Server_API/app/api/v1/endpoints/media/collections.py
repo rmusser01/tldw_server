@@ -5,6 +5,7 @@ from dataclasses import replace
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import TypeAdapter
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
@@ -24,6 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.media_collections import (
     MediaCollectionUpdateRequest,
     PlanKey,
     QuickIngestClaimResponse,
+    QuickIngestDispatchState,
     QuickIngestPlanItemResponse,
     QuickIngestPlanRequest,
     QuickIngestPlanResponse,
@@ -41,6 +43,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import (
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 router = APIRouter()
+_PLAN_DISPATCH_STATE = TypeAdapter[QuickIngestDispatchState](QuickIngestDispatchState)
 
 
 def _item_response(row: MediaCollectionItemRow) -> MediaCollectionItemResponse:
@@ -117,7 +120,7 @@ def _recover_plan_job(
     """Reconcile a Jobs commit even when its submitter lost the response before projecting its ID."""
     if row.dispatch_state != "jobs":
         return row
-    key = row.idempotency_key
+    key = row.require_plan_attempt_key()
     is_file = row.source_url.startswith("local://")
     job_key = f"media-upload:{db.user_id}:{key}" if is_file else ingest_jobs._collection_url_job_key(db.user_id, key)
     # Direct saves can plan and resume independently of Jobs availability.
@@ -217,7 +220,11 @@ async def put_quick_ingest_plan(
         return QuickIngestPlanResponse(
             collection_id=collection_id,
             items=[
-                QuickIngestPlanItemResponse(source_key=key, item=_item_response(row), dispatch_state=row.dispatch_state)
+                QuickIngestPlanItemResponse(
+                    source_key=key,
+                    item=_item_response(row),
+                    dispatch_state=_PLAN_DISPATCH_STATE.validate_python(row.dispatch_state),
+                )
                 for key, row in items.items()
             ],
         )
@@ -247,7 +254,7 @@ async def get_quick_ingest_source_status(
             collection_id=row.collection_id,
             source_key=source_key,
             item=_item_response(row),
-            dispatch_state=row.dispatch_state,
+            dispatch_state=_PLAN_DISPATCH_STATE.validate_python(row.dispatch_state),
         )
     except (KeyError, ValueError) as exc:
         _raise_collection_error(exc)
@@ -271,7 +278,11 @@ async def claim_quick_ingest_source(
     try:
         _recover_plan_job(db, plan_key, source_key, db.get_quick_ingest_source(plan_key, source_key), job_manager_factory)
         claimed, row = db.claim_quick_ingest_source(plan_key, source_key, **(retry.model_dump() if retry else {}))
-        return QuickIngestClaimResponse(claimed=claimed, item=_item_response(row), dispatch_state=row.dispatch_state)
+        return QuickIngestClaimResponse(
+            claimed=claimed,
+            item=_item_response(row),
+            dispatch_state=_PLAN_DISPATCH_STATE.validate_python(row.dispatch_state),
+        )
     except (KeyError, ValueError) as exc:
         _raise_collection_error(exc)
         raise

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from tldw_Server_API.app.api.v1.endpoints.media import quick_ingest_dispatch as dispatch
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
@@ -52,6 +52,14 @@ async def test_lost_ack_returns_original_receipt_without_dispatching_again(attem
     assert first["dispatched"] and not replay["dispatched"]
     assert first["result"] == reply and getattr(replay["item"], identity[0]) == identity[1]
     call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_records_json_receipt_from_memoryview_response(attempt):
+    response = Response(memoryview(b'{"media_ids":[42]}'), media_type="application/json")
+    saved = await dispatch.receive(attempt, "web", args("web"), AsyncMock(return_value=response))
+    assert saved["result"] == {"media_ids": [42]}
+    assert attempt.db.get_quick_ingest_source("plan", "source").media_id == 42
 
 
 @pytest.mark.asyncio

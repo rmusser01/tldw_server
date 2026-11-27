@@ -292,6 +292,12 @@ class MediaCollectionItemRow:
     updated_at: str
     dispatch_state: str | None = None
 
+    def require_plan_attempt_key(self) -> str:
+        """Return the processing key required for every durable plan source."""
+        if not self.idempotency_key:
+            raise QuickIngestPlanConflict("The plan source is missing its processing key.")
+        return self.idempotency_key
+
 
 @dataclass
 class MediaCollectionRow:
@@ -3610,6 +3616,8 @@ class CollectionsDatabase:
                 (self.user_id, plan_key),
                 connection=conn,
             ).first
+            if binding is None:
+                raise DatabaseError("Failed to bind the Quick Ingest plan")
             collection_id = binding["collection_id"]
             if collection_id is None:
                 collection_id = self.create_media_collection(**collection, connection=conn).id
@@ -3637,17 +3645,18 @@ class CollectionsDatabase:
                     ).first
                 ):
                     fields = {**fields, "ordinal": None}
+                attempt_key = "quick-ingest-" + uuid4().hex
                 row = self.add_media_collection_item(
-                    **{**fields, "idempotency_key": "quick-ingest-" + uuid4().hex},
+                    **{**fields, "idempotency_key": attempt_key},
                     collection_id=collection_id,
                     connection=conn,
                 )
                 self.backend.execute(
                     "INSERT INTO quick_ingest_plan_sources (user_id, plan_key, source_key, item_id, attempt_key) VALUES (?, ?, ?, ?, ?)",
-                    (self.user_id, plan_key, key, row.id, row.idempotency_key),
+                    (self.user_id, plan_key, key, row.id, attempt_key),
                     connection=conn,
                 )
-                self._record_quick_ingest_attempt(conn, row.id, 0, row.idempotency_key)
+                self._record_quick_ingest_attempt(conn, row.id, 0, attempt_key)
                 result[key] = self._project_plan_state(row, "unclaimed")
             return int(collection_id), result
 
@@ -3738,13 +3747,14 @@ class CollectionsDatabase:
                     return False, row
             elif row.status != "planned" or row.latest_job_id is not None or row.retry_count != 0:
                 return False, row
+            attempt_key = idempotency_key or row.require_plan_attempt_key()
             applied = self.backend.execute(
                 "UPDATE media_collection_items SET status='processing', retry_count=?, idempotency_key=?, "
                 "source_url=?, latest_job_id=NULL, latest_run_id=NULL, error_summary=NULL, updated_at=? "
                 "WHERE user_id=? AND id=? AND status=? AND retry_count=? AND media_id IS NULL AND content_item_id IS NULL",
                 (
                     retry_count,
-                    idempotency_key or row.idempotency_key,
+                    attempt_key,
                     source_url or row.source_url,
                     _utcnow_iso(),
                     self.user_id,
@@ -3756,7 +3766,7 @@ class CollectionsDatabase:
             )
             if applied.rowcount:
                 if retry_count:
-                    self._record_quick_ingest_attempt(conn, row.id, retry_count, idempotency_key)
+                    self._record_quick_ingest_attempt(conn, row.id, retry_count, attempt_key)
                 if source_url and row.source_url != source_url:
                     metadata = {
                         k: v
@@ -3772,7 +3782,7 @@ class CollectionsDatabase:
                 self.backend.execute(
                     "UPDATE quick_ingest_plan_sources SET claimed_attempt=?, attempt_key=?, dispatch_state='reserved' "
                     "WHERE user_id=? AND plan_key=? AND source_key=?",
-                    (retry_count, idempotency_key or row.idempotency_key, self.user_id, plan_key, source_key),
+                    (retry_count, attempt_key, self.user_id, plan_key, source_key),
                     connection=conn,
                 )
             return bool(applied.rowcount), self._project_plan_state(
@@ -3965,7 +3975,7 @@ class CollectionsDatabase:
             return self.finish_quick_ingest_dispatch(
                 **binding,
                 retry_count=row.retry_count,
-                idempotency_key=row.idempotency_key,
+                idempotency_key=row.require_plan_attempt_key(),
                 transport="jobs",
                 status=status,
                 media_id=media_id,
