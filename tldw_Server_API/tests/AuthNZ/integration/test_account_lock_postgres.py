@@ -232,3 +232,104 @@ async def test_suspended_key_is_invalid_pg(lock_db) -> None:
     assert await manager.validate_api_key(created["key"]) is None
     suspended = await lock_db.pool.fetchval("SELECT suspended_at FROM api_keys WHERE id = $1", int(created["id"]))
     assert suspended is not None
+
+
+# --- unlock through the mailed link (Task 6), at the account_lock level -----------------------------
+
+
+@pytest.fixture
+def unlock_audit(monkeypatch) -> list[tuple]:
+    """The ``(event type, metadata)`` of every account audit event ``redeem_unlock`` writes."""
+    from tldw_Server_API.app.core.AuthNZ import account_lock
+
+    written: list[tuple] = []
+
+    async def _record(event_type, **kwargs) -> None:
+        written.append((event_type.value, kwargs.get("metadata")))
+
+    monkeypatch.setattr(account_lock, "write_account_audit", _record)
+    return written
+
+
+async def _pg_user(lock_db) -> dict:
+    from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+
+    return await AuthnzUsersRepo(lock_db.pool).get_user_by_id(lock_db.user_id)
+
+
+def _unlock_claims(email: str, *, restores: bool) -> dict:
+    """The claims of an unlock link as ``send_lock_mail`` mints them."""
+    return {"email": email, "purpose": "account_unlock", "restore_email": restores}
+
+
+async def _redeem(lock_db, claims: dict) -> bool:
+    from tldw_Server_API.app.core.AuthNZ.account_lock import redeem_unlock
+
+    return await redeem_unlock(await _pg_user(lock_db), claims, via="magic_link", ip_address=None, user_agent=None)
+
+
+async def test_unlock_link_signs_in_with_one_session_and_clears_the_lock_pg(lock_db, unlock_audit) -> None:
+    from tldw_Server_API.app.core.AuthNZ.account_lock import magic_link_email_allowed, magic_link_email_current
+    from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
+    from tldw_Server_API.tests.AuthNZ_SQLite.test_account_lock_schema_sqlite import _live_session_count, _session
+
+    await _session(lock_db, "before-the-lock")
+    await lock_user(lock_db.user_id)
+    owner = _unlock_claims(OLD, restores=False)
+    assert await magic_link_email_allowed(await _pg_user(lock_db), owner) is True
+    assert await _redeem(lock_db, owner) is True
+    await (await get_session_manager()).create_session(user_id=lock_db.user_id, access_token="a", refresh_token="r")
+    row = await _pg_user(lock_db)
+    assert row["security_locked_at"] is None and row["credentials_valid_after"] is not None
+    assert await _live_session_count(lock_db) == 1
+    assert await magic_link_email_current(lock_db.user_id, owner) is True
+    assert unlock_audit == [("auth.account.unlocked", {"via": "magic_link", "took_back_address": False})]
+
+
+async def test_link_to_previous_address_takes_the_account_back_pg(lock_db, unlock_audit) -> None:
+    from tldw_Server_API.app.core.AuthNZ.account_lock import magic_link_email_allowed, magic_link_email_current
+    from tldw_Server_API.tests.AuthNZ_SQLite.test_account_lock_schema_sqlite import NEW, _move_email, _password_verifies
+
+    await _move_email(lock_db, NEW)
+    await lock_user(lock_db.user_id)
+    owner, intruder = _unlock_claims(OLD, restores=True), _unlock_claims(NEW, restores=False)
+    locked = await _pg_user(lock_db)
+    assert await magic_link_email_allowed(locked, owner) is True
+    assert await magic_link_email_allowed(locked, intruder) is True
+    assert await _redeem(lock_db, owner) is True
+    row = await _pg_user(lock_db)
+    assert (row["email"], row["previous_email"], row["security_locked_at"]) == (OLD, None, None)
+    assert await _password_verifies(lock_db) is False
+    assert await magic_link_email_allowed(row, intruder) is False  # the newer address's link is dead
+    assert await magic_link_email_current(lock_db.user_id, owner) is True
+    assert await magic_link_email_current(lock_db.user_id, intruder) is False
+    assert unlock_audit == [("auth.account.unlocked", {"via": "magic_link", "took_back_address": True})]
+
+
+async def test_take_back_after_the_newer_address_unlocked_first_leaves_the_intruder_nothing_pg(
+    lock_db, unlock_audit
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
+    from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
+    from tldw_Server_API.tests.AuthNZ_SQLite.test_account_lock_schema_sqlite import (
+        NEW,
+        _live_session_count,
+        _move_email,
+    )
+
+    await _move_email(lock_db, NEW)
+    recent, keys = await _pg_key(lock_db)  # made in the week before the lock: the unlock suspends it
+    await lock_user(lock_db.user_id)
+    assert await _redeem(lock_db, _unlock_claims(NEW, restores=False)) is True
+    # The intruder signs in, makes a key and lifts the suspension of the recent one.
+    await (await get_session_manager()).create_session(user_id=lock_db.user_id, access_token="a", refresh_token="r")
+    created = await keys.create_api_key(user_id=lock_db.user_id, name="intruder")
+    repo = AuthnzApiKeysRepo(db_pool=lock_db.pool)
+    assert await repo.unsuspend_key_for_user(key_id=int(recent["id"]), user_id=lock_db.user_id) is True
+
+    assert await _redeem(lock_db, _unlock_claims(OLD, restores=True)) is True
+    assert (await _pg_user(lock_db))["email"] == OLD
+    assert await _live_session_count(lock_db) == 0
+    assert await keys.validate_api_key(created["key"]) is None
+    assert await keys.validate_api_key(recent["key"]) is None
+    assert [took_back["took_back_address"] for _event, took_back in unlock_audit] == [False, True]

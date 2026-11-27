@@ -83,11 +83,19 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     MandatoryAuditWriteError,
 )
 from tldw_Server_API.app.core.AuthNZ.account_lock import (
+    UNLOCK_PURPOSE,
     AccountSecurityLockedError,
     lock_account,
     lock_availability_for_user,
     StaleCredentialError,
+    TakeBackUnavailableError,
     assert_account_not_locked,
+    find_locked_user_by_previous_address,
+    is_security_locked,
+    magic_link_email_allowed,
+    magic_link_email_current,
+    redeem_unlock,
+    resend_unlock_link,
 )
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
@@ -2662,7 +2670,12 @@ async def forgot_password(
         # Check if user exists
         user = await _fetch_user_by_email_for_password_reset(db, data.email)
 
-        if user and user["is_active"]:
+        if user and user["is_active"] and is_security_locked(user):
+            # A locked account gets its unlock link, to the typed address, never a reset link.
+            await resend_unlock_link(
+                user, data.email, ip_address=client_ip, user_agent=request.headers.get("User-Agent")
+            )
+        elif user and user["is_active"]:
             # Generate reset token
             reset_token = jwt_service.create_password_reset_token(
                 user_id=user["id"],
@@ -3002,6 +3015,11 @@ async def request_magic_link(
         return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
 
     user = await _auth_service.fetch_user_by_login_identifier(db, email)
+    user = user or await find_locked_user_by_previous_address(email)
+    if user and is_security_locked(user):
+        # A locked account gets its unlock link again, to the typed address only, never a sign-in link.
+        await resend_unlock_link(user, email, ip_address=client_ip, user_agent=request.headers.get("User-Agent"))
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
     user_id = int(user["id"]) if user and user.get("id") is not None else None
 
     # If registration is disabled and user doesn't exist, do not send an email.
@@ -3184,6 +3202,11 @@ async def verify_magic_link(
         )
     if user and user.get("is_active") in (False, 0):
         raise HTTPException(status_code=401, detail="Invalid or inactive user")
+    if user:  # refused before the link is spent
+        if not await magic_link_email_allowed(user, payload):  # an address the account no longer has
+            raise HTTPException(status_code=400, detail="Invalid magic link token")
+        if is_security_locked(user) and payload.get("purpose") != UNLOCK_PURPOSE:
+            raise AccountSecurityLockedError()
 
     jti, expiry = payload.get("jti"), payload.get("exp")
     try:
@@ -3208,6 +3231,17 @@ async def verify_magic_link(
         raise HTTPException(status_code=503, detail="Magic link sign-in is temporarily unavailable") from None
     if not claimed or expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Invalid magic link token")
+    if user and payload.get("purpose") == UNLOCK_PURPOSE:
+        try:  # when it unlocked nothing and the account is still locked, create_session refuses with the 423
+            await redeem_unlock(
+                user,
+                payload,
+                via="magic_link",
+                ip_address=_auth_request_client_ip(request),
+                user_agent=request.headers.get("User-Agent"),
+            )
+        except TakeBackUnavailableError:  # another account took the address after the check above
+            raise HTTPException(status_code=400, detail="Invalid magic link token") from None
 
     if not user:
         # Create a new user on first magic-link sign-in
@@ -3281,6 +3315,9 @@ async def verify_magic_link(
     session_id = temp_session_info["session_id"]
 
     async with session_manager.revoke_on_failure(session_id, int(user["id"])):
+        # A take-back that committed since the check above moved the email; this session is revoked.
+        if not await magic_link_email_current(int(user["id"]), payload):
+            raise HTTPException(status_code=400, detail="Invalid magic link token")
         scope_claims = await _build_scope_claims(int(user["id"]))
         add_claims = dict(scope_claims)
         add_claims["session_id"] = session_id

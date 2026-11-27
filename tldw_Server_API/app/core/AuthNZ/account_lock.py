@@ -63,8 +63,13 @@ __all__ = [
     "TakeBackUnavailableError",
     "assert_account_not_locked",
     "clear_lock",
+    "find_locked_user_by_previous_address",
     "is_security_locked",
     "is_user_security_locked",
+    "magic_link_email_allowed",
+    "magic_link_email_current",
+    "redeem_unlock",
+    "resend_unlock_link",
     "security_mail_recipients",
     "set_lock",
     "take_back_address",
@@ -286,6 +291,75 @@ async def clear_lock(user_id: int, *, take_back: str | None = None) -> datetime 
     await users.force_security_lock(user_id, now=datetime.now(timezone.utc))
     logger.warning("Take-back of user {} gave up after {} attempts; the account stays locked", user_id, _TAKE_BACK_ATTEMPTS)
     return None
+
+
+def _same_address(left: Any, right: Any) -> bool:
+    left, right = str(left or "").strip().lower(), str(right or "").strip().lower()
+    return bool(left) and left == right
+
+
+async def magic_link_email_allowed(user: Mapping[str, Any], token_payload: Mapping[str, Any]) -> bool:
+    """Whether a magic link may sign in to ``user``: its email is the user's, or a take-back of a free address."""
+    if _same_address(token_payload.get("email"), user.get("email")):
+        return True
+    address = take_back_address(user, token_payload)
+    if address is None:
+        return False
+    users = await AuthnzUsersRepo.from_pool()
+    return not await users.email_in_use_by_another_user(address, user_id=int(user["id"]))
+
+
+async def magic_link_email_current(user_id: int, token_payload: Mapping[str, Any]) -> bool:
+    """Whether the link's email is the user's email now (a take-back may have committed meanwhile)."""
+    user = await (await AuthnzUsersRepo.from_pool()).get_user_by_id(int(user_id))
+    return user is not None and _same_address(token_payload.get("email"), user.get("email"))
+
+
+async def redeem_unlock(
+    user: Mapping[str, Any],
+    token_payload: Mapping[str, Any],
+    *,
+    via: str,
+    ip_address: str | None,
+    user_agent: str | None,
+) -> bool:
+    """Unlock (and for a previous-address link take back) the account; True when this call unlocked it.
+
+    Raises ``TakeBackUnavailableError`` when the address cannot be restored; the account stays locked.
+    """
+    user_id = int(user["id"])
+    take_back = take_back_address(user, token_payload)
+    if await clear_lock(user_id, take_back=take_back) is None:
+        return False
+    await write_account_audit(
+        AuditEventType.AUTH_ACCOUNT_UNLOCKED,
+        user_id=user_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        metadata={"via": via, "took_back_address": take_back is not None},
+    )
+    return True
+
+
+async def find_locked_user_by_previous_address(address: str) -> dict[str, Any] | None:
+    """The locked user whose recent previous address is ``address`` (unique match), else None."""
+    since = datetime.now(timezone.utc) - timedelta(days=PREVIOUS_ADDRESS_MAIL_DAYS)
+    return await (await AuthnzUsersRepo.from_pool()).find_locked_user_by_previous_email(address, since=since)
+
+
+async def resend_unlock_link(
+    user: Mapping[str, Any], typed_address: str, *, ip_address: str | None, user_agent: str | None
+) -> None:
+    """Mail the unlock link again, only to the address the requester typed; failures are logged, never raised.
+
+    The anonymous routes answer the same whether this mail went out or not, as they do for a reset link.
+    """
+    try:
+        await send_lock_mail(
+            user, locked_at=None, device=device_label(user_agent), ip_address=ip_address, only_address=typed_address
+        )
+    except _ACCOUNT_LOCK_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning("Unlock link not resent for user {}: {}", user.get("id"), type(exc).__name__)
 
 
 async def write_account_audit(

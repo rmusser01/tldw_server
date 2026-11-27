@@ -3,12 +3,30 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ import email_service
 from tldw_Server_API.app.core.AuthNZ.account_lock import ACCOUNT_LOCK_REVOKE_REASON, clear_lock, set_lock
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
+
+
+async def repair_reset_tokens_table() -> None:
+    """Rebuild ``password_reset_tokens`` as migration 011 defines it.
+
+    Pre-existing bug, not the lock's: the packaged SQLite schema creates the table with ``token``, and
+    migration 011's ``ADD COLUMN token_hash TEXT UNIQUE`` fails silently (SQLite cannot add a UNIQUE
+    column), so forgot-password and reset-password cannot store or find a token on a fresh SQLite database.
+    """
+    with sqlite3.connect((await get_db_pool()).db_path) as conn:
+        conn.execute("DROP TABLE password_reset_tokens")
+        conn.execute(
+            "CREATE TABLE password_reset_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, "
+            "token_hash TEXT UNIQUE, expires_at TIMESTAMP NOT NULL, used_at TIMESTAMP, ip_address TEXT, "
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)"
+        )
 
 
 async def lock_user(user_id: int) -> None:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timedelta
 
 import pytest
@@ -17,7 +16,12 @@ from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRe
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
 from tldw_Server_API.app.services.auth_service import store_password_reset_token
-from tldw_Server_API.tests.AuthNZ_SQLite._account_lock_fixtures import assert_locked, lock_user, unlock_user
+from tldw_Server_API.tests.AuthNZ_SQLite._account_lock_fixtures import (
+    assert_locked,
+    lock_user,
+    repair_reset_tokens_table,
+    unlock_user,
+)
 from tldw_Server_API.tests.AuthNZ_SQLite._sessions_http_fixtures import bearer, login, session_id_of
 
 pytestmark = pytest.mark.asyncio
@@ -71,25 +75,9 @@ async def _password_hash(user_id: int) -> str:
     return row["password_hash"]
 
 
-async def _repair_reset_tokens_table() -> None:
-    """Rebuild ``password_reset_tokens`` as migration 011 defines it.
-
-    Pre-existing bug, not the lock's: the packaged SQLite schema creates the table with ``token``, and
-    migration 011's ``ADD COLUMN token_hash TEXT UNIQUE`` fails silently (SQLite cannot add a UNIQUE
-    column), so reset-password cannot store or find a token on a fresh SQLite database.
-    """
-    with sqlite3.connect((await get_db_pool()).db_path) as conn:
-        conn.execute("DROP TABLE password_reset_tokens")
-        conn.execute(
-            "CREATE TABLE password_reset_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, "
-            "token_hash TEXT UNIQUE, expires_at TIMESTAMP NOT NULL, used_at TIMESTAMP, ip_address TEXT, "
-            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)"
-        )
-
-
 async def _reset_token(user_id: int, email: str) -> str:
     """A reset token and its stored record, as forgot-password makes them."""
-    await _repair_reset_tokens_table()
+    await repair_reset_tokens_table()
     jwt_service = get_jwt_service()
     token = jwt_service.create_password_reset_token(user_id=user_id, email=email, expires_in_hours=1)
     async with (await get_db_pool()).transaction() as conn:
