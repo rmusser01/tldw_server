@@ -478,6 +478,322 @@ async def _async_stream(source: Any, state: _StreamState) -> AsyncIterator[Any]:
             _close(source)
 
 
+# --------------------------------------------------------------------------- Anthropic format
+# For /api/v1/messages' native providers (raw HTTP, no gateway call). They share the policy
+# resolution, fail-closed rules and logging of the hooks above.
+
+_THINKING_BLOCKS = frozenset({"thinking", "redacted_thinking"})
+# deltas that can carry text the moderator already changed: dropped from a message once any text was changed or held
+_THINKING_DELTAS = frozenset({"thinking_delta", "signature_delta", "citations_delta"})
+
+
+def _moderate_anthropic_content(content: Any, policy: Any, note: Callable[[str], None]) -> Any:
+    """A user message's content: a string, text blocks, and the text inside ``tool_result`` blocks."""
+    if isinstance(content, str):
+        return _moderate_content(content, policy, note)
+    if not isinstance(content, list):
+        return content
+    blocks: list[Any] | None = None
+    for i, block in enumerate(content):
+        if not isinstance(block, dict):
+            continue
+        kind = block.get("type")
+        if kind == "text":
+            new = _moderate_content([block], policy, note)[0]
+        elif kind == "tool_result" and isinstance(block.get("content"), (str, list)):
+            inner = _moderate_anthropic_content(block["content"], policy, note)
+            new = block if inner is block["content"] else {**block, "content": inner}
+        else:
+            continue
+        if new is not block:
+            blocks = list(content) if blocks is None else blocks
+            blocks[i] = new
+    return content if blocks is None else blocks
+
+
+def moderate_anthropic_request(payload: dict, *, surface: str | None, user_id: int | None) -> dict:
+    """Input moderation for an Anthropic Messages payload: the same dict when nothing changes, a new one
+    on redact, ``LLMPolicyRefusal`` on block. Moderates ``user`` text and ``tool_result`` text; the
+    top-level ``system``, images, ``tool_use`` and assistant messages are left alone."""
+    with _input_check_refusal(surface, None, user_id):
+        policy = resolve_policy(surface, user_id)
+        messages = payload.get("messages")
+        if policy is None or not policy.input_enabled or not isinstance(messages, list):
+            return payload
+
+        def note(action: str) -> None:
+            _log_action("input", action, surface, None, user_id)
+            if action == "block":
+                raise LLMPolicyRefusal(INPUT_REFUSAL)
+
+        out: list[Any] | None = None
+        for i, message in enumerate(messages):
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            content = message.get("content")
+            new = _moderate_anthropic_content(content, policy, note)
+            if new is not content:
+                out = list(messages) if out is None else out
+                out[i] = {**message, "content": new}
+        return payload if out is None else {**payload, "messages": out}
+
+
+def _refused_message(resp: dict) -> dict:
+    """The refusal in place of ``resp``: nothing of the original survives but its ids and usage."""
+    kept = {k: v for k, v in resp.items() if k in ("id", "type", "role", "model", "usage")}
+    return {
+        **kept,
+        "content": [{"type": "text", "text": OUTPUT_REFUSAL}],
+        "stop_reason": "refusal",
+        "stop_sequence": None,
+    }
+
+
+def moderate_anthropic_response(resp: dict, *, surface: str | None, user_id: int | None) -> dict:
+    """Output moderation for an Anthropic Messages response: the same dict when nothing changes. A block
+    returns the refusal text with ``stop_reason: "refusal"``; a redact replaces the text blocks' text. Any
+    change drops ``thinking`` blocks and the changed block's ``citations``, which carry the original text.
+    Usage is the provider's. Never raises: a failure is a block."""
+    try:
+        policy = resolve_policy(surface, user_id)
+    except Exception as exc:  # fail closed: moderation is on for all we know, and nothing was checked
+        logger.warning("moderation policy resolution failed ({}) surface={}", type(exc).__name__, surface)
+        return _refused_message(resp)
+    content = resp.get("content")
+    if policy is None or not policy.output_enabled or not isinstance(content, list):
+        return resp
+    blocks: list[Any] = []
+    changed = False
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+            new, action = _moderate_output(block["text"], policy, surface, None, user_id)
+            if action == "block":
+                return _refused_message(resp)
+            if action == "redact":
+                changed = True
+                block = {**{k: v for k, v in block.items() if k != "citations"}, "text": new}
+        blocks.append(block)
+    if not changed:
+        return resp
+    return {**resp, "content": [b for b in blocks if not (isinstance(b, dict) and b.get("type") in _THINKING_BLOCKS)]}
+
+
+def _anthropic_frame(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
+
+
+def _with_data(item: str, data: dict) -> str:
+    """``item`` with its first ``data:`` line replaced; every other line (``event:``) is kept."""
+    new_data = "data: " + json.dumps(data, separators=(",", ":"))
+    out: list[str] = []
+    for line in item.strip("\n").splitlines():
+        if not line.startswith("data:"):
+            out.append(line)
+        elif new_data:
+            out.append(new_data)
+            new_data = ""
+    return "\n".join(out) + "\n\n"
+
+
+def _text_delta(index: int, text: str) -> str:
+    return _anthropic_frame(
+        "content_block_delta", {"type": "content_block_delta", "index": index, "delta": {"type": "text_delta", "text": text}}
+    )
+
+
+class _AnthropicStreamState:
+    """Logic of the Anthropic stream wrapper, shared by the sync and async wrappers. ``process`` maps one
+    source frame to the items to yield, ``finish`` the items to yield when the source ends."""
+
+    def __init__(self, policy: Any, surface: str | None, user_id: int | None):
+        self._policy = policy
+        self._moderators: dict[int, StreamModerator] = {}
+        self._open: set[int] = set()
+        self._context = (surface, user_id)
+        # Set whenever text is held or rewritten, which is nearly every text frame while the holdback is above 0.
+        # That is why later thinking/citations deltas are dropped even when nothing was redacted, and why text
+        # frames are rarely the same object. The OpenAI path does the same.
+        self.changed = False
+        self.stopped = False
+        self.blocked = False
+        self._used: set[int] = set()  # every block index seen
+        self._start_usage: dict = {}  # message_start's usage, kept for the injected block message_delta
+        self._seen_output_tokens = 0  # the provider's own last output_tokens from a message_delta
+        self._chars = 0  # text characters the provider produced so far, held text included
+
+    def _moderator(self, index: int) -> StreamModerator:
+        if index not in self._moderators:
+            surface, user_id = self._context
+            self._moderators[index] = StreamModerator(
+                self._policy, on_action=lambda action: _log_action("output", action, surface, None, user_id)
+            )
+        return self._moderators[index]
+
+    def _flush(self, only: int | None = None) -> list[str]:
+        items = self._moderators.items() if only is None else [(only, self._moderators[only])] if only in self._moderators else []
+        return [_text_delta(i, held) for i, m in sorted(items) if (held := m.flush())]
+
+    def finish(self) -> list[str]:
+        return [] if self.stopped else self._flush()
+
+    def block(self, trigger: int | None = None) -> list[str]:
+        """The refusal, a closed lifecycle for every open block, then the end of the message. The refusal goes
+        in the block that triggered the block; with none open it goes in a block index nothing has used."""
+        self.stopped = self.blocked = True
+        index = trigger if trigger in self._open else max(self._used, default=-1) + 1
+        frames = [] if index in self._open else [_anthropic_frame(
+            "content_block_start", {"type": "content_block_start", "index": index, "content_block": {"type": "text", "text": ""}})]
+        frames.append(_text_delta(index, OUTPUT_REFUSAL))
+        frames += [_anthropic_frame("content_block_stop", {"type": "content_block_stop", "index": i}) for i in sorted(self._open | {index})]
+        # The source is closed, so its own message_delta never arrives: estimate what it produced (4 chars a token).
+        usage = {**self._start_usage, "output_tokens": max(1, self._chars // 4, self._seen_output_tokens)}
+        frames.append(_anthropic_frame("message_delta", {
+            "type": "message_delta", "delta": {"stop_reason": "refusal", "stop_sequence": None}, "usage": usage}))
+        frames.append(_anthropic_frame("message_stop", {"type": "message_stop"}))
+        self._open.clear()
+        return frames
+
+    def process(self, item: Any) -> list[Any]:
+        data = _data_payload(item) if isinstance(item, str) and not self.stopped else None
+        if data is None:
+            return [item]
+        try:
+            event = json.loads(data)
+        except ValueError:
+            return [item]
+        kind = event.get("type") if isinstance(event, dict) else None
+        index = event.get("index") if isinstance(event, dict) else None
+        index = index if isinstance(index, int) and not isinstance(index, bool) else 0
+        if kind == "message_start":
+            return self._process_message_start(item, event)
+        if kind == "content_block_start":
+            self._open.add(index)
+            self._used.add(index)
+            block = event.get("content_block")
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"]:
+                return self._process_text(item, event, index, block["text"], start=True)
+        elif kind == "content_block_stop":
+            pre = self._flush(index)
+            self._open.discard(index)
+            return [*pre, item]
+        elif kind in ("message_delta", "message_stop"):
+            usage = event.get("usage")
+            tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
+            if isinstance(tokens, int) and not isinstance(tokens, bool):
+                self._seen_output_tokens = max(self._seen_output_tokens, tokens)
+            return [*self._flush(), item]
+        elif kind == "content_block_delta" and isinstance(event.get("delta"), dict):
+            delta = event["delta"]
+            if delta.get("type") in _THINKING_DELTAS:
+                return [] if self.changed else [item]
+            if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
+                return self._process_text(item, event, index, delta["text"])
+        return [item]
+
+    def _process_message_start(self, item: str, event: dict) -> list[Any]:
+        """Keep the start usage; moderate any text blocks the start frame itself carries (real providers send none)."""
+        message = event.get("message")
+        if not isinstance(message, dict):
+            return [item]
+        if isinstance(message.get("usage"), dict):
+            self._start_usage = dict(message["usage"])
+        content = message.get("content")
+        if not isinstance(content, list):
+            return [item]
+        blocks: list[Any] | None = None
+        for i, block in enumerate(content):
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"]:
+                self._chars += len(block["text"])
+                try:  # one-shot: this text has no later chunk, so nothing is held
+                    new, action = _moderate_text(block["text"], self._policy, "output") if self._policy.output_enabled else (block["text"], "pass")
+                except Exception as exc:  # fail closed
+                    logger.warning("moderation output evaluator failed ({}); blocking stream", type(exc).__name__)
+                    action = "block"
+                if action == "block":
+                    return self.block()
+                if action == "redact":
+                    blocks = list(content) if blocks is None else blocks
+                    blocks[i] = {**{k: v for k, v in block.items() if k != "citations"}, "text": new}
+        if blocks is None:
+            return [item]
+        self.changed = True
+        return [_with_data(item, {**event, "message": {**message, "content": blocks}})]
+
+    def _process_text(self, item: str, event: dict, index: int, text: str, start: bool = False) -> list[Any]:
+        self._chars += len(text)
+        moderator = self._moderator(index)
+        emit, blocked = moderator.feed(text)
+        if blocked:
+            return self.block(index)
+        if emit == text and not moderator.held:
+            return [item]
+        self.changed = True
+        if start:  # the held text follows as a delta once the block is open
+            return [_with_data(item, {**event, "content_block": {**event["content_block"], "text": emit}})]
+        if not emit:
+            return []
+        return [_with_data(item, {**event, "delta": {**event["delta"], "text": emit}})]
+
+
+class _RefusedState:
+    """A state that ignores its source and yields the refusal frames, then ends."""
+
+    def __init__(self, frames: list[str]) -> None:
+        self._frames = frames
+        self.stopped = self.blocked = True
+
+    def process(self, item: Any) -> list[str]:
+        frames, self._frames = self._frames, []
+        return frames
+
+    def finish(self) -> list[str]:
+        return self.process(None)
+
+
+class _AnthropicAsyncStream:
+    """The async wrapper. It keeps the source's ``defer_usage_until_terminal`` flag, which the
+    accounting wrappers read from the stream they are given."""
+
+    def __init__(self, source: Any, state: _AnthropicStreamState) -> None:
+        self.defer_usage_until_terminal = getattr(source, "defer_usage_until_terminal", False)
+        self._source = source
+        self._gen = _async_stream(source, state)  # type: ignore[arg-type]
+
+    def __aiter__(self) -> _AnthropicAsyncStream:
+        return self
+
+    async def __anext__(self) -> Any:
+        return await self._gen.__anext__()
+
+    async def aclose(self) -> None:
+        await self._gen.aclose()
+        aclose = getattr(self._source, "aclose", None)
+        if callable(aclose):
+            with contextlib.suppress(Exception):
+                await aclose()
+
+
+def wrap_anthropic_stream(iterator: Any, *, surface: str | None, user_id: int | None) -> Any:
+    """Moderate an Anthropic SSE stream (one frame per item, ``event:`` + ``data:`` lines). The same
+    iterator when moderation is off. Text deltas are moderated per content block; an unchanged frame is
+    yielded as the same object. On block the stream ends with a refusal delta, ``content_block_stop``
+    for every open block, ``message_delta`` (``stop_reason: "refusal"``) and ``message_stop``."""
+    try:
+        policy = resolve_policy(surface, user_id)
+    except Exception as exc:  # fail closed: nothing was checked, so the source is closed and only the refusal is sent
+        logger.warning("moderation policy resolution failed ({}) surface={}", type(exc).__name__, surface)
+        refusal = _AnthropicStreamState(None, surface, user_id).block()
+        return _AnthropicAsyncStream(iterator, _RefusedState(refusal)) if hasattr(iterator, "__aiter__") else _SyncStream(
+            iterator, _RefusedState(refusal)  # type: ignore[arg-type]
+        )
+    if policy is None or not policy.output_enabled:
+        return iterator
+    state = _AnthropicStreamState(policy, surface, user_id)
+    if hasattr(iterator, "__aiter__"):
+        return _AnthropicAsyncStream(iterator, state)
+    return _SyncStream(iterator, state)  # type: ignore[arg-type]  # same process/finish/blocked shape
+
+
 # --------------------------------------------------------------------------- hooks
 
 
