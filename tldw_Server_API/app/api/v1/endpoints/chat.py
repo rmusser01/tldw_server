@@ -5529,7 +5529,7 @@ async def create_chat_completion(
                 if use_mock_provider and provider in {"openai", "groq", "mistral"}:
                     llm_call_func = partial(_mock_chat_call, **cleaned_args)
                 else:
-                    llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
+                    llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args, llm_surface="chat.completions")
 
                 def _active_provider_uses_openai_oauth() -> bool:
                     active_handle = active_credential.get("handle")
@@ -5615,7 +5615,7 @@ async def create_chat_completion(
                             try:
                                 # Checked at the call on its own handle. The usage row keeps the first handle's
                                 # source, which differs only if the user's OAuth key was deleted mid-request (TASK-13955).
-                                refreshed_response = _chat_service.perform_chat_api_call(**refreshed_args)
+                                refreshed_response = _chat_service.perform_chat_api_call(**refreshed_args, llm_surface="chat.completions")
                                 _record_openai_oauth_retry("success")
                                 return refreshed_response
                             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as retry_exc:
@@ -5918,7 +5918,7 @@ async def create_chat_completion(
                                 raise _provider_credential_http_exception_for_code("missing_provider_credentials")
                             cleaned_args = refreshed_args
                             model = refreshed_model or model
-                            llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
+                            llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args, llm_surface="chat.completions")
                             continue
 
                         if replay_certified and stream_error_code == "provider_unavailable":
@@ -5957,7 +5957,7 @@ async def create_chat_completion(
                                 cleaned_args = refreshed_args
                                 model = refreshed_model or model
                                 selected_provider = fallback_provider
-                                llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
+                                llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args, llm_surface="chat.completions")
                                 continue
 
                         if oauth_retry_state["attempted"]:
@@ -6068,7 +6068,7 @@ async def create_chat_completion(
                                 )
                             cleaned_args = refreshed_args
                             model = refreshed_model or model
-                            llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
+                            llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args, llm_surface="chat.completions")
                     persona_telemetry: dict[str, Any] | None = None
                     assistant_reply_text = (
                         _extract_assistant_text_from_completion_payload(encoded_payload)

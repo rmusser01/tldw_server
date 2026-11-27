@@ -478,7 +478,7 @@ async def run_non_stream_call(cst: "NonStreamCall") -> dict[str, Any]:
 
                     try:
                         cst.llm_response = await cs.await_owned_worker(
-                            cs.perform_chat_api_call_async(**cst.cleaned_args),
+                            cs.perform_chat_api_call_async(**cst.cleaned_args, llm_surface="chat.completions"),
                             on_cancel_result=functools.partial(_record_fallback_use_after_cancel, cst),
                         )
                         cs._require_usable_nonstream_provider_result(cst.llm_response)
