@@ -1,5 +1,8 @@
 # Design-System Remaining Work Tracker Issue Map
 
+For loading, empty, recovery, and status UI in any tracked product area, see the
+[shared component examples](../../Design/tldw_web_design_system_component_examples.md).
+
 ## GitHub Issues
 
 | Slug | URL |
