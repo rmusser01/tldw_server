@@ -483,7 +483,8 @@ async def _async_stream(source: Any, state: _StreamState) -> AsyncIterator[Any]:
 # resolution, fail-closed rules and logging of the hooks above.
 
 _THINKING_BLOCKS = frozenset({"thinking", "redacted_thinking"})
-_THINKING_DELTAS = frozenset({"thinking_delta", "signature_delta"})
+# deltas that can carry text the moderator already changed: dropped from a message once any text was changed or held
+_THINKING_DELTAS = frozenset({"thinking_delta", "signature_delta", "citations_delta"})
 
 
 def _moderate_anthropic_content(content: Any, policy: Any, note: Callable[[str], None]) -> Any:
@@ -609,9 +610,16 @@ class _AnthropicStreamState:
         self._moderators: dict[int, StreamModerator] = {}
         self._open: set[int] = set()
         self._context = (surface, user_id)
-        self.changed = False  # a text frame was rewritten or held: thinking deltas are dropped from then on
+        # Set whenever text is held or rewritten, which is nearly every text frame while the holdback is above 0.
+        # That is why later thinking/citations deltas are dropped even when nothing was redacted, and why text
+        # frames are rarely the same object. The OpenAI path does the same.
+        self.changed = False
         self.stopped = False
         self.blocked = False
+        self._used: set[int] = set()  # every block index seen
+        self._start_usage: dict = {}  # message_start's usage, kept for the injected block message_delta
+        self._seen_output_tokens = 0  # the provider's own last output_tokens from a message_delta
+        self._chars = 0  # text characters the provider produced so far, held text included
 
     def _moderator(self, index: int) -> StreamModerator:
         if index not in self._moderators:
@@ -628,16 +636,19 @@ class _AnthropicStreamState:
     def finish(self) -> list[str]:
         return [] if self.stopped else self._flush()
 
-    def block(self) -> list[str]:
-        """The refusal, a closed lifecycle for every open block, then the end of the message."""
+    def block(self, trigger: int | None = None) -> list[str]:
+        """The refusal, a closed lifecycle for every open block, then the end of the message. The refusal goes
+        in the block that triggered the block; with none open it goes in a block index nothing has used."""
         self.stopped = self.blocked = True
-        index = min(self._open) if self._open else 0
-        frames = [] if self._open else [_anthropic_frame(
+        index = trigger if trigger in self._open else max(self._used, default=-1) + 1
+        frames = [] if index in self._open else [_anthropic_frame(
             "content_block_start", {"type": "content_block_start", "index": index, "content_block": {"type": "text", "text": ""}})]
         frames.append(_text_delta(index, OUTPUT_REFUSAL))
-        frames += [_anthropic_frame("content_block_stop", {"type": "content_block_stop", "index": i}) for i in sorted(self._open or {index})]
+        frames += [_anthropic_frame("content_block_stop", {"type": "content_block_stop", "index": i}) for i in sorted(self._open | {index})]
+        # The source is closed, so its own message_delta never arrives: estimate what it produced (4 chars a token).
+        usage = {**self._start_usage, "output_tokens": max(1, self._chars // 4, self._seen_output_tokens)}
         frames.append(_anthropic_frame("message_delta", {
-            "type": "message_delta", "delta": {"stop_reason": "refusal", "stop_sequence": None}, "usage": {"output_tokens": 0}}))
+            "type": "message_delta", "delta": {"stop_reason": "refusal", "stop_sequence": None}, "usage": usage}))
         frames.append(_anthropic_frame("message_stop", {"type": "message_stop"}))
         self._open.clear()
         return frames
@@ -653,13 +664,23 @@ class _AnthropicStreamState:
         kind = event.get("type") if isinstance(event, dict) else None
         index = event.get("index") if isinstance(event, dict) else None
         index = index if isinstance(index, int) and not isinstance(index, bool) else 0
+        if kind == "message_start":
+            return self._process_message_start(item, event)
         if kind == "content_block_start":
             self._open.add(index)
+            self._used.add(index)
+            block = event.get("content_block")
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"]:
+                return self._process_text(item, event, index, block["text"], start=True)
         elif kind == "content_block_stop":
             pre = self._flush(index)
             self._open.discard(index)
             return [*pre, item]
         elif kind in ("message_delta", "message_stop"):
+            usage = event.get("usage")
+            tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
+            if isinstance(tokens, int) and not isinstance(tokens, bool):
+                self._seen_output_tokens = max(self._seen_output_tokens, tokens)
             return [*self._flush(), item]
         elif kind == "content_block_delta" and isinstance(event.get("delta"), dict):
             delta = event["delta"]
@@ -669,14 +690,46 @@ class _AnthropicStreamState:
                 return self._process_text(item, event, index, delta["text"])
         return [item]
 
-    def _process_text(self, item: str, event: dict, index: int, text: str) -> list[Any]:
+    def _process_message_start(self, item: str, event: dict) -> list[Any]:
+        """Keep the start usage; moderate any text blocks the start frame itself carries (real providers send none)."""
+        message = event.get("message")
+        if not isinstance(message, dict):
+            return [item]
+        if isinstance(message.get("usage"), dict):
+            self._start_usage = dict(message["usage"])
+        content = message.get("content")
+        if not isinstance(content, list):
+            return [item]
+        blocks: list[Any] | None = None
+        for i, block in enumerate(content):
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"]:
+                self._chars += len(block["text"])
+                try:  # one-shot: this text has no later chunk, so nothing is held
+                    new, action = _moderate_text(block["text"], self._policy, "output") if self._policy.output_enabled else (block["text"], "pass")
+                except Exception as exc:  # fail closed
+                    logger.warning("moderation output evaluator failed ({}); blocking stream", type(exc).__name__)
+                    action = "block"
+                if action == "block":
+                    return self.block()
+                if action == "redact":
+                    blocks = list(content) if blocks is None else blocks
+                    blocks[i] = {**{k: v for k, v in block.items() if k != "citations"}, "text": new}
+        if blocks is None:
+            return [item]
+        self.changed = True
+        return [_with_data(item, {**event, "message": {**message, "content": blocks}})]
+
+    def _process_text(self, item: str, event: dict, index: int, text: str, start: bool = False) -> list[Any]:
+        self._chars += len(text)
         moderator = self._moderator(index)
         emit, blocked = moderator.feed(text)
         if blocked:
-            return self.block()
+            return self.block(index)
         if emit == text and not moderator.held:
             return [item]
         self.changed = True
+        if start:  # the held text follows as a delta once the block is open
+            return [_with_data(item, {**event, "content_block": {**event["content_block"], "text": emit}})]
         if not emit:
             return []
         return [_with_data(item, {**event, "delta": {**event["delta"], "text": emit}})]
