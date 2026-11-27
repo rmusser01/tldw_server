@@ -387,9 +387,10 @@ class RealtimeSession:
         except Exception as exc:  # noqa: BLE001 - injected pipelines may raise provider-specific errors
             if not self._generation_is_current(generation_id, response_id):
                 return
-            # A pipeline error may carry a client-safe code (e.g. llm_policy_refused) and message; others stay generic.
-            error_code = getattr(exc, "code", None)
-            error_code = error_code if isinstance(error_code, str) and error_code else None
+            # Only our own pipeline error may carry a client-safe code (e.g. llm_policy_refused) and message; others stay generic.
+            from tldw_Server_API.app.core.Audio.Realtime.default_pipeline import RealtimePipelineError
+
+            error_code = exc.code if isinstance(exc, RealtimePipelineError) and exc.code else None
             error_message = str(exc) if error_code else "Realtime pipeline failed"
             yield RealtimeErrorEvent(
                 code=error_code or "internal_error",

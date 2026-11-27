@@ -453,3 +453,35 @@ async def test_speech_chat_sync_adapter_is_admitted_to_the_pool_before_abandonme
 
 async def _noop_async() -> None:
     return None
+
+
+def test_realtime_session_does_not_forward_foreign_error_codes():
+    """Only a RealtimePipelineError's code and message reach the client; any other exception stays generic."""
+    from tldw_Server_API.app.core.Audio.Realtime.models import (
+        AppendAudioCommand,
+        CommitAudioCommand,
+        CreateResponseCommand,
+        RealtimeErrorEvent,
+    )
+    from tldw_Server_API.app.core.Audio.Realtime.session import RealtimeSession
+
+    class _ProviderError(Exception):
+        code = "x"
+
+    class _Pipeline:
+        async def transcribe_pcm16(self, audio, *, sample_rate_hz, language):
+            return "hi"
+
+        async def stream_turn(self, transcript, *, config):
+            if False:
+                yield None
+            raise _ProviderError("internal provider detail")
+
+    async def go():
+        session = RealtimeSession(pipeline=_Pipeline())
+        await session.append_audio(AppendAudioCommand(event_id="a", audio=b"\x00\x01"))
+        await session.commit_audio(CommitAudioCommand(event_id="c"))
+        return [e async for e in session.create_response(CreateResponseCommand(event_id="r"))]
+
+    errors = [e for e in asyncio.run(go()) if isinstance(e, RealtimeErrorEvent)]
+    assert [(e.code, e.message) for e in errors] == [("internal_error", "Realtime pipeline failed")]
