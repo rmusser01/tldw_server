@@ -10,7 +10,7 @@
 
 **Related task:** TASK-15659.1
 
-**Related spec/plan:** [Resume collection setup](../Design/2026-11-26-quick-ingest-collection-reuse.md)
+**Related spec/plan:** [Resume collection setup](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Design/2026-11-26-quick-ingest-collection-reuse.md)
 
 ## Decision
 
