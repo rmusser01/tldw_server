@@ -10,6 +10,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router-dom"
 import OptionNotes from "@/routes/option-notes"
 import { getFlashcardSourceMeta } from "@/components/Flashcards/utils/source-reference"
 import { Modal } from "antd"
+import { tldwAuth } from "@/services/tldw/TldwAuth"
 
 const {
   mockBgRequest,
@@ -370,14 +371,19 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     fireEvent.change(content, { target: { value: "Notes typed while the account loads." } })
 
     const save = screen.getByTestId("notes-save-button")
+    const saveAndNew = screen.getByTestId("notes-save-and-new-button")
+    expect(content).not.toHaveAttribute("readonly")
     expect(save).toBeDisabled()
-    expect(screen.getByTestId("notes-save-and-new-button")).toBeDisabled()
+    expect(saveAndNew).toBeDisabled()
+    expect(save).toHaveAccessibleDescription("Saving is unavailable until your account is verified")
+    expect(saveAndNew).toHaveAccessibleDescription("Saving is unavailable until your account is verified")
     await act(async () => { fireEvent.keyDown(content, { key: "s", ctrlKey: true }) })
     expect(createCalls()).toHaveLength(0)
     expect(mockMessageError).not.toHaveBeenCalled()
 
     await act(async () => principal.resolve({ id: 7, username: "notes-user", is_active: true }))
     expect(save).toBeEnabled()
+    expect(content).toHaveValue("Notes typed while the account loads.")
     fireEvent.click(save)
     await waitFor(() => {
       expect(createCalls()).toEqual([[expect.objectContaining({
@@ -385,6 +391,21 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
         headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "7" })
       })]])
     })
+  })
+
+  it.each(["unavailable", "inactive"])("keeps Save unavailable when the initial owner is %s", async (state) => {
+    const lookup = canonicalBoundary.getCurrentUser
+    if (state === "unavailable") lookup.mockRejectedValue(new Error("Owner lookup unavailable"))
+    else lookup.mockResolvedValue({ id: 7, username: "notes-user", is_active: false })
+    renderPage()
+    await act(async () => {})
+    const content = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+    fireEvent.change(content, { target: { value: "Keep this unowned draft" } })
+
+    expect(screen.getByTestId("notes-save-button")).toBeDisabled()
+    expect(screen.getByTestId("notes-save-and-new-button")).toBeDisabled()
+    expect(content).toHaveValue("Keep this unowned draft")
+    expect(createCalls()).toHaveLength(0)
   })
 
   it("opens an owned saved Flashcard Note source through the actual route even outside the list page", async () => {

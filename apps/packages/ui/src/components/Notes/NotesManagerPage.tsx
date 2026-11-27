@@ -3044,6 +3044,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         title={ed.title}
         content={ed.content}
         editorDisabled={editorDisabled || ed.loadingSelection || preparingDraft}
+        saveUnavailableReason={!ed.saveOwnerReady
+          ? t('option:notesSearch.saveOwnerUnverified', {
+              defaultValue: 'Saving is unavailable until your account is verified'
+            })
+          : null}
         isDirty={ed.isDirty}
         isOnline={isOnline}
         notesServerUnavailable={list.isError && isNotesServerUnavailableError(list.error)}
@@ -3071,7 +3076,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         editorKeywords={kw.editorKeywords}
         keywordOptions={kw.keywordOptions}
         saveIndicator={ed.saveIndicator}
-        saveOwnerReady={ed.saveOwnerReady}
         saveIssue={ed.saveIssue}
         saveStatusDetail={ed.saveStatusDetail}
         selectedLastSavedAt={ed.selectedLastSavedAt}

@@ -130,6 +130,7 @@ export interface NotesEditorPaneProps {
   title: string
   content: string
   editorDisabled: boolean
+  saveUnavailableReason?: string | null
   isDirty: boolean
   isOnline: boolean
   /** The notes list cannot reach the server; edits fall back to this device (NL-16). */
@@ -166,7 +167,6 @@ export interface NotesEditorPaneProps {
   editorKeywords: string[]
   keywordOptions: string[]
   saveIndicator: SaveIndicatorState
-  saveOwnerReady: boolean
   /** The one save-problem surface: conflict, error, retrying or a newer server copy. */
   saveIssue: NotesSaveIssue | null
   /** Version, last save and server for the status pill's tooltip. */
@@ -360,6 +360,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   title,
   content,
   editorDisabled,
+  saveUnavailableReason = null,
   isDirty,
   notesServerUnavailable = false,
   isOnline,
@@ -385,7 +386,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   editorKeywords,
   keywordOptions,
   saveIndicator,
-  saveOwnerReady,
   saveIssue,
   saveStatusDetail,
   selectedLastSavedAt,
@@ -713,15 +713,16 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         backlinkMessageId={backlinkMessageId}
         sourceLinks={noteRelations.sources}
         editorDisabled={editorDisabled}
+        saveUnavailableReason={saveUnavailableReason}
         openingLinkedChat={openingLinkedChat}
         editorMode={editorMode}
         hasContent={content.trim().length > 0}
         canSave={
           !editorDisabled &&
+          !saveUnavailableReason &&
           !saving &&
           (title.trim().length > 0 || content.trim().length > 0)
         }
-        saveOwnerReady={saveOwnerReady}
         canGenerateFlashcards={!editorDisabled && content.trim().length > 0}
         canOpenNotesStudio={!editorDisabled && selectedId != null && content.trim().length > 0}
         canExport={Boolean(title || content)}

@@ -35,7 +35,7 @@ interface NotesEditorHeaderProps {
   editorMode: 'edit' | 'split' | 'preview'
   hasContent: boolean
   canSave: boolean
-  saveOwnerReady?: boolean
+  saveUnavailableReason?: string | null
   canGenerateFlashcards: boolean
   canCreateStudyPack?: boolean
   canOpenNotesStudio?: boolean
@@ -79,8 +79,8 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   openingLinkedChat,
   editorMode,
   hasContent,
-  canSave: canSaveDraft,
-  saveOwnerReady = true,
+  canSave,
+  saveUnavailableReason = null,
   canGenerateFlashcards,
   canCreateStudyPack = false,
   canOpenNotesStudio = false,
@@ -112,14 +112,6 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   studioBadgeLabel = null,
 }) => {
   const { t } = useTranslation(['option', 'common'])
-  const canSave = canSaveDraft && saveOwnerReady
-  const saveDisabledTooltip = saveOwnerReady
-    ? t('option:notesSearch.toolbarSaveDisabledTooltip', {
-        defaultValue: 'Add a title or content to save'
-      })
-    : t('option:notesSearch.toolbarSaveOwnerUnavailable', {
-        defaultValue: 'Notes needs a verified account to save'
-      })
   const { token } = theme.useToken()
   const isMobileViewport = useMobile()
   const toolbarButtonSize: 'small' | 'large' = isMobileViewport ? 'large' : 'small'
@@ -511,11 +503,13 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
       >
         <Tooltip
           title={
-            !canSave
-              ? saveDisabledTooltip
+            saveUnavailableReason || (!canSave
+              ? t('option:notesSearch.toolbarSaveDisabledTooltip', {
+                  defaultValue: 'Add a title or content to save'
+                })
               : t('option:notesSearch.toolbarSaveTooltip', {
                   defaultValue: 'Save note (auto-saves after 5 seconds)'
-                })
+                }))
           }
         >
           <Button
@@ -524,6 +518,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
             onClick={onSave}
             loading={isSaving}
             disabled={!canSave || isSaving}
+            aria-description={saveUnavailableReason || undefined}
             icon={(<SaveIcon className="w-4 h-4" />)}
             className={touchTargetClass}
             aria-label={t('option:notesSearch.toolbarSaveTooltip', {
@@ -538,11 +533,13 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         {!isMobileViewport && onSaveAndNew ? (
           <Tooltip
             title={
-              !canSave
-                ? saveDisabledTooltip
+              saveUnavailableReason || (!canSave
+                ? t('option:notesSearch.toolbarSaveDisabledTooltip', {
+                    defaultValue: 'Add a title or content to save'
+                  })
                 : t('option:notesSearch.toolbarSaveAndNewTooltip', {
                     defaultValue: 'Save and start another note'
-                  })
+                  }))
             }
           >
             <Button
@@ -550,6 +547,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
               onClick={onSaveAndNew}
               loading={isSaving}
               disabled={!canSave || isSaving}
+              aria-description={saveUnavailableReason || undefined}
               icon={(<FilePlusIcon className="w-4 h-4" />)}
               className={touchTargetClass}
               data-testid="notes-save-and-new-button"

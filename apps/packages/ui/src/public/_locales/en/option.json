@@ -7219,8 +7219,5 @@
   },
   "header_closePageLauncher": {
     "message": "Close page launcher"
-  },
-  "notesSearch_toolbarSaveOwnerUnavailable": {
-    "message": "Notes needs a verified account to save"
   }
 }
