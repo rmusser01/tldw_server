@@ -10,9 +10,9 @@
 
 **Spec:** [Approved Phase 5 design](../specs/2026-10-04-web-scraping-phase-5-crawl-process-local-jobs-design.md).
 
-**Decision:** [Accepted ADR-096](../../ADR/096-web-scraping-crawl-and-process-local-job-ownership.md). No new ADR: this plan implements that ownership decision without changing it.
+**Decision:** [Accepted ADR-105](../../ADR/105-web-scraping-crawl-and-process-local-job-ownership.md). No new ADR: this plan implements that ownership decision without changing it.
 
-**Task:** TASK-15432 (planning complete); TASK-15467 (execution complete). **Status:** Approved for subagent-driven execution by the human requester on 2026-11-01; implementation and review complete. Integration, publication and the later merge request are tracked separately by TASK-15493 and its integration and review plans.
+**Task:** TASK-15432 (planning complete); TASK-15467 (execution complete). **Status:** Approved for subagent-driven execution by the human requester on 2026-11-01; implementation and review complete. Integration, publication and the later merge request are tracked separately by TASK-15690 and its integration and review plans.
 
 ## Global Constraints
 

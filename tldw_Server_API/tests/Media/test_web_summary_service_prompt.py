@@ -11,8 +11,6 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.endpoints.media import ingest_web_content as ingest_endpoint
-from tldw_Server_API.app.api.v1.endpoints.media import process_web_scraping as endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import IngestWebContentRequest
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Context_Integrity import prompt_loader
@@ -100,7 +98,6 @@ def context(
         return {"choices": [{"message": {"role": "assistant", "content": "Summary result."}, "finish_reason": "stop"}]}
 
     monkeypatch.setitem(client.app.dependency_overrides, get_request_user, user)
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user", database, raising=False)
     monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps.get_prompts_db_for_user", database, raising=False)
     monkeypatch.setattr(scraper_mod, "get_database_dir", lambda: str(tmp_path))
     state.scraper = scraper_mod.EnhancedWebScraper({})

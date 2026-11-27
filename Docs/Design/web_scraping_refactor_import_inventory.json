@@ -29,7 +29,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 22,
+        "line": 20,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Media/test_web_summary_service_prompt.py",
         "target_name": "Article_Extractor_Lib"
@@ -485,7 +485,7 @@
       {
         "import_kind": "from",
         "imported_name": "Article_Extractor_Lib",
-        "line": 4,
+        "line": 7,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_pr3436_sync_admission.py",
         "target_name": "Article_Extractor_Lib"
@@ -1161,7 +1161,7 @@
       {
         "import_kind": "from",
         "imported_name": "enhanced_web_scraping",
-        "line": 23,
+        "line": 21,
         "module": "tldw_Server_API.app.core.Web_Scraping",
         "path": "tldw_Server_API/tests/Media/test_web_summary_service_prompt.py",
         "target_name": "enhanced_web_scraping"

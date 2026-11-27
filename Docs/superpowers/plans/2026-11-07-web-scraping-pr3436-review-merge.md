@@ -1,10 +1,10 @@
 # PR 3436 Review And Merge
 
-**Task:** TASK-15493 (formerly TASK-15466). User requests rebase onto latest `dev`, address all issues
+**Task:** TASK-15690 (formerly TASK-15493 and TASK-15466). User requests rebase onto latest `dev`, address all issues
 and comments, use `superpowers:requesting-code-review` instead of Qodo, then merge.
 The requester explicitly answered "waived" to the human Change-summary gate;
 record that exception for this PR only, without inventing human-authored prose.
-ADR assessment: existing ADR-096 governs; no new architecture decision is planned.
+ADR assessment: existing ADR-105 governs; no new architecture decision is planned.
 Preserve all functionality, analyzer behavior and existing architecture.
 
 ## Stage 1: Rebase
@@ -107,3 +107,22 @@ PR-specific summary waiver recorded; no unapproved check bypass or unrelated cle
    and 193 WebSocket cases; production Bandit found no issues. Regenerated the
    four affected inventory line references and reran all 12 inventory tests
    successfully. Chat and hosted CI remain open.
+
+## November 27 Rebase
+
+1. Retain the reviewed tip locally and replay all 84 PR changes on current
+   `dev`, including the edits originally made in the two merge commits.
+   Status: complete at base `2053ec5ad4`.
+2. Resolve shared endpoint, CI and docs changes without dropping behavior.
+   Regenerate derived inventories and reserve a conflict-free identifier for
+   this PR's ADR and integration task. Run the new env-read and other backend
+   ratchets, native browser tests and affected service tests. Status: 349
+   focused contracts and endpoint tests, including both env-read ratchets,
+   and 74 native Playwright 1.65.2 tests passed. Bandit found no issues on the
+   49 PR production files. Review found the Python Chromium runner was being
+   validated using the frontend lockfile; pin only the affected Linux shards
+   and verify the separate Python runner contract. Task and ADR IDs were
+   checked against dev and open PRs, and the accepted decision is unchanged.
+3. Independently review the integration delta and publish using an exact head
+   lease. Arm protected auto-merge and verify the resulting commit on `dev`.
+   Status: pending.

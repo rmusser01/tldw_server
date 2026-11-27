@@ -9,10 +9,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
+import tldw_Server_API.app.services.enhanced_web_scraping_service as _enhanced_web_scraping_service
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
-import tldw_Server_API.app.services.enhanced_web_scraping_service as _enhanced_web_scraping_service
 from tldw_Server_API.app.core.Web_Scraping.jobs.projections import public_progress
 from tldw_Server_API.app.services.enhanced_web_scraping_service import is_platform_admin
 

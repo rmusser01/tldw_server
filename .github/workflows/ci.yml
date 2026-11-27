@@ -581,7 +581,8 @@ jobs:
 
   full-suite-linux-312-shards:
     name: Full Suite shard (Ubuntu / Python 3.12 / ${{ matrix.shard.name }})
-    runs-on: ubuntu-latest
+    # The Python Playwright dependency is independent of the frontend lockfile.
+    runs-on: ${{ matrix.shard.name == 'integrations' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
     # admission is skipped outside workflow_run, and an implicit success() treats any
@@ -2352,7 +2353,7 @@ jobs:
   full-suite-linux-313-shards:
     # Additional platforms run only for full release qualification.
     name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.shard.name == 'integrations' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
     # admission is skipped outside workflow_run, and an implicit success() treats any

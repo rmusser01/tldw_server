@@ -118,18 +118,15 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-094](094-jobs-resource-admission-and-domain-publication.md) | Accepted | Keep exclusive resource admission and monotonic authority in shared Jobs, with atomic output fences and replay receipts in domain storage. |
 | [ADR-095](095-coordinated-chroma-sdk-storage-lifetimes.md) | Proposed | Coordinate validation and complete canonical Chroma SDK lifetimes in shared storage sessions; fail closed on unsupported or incomplete existing storage. |
 | [ADR-096](096-tiered-development-and-release-ci.md) | Proposed | Run focused CI on dev PRs and require full same-commit qualification on main PRs and server publication. |
-
-
-
 | [ADR-089](089-data-table-completion-before-publication.md) | Proposed | Complete exact-attempt Data Tables Jobs before replayable owner/version-guarded Media publication. |
 | [ADR-090](090-configured-searx-egress-policy.md) | Accepted | Reuse exact server-configured origin scope for Searx while preserving ordinary URL capture policy. |
+| [ADR-105](105-web-scraping-crawl-and-process-local-job-ownership.md) | Accepted | Separate crawl and bounded process-local job state behind injected canonical execution, preserving public outcomes and compatibility while deferring durable Jobs migration. |
 | [ADR-091](091-bounded-durable-persona-session-transcripts.md) | Accepted | Retain bounded owned Persona turns across process restart without changing Chat or semantic-memory persistence. |
 | [ADR-092](092-postgresql-skills-registry-owner-boundary.md) | Proposed | Scope the shared PostgreSQL Skill registry by checkout owner; preserve unowned legacy rows and ambiguous purge archives. |
 | [ADR-093](093-postgresql-media-source-owner-identity.md) | Proposed | Scope shared PostgreSQL Media source identity by owner while preserving reserved clone URL recovery guarantees. |
 | [ADR-098](098-advisory-ui-design-drift-reporting.md) | Proposed | Report UI token, color, radius, and layout drift across all four product UI roots without blocking builds or merges. |
 | [ADR-099](099-per-user-session-cap.md) | Accepted | Cap live sessions per user; evict the least recently active, same install first; never refuse sign-in. |
 | [ADR-100](100-document-workspace-chat-association.md) | Proposed | Store Document Workspace chat links with the owned native conversation and verify access through Media and Chat. |
-| [ADR-096](096-web-scraping-crawl-and-process-local-job-ownership.md) | Accepted | Separate crawl and bounded process-local job state behind injected canonical execution, preserving public outcomes and compatibility while deferring durable Jobs migration. |
 | [ADR-104](104-account-security-lock.md) | Accepted | Let a user lock their own account: all credentials refused (423) until an emailed link unlocks it; the previous address can take the account back for 7 days. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

@@ -1,4 +1,4 @@
-# ADR-096: Web Scraping Crawl And Process-Local Job Ownership
+# ADR-105: Web Scraping Crawl And Process-Local Job Ownership
 
 **Status:** Accepted
 **Date:** 2026-10-04
@@ -123,3 +123,9 @@ record therefore moves to ADR-096, integration to TASK-15466, execution to
 TASK-15467, and Tasks 3-11 to TASK-15468 through TASK-15476. All pages of 45 open
 PRs were checked; design/planning and Tasks 1/2 keep their existing identifiers.
 The accepted decision and rationale remain unchanged, not superseded.
+
+## Identifier Correction (2026-11-27)
+
+Dev assigned ADR-096 to tiered server CI. The Phase 5 record moves to ADR-105
+without changing the accepted decision. The conflicting PR integration task
+moves to TASK-15690; its prior identifiers remain in the dated record.
