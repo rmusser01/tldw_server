@@ -148,7 +148,7 @@ async def run_non_stream_tool_autoexec(cst: "NonStreamCall") -> None:
                     continuation_start_time = cs.time.time()
                     try:
                         continuation_response = await cs.await_owned_worker(
-                            cs.perform_chat_api_call_async(**continuation_args),
+                            cs.perform_chat_api_call_async(**continuation_args, llm_surface="chat.completions"),
                             on_cancel_result=functools.partial(_completion_pipeline._record_provider_use_after_cancel, cst),
                         )
                         cs._require_usable_nonstream_provider_result(

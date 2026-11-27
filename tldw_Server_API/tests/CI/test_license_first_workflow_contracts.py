@@ -1698,6 +1698,7 @@ def test_backend_required_unit_smoke_runs_the_unit_tests() -> None:
     "guard",
     [
         "tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py",
+        "tldw_Server_API/tests/lint/test_unmoderated_llm_calls_guard.py",
         "tldw_Server_API/tests/lint/test_llm_calls_import_isolation.py",
         "tldw_Server_API/tests/lint/test_no_inline_sse_frames.py",
     ],

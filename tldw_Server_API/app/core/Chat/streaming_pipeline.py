@@ -719,7 +719,7 @@ def _queued_processor(cst: "StreamCall"):
                     cs._check_fallback_prompt_cost(refreshed_args, fallback_provider, refreshed_model or cst.model, streaming=True)
                     cst.model = refreshed_model or cst.model
                     def llm_call_func_fb():
-                        return cs.perform_chat_api_call(**refreshed_args)
+                        return cs.perform_chat_api_call(**refreshed_args, llm_surface="chat.completions")
                     try:
                         result = cs._call_stream_factory_from_isolated_worker(
                             llm_call_func_fb,
@@ -1148,7 +1148,7 @@ async def run_streaming_call(cst: "StreamCall") -> cs.StreamingResponse:
                     cst.model = cst.refreshed_model or cst.model
                     fallback_start_time = cs.time.time()
                     def llm_call_func_fb():
-                        return cs.perform_chat_api_call(**cst.cleaned_args)
+                        return cs.perform_chat_api_call(**cst.cleaned_args, llm_surface="chat.completions")
                     try:
                         cst.raw_stream_iter = await cs._call_stream_factory_bounded(
                             llm_call_func_fb,

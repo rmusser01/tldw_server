@@ -108,3 +108,22 @@ def test_a_post_call_replacement_keeps_the_provider_usage(
     assert response.status_code == 200, response.text
     assert "[redacted]" in response.text and "provider reply" not in response.text
     assert recorded_usage == [(30, 12)]
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["non-stream", "stream"])
+def test_every_chat_gateway_call_carries_chat_surface(
+    authenticated_client, mock_chacha_db, setup_dependencies, fake_anthropic, stream
+):
+    """TASK-13950.27: chat's call sites name the surface themselves; the params dict no longer carries it.
+
+    Tool continuation is not covered here: this file's stub adapter never returns tool calls.
+    """
+    surfaces = []
+    remove = gateway.add_policy_hooks(pre_call=lambda call: surfaces.append(call.surface))
+    try:
+        response = authenticated_client.post("/api/v1/chat/completions", json={**_BODY, "stream": stream})
+    finally:
+        remove()
+
+    assert response.status_code == 200, response.text
+    assert surfaces and set(surfaces) == {"chat.completions"}
