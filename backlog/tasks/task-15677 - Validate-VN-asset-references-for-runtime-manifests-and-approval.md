@@ -34,6 +34,7 @@ Runtime approval and manifest reads share the content resolver. The review trans
 Readiness uses one captured set of slots and items for both coverage and file checks. A required slot must contribute a v1 manifest entry. Portability backup behavior is covered by the existing export tests.
 
 All 265 tests in the VN asset API, manifest, readiness, repository, storage, and portability regression run passed. OpenAPI fingerprint and path checks, scoped Ruff, Bandit, pre-commit, and independent review passed. Bandit reported zero findings. The file checks cover owned registration, media metadata, path containment, and recorded byte count at the VN asset API boundary.
+Pull request [#3665](https://github.com/rmusser01/tldw_server/pull/3665) targets dev.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
