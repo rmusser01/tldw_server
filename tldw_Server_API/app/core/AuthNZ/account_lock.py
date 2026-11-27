@@ -87,14 +87,15 @@ UNLOCK_PURPOSE = "account_unlock"  # the magic-link ``purpose`` claim of an unlo
 
 _TAKE_BACK_ATTEMPTS = 3
 
-# Side effects that must never fail a lock or an unlock: session revocation, SSO-link cleanup, audit.
+# Side effects that must never fail a lock or an unlock: session revocation, lock mail, audit. The take-back's
+# SSO-link cleanup is not one: it fails the take-back, with the account locked.
 _ACCOUNT_LOCK_NONCRITICAL_EXCEPTIONS = (
     UserRegistrationException,  # SessionError from revoke_all_user_sessions; AuthNZ DatabaseError/TransactionError
     ServiceInitializationError,  # the audit service failed to start, timed out or is shutting down
     sqlite3.Error,  # SQLite statements (aiosqlite re-raises sqlite3 errors)
     asyncpg.PostgresError,  # PostgreSQL statements
     OSError,  # audit and user database files
-    RuntimeError,  # FederatedIdentityRepo.ensure_tables without the tables; the session key file checks
+    RuntimeError,  # the session key file checks
     ValueError,  # SessionManager() with a malformed SESSION_ENCRYPTION_KEY; audit tenant resolution
     TimeoutError,  # pool acquisition and statement timeouts
 )
@@ -227,10 +228,20 @@ async def _restore_address(users: AuthnzUsersRepo, user_id: int, address: str, p
 
 
 async def _take_address_back(users: AuthnzUsersRepo, user_id: int, address: str, since: datetime) -> None:
-    """Step 5: restore ``address``, end password sign-in, drop the SSO links made since ``since``.
+    """Step 5: drop the SSO links made since ``since``, restore ``address``, end password sign-in.
 
     Raises ``TakeBackUnavailableError``, with the account still locked, when the address cannot be restored.
+    Any error deleting the SSO links propagates, with the account still locked: nothing else removes an
+    intruder's link. The links go first, so such an error leaves ``previous_email`` set and the next link to
+    that address runs the whole take-back again (TASK-15679).
     """
+    links = FederatedIdentityRepo(users.db_pool)
+    await links.ensure_tables()
+    try:
+        await links.delete_identity_links_created_since(user_id=user_id, since=since)
+    except asyncpg.UndefinedTableError:
+        # PostgreSQL creates the SSO tables on first use; where the role could not, no link can exist.
+        logger.info("Take-back of user {}: no SSO link table, so no SSO links to drop", user_id)
     passwords = PasswordService()
     # A password nobody knows; the column is NOT NULL on SQLite, so it is replaced rather than cleared.
     password_hash = passwords.hash_password(passwords.generate_secure_password(64))
@@ -242,13 +253,6 @@ async def _take_address_back(users: AuthnzUsersRepo, user_id: int, address: str,
         # Already restored (a retry, or a second link to the same address): the password is replaced anyway.
         async with users.db_pool.transaction() as conn:
             await passwords.set_password(user_id, password_hash, conn, is_postgres=users._is_postgres_backend())
-    links = FederatedIdentityRepo(users.db_pool)
-    try:
-        await links.ensure_tables()
-    except _ACCOUNT_LOCK_NONCRITICAL_EXCEPTIONS as exc:
-        logger.info("Take-back of user {} dropped no SSO links: {}", user_id, type(exc).__name__)
-        return
-    await links.delete_identity_links_created_since(user_id=user_id, since=since)
 
 
 async def _clear_once(
@@ -283,7 +287,8 @@ async def clear_lock(user_id: int, *, take_back: str | None = None) -> datetime 
     nothing to unlock: not locked and no take-back, another request cleared the same lock first, or a
     take-back that lost its compare-and-set on every attempt (it leaves the account locked). Raises
     ``TakeBackUnavailableError`` when the address cannot be restored: before any write when another account
-    holds it, otherwise from step 5 with the account left locked.
+    holds it, otherwise from step 5 with the account left locked. Any other error of a take-back step
+    propagates, also with the account left locked.
     """
     user_id = int(user_id)
     users = await AuthnzUsersRepo.from_pool()
@@ -312,17 +317,23 @@ async def clear_lock(user_id: int, *, take_back: str | None = None) -> datetime 
     # 2. A take-back writes a fresh lock first, so nothing can mint a credential while it runs. When its
     #    compare-and-set loses (another unlock or take-back changed the lock meanwhile, and may have let a
     #    credential through), it locks again and redoes steps 3-7. It unlocks only by winning its own
-    #    compare-and-set; after the last attempt it leaves the account locked.
-    for attempt in range(1, _TAKE_BACK_ATTEMPTS + 1):
-        await users.force_security_lock(user_id, now=datetime.now(timezone.utc))
-        lock_value = ((await users.get_user_by_id(user_id)) or {}).get("security_locked_at")
-        valid_after = await _clear_once(users, user_id, lock_value, since, take_back=take_back)
-        if valid_after is not None:
-            return valid_after
-        logger.info("Take-back of user {} lost its compare-and-set (attempt {})", user_id, attempt)
-    await users.force_security_lock(user_id, now=datetime.now(timezone.utc))
-    logger.warning("Take-back of user {} gave up after {} attempts; the account stays locked", user_id, _TAKE_BACK_ATTEMPTS)
-    return None
+    #    compare-and-set; after the last attempt, or when a step raises, it leaves the account locked.
+    valid_after = None
+    try:
+        for attempt in range(1, _TAKE_BACK_ATTEMPTS + 1):
+            await users.force_security_lock(user_id, now=datetime.now(timezone.utc))
+            lock_value = ((await users.get_user_by_id(user_id)) or {}).get("security_locked_at")
+            valid_after = await _clear_once(users, user_id, lock_value, since, take_back=take_back)
+            if valid_after is not None:
+                return valid_after
+            logger.info("Take-back of user {} lost its compare-and-set (attempt {})", user_id, attempt)
+        logger.warning(
+            "Take-back of user {} gave up after {} attempts; the account stays locked", user_id, _TAKE_BACK_ATTEMPTS
+        )
+        return None
+    finally:
+        if valid_after is None:  # another unlock may have cleared this attempt's lock before the step failed
+            await users.force_security_lock(user_id, now=datetime.now(timezone.utc))
 
 
 def _same_address(left: Any, right: Any) -> bool:

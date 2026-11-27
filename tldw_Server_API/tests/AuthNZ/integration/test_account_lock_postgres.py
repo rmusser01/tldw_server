@@ -30,6 +30,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite.test_account_lock_schema_sqlite import 
     test_previous_address_lookup_refuses_an_ambiguous_match,
     test_recently_released_address_is_refused_in_any_letter_case,
     test_set_lock_is_first_writer_wins,
+    test_take_back_fails_closed_when_the_sso_links_cannot_be_dropped,
     test_take_back_is_refused_and_the_lock_kept_when_another_user_holds_the_address,
     test_take_back_is_refused_and_the_lock_kept_when_the_address_is_taken_while_it_runs,
     test_take_back_of_an_unlocked_account_leaves_nothing_made_while_it_ran,

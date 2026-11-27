@@ -499,6 +499,26 @@ async def test_take_back_is_refused_and_the_lock_kept_when_the_address_is_taken_
     assert "by" in taken and row["email"] == NEW and row["security_locked_at"] is not None
 
 
+async def test_take_back_fails_closed_when_the_sso_links_cannot_be_dropped(lock_db, monkeypatch) -> None:
+    """Nothing else removes an intruder's SSO link, so the take-back fails and the account ends locked, also
+    when another link cleared the take-back's lock just before. The address is not restored yet, so the
+    next link to it runs the whole take-back again (TASK-15679)."""
+    uid = lock_db.user_id
+    await _move_email(lock_db, NEW)
+    await set_lock(uid)
+
+    async def _another_unlock_wins_then_the_cleanup_fails(self) -> None:
+        await self.db_pool.execute("UPDATE users SET security_locked_at = NULL WHERE id = ?", uid)
+        raise RuntimeError("PostgreSQL identity federation schema ensure failed")
+
+    monkeypatch.setattr(FederatedIdentityRepo, "ensure_tables", _another_unlock_wins_then_the_cleanup_fails)
+    with pytest.raises(RuntimeError):
+        await clear_lock(uid, take_back=OLD)
+    row = await _row(lock_db)
+    assert row["security_locked_at"] is not None
+    assert (row["email"], row["previous_email"]) == (NEW, OLD)
+
+
 async def test_a_second_take_back_to_the_restored_address_still_replaces_the_password(lock_db) -> None:
     uid = lock_db.user_id
     await _move_email(lock_db, NEW)

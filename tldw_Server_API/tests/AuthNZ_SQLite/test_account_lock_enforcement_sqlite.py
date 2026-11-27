@@ -6,8 +6,10 @@ import json
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 
+import pyotp
 import pytest
 from fastapi import Depends
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
@@ -33,6 +35,8 @@ from tldw_Server_API.tests.AuthNZ_SQLite._account_lock_fixtures import (
     unlock_user,
 )
 from tldw_Server_API.tests.AuthNZ_SQLite._sessions_http_fixtures import bearer, login, session_id_of
+from tldw_Server_API.tests.AuthNZ_SQLite.test_mfa_login_sqlite import PASSWORD as MFA_PASSWORD
+from tldw_Server_API.tests.AuthNZ_SQLite.test_mfa_login_sqlite import _mfa_user
 
 pytestmark = pytest.mark.asyncio
 
@@ -156,6 +160,23 @@ async def test_refresh_of_a_locked_account_is_423_not_500(two_user_client) -> No
     tokens = login(two_user_client.client, "alice", two_user_client.password)
     await set_lock(two_user_client.alice_id)
     assert_locked(two_user_client.client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}))
+
+
+async def test_mfa_sign_in_of_an_account_locked_after_the_password_step_is_423(tmp_path, monkeypatch) -> None:
+    """The password step left an MFA challenge; the account is locked before the second factor is sent."""
+    pool, user_id, secret = await _mfa_user(tmp_path, monkeypatch)
+    from tldw_Server_API.app.main import app
+
+    with TestClient(app) as client:
+        challenge = client.post("/api/v1/auth/login", data={"username": "mfa-user", "password": MFA_PASSWORD})
+        assert challenge.status_code == 202 and challenge.json()["mfa_required"] is True, challenge.text
+        await lock_user(user_id)
+        response = client.post(
+            "/api/v1/auth/mfa/login",
+            json={"session_token": challenge.json()["session_token"], "mfa_token": pyotp.TOTP(secret).now()},
+        )
+        assert_locked(response)
+        assert await AuthnzSessionsRepo(pool).get_active_sessions_for_user(user_id) == []
 
 
 async def test_reset_password_token_minted_before_the_lock_is_refused_while_locked(two_user_client) -> None:
