@@ -128,8 +128,8 @@ function BreakdownCard({ title, rows, keyLabel }: { title: string; rows: RouterA
             <TableRow>
               <TableHead>{keyLabel}</TableHead>
               <TableHead className="text-right">Requests</TableHead>
-              <TableHead className="text-right" title="Prompt tokens processed">PP</TableHead>
-              <TableHead className="text-right" title="Tokens generated (completion)">TG</TableHead>
+              <TableHead className="text-right" aria-label="Prompt Tokens" title="Prompt tokens processed">PP</TableHead>
+              <TableHead className="text-right" aria-label="Total Generated Tokens" title="Tokens generated (completion)">TG</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -760,8 +760,8 @@ export default function UsagePage() {
                         <TableRow>
                           <TableHead>Provider</TableHead>
                           <TableHead className="text-right">Requests</TableHead>
-                          <TableHead className="text-right" title="Prompt tokens processed">PP</TableHead>
-                          <TableHead className="text-right" title="Tokens generated (completion)">TG</TableHead>
+                          <TableHead className="text-right" aria-label="Prompt Tokens" title="Prompt tokens processed">PP</TableHead>
+                          <TableHead className="text-right" aria-label="Total Generated Tokens" title="Tokens generated (completion)">TG</TableHead>
                           <TableHead className="text-right">Cost USD</TableHead>
                           <TableHead className="text-right">Latency ms</TableHead>
                           <TableHead className="text-right">Errors</TableHead>
@@ -945,8 +945,8 @@ export default function UsagePage() {
                           <TableHead>Model</TableHead>
                           <TableHead>Provider</TableHead>
                           <TableHead className="text-right">Requests</TableHead>
-                          <TableHead className="text-right" title="Prompt tokens processed">PP</TableHead>
-                          <TableHead className="text-right" title="Tokens generated (completion)">TG</TableHead>
+                          <TableHead className="text-right" aria-label="Prompt Tokens" title="Prompt tokens processed">PP</TableHead>
+                          <TableHead className="text-right" aria-label="Total Generated Tokens" title="Tokens generated (completion)">TG</TableHead>
                           <TableHead className="text-right">Cost USD</TableHead>
                           <TableHead className="text-right">Latency ms</TableHead>
                           <TableHead className="text-right">Errors</TableHead>
@@ -1032,8 +1032,8 @@ export default function UsagePage() {
                         <TableRow>
                           <TableHead>Conversation</TableHead>
                           <TableHead className="text-right">Requests</TableHead>
-                          <TableHead className="text-right" title="Prompt tokens processed">PP</TableHead>
-                          <TableHead className="text-right" title="Tokens generated (completion)">TG</TableHead>
+                          <TableHead className="text-right" aria-label="Prompt Tokens" title="Prompt tokens processed">PP</TableHead>
+                          <TableHead className="text-right" aria-label="Total Generated Tokens" title="Tokens generated (completion)">TG</TableHead>
                           <TableHead className="text-right">Cost USD</TableHead>
                           <TableHead className="text-right">Latency ms</TableHead>
                           <TableHead className="text-right">Errors</TableHead>
