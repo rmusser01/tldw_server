@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Empty,
   Form,
@@ -19,6 +18,7 @@ import {
 } from "antd"
 import { CalendarClock, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives/Alert"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import { dedupeTags } from "@/utils/tag-identity"
 import type {
@@ -316,13 +316,15 @@ export const DigestSchedulesPanel: React.FC = () => {
 
       {error && (
         <Alert
-          type="error"
-          title={error}
-          action={
-            <Button size="small" onClick={() => void loadSchedules()}>
-              {t("common:retry", "Retry")}
-            </Button>
-          }
+          variant="error"
+          role="status"
+          aria-live="off"
+          title={<span role="alert" className="text-text">{error}</span>}
+          action={{
+            label: t("common:retry", "Retry"),
+            onClick: () => void loadSchedules(),
+            variant: "outline"
+          }}
         />
       )}
 

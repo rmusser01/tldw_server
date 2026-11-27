@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Alert,
   Button,
   Card,
   Checkbox,
@@ -9,7 +8,6 @@ import {
   List,
   message,
   Radio,
-  Result,
   Spin,
   Steps,
   Upload
@@ -23,6 +21,8 @@ import {
   AlertCircle
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives/Alert"
+import { StatePanel } from "@/components/ui/state"
 import { useCollectionsStore } from "@/store/collections"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import { useSelectionKeyboard } from "@/hooks/useSelectionKeyboard"
@@ -354,16 +354,55 @@ const ImportSection: React.FC = () => {
         ? 1
         : 2
 
+  const importTitle = t("collections:import.title", "Import")
+  const processingMessage = t("collections:import.processing", "Processing file...")
+  const progressTitle = importJob
+    ? t("collections:import.currentStatus", "Current status: {{status}}", {
+        status: importStatusLabel(importJob.status)
+      })
+    : null
+  const progressMessage = importJob?.progress_message || processingMessage
+  const resultTitle = importResult
+    ? t("collections:import.complete", "Import Complete")
+    : t("collections:import.failedTitle", "Import Failed")
+  const resultMessage = importResult
+    ? t(
+        "collections:import.resultSummary",
+        "Imported: {{imported}}, Updated: {{updated}}, Skipped: {{skipped}}",
+        {
+          imported: importResult.imported,
+          updated: importResult.updated,
+          skipped: importResult.skipped
+        }
+      )
+    : importError ||
+      t("collections:import.failed", "The import job did not complete successfully.")
+  const resultErrorCount = importResult?.errors.length ?? 0
+  const resultErrors =
+    resultErrorCount > 0
+      ? t("collections:import.errorsSummary", "Import errors: {{count}}", { count: resultErrorCount })
+      : ""
+  const completedState = resultErrorCount > 0 ? "degraded" : "ready"
+  const importAnnouncement =
+    importWizardStep === "result"
+      ? [resultTitle, resultMessage, resultErrors].filter(Boolean).join(". ")
+      : importInProgress
+        ? [progressTitle, progressMessage].filter(Boolean).join(". ")
+        : ""
+
   return (
     <Card
       title={
         <span className="flex items-center gap-2">
           <UploadIcon className="h-5 w-5" />
-          {t("collections:import.title", "Import")}
+          {importTitle}
         </span>
       }
     >
       <Steps current={currentStep} items={stepItems} size="small" className="mb-6" />
+      <p role="status" aria-label={importTitle} aria-atomic="true" className="sr-only">
+        {importAnnouncement}
+      </p>
 
       {importWizardStep === "source" && (
         <div className="space-y-3">
@@ -392,15 +431,19 @@ const ImportSection: React.FC = () => {
       {importWizardStep === "upload" && (
         <div className="space-y-4">
           <Alert
-            type="info"
-            showIcon
-            title={t("collections:import.selectedSource", "Source: {{source}}", {
-              source: importSource
-                ? t(`collections:import.sources.${importSource}.label`, importSource)
-                : t("collections:import.sources.auto.label", "Auto-detect")
-            })}
-            description={describeExpectedFormats(importSource)}
-          />
+            aria-live="off"
+            title={
+              <span className="text-text">
+                {t("collections:import.selectedSource", "Source: {{source}}", {
+                  source: importSource
+                    ? t(`collections:import.sources.${importSource}.label`, importSource)
+                    : t("collections:import.sources.auto.label", "Auto-detect")
+                })}
+              </span>
+            }
+          >
+            <span className="text-text">{describeExpectedFormats(importSource)}</span>
+          </Alert>
 
           <Checkbox
             checked={mergeTags}
@@ -426,7 +469,7 @@ const ImportSection: React.FC = () => {
               <div className="py-8">
                 <Spin size="large" />
                 <p className="mt-4 text-text-muted">
-                  {t("collections:import.processing", "Processing file...")}
+                  {processingMessage}
                 </p>
               </div>
             ) : (
@@ -449,16 +492,11 @@ const ImportSection: React.FC = () => {
 
           {importInProgress && importJob && (
             <Alert
-              type="info"
-              showIcon
-              title={t("collections:import.currentStatus", "Current status: {{status}}", {
-                status: importStatusLabel(importJob.status)
-              })}
-              description={
-                importJob.progress_message ||
-                t("collections:import.processing", "Processing file...")
-              }
-            />
+              aria-live="off"
+              title={<span className="text-text">{progressTitle}</span>}
+            >
+              <span className="text-text">{progressMessage}</span>
+            </Alert>
           )}
 
           {importError && (
@@ -475,67 +513,45 @@ const ImportSection: React.FC = () => {
       )}
 
       {importWizardStep === "result" && (
-        <>
-          {importResult ? (
-            <div className="space-y-3">
-              <Result
-                status={importResult.errors.length === 0 ? "success" : "warning"}
-                title={t("collections:import.complete", "Import Complete")}
-                subTitle={t(
-                  "collections:import.resultSummary",
-                  "Imported: {{imported}}, Updated: {{updated}}, Skipped: {{skipped}}",
-                  {
-                    imported: importResult.imported,
-                    updated: importResult.updated,
-                    skipped: importResult.skipped
-                  }
-                )}
-                extra={[
-                  <Button key="done" type="primary" onClick={resetImportWizard}>
-                    {t("collections:import.importMore", "Import More")}
-                  </Button>
-                ]}
-              />
-              {importResult.errors.length > 0 && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  title={t("collections:import.topErrorsTitle", "Top import errors")}
-                  description={
-                    <ul className="mb-0 list-disc pl-5">
-                      {importResult.errors.slice(0, MAX_IMPORT_ERRORS_TO_SHOW).map((err, index) => (
-                        <li key={`${err}-${index}`} className="text-sm">
-                          {err}
-                        </li>
-                      ))}
-                      {importResult.errors.length > MAX_IMPORT_ERRORS_TO_SHOW && (
-                        <li className="text-sm">
-                          {t("collections:import.moreErrors", "+{{count}} more errors", {
-                            count: importResult.errors.length - MAX_IMPORT_ERRORS_TO_SHOW
-                          })}
-                        </li>
-                      )}
-                    </ul>
-                  }
-                />
-              )}
-            </div>
-          ) : (
-            <Result
-              status="error"
-              title={t("collections:import.failedTitle", "Import Failed")}
-              subTitle={
-                importError ||
-                t("collections:import.failed", "The import job did not complete successfully.")
+        <div className="space-y-3 pt-4">
+          <StatePanel
+            state={importResult ? completedState : "error"}
+            title={resultTitle}
+            message={resultMessage}
+            className="border-border"
+            primaryAction={{
+              label: importResult
+                ? t("collections:import.importMore", "Import More")
+                : t("collections:import.tryAgain", "Try Again"),
+              onClick: resetImportWizard
+            }}
+          />
+          {importResult && resultErrorCount > 0 && (
+            <Alert
+              variant="warning"
+              role="status"
+              aria-live="off"
+              title={
+                <span className="text-text">
+                  {t("collections:import.topErrorsTitle", "Top import errors")}
+                </span>
               }
-              extra={[
-                <Button key="retry" type="primary" onClick={resetImportWizard}>
-                  {t("collections:import.tryAgain", "Try Again")}
-                </Button>
-              ]}
-            />
+            >
+              <ul className="mb-0 list-disc pl-5 text-text">
+                {importResult.errors.slice(0, MAX_IMPORT_ERRORS_TO_SHOW).map((err, index) => (
+                  <li key={`${err}-${index}`}>{err}</li>
+                ))}
+                {resultErrorCount > MAX_IMPORT_ERRORS_TO_SHOW && (
+                  <li>
+                    {t("collections:import.moreErrors", "+{{count}} more errors", {
+                      count: resultErrorCount - MAX_IMPORT_ERRORS_TO_SHOW
+                    })}
+                  </li>
+                )}
+              </ul>
+            </Alert>
           )}
-        </>
+        </div>
       )}
     </Card>
   )
@@ -1180,39 +1196,42 @@ const ExportSection: React.FC = () => {
 
         {exportFormat === "zip" && selectedIds.length > 0 && (
           <Alert
-            type="warning"
-            showIcon
-            title={t(
-              "collections:export.zipSelectionWarning",
-              "ZIP export doesn't support item selection"
-            )}
-            description={
-              <span>
+            variant="warning"
+            role="status"
+            aria-live="off"
+            title={
+              <span role="alert" className="text-text">
                 {t(
-                  "collections:export.zipSelectionHint",
-                  "To export selected items, switch to JSONL format or clear your selection to export all items as ZIP."
+                  "collections:export.zipSelectionWarning",
+                  "ZIP export doesn't support item selection"
                 )}
-                <Button
-                  type="link"
-                  size="small"
-                  className="ml-1 p-0"
-                  onClick={() => setExportFormat("jsonl")}
-                >
-                  {t("collections:export.switchToJsonl", "Switch to JSONL")}
-                </Button>
               </span>
             }
-          />
+            secondaryAction={{
+              label: t("collections:export.switchToJsonl", "Switch to JSONL"),
+              onClick: () => setExportFormat("jsonl")
+            }}
+          >
+            <span className="text-text">
+              {t(
+                "collections:export.zipSelectionHint",
+                "To export selected items, switch to JSONL format or clear your selection to export all items as ZIP."
+              )}
+            </span>
+          </Alert>
         )}
 
         {exportFormat === "zip" && applyReadingFilters && hasDateFilter && selectedIds.length === 0 && (
           <Alert
-            type="warning"
-            showIcon
-            title={t(
-              "collections:export.dateZipUnsupported",
-              "Date range filter export is available in JSONL mode only."
-            )}
+            variant="warning"
+            title={
+              <span className="text-text">
+                {t(
+                  "collections:export.dateZipUnsupported",
+                  "Date range filter export is available in JSONL mode only."
+                )}
+              </span>
+            }
           />
         )}
 
