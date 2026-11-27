@@ -84,7 +84,7 @@ class _Svc:
     def __init__(self, policy: _Policy):
         self._p = policy
 
-    def get_effective_policy(self, user_id: str):
+    def get_effective_policy(self, user_id: str, surface=None):
         return self._p
 
     def evaluate_action(self, text: str, policy: _Policy, phase: str) -> Tuple[str, Optional[str], Optional[str], Optional[str]]:
@@ -222,7 +222,7 @@ def test_output_guardian_proxy_receives_character_chat_type_for_continued_charac
                 proxy_chat_types.append(chat_type)
                 self._base = base
 
-            def get_effective_policy(self, user_id: str | None = None):
+            def get_effective_policy(self, user_id: str | None = None, surface=None):
                 return self._base.get_effective_policy(user_id)
 
             def __getattr__(self, name: str):
@@ -310,7 +310,7 @@ def test_output_guardian_proxy_receives_regular_chat_type_for_resumed_default_as
                 proxy_chat_types.append(chat_type)
                 self._base = base
 
-            def get_effective_policy(self, user_id: str | None = None):
+            def get_effective_policy(self, user_id: str | None = None, surface=None):
                 return self._base.get_effective_policy(user_id)
 
             def __getattr__(self, name: str):

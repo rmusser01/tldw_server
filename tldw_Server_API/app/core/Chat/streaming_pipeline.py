@@ -474,7 +474,10 @@ async def tracked_streaming_generator(cst: "StreamCall"):
                 cst.req_user_id = getattr(cst.request.state, "user_id", None)
         except cs._CHAT_NONCRITICAL_EXCEPTIONS:
             cst.req_user_id = None
-        cst.eff_policy = cst.moderation.get_effective_policy(str(cst.req_user_id) if cst.req_user_id is not None else cst.client_id)
+        cst.eff_policy = cst.moderation.get_effective_policy(
+            str(cst.req_user_id) if cst.req_user_id is not None else cst.client_id,
+            surface="chat.completions",
+        )
 
         cst.mandatory_moderation_audit_tasks: list[asyncio.Task[Any]] = []
         cst.stream_id = _uuid.uuid4().hex

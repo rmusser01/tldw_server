@@ -193,6 +193,29 @@ def test_direct_adapter_reference_counts() -> None:
     assert count_module(ast.parse("get_registry().get_adapter(p).chat(r)")) == 1
 
 
+def test_every_surface_literal_is_registered() -> None:
+    from tldw_Server_API.app.core.Moderation.surfaces import KNOWN_SURFACES
+
+    problems = []
+    for path, tree in parse_tree(APP_ROOT.resolve()).items():
+        relative = path.relative_to(APP_ROOT.resolve())
+        if "tests" in relative.parts[:-1]:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for kw in node.keywords:
+                if kw.arg != _SURFACE:
+                    continue
+                v = kw.value
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    if v.value not in KNOWN_SURFACES:
+                        problems.append(f"{relative.as_posix()}:{node.lineno}: unknown surface {v.value!r}")
+                elif not isinstance(v, ast.Name):
+                    problems.append(f"{relative.as_posix()}:{node.lineno}: llm_surface must be a literal or a forwarded parameter")
+    assert problems == [], "\n".join(problems)
+
+
 # --- The ratchet --------------------------------------------------------------------------------
 
 

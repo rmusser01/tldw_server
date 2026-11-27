@@ -386,8 +386,8 @@ class GuardianModerationProxy:
         self._dep_uid = dependent_user_id
         self._chat_type = str(chat_type or "regular").strip().lower() or "regular"
 
-    def get_effective_policy(self, user_id: str | None = None) -> ModerationPolicy:
-        base_policy = self._base.get_effective_policy(user_id)
+    def get_effective_policy(self, user_id: str | None = None, *, surface: str | None) -> ModerationPolicy:
+        base_policy = self._base.get_effective_policy(user_id, surface=surface)
         try:
             return self._engine.build_moderation_policy_overlay(
                 self._dep_uid,

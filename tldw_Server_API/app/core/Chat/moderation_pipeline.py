@@ -295,7 +295,8 @@ async def _apply_output_moderation(
         moderation = moderation_getter()
         req_user_id = _request_state_attr(runtime.request, "user_id")
         eff_policy = moderation.get_effective_policy(
-            str(req_user_id) if req_user_id is not None else runtime.client_id
+            str(req_user_id) if req_user_id is not None else runtime.client_id,
+            surface="chat.completions",
         )
         if not eff_policy.enabled or not eff_policy.output_enabled:
             return None
@@ -799,7 +800,10 @@ async def _apply_stream_output_policies(
                 req_user_id = getattr(cst.request.state, "user_id", None)
         except cs._CHAT_NONCRITICAL_EXCEPTIONS:
             req_user_id = None
-        eff_policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else cst.client_id)
+        eff_policy = moderation.get_effective_policy(
+            str(req_user_id) if req_user_id is not None else cst.client_id,
+            surface="chat.completions",
+        )
         if full_reply and eff_policy.enabled and eff_policy.output_enabled:
             action = None
             redacted = None

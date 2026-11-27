@@ -29,6 +29,7 @@ from dataclasses import dataclass, replace
 from loguru import logger
 
 from tldw_Server_API.app.core.config import load_and_log_configs, load_comprehensive_config
+from tldw_Server_API.app.core.config_sections.moderation import parse_surface_enabled
 from tldw_Server_API.app.core.Moderation.models import (
     ModerationEvaluationResult,
     ModerationPolicy,
@@ -73,6 +74,8 @@ class ModerationService:
     _UNCATEGORIZED_CATEGORY = PolicyEvaluator._UNCATEGORIZED_CATEGORY
     _ALLOWED_REGEX_FLAGS = set(PolicyCompiler._ALLOWED_REGEX_FLAGS)
     _ALLOWED_ACTIONS = set(PolicyCompiler._ALLOWED_ACTIONS)
+    # Replaced (never mutated) on each policy load; the class default serves instances built without __init__.
+    _surface_enabled: dict[str, bool] = {}
 
     def __init__(self) -> None:
         self._config = load_and_log_configs() or {}
@@ -122,6 +125,11 @@ class ModerationService:
     def _load_global_policy(self) -> ModerationPolicy:
         mod_cfg = self._load_moderation_config_section()
         resolved = self._resolve_moderation_config(mod_cfg)
+        try:
+            self._surface_enabled = parse_surface_enabled(mod_cfg)
+        except ValueError as exc:
+            logger.warning("Ignoring [Moderation] surface keys: {}", exc)
+            self._surface_enabled = {}
         self._user_overrides_path = resolved.user_overrides_path
         self._blocklist_path = resolved.blocklist_path
         self._runtime_overrides_path = resolved.runtime_overrides_path
@@ -513,9 +521,16 @@ class ModerationService:
         except _MODERATION_NONCRITICAL_EXCEPTIONS:
             logger.warning("Failed to save runtime overrides file")
 
-    def get_effective_policy(self, user_id: str | None) -> ModerationPolicy:
-        """Return policy after applying per-user overrides if enabled."""
+    def get_effective_policy(self, user_id: str | None, *, surface: str | None) -> ModerationPolicy:
+        """Return policy after applying per-user overrides if enabled.
+
+        ``surface`` narrows the default policy only: a ``[Moderation] surface.<id> = false`` key turns
+        the global default off for that surface. An explicit per-user ``enabled`` override still
+        coalesces over it, and the Guardian overlay still forces it on. ``None`` means no narrowing.
+        """
         policy = self._global_policy
+        if surface is not None and policy.enabled and self._surface_enabled.get(surface, True) is False:
+            policy = replace(policy, enabled=False)
         if not policy.per_user_overrides or not user_id:
             return policy
         override = self._user_overrides.get(str(user_id))
@@ -635,7 +650,7 @@ class ModerationService:
 
     def effective_policy_snapshot(self, user_id: str | None) -> dict[str, object]:
         """Return a serializable dict of the effective policy for inspection."""
-        return self.get_effective_policy(user_id).to_dict()
+        return self.get_effective_policy(user_id, surface=None).to_dict()
 
     @staticmethod
     def _parse_bool_value(v: object) -> bool | None:

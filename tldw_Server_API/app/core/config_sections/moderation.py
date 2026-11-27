@@ -5,6 +5,10 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from loguru import logger
+
+from tldw_Server_API.app.core.Moderation.surfaces import KNOWN_SURFACES
+
 from .precedence import resolve
 from .types import ConfigParserLike
 
@@ -33,6 +37,10 @@ class ModerationConfig:
     pii_enabled: bool
 
 
+_SURFACE_PREFIX = "surface."
+_warned_unknown_surfaces: set[str] = set()
+
+
 def _get_raw(
     config_parser: ConfigParserLike,
     env_map: Mapping[str, str],
@@ -57,6 +65,23 @@ def _parse_bool(raw: object, *, option: str, default: bool) -> bool:
         return False
     accepted = ", ".join(sorted(_TRUE_VALUES | _FALSE_VALUES))
     raise ValueError(f"Invalid Moderation.{option} value {raw!r}; expected one of: {accepted}")
+
+
+def parse_surface_enabled(options: Mapping[str, object]) -> dict[str, bool]:
+    """Read ``surface.<id> = true|false`` entries; an unknown id warns once and is ignored."""
+    out: dict[str, bool] = {}
+    for key, raw in options.items():
+        name = str(key).strip().lower()
+        if not name.startswith(_SURFACE_PREFIX):
+            continue
+        surface = name[len(_SURFACE_PREFIX):]
+        if surface not in KNOWN_SURFACES:
+            if surface not in _warned_unknown_surfaces:
+                _warned_unknown_surfaces.add(surface)
+                logger.warning("Ignoring unknown moderation surface key {!r} in [Moderation]", key)
+            continue
+        out[surface] = _parse_bool(raw, option=name, default=True)
+    return out
 
 
 def _parse_int(raw: object, *, option: str, default: int) -> int:
@@ -265,4 +290,46 @@ def load_moderation_config(
         blocklist_write_debounce_ms=blocklist_write_debounce_ms,
         categories_enabled=categories_enabled,
         pii_enabled=pii_enabled,
+    )
+
+
+@dataclass(frozen=True)
+class ModerationSurfaceConfig:
+    stream_buffer_chars: int
+    surface_enabled: dict[str, bool]
+
+
+def load_moderation_surface_config(
+    config_parser: ConfigParserLike,
+    env: Mapping[str, str] | None = None,
+) -> ModerationSurfaceConfig:
+    """Per-surface keys and the output stream buffer size.
+
+    Kept apart from ``load_moderation_config`` so that loader's characterisation golden is unchanged.
+    """
+    env_map: Mapping[str, str] = env if env is not None else os.environ
+    stream_buffer_chars = _parse_int(
+        _get_raw(
+            config_parser,
+            env_map,
+            env_key="MODERATION_STREAM_BUFFER_CHARS",
+            option="stream_buffer_chars",
+            default="1024",
+        ),
+        option="stream_buffer_chars",
+        default=1024,
+    )
+    if stream_buffer_chars <= 0:
+        raise ValueError(f"Invalid Moderation.stream_buffer_chars value {stream_buffer_chars!r}; must be positive")
+    surface_options: dict[str, object] = {}
+    if config_parser.has_section("Moderation"):  # type: ignore[attr-defined]
+        surface_options = {
+            name: config_parser.get("Moderation", name, fallback="")
+            for name in config_parser.options("Moderation")  # type: ignore[attr-defined]
+            if name.lower().startswith(_SURFACE_PREFIX)
+        }
+
+    return ModerationSurfaceConfig(
+        stream_buffer_chars=stream_buffer_chars,
+        surface_enabled=parse_surface_enabled(surface_options),
     )

@@ -976,7 +976,7 @@ async def test_moderation_adapter_sanitizes_invalid_custom_pattern_logs(monkeypa
         redact_replacement = "[REDACTED]"
 
     class _Service:
-        def get_effective_policy(self, _user_id):
+        def get_effective_policy(self, _user_id, surface=None):
             return _Policy()
 
         def redact_text_with_count(self, text, _policy):
