@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     await_bounded_sync_call,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMPolicyRefusal, NetworkError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
 from tldw_Server_API.app.core.http_client import RetryPolicy, astream_bytes, create_async_client
 from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
@@ -467,14 +467,17 @@ def _moderate_request(target: ResolvedExecutionTarget, payload: dict[str, Any]) 
         if target.provider == "anthropic":
             return moderate_anthropic_request(payload, surface=_SURFACE, user_id=user_id)
         messages = moderate_input_messages_for_surface(payload["messages"], surface=_SURFACE, user_id=user_id)
-    except LLMPolicyRefusal:
+    except Exception:  # noqa: BLE001 - a refusal, or a policy that could not be resolved: fail closed, terminal
         _fail("llm_policy_refused")
     return payload if messages is payload["messages"] else {**payload, "messages": messages}
 
 
 def _moderate_text(text: str) -> str:
     """The generated document text: redacted, or a refusal. Unchanged and unevaluated when moderation is off."""
-    moderated, action = moderate_output_text_for_surface(text, surface=_SURFACE, user_id=current_llm_user_id())
+    try:
+        moderated, action = moderate_output_text_for_surface(text, surface=_SURFACE, user_id=current_llm_user_id())
+    except Exception:  # noqa: BLE001 - the policy could not be resolved: fail closed, terminal, not a retried worker error
+        _fail("llm_policy_refused")
     if action == "block":
         _fail("llm_policy_refused")
     return moderated

@@ -438,3 +438,85 @@ async def test_web_extraction_refusal_is_not_retried(moderation_hooks, provider)
     with pytest.raises(LLMPolicyRefusal):
         await _web("forbidden words")
     assert provider.requests == []
+
+
+# ---- refusals reach the route as a 400, never a retryable 502 or a null answer (fix round 1) -------------------
+
+
+async def test_vn_turn_refusal_is_terminal_400_and_never_model_failed():
+    from tldw_Server_API.app.api.v1.endpoints.vn_play import _http_error_for_service_exception
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
+    from tldw_Server_API.app.core.VN_Play.service import VNPlayService, VNPlayTurnError
+
+    class Adapter:
+        def __init__(self, error: Exception) -> None:
+            self.error = error
+
+        async def generate_turn(self, _context: Any) -> Any:
+            raise self.error
+
+    db = CharactersRAGDB(":memory:", client_id="vn-refusal-test")
+    try:
+        repo = VNPlayRepository.initialized(db)
+        refusing = VNPlayService(repo=repo, owner_user_id=42, adapter=Adapter(LLMPolicyRefusal("Input violates moderation policy")))
+        session = refusing.create_session(
+            mode="freeform", title="t", primary_character_id=1, vn_asset_pack_id=10,
+            content_rating="general", seed="s", settings={},
+        )
+
+        with pytest.raises(VNPlayTurnError, match="llm_policy_refused") as submit:
+            await refusing.submit_turn(session.id, input_text="hi", client_scene_version=0, idempotency_key="k1")
+        error = _http_error_for_service_exception(submit.value)
+        assert error.status_code == 400 and error.detail["retryable"] is False
+        assert refusing.get_session(session.id).active_turn_request_id is None
+        # Terminal: the refused turn is not offered for retry (only model_failed/parse_failed/abandoned are).
+        with pytest.raises(VNPlayTurnError, match="retry_last_turn_not_failed"):
+            await refusing.retry_last_turn(
+                session.id, client_scene_version=refusing.get_session(session.id).scene_version, idempotency_key="k2"
+            )
+
+        # The retry path: a turn that failed for a provider reason, retried into a refusal, ends the same way.
+        failing = VNPlayService(repo=repo, owner_user_id=42, adapter=Adapter(RuntimeError("down")))
+        other = failing.create_session(
+            mode="freeform", title="t2", primary_character_id=1, vn_asset_pack_id=10,
+            content_rating="general", seed="s", settings={},
+        )
+        with pytest.raises(VNPlayTurnError, match="model_failed"):
+            await failing.submit_turn(other.id, input_text="hi", client_scene_version=0, idempotency_key="k3")
+        retrying = VNPlayService(repo=repo, owner_user_id=42, adapter=Adapter(LLMPolicyRefusal("x")))
+        with pytest.raises(VNPlayTurnError, match="llm_policy_refused"):
+            await retrying.retry_last_turn(
+                other.id, client_scene_version=retrying.get_session(other.id).scene_version, idempotency_key="k4"
+            )
+    finally:
+        db.close_connection()
+
+
+async def test_rpg_rules_answer_refusal_propagates_as_400(moderation_hooks, provider):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints.rpg import _map_error
+    from tldw_Server_API.app.core.RPG.rules.answering import ChatRulesAnswerGenerator, RulesAnswerOptions
+    from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
+    from tldw_Server_API.tests.RPG.test_rpg_rules_answering import FakeLookupRetriever, _item
+
+    lookup = RulesLookupService(retriever=FakeLookupRetriever([_item()]), answer_generator=ChatRulesAnswerGenerator())
+
+    with pytest.raises(LLMPolicyRefusal) as refused:
+        await lookup.lookup(
+            owner_user_id=42, adapter_key="fate", query="forbidden words",
+            linked_rules_pack_refs=[{"source_type": "media_item", "source_id": 42}], mode="answer",
+            answer_options=RulesAnswerOptions(provider=PROVIDER, model="m"),
+        )
+    mapped = _map_error(refused.value)
+    assert isinstance(mapped, HTTPException) and mapped.status_code == 400
+    assert provider.requests == []
+
+
+def test_slides_job_refusal_is_final_not_retried():
+    from tldw_Server_API.app.core.Research_Workspace.output_jobs import _slides_generation_job_error
+
+    error = _slides_generation_job_error(LLMPolicyRefusal("Input violates moderation policy"))
+
+    assert (error.public_code, error.retryable) == ("llm_policy_refused", False)

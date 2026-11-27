@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import VNProfileSnapshotRepository
 from tldw_Server_API.app.core.DB_Management.VNScripts_DB import VNScriptsRepository
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
@@ -78,6 +79,7 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     TURN_STATUS_MODEL_CALLING,
     TURN_STATUS_MODEL_FAILED,
     TURN_STATUS_PARSE_FAILED,
+    TURN_STATUS_POLICY_REFUSED,
     TURN_STATUS_PENDING,
 )
 from tldw_Server_API.app.core.VN_Play.errors import (
@@ -672,6 +674,16 @@ class VNPlayService:
                 event_type=EVENT_MODEL_TURN_PARSE_FAILED,
             )
             raise VNPlayTurnError(TURN_STATUS_PARSE_FAILED) from exc
+        except LLMPolicyRefusal as exc:
+            # Moderation refused the turn: final (400, not retryable), never "model_failed" (a retryable 502).
+            self._mark_turn_failed(
+                session_id=session_id,
+                turn_request_id=int(turn_request["id"]),
+                error_code=TURN_STATUS_POLICY_REFUSED,
+                error_message=TURN_STATUS_POLICY_REFUSED,
+                client_scene_version=client_scene_version,
+            )
+            raise VNPlayTurnError(TURN_STATUS_POLICY_REFUSED) from exc
         except Exception as exc:
             self._mark_turn_failed(
                 session_id=session_id,
@@ -800,6 +812,16 @@ class VNPlayService:
                 event_type=EVENT_MODEL_TURN_PARSE_FAILED,
             )
             raise VNPlayTurnError(TURN_STATUS_PARSE_FAILED) from exc
+        except LLMPolicyRefusal as exc:
+            # Moderation refused the turn: final (400, not retryable), never "model_failed" (a retryable 502).
+            self._mark_turn_failed(
+                session_id=session_id,
+                turn_request_id=int(turn_request["id"]),
+                error_code=TURN_STATUS_POLICY_REFUSED,
+                error_message=TURN_STATUS_POLICY_REFUSED,
+                client_scene_version=client_scene_version,
+            )
+            raise VNPlayTurnError(TURN_STATUS_POLICY_REFUSED) from exc
         except Exception as exc:
             self._mark_turn_failed(
                 session_id=session_id,

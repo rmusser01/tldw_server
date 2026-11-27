@@ -172,3 +172,46 @@ def test_ingestion_claim_store_uses_managed_media_database(monkeypatch):
         else:
             app_settings.pop("SERVER_CLIENT_ID", None)
         shutil.rmtree(base_dir, ignore_errors=True)
+
+
+def test_ingestion_claims_refusal_skips_claims_but_embedding_completes(monkeypatch):
+    """Claims are an optional enrichment: a moderation refusal skips them, never the media embedding."""
+    from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+
+    base_dir = tempfile.mkdtemp(prefix="claims_refusal_base_")
+    try:
+        monkeypatch.setitem(app_settings, "ENABLE_INGESTION_CLAIMS", True)
+        monkeypatch.setitem(app_settings, "CLAIMS_EMBED", False)
+        mock_coll = MagicMock()
+        mock_coll.name = "media-test"
+        mock_coll.count.return_value = 0
+        mock_client = MagicMock()
+        mock_client.get_or_create_collection.return_value = mock_coll
+        manager = ChromaDBManager(
+            user_id="test_user",
+            user_embedding_config={
+                "USER_DB_BASE_DIR": base_dir,
+                "embedding_config": {"default_model_id": "unused", "models": {}},
+                "chroma_client_settings": {"backend": "stub"},
+            },
+            client=mock_client,
+        )
+        manager.db_path = "/tmp/claims-refusal-media.db"
+        stored: list[object] = []
+
+        def _refuse(*_args, **_kwargs):
+            raise LLMPolicyRefusal("Input violates moderation policy")
+
+        monkeypatch.setattr(ingestion_claims, "extract_claims_for_chunks", _refuse)
+        monkeypatch.setattr(ingestion_claims, "store_claims", lambda *a, **k: stored.append(k) or 1)
+        monkeypatch.setattr(cdl, "create_embeddings_batch", lambda texts, **_k: [[0.1, 0.2, 0.3] for _ in texts])
+
+        manager.process_and_store_content(
+            content="Python 3.11 was released in 2022.", media_id=123, file_name="claims.txt", create_embeddings=True
+        )
+
+        assert stored == []
+        assert mock_coll.upsert.called or mock_coll.add.called, "the media embedding still completed"
+    finally:
+        shutil.rmtree(base_dir, ignore_errors=True)

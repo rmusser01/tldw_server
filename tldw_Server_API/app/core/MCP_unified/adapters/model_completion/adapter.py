@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
     ByokResolutionError,
     ProviderCredentialRuntime,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 
 _T = TypeVar("_T")
 
@@ -397,11 +398,13 @@ class ModelCompletionAdapter:
                 request, identity, credential_source=getattr(credentials, "credential_source", None)
             )
             self._guard(invocation)
-            invocation.child = self._operation(
-                self._provider(invocation, request, runtime, credentials),
-                invocation,
-                "mcp-model-completion-" + identity.execution_id,
-            )
+            # The provider task copies this context: the transport's moderation applies this user's policy.
+            with llm_call_context(user_id=identity.user_id):
+                invocation.child = self._operation(
+                    self._provider(invocation, request, runtime, credentials),
+                    invocation,
+                    "mcp-model-completion-" + identity.execution_id,
+                )
             return await self._await_owned(invocation.child, cancel_on_cancellation=True)
         finally:
             try:

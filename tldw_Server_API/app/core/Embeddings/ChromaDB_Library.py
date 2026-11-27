@@ -56,6 +56,7 @@ def _is_transient_chroma_segment_error(error: BaseException) -> bool:
 from tldw_Server_API.app.core.Chunking import Chunker, chunk_for_embedding  # Using V2 through compatibility layer
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Embeddings.chroma_storage import (
     ChromaStorageError,
     ExistingClient,
@@ -746,6 +747,14 @@ class ChromaDBManager:
             logger.warning(f"User '{self.user_id}': Outline generation failed: {e}")
             return ""
 
+    def _claims_or_none_if_refused(self, extract: Any, chunks: Any, mode: str, max_per: int, media_id: Any) -> list:
+        """Ingestion-time claims are optional enrichment: a moderation refusal skips them, never the embedding."""
+        try:
+            return extract(chunks, extractor_mode=mode, max_per_chunk=max_per)
+        except LLMPolicyRefusal:
+            logger.warning(f"User '{self.user_id}': claims_policy_refused: skipped ingestion-time claims for media_id {media_id}.")
+            return []
+
     def process_and_store_content(self,
                                   content: str,
                                   media_id: Union[int, str],  # TODO: Update type based on new MediaDatabase
@@ -878,7 +887,7 @@ class ChromaDBManager:
 
                         max_per = int(_settings.get("CLAIMS_MAX_PER_CHUNK", 3))
                         mode = str(_settings.get("CLAIM_EXTRACTOR_MODE", "heuristic"))
-                        claims = extract_claims_for_chunks(chunks, extractor_mode=mode, max_per_chunk=max_per)
+                        claims = self._claims_or_none_if_refused(extract_claims_for_chunks, chunks, mode, max_per, media_id)
                         if claims:
                             try:
                                 # Ensure media_id can be used as integer FK

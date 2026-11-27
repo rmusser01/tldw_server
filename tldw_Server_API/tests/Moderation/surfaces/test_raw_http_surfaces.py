@@ -23,6 +23,10 @@ from tldw_Server_API.app.core.MCP_unified.tests.test_model_completion_transport 
     _request,
     credentials,
 )
+from tldw_Server_API.app.core.MCP_unified.tests.test_model_completion_adapter import (  # noqa: F401 - fixtures
+    harness,
+    invoke as mcp_invoke,
+)
 from tldw_Server_API.tests.Slides.test_standalone_html_provider import (  # noqa: F401 - fixtures
     DOCUMENT,
     SYSTEM_PROMPT,
@@ -129,13 +133,24 @@ async def test_slides_standalone_output_block_is_a_refusal(provider, provider_mo
     assert isinstance(outcome, provider_module.StandaloneHtmlProviderError)
     assert outcome.code == "llm_policy_refused"
 
+# The worker's classification of `llm_policy_refused` as terminal on its first attempt is asserted in
+# tests/Slides/test_standalone_html_generation_jobs.py::test_provider_terminal_retention_starts_when_failure_occurs.
 
-def test_a_standalone_refusal_is_terminal_not_retried():
-    """The jobs worker retries only timeout, unavailable and http-error codes."""
-    from tldw_Server_API.app.services import standalone_html_generation_jobs_worker as worker
 
-    source = open(worker.__file__, encoding="utf-8").read()
-    assert "llm_policy_refused" not in source  # not among the retried codes, and no arm turns it into a retry
+async def test_slides_standalone_policy_resolution_failure_is_a_terminal_refusal(provider_module, make_service, monkeypatch):
+    """A policy that cannot be resolved fails closed as `llm_policy_refused`, not as a retried worker error."""
+    import tldw_Server_API.app.core.Moderation.gateway_hooks as hooks
+
+    make_service(enabled=True)
+    monkeypatch.setattr(hooks, "resolve_policy", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("store down")))
+    target = _target(ADAPTERS["openai"])
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as text_error:
+        provider_module._moderate_text("a generated document")
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as request_error:
+        provider_module._moderate_request(target, {"messages": [{"role": "user", "content": "x"}]})
+
+    assert text_error.value.code == request_error.value.code == "llm_policy_refused"
 
 
 @pytest.mark.parametrize("provider", ["openai", "anthropic"])
@@ -204,3 +219,37 @@ async def test_mcp_model_completion_global_off_zero_calls(mcp_network, credentia
     assert result.content == "forbidden secret answer"
     assert json.loads(harness.requests[0].content)["messages"][-1]["content"] == "forbidden secret"
     assert evaluator_spy == []
+
+
+async def test_mcp_model_completion_moderates_for_the_identitys_user(harness, moderation_hooks):
+    """The transport's moderation runs as the MCP invocation's user, so per-user overrides and Guardian apply."""
+    from tldw_Server_API.app.core.Moderation.gateway_hooks import moderate_output_text_for_surface
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+
+    seen: list[int | None] = []
+    moderated: list[tuple[str, str]] = []
+    resolved: list[object] = []
+    original_resolve = moderation_hooks.get_effective_policy
+
+    def resolving(user_id, *, surface):
+        resolved.append(user_id)
+        return original_resolve(user_id, surface=surface)
+
+    moderation_hooks.get_effective_policy = resolving
+    original = harness.transport.complete
+
+    async def spy(*args, **kwargs):
+        seen.append(current_llm_user_id())
+        # The real moderator, in the transport's task context: the policy is resolved for the identity's user.
+        moderated.append(
+            moderate_output_text_for_surface("a forbidden reply", surface="mcp.model_completion", user_id=current_llm_user_id())
+        )
+        return await original(*args, **kwargs)
+
+    harness.transport.complete = spy
+    result = await mcp_invoke(harness, harness.build())
+
+    assert result.content == "valid content"
+    assert seen == [harness.identity.user_id]
+    assert moderated == [("Output violates moderation policy", "block")]
+    assert resolved == [str(harness.identity.user_id)]
