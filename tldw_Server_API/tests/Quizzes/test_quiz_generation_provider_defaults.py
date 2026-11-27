@@ -8,6 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.services import quiz_generator
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
@@ -31,7 +32,7 @@ def configured_adapter(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(quiz_generator, "load_and_log_configs", lambda: snapshot)
     monkeypatch.setattr(quiz_generator, "resolve_provider_api_key", lambda *_args, **_kwargs: (None, {}))
-    monkeypatch.setattr(quiz_generator, "_get_adapter", lambda provider: Adapter(provider))
+    route_gateway_adapters(monkeypatch, lambda provider: Adapter(provider))
     return snapshot, calls, response
 
 
@@ -124,7 +125,7 @@ async def test_quiz_cancellation_retains_provider_ownership(configured_adapter, 
                 return {"choices": [{"message": {"content": "retained result"}}]}
             finally:
                 exited.set()
-    monkeypatch.setattr(quiz_generator, "_get_adapter", lambda _provider: HeldAdapter())
+    route_gateway_adapters(monkeypatch, lambda _provider: HeldAdapter())
     with llm_call_root(37):
         work = asyncio.create_task(quiz_generator._call_quiz_generation_llm(prompt="Private facts", api_provider="llamacpp"))
     try:

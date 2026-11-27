@@ -53,6 +53,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner import
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.types_common import (
     MetricType,
 )
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 pytestmark = pytest.mark.unit
 
@@ -276,6 +277,7 @@ async def test_prompt_executor_attaches_authentic_runtime_handle_at_adapter_boun
         lambda: _Registry(),
         raising=True,
     )
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
 
     try:
         result = await PromptExecutor(db)._call_llm(
@@ -348,12 +350,7 @@ async def test_test_runner_attaches_authentic_runtime_handle_at_adapter_boundary
             captured.append(request)
             return {"choices": [{"message": {"content": "ok"}}]}
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda _provider: _Adapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _Adapter())
     db = _new_db(tmp_path, "test-runner-adapter-handle")
 
     try:

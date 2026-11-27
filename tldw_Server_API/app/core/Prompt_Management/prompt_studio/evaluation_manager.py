@@ -15,7 +15,6 @@ from ....core.Chat.streaming_utils import sanitized_provider_stream_exception
 from ....core.exceptions import LLMQuotaExceededError
 from ....core.LLM_Calls.adapter_utils import (
     ensure_app_config,
-    get_adapter_or_raise,
     normalize_provider,
     resolve_provider_api_key_from_config,
     resolve_provider_model,
@@ -27,6 +26,7 @@ from ....core.Provider_Credentials.provider_credential_runtime import (
     is_runtime_issued_provider_call_credentials,
 )
 from ....core.testing import is_test_mode
+from .gateway_call import call_prompt_studio_llm
 from .test_runner import TestRunner
 
 
@@ -106,7 +106,7 @@ class EvaluationManager:
         }
         if provider_credentials is not None:
             request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
-        response = get_adapter_or_raise(provider_name).chat(request, timeout=timeout)
+        response = call_prompt_studio_llm(provider_name, request, timeout=timeout)
         return TestRunner._extract_response_text(response)
 
     async def run_evaluation_with_existing_record(
@@ -233,7 +233,8 @@ class EvaluationManager:
                     on_provider_success=on_provider_success,
                 )
                 score = float((run_result.get("scores") or {}).get("aggregate_score", 0.0))
-                passed = score >= 0.5
+                sample_error = bool((run_result.get("scores") or {}).get("sample_error"))
+                passed = score >= 0.5 and not sample_error
                 run_id = run_result.get("id")
                 if isinstance(run_id, int):
                     test_run_ids.append(run_id)
@@ -246,6 +247,7 @@ class EvaluationManager:
                         "actual": run_result.get("actual") or {},
                         "score": score,
                         "passed": passed,
+                        **({"sample_error": True} if sample_error else {}),
                     }
                 )
                 _log.debug(
@@ -290,7 +292,9 @@ class EvaluationManager:
 
         passed_count = sum(1 for r in results if bool(r.get("passed")))
         total = len(results)
-        avg_score = (sum(float(r.get("score", 0.0)) for r in results) / total) if total else 0.0
+        # A refused case is a sample error: out of the average, like any failed model call.
+        scored = [r for r in results if not r.get("sample_error")]
+        avg_score = (sum(float(r.get("score", 0.0)) for r in scored) / len(scored)) if scored else 0.0
         duration_ms = int((time.perf_counter() - t0) * 1000)
 
         aggregate_metrics = {

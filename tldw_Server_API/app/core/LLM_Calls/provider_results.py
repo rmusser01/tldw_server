@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.exceptions import (
     ChatAuthenticationError,
     ChatConfigurationError,
     ChatModelNotAvailableError,
+    LLMPolicyRefusal,
     SanitizedProviderStreamError,
 )
 from tldw_Server_API.app.core.LLM_Calls.sse import SSE_CONTROL_FIELD_PREFIXES, is_done_line
@@ -101,6 +102,18 @@ class NormalizedProviderStreamError:
     status_code: int
     replay_certified: bool = False
     credential_refresh_retry_certified: bool = False
+
+
+def raise_if_content_filtered(response: Any) -> None:
+    """Raise ``LLMPolicyRefusal`` when moderation replaced the answer (``finish_reason`` ``content_filter``).
+
+    For a caller that parses structured output from the reply: a refused answer is never parsed, scored,
+    repaired or retried (TASK-13950.27).
+    """
+    choices = response.get("choices") if isinstance(response, dict) else None
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        if choices[0].get("finish_reason") == "content_filter":
+            raise LLMPolicyRefusal("Output violates moderation policy")
 
 
 def _provider_stream_code(value: Any) -> Optional[str]:

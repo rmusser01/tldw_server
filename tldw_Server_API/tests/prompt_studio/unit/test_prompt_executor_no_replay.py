@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import (
     PromptExecutor,
 )
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 
 @pytest.mark.asyncio
@@ -37,6 +38,7 @@ async def test_prompt_executor_does_not_replay_rate_limited_provider_dispatch(
         return None
 
     monkeypatch.setattr(executor_module, "get_registry", _Registry)
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=_Registry: _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(executor_module, "await_bounded_sync_call", _run_sync_call)
     monkeypatch.setattr(executor_module.asyncio, "sleep", _no_sleep)
 

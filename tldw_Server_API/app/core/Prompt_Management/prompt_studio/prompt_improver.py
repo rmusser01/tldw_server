@@ -10,9 +10,9 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError, PromptStudioDatabase
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio.gateway_call import call_prompt_studio_llm
 
 ########################################################################################################################
 # Enums and Data Classes
@@ -81,11 +81,7 @@ class ImprovementResult:
 
 
 def _call_openai_adapter(request: dict[str, Any]) -> dict[str, Any]:
-    registry = get_registry()
-    adapter = registry.get_adapter("openai")
-    if adapter is None:
-        raise ChatConfigurationError(provider="openai", message="OpenAI adapter unavailable.")
-    return adapter.chat(request)
+    return call_prompt_studio_llm("openai", request)
 
 ########################################################################################################################
 # Improvement Strategies
@@ -709,6 +705,8 @@ class PromptImprover:
                 )
             }
 
+        except LLMPolicyRefusal:
+            raise  # moderation refusals reach the caller as 400, not as a database error
         except Exception as e:
             logger.error(f"Failed to improve prompt: {e}")
             raise DatabaseError(f"Failed to improve prompt: {e}") from e
@@ -780,6 +778,8 @@ Format as JSON.
                 "recommended_strategies": self._recommend_strategies(analysis)
             }
 
+        except LLMPolicyRefusal:
+            raise  # moderation refusals reach the caller as 400, not as a database error
         except Exception as e:
             logger.error(f"Failed to analyze prompt: {e}")
             raise DatabaseError(f"Failed to analyze prompt: {e}") from e

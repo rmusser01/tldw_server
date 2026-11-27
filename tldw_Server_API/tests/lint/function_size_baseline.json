@@ -145,7 +145,7 @@
   "tldw_Server_API.app.core.Metrics.metrics_manager:MetricsRegistry._register_standard_metrics": {"lines": 1596, "params": 1, "reason": null},
   "tldw_Server_API.app.core.Notes_Tasks.service:NotesTaskService._reconcile_managed_note_through_sync": {"lines": 404, "params": 8, "reason": null},
   "tldw_Server_API.app.core.Notes_Tasks.service:NotesTaskService.resolve_projection_drift": {"lines": 383, "params": 13, "reason": null},
-  "tldw_Server_API.app.core.Prompt_Management.Prompt_Engineering:generate_prompt": {"lines": 501, "params": 5, "reason": null},
+  "tldw_Server_API.app.core.Prompt_Management.Prompt_Engineering:generate_prompt": {"lines": 504, "params": 5, "reason": "TASK-13950.27 PR H: names its llm_surface and lets a moderation refusal through the broad except (+3 lines)"},
   "tldw_Server_API.app.core.Prompt_Management.prompt_studio.mcts_optimizer:MCTSOptimizer.optimize": {"lines": 442, "params": 14, "reason": null},
   "tldw_Server_API.app.core.Prompt_Management.prompt_studio.monitoring:PromptStudioMetrics._register_metrics": {"lines": 360, "params": 1, "reason": null},
   "tldw_Server_API.app.core.Prompt_Management.prompt_studio.services.jobs_worker:_handle_job": {"lines": 433, "params": 2, "reason": null},

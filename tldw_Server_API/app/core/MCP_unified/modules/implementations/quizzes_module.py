@@ -15,6 +15,7 @@ from loguru import logger
 from ....config import load_and_log_configs
 from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from ....DB_Management.media_db.api import managed_media_database
+from ....LLM_Calls.provider_results import raise_if_content_filtered
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
 
@@ -1099,7 +1100,9 @@ Return ONLY the JSON array, no other text."""
             model=model,
             messages=messages,
             system_message=system_prompt,
+            llm_surface="study.quizzes",
         )
+        raise_if_content_filtered(response)  # moderation replaced the answer: never parsed as quiz JSON
         return self._extract_llm_text(response)
 
     def _extract_llm_text(self, response: Any) -> str:

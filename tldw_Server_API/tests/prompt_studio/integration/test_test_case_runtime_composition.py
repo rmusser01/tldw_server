@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
     test_runner as test_runner_module,
 )
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 pytestmark = pytest.mark.integration
 
@@ -96,12 +97,7 @@ async def test_endpoint_real_manager_runner_cancellation_keeps_runtime_order(
         _ObservedProductionRuntime,
         raising=True,
     )
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda provider: adapter if provider == "openai" else None,
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda provider: adapter if provider == "openai" else None)
 
     project = isolated_db.create_project("Composition", user_id="7")
     prompt = isolated_db.create_prompt(

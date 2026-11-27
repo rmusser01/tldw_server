@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
     prompt_executor as prompt_executor_module,
 )
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 
 def _make_prompt_definition_payload() -> dict:
@@ -215,6 +216,7 @@ async def test_prompt_executor_rejects_nonsemantic_response_before_usage_mark(
         marks.append("mark")
 
     monkeypatch.setattr(prompt_executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(
         PromptExecutor,
         "_build_adapter_request",
@@ -269,6 +271,7 @@ async def test_prompt_executor_concurrent_nonsemantic_response_marks_only_valid_
         marks.append(key)
 
     monkeypatch.setattr(prompt_executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(PromptExecutor, "_build_adapter_request", _build_request)
     executor = PromptExecutor(SimpleNamespace(client_id="unit-test"))
     valid_task = asyncio.create_task(
@@ -584,6 +587,7 @@ async def test_prompt_executor_concurrent_mixed_error_is_request_local(
             return _Adapter()
 
     monkeypatch.setattr(prompt_executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(
         PromptExecutor,
         "_build_adapter_request",
@@ -655,6 +659,7 @@ async def test_prompt_executor_detaches_raised_adapter_detail(
             return _Adapter()
 
     monkeypatch.setattr(prompt_executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(
         PromptExecutor,
         "_build_adapter_request",
@@ -726,6 +731,7 @@ async def test_prompt_executor_concurrent_nested_results_remain_request_local(
             return _Adapter()
 
     monkeypatch.setattr(prompt_executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(
         PromptExecutor,
         "_build_adapter_request",
@@ -834,6 +840,7 @@ async def test_prompt_executor_concurrent_list_results_remain_request_local_and_
         return {"messages": kwargs["messages"], "model": kwargs["model"]}
 
     monkeypatch.setattr(prompt_executor_module, "get_registry", lambda: _Registry())
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(PromptExecutor, "_build_adapter_request", _build_request)
     executor = PromptExecutor(_Db())  # type: ignore[arg-type]
     valid_task = asyncio.create_task(

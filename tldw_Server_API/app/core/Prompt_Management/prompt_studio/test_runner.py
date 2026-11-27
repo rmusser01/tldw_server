@@ -19,10 +19,9 @@ from ....core.Chat.streaming_utils import (
     provider_result_contains_error,
     sanitized_provider_stream_exception,
 )
-from ....core.exceptions import LLMQuotaExceededError, raise_detached_error
+from ....core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError, raise_detached_error
 from ....core.LLM_Calls.adapter_utils import (
     ensure_app_config,
-    get_adapter_or_raise,
     normalize_provider,
     resolve_provider_api_key_from_config,
     resolve_provider_model,
@@ -34,8 +33,11 @@ from ....core.Provider_Credentials.provider_credential_runtime import (
     is_runtime_issued_provider_call_credentials,
 )
 from ..structured_prompts import StructuredPromptAssemblyError
+from .gateway_call import call_prompt_studio_llm
 from .program_evaluator import ProgramEvaluator
 from .prompt_executor import PromptExecutor
+
+REFUSAL_ERROR_CODE = LLMPolicyRefusal.failure_code  # a refused case is a sample error, never a score
 
 
 class _BoundedProviderResponseError(RuntimeError):
@@ -122,10 +124,7 @@ class TestRunner:
         }
         if provider_credentials is not None:
             request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = provider_credentials
-        return get_adapter_or_raise(provider_name).chat(
-            request,
-            timeout=timeout_seconds,
-        )
+        return call_prompt_studio_llm(provider_name, request, timeout=timeout_seconds)
 
     async def run_test_case(
         self,
@@ -219,6 +218,12 @@ class TestRunner:
 
         except LLMQuotaExceededError:
             raise  # the user's limit: neither a provider outage nor a failed run scored 0.0
+        except LLMPolicyRefusal as refusal:
+            # Moderation is deterministic: never retried. A job fails; otherwise the case is a sample error.
+            if strict_provider_errors:
+                raise
+            _log.warning("PS testrun.llm.refused time_ms={}", int((time.time() - start_time) * 1000))
+            actual_output = {"error": str(refusal.detail), "error_code": REFUSAL_ERROR_CODE}
         except Exception as e:
             if prompt_request is None and isinstance(e, StructuredPromptAssemblyError):
                 if strict_provider_errors:
@@ -534,6 +539,9 @@ class TestRunner:
         outputs_for_storage = self._truncate_value(outputs_for_storage, self.MAX_PERSISTED_OUTPUT_CHARS)
 
         scores_payload: dict[str, Any] = {"aggregate_score": float(score)}
+        sample_error = (result.get("actual") or {}).get("error_code") == REFUSAL_ERROR_CODE
+        if sample_error:
+            scores_payload["sample_error"] = True
         if reward is not None:
             scores_payload["reward"] = float(reward)
         if eval_res is not None:
@@ -570,6 +578,8 @@ class TestRunner:
         result["id"] = stored_run.get("id")
         result["success"] = bool(run_success)
         result["scores"] = {"aggregate_score": float(score)}
+        if sample_error:
+            result["scores"]["sample_error"] = True
         if reward is not None:
             result["scores"]["reward"] = float(reward)
         if eval_res is not None:

@@ -58,6 +58,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.job_processor impo
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.services import (
     jobs_worker,
 )
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 pytestmark = pytest.mark.unit
 
@@ -3093,18 +3094,14 @@ async def test_durable_job_passes_one_resolved_snapshot_through_runner_and_execu
         def get_adapter(_provider: str) -> _Adapter:
             return _Adapter("executor")
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda _provider: _Adapter("runner"),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _Adapter("runner"))
     monkeypatch.setattr(
         prompt_executor_module,
         "get_registry",
         lambda: _Registry(),
         raising=True,
     )
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     processor = JobProcessor(db)
     monkeypatch.setattr(
         jobs_worker,
@@ -3225,18 +3222,14 @@ async def test_mcts_scorer_model_policy_denial_precedes_scorer_adapter_dispatch(
         def get_adapter(_provider: str) -> _Adapter:
             return _Adapter()
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda _provider: _Adapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _Adapter())
     monkeypatch.setattr(
         prompt_executor_module,
         "get_registry",
         lambda: _Registry(),
         raising=True,
     )
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     optimization_id, prompt_id, case_ids = _seed_optimization(
         db,
         name="mcts-scorer-denied",
@@ -3355,18 +3348,14 @@ async def test_mcts_scorer_dispatch_uses_separately_resolved_runtime_snapshot(
         def get_adapter(_provider: str) -> _Adapter:
             return _Adapter()
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda _provider: _Adapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _Adapter())
     monkeypatch.setattr(
         prompt_executor_module,
         "get_registry",
         lambda: _Registry(),
         raising=True,
     )
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     strategy_params = {
         "mcts_simulations": 1,
         "mcts_max_depth": 1,
@@ -3445,12 +3434,7 @@ async def test_durable_job_requires_one_validated_baseline_before_completion(
         def chat(self, *_args: Any, **_kwargs: Any) -> Any:
             raise AssertionError("no provider call is valid without a baseline case")
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda _provider: _ForbiddenAdapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _ForbiddenAdapter())
     processor = JobProcessor(db)
     monkeypatch.setattr(jobs_worker, "_get_processor", lambda _uid: processor, raising=True)
     optimization_id, prompt_id, case_ids = _seed_optimization(
@@ -3531,12 +3515,7 @@ async def test_durable_job_fails_closed_on_runtime_credential_failure(
         def chat(self, *_args: Any, **_kwargs: Any) -> Any:
             raise AssertionError("credential failure reached the adapter")
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda _provider: _ForbiddenAdapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _ForbiddenAdapter())
     processor = JobProcessor(db)
     monkeypatch.setattr(jobs_worker, "_get_processor", lambda _uid: processor, raising=True)
     optimization_id, prompt_id, case_ids = _seed_optimization(
@@ -3644,12 +3623,7 @@ async def test_strict_optimization_failure_reaches_jobs_with_safe_retry_metadata
                 raise adapter_outcome
             return adapter_outcome
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda _provider: _Adapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _Adapter())
     processor = JobProcessor(db)
     monkeypatch.setattr(jobs_worker, "_get_processor", lambda _uid: processor, raising=True)
     optimization_id, prompt_id, case_ids = _seed_optimization(
@@ -3816,18 +3790,14 @@ async def test_valid_baseline_then_optimizer_failure_fails_job_without_completio
         def get_adapter(_provider: str) -> _ExecutorAdapter:
             return _ExecutorAdapter()
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda _provider: _RunnerAdapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _RunnerAdapter())
     monkeypatch.setattr(
         prompt_executor_module,
         "get_registry",
         lambda: _Registry(),
         raising=True,
     )
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     original_complete = db.complete_optimization
 
     def _record_complete(*args: Any, **kwargs: Any) -> Any:
@@ -3965,18 +3935,14 @@ async def test_concurrent_same_and_different_owner_jobs_use_distinct_runtimes(
         def get_adapter(provider: str) -> _Adapter:
             return _Adapter("executor", provider)
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda provider: _Adapter("runner", provider),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda provider: _Adapter("runner", provider))
     monkeypatch.setattr(
         prompt_executor_module,
         "get_registry",
         lambda: _Registry(),
         raising=True,
     )
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     processors = {
         "7": JobProcessor(first_db),
         "8": JobProcessor(second_db),
@@ -4310,12 +4276,7 @@ async def test_cancelled_durable_job_drains_late_success_before_runtime_close(
             events.append("adapter_done")
             return {"choices": [{"message": {"content": "valid mismatch"}}]}
 
-    monkeypatch.setattr(
-        test_runner_module,
-        "get_adapter_or_raise",
-        lambda _provider: _Adapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _Adapter())
     processor = JobProcessor(db)
     monkeypatch.setattr(jobs_worker, "_get_processor", lambda _uid: processor, raising=True)
     optimization_id, prompt_id, case_ids = _seed_optimization(

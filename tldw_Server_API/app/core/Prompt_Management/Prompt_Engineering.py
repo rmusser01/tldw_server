@@ -7,9 +7,7 @@ from typing import Any, Optional
 from loguru import logger
 
 # Local Imports
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
-from tldw_Server_API.app.core.config import load_and_log_configs
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 
 
 class PromptGenerationError(Exception):
@@ -17,50 +15,14 @@ class PromptGenerationError(Exception):
     pass
 
 
-def _call_adapter(api_endpoint: str, request: dict[str, Any]) -> Any:
-    provider = (api_endpoint or "").strip().lower()
-    if not provider:
-        raise PromptGenerationError("Provider name is required.")
-    registry = get_registry()
-    adapter = registry.get_adapter(provider)
-    if adapter is None:
-        raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
-    payload = dict(request or {})
-    app_config = payload.get("app_config") or load_and_log_configs() or {}
-    payload["app_config"] = app_config
-    if payload.get("model") is None:
-        resolved = _resolve_model(provider, app_config)
-        if not resolved:
-            raise PromptGenerationError(f"Model is required for provider '{provider}'.")
-        payload["model"] = resolved
-    return adapter.chat(payload)
+def chat_api_call(*, llm_surface: str | None = None, **kwargs: Any) -> Any:
+    """Compatibility shim for legacy chat_api_call usage in prompt tooling; goes through the LLM gateway."""
+    from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 
-
-def _resolve_model(provider: str, app_config: dict[str, Any]) -> Optional[str]:
-    key = f"{provider.replace('-', '_').replace('.', '_')}_api"
-    model = (app_config.get(key) or {}).get("model")
-    return model
-
-
-def chat_api_call(**kwargs: Any) -> Any:
-    """Compatibility shim for legacy chat_api_call usage in prompt tooling."""
-    try:
-        from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call
-    except Exception:
-        api_endpoint = (
-            kwargs.get("api_endpoint")
-            or kwargs.get("api_name")
-            or kwargs.get("provider")
-            or kwargs.get("endpoint")
-        )
-        if not api_endpoint:
-            raise PromptGenerationError("Provider name is required.") from None
-        request = dict(kwargs)
-        messages_payload = request.pop("messages_payload", None)
-        if messages_payload is not None and "messages" not in request:
-            request["messages"] = messages_payload
-        return _call_adapter(api_endpoint, request)
-    return perform_chat_api_call(**kwargs)
+    response = perform_chat_api_call(llm_surface=llm_surface, **kwargs)
+    raise_if_content_filtered(response)  # moderation replaced the answer: callers parse the reply
+    return response
 
 
 #######################################################################################################################
@@ -563,10 +525,13 @@ def generate_prompt(api_endpoint: str, api_key: str, task: str, variables_str: s
             api_key=api_key,
             messages_payload=[{"role": "user", "content": metaprompt}],
             temperature=temperature,
+            llm_surface="prompt_studio",
         )
         if response is None:
             raise PromptGenerationError("Chat API returned empty response")
         return response
+    except LLMPolicyRefusal:
+        raise  # a moderation refusal is not a generation error
     except Exception as e:
         logger.error(f"Failed to generate prompt via chat API: {e}")
         raise PromptGenerationError(f"Failed to generate prompt: {e}") from e
@@ -663,10 +628,13 @@ def test_generated_prompt(
             api_key=api_key,
             messages_payload=[{"role": "user", "content": prompt_with_values}],
             temperature=temperature,
+            llm_surface="prompt_studio",
         )
         if response is None:
             raise PromptGenerationError("Chat API returned empty response")
         return response
+    except LLMPolicyRefusal:
+        raise  # a moderation refusal is not a generation error
     except Exception as e:
         logger.error(f"Failed to test generated prompt via chat API: {e}")
         raise PromptGenerationError(f"Failed to test generated prompt: {e}") from e

@@ -22,10 +22,11 @@ from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import BadRequestError, OsceVerificationError, QuizMalformedOutputError
-from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.LLM_Calls.gateway import perform_chat_api_call
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import capture_provider_override_call_snapshot
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     configured_provider_model_from_snapshot,
@@ -245,14 +246,6 @@ def _resolve_model(provider: str, model: str | None, app_config: dict[str, Any])
     if model:
         return model
     return configured_provider_model_from_snapshot(provider, app_config)
-
-
-def _get_adapter(provider: str):
-    registry = get_registry()
-    adapter = registry.get_adapter(provider)
-    if adapter is None:
-        raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
-    return adapter
 
 
 def _normalize_question_type(value: Any) -> str | None:
@@ -1531,22 +1524,22 @@ async def _call_quiz_generation_llm(
         override.enforce(model_to_use, require_model=True)
         if model_to_use is None:
             raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
-        adapter = _get_adapter(provider)
-        return adapter.chat(
-            {
-                "messages": messages_payload,
-                "api_key": api_key,
-                "model": model_to_use,
-                "temperature": 0.3,
-                "max_tokens": max_tokens,
-                "response_format": response_format,
-                "app_config": app_config,
-            }
+        return perform_chat_api_call(
+            api_provider=provider,
+            messages=messages_payload,
+            api_key=api_key,
+            model=model_to_use,
+            temperature=0.3,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            app_config=app_config,
+            llm_surface="study.quizzes",
         )
 
     start = time.time()
     raw_response = await await_owned_worker(asyncio.get_running_loop().run_in_executor(None, _call_llm))
     logger.info("Quiz generation LLM call completed in {:.1f}ms", (time.time() - start) * 1000.0)
+    raise_if_content_filtered(raw_response)  # moderation replaced the answer: never parsed or retried
     return raw_response
 
 

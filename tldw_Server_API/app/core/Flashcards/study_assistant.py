@@ -19,7 +19,7 @@ try:
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 except ImportError:  # pragma: no cover - fallback for limited test imports
 
-    async def perform_chat_api_call_async(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def perform_chat_api_call_async(*args: Any, llm_surface: str | None = None, **kwargs: Any) -> dict[str, Any]:
         raise ImportError("chat_service_unavailable")
 
 
@@ -478,6 +478,7 @@ async def generate_study_assistant_reply(
         call_policy=ProviderCallPolicy(privacy_safe_errors=True),
         max_tokens=1000,
         temperature=0.3,
+        llm_surface="study.assistant",
         **({PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials} if provider_credentials is not None else {}),
     )
     response_text = (extract_openai_content(response) or "").strip()

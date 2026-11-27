@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
 )
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.exceptions import (
+    LLMPolicyRefusal,
     OsceCitationError,
     OsceGenerationError,
     OsceMalformedOutputError,
@@ -720,6 +721,8 @@ async def generate_osce_stations_from_sources(
                 api_provider=api_provider,
                 max_tokens=min(12000, max(3000, num_stations * 1200)),
             )
+        except LLMPolicyRefusal:
+            raise  # moderation refusal: a 400 for the client, not a provider failure
         except Exception as exc:
             _log_failure(OsceProviderError.code, exc, provider=api_provider)
             raise OsceProviderError() from exc

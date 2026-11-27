@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_engin
 )
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.services import jobs_worker
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner import TestRunner
+from tldw_Server_API.tests.helpers.gateway_routing import route_gateway_adapters
 
 pytestmark = pytest.mark.integration
 
@@ -111,12 +112,8 @@ def optimization_runtime_boundary(monkeypatch: pytest.MonkeyPatch) -> dict[str, 
         lambda: _Registry(),
         raising=True,
     )
-    monkeypatch.setattr(
-        test_runner_mod,
-        "get_adapter_or_raise",
-        lambda _provider: _Adapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
+    route_gateway_adapters(monkeypatch, lambda _provider: _Adapter())
     for module in (prompt_executor_mod, test_runner_mod):
         monkeypatch.setattr(
             module,
@@ -801,18 +798,14 @@ async def test_simple_endpoint_compat_strategy_uses_real_provider_boundaries(
             lambda *_args, **_kwargs: None,
             raising=True,
         )
-    monkeypatch.setattr(
-        test_runner_mod,
-        "get_adapter_or_raise",
-        lambda _provider: _Adapter("runner"),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _Adapter("runner"))
     monkeypatch.setattr(
         prompt_executor_mod,
         "get_registry",
         lambda: _Registry(),
         raising=True,
     )
+    route_gateway_adapters(monkeypatch, lambda provider, _registry=lambda: _Registry(): _registry().get_adapter(provider), caller="prompt_executor")
     monkeypatch.setattr(jobs_worker, "_get_processor", lambda _user_id: JobProcessor(db), raising=True)
 
     response = await ps_opt_endpoints.create_optimization_simple(
@@ -1068,12 +1061,7 @@ async def test_generic_jobs_cancellation_stops_running_optimization_at_adapter_b
                 "usage": {"total_tokens": 2},
             }
 
-    monkeypatch.setattr(
-        test_runner_mod,
-        "get_adapter_or_raise",
-        lambda _provider: _BlockingAdapter(),
-        raising=True,
-    )
+    route_gateway_adapters(monkeypatch, lambda _provider: _BlockingAdapter())
     monkeypatch.setattr(jobs_worker, "_get_processor", lambda _user_id: JobProcessor(db), raising=True)
 
     optimization_id, job_id, _body = await _create_optimization_via_endpoint(

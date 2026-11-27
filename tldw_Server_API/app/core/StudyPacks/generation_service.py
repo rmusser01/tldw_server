@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import PROVIDER_CAPABILITIES
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.StudyPacks.media_sections import (
     MAX_STUDY_PACK_PASSES,
     bounded_spans,
@@ -52,7 +53,7 @@ from tldw_Server_API.app.core.StudyPacks.types import (
 try:
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
 except ImportError:  # pragma: no cover - covered by existing adapter tests elsewhere
-    async def perform_chat_api_call_async(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    async def perform_chat_api_call_async(*args: Any, llm_surface: str | None = None, **kwargs: Any) -> dict[str, Any]:
         raise ImportError("chat_service_unavailable")
 
 if TYPE_CHECKING:
@@ -602,7 +603,9 @@ class StudyPackGenerationService:
             system_message=system_prompt,
             max_tokens=max_tokens,
             temperature=0.2,
+            llm_surface="study.packs",
         )
+        raise_if_content_filtered(response)  # moderation replaced the answer: never parsed, repaired or retried
         choices = response.get("choices") if isinstance(response, Mapping) else None
         first_choice = choices[0] if isinstance(choices, (list, tuple)) and choices else None
         finish_reason = _clean_text(first_choice.get("finish_reason")).casefold() if isinstance(first_choice, Mapping) else ""
