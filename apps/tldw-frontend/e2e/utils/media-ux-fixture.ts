@@ -1,7 +1,7 @@
 import { seedAuth } from './helpers';
 
-export const FRONTEND_URL = 'http://127.0.0.1:18881';
-export const DUMMY_API_URL = 'http://127.0.0.1:18882';
+export const FRONTEND_URL = new URL(process.env.TLDW_WEB_URL || 'http://127.0.0.1:18881').origin;
+export const DUMMY_API_URL = new URL(process.env.TLDW_FIXTURE_API_URL || 'http://127.0.0.1:18882').origin;
 
 const titles = [
   'Understanding retrieval: a field guide',
@@ -78,6 +78,14 @@ export async function installBrowserFixture(
   await page.route('**/*', async (route: any) => {
     const req = route.request();
     const url = new URL(req.url());
+    if (url.origin === FRONTEND_URL && url.pathname === '/api/_tldw-webui/runtime-config') {
+      return route.fulfill({
+        json: {
+          runtimeAuth: { available: false },
+          networking: { deploymentMode: 'advanced', serverUrl: DUMMY_API_URL },
+        },
+      });
+    }
     if (url.origin !== DUMMY_API_URL) {
       if (
         url.origin === FRONTEND_URL ||

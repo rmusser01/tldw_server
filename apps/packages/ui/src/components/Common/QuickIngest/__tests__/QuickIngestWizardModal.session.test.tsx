@@ -273,11 +273,13 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
     AddContentStep: ({
       onQuickProcess,
       quickProcessWarning,
+      oneScreen,
     }: {
       onQuickProcess?: () => void
       quickProcessWarning?: string | null
+      oneScreen?: boolean
     }) => {
-      if (mocks.useActualAddContentStep) return <ActualAddContentStep onQuickProcess={onQuickProcess} quickProcessWarning={quickProcessWarning} />
+      if (mocks.useActualAddContentStep) return <ActualAddContentStep oneScreen={oneScreen} onQuickProcess={onQuickProcess} quickProcessWarning={quickProcessWarning} />
       const context = actual.useIngestWizard() as any
       const { state, setQueueItems } = context
       return (
@@ -514,7 +516,12 @@ vi.mock("@/components/Common/QuickIngest/FloatingProgressWidget", () => ({
   FloatingProgressWidget: () => null,
 }))
 
-import { QuickIngestWizardModal } from "@/components/Common/QuickIngestWizardModal"
+import { QuickIngestWizardModal as RuntimeIngestModal } from "@/components/Common/QuickIngestWizardModal"
+
+// These existing contracts exercise the extension wizard. WebUI cases mount its normal entry point.
+const QuickIngestWizardModal = (props: React.ComponentProps<typeof RuntimeIngestModal>) => (
+  <RuntimeIngestModal {...props} oneScreen={false} />
+)
 import {
   createEmptyQuickIngestSession,
   useQuickIngestSessionStore,
@@ -573,6 +580,85 @@ function CatalogueProbe() {
 }
 
 describe("QuickIngestWizardModal session runtime", () => {
+  it("restores unsent source text and focus after replacement review", async () => {
+    mocks.useActualAddContentStep = true
+    const quick = resolvePresetMap().quick
+    useQuickIngestSessionStore.getState().createDraftSession({
+      selectedPreset: "custom",
+      presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: true } },
+      queueItems: [{ id: "existing", kind: "url", url: "https://source.test/existing", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+    })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Text" }))
+    const passage = "Remember to verify the transcript."
+    fireEvent.change(screen.getByRole("textbox", { name: "Pasted text input" }), { target: { value: passage } })
+    fireEvent.click(screen.getByRole("button", { name: "Review replacements" }))
+    expect(screen.queryByRole("textbox", { name: "Pasted text input" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Back to sources" }))
+    expect(screen.getByRole("textbox", { name: "Pasted text input" })).toHaveValue(passage)
+    expect(screen.getByRole("button", { name: "Review replacements" })).toHaveFocus()
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { storeRemote: true, reviewBeforeStorage: false, action: "Save 1 source" },
+    { storeRemote: true, reviewBeforeStorage: true, action: "Create 1 review draft" },
+    { storeRemote: false, reviewBeforeStorage: false, action: "Extract 1 source" },
+  ])("submits the displayed WebUI destination: $action", async ({ storeRemote, reviewBeforeStorage, action }) => {
+    const presetConfig = { ...resolvePresetMap().quick, storeRemote, reviewBeforeStorage }
+    useQuickIngestSessionStore.getState().createDraftSession({
+      selectedPreset: "custom", presetConfig,
+      queueItems: [{ id: "one", kind: "url", url: "https://source.test/one", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+    })
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-test" })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: action }))
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1))
+    expect(mocks.startQuickIngestSession.mock.calls[0][0]).toMatchObject({ storeRemote, processOnly: reviewBeforeStorage || !storeRemote })
+  })
+
+  it("opens one confirmed draft batch with both original and retried sources", async () => {
+    mocks.useActualResultsStep = true
+    const receipt = (id: string) => ({
+      id, status: "ok" as const, type: "document", url: "https://source.test/" + id,
+      data: { results: [{ status: "Success", content: id, title: id }] },
+    })
+    const session = useQuickIngestSessionStore.getState().createDraftSession({
+      currentStep: 5, lifecycle: "partial_failure",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      queueItems: ["first", "second"].map(id => ({ id, kind: "url", url: "https://source.test/" + id, detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } })),
+      results: [receipt("first"), { id: "second", type: "document", status: "error", error: "Network error" }],
+    })
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-direct-draft-retry" })
+    mocks.submitQuickIngestBatch.mockResolvedValue({ ok: true, results: [receipt("second")] })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    await waitFor(() => expect(mocks.reviewDrafts.size).toBe(1))
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Retry failed source" }))
+    await waitFor(() => expect(mocks.reviewDrafts.size).toBe(2))
+    fireEvent.click(screen.getByRole("button", { name: "Open drafts" }))
+    expect(mocks.navigate).toHaveBeenCalledWith("/content-review?batch=" + encodeURIComponent("quick-ingest-review:" + session.id))
+  })
+
+  it.each(["global", "playlist"])("requires explicit %s overwrite confirmation even on an automatic WebUI launch", async mode => {
+    const quick = resolvePresetMap().quick
+    useQuickIngestSessionStore.getState().createDraftSession({
+      selectedPreset: "custom", presetConfig: { ...quick, common: { ...quick.common, overwrite_existing: mode === "global" } },
+      queueItems: [{ id: "replace", kind: "url", url: "https://source.test/replace", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true },
+        ...(mode === "playlist" ? { playlist: { duplicateStatus: "duplicate_existing" }, conferenceOverride: { selected: true, duplicatePolicy: "overwrite" as const } } : {}),
+      }, { id: "fresh", kind: "url", url: "https://source.test/fresh", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+    })
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-test" })
+    render(<RuntimeIngestModal open autoProcessQueued onClose={vi.fn()} />)
+    const review = await screen.findByRole("button", { name: "Review replacements" })
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+    fireEvent.click(review)
+    const listedSources = screen.getAllByRole("listitem").map(row => row.textContent)
+    expect(listedSources).toEqual(mode === "global" ? ["https://source.test/replace", "https://source.test/fresh"] : ["https://source.test/replace"])
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm and save 2 sources" }))
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1))
+  })
+
   it("persists both native upload acknowledgements and shows the confirmed result when the first status becomes inaccessible", async () => {
     mocks.useActualAddContentStep = true
     const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
@@ -667,6 +753,51 @@ describe("QuickIngestWizardModal session runtime", () => {
     expect(await screen.findByTestId("wizard-configure")).toBeVisible()
     expect(useQuickIngestSessionStore.getState().session?.results).toEqual(expect.arrayContaining([expect.objectContaining({ id: "saved", status: "ok", mediaId: 7 })]))
     expect(mocks.submitQuickIngestBatch).not.toHaveBeenCalled()
+  })
+
+  it("submits only the corrected source after reload and preserves the other receipts", async () => {
+    mocks.useActualResultsStep = true
+    const acknowledgement = deferred<{ ok: boolean; sessionId: string }>()
+    mocks.startQuickIngestSession.mockReturnValue(acknowledgement.promise)
+    mocks.submitQuickIngestBatch.mockResolvedValue({
+      ok: true, results: [{ id: "corrected", status: "ok", type: "pdf", mediaId: 88 }],
+    })
+    useQuickIngestSessionStore.getState().createDraftSession({
+      currentStep: 5, lifecycle: "partial_failure", presetConfig: resolvePresetMap().quick,
+      queueItems: ["saved", "corrected", "other"].map(id => ({
+        id, kind: "url", url: "https://source.test/" + id + ".pdf", detectedType: "pdf",
+        icon: "FileText", fileSize: 0, validation: { valid: true },
+      })),
+      results: [
+        { id: "saved", type: "pdf", status: "ok", mediaId: 7 },
+        { id: "corrected", type: "pdf", status: "error", error: "Unauthorized 401", collectionItemId: 81, retryAttempt: 2 },
+        { id: "other", type: "pdf", status: "error", error: "Unauthorized 401", collectionItemId: 82, retryAttempt: 2 },
+      ],
+      tracking: { mode: "webui-direct", sessionId: "old-attempt", jobIds: [77], collectionId: "5", durableMode: "durable_collection" },
+    })
+    const view = render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Correct settings for corrected" }))
+    expect(await screen.findByRole("button", { name: "Save 1 source" })).toBeEnabled()
+    const snapshot = JSON.parse(JSON.stringify(useQuickIngestSessionStore.getState().session))
+    view.unmount()
+    act(() => { useQuickIngestSessionStore.getState().createDraftSession(snapshot) })
+    render(<RuntimeIngestModal open onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Save 1 source" }))
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1))
+    const payload = mocks.startQuickIngestSession.mock.calls[0][0]
+    expect(payload.entries.map((entry: { id: string }) => entry.id)).toEqual(["corrected"])
+    expect(payload.conferenceRetry.items.map((item: { resultId: string }) => item.resultId)).toEqual(["corrected"])
+    const running = useQuickIngestSessionStore.getState().session!
+    expect(running.processingState.perItemProgress.map(({ id }) => id)).toEqual(["corrected"])
+    expect(running.processingState.status).toBe("running")
+    expect(running.tracking?.jobIds).toBeUndefined()
+    expect(mocks.reattachQuickIngestSession).not.toHaveBeenCalled()
+    await act(async () => acknowledgement.resolve({ ok: true, sessionId: "qi-direct-corrected" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "saved", status: "ok", mediaId: 7 }),
+      expect.objectContaining({ id: "corrected", status: "ok", mediaId: 88 }),
+      expect.objectContaining({ id: "other", status: "error" }),
+    ])))
   })
 
   it("retains conference identity after failed retry upload and reload before the next fresh attempt", async () => {
