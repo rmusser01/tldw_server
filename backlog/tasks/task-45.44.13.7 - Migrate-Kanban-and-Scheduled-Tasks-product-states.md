@@ -35,6 +35,7 @@ Verified on latest remote dev 2053ec5ad4. The parent #1670 area had 26 blocked f
 Red guards identified four affected components and the retired entries. A targeted test caught insertion of a new status region on Stop. The final UI reuses the same live region, keeps checklist/generation failures assertive, and uses the standard foreground token for readable alert text.
 Passed 303 focused Kanban, Scheduled Tasks, and guard tests, full shared-UI typecheck, scoped ESLint, and git diff --check. Bandit is inapplicable to the TypeScript, JSON, and Markdown scope.
 Chromium verified the real WebUI import modal at 1440x900 and 390x844 with a fixture backend. It preserved both format descriptions, the upload affordance, and the modal bounds. Desktop before and after captures were inspected. Rendered dark-theme guidance text measured 10.56:1. The Chrome extension build and isolated packaged-extension Kanban import probe passed using a loopback fixture server. Local browser evidence is in /private/tmp/tldw-tracker-1673.dVPeGP.
+Pull request: https://github.com/rmusser01/tldw_server/pull/3671
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
