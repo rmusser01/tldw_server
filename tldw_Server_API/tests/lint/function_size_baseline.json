@@ -140,7 +140,7 @@
   "tldw_Server_API.app.core.MCP_unified.modules.implementations.slides_module:SlidesModule.get_tools": {"lines": 316, "params": 1, "reason": null},
   "tldw_Server_API.app.core.MCP_unified.protocol:MCPProtocol.process_request": {"lines": 352, "params": 3, "reason": null},
   "tldw_Server_API.app.core.MCP_unified.server:MCPServer.handle_websocket": {"lines": 409, "params": 9, "reason": "TASK-2294.3.2 projects verified cookie/JWT/API-key scope and rejects malformed authenticated identity before fallback; keep security branches explicit at the handshake boundary."},
-  "tldw_Server_API.app.core.MCP_unified.tool_execution.runtime:ToolExecutionRuntime.execute_prepared_tool_call": {"lines": 549, "params": 2, "reason": null},
+  "tldw_Server_API.app.core.MCP_unified.tool_execution.runtime:ToolExecutionRuntime.execute_prepared_tool_call": {"lines": 554, "params": 2, "reason": "TASK-13950.27 PR H: a moderation refusal is an IGNORE ExpectedToolFailure like a quota refusal (+5 lines)"},
   "tldw_Server_API.app.core.MCP_unified.tool_execution.security:ToolExecutionSecurity.prepare_tool_call": {"lines": 381, "params": 5, "reason": null},
   "tldw_Server_API.app.core.Metrics.metrics_manager:MetricsRegistry._register_standard_metrics": {"lines": 1596, "params": 1, "reason": null},
   "tldw_Server_API.app.core.Notes_Tasks.service:NotesTaskService._reconcile_managed_note_through_sync": {"lines": 404, "params": 8, "reason": null},

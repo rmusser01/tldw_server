@@ -299,3 +299,85 @@ def test_prompt_engineering_does_not_wrap_a_refusal(stub_llm_registry, moderatio
 
     with pytest.raises(LLMPolicyRefusal):
         Prompt_Engineering.generate_prompt(PROVIDER, "k", "forbidden words", "x", 0.1)
+
+
+# ---- review fixes: keyless calls, refusals are not scores, legacy branch, Anthropic shape ------------------------
+
+
+def test_a_resolved_flag_without_a_handle_and_without_a_key_fails_closed(stub_llm_registry, monkeypatch):
+    """The adapter never fell back to a server key for a resolved call; the gateway would, so the call is refused."""
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio.gateway_call import call_prompt_studio_llm
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "server-key-that-must-not-pay")
+    request = {"messages": MESSAGES, "model": "claude-test", "api_key": None, "credentials_resolved": True}
+
+    with pytest.raises(ChatConfigurationError):
+        call_prompt_studio_llm(PROVIDER, request)
+    assert stub_llm_registry.requests == []
+
+    call_prompt_studio_llm(PROVIDER, {**request, "api_key": "explicit-key"})  # an explicit key stands on its own
+    assert stub_llm_registry.requests[0]["api_key"] == "explicit-key"
+    assert "credentials_resolved" not in stub_llm_registry.requests[0]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_quality_score_call_is_not_the_base_score():
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_quality import PromptQualityScorer
+
+    class _Refusing:
+        async def _call_llm(self, **_kwargs):
+            raise LLMPolicyRefusal("Input violates moderation policy")
+
+    scorer = PromptQualityScorer(executor=_Refusing(), scorer_model="m")
+    with pytest.raises(LLMPolicyRefusal):
+        await scorer.score_prompt_async(system_text="You are helpful.", user_text="x", model_config={"provider": PROVIDER})
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_is_not_an_optimizer_fallback_prompt():
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_strategies import GeneticOptimizer
+
+    class _Refusing:
+        async def _call_llm(self, **_kwargs):
+            raise LLMPolicyRefusal("Input violates moderation policy")
+
+    optimizer = GeneticOptimizer.__new__(GeneticOptimizer)
+    optimizer.executor = _Refusing()
+    with pytest.raises(LLMPolicyRefusal):
+        await optimizer._mutate({"user_prompt": "p", "system_prompt": "s"})
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"choices": [{"message": {"content": "x"}, "finish_reason": "content_filter"}]},
+        {"type": "message", "content": [{"type": "text", "text": "x"}], "stop_reason": "refusal"},
+    ],
+    ids=["openai", "anthropic"],
+)
+def test_content_filter_and_anthropic_refusal_shapes_are_refused(response):
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
+
+    with pytest.raises(LLMPolicyRefusal):
+        raise_if_content_filtered(response)
+    raise_if_content_filtered({"choices": [{"message": {"content": "x"}, "finish_reason": "stop"}], "stop_reason": "end_turn"})
+
+
+@pytest.mark.asyncio
+async def test_the_legacy_orchestrator_branch_names_its_surface_and_refuses_content_filter(monkeypatch):
+    """No registered adapter: the orchestrator path gets llm_surface and the same content_filter rule."""
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
+
+    seen: list[dict] = []
+
+    def legacy(**kwargs):
+        seen.append(kwargs)
+        return {"choices": [{"message": {"content": "blocked"}, "finish_reason": "content_filter"}]}
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", legacy)
+    with pytest.raises(LLMPolicyRefusal):
+        await PromptExecutor(SimpleNamespace(client_id="c"))._call_llm(
+            "no-such-provider", "m", "hello", api_key_override="k", app_config={}
+        )
+    assert seen[0]["llm_surface"] == "prompt_studio"

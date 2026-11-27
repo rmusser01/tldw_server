@@ -2202,6 +2202,10 @@ async def test_prompt_studio_keeps_request_snapshot_at_adapter_boundary(
         func, args, kwargs = background_tasks.task
         await func(*args, **kwargs)
 
+    if captured_key is None:
+        # A resolved call with no key never falls back to a server key: it fails closed before any dispatch.
+        assert not adapter_requests
+        return
     assert adapter_requests
     assert all(request["api_key"] == captured_key for request, _timeout in adapter_requests)
     assert all(

@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_results import raise_if_content_filtered
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.gateway_call import call_prompt_studio_llm
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     StructuredPromptAssemblyError,
@@ -541,6 +542,7 @@ class PromptExecutor:
                         else None
                     ),
                 )
+                raise_if_content_filtered(response)  # the legacy path gets the same refusal rule
             else:
                 provider_dispatched = True
                 response = await await_bounded_sync_call(

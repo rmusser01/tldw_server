@@ -76,7 +76,8 @@ compatibility behavior.
 
 When a module's LLM call is refused because the calling user is over an LLM
 quota, the call returns the `llm_quota_exceeded` tool error. It is one user's
-limit, not a module fault, so the module circuit breaker does not count it.
+limit, not a module fault, so the module circuit breaker does not count it. A moderation refusal
+(`llm_policy_refused`) is handled the same way: one user's blocked text must not open the breaker.
 
 ### Idempotency Partitioning And Retention
 

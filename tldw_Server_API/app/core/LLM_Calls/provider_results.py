@@ -110,10 +110,14 @@ def raise_if_content_filtered(response: Any) -> None:
     For a caller that parses structured output from the reply: a refused answer is never parsed, scored,
     repaired or retried (TASK-13950.27).
     """
-    choices = response.get("choices") if isinstance(response, dict) else None
+    if not isinstance(response, dict):
+        return
+    choices = response.get("choices")
+    blocked = response.get("stop_reason") == "refusal"  # Anthropic-shaped block (gateway_hooks)
     if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-        if choices[0].get("finish_reason") == "content_filter":
-            raise LLMPolicyRefusal("Output violates moderation policy")
+        blocked = blocked or choices[0].get("finish_reason") == "content_filter"
+    if blocked:
+        raise LLMPolicyRefusal("Output violates moderation policy")
 
 
 def _provider_stream_code(value: Any) -> Optional[str]:

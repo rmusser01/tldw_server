@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, Module
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
 from tldw_Server_API.app.core.Usage import llm_accounting
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
 
 pytestmark = pytest.mark.unit
@@ -177,3 +178,24 @@ async def test_a_tool_run_by_chat_tool_auto_exec_is_recorded_for_the_user(rows, 
     await llm_accounting.drain_accounting()
     (row,) = rows
     assert (row["user_id"], row["prompt_tokens"], row["completion_tokens"]) == (7, 6, 2)
+
+
+class _RefusedToolModule(_LLMToolModule):
+    """A tool whose LLM call is refused by the moderation policy."""
+
+    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
+        """Refuse, as the gateway's pre-call hook does."""
+        raise LLMPolicyRefusal("Input violates moderation policy")
+
+
+async def test_moderation_refusals_do_not_trip_the_module_breaker(rows) -> None:
+    """One user's blocked text is not a module outage: more refusals than the threshold leave the module available."""
+    module = _RefusedToolModule(ModuleConfig(name="llmtool", circuit_breaker_threshold=2))
+    proto = _protocol(module)
+    for _ in range(4):
+        result = await _call_tool(proto)
+        assert result["isError"] is True
+        assert result["content"][0]["json"]["reason_code"] == "llm_policy_refused"
+    assert module.is_circuit_breaker_open() is False
+    ok = await _call_tool(_protocol(_LLMToolModule(ModuleConfig(name="llmtool"))))
+    assert ok["content"][0]["json"]["answer"] == "ok"

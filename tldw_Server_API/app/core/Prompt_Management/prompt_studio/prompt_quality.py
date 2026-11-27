@@ -15,6 +15,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCallCredentials,
 )
@@ -151,6 +152,8 @@ class PromptQualityScorer:
             if use_cache:
                 self._cache[key] = (final, now + self._cache_ttl)
             return final
+        except LLMPolicyRefusal:
+            raise  # a refused call is not a score: neither the base score nor a blend
         except Exception:
             if strict_provider_errors:
                 raise

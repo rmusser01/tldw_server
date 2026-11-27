@@ -48,8 +48,8 @@ def route_gateway_adapters(
     routes = monkeypatch.__dict__.setdefault(_ROUTES, {})
     routes[caller] = adapter_for
     monkeypatch.setattr(gateway, "_get_llm_registry", lambda: _Registry(routes))
-    # These tests hand the call a fake credential handle and patch the module-level check to accept it; the
-    # gateway's own check (adapter_utils) gets the same treatment.
+    # Bypasses the gateway's runtime-issued-handle authenticity check (adapter_utils), because these tests hand the
+    # call a fake handle and already patch the module-level check the same way; real handles are covered elsewhere.
     monkeypatch.setattr(
         adapter_utils,
         "is_runtime_issued_provider_call_credentials",
