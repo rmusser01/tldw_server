@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.18
 title: Add shared design-system component documentation and examples
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-05-14 03:21
 labels:
@@ -29,12 +29,12 @@ Mirror the linked GitHub governance issue. Closure requires a durable guard, doc
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The linked GitHub issue owns public status.
-- [ ] #2 Backlog notes record PR links and verification evidence.
+- [x] #2 Backlog notes record PR links and verification evidence.
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
@@ -52,6 +52,7 @@ The guide includes working examples for loading, empty, blocked, recovery, and c
 Passed 27 focused component tests and five rendered example checks. Typechecked all three TSX blocks against the shared UI and verified 14 repository link targets. The product-state verifier exits 1 with byte-identical output on this branch and on clean dev, including 132 blocked findings, 28 stale entries, and 35 active baseline exceptions. The base update leaves all verifier inputs byte-identical. Bandit is inapplicable to Markdown changes.
 
 The implementation is ready for a PR. Retain the open GitHub status and leave the PR-link criterion unchecked until publication. The repository copy of the epic links to the guide.
+Pull request: https://github.com/rmusser01/tldw_server/pull/3668. GitHub retains the public issue status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
